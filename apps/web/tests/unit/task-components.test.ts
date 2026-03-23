@@ -119,7 +119,7 @@ describe('ProjectChat chat-first submit integration', () => {
 });
 
 describe('API client: runProjectTask', () => {
-  const source = readSource('lib/api.ts');
+  const source = readSource('lib/api/tasks.ts');
 
   it('exports runProjectTask function', () => {
     expect(source).toContain('export async function runProjectTask');
