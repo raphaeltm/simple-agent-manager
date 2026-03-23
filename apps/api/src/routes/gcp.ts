@@ -11,6 +11,7 @@ import { verifyGcpOidcSetup } from '../services/gcp-sts';
 import { serializeCredentialToken } from '../services/provider-credentials';
 import * as schema from '../db/schema';
 import { DEFAULT_GCP_API_TIMEOUT_MS } from '@simple-agent-manager/shared';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 
 const gcpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -99,7 +100,7 @@ gcpRoutes.post('/setup', async (c) => {
       defaultZone: credential.defaultZone,
     });
 
-    const { ciphertext, iv } = await encrypt(tokenToEncrypt, c.env.ENCRYPTION_KEY);
+    const { ciphertext, iv } = await encrypt(tokenToEncrypt, getCredentialEncryptionKey(c.env));
     const now = new Date().toISOString();
 
     // Invalidate any cached GCP access token for this user+project
@@ -201,7 +202,7 @@ gcpRoutes.post('/verify', async (c) => {
   }
 
   const { decrypt } = await import('../services/encryption');
-  const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
+  const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, getCredentialEncryptionKey(c.env));
   const { parseGcpCredential } = await import('../services/provider-credentials');
   const gcpCred = parseGcpCredential(decryptedToken);
 

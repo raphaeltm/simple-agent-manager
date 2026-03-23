@@ -16,7 +16,8 @@
  *
  * Actual infrastructure destruction (Hetzner API, DNS) is handled by the
  * cron sweep, NOT by this DO — because user credentials are encrypted in D1
- * and must be decrypted with ENCRYPTION_KEY in the worker context.
+ * and must be decrypted with CREDENTIAL_ENCRYPTION_KEY (or ENCRYPTION_KEY
+ * fallback) in the worker context via getCredentialEncryptionKey(env).
  *
  * See: specs/021-task-chat-architecture/tasks.md (Phase 5)
  */
