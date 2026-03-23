@@ -207,11 +207,12 @@ export async function verifyCallbackToken(
     throw new Error('Missing workspace claim');
   }
 
-  // Extract optional scope claim (legacy tokens won't have it)
-  const scope = payload.scope as CallbackTokenScope | undefined;
-  if (scope !== undefined && scope !== 'node' && scope !== 'workspace') {
-    throw new Error(`Invalid token scope: ${scope}`);
+  // Extract and validate optional scope claim (legacy tokens won't have it)
+  const rawScope = payload.scope;
+  if (rawScope !== undefined && rawScope !== 'node' && rawScope !== 'workspace') {
+    throw new Error('Invalid token scope claim');
   }
+  const scope = rawScope as CallbackTokenScope | undefined;
 
   return {
     workspace: payload.workspace,

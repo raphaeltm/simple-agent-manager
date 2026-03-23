@@ -81,7 +81,7 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     await expect(
       verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Node-scoped tokens cannot access workspace endpoints');
+    ).rejects.toThrow('Insufficient token scope');
   });
 
   it('REJECTS node-scoped tokens even when workspace claim matches workspaceId', async () => {
@@ -97,7 +97,7 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     await expect(
       verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Node-scoped tokens cannot access workspace endpoints');
+    ).rejects.toThrow('Insufficient token scope');
   });
 
   // ==========================================================================
@@ -130,7 +130,7 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     await expect(
       verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Token workspace mismatch');
+    ).rejects.toThrow('Insufficient token scope');
   });
 
   it('REJECTS workspace-scoped tokens for a different workspace on the same node', async () => {
@@ -146,7 +146,7 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     await expect(
       verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Token workspace mismatch');
+    ).rejects.toThrow('Insufficient token scope');
 
     // Verify no DB query was made (scope: workspace does direct match only)
     expect(mockDbSelect).not.toHaveBeenCalled();
@@ -201,7 +201,7 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     await expect(
       verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Token workspace mismatch');
+    ).rejects.toThrow('Insufficient token scope');
   });
 
   // ==========================================================================

@@ -101,7 +101,13 @@ async function verifyNodeCallbackAuth(c: Context<{ Bindings: Env }>, nodeId: str
 
   // Workspace-scoped tokens CANNOT be used for node-level endpoints.
   if (payload.scope === 'workspace') {
-    throw errors.unauthorized('Workspace-scoped tokens cannot access node endpoints');
+    console.error('Rejected workspace-scoped token on node endpoint', {
+      tokenWorkspace: payload.workspace,
+      nodeId,
+      scope: payload.scope,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Insufficient token scope');
   }
 
   if (payload.workspace !== nodeId) {
@@ -491,6 +497,8 @@ nodesRoutes.post('/:id/ready', async (c) => {
 
       for (const workspace of pendingWorkspaces) {
         try {
+          // Intentionally workspace-scoped (not signNodeCallbackToken) — this token
+          // is for a specific workspace's VM agent callbacks, not node-level operations.
           const callbackToken = await signCallbackToken(workspace.id, c.env);
           await createWorkspaceOnNode(nodeId, c.env, workspace.userId, {
             workspaceId: workspace.id,

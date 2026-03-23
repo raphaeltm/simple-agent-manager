@@ -111,7 +111,7 @@ export async function verifyWorkspaceCallbackAuth(
       scope: payload.scope,
       action: 'rejected',
     });
-    throw errors.forbidden('Node-scoped tokens cannot access workspace endpoints');
+    throw errors.forbidden('Insufficient token scope');
   }
 
   // Workspace-scoped tokens: direct workspace match required.
@@ -119,7 +119,7 @@ export async function verifyWorkspaceCallbackAuth(
     if (payload.workspace === workspaceId) {
       return;
     }
-    throw errors.forbidden('Token workspace mismatch');
+    throw errors.forbidden('Insufficient token scope');
   }
 
   // Legacy tokens (no scope claim): backward compatible behavior.
@@ -135,6 +135,7 @@ export async function verifyWorkspaceCallbackAuth(
 
   // Legacy fallback: allow node-level token to access workspaces on that node.
   // This preserves backward compatibility for VMs with pre-scoped tokens.
+  // TODO: Remove after 2026-04-23 — all nodes should have scoped tokens by then.
   const db = drizzle(c.env.DATABASE, { schema });
   const rows = await db
     .select({ nodeId: schema.workspaces.nodeId })
@@ -157,7 +158,7 @@ export async function verifyWorkspaceCallbackAuth(
     return;
   }
 
-  throw errors.forbidden('Token workspace mismatch');
+  throw errors.forbidden('Insufficient token scope');
 }
 
 export async function getWorkspaceRuntimeAssets(

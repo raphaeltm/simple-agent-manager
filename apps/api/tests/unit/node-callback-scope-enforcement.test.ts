@@ -134,7 +134,7 @@ describe('node callback auth — scope enforcement', () => {
 
     expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body.message).toBe('Workspace-scoped tokens cannot access node endpoints');
+    expect(body.message).toBe('Insufficient token scope');
   });
 
   it('ACCEPTS node-scoped tokens on node heartbeat endpoint', async () => {
@@ -194,7 +194,7 @@ describe('node callback auth — scope enforcement', () => {
 
     expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body.message).toBe('Workspace-scoped tokens cannot access node endpoints');
+    expect(body.message).toBe('Insufficient token scope');
   });
 
   it('REJECTS workspace-scoped tokens on node errors endpoint', async () => {
@@ -215,6 +215,6 @@ describe('node callback auth — scope enforcement', () => {
 
     expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body.message).toBe('Workspace-scoped tokens cannot access node endpoints');
+    expect(body.message).toBe('Insufficient token scope');
   });
 });

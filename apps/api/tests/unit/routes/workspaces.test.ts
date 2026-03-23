@@ -54,7 +54,7 @@ describe('workspaces routes source contract', () => {
 
   it('accepts node-scoped callback tokens for workspace callbacks', () => {
     expect(file).toContain('payload.workspace === workspace.nodeId');
-    expect(file).toContain("throw errors.forbidden('Token workspace mismatch')");
+    expect(file).toContain("throw errors.forbidden('Insufficient token scope')");
     expect(file).toContain("lifecycleRoutes.post('/:id/provisioning-failed'");
     expect(file).toContain("reason: 'workspace_not_creating'");
   });
