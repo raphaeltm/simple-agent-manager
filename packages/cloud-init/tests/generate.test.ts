@@ -510,6 +510,143 @@ describe('generateCloudInit', () => {
     });
   });
 
+  describe('cloud metadata API blocking', () => {
+    it('dedicated metadata block script contains IPv4 DOCKER-USER chain rules', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const metadataScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/apply-metadata-block.sh'
+      );
+      expect(metadataScript).toBeDefined();
+      expect(metadataScript.permissions).toBe('0755');
+      const content: string = metadataScript.content;
+      // IPv4 only — metadata API is 169.254.169.254, ip6tables rejects IPv4 addresses
+      expect(content).toContain('iptables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP');
+      // No ip6tables commands (only comments may mention it)
+      expect(content).not.toMatch(/^\s*ip6tables\s/m);
+    });
+
+    it('metadata block script uses delete-then-insert for idempotency', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const metadataScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/apply-metadata-block.sh'
+      );
+      const content: string = metadataScript.content;
+      const deleteIdx = content.indexOf('iptables -D DOCKER-USER -d "$METADATA_IP"');
+      const insertIdx = content.indexOf('iptables -I DOCKER-USER 1 -d "$METADATA_IP"');
+      expect(deleteIdx).toBeGreaterThan(-1);
+      expect(insertIdx).toBeGreaterThan(-1);
+      // Delete must come before insert for idempotency
+      expect(deleteIdx).toBeLessThan(insertIdx);
+      // Delete ignores error if rule doesn't exist yet
+      expect(content).toContain('iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true');
+    });
+
+    it('metadata block script uses METADATA_IP variable for the well-known endpoint', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const metadataScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/apply-metadata-block.sh'
+      );
+      expect(metadataScript.content).toContain('METADATA_IP="169.254.169.254"');
+    });
+
+    it('firewall script delegates to apply-metadata-block.sh with Docker readiness wait', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      // Waits for DOCKER-USER chain to be available
+      expect(content).toContain('iptables -L DOCKER-USER -n');
+      // Delegates to the dedicated script
+      expect(content).toContain('/etc/sam/firewall/apply-metadata-block.sh');
+    });
+
+    it('metadata block delegation appears before iptables-save (rules are persisted)', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      const metadataIdx = content.indexOf('apply-metadata-block.sh');
+      const saveIdx = content.indexOf('iptables-save');
+      expect(metadataIdx).toBeGreaterThan(-1);
+      expect(saveIdx).toBeGreaterThan(-1);
+      expect(metadataIdx).toBeLessThan(saveIdx);
+    });
+
+    it('firewall log message mentions metadata API blocking', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      expect(firewallScript.content).toContain('metadata API blocked');
+    });
+
+    it('systemd unit ensures metadata block survives Docker restarts', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const unit = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam-metadata-block.service'
+      );
+      expect(unit).toBeDefined();
+      const content: string = unit.content;
+      expect(content).toContain('After=docker.service');
+      expect(content).toContain('Requires=docker.service');
+      expect(content).toContain('PartOf=docker.service');
+      expect(content).toContain('ExecStart=/etc/sam/firewall/apply-metadata-block.sh');
+      expect(content).toContain('Type=oneshot');
+      expect(content).toContain('RemainAfterExit=yes');
+    });
+
+    it('runcmd enables sam-metadata-block service', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      expect(runcmdStr).toContain('systemctl enable sam-metadata-block.service');
+    });
+  });
+
+  describe('TLS key permission hardening', () => {
+    it('runcmd includes chmod/chown for TLS key as defense-in-depth', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      expect(runcmdStr).toContain('chmod 600 /etc/sam/tls/origin-ca-key.pem');
+      expect(runcmdStr).toContain('chown root:root /etc/sam/tls/origin-ca-key.pem');
+    });
+
+    it('TLS key hardening runcmd includes test -f guard and || true fallback', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      // Guard: only runs chmod/chown if file exists; || true prevents script abort
+      expect(runcmdStr).toContain('test -f /etc/sam/tls/origin-ca-key.pem');
+      expect(runcmdStr).toMatch(/test -f.*origin-ca-key\.pem.*\|\| true/);
+    });
+  });
+
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {
       const config = generateCloudInit(baseVariables({
