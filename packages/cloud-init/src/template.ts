@@ -88,8 +88,13 @@ runcmd:
   # Restart Docker to pick up journald log driver and DNS configuration
   - systemctl restart docker
 
+  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
+  # Docker recreates DOCKER-USER on start, so iptables-persistent alone is not enough.
+  - systemctl daemon-reload
+  - systemctl enable sam-metadata-block.service
+
   # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
-  - test -f /etc/sam/tls/origin-ca-key.pem && chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem || true
+  - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
 
 write_files:
   - path: /etc/systemd/journald.conf.d/sam.conf
@@ -211,16 +216,19 @@ write_files:
       ip6tables -P INPUT DROP
 
       # --- Block container access to cloud metadata API ---
-      # Prevents containers from reading cloud-init user-data (which contains
-      # TLS private key and callback tokens) via the metadata endpoint.
-      # DOCKER-USER chain is in the FORWARD path — only affects container traffic,
-      # not host-level access (cloud-init itself still works).
-      # Delete-then-insert pattern ensures idempotency on daily cron refresh.
-      METADATA_IP="169.254.169.254"
-      iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
-      iptables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP
-      ip6tables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
-      ip6tables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP
+      # Delegates to apply-metadata-block.sh which manages the DOCKER-USER chain.
+      # Wait for Docker to create DOCKER-USER chain (up to 30s) since there is a
+      # brief race window between "systemctl start docker" returning and chain creation.
+      DOCKER_USER_WAIT=0
+      while ! iptables -L DOCKER-USER -n >/dev/null 2>&1; do
+        if [ "$DOCKER_USER_WAIT" -ge 30 ]; then
+          logger -t sam-firewall "WARNING: DOCKER-USER chain not available after 30s, skipping metadata block"
+          break
+        fi
+        sleep 1
+        DOCKER_USER_WAIT=$((DOCKER_USER_WAIT + 1))
+      done
+      /etc/sam/firewall/apply-metadata-block.sh || logger -t sam-firewall "WARNING: metadata block script failed"
 
       # Persist rules across reboots
       mkdir -p /etc/iptables
@@ -235,6 +243,42 @@ write_files:
       #!/bin/bash
       # Daily refresh of Cloudflare IP ranges for the SAM firewall.
       /etc/sam/firewall/setup-firewall.sh 2>&1 | logger -t sam-firewall-update
+
+  - path: /etc/sam/firewall/apply-metadata-block.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Applies DOCKER-USER chain rules to block container access to the
+      # cloud metadata API. Called by sam-metadata-block.service after Docker
+      # starts, and by setup-firewall.sh during initial provisioning / daily cron.
+      set -euo pipefail
+      METADATA_IP="169.254.169.254"
+      if iptables -L DOCKER-USER -n >/dev/null 2>&1; then
+        iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
+        iptables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP
+        ip6tables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
+        ip6tables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP
+        logger -t sam-firewall "Metadata API blocked for containers (DOCKER-USER chain)"
+      else
+        logger -t sam-firewall "WARNING: DOCKER-USER chain not found, cannot block metadata API"
+      fi
+
+  - path: /etc/systemd/system/sam-metadata-block.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM metadata API block for Docker containers
+      After=docker.service
+      Requires=docker.service
+      PartOf=docker.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/etc/sam/firewall/apply-metadata-block.sh
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
 
   - path: /etc/sam/tls/origin-ca.pem
     content: |

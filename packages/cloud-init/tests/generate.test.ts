@@ -511,42 +511,43 @@ describe('generateCloudInit', () => {
   });
 
   describe('cloud metadata API blocking', () => {
-    it('firewall script blocks container access to metadata API via DOCKER-USER chain', () => {
+    it('dedicated metadata block script contains DOCKER-USER chain rules', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      const metadataScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/apply-metadata-block.sh'
       );
-      const content: string = firewallScript.content;
+      expect(metadataScript).toBeDefined();
+      expect(metadataScript.permissions).toBe('0755');
+      const content: string = metadataScript.content;
       expect(content).toContain('iptables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP');
       expect(content).toContain('ip6tables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP');
     });
 
-    it('metadata blocking uses delete-then-insert for idempotency', () => {
+    it('metadata block script uses delete-then-insert for idempotency', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      const metadataScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/apply-metadata-block.sh'
       );
-      const content: string = firewallScript.content;
-      // Delete existing rule first (idempotent — ignores error if rule doesn't exist)
+      const content: string = metadataScript.content;
       expect(content).toContain('iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true');
       expect(content).toContain('ip6tables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true');
     });
 
-    it('metadata blocking uses METADATA_IP variable for the well-known endpoint', () => {
+    it('metadata block script uses METADATA_IP variable for the well-known endpoint', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      const metadataScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/apply-metadata-block.sh'
       );
-      expect(firewallScript.content).toContain('METADATA_IP="169.254.169.254"');
+      expect(metadataScript.content).toContain('METADATA_IP="169.254.169.254"');
     });
 
-    it('metadata blocking appears before iptables-save (rules are persisted)', () => {
+    it('firewall script delegates to apply-metadata-block.sh with Docker readiness wait', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -554,14 +555,28 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       const content: string = firewallScript.content;
-      const metadataIdx = content.indexOf('DOCKER-USER');
+      // Waits for DOCKER-USER chain to be available
+      expect(content).toContain('iptables -L DOCKER-USER -n');
+      // Delegates to the dedicated script
+      expect(content).toContain('/etc/sam/firewall/apply-metadata-block.sh');
+    });
+
+    it('metadata block delegation appears before iptables-save (rules are persisted)', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      const metadataIdx = content.indexOf('apply-metadata-block.sh');
       const saveIdx = content.indexOf('iptables-save');
       expect(metadataIdx).toBeGreaterThan(-1);
       expect(saveIdx).toBeGreaterThan(-1);
       expect(metadataIdx).toBeLessThan(saveIdx);
     });
 
-    it('log message mentions metadata API blocking', () => {
+    it('firewall log message mentions metadata API blocking', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -569,6 +584,32 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       expect(firewallScript.content).toContain('metadata API blocked');
+    });
+
+    it('systemd unit ensures metadata block survives Docker restarts', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const unit = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam-metadata-block.service'
+      );
+      expect(unit).toBeDefined();
+      const content: string = unit.content;
+      expect(content).toContain('After=docker.service');
+      expect(content).toContain('Requires=docker.service');
+      expect(content).toContain('PartOf=docker.service');
+      expect(content).toContain('ExecStart=/etc/sam/firewall/apply-metadata-block.sh');
+      expect(content).toContain('Type=oneshot');
+      expect(content).toContain('RemainAfterExit=yes');
+    });
+
+    it('runcmd enables sam-metadata-block service', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      expect(runcmdStr).toContain('systemctl enable sam-metadata-block.service');
     });
   });
 
