@@ -14,15 +14,16 @@ This document provides a complete classification of all secrets and credentials 
 │  │   (Worker Secrets)      │    │   (Encrypted in D1)         │ │
 │  ├─────────────────────────┤    ├─────────────────────────────┤ │
 │  │ • ENCRYPTION_KEY        │    │ • Hetzner API Token         │ │
-│  │ • JWT_PRIVATE_KEY       │    │ • (Future cloud providers)  │ │
-│  │ • JWT_PUBLIC_KEY        │    │                             │ │
-│  │ • CF_API_TOKEN          │    │ Stored: Per-user in DB      │ │
-│  │ • CF_ZONE_ID            │    │ Encrypted: AES-GCM          │ │
-│  │ • GITHUB_CLIENT_ID      │    │ Provided: By each user      │ │
-│  │ • GITHUB_CLIENT_SECRET  │    │                             │ │
-│  │ • GITHUB_APP_ID         │    └─────────────────────────────┘ │
-│  │ • GITHUB_APP_PRIVATE_KEY│                                    │
-│  │                         │                                    │
+│  │ • BETTER_AUTH_SECRET*   │    │ • (Future cloud providers)  │ │
+│  │ • CREDENTIAL_ENC_KEY*   │    │                             │ │
+│  │ • GITHUB_WEBHOOK_SEC*   │    │ Stored: Per-user in DB      │ │
+│  │ • JWT_PRIVATE_KEY       │    │ Encrypted: AES-GCM          │ │
+│  │ • JWT_PUBLIC_KEY        │    │ Provided: By each user      │ │
+│  │ • CF_API_TOKEN          │    │                             │ │
+│  │ • CF_ZONE_ID            │    └─────────────────────────────┘ │
+│  │ • GITHUB_CLIENT_*       │                                    │
+│  │ • GITHUB_APP_*          │  * Optional overrides; fall back   │
+│  │                         │    to ENCRYPTION_KEY when unset    │
 │  │ Stored: Cloudflare      │                                    │
 │  │ Set by: Platform admin  │                                    │
 │  └─────────────────────────┘                                    │

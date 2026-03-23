@@ -90,6 +90,14 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `GH_APP_PRIVATE_KEY` | GitHub App private key (raw PEM or base64 encoded — both work) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
 
+**Optional secrets** (purpose-specific security overrides — recommended for production):
+
+| Secret | Description |
+|--------|-------------|
+| `BETTER_AUTH_SECRET` | BetterAuth session signing/encryption (overrides `ENCRYPTION_KEY` for sessions) |
+| `CREDENTIAL_ENCRYPTION_KEY` | AES-GCM encryption of user cloud credentials (overrides `ENCRYPTION_KEY` for credential storage) |
+| `GITHUB_WEBHOOK_SECRET` | GitHub webhook HMAC-SHA256 verification (overrides `ENCRYPTION_KEY`; must match GitHub App webhook secret) |
+
 **Optional secrets** (for GCP OIDC integration):
 
 | Secret | Description |
@@ -407,7 +415,7 @@ pnpm tsx scripts/deploy/generate-keys.ts
 ```
 
 This generates:
-- **ENCRYPTION_KEY**: AES-256 key for encrypting stored credentials
+- **ENCRYPTION_KEY**: Shared fallback key — used for credential encryption, session management, and webhook verification when purpose-specific overrides are not set
 - **JWT_PRIVATE_KEY**: RSA private key for signing terminal access tokens
 - **JWT_PUBLIC_KEY**: RSA public key for token verification
 
@@ -546,6 +554,11 @@ wrangler secret put GITHUB_APP_PRIVATE_KEY
 wrangler secret put ENCRYPTION_KEY
 wrangler secret put JWT_PRIVATE_KEY
 wrangler secret put JWT_PUBLIC_KEY
+
+# Optional purpose-specific overrides (recommended for production)
+# wrangler secret put BETTER_AUTH_SECRET
+# wrangler secret put CREDENTIAL_ENCRYPTION_KEY
+# wrangler secret put GITHUB_WEBHOOK_SECRET
 ```
 
 **Tip**: For multiline values (like private keys), you can pipe them:
@@ -819,7 +832,7 @@ wrangler secret put ENCRYPTION_KEY
 
 **Warning**: Rotating keys will:
 - Invalidate all active terminal sessions (JWT keys)
-- Make existing encrypted credentials unreadable (ENCRYPTION_KEY) - users will need to re-enter their Hetzner tokens
+- Make existing encrypted credentials unreadable (`CREDENTIAL_ENCRYPTION_KEY`, or `ENCRYPTION_KEY` if the override is not set) - users will need to re-enter their Hetzner tokens
 
 ---
 
