@@ -44,6 +44,23 @@ describe('Secret key resolution helpers', () => {
     });
   });
 
+  describe('empty-string fallback', () => {
+    it('falls back to ENCRYPTION_KEY when BETTER_AUTH_SECRET is empty string', () => {
+      expect(getBetterAuthSecret({ ...baseEnv, BETTER_AUTH_SECRET: '' }))
+        .toBe('shared-fallback-key');
+    });
+
+    it('falls back to ENCRYPTION_KEY when CREDENTIAL_ENCRYPTION_KEY is empty string', () => {
+      expect(getCredentialEncryptionKey({ ...baseEnv, CREDENTIAL_ENCRYPTION_KEY: '' }))
+        .toBe('shared-fallback-key');
+    });
+
+    it('falls back to ENCRYPTION_KEY when GITHUB_WEBHOOK_SECRET is empty string', () => {
+      expect(getWebhookSecret({ ...baseEnv, GITHUB_WEBHOOK_SECRET: '' }))
+        .toBe('shared-fallback-key');
+    });
+  });
+
   describe('isolation', () => {
     it('each helper returns a different key when all three are set', () => {
       const env = {

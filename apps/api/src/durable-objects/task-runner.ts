@@ -44,7 +44,12 @@ import { log } from '../lib/logger';
 // Types
 // =============================================================================
 
-/** The subset of Env bindings the TaskRunner DO needs. */
+/**
+ * The subset of Env bindings the TaskRunner DO needs.
+ * Intentionally omits BETTER_AUTH_SECRET and GITHUB_WEBHOOK_SECRET —
+ * the DO only needs credential encryption (for node provisioning), not
+ * session management or webhook verification.
+ */
 type TaskRunnerEnv = {
   DATABASE: D1Database;
   OBSERVABILITY_DATABASE: D1Database;

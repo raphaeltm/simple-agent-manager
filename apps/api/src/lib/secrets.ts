@@ -4,6 +4,9 @@
  * Each helper returns the purpose-specific secret when set, falling back to
  * the shared ENCRYPTION_KEY for backwards compatibility with existing
  * deployments that only configure ENCRYPTION_KEY.
+ *
+ * Uses truthy checks (not nullish coalescing) so that empty strings from
+ * misconfigured CI/CD pipelines also trigger the fallback.
  */
 
 interface SecretsEnv {
@@ -15,15 +18,15 @@ interface SecretsEnv {
 
 /** Key used by BetterAuth for session signing/encryption. */
 export function getBetterAuthSecret(env: SecretsEnv): string {
-  return env.BETTER_AUTH_SECRET ?? env.ENCRYPTION_KEY;
+  return env.BETTER_AUTH_SECRET || env.ENCRYPTION_KEY;
 }
 
 /** Key used for AES-GCM encryption of user credentials (cloud tokens, etc.). */
 export function getCredentialEncryptionKey(env: SecretsEnv): string {
-  return env.CREDENTIAL_ENCRYPTION_KEY ?? env.ENCRYPTION_KEY;
+  return env.CREDENTIAL_ENCRYPTION_KEY || env.ENCRYPTION_KEY;
 }
 
 /** Secret used for GitHub webhook HMAC-SHA256 signature verification. */
 export function getWebhookSecret(env: SecretsEnv): string {
-  return env.GITHUB_WEBHOOK_SECRET ?? env.ENCRYPTION_KEY;
+  return env.GITHUB_WEBHOOK_SECRET || env.ENCRYPTION_KEY;
 }
