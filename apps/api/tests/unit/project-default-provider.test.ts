@@ -32,24 +32,25 @@ describe('Project default provider — schema', () => {
 });
 
 describe('Project default provider — shared types', () => {
-  const types = sharedSrc('types.ts');
+  const projectTypes = sharedSrc('types/project.ts');
+  const taskTypes = sharedSrc('types/task.ts');
 
   it('Project interface includes defaultProvider field', () => {
-    expect(types).toContain('defaultProvider?: CredentialProvider | null');
+    expect(projectTypes).toContain('defaultProvider?: CredentialProvider | null');
   });
 
   it('UpdateProjectRequest includes defaultProvider field', () => {
-    const updateBlock = types.slice(
-      types.indexOf('export interface UpdateProjectRequest'),
-      types.indexOf('}', types.indexOf('export interface UpdateProjectRequest')) + 1
+    const updateBlock = projectTypes.slice(
+      projectTypes.indexOf('export interface UpdateProjectRequest'),
+      projectTypes.indexOf('}', projectTypes.indexOf('export interface UpdateProjectRequest')) + 1
     );
     expect(updateBlock).toContain('defaultProvider?: CredentialProvider | null');
   });
 
   it('SubmitTaskRequest includes provider field', () => {
-    const submitBlock = types.slice(
-      types.indexOf('export interface SubmitTaskRequest'),
-      types.indexOf('}', types.indexOf('export interface SubmitTaskRequest')) + 1
+    const submitBlock = taskTypes.slice(
+      taskTypes.indexOf('export interface SubmitTaskRequest'),
+      taskTypes.indexOf('}', taskTypes.indexOf('export interface SubmitTaskRequest')) + 1
     );
     expect(submitBlock).toContain('provider?: CredentialProvider');
   });
