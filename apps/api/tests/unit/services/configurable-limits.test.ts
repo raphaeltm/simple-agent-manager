@@ -18,7 +18,7 @@
  * - New default values for maxProjectsPerUser (25→100) and maxTaskDependenciesPerTask (25→50)
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getRuntimeLimits } from '../../../src/services/limits';
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
@@ -222,10 +222,13 @@ describe('ACP sessions fork — configurable MAX_ACP_CONTEXT_BYTES', () => {
 // =============================================================================
 
 describe('MCP routes — configurable message length limits', () => {
-  const mcpSource = readFileSync(
-    resolve(process.cwd(), 'src/routes/mcp.ts'),
-    'utf8'
-  );
+  // After the mcp.ts → mcp/ directory split, the limits definition lives in _helpers.ts
+  // and getMcpLimits() call sites are spread across handler files.
+  const mcpDir = resolve(process.cwd(), 'src/routes/mcp');
+  const mcpSource = readdirSync(mcpDir)
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => readFileSync(resolve(mcpDir, f), 'utf8'))
+    .join('\n');
 
   it('has a getMcpLimits() helper that reads from env', () => {
     expect(mcpSource).toContain('function getMcpLimits(env');
