@@ -666,4 +666,56 @@ describe('useChatWebSocket (behavioral)', () => {
 
     expect(onCatchUp).not.toHaveBeenCalled();
   });
+
+  // ===========================================================================
+  // Regression test: catch-up must not fire on initial connect, only reconnect.
+  // This is the test that would have caught the bug introduced in c64ee4c7.
+  // See docs/notes/2026-03-23-disappearing-messages-postmortem.md
+  // ===========================================================================
+
+  it('regression: initial connect then reconnect — catch-up fires exactly once (on reconnect only)', async () => {
+    const onCatchUp = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
+
+    // Step 1: Initial connect — simulates what happens after loadSession()
+    // sets messages. Catch-up must NOT fire here.
+    await act(async () => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onCatchUp).toHaveBeenCalledTimes(0);
+
+    // Step 2: Connection drops (e.g., network hiccup)
+    act(() => {
+      MockWebSocket.instances[0]!.simulateClose(1006);
+    });
+
+    // Step 3: Backoff timer fires, reconnect attempt
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    // Step 4: Reconnect succeeds — catch-up MUST fire here to fetch missed messages
+    await act(async () => {
+      MockWebSocket.instances[1]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
+
+    // Step 5: Another disconnect + reconnect — catch-up fires again
+    act(() => {
+      MockWebSocket.instances[1]!.simulateClose(1006);
+    });
+    act(() => {
+      vi.advanceTimersByTime(2000); // 2nd backoff
+    });
+    await act(async () => {
+      MockWebSocket.instances[2]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onCatchUp).toHaveBeenCalledTimes(2);
+  });
 });
