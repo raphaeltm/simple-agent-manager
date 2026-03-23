@@ -511,7 +511,7 @@ describe('generateCloudInit', () => {
   });
 
   describe('cloud metadata API blocking', () => {
-    it('dedicated metadata block script contains DOCKER-USER chain rules', () => {
+    it('dedicated metadata block script contains IPv4 DOCKER-USER chain rules', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -521,8 +521,10 @@ describe('generateCloudInit', () => {
       expect(metadataScript).toBeDefined();
       expect(metadataScript.permissions).toBe('0755');
       const content: string = metadataScript.content;
+      // IPv4 only — metadata API is 169.254.169.254, ip6tables rejects IPv4 addresses
       expect(content).toContain('iptables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP');
-      expect(content).toContain('ip6tables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP');
+      // No ip6tables commands (only comments may mention it)
+      expect(content).not.toMatch(/^\s*ip6tables\s/m);
     });
 
     it('metadata block script uses delete-then-insert for idempotency', () => {
@@ -533,8 +535,14 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/apply-metadata-block.sh'
       );
       const content: string = metadataScript.content;
+      const deleteIdx = content.indexOf('iptables -D DOCKER-USER -d "$METADATA_IP"');
+      const insertIdx = content.indexOf('iptables -I DOCKER-USER 1 -d "$METADATA_IP"');
+      expect(deleteIdx).toBeGreaterThan(-1);
+      expect(insertIdx).toBeGreaterThan(-1);
+      // Delete must come before insert for idempotency
+      expect(deleteIdx).toBeLessThan(insertIdx);
+      // Delete ignores error if rule doesn't exist yet
       expect(content).toContain('iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true');
-      expect(content).toContain('ip6tables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true');
     });
 
     it('metadata block script uses METADATA_IP variable for the well-known endpoint', () => {
@@ -627,14 +635,15 @@ describe('generateCloudInit', () => {
       expect(runcmdStr).toContain('chown root:root /etc/sam/tls/origin-ca-key.pem');
     });
 
-    it('TLS key hardening is conditional on file existence', () => {
+    it('TLS key hardening runcmd includes test -f guard and || true fallback', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
       const runcmd: string[] = parsed.runcmd;
       const runcmdStr = runcmd.map(String).join('\n');
-      // The command uses test -f ... && ... || true, so it's a no-op if file doesn't exist
+      // Guard: only runs chmod/chown if file exists; || true prevents script abort
       expect(runcmdStr).toContain('test -f /etc/sam/tls/origin-ca-key.pem');
+      expect(runcmdStr).toMatch(/test -f.*origin-ca-key\.pem.*\|\| true/);
     });
   });
 

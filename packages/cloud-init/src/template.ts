@@ -252,12 +252,12 @@ write_files:
       # cloud metadata API. Called by sam-metadata-block.service after Docker
       # starts, and by setup-firewall.sh during initial provisioning / daily cron.
       set -euo pipefail
+      # Cloud metadata API is IPv4-only (169.254.169.254). No ip6tables rules needed
+      # since ip6tables rejects IPv4 addresses as invalid.
       METADATA_IP="169.254.169.254"
       if iptables -L DOCKER-USER -n >/dev/null 2>&1; then
         iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
         iptables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP
-        ip6tables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
-        ip6tables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP
         logger -t sam-firewall "Metadata API blocked for containers (DOCKER-USER chain)"
       else
         logger -t sam-firewall "WARNING: DOCKER-USER chain not found, cannot block metadata API"
