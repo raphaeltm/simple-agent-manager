@@ -189,6 +189,7 @@ export type PersistMessageBatchResponseContract = z.infer<typeof PersistMessageB
 export const CallbackTokenClaimsSchema = z.object({
   workspace: z.string(),
   type: z.literal('callback'),
+  scope: z.enum(['node', 'workspace']).optional(),
   iss: z.string(),
   sub: z.string(),
   aud: z.literal('workspace-callback'),

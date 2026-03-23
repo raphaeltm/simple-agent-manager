@@ -11,7 +11,7 @@ import { requireNodeOwnership } from '../middleware/node-auth';
 import * as schema from '../db/schema';
 import { getRuntimeLimits } from '../services/limits';
 import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
-import { shouldRefreshCallbackToken, signCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
+import { shouldRefreshCallbackToken, signCallbackToken, signNodeCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import {
@@ -98,6 +98,12 @@ async function verifyNodeCallbackAuth(c: Context<{ Bindings: Env }>, nodeId: str
 
   const token = authHeader.slice(7);
   const payload = await verifyCallbackToken(token, c.env);
+
+  // Workspace-scoped tokens CANNOT be used for node-level endpoints.
+  if (payload.scope === 'workspace') {
+    throw errors.unauthorized('Workspace-scoped tokens cannot access node endpoints');
+  }
+
   if (payload.workspace !== nodeId) {
     throw errors.unauthorized('Callback token does not match node');
   }
@@ -608,7 +614,7 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
   };
 
   if (tokenNeedsRefresh) {
-    response.refreshedToken = await signCallbackToken(nodeId, c.env);
+    response.refreshedToken = await signNodeCallbackToken(nodeId, c.env);
   }
 
   return c.json(response);

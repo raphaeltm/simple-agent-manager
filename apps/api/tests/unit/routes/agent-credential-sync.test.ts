@@ -19,7 +19,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   getAuth: () => ({ userId: 'test-user-id' }),
 }));
 vi.mock('../../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-123' }),
+  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/encryption', () => ({

@@ -69,8 +69,12 @@ export async function signTerminalToken(
 }
 
 /**
- * Sign a callback token for VM-to-API authentication.
- * Used by VM agent to call back to control plane (heartbeat, ready, etc.)
+ * Sign a workspace-scoped callback token for VM-to-API authentication.
+ * Used by VM agent to call back to control plane for workspace-specific operations
+ * (agent-key, runtime-assets, boot-log, messages, ready, etc.)
+ *
+ * The `scope: 'workspace'` claim restricts this token to the specific workspace.
+ * Node-scoped tokens cannot be used for workspace-scoped endpoints.
  */
 export async function signCallbackToken(
   workspaceId: string,
@@ -84,10 +88,44 @@ export async function signCallbackToken(
   const token = await new SignJWT({
     workspace: workspaceId,
     type: 'callback',
+    scope: 'workspace',
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
     .setSubject(workspaceId)
+    .setAudience(CALLBACK_AUDIENCE)
+    .setExpirationTime(expiresAt)
+    .setIssuedAt()
+    .sign(privateKey);
+
+  return token;
+}
+
+/**
+ * Sign a node-scoped callback token for VM-to-API authentication.
+ * Used by VM agent for node-level operations (heartbeat, ready, error reporting).
+ *
+ * The `scope: 'node'` claim restricts this token to node-level endpoints only.
+ * Node-scoped tokens CANNOT be used for workspace-scoped endpoints (agent-key,
+ * runtime-assets, etc.) to prevent cross-workspace secret access on multi-tenant nodes.
+ */
+export async function signNodeCallbackToken(
+  nodeId: string,
+  env: Env
+): Promise<string> {
+  const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
+  const expiry = getCallbackTokenExpiry(env);
+  const expiresAt = new Date(Date.now() + expiry);
+  const issuer = getIssuer(env);
+
+  const token = await new SignJWT({
+    workspace: nodeId,
+    type: 'callback',
+    scope: 'node',
+  })
+    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setIssuer(issuer)
+    .setSubject(nodeId)
     .setAudience(CALLBACK_AUDIENCE)
     .setExpirationTime(expiresAt)
     .setIssuedAt()
@@ -129,17 +167,22 @@ export async function signNodeManagementToken(
   };
 }
 
+/** Token scope discriminator. Legacy tokens (pre-scoping) have no scope claim. */
+export type CallbackTokenScope = 'node' | 'workspace';
+
 /**
  * Payload structure for verified callback tokens.
+ * `scope` is optional for backward compatibility with legacy tokens.
  */
 export interface CallbackTokenPayload {
   workspace: string;
   type: 'callback';
+  scope?: CallbackTokenScope;
 }
 
 /**
  * Verify a callback token from VM Agent.
- * Returns the workspace ID if valid, throws on invalid token.
+ * Returns the payload including the optional scope claim.
  *
  * @throws Error if token is invalid, expired, or has wrong audience
  */
@@ -164,9 +207,16 @@ export async function verifyCallbackToken(
     throw new Error('Missing workspace claim');
   }
 
+  // Extract optional scope claim (legacy tokens won't have it)
+  const scope = payload.scope as CallbackTokenScope | undefined;
+  if (scope !== undefined && scope !== 'node' && scope !== 'workspace') {
+    throw new Error(`Invalid token scope: ${scope}`);
+  }
+
   return {
     workspace: payload.workspace,
     type: 'callback',
+    scope,
   };
 }
 

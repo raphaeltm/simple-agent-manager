@@ -494,6 +494,7 @@ describe('JWT Token Contract', () => {
       // Validate specific claim values
       expect(payload.workspace).toBe('ws-test-123');
       expect(payload.type).toBe('callback');
+      expect(payload.scope).toBe('workspace');
       expect(payload.sub).toBe('ws-test-123');
       expect(payload.aud).toBe(JWT_AUDIENCES.callback);
       expect(payload.iss).toBe('https://api.example.com');
@@ -504,6 +505,99 @@ describe('JWT Token Contract', () => {
       const expiry = (payload.exp as number) - (payload.iat as number);
       expect(expiry).toBeGreaterThan(0);
       expect(expiry).toBeLessThanOrEqual(24 * 60 * 60 + 1);
+    });
+  });
+
+  describe('signNodeCallbackToken', () => {
+    it('produces a node-scoped token with correct claims', async () => {
+      const { signNodeCallbackToken } = await import('../../src/services/jwt');
+      const { jwtVerify, importSPKI } = await import('jose');
+
+      const env = {
+        JWT_PRIVATE_KEY: testPrivateKey,
+        JWT_PUBLIC_KEY: testPublicKey,
+        BASE_DOMAIN: 'example.com',
+      } as any;
+
+      const token = await signNodeCallbackToken('node-abc-123', env);
+      expect(typeof token).toBe('string');
+
+      const publicKey = await importSPKI(testPublicKey, JWT_ALGORITHM);
+      const { payload } = await jwtVerify(token, publicKey, {
+        issuer: 'https://api.example.com',
+        audience: JWT_AUDIENCES.callback,
+      });
+
+      const claimsResult = CallbackTokenClaimsSchema.safeParse(payload);
+      expect(claimsResult.success).toBe(true);
+
+      expect(payload.workspace).toBe('node-abc-123');
+      expect(payload.type).toBe('callback');
+      expect(payload.scope).toBe('node');
+      expect(payload.sub).toBe('node-abc-123');
+      expect(payload.aud).toBe(JWT_AUDIENCES.callback);
+    });
+  });
+
+  describe('verifyCallbackToken returns scope', () => {
+    it('returns scope: workspace for workspace-scoped tokens', async () => {
+      const { signCallbackToken, verifyCallbackToken } = await import('../../src/services/jwt');
+
+      const env = {
+        JWT_PRIVATE_KEY: testPrivateKey,
+        JWT_PUBLIC_KEY: testPublicKey,
+        BASE_DOMAIN: 'example.com',
+      } as any;
+
+      const token = await signCallbackToken('ws-scope-test', env);
+      const payload = await verifyCallbackToken(token, env);
+
+      expect(payload.workspace).toBe('ws-scope-test');
+      expect(payload.scope).toBe('workspace');
+    });
+
+    it('returns scope: node for node-scoped tokens', async () => {
+      const { signNodeCallbackToken, verifyCallbackToken } = await import('../../src/services/jwt');
+
+      const env = {
+        JWT_PRIVATE_KEY: testPrivateKey,
+        JWT_PUBLIC_KEY: testPublicKey,
+        BASE_DOMAIN: 'example.com',
+      } as any;
+
+      const token = await signNodeCallbackToken('node-scope-test', env);
+      const payload = await verifyCallbackToken(token, env);
+
+      expect(payload.workspace).toBe('node-scope-test');
+      expect(payload.scope).toBe('node');
+    });
+
+    it('returns scope: undefined for legacy tokens (no scope claim)', async () => {
+      const { SignJWT, importPKCS8 } = await import('jose');
+      const { verifyCallbackToken } = await import('../../src/services/jwt');
+
+      const privateKey = await importPKCS8(testPrivateKey, JWT_ALGORITHM);
+      const legacyToken = await new SignJWT({
+        workspace: 'ws-legacy',
+        type: 'callback',
+        // No scope claim — simulates pre-scoping token
+      })
+        .setProtectedHeader({ alg: JWT_ALGORITHM, kid: 'key-2024-01' })
+        .setIssuer('https://api.example.com')
+        .setSubject('ws-legacy')
+        .setAudience(JWT_AUDIENCES.callback)
+        .setExpirationTime(new Date(Date.now() + 86400000))
+        .setIssuedAt()
+        .sign(privateKey);
+
+      const env = {
+        JWT_PUBLIC_KEY: testPublicKey,
+        BASE_DOMAIN: 'example.com',
+      } as any;
+
+      const payload = await verifyCallbackToken(legacyToken, env);
+      expect(payload.workspace).toBe('ws-legacy');
+      expect(payload.scope).toBeUndefined();
     });
   });
 
@@ -584,6 +678,7 @@ describe('JWT Token Contract', () => {
 
       expect(payload.workspace).toBe('ws-verify-test');
       expect(payload.type).toBe('callback');
+      expect(payload.scope).toBe('workspace');
     });
 
     it('rejects an expired callback token', async () => {

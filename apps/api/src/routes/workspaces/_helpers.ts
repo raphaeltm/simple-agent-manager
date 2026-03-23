@@ -102,10 +102,40 @@ export async function verifyWorkspaceCallbackAuth(
 
   const token = authHeader.slice(7);
   const payload = await verifyCallbackToken(token, c.env);
+
+  // Node-scoped tokens CANNOT access workspace-scoped endpoints.
+  // This prevents cross-workspace secret access on multi-tenant nodes.
+  if (payload.scope === 'node') {
+    console.error('Rejected node-scoped token on workspace endpoint', {
+      tokenWorkspace: payload.workspace,
+      requestedWorkspaceId: workspaceId,
+      scope: payload.scope,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Node-scoped tokens cannot access workspace endpoints');
+  }
+
+  // Workspace-scoped tokens: direct workspace match required.
+  if (payload.scope === 'workspace') {
+    if (payload.workspace === workspaceId) {
+      return;
+    }
+    throw errors.forbidden('Token workspace mismatch');
+  }
+
+  // Legacy tokens (no scope claim): backward compatible behavior.
+  // Direct workspace match.
   if (payload.workspace === workspaceId) {
+    console.warn('Legacy callback token without scope claim used', {
+      tokenWorkspace: payload.workspace,
+      workspaceId,
+      action: 'allowed_legacy',
+    });
     return;
   }
 
+  // Legacy fallback: allow node-level token to access workspaces on that node.
+  // This preserves backward compatibility for VMs with pre-scoped tokens.
   const db = drizzle(c.env.DATABASE, { schema });
   const rows = await db
     .select({ nodeId: schema.workspaces.nodeId })
@@ -119,6 +149,12 @@ export async function verifyWorkspaceCallbackAuth(
   }
 
   if (workspace.nodeId && payload.workspace === workspace.nodeId) {
+    console.warn('Legacy node-level callback token used for workspace access (deprecated)', {
+      tokenWorkspace: payload.workspace,
+      workspaceId,
+      nodeId: workspace.nodeId,
+      action: 'allowed_legacy_node_fallback',
+    });
     return;
   }
 

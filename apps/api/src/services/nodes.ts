@@ -7,7 +7,7 @@ import type { Env } from '../index';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { ProviderError } from '@simple-agent-manager/providers';
 import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
-import { signCallbackToken } from './jwt';
+import { signNodeCallbackToken } from './jwt';
 import { createProviderForUser } from './provider-credentials';
 import { log } from '../lib/logger';
 import { persistError } from './observability';
@@ -113,7 +113,7 @@ export async function provisionNode(
       );
     }
 
-    const callbackToken = await signCallbackToken(node.id, env);
+    const callbackToken = await signNodeCallbackToken(node.id, env);
 
     const cloudInit = generateCloudInit({
       nodeId: node.id,
