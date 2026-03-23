@@ -39,10 +39,10 @@ describe('useChatWebSocket hook', () => {
     expect(hookSource).toContain('hadConnectionRef');
   });
 
-  it('always catches up on connect (initial and reconnect)', () => {
+  it('only catches up on reconnect (not initial connect)', () => {
     expect(hookSource).toContain('void catchUpMessages()');
-    // Catch-up fires on every connect, not just reconnects
-    expect(hookSource).not.toContain('if (wasReconnect)');
+    // Catch-up only fires on reconnect to avoid racing with loadSession
+    expect(hookSource).toContain('if (wasReconnect)');
   });
 
   it('handles all WebSocket message types including batch and agent_completed', () => {
