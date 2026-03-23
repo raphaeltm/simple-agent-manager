@@ -92,7 +92,10 @@ type Config struct {
 	PTYOutputBufferSize  int           // Ring buffer capacity per session in bytes
 
 	// ACP settings - configurable per constitution principle XI
-	ACPInitTimeoutMs      int
+	ACPInitTimeoutMs         int // Fallback timeout for all ACP init phases (default: 30000ms)
+	ACPInitializeTimeoutMs   int // Per-phase timeout for Initialize RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPNewSessionTimeoutMs   int // Per-phase timeout for NewSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPLoadSessionTimeoutMs  int // Per-phase timeout for LoadSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
 	ACPReconnectDelayMs   int
 	ACPReconnectTimeoutMs int
 	ACPMaxRestartAttempts int
@@ -258,7 +261,10 @@ func Load() (*Config, error) {
 		PTYOutputBufferSize:  getEnvInt("PTY_OUTPUT_BUFFER_SIZE", 262144), // 256 KB default
 
 		// ACP settings - configurable per constitution principle XI
-		ACPInitTimeoutMs:      getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
+		ACPInitTimeoutMs:        getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
+		ACPInitializeTimeoutMs:  getEnvInt("ACP_INITIALIZE_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
+		ACPNewSessionTimeoutMs:  getEnvInt("ACP_NEW_SESSION_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
+		ACPLoadSessionTimeoutMs: getEnvInt("ACP_LOAD_SESSION_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
 		ACPReconnectDelayMs:   getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
 		ACPReconnectTimeoutMs: getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
 		ACPMaxRestartAttempts: getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),

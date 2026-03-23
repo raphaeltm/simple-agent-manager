@@ -93,8 +93,18 @@ type MessageReportEntry struct {
 
 // GatewayConfig holds configuration for the ACP gateway and SessionHost.
 type GatewayConfig struct {
-	// InitTimeoutMs is the ACP initialization timeout in milliseconds.
+	// InitTimeoutMs is the fallback ACP initialization timeout in milliseconds.
+	// Used when per-phase timeouts below are not set (0).
 	InitTimeoutMs int
+	// InitializeTimeoutMs is the timeout for the Initialize RPC in milliseconds.
+	// When 0, falls back to InitTimeoutMs.
+	InitializeTimeoutMs int
+	// NewSessionTimeoutMs is the timeout for the NewSession RPC in milliseconds.
+	// When 0, falls back to InitTimeoutMs.
+	NewSessionTimeoutMs int
+	// LoadSessionTimeoutMs is the timeout for the LoadSession RPC in milliseconds.
+	// When 0, falls back to InitTimeoutMs.
+	LoadSessionTimeoutMs int
 	// MaxRestartAttempts is the maximum number of restart attempts on crash.
 	MaxRestartAttempts int
 	// ControlPlaneURL is the URL for fetching agent API keys.

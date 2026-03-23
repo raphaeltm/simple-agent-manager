@@ -199,6 +199,9 @@ func New(cfg *config.Config) (*Server, error) {
 	// Build ACP gateway configuration
 	acpGatewayConfig := acp.GatewayConfig{
 		InitTimeoutMs:           cfg.ACPInitTimeoutMs,
+		InitializeTimeoutMs:    cfg.ACPInitializeTimeoutMs,
+		NewSessionTimeoutMs:    cfg.ACPNewSessionTimeoutMs,
+		LoadSessionTimeoutMs:   cfg.ACPLoadSessionTimeoutMs,
 		MaxRestartAttempts:      cfg.ACPMaxRestartAttempts,
 		ControlPlaneURL:         cfg.ControlPlaneURL,
 		WorkspaceID:             defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID),
