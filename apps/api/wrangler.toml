@@ -122,6 +122,9 @@ crons = ["*/5 * * * *"]
 # - JWT_PRIVATE_KEY
 # - JWT_PUBLIC_KEY
 # - ENCRYPTION_KEY
+# - BETTER_AUTH_SECRET (optional — overrides ENCRYPTION_KEY for BetterAuth sessions)
+# - CREDENTIAL_ENCRYPTION_KEY (optional — overrides ENCRYPTION_KEY for AES-GCM credential encryption)
+# - GITHUB_WEBHOOK_SECRET (optional — overrides ENCRYPTION_KEY for GitHub webhook HMAC)
 # - ORIGIN_CA_CERT (Origin CA certificate for VM agent TLS)
 # - ORIGIN_CA_KEY (Origin CA private key for VM agent TLS)
 # - GOOGLE_CLIENT_ID (optional — Google Cloud Console OAuth client ID, enables GCP OIDC integration)
