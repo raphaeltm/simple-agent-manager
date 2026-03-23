@@ -170,12 +170,13 @@ describe('selectNodeForTaskRun warm pool path', () => {
     expect(warmSection).toContain('warmNode.id');
   });
 
-  it('sets activeWorkspaceCount to 0 for claimed warm nodes', () => {
+  it('checks workspace count before returning claimed warm nodes', () => {
     const warmSection = selectorSource.slice(
       selectorSource.indexOf('for (const warmNode'),
       selectorSource.indexOf('Get all running nodes')
     );
-    expect(warmSection).toContain('activeWorkspaceCount: 0');
+    expect(warmSection).toContain('warmActiveCount >= maxWorkspacesPerNode');
+    expect(warmSection).toContain('activeWorkspaceCount: warmActiveCount');
   });
 
   it('catches claim failures and tries the next warm node', () => {

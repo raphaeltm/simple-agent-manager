@@ -1009,6 +1009,19 @@ func TestPhaseTimeout_FallsBackWhenZero(t *testing.T) {
 	}
 }
 
+func TestPhaseTimeout_FallsBackWhenNegative(t *testing.T) {
+	t.Parallel()
+
+	fallback := 30 * time.Second
+
+	if got := phaseTimeout(-1, fallback); got != fallback {
+		t.Fatalf("phaseTimeout(-1, 30s): got %v, want %v", got, fallback)
+	}
+	if got := phaseTimeout(-99999, fallback); got != fallback {
+		t.Fatalf("phaseTimeout(-99999, 30s): got %v, want %v", got, fallback)
+	}
+}
+
 // --- Message reporter integration tests (T025) ---
 
 // mockMessageReporter captures enqueued messages for testing.

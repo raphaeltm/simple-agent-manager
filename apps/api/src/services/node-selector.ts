@@ -184,6 +184,21 @@ export async function selectNodeForTaskRun(
           taskId
         );
         if (result.claimed) {
+          // Defense-in-depth: verify workspace count even for warm nodes
+          const [wsCountRow] = await db
+            .select({ count: count() })
+            .from(schema.workspaces)
+            .where(
+              and(
+                eq(schema.workspaces.nodeId, warmNode.id),
+                eq(schema.workspaces.userId, userId),
+                inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
+              )
+            );
+          const warmActiveCount = wsCountRow?.count ?? 0;
+          if (warmActiveCount >= maxWorkspacesPerNode) {
+            continue; // At capacity despite being warm — skip
+          }
           return {
             id: warmNode.id,
             status: warmNode.status,
@@ -191,7 +206,7 @@ export async function selectNodeForTaskRun(
             vmSize: warmNode.vmSize,
             vmLocation: warmNode.vmLocation,
             lastMetrics: parseMetrics(warmNode.lastMetrics),
-            activeWorkspaceCount: 0,
+            activeWorkspaceCount: warmActiveCount,
           };
         }
       } catch {

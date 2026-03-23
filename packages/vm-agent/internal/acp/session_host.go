@@ -38,6 +38,10 @@ const (
 	// DefaultPromptCancelGracePeriod is how long we wait after cancel before
 	// force-stopping an unresponsive agent process.
 	DefaultPromptCancelGracePeriod = 5 * time.Second
+
+	// DefaultACPInitTimeout is the safety-net timeout for ACP phase operations
+	// when InitTimeoutMs is not configured. Matches the default for ACP_INIT_TIMEOUT_MS.
+	DefaultACPInitTimeout = 30 * time.Second
 )
 
 // buildAcpMcpServers converts McpServerEntry configs into acpsdk.McpServer
@@ -952,7 +956,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	// When the per-phase value is 0, fall back to the general InitTimeoutMs.
 	fallbackTimeout := time.Duration(h.config.InitTimeoutMs) * time.Millisecond
 	if fallbackTimeout == 0 {
-		fallbackTimeout = 30 * time.Second
+		fallbackTimeout = DefaultACPInitTimeout
 	}
 
 	initializeTimeout := phaseTimeout(h.config.InitializeTimeoutMs, fallbackTimeout)

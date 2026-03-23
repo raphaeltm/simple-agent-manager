@@ -1327,6 +1327,16 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         const result = await stub.tryClaim(state.taskId) as { claimed: boolean };
 
         if (result.claimed) {
+          // Defense-in-depth: verify workspace count even for warm nodes
+          const wsCount = await this.env.DATABASE.prepare(
+            `SELECT COUNT(*) as c FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
+          ).bind(warmNode.id).first<{ c: number }>();
+          const maxWorkspaces = parseEnvInt(
+            this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE,
+          );
+          if ((wsCount?.c ?? 0) >= maxWorkspaces) {
+            continue; // At capacity despite being warm — skip
+          }
           log.info('task_runner_do.warm_node_claimed', {
             taskId: state.taskId,
             nodeId: warmNode.id,
@@ -1365,6 +1375,17 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
 
     if (!nodes.results.length) return null;
 
+    // Batch workspace count query to avoid N+1 D1 round-trips
+    const nodeIds = nodes.results.map(n => n.id);
+    const placeholders = nodeIds.map(() => '?').join(',');
+    const wsCounts = await this.env.DATABASE.prepare(
+      `SELECT node_id, COUNT(*) as c FROM workspaces
+       WHERE node_id IN (${placeholders})
+       AND status IN ('running', 'creating', 'recovery')
+       GROUP BY node_id`
+    ).bind(...nodeIds).all<{ node_id: string; c: number }>();
+    const countByNode = new Map((wsCounts.results ?? []).map(r => [r.node_id, r.c]));
+
     type ScoredNode = {
       id: string;
       vmSize: string;
@@ -1376,10 +1397,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
 
     for (const node of nodes.results) {
       // Hard workspace count limit — reject node regardless of CPU/memory metrics
-      const wsCount = await this.env.DATABASE.prepare(
-        `SELECT COUNT(*) as c FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
-      ).bind(node.id).first<{ c: number }>();
-      if ((wsCount?.c ?? 0) >= maxWorkspaces) continue;
+      if ((countByNode.get(node.id) ?? 0) >= maxWorkspaces) continue;
       let metrics: { cpuLoadAvg1?: number; memoryPercent?: number } | null = null;
       if (node.last_metrics) {
         try { metrics = JSON.parse(node.last_metrics); } catch { /* ignore */ }
