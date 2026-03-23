@@ -30,7 +30,7 @@ describe('workspaces runtime-assets callback route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.decrypt.mockResolvedValue('decrypted-secret');
-    mocks.verifyCallbackToken.mockResolvedValue({ workspace: 'WS_1' });
+    mocks.verifyCallbackToken.mockResolvedValue({ workspace: 'WS_1', type: 'callback', scope: 'workspace' });
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {

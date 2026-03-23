@@ -49,10 +49,11 @@ vi.mock('drizzle-orm/d1', () => ({
   }),
 }));
 
-// Mock JWT verification to accept any token
+// Mock JWT verification to accept any token (workspace-scoped)
 vi.mock('../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-test' }),
+  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn().mockResolvedValue('mock-token'),
+  signNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
 }));
 
 // Mock task-runner-do service

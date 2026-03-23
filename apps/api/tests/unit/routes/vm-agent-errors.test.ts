@@ -4,8 +4,9 @@ import type { Env } from '../../../src/index';
 
 // Mock JWT verification — accept any token
 vi.mock('../../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'node-123' }),
+  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'node-123', type: 'callback', scope: 'node' }),
   signCallbackToken: vi.fn(),
+  signNodeCallbackToken: vi.fn(),
   signNodeManagementToken: vi.fn(),
 }));
 

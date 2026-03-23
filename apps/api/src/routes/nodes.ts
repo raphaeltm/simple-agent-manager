@@ -11,7 +11,7 @@ import { requireNodeOwnership } from '../middleware/node-auth';
 import * as schema from '../db/schema';
 import { getRuntimeLimits } from '../services/limits';
 import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
-import { shouldRefreshCallbackToken, signCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
+import { shouldRefreshCallbackToken, signCallbackToken, signNodeCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import {
@@ -98,6 +98,18 @@ async function verifyNodeCallbackAuth(c: Context<{ Bindings: Env }>, nodeId: str
 
   const token = authHeader.slice(7);
   const payload = await verifyCallbackToken(token, c.env);
+
+  // Workspace-scoped tokens CANNOT be used for node-level endpoints.
+  if (payload.scope === 'workspace') {
+    console.error('Rejected workspace-scoped token on node endpoint', {
+      tokenWorkspace: payload.workspace,
+      nodeId,
+      scope: payload.scope,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Insufficient token scope');
+  }
+
   if (payload.workspace !== nodeId) {
     throw errors.unauthorized('Callback token does not match node');
   }
@@ -485,6 +497,8 @@ nodesRoutes.post('/:id/ready', async (c) => {
 
       for (const workspace of pendingWorkspaces) {
         try {
+          // Intentionally workspace-scoped (not signNodeCallbackToken) — this token
+          // is for a specific workspace's VM agent callbacks, not node-level operations.
           const callbackToken = await signCallbackToken(workspace.id, c.env);
           await createWorkspaceOnNode(nodeId, c.env, workspace.userId, {
             workspaceId: workspace.id,
@@ -608,7 +622,7 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
   };
 
   if (tokenNeedsRefresh) {
-    response.refreshedToken = await signCallbackToken(nodeId, c.env);
+    response.refreshedToken = await signNodeCallbackToken(nodeId, c.env);
   }
 
   return c.json(response);

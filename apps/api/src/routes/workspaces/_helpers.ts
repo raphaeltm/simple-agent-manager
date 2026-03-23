@@ -5,8 +5,7 @@ import type { Env } from '../../index';
 import { errors } from '../../middleware/error';
 import * as schema from '../../db/schema';
 import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/shared';
-import { verifyCallbackToken } from '../../services/jwt';
-import { signCallbackToken } from '../../services/jwt';
+import { verifyCallbackToken, signCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { decrypt } from '../../services/encryption';
 
@@ -102,10 +101,41 @@ export async function verifyWorkspaceCallbackAuth(
 
   const token = authHeader.slice(7);
   const payload = await verifyCallbackToken(token, c.env);
+
+  // Node-scoped tokens CANNOT access workspace-scoped endpoints.
+  // This prevents cross-workspace secret access on multi-tenant nodes.
+  if (payload.scope === 'node') {
+    console.error('Rejected node-scoped token on workspace endpoint', {
+      tokenWorkspace: payload.workspace,
+      requestedWorkspaceId: workspaceId,
+      scope: payload.scope,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Insufficient token scope');
+  }
+
+  // Workspace-scoped tokens: direct workspace match required.
+  if (payload.scope === 'workspace') {
+    if (payload.workspace === workspaceId) {
+      return;
+    }
+    throw errors.forbidden('Insufficient token scope');
+  }
+
+  // Legacy tokens (no scope claim): backward compatible behavior.
+  // Direct workspace match.
   if (payload.workspace === workspaceId) {
+    console.warn('Legacy callback token without scope claim used', {
+      tokenWorkspace: payload.workspace,
+      workspaceId,
+      action: 'allowed_legacy',
+    });
     return;
   }
 
+  // Legacy fallback: allow node-level token to access workspaces on that node.
+  // This preserves backward compatibility for VMs with pre-scoped tokens.
+  // TODO: Remove after 2026-04-23 — all nodes should have scoped tokens by then.
   const db = drizzle(c.env.DATABASE, { schema });
   const rows = await db
     .select({ nodeId: schema.workspaces.nodeId })
@@ -119,10 +149,16 @@ export async function verifyWorkspaceCallbackAuth(
   }
 
   if (workspace.nodeId && payload.workspace === workspace.nodeId) {
+    console.warn('Legacy node-level callback token used for workspace access (deprecated)', {
+      tokenWorkspace: payload.workspace,
+      workspaceId,
+      nodeId: workspace.nodeId,
+      action: 'allowed_legacy_node_fallback',
+    });
     return;
   }
 
-  throw errors.forbidden('Token workspace mismatch');
+  throw errors.forbidden('Insufficient token scope');
 }
 
 export async function getWorkspaceRuntimeAssets(
