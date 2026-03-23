@@ -108,14 +108,18 @@ export function useChatWebSocket({
           ws.close(1000);
           return;
         }
+        const wasReconnect = hadConnectionRef.current;
         retriesRef.current = 0;
         setConnectionState('connected');
         hadConnectionRef.current = true;
 
-        // Always catch up on connect — the initial REST load may have
-        // completed before messages arrived, and reconnects need to
-        // fetch anything missed while disconnected.
-        void catchUpMessages();
+        // Only catch up on reconnect — the initial REST load (loadSession)
+        // already fetches messages, so a duplicate catch-up on first connect
+        // races with it and can overwrite messages via the 'replace' merge
+        // strategy, causing them to briefly appear then disappear.
+        if (wasReconnect) {
+          void catchUpMessages();
+        }
       };
 
       ws.onmessage = (event) => {

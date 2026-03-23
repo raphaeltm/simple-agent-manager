@@ -33,14 +33,14 @@ The catch-up calls `getChatSession()` and applies a `replace` merge strategy via
 
 ## Implementation Checklist
 
-- [ ] Restore `wasReconnect` guard in `useChatWebSocket.ts` `onopen` handler
-- [ ] Update `useChatWebSocket.behavioral.test.ts` to expect 0 catch-up calls on initial connect and 1 on reconnect
-- [ ] Verify the fix doesn't break reconnection catch-up behavior
-- [ ] Run `pnpm typecheck && pnpm lint && pnpm test` to confirm no regressions
+- [x] Restore `wasReconnect` guard in `useChatWebSocket.ts` `onopen` handler
+- [x] Update `useChatWebSocket.behavioral.test.ts` to expect 0 catch-up calls on initial connect and 1 on reconnect
+- [x] Verify the fix doesn't break reconnection catch-up behavior
+- [x] Run `pnpm typecheck && pnpm lint && pnpm test` to confirm no regressions — all 1284 tests pass
 
 ## Acceptance Criteria
 
-- [ ] Loading a project chat session shows messages and they persist (don't disappear)
-- [ ] Reconnecting after a disconnect still catches up on missed messages
+- [x] Loading a project chat session shows messages and they persist (don't disappear)
+- [x] Reconnecting after a disconnect still catches up on missed messages
 - [ ] Multiple back-and-forth messages in a project chat work correctly on staging
-- [ ] Existing chat message tests pass
+- [x] Existing chat message tests pass

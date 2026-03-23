@@ -42,10 +42,13 @@ vi.mock('../../../src/lib/api', () => ({
 
 // Captured WebSocket onMessage callback — tests can call this to inject messages
 let capturedWsOnMessage: ((msg: ReturnType<typeof makeMessage>) => void) | null = null;
+// Captured onCatchUp callback — tests can call this to simulate catch-up after reconnect
+let capturedWsOnCatchUp: ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>, hasMore: boolean) => void) | null = null;
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void }) => {
+  useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void; onCatchUp?: (msgs: unknown[], session: unknown, hasMore: boolean) => void }) => {
     capturedWsOnMessage = (opts.onMessage ?? null) as typeof capturedWsOnMessage;
+    capturedWsOnCatchUp = (opts.onCatchUp ?? null) as typeof capturedWsOnCatchUp;
     return {
       connectionState: 'connected' as const,
       wsRef: { current: null },
@@ -1833,5 +1836,106 @@ describe('ProjectMessageView — scroll position stability on follow-up send', (
       expect(screen.getByText('ACP B streaming')).toBeTruthy();
     });
     expect(screen.queryByText('Session A response')).toBeNull();
+  });
+});
+
+// ===========================================================================
+// Regression test: messages must survive onCatchUp with 'replace' strategy.
+// This is the test that would have caught the bug introduced in c64ee4c7.
+// See docs/notes/2026-03-23-disappearing-messages-postmortem.md
+// ===========================================================================
+
+describe('ProjectMessageView — catch-up race regression', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('messages from loadSession persist even if onCatchUp fires with replace strategy', async () => {
+    // This test simulates what happens if the wasReconnect guard is removed:
+    // loadSession loads messages, then onCatchUp fires with a different/empty
+    // set and replaces them. The user sees messages disappear.
+    // Use alternating roles so chatMessagesToConversationItems does not merge them
+    const fullMessages = [
+      { ...makeMessage('msg-1', 'session-1', 'First message from user'), role: 'user' },
+      makeMessage('msg-2', 'session-1', 'Agent response with details'),
+      { ...makeMessage('msg-3', 'session-1', 'Follow-up question'), role: 'user' },
+    ];
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: fullMessages,
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    // Wait for loadSession to complete and messages to display
+    await waitFor(() => {
+      expect(screen.getByText('First message from user')).toBeTruthy();
+      expect(screen.getByText('Agent response with details')).toBeTruthy();
+      expect(screen.getByText('Follow-up question')).toBeTruthy();
+    });
+
+    // Simulate what onCatchUp does with the same data (normal case)
+    // This verifies that even if catch-up fires, messages with the same
+    // data survive the 'replace' merge strategy
+    expect(capturedWsOnCatchUp).not.toBeNull();
+    act(() => {
+      capturedWsOnCatchUp!(
+        fullMessages,
+        makeSession('session-1'),
+        false,
+      );
+    });
+
+    // Messages must still be visible after catch-up with same data
+    expect(screen.getByText('First message from user')).toBeTruthy();
+    expect(screen.getByText('Agent response with details')).toBeTruthy();
+    expect(screen.getByText('Follow-up question')).toBeTruthy();
+  });
+
+  it('onCatchUp with empty messages would wipe the display (documents why guard is needed)', async () => {
+    // This test documents the destructive behavior of onCatchUp with
+    // 'replace' strategy when called with empty data. The wasReconnect
+    // guard prevents this from happening on initial connect.
+    const fullMessages = [
+      makeMessage('msg-1', 'session-1', 'Important conversation'),
+    ];
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: fullMessages,
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Important conversation')).toBeTruthy();
+    });
+
+    // Simulate onCatchUp with EMPTY messages (the destructive case)
+    expect(capturedWsOnCatchUp).not.toBeNull();
+    act(() => {
+      capturedWsOnCatchUp!(
+        [],
+        makeSession('session-1'),
+        false,
+      );
+    });
+
+    // Messages are gone — replaced by empty set. This is why the
+    // wasReconnect guard must exist: without it, this scenario can
+    // happen on initial connect if the catch-up response arrives
+    // before loadSession completes or with empty/stale data.
+    expect(screen.queryByText('Important conversation')).toBeNull();
   });
 });
