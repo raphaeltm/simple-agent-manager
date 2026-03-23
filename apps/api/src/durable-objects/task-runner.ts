@@ -36,6 +36,7 @@ import {
   DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_WORKSPACE_PROFILE,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
@@ -1346,6 +1347,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     const memThreshold = parseEnvInt(
       this.env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT, DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
     );
+    const maxWorkspaces = parseEnvInt(
+      this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE,
+    );
 
     const nodes = await this.env.DATABASE.prepare(
       `SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes
@@ -1369,9 +1373,12 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
 
     const candidates: ScoredNode[] = [];
 
-    // Node capacity is determined by resource usage (CPU/memory thresholds),
-    // not by a hard workspace count limit.
     for (const node of nodes.results) {
+      // Hard workspace count limit — reject node regardless of CPU/memory metrics
+      const wsCount = await this.env.DATABASE.prepare(
+        `SELECT COUNT(*) as c FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
+      ).bind(node.id).first<{ c: number }>();
+      if ((wsCount?.c ?? 0) >= maxWorkspaces) continue;
       let metrics: { cpuLoadAvg1?: number; memoryPercent?: number } | null = null;
       if (node.last_metrics) {
         try { metrics = JSON.parse(node.last_metrics); } catch { /* ignore */ }

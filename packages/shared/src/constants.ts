@@ -151,6 +151,10 @@ export const WORKSPACE_NAME_MAX_LENGTH = 64;
 // Task Run Defaults (Autonomous Execution)
 // =============================================================================
 
+/** Default max workspaces per node. Hard ceiling regardless of CPU/memory metrics.
+ * Override via MAX_WORKSPACES_PER_NODE env var. */
+export const DEFAULT_MAX_WORKSPACES_PER_NODE = 3;
+
 /** Default CPU usage threshold (%) above which a node is considered full. Override via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
 export const DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT = 50;
 

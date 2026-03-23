@@ -104,6 +104,7 @@ export interface Env {
   RATE_LIMIT_ANONYMOUS?: string;
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
+  MAX_WORKSPACES_PER_NODE?: string;
   MAX_AGENT_SESSIONS_PER_WORKSPACE?: string;
   MAX_PROJECTS_PER_USER?: string;
   MAX_BRANCHES_PER_REPO?: string;
