@@ -955,9 +955,9 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		fallbackTimeout = 30 * time.Second
 	}
 
-	initializeTimeout := h.phaseTimeout(h.config.InitializeTimeoutMs, fallbackTimeout)
-	loadSessionTimeout := h.phaseTimeout(h.config.LoadSessionTimeoutMs, fallbackTimeout)
-	newSessionTimeout := h.phaseTimeout(h.config.NewSessionTimeoutMs, fallbackTimeout)
+	initializeTimeout := phaseTimeout(h.config.InitializeTimeoutMs, fallbackTimeout)
+	loadSessionTimeout := phaseTimeout(h.config.LoadSessionTimeoutMs, fallbackTimeout)
+	newSessionTimeout := phaseTimeout(h.config.NewSessionTimeoutMs, fallbackTimeout)
 
 	// Phase 1: Initialize the ACP protocol handshake
 	initCtx, initCancel := context.WithTimeout(ctx, initializeTimeout)
@@ -994,7 +994,6 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	// Phase 2: Attempt LoadSession if we have a previous session ID and the agent supports it
 	if previousAcpSessionID != "" && initResp.AgentCapabilities.LoadSession {
 		loadCtx, loadCancel := context.WithTimeout(ctx, loadSessionTimeout)
-		defer loadCancel()
 
 		slog.Info("ACP: attempting LoadSession with previous session", "previousAcpSessionID", previousAcpSessionID, "timeout", loadSessionTimeout)
 		h.reportLifecycle("info", "ACP LoadSession started", map[string]interface{}{
@@ -1041,7 +1040,6 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 
 	// Phase 3: NewSession
 	newCtx, newCancel := context.WithTimeout(ctx, newSessionTimeout)
-	defer newCancel()
 
 	slog.Info("ACP: sending NewSession request", "timeout", newSessionTimeout)
 	h.reportLifecycle("info", "ACP NewSession started", map[string]interface{}{
@@ -1052,12 +1050,14 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		McpServers: buildAcpMcpServers(h.config.McpServers),
 	})
 	if err != nil {
+		newCancel()
 		h.reportLifecycle("warn", "ACP NewSession failed", map[string]interface{}{
 			"agentType": agentType,
 			"error":     err.Error(),
 		})
 		return fmt.Errorf("ACP new session failed: %w", err)
 	}
+	newCancel() // release NewSession context early
 	h.sessionID = sessResp.SessionId
 	slog.Info("ACP: NewSession succeeded", "sessionID", string(h.sessionID))
 	h.reportLifecycle("info", "ACP NewSession succeeded", map[string]interface{}{
@@ -1072,7 +1072,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 
 // phaseTimeout returns a per-phase timeout duration. If phaseMs is > 0, it is
 // used; otherwise the fallback timeout is returned.
-func (h *SessionHost) phaseTimeout(phaseMs int, fallback time.Duration) time.Duration {
+func phaseTimeout(phaseMs int, fallback time.Duration) time.Duration {
 	if phaseMs > 0 {
 		return time.Duration(phaseMs) * time.Millisecond
 	}

@@ -60,16 +60,16 @@ type Server struct {
 	messageReporters    map[string]*messagereport.Reporter // keyed by workspaceID
 	worktreeCacheMu     sync.RWMutex
 	worktreeCache       map[string]cachedWorktreeList
-	logReader            *logreader.Reader
-	bootLogBroadcasters  *BootLogBroadcasterManager
-	containerDiscovery   *container.Discovery
-	portScannerMu        sync.RWMutex
-	portScanners         map[string]*ports.Scanner
-	portDiscoveries      map[string]*container.Discovery // per-workspace container discovery
-	bootstrapComplete    bool
-	callbackTokenMu      sync.RWMutex
-	callbackToken        string
-	done                 chan struct{}
+	logReader           *logreader.Reader
+	bootLogBroadcasters *BootLogBroadcasterManager
+	containerDiscovery  *container.Discovery
+	portScannerMu       sync.RWMutex
+	portScanners        map[string]*ports.Scanner
+	portDiscoveries     map[string]*container.Discovery // per-workspace container discovery
+	bootstrapComplete   bool
+	callbackTokenMu     sync.RWMutex
+	callbackToken       string
+	done                chan struct{}
 }
 
 type cachedWorktreeList struct {
@@ -199,9 +199,9 @@ func New(cfg *config.Config) (*Server, error) {
 	// Build ACP gateway configuration
 	acpGatewayConfig := acp.GatewayConfig{
 		InitTimeoutMs:           cfg.ACPInitTimeoutMs,
-		InitializeTimeoutMs:    cfg.ACPInitializeTimeoutMs,
-		NewSessionTimeoutMs:    cfg.ACPNewSessionTimeoutMs,
-		LoadSessionTimeoutMs:   cfg.ACPLoadSessionTimeoutMs,
+		InitializeTimeoutMs:     cfg.ACPInitializeTimeoutMs,
+		NewSessionTimeoutMs:     cfg.ACPNewSessionTimeoutMs,
+		LoadSessionTimeoutMs:    cfg.ACPLoadSessionTimeoutMs,
 		MaxRestartAttempts:      cfg.ACPMaxRestartAttempts,
 		ControlPlaneURL:         cfg.ControlPlaneURL,
 		WorkspaceID:             defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID),
@@ -291,12 +291,12 @@ func New(cfg *config.Config) (*Server, error) {
 		errorReporter:       errorReporter,
 		messageReporters:    messageReporters,
 		worktreeCache:       make(map[string]cachedWorktreeList),
-		logReader:            logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
-		bootLogBroadcasters:  NewBootLogBroadcasterManager(),
-		containerDiscovery:   containerDiscoveryInstance,
-		portScanners:         make(map[string]*ports.Scanner),
-		callbackToken:        cfg.CallbackToken,
-		done:                 make(chan struct{}),
+		logReader:           logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
+		bootLogBroadcasters: NewBootLogBroadcasterManager(),
+		containerDiscovery:  containerDiscoveryInstance,
+		portScanners:        make(map[string]*ports.Scanner),
+		callbackToken:       cfg.CallbackToken,
+		done:                make(chan struct{}),
 	}
 
 	// Wire the git token fetcher now that the server exists.
@@ -905,11 +905,11 @@ func (a *messageReporterAdapter) Enqueue(entry acp.MessageReportEntry) error {
 }
 
 // makeTaskCompletionCallback returns an OnPromptComplete callback that:
-// 1. On success: runs git add/commit/push inside the workspace container,
-//    optionally creates a PR via gh, then POSTs executionStep=awaiting_followup
-//    with the gitPushResult to the control plane (leaving the task running for
-//    follow-up messages).
-// 2. On failure: POSTs toStatus=failed to the control plane.
+//  1. On success: runs git add/commit/push inside the workspace container,
+//     optionally creates a PR via gh, then POSTs executionStep=awaiting_followup
+//     with the gitPushResult to the control plane (leaving the task running for
+//     follow-up messages).
+//  2. On failure: POSTs toStatus=failed to the control plane.
 //
 // The callback reads CallbackToken from the server's ACP config pointer so it
 // picks up the token set after bootstrap.
