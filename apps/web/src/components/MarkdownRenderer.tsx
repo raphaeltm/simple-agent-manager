@@ -67,7 +67,6 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
         if (!cancelled && containerRef.current) {
           containerRef.current.innerHTML = DOMPurify.sanitize(svg, {
             USE_PROFILES: { svg: true, svgFilters: true },
-            ADD_TAGS: ['foreignObject'],
           });
         }
       } catch (err) {
