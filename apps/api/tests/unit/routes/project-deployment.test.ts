@@ -63,6 +63,9 @@ vi.mock('../../../src/services/mcp-token', () => ({
   validateMcpToken: (...args: unknown[]) => mockValidateMcpToken(...args),
 }));
 
+// verifyCallbackToken mock kept as a canary — the identity token endpoint must NOT
+// import or call verifyCallbackToken. If a future change re-adds the import, this
+// mock will intercept it and tests can assert it was never called.
 const mockVerifyCallbackToken = vi.fn();
 const mockSignIdentityToken = vi.fn();
 vi.mock('../../../src/services/jwt', () => ({
@@ -234,38 +237,9 @@ describe('GET /:id/deployment-identity-token', () => {
     );
   });
 
-  it('falls back to callback token when MCP token is invalid', async () => {
-    mockValidateMcpToken.mockResolvedValue(null); // MCP invalid
-    mockVerifyCallbackToken.mockResolvedValue({ workspace: 'ws-1' });
-
-    // First limit call: workspace lookup
-    mockLimit.mockResolvedValueOnce([
-      { id: 'ws-1', projectId: 'proj-1', userId: 'u1' },
-    ]);
-    // Second limit call: credential lookup
-    mockLimit.mockResolvedValueOnce([CRED_ROW]);
-
-    mockSignIdentityToken.mockResolvedValue('signed-jwt-456');
-
-    const app = createTestApp();
-    const res = await app.request(
-      '/api/projects/proj-1/deployment-identity-token',
-      { method: 'GET', headers: { Authorization: 'Bearer callback-token-1' } },
-      mockEnv,
-    );
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ token: 'signed-jwt-456' });
-  });
-
-  it('returns 403 when callback token workspace belongs to different project', async () => {
+  it('rejects non-MCP tokens with 403 and does not sign identity token', async () => {
+    // MCP validation returns null for non-MCP tokens (including callback tokens)
     mockValidateMcpToken.mockResolvedValue(null);
-    mockVerifyCallbackToken.mockResolvedValue({ workspace: 'ws-1' });
-
-    // Workspace belongs to a different project
-    mockLimit.mockResolvedValueOnce([
-      { id: 'ws-1', projectId: 'other-project', userId: 'u1' },
-    ]);
 
     const app = createTestApp();
     const res = await app.request(
@@ -274,6 +248,66 @@ describe('GET /:id/deployment-identity-token', () => {
       mockEnv,
     );
     expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.message).toContain('MCP token');
+
+    // Identity token must NOT be signed for non-MCP tokens
+    expect(mockSignIdentityToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects any random bearer token with 403', async () => {
+    mockValidateMcpToken.mockResolvedValue(null);
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer random-invalid-token' } },
+      mockEnv,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 401 when Bearer token value is empty', async () => {
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer ' } },
+      mockEnv,
+    );
+    // 'Bearer ' without a token value fails the startsWith check
+    expect(res.status).toBe(401);
+    expect(mockSignIdentityToken).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when validateMcpToken throws (KV unavailable)', async () => {
+    mockValidateMcpToken.mockRejectedValue(new Error('KV connection failed'));
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer any-token' } },
+      mockEnv,
+    );
+    expect(res.status).toBe(500);
+    expect(mockSignIdentityToken).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when signIdentityToken throws', async () => {
+    mockValidateMcpToken.mockResolvedValue({
+      projectId: 'proj-1',
+      userId: 'u1',
+      workspaceId: 'ws-1',
+    });
+    mockLimit.mockResolvedValue([CRED_ROW]);
+    mockSignIdentityToken.mockRejectedValue(new Error('JWT signing failed'));
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
+      mockEnv,
+    );
+    expect(res.status).toBe(500);
   });
 });
 
