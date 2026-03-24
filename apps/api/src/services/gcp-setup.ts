@@ -29,7 +29,7 @@ interface GcpProjectListResponse {
  * at the function boundary to prevent injection if a non-ULID value is ever passed.
  */
 function assertSafeCelValue(value: string, fieldName: string): void {
-  if (!/^[a-zA-Z0-9_:.\-]+$/.test(value)) {
+  if (!/^[a-zA-Z0-9_:.-]+$/.test(value)) {
     throw new Error(`${fieldName} contains characters unsafe for CEL interpolation: ${value}`);
   }
 }
