@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { Project } from '../../src/pages/Project';
 
 // Mock AuthProvider
@@ -63,6 +63,10 @@ function renderProject(path = '/projects/proj-1/overview') {
     </MemoryRouter>,
   );
 }
+
+beforeEach(() => {
+  mockSetProjectName.mockClear();
+});
 
 describe('Project shell (non-chat routes)', () => {
   it('does not render a desktop header bar (project name is in the sidebar)', async () => {

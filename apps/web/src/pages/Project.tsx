@@ -108,6 +108,7 @@ export function Project() {
   return (
     <div className={`min-h-screen bg-canvas ${isMobile ? 'flex flex-col' : ''}`}>
       <main
+        aria-label={project?.name ? `${project.name} — Project` : 'Project'}
         className={`max-w-[80rem] mx-auto ${isMobile ? 'flex flex-col flex-1 min-h-0' : ''}`}
         style={isMobile
           ? { padding: 'var(--sam-space-3) var(--sam-space-3)' }
@@ -133,6 +134,8 @@ export function Project() {
           <div className={`flex flex-col flex-1 min-h-0 ${isMobile ? 'mt-2' : 'mt-3'}`}>
             <ProjectContext.Provider value={contextValue}>
               <Outlet />
+              <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+              <ProjectInfoPanel projectId={projectId} open={infoPanelOpen} onClose={() => setInfoPanelOpen(false)} />
             </ProjectContext.Provider>
           </div>
         )}
