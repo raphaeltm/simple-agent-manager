@@ -25,6 +25,7 @@ import {
 } from '../lib/api';
 import { useToast } from '../hooks/useToast';
 import { useProjectContext } from './ProjectContext';
+import { DeploymentSettings } from '../components/DeploymentSettings';
 
 const FALLBACK_VM_SIZES: { value: VMSize; label: string; description: string }[] = [
   { value: 'small', label: 'Small', description: '2-3 vCPUs, 4 GB RAM' },
@@ -753,6 +754,9 @@ export function ProjectSettings() {
         </div>
       )}
     </section>
+
+      {/* Deploy to Cloud */}
+      <DeploymentSettings projectId={projectId} />
 
       {/* Danger Zone */}
       <section className="border border-danger rounded-md bg-surface p-4 grid gap-3">

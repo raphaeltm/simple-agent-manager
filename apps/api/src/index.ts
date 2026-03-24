@@ -38,6 +38,7 @@ import { mcpRoutes } from './routes/mcp';
 import { notificationRoutes } from './routes/notifications';
 import { gcpRoutes } from './routes/gcp';
 import { googleAuthRoutes } from './routes/google-auth';
+import { projectDeploymentRoutes } from './routes/project-deployment';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
@@ -306,6 +307,15 @@ export interface Env {
   GCP_IMAGE_FAMILY?: string;
   GCP_IMAGE_PROJECT?: string;
   GCP_DISK_SIZE_GB?: string;
+  // GCP deployment (project-level OIDC for Defang)
+  GCP_DEPLOY_WIF_POOL_ID?: string;
+  GCP_DEPLOY_WIF_PROVIDER_ID?: string;
+  GCP_DEPLOY_SERVICE_ACCOUNT_ID?: string;
+  GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS?: string;
+  GCP_STS_TOKEN_URL?: string;
+  GCP_IAM_CREDENTIALS_BASE_URL?: string;
+  GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS?: string;
+  GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -613,6 +623,7 @@ app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
+app.route('/api/projects', projectDeploymentRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/notifications', notificationRoutes);

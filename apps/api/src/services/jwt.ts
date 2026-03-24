@@ -303,10 +303,11 @@ export interface IdentityTokenClaims {
  */
 export async function signIdentityToken(
   claims: IdentityTokenClaims,
-  env: Env
+  env: Env,
+  expirySecondsOverride?: number,
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expirySeconds = getIdentityTokenExpiry(env);
+  const expirySeconds = expirySecondsOverride ?? getIdentityTokenExpiry(env);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({

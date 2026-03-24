@@ -90,6 +90,40 @@ export interface GcpOidcCredential {
 }
 
 // =============================================================================
+// Project Deployment Credentials (GCP OIDC for Defang deployments)
+// =============================================================================
+
+/** Project-scoped deployment credential config (non-secret identifiers) */
+export interface ProjectDeploymentCredential {
+  id: string;
+  projectId: string;
+  userId: string;
+  provider: 'gcp';
+  gcpProjectId: string;
+  gcpProjectNumber: string;
+  serviceAccountEmail: string;
+  wifPoolId: string;
+  wifProviderId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** API response for project deployment credential (safe to expose) */
+export interface ProjectDeploymentCredentialResponse {
+  provider: 'gcp';
+  gcpProjectId: string;
+  serviceAccountEmail: string;
+  connected: boolean;
+  createdAt: string;
+}
+
+/** Request to set up GCP deployment for a project */
+export interface SetupProjectDeploymentRequest {
+  oauthHandle: string;
+  gcpProjectId: string;
+}
+
+// =============================================================================
 // Provider Catalog (dynamic instance types & locations)
 // =============================================================================
 

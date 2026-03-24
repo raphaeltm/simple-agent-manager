@@ -36,6 +36,7 @@ import {
   handleGetSessionMessages,
   handleSearchMessages,
 } from './session-tools';
+import { handleGetDeploymentCredentials } from './deployment-tools';
 import {
   handleLinkIdea,
   handleUnlinkIdea,
@@ -57,9 +58,8 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>();
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
 mcpRoutes.post('/', async (c) => {
-  // Authenticate — returns parsed token data (raw token no longer needed
-  // since token revocation was removed from complete_task)
-  const [tokenData] = await authenticateMcpRequest(
+  // Authenticate — returns parsed token data and raw token
+  const [tokenData, rawToken] = await authenticateMcpRequest(
     c.req.header('Authorization'),
     c.env.KV,
   );
@@ -156,6 +156,8 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleListIdeas(requestId, toolArgs, tokenData, c.env));
         case 'search_ideas':
           return c.json(await handleSearchIdeas(requestId, toolArgs, tokenData, c.env));
+        case 'get_deployment_credentials':
+          return c.json(await handleGetDeploymentCredentials(requestId, tokenData, c.env, rawToken!));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }

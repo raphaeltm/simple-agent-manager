@@ -66,7 +66,7 @@ export async function listGcpProjects(
 /**
  * Get the project number for a given project ID.
  */
-async function getProjectNumber(
+export async function getProjectNumber(
   oauthToken: string,
   projectId: string,
   timeoutMs: number,
@@ -88,10 +88,21 @@ async function getProjectNumber(
 /**
  * Enable required GCP APIs for the project.
  */
-async function enableApis(
+/** Default APIs enabled for VM provisioning. */
+const VM_APIS = [
+  'cloudresourcemanager.googleapis.com',
+  'iam.googleapis.com',
+  'iamcredentials.googleapis.com',
+  'sts.googleapis.com',
+  'compute.googleapis.com',
+  'aiplatform.googleapis.com',
+];
+
+export async function enableApis(
   oauthToken: string,
   projectNumber: string,
   timeoutMs: number,
+  serviceIds: string[] = VM_APIS,
 ): Promise<void> {
   const url = `${SERVICE_USAGE_URL}/projects/${projectNumber}/services:batchEnable`;
   const res = await fetchWithTimeout(url, {
@@ -100,16 +111,7 @@ async function enableApis(
       Authorization: `Bearer ${oauthToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      serviceIds: [
-        'cloudresourcemanager.googleapis.com',
-        'iam.googleapis.com',
-        'iamcredentials.googleapis.com',
-        'sts.googleapis.com',
-        'compute.googleapis.com',
-        'aiplatform.googleapis.com',
-      ],
-    }),
+    body: JSON.stringify({ serviceIds }),
   }, timeoutMs);
 
   if (!res.ok) {
@@ -128,7 +130,7 @@ async function enableApis(
  * Create a Workload Identity Pool.
  * Returns the pool name or reuses an existing one if it already exists.
  */
-async function createWifPool(
+export async function createWifPool(
   oauthToken: string,
   projectNumber: string,
   poolId: string,
@@ -168,7 +170,7 @@ async function createWifPool(
 /**
  * Create an OIDC provider in the WIF pool.
  */
-async function createOidcProvider(
+export async function createOidcProvider(
   oauthToken: string,
   projectNumber: string,
   poolId: string,
@@ -223,7 +225,7 @@ async function createOidcProvider(
 /**
  * Update an existing OIDC provider (if it already existed).
  */
-async function updateOidcProvider(
+export async function updateOidcProvider(
   oauthToken: string,
   projectNumber: string,
   poolId: string,
@@ -269,11 +271,13 @@ async function updateOidcProvider(
 /**
  * Create a service account for VM management.
  */
-async function createServiceAccount(
+export async function createServiceAccount(
   oauthToken: string,
   projectId: string,
   accountId: string,
   timeoutMs: number,
+  displayName = 'SAM VM Manager',
+  description = 'Service account for SAM to manage Compute Engine VMs',
 ): Promise<string> {
   const url = `${IAM_URL}/projects/${projectId}/serviceAccounts`;
   const res = await fetchWithTimeout(url, {
@@ -284,10 +288,7 @@ async function createServiceAccount(
     },
     body: JSON.stringify({
       accountId,
-      serviceAccount: {
-        displayName: 'SAM VM Manager',
-        description: 'Service account for SAM to manage Compute Engine VMs',
-      },
+      serviceAccount: { displayName, description },
     }),
   }, timeoutMs);
 
@@ -309,7 +310,7 @@ async function createServiceAccount(
 /**
  * Grant Workload Identity User on the service account (read-modify-write pattern).
  */
-async function grantWifUserOnSa(
+export async function grantWifUserOnSa(
   oauthToken: string,
   projectId: string,
   projectNumber: string,
@@ -384,11 +385,12 @@ const SA_PROJECT_ROLES = [
   'roles/aiplatform.user',          // Vertex AI access (e.g. Gemini CLI)
 ];
 
-async function grantProjectRoles(
+export async function grantProjectRoles(
   oauthToken: string,
   projectId: string,
   saEmail: string,
   timeoutMs: number,
+  roles: string[] = SA_PROJECT_ROLES,
 ): Promise<void> {
   // Read current project IAM policy
   const getUrl = `${RESOURCE_MANAGER_URL}/projects/${projectId}:getIamPolicy`;
@@ -416,7 +418,7 @@ async function grantProjectRoles(
   const bindings = [...(policy.bindings || [])];
   let changed = false;
 
-  for (const role of SA_PROJECT_ROLES) {
+  for (const role of roles) {
     const existingBinding = bindings.find((b) => b.role === role);
     if (existingBinding?.members?.includes(member)) {
       continue; // Already granted
@@ -520,7 +522,7 @@ export async function runGcpSetup(
 /**
  * Poll a GCP long-running operation until complete.
  */
-async function pollOperation(
+export async function pollOperation(
   oauthToken: string,
   operationName: string,
   timeoutMs: number,
@@ -562,7 +564,7 @@ async function pollOperation(
   throw new Error(`GCP operation timed out: ${operationName}`);
 }
 
-async function fetchWithTimeout(
+export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs: number,
