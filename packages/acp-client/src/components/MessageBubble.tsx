@@ -144,7 +144,6 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
  */
 export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, timestamp, ttsApiUrl, ttsStorageId }: MessageBubbleProps) {
   const isUser = role === 'user';
-  const isAgent = role === 'agent';
   const components = isUser ? USER_MARKDOWN_COMPONENTS : AGENT_MARKDOWN_COMPONENTS;
   const showActions = !streaming && timestamp != null && timestamp > 0;
 
