@@ -64,6 +64,7 @@ projectDeploymentRoutes.get(
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: 'https://www.googleapis.com/auth/cloud-platform',
+      // access_type: 'online' — no refresh token issued; this is a one-time setup flow only
       access_type: 'online',
       state,
       prompt: 'consent',
@@ -77,8 +78,13 @@ projectDeploymentRoutes.get(
  * GET /api/projects/:id/deployment/gcp/callback
  * Handle Google OAuth callback for deployment setup.
  */
-projectDeploymentRoutes.get('/:id/deployment/gcp/callback', async (c) => {
+projectDeploymentRoutes.get(
+  '/:id/deployment/gcp/callback',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
   const projectId = c.req.param('id');
+  const sessionUserId = getUserId(c);
 
   if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
     throw errors.badRequest('Google OAuth is not configured');
@@ -109,6 +115,9 @@ projectDeploymentRoutes.get('/:id/deployment/gcp/callback', async (c) => {
   if (storedState.projectId !== projectId) {
     return c.redirect(`${appUrl}?gcp_deploy_error=${encodeURIComponent('OAuth state project mismatch')}`);
   }
+  if (storedState.userId !== sessionUserId) {
+    return c.redirect(`${appUrl}?gcp_deploy_error=${encodeURIComponent('OAuth state user mismatch')}`);
+  }
 
   // Exchange auth code for access token
   const redirectUri = `https://api.${c.env.BASE_DOMAIN}/api/projects/${projectId}/deployment/gcp/callback`;
@@ -125,7 +134,11 @@ projectDeploymentRoutes.get('/:id/deployment/gcp/callback', async (c) => {
   });
 
   if (!tokenResponse.ok) {
-    console.error('Google token exchange failed:', await tokenResponse.text());
+    const errBody = await tokenResponse.json().catch(() => ({})) as { error?: string };
+    console.error('Google token exchange failed', {
+      status: tokenResponse.status,
+      error: errBody.error ?? 'unknown',
+    });
     return c.redirect(`${appUrl}?gcp_deploy_error=token_exchange_failed`);
   }
 
@@ -203,6 +216,9 @@ projectDeploymentRoutes.post(
     const oauthToken = await resolveDeployOAuthToken(body.oauthHandle, c.env.KV);
 
     const result = await runGcpDeploySetup(oauthToken, body.gcpProjectId, c.env);
+
+    // Consume the OAuth token after successful setup (one-time use)
+    await c.env.KV.delete(`gcp-deploy-oauth-token:${body.oauthHandle}`);
 
     // Upsert deployment credential
     const now = new Date().toISOString();
