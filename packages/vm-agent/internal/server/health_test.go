@@ -356,6 +356,122 @@ func TestHeartbeatRetryPermanentErrorClearsPending(t *testing.T) {
 	}
 }
 
+func TestHeartbeatRetryTransientErrorKeepsPending(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/heartbeat") {
+			resp := heartbeatResponse{
+				Status:          "running",
+				LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
+				HealthStatus:    "healthy",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/ready") {
+			// 503 = transient error — should keep pending for next heartbeat retry
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL:               ts.URL,
+		NodeID:                        "test-node-transient",
+		CallbackToken:                 "node-token",
+		HeartbeatInterval:             time.Minute,
+		WorkspaceReadyCallbackTimeout: 10 * time.Second,
+	}
+
+	s := &Server{
+		config:        cfg,
+		callbackToken: cfg.CallbackToken,
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-transient": {
+				ID:                   "ws-transient",
+				Status:               "running",
+				CallbackToken:        "ws-token",
+				ReadyCallbackPending: true,
+				ReadyCallbackStatus:  "running",
+			},
+		},
+		errorReporter: newTestErrorReporter(),
+		done:          make(chan struct{}),
+	}
+
+	s.sendNodeHeartbeat()
+
+	// Wait for background retry goroutine to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// On transient error (5xx), pending flag should remain set for next retry
+	s.workspaceMu.RLock()
+	pending := s.workspaces["ws-transient"].ReadyCallbackPending
+	s.workspaceMu.RUnlock()
+	if !pending {
+		t.Fatal("expected ReadyCallbackPending to remain true on transient 5xx error")
+	}
+}
+
+func TestHeartbeatRetryUsesNodeTokenWhenWorkspaceHasNone(t *testing.T) {
+	var receivedAuth string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/heartbeat") {
+			resp := heartbeatResponse{
+				Status:          "running",
+				LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
+				HealthStatus:    "healthy",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/ready") {
+			receivedAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL:               ts.URL,
+		NodeID:                        "test-node-fallback",
+		CallbackToken:                 "node-level-token",
+		HeartbeatInterval:             time.Minute,
+		WorkspaceReadyCallbackTimeout: 10 * time.Second,
+	}
+
+	s := &Server{
+		config:        cfg,
+		callbackToken: cfg.CallbackToken,
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-no-token": {
+				ID:                   "ws-no-token",
+				Status:               "running",
+				CallbackToken:        "", // empty — should fall back to node token
+				ReadyCallbackPending: true,
+				ReadyCallbackStatus:  "running",
+			},
+		},
+		errorReporter: newTestErrorReporter(),
+		done:          make(chan struct{}),
+	}
+
+	s.sendNodeHeartbeat()
+
+	// Wait for background retry goroutine to complete
+	time.Sleep(100 * time.Millisecond)
+
+	if receivedAuth != "Bearer node-level-token" {
+		t.Fatalf("expected retry to use node-level token, got %q", receivedAuth)
+	}
+}
+
 func TestHeartbeatNoRefreshWhenFieldEmpty(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := heartbeatResponse{
