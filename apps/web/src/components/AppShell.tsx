@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, Search, ArrowLeft, Shield, Server, Monitor } from 'lucide-react';
 import { useAuth } from './AuthProvider';
@@ -11,6 +11,16 @@ import { isMacPlatform } from '../lib/keyboard-shortcuts';
 import { signOut } from '../lib/auth';
 import { NotificationCenter } from './NotificationCenter';
 
+interface AppShellContextValue {
+  setProjectName: (name: string | undefined) => void;
+}
+
+const AppShellContext = createContext<AppShellContextValue>({ setProjectName: () => {} });
+
+export function useAppShell() {
+  return useContext(AppShellContext);
+}
+
 interface AppShellProps {
   children?: ReactNode;
 }
@@ -21,7 +31,12 @@ export function AppShell({ children }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [projectName, setProjectNameState] = useState<string | undefined>(undefined);
   const commandPalette = useGlobalCommandPalette();
+
+  const setProjectName = useCallback((name: string | undefined) => {
+    setProjectNameState(name);
+  }, []);
 
   // Detect project context from URL (excludes reserved paths like /projects/new)
   const projectId = extractProjectId(location.pathname);
@@ -63,6 +78,13 @@ export function AppShell({ children }: AppShellProps) {
     setDrawerOpen(false);
   }, [location.pathname]);
 
+  // Clear project name when leaving project context
+  useEffect(() => {
+    if (!projectId) {
+      setProjectNameState(undefined);
+    }
+  }, [projectId]);
+
   const handleSignOut = async () => {
     try {
       await signOut();
@@ -83,8 +105,11 @@ export function AppShell({ children }: AppShellProps) {
     </div>
   );
 
+  const shellContext = useMemo(() => ({ setProjectName }), [setProjectName]);
+
   if (isMobile) {
     return (
+      <AppShellContext.Provider value={shellContext}>
       <div className="flex flex-col bg-canvas h-screen">
         <header className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-surface">
           {/* Title on the left */}
@@ -121,7 +146,7 @@ export function AppShell({ children }: AppShellProps) {
             currentPath={location.pathname}
             onNavigate={(path) => { navigate(path); setDrawerOpen(false); }}
             onSignOut={handleSignOut}
-            projectName={projectId ? 'Project' : undefined}
+            projectName={projectId ? (projectName || 'Project') : undefined}
             infraSection={mobileInfraSection}
           />
         )}
@@ -130,10 +155,12 @@ export function AppShell({ children }: AppShellProps) {
           <GlobalCommandPalette onClose={commandPalette.close} />
         )}
       </div>
+      </AppShellContext.Provider>
     );
   }
 
   return (
+    <AppShellContext.Provider value={shellContext}>
     <div className="grid bg-canvas h-screen" style={{ gridTemplateColumns: '220px 1fr' }}>
       <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 h-screen overflow-y-auto">
         <div className="p-4 border-b border-border-default flex items-center justify-between">
@@ -152,7 +179,7 @@ export function AppShell({ children }: AppShellProps) {
             {isMacPlatform() ? '\u2318K' : 'Ctrl+K'}
           </kbd>
         </button>
-        <NavSidebar />
+        <NavSidebar projectName={projectName} />
         {user && (
           <div className="mt-auto p-3 border-t border-border-default flex items-center gap-2">
             {avatarElement}
@@ -182,5 +209,6 @@ export function AppShell({ children }: AppShellProps) {
         <GlobalCommandPalette onClose={commandPalette.close} />
       )}
     </div>
+    </AppShellContext.Provider>
   );
 }
