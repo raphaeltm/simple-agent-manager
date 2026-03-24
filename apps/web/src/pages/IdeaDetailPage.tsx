@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -165,7 +165,7 @@ function ConversationsPanel({ sessions, onSessionClick, searchQuery, onSearchCha
         {searchQuery && (
           <button
             onClick={() => onSearchChange('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer"
+            className="absolute right-1 top-1/2 -translate-y-1/2 p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer"
             aria-label="Clear search"
           >
             <X size={14} />
@@ -220,6 +220,15 @@ function MobileConversationsModal({
   searchQuery,
   onSearchChange,
 }: MobileConversationsModalProps) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      // Move focus into modal on open for accessibility
+      closeButtonRef.current?.focus();
+    }
+  }, [open]);
+
   if (!open) return null;
 
   return (
@@ -234,7 +243,9 @@ function MobileConversationsModal({
       <div
         className="fixed inset-x-0 bottom-0 max-h-[80vh] bg-surface border-t border-border-default rounded-t-2xl z-drawer flex flex-col overflow-hidden"
         role="dialog"
+        aria-modal="true"
         aria-label="Linked conversations"
+        tabIndex={-1}
       >
         {/* Header + close */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default shrink-0">
@@ -242,6 +253,7 @@ function MobileConversationsModal({
             Conversations {sessions.length > 0 && `(${sessions.length})`}
           </h2>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
             className="p-2 text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center"
             aria-label="Close conversations panel"
