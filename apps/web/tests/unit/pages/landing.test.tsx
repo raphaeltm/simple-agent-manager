@@ -37,8 +37,18 @@ describe('Landing page source contract', () => {
   it('does not advertise idle-based zero-cost behavior', () => {
     expect(file).not.toContain('Zero Cost');
     expect(file).not.toContain('When idle');
-    expect(file).toContain('Pay As You Go');
-    expect(file).toContain('Your cloud, your costs');
+  });
+
+  it('includes BYOC messaging', () => {
+    expect(file).toContain('Bring your own cloud');
+    expect(file).toContain('your infrastructure, your costs');
+  });
+
+  it('does not contain marketing sections', () => {
+    expect(file).not.toContain('How It Works');
+    expect(file).not.toContain('Choose Your Agent');
+    expect(file).not.toContain('Platform Features');
+    expect(file).not.toContain('Shipped & Planned');
   });
 });
 
