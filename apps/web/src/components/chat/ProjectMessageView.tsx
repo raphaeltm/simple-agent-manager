@@ -698,7 +698,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
               setResumeError('Could not resume agent \u2014 workspace may have been cleaned up.');
             } else {
-              setResumeError(`Could not resume agent: ${msg}`);
+              console.error('Agent resume failed:', msg);
+              setResumeError('Could not resume agent \u2014 please try again.');
             }
           });
       } else {
@@ -768,7 +769,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Resuming agent banner — shown during auto-resume of idle/suspended sessions */}
       {isResuming && (
-        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted">
+        <div role="status" aria-label="Resuming agent" className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted">
           <Spinner size="sm" />
           <span>Resuming agent...</span>
         </div>
@@ -776,7 +777,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Resume error banner */}
       {resumeError && (
-        <div className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
+        <div role="alert" className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
           {resumeError}
         </div>
       )}
@@ -941,7 +942,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onChange={setFollowUp}
           onSend={handleSendFollowUp}
           sending={sendingFollowUp}
-          placeholder="Send a follow-up to keep the session alive..."
+          placeholder="Send a message to resume the agent..."
           transcribeApiUrl={transcribeApiUrl}
         />
       )}

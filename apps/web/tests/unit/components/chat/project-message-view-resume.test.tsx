@@ -193,7 +193,7 @@ describe('ProjectMessageView — auto-resume', () => {
     });
 
     // Find and fill the input, then click Send
-    const input = await screen.findByPlaceholderText(/send a follow-up/i);
+    const input = await screen.findByPlaceholderText(/send a message/i);
     fireEvent.change(input, { target: { value: 'Continue working on this' } });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
@@ -217,7 +217,7 @@ describe('ProjectMessageView — auto-resume', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    const input = await screen.findByPlaceholderText(/send a follow-up/i);
+    const input = await screen.findByPlaceholderText(/send a message/i);
     fireEvent.change(input, { target: { value: 'Resume please' } });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
@@ -240,7 +240,7 @@ describe('ProjectMessageView — auto-resume', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    const input = await screen.findByPlaceholderText(/send a follow-up/i);
+    const input = await screen.findByPlaceholderText(/send a message/i);
     fireEvent.change(input, { target: { value: 'Hello again' } });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
@@ -263,12 +263,12 @@ describe('ProjectMessageView — auto-resume', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    const input = await screen.findByPlaceholderText(/send a follow-up/i);
+    const input = await screen.findByPlaceholderText(/send a message/i);
     fireEvent.change(input, { target: { value: 'Hello again' } });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/could not resume agent.*network timeout/i)).toBeInTheDocument();
+      expect(screen.getByText(/could not resume agent.*please try again/i)).toBeInTheDocument();
     });
   });
 
@@ -290,7 +290,7 @@ describe('ProjectMessageView — auto-resume', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    const input = await screen.findByPlaceholderText(/send a follow-up/i);
+    const input = await screen.findByPlaceholderText(/send a message/i);
     fireEvent.change(input, { target: { value: 'Test' } });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
@@ -320,7 +320,7 @@ describe('ProjectMessageView — auto-resume', () => {
     });
 
     // Send a message that triggers resume
-    const input = await screen.findByPlaceholderText(/send a follow-up/i);
+    const input = await screen.findByPlaceholderText(/send a message/i);
     fireEvent.change(input, { target: { value: 'Queued message' } });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
@@ -364,7 +364,7 @@ describe('ProjectMessageView — auto-resume', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    const input = await screen.findByPlaceholderText(/send a follow-up/i);
+    const input = await screen.findByPlaceholderText(/send a message/i);
     fireEvent.change(input, { target: { value: 'Direct message' } });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
