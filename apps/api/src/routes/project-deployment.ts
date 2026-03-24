@@ -8,6 +8,7 @@ import { errors } from '../middleware/error';
 import { ulid } from '../lib/ulid';
 import { listGcpProjects } from '../services/gcp-setup';
 import { runGcpDeploySetup } from '../services/gcp-deploy-setup';
+import { sanitizeGcpError } from '../services/gcp-errors';
 import { signIdentityToken } from '../services/jwt';
 import { validateMcpToken } from '../services/mcp-token';
 import {
@@ -142,8 +143,12 @@ projectDeploymentRoutes.post(
       ? parseInt(c.env.GCP_API_TIMEOUT_MS, 10)
       : DEFAULT_GCP_API_TIMEOUT_MS;
 
-    const projects = await listGcpProjects(oauthToken, timeoutMs);
-    return c.json({ projects });
+    try {
+      const projects = await listGcpProjects(oauthToken, timeoutMs);
+      return c.json({ projects });
+    } catch (err) {
+      throw errors.badRequest(sanitizeGcpError(err, 'deploy-list-projects'));
+    }
   },
 );
 
@@ -175,7 +180,12 @@ projectDeploymentRoutes.post(
 
     const oauthToken = await resolveDeployOAuthToken(body.oauthHandle, c.env.KV);
 
-    const result = await runGcpDeploySetup(oauthToken, body.gcpProjectId, c.env, undefined, projectId);
+    let result;
+    try {
+      result = await runGcpDeploySetup(oauthToken, body.gcpProjectId, c.env, undefined, projectId);
+    } catch (err) {
+      throw errors.badRequest(sanitizeGcpError(err, 'deploy-setup'));
+    }
 
     // Consume the OAuth token after successful setup (one-time use)
     await c.env.KV.delete(`gcp-deploy-oauth-token:${body.oauthHandle}`);

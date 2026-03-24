@@ -6,6 +6,7 @@ import {
   DEFAULT_GCP_SERVICE_ACCOUNT_ID,
   DEFAULT_GCP_API_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
+import { GcpApiError } from './gcp-errors';
 
 const RESOURCE_MANAGER_URL = 'https://cloudresourcemanager.googleapis.com/v1';
 const SERVICE_USAGE_URL = 'https://serviceusage.googleapis.com/v1';
@@ -55,7 +56,7 @@ export async function listGcpProjects(
 
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`Failed to list GCP projects (${res.status}): ${body}`);
+      throw new GcpApiError({ step: 'list_projects', message: `Failed to list GCP projects (${res.status})`, statusCode: res.status, rawBody: body });
     }
 
     const data = (await res.json()) as GcpProjectListResponse;
@@ -89,7 +90,7 @@ export async function getProjectNumber(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Failed to get project ${projectId} (${res.status}): ${body}`);
+    throw new GcpApiError({ step: 'get_project_number', message: `Failed to get project info (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
   const data = (await res.json()) as GcpProject;
@@ -127,7 +128,7 @@ export async function enableApis(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Failed to enable APIs (${res.status}): ${body}`);
+    throw new GcpApiError({ step: 'enable_apis', message: `Failed to enable APIs (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
   // Poll the long-running operation
@@ -167,7 +168,7 @@ export async function createWifPool(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Failed to create WIF pool (${res.status}): ${body}`);
+    throw new GcpApiError({ step: 'create_wif_pool', message: `Failed to create WIF pool (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
   const op = (await res.json()) as { name: string; done?: boolean };
@@ -234,7 +235,7 @@ export async function createOidcProvider(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Failed to create OIDC provider (${res.status}): ${body}`);
+    throw new GcpApiError({ step: 'create_oidc_provider', message: `Failed to create OIDC provider (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
   const op = (await res.json()) as { name: string; done?: boolean };
@@ -288,7 +289,7 @@ export async function updateOidcProvider(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Failed to update OIDC provider (${res.status}): ${body}`);
+    throw new GcpApiError({ step: 'update_oidc_provider', message: `Failed to update OIDC provider (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
   const op = (await res.json()) as { name: string; done?: boolean };
@@ -330,7 +331,7 @@ export async function createServiceAccount(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Failed to create service account (${res.status}): ${body}`);
+    throw new GcpApiError({ step: 'create_service_account', message: `Failed to create service account (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
   return email;
@@ -368,7 +369,7 @@ export async function grantWifUserOnSa(
 
   if (!getRes.ok) {
     const body = await getRes.text();
-    throw new Error(`Failed to get SA IAM policy (${getRes.status}): ${body}`);
+    throw new GcpApiError({ step: 'grant_wif_user', message: `Failed to get SA IAM policy (${getRes.status})`, statusCode: getRes.status, rawBody: body });
   }
 
   const policy = (await getRes.json()) as {
@@ -411,7 +412,7 @@ export async function grantWifUserOnSa(
 
   if (!setRes.ok) {
     const body = await setRes.text();
-    throw new Error(`Failed to set SA IAM policy (${setRes.status}): ${body}`);
+    throw new GcpApiError({ step: 'grant_wif_user', message: `Failed to set SA IAM policy (${setRes.status})`, statusCode: setRes.status, rawBody: body });
   }
 }
 
@@ -445,7 +446,7 @@ export async function grantProjectRoles(
 
   if (!getRes.ok) {
     const body = await getRes.text();
-    throw new Error(`Failed to get project IAM policy (${getRes.status}): ${body}`);
+    throw new GcpApiError({ step: 'grant_project_roles', message: `Failed to get project IAM policy (${getRes.status})`, statusCode: getRes.status, rawBody: body });
   }
 
   const policy = (await getRes.json()) as {
@@ -490,7 +491,7 @@ export async function grantProjectRoles(
 
   if (!setRes.ok) {
     const body = await setRes.text();
-    throw new Error(`Failed to set project IAM policy (${setRes.status}): ${body}`);
+    throw new GcpApiError({ step: 'grant_project_roles', message: `Failed to set project IAM policy (${setRes.status})`, statusCode: setRes.status, rawBody: body });
   }
 }
 
@@ -588,12 +589,12 @@ export async function pollOperation(
 
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`Failed to poll operation ${operationName} (${res.status}): ${body}`);
+      throw new GcpApiError({ step: 'poll_operation', message: `Failed to poll operation (${res.status})`, statusCode: res.status, rawBody: body });
     }
 
     const op = (await res.json()) as { done?: boolean; error?: { message: string } };
     if (op.error) {
-      throw new Error(`GCP operation failed: ${op.error.message}`);
+      throw new GcpApiError({ step: 'poll_operation', message: 'GCP operation failed', rawBody: op.error.message });
     }
     if (op.done) {
       return;
@@ -602,7 +603,7 @@ export async function pollOperation(
     delayMs = Math.min(delayMs * 1.5, 10_000);
   }
 
-  throw new Error(`GCP operation timed out: ${operationName}`);
+  throw new GcpApiError({ step: 'poll_operation', message: 'GCP operation timed out' });
 }
 
 export async function fetchWithTimeout(
