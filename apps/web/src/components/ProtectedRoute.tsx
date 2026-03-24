@@ -11,10 +11,12 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, skipApprovalCheck }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, isApproved, user } = useAuth();
+  const { isAuthenticated, isLoading, isApproved, isRefetching, user } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
+  // Show spinner during initial load or while re-checking session (e.g. after tab regains focus).
+  // This prevents false redirects to login during transient network errors on mobile app resume.
+  if (isLoading || (isRefetching && !isAuthenticated)) {
     return (
       <div className="min-h-[var(--sam-app-height)] flex items-center justify-center bg-canvas">
         <Spinner size="lg" />

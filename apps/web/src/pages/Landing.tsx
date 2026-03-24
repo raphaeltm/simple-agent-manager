@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { signInWithGitHub } from '../lib/auth';
 import { useAuth } from '../components/AuthProvider';
 import { Button, Card, Typography, Container } from '@simple-agent-manager/ui';
@@ -10,12 +10,19 @@ import { Button, Card, Typography, Container } from '@simple-agent-manager/ui';
 export function Landing() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
-      navigate('/dashboard');
+      // Respect the original page the user was on before being redirected to login.
+      // ProtectedRoute passes this as location.state.from when redirecting.
+      const from = (location.state as { from?: Location })?.from;
+      const returnTo = from
+        ? `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`
+        : '/dashboard';
+      navigate(returnTo, { replace: true });
     }
-  }, [isAuthenticated, isLoading, navigate]);
+  }, [isAuthenticated, isLoading, navigate, location.state]);
 
   const handleSignIn = async () => {
     try {

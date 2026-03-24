@@ -1,4 +1,4 @@
-import { createContext, useContext, ReactNode } from 'react';
+import { createContext, useContext, useRef, ReactNode } from 'react';
 import { useSession } from '../lib/auth';
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 
@@ -17,6 +17,8 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isSuperadmin: boolean;
   isApproved: boolean;
+  /** True when BetterAuth is re-checking the session (e.g. after tab regains focus) */
+  isRefetching: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -25,6 +27,7 @@ const AuthContext = createContext<AuthContextValue>({
   isAuthenticated: false,
   isSuperadmin: false,
   isApproved: false,
+  isRefetching: false,
 });
 
 interface AuthProviderProps {
@@ -33,11 +36,30 @@ interface AuthProviderProps {
 
 /**
  * Auth provider component that wraps the app and provides auth state.
+ *
+ * Implements a "last known good session" pattern to prevent transient network
+ * errors (common on mobile app resume) from appearing as logout. When a
+ * session refetch fails but we previously had a valid session, we preserve
+ * the cached session instead of showing the login page.
  */
 export function AuthProvider({ children }: AuthProviderProps) {
-  const { data: session, isPending } = useSession();
+  const { data: session, isPending, error, isRefetching } = useSession();
+  const lastGoodSessionRef = useRef<typeof session>(null);
 
-  const user = session?.user ?? null;
+  // Cache every successful session
+  if (session?.user) {
+    lastGoodSessionRef.current = session;
+  }
+
+  // Use cached session when a refetch error wipes the current one
+  const effectiveSession =
+    session?.user
+      ? session
+      : error && lastGoodSessionRef.current
+        ? lastGoodSessionRef.current
+        : session;
+
+  const user = effectiveSession?.user ?? null;
   const sessionUser = user as (Record<string, unknown> & NonNullable<typeof user>) | null;
   const role = (sessionUser?.role as UserRole) ?? 'user';
   const status = (sessionUser?.status as UserStatus) ?? 'active';
@@ -52,6 +74,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     isAuthenticated: !!user,
     isSuperadmin: role === 'superadmin',
     isApproved: status === 'active' || role === 'superadmin' || role === 'admin',
+    isRefetching: isRefetching ?? false,
   };
 
   return (
