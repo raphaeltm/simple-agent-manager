@@ -76,6 +76,21 @@ describe('Landing page navigation', () => {
     expect(screen.queryByTestId('dashboard')).not.toBeInTheDocument();
   });
 
+  it('rejects protocol-relative paths in state.from (open redirect defense)', () => {
+    mockUseAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    const maliciousFrom = { pathname: '//evil.com/steal', search: '', hash: '' };
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/', state: { from: maliciousFrom } }]}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/dashboard" element={<div data-testid="dashboard" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    // Should fall back to /dashboard, not navigate to //evil.com
+    expect(screen.getByTestId('dashboard')).toBeInTheDocument();
+  });
+
   it('shows landing content when not authenticated', () => {
     mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
     render(

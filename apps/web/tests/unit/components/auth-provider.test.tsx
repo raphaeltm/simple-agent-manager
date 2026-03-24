@@ -114,6 +114,35 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('refetching')).toHaveTextContent('true');
   });
 
+  it('clears cached session on clean null (intentional signout)', () => {
+    // Start with valid session
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    const { rerender } = renderWithAuth();
+    expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+
+    // Server returns clean null — no error, not pending (signout or session expiry)
+    mockUseSession.mockReturnValue({
+      data: null,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    rerender(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    // Must NOT use cached session — this was an intentional signout
+    expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+    expect(screen.getByTestId('user-name')).toHaveTextContent('none');
+  });
+
   it('recovers when refetch succeeds after transient error', () => {
     // Start with valid session
     mockUseSession.mockReturnValue({

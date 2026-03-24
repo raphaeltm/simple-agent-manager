@@ -41,6 +41,9 @@ interface AuthProviderProps {
  * errors (common on mobile app resume) from appearing as logout. When a
  * session refetch fails but we previously had a valid session, we preserve
  * the cached session instead of showing the login page.
+ *
+ * NOTE: Cached session values (role, status) are for UI display only.
+ * All authorization decisions are enforced server-side via requireAuth().
  */
 export function AuthProvider({ children }: AuthProviderProps) {
   const { data: session, isPending, error, isRefetching } = useSession();
@@ -49,6 +52,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Cache every successful session
   if (session?.user) {
     lastGoodSessionRef.current = session;
+  } else if (!error && !isPending) {
+    // Clean null from server (intentional signout or expired session) — clear cache.
+    // Only preserve the cache when there's an error (transient network failure).
+    lastGoodSessionRef.current = null;
   }
 
   // Use cached session when a refetch error wipes the current one

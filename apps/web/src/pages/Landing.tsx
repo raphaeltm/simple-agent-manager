@@ -20,7 +20,9 @@ export function Landing() {
       // Respect the original page the user was on before being redirected to login.
       // ProtectedRoute passes this as location.state.from when redirecting.
       const from = fromRef.current;
-      const returnTo = from
+      // Validate pathname is a safe internal path (not protocol-relative like //evil.com)
+      const isSafePath = from?.pathname?.startsWith('/') && !from.pathname.startsWith('//');
+      const returnTo = from && isSafePath
         ? `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`
         : '/dashboard';
       navigate(returnTo, { replace: true });
