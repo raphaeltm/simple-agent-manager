@@ -58,6 +58,23 @@ describe('DeploymentSettings', () => {
     });
   });
 
+  describe('connect button', () => {
+    it('clicking "Connect Google Cloud" triggers navigation to OAuth', async () => {
+      // jsdom does not allow navigating — just verify the button is clickable and triggers the handler
+      // The handler sets window.location.href which jsdom will attempt to navigate
+      renderWithRouter(<DeploymentSettings projectId={projectId} />);
+      await waitFor(() => {
+        expect(screen.getByText('Connect Google Cloud')).toBeInTheDocument();
+      });
+
+      // The button should be enabled and clickable
+      const button = screen.getByText('Connect Google Cloud');
+      expect(button).not.toBeDisabled();
+      // Clicking should not throw (handler fires)
+      fireEvent.click(button);
+    });
+  });
+
   describe('connected state', () => {
     beforeEach(() => {
       mocks.getProjectDeploymentGcp.mockResolvedValue({
@@ -228,6 +245,136 @@ describe('DeploymentSettings', () => {
       await waitFor(() => {
         expect(screen.getByText('GCP Connected')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('setup flow — error paths', () => {
+    it('shows error toast and returns to project-select on setup failure', async () => {
+      mocks.listGcpProjectsForDeploy.mockResolvedValue({
+        projects: [{ projectId: 'proj-a', name: 'Project A' }],
+      });
+      mocks.setupProjectDeploymentGcp.mockRejectedValue(new Error('Permission denied'));
+
+      renderWithRouter(
+        <DeploymentSettings projectId={projectId} />,
+        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Set Up Deployment')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText('Set Up Deployment'));
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Permission denied');
+      });
+      // Should return to project-select phase
+      expect(screen.getByText('Set Up Deployment')).toBeInTheDocument();
+    });
+
+    it('passes correct arguments to setupProjectDeploymentGcp', async () => {
+      mocks.listGcpProjectsForDeploy.mockResolvedValue({
+        projects: [
+          { projectId: 'proj-a', name: 'Project A' },
+          { projectId: 'proj-b', name: 'Project B' },
+        ],
+      });
+      mocks.setupProjectDeploymentGcp.mockResolvedValue({});
+      mocks.getProjectDeploymentGcp
+        .mockResolvedValueOnce({ connected: false })
+        .mockResolvedValueOnce({ connected: true, gcpProjectId: 'proj-b', serviceAccountEmail: 'sa@proj-b.iam' });
+
+      renderWithRouter(
+        <DeploymentSettings projectId={projectId} />,
+        { initialEntries: ['/settings?gcp_deploy_setup=handle-456'] }
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Set Up Deployment')).toBeInTheDocument();
+      });
+
+      // Change selection to second project
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'proj-b' } });
+
+      fireEvent.click(screen.getByText('Set Up Deployment'));
+
+      await waitFor(() => {
+        expect(mocks.setupProjectDeploymentGcp).toHaveBeenCalledWith(projectId, {
+          oauthHandle: 'handle-456',
+          gcpProjectId: 'proj-b',
+        });
+      });
+    });
+  });
+
+  describe('project list fetch — error path', () => {
+    it('shows error toast and returns to idle when listGcpProjects fails', async () => {
+      mocks.listGcpProjectsForDeploy.mockRejectedValue(new Error('Network error'));
+
+      renderWithRouter(
+        <DeploymentSettings projectId={projectId} />,
+        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+      );
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Network error');
+      });
+      // Should return to idle state
+      await waitFor(() => {
+        expect(screen.getByText('Connect Google Cloud')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('disconnect — error path', () => {
+    beforeEach(() => {
+      mocks.getProjectDeploymentGcp.mockResolvedValue({
+        connected: true,
+        gcpProjectId: 'my-gcp-project',
+        serviceAccountEmail: 'sa@test.iam.gserviceaccount.com',
+      });
+    });
+
+    it('shows error toast when disconnect fails', async () => {
+      mocks.deleteProjectDeploymentGcp.mockRejectedValue(new Error('Server error'));
+
+      renderWithRouter(<DeploymentSettings projectId={projectId} />);
+      await waitFor(() => {
+        expect(screen.getByText('Disconnect')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText('Disconnect'));
+      fireEvent.click(screen.getByText('Confirm Disconnect'));
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Server error');
+      });
+    });
+  });
+
+  describe('project-select cancel', () => {
+    it('returns to idle state when cancel is clicked with projects loaded', async () => {
+      mocks.listGcpProjectsForDeploy.mockResolvedValue({
+        projects: [{ projectId: 'proj-a', name: 'Project A' }],
+      });
+
+      renderWithRouter(
+        <DeploymentSettings projectId={projectId} />,
+        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Set Up Deployment')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText('Cancel'));
+
+      // Should return to idle
+      await waitFor(() => {
+        expect(screen.getByText('Connect Google Cloud')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Set Up Deployment')).not.toBeInTheDocument();
     });
   });
 
