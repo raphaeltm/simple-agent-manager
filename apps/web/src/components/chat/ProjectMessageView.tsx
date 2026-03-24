@@ -16,7 +16,7 @@ import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, Che
 import { TruncatedSummary } from './TruncatedSummary';
 import { mergeMessages } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
-import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession } from '../../lib/api';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import type { WorkspaceResponse, NodeResponse, VMSize, DetectedPort } from '@simple-agent-manager/shared';
@@ -347,6 +347,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
 
+  // Auto-resume state: tracks when we're resuming a suspended/idle session
+  const [isResuming, setIsResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const pendingFollowUpRef = useRef<string | null>(null);
+
   // Grace period: keep showing ACP view after prompting ends so DO can catch up
   // (VM agent batches messages with ~2s delay before persisting to DO)
   const [acpGrace, setAcpGrace] = useState(false);
@@ -415,6 +420,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     committedToDoViewRef.current = false;
     setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
+    setIsResuming(false);
+    setResumeError(null);
+    pendingFollowUpRef.current = null;
     if (acpGraceTimerRef.current) {
       clearTimeout(acpGraceTimerRef.current);
       acpGraceTimerRef.current = null;
@@ -583,7 +591,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const agentCompletedAt = session?.agentCompletedAt ?? null;
 
   useEffect(() => {
-    if (sessionState !== 'idle') {
+    if (sessionState !== 'idle' || isResuming) {
       setIdleCountdownMs(null);
       return;
     }
@@ -604,7 +612,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     }
     // No timing info available — don't show countdown
     return;
-  }, [sessionState, cleanupAt, agentCompletedAt]);
+  }, [sessionState, cleanupAt, agentCompletedAt, isResuming]);
+
+  // Flush pending follow-up message once agent becomes active after resume
+  useEffect(() => {
+    if (!agentSession.isAgentActive || !pendingFollowUpRef.current) return;
+    const queued = pendingFollowUpRef.current;
+    pendingFollowUpRef.current = null;
+    setIsResuming(false);
+    setResumeError(null);
+    agentSession.sendPrompt(queued);
+  }, [agentSession.isAgentActive, agentSession.sendPrompt]);
 
   // Send follow-up message via DO WebSocket (persistence) + ACP (agent prompt)
   const handleSendFollowUp = async () => {
@@ -657,8 +675,35 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       if (agentSession.isAgentActive) {
         // Also send via ACP so the agent processes the prompt
         agentSession.sendPrompt(trimmed);
+      } else if (sessionState === 'idle' && session?.workspaceId && agentSessionId) {
+        // Agent is idle/suspended — auto-resume and queue the message
+        pendingFollowUpRef.current = trimmed;
+        setIsResuming(true);
+        setResumeError(null);
+        resumeAgentSession(session.workspaceId, agentSessionId)
+          .then(() => {
+            // Resume API succeeded — D1 status updated + node notified.
+            // The ACP WebSocket (already enabled for idle sessions) will
+            // reconnect and the pending message will be flushed by the
+            // effect that watches isAgentActive.
+            setSession((prev) => {
+              if (!prev) return prev;
+              return { ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
+            });
+          })
+          .catch((err) => {
+            setIsResuming(false);
+            pendingFollowUpRef.current = null;
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
+              setResumeError('Could not resume agent \u2014 workspace may have been cleaned up.');
+            } else {
+              console.error('Agent resume failed:', msg);
+              setResumeError('Could not resume agent \u2014 please try again.');
+            }
+          });
       } else {
-        setError('Agent is not connected — message saved but prompt not delivered.');
+        setError('Agent is not connected \u2014 message saved but prompt not delivered.');
       }
 
       setFollowUp('');
@@ -722,10 +767,25 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <ConnectionBanner state={connectionState} onRetry={retryWs} />
       )}
 
+      {/* Resuming agent banner — shown during auto-resume of idle/suspended sessions */}
+      {isResuming && (
+        <div role="status" aria-label="Resuming agent" className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted">
+          <Spinner size="sm" />
+          <span>Resuming agent...</span>
+        </div>
+      )}
+
+      {/* Resume error banner */}
+      {resumeError && (
+        <div role="alert" className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
+          {resumeError}
+        </div>
+      )}
+
       {/* ACP agent error / disconnect warning — shown when DO WebSocket is fine but agent is unreachable.
-          Suppressed during provisioning since the agent was never online yet. */}
+          Suppressed during provisioning or active resume since the agent was never online yet. */}
       {sessionState === 'active' && connectionState === 'connected' && session?.workspaceId &&
-        !agentSession.isAgentActive && !agentSession.isConnecting && !isProvisioning && (
+        !agentSession.isAgentActive && !agentSession.isConnecting && !isProvisioning && !isResuming && (
         <AgentErrorBanner session={agentSession.session} />
       )}
 
@@ -882,7 +942,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onChange={setFollowUp}
           onSend={handleSendFollowUp}
           sending={sendingFollowUp}
-          placeholder="Send a follow-up to keep the session alive..."
+          placeholder="Send a message to resume the agent..."
           transcribeApiUrl={transcribeApiUrl}
         />
       )}
