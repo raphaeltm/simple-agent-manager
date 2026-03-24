@@ -36,6 +36,7 @@ vi.mock('../../../../src/lib/api', () => ({
   getTtsApiUrl: () => mockGetTtsApiUrl(),
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
+  saveCachedCommands: vi.fn().mockResolvedValue({ cached: 0 }),
 }));
 
 // Mock useProjectAgentSession — controllable via module-level variable
@@ -56,7 +57,7 @@ let mockAgentSession = {
     reconnect: vi.fn(),
     switchAgent: vi.fn(),
   },
-  messages: { items: [], processMessage: vi.fn(), prepareForReplay: vi.fn(), clear: vi.fn(), addUserMessage: vi.fn() },
+  messages: { items: [], availableCommands: [], processMessage: vi.fn(), prepareForReplay: vi.fn(), clear: vi.fn(), addUserMessage: vi.fn() },
 };
 
 vi.mock('../../../../src/hooks/useProjectAgentSession', () => ({
@@ -175,7 +176,7 @@ describe('ProjectMessageView — auto-resume', () => {
         reconnect: vi.fn(),
         switchAgent: vi.fn(),
       },
-      messages: { items: [], processMessage: vi.fn(), prepareForReplay: vi.fn(), clear: vi.fn(), addUserMessage: vi.fn() },
+      messages: { items: [], availableCommands: [], processMessage: vi.fn(), prepareForReplay: vi.fn(), clear: vi.fn(), addUserMessage: vi.fn() },
     };
   });
 
