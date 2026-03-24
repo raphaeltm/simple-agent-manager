@@ -615,7 +615,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
             </section>
 
             {/* Deploy to Cloud */}
-            <DeploymentSettings projectId={projectId} />
+            <DeploymentSettings projectId={projectId} compact />
 
             {/* Project Views — power-user links to hidden routes */}
             <section className="grid gap-3">

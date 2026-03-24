@@ -102,10 +102,10 @@ describe('DeploymentSettings', () => {
       // Click disconnect — should show inline confirmation, not window.confirm
       fireEvent.click(screen.getByText('Disconnect'));
 
-      // Inline confirmation should appear
-      expect(screen.getByText(/Disconnect GCP deployment credentials/)).toBeInTheDocument();
+      // Confirmation dialog should appear
+      expect(screen.getByText('Disconnect GCP deployment?')).toBeInTheDocument();
+      expect(screen.getByText(/Agents will no longer be able to deploy/)).toBeInTheDocument();
       expect(screen.getByText('Confirm Disconnect')).toBeInTheDocument();
-      expect(screen.getByText('Cancel')).toBeInTheDocument();
     });
 
     it('can cancel the disconnect confirmation', async () => {
@@ -115,11 +115,11 @@ describe('DeploymentSettings', () => {
       });
 
       fireEvent.click(screen.getByText('Disconnect'));
-      expect(screen.getByText('Confirm Disconnect')).toBeInTheDocument();
+      expect(screen.getByText('Disconnect GCP deployment?')).toBeInTheDocument();
 
       fireEvent.click(screen.getByText('Cancel'));
-      // Confirmation should be dismissed
-      expect(screen.queryByText('Confirm Disconnect')).not.toBeInTheDocument();
+      // Confirmation dialog should be dismissed
+      expect(screen.queryByText('Disconnect GCP deployment?')).not.toBeInTheDocument();
     });
 
     it('executes disconnect when confirmed', async () => {
