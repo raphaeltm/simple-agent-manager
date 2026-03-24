@@ -8,8 +8,8 @@ import { errors } from '../middleware/error';
 import { ulid } from '../lib/ulid';
 import { listGcpProjects } from '../services/gcp-setup';
 import { runGcpDeploySetup } from '../services/gcp-deploy-setup';
-import { signIdentityToken } from '../services/jwt';
-import { verifyCallbackToken } from '../services/jwt';
+import { signIdentityToken, verifyCallbackToken } from '../services/jwt';
+import { validateMcpToken } from '../services/mcp-token';
 import * as schema from '../db/schema';
 import {
   DEFAULT_GCP_API_TIMEOUT_MS,
@@ -322,40 +322,58 @@ projectDeploymentRoutes.delete(
 /**
  * GET /api/projects/:id/deployment-identity-token
  * Returns a signed OIDC JWT for GCP token exchange.
- * Auth: workspace callback token (not user session).
+ * Auth: workspace callback token OR MCP token.
  * Called by GCP client libraries via external_account credential config.
  */
 projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
   const projectId = c.req.param('id');
 
-  // Authenticate via callback token
+  // Authenticate via Bearer token (callback token or MCP token)
   const authHeader = c.req.header('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     throw errors.unauthorized('Missing or invalid Authorization header');
   }
   const token = authHeader.slice(7);
-  const payload = await verifyCallbackToken(token, c.env);
 
-  // Verify the workspace belongs to this project
+  // Try MCP token first, then fall back to callback token
+  let userId: string;
+  let workspaceId: string;
+  const mcpData = await validateMcpToken(c.env.KV, token);
+  if (mcpData) {
+    // MCP token — verify project match
+    if (mcpData.projectId !== projectId) {
+      throw errors.forbidden('MCP token project does not match requested project');
+    }
+    userId = mcpData.userId;
+    workspaceId = mcpData.workspaceId;
+  } else {
+    // Try callback token
+    const payload = await verifyCallbackToken(token, c.env);
+    const cbWorkspaceId = payload.workspace;
+    if (!cbWorkspaceId) {
+      throw errors.badRequest('Callback token does not contain a workspace ID');
+    }
+
+    // Verify workspace belongs to project
+    const db = drizzle(c.env.DATABASE, { schema });
+    const wsRows = await db
+      .select()
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.id, cbWorkspaceId))
+      .limit(1);
+
+    const workspace = wsRows[0];
+    if (!workspace) {
+      throw errors.notFound('Workspace');
+    }
+    if (workspace.projectId !== projectId) {
+      throw errors.forbidden('Workspace does not belong to this project');
+    }
+    userId = workspace.userId;
+    workspaceId = cbWorkspaceId;
+  }
+
   const db = drizzle(c.env.DATABASE, { schema });
-  const workspaceId = payload.workspace;
-  if (!workspaceId) {
-    throw errors.badRequest('Callback token does not contain a workspace ID');
-  }
-
-  const wsRows = await db
-    .select()
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = wsRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-  if (workspace.projectId !== projectId) {
-    throw errors.forbidden('Workspace does not belong to this project');
-  }
 
   // Look up deployment credential
   const credRows = await db
@@ -385,7 +403,7 @@ projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
 
   const identityToken = await signIdentityToken(
     {
-      userId: workspace.userId,
+      userId,
       projectId,
       workspaceId,
       audience,

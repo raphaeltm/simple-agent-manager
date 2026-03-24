@@ -430,4 +430,14 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'get_deployment_credentials',
+    description:
+      'Get GCP deployment credentials for the current project. Returns a GCP external_account credential config JSON that can be written to a file and used with GOOGLE_APPLICATION_CREDENTIALS. GCP client libraries will auto-refresh tokens via SAM.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
 ];
