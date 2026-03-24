@@ -420,7 +420,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     expect(location).toContain('gcp_deploy_error=');
   });
 
-  it('redirects with error when state userId does not match session', async () => {
+  it('redirects with error when state userId does not match session and preserves state token', async () => {
     // KV returns state with a different userId than the session (test-user-id)
     mockKvGet.mockResolvedValue(
       JSON.stringify({ projectId: 'proj-1', userId: 'different-user' }),
@@ -436,6 +436,9 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     const location = res.headers.get('Location')!;
     expect(location).toContain('gcp_deploy_error=');
     expect(location).toContain('user%20mismatch');
+
+    // State token must NOT be deleted on user mismatch — the legitimate user can still retry
+    expect(mockKvDelete).not.toHaveBeenCalled();
   });
 
   it('redirects to correct project settings using projectId from KV state', async () => {

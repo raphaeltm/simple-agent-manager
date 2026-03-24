@@ -410,13 +410,28 @@ gcpDeployCallbackRoute.get(
     if (!storedStateRaw) {
       return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid or expired OAuth state')}`);
     }
-    await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
 
-    const storedState = JSON.parse(storedStateRaw) as { projectId: string; userId: string };
-    if (storedState.userId !== sessionUserId) {
-      const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${storedState.projectId}/settings`;
-      return c.redirect(`${appUrl}?gcp_deploy_error=${encodeURIComponent('OAuth state user mismatch')}`);
+    let storedState: { projectId: string; userId: string };
+    try {
+      storedState = JSON.parse(storedStateRaw) as { projectId: string; userId: string };
+    } catch {
+      await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid OAuth state format')}`);
     }
+
+    if (!storedState.projectId || !storedState.userId) {
+      await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Incomplete OAuth state')}`);
+    }
+
+    // Validate user identity BEFORE consuming the state token — if the user doesn't
+    // match, the state remains valid for the legitimate user to retry
+    if (storedState.userId !== sessionUserId) {
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('OAuth state user mismatch')}`);
+    }
+
+    // All validation passed — consume the state token (one-time use)
+    await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
 
     const projectId = storedState.projectId;
     const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${projectId}/settings`;
