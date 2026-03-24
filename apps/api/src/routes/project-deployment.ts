@@ -10,6 +10,14 @@ import { listGcpProjects } from '../services/gcp-setup';
 import { runGcpDeploySetup } from '../services/gcp-deploy-setup';
 import { signIdentityToken } from '../services/jwt';
 import { validateMcpToken } from '../services/mcp-token';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  DEFAULT_WINDOW_SECONDS,
+  getCurrentWindowStart,
+  getRateLimit,
+  RateLimitError,
+} from '../middleware/rate-limit';
 import * as schema from '../db/schema';
 import {
   DEFAULT_GCP_API_TIMEOUT_MS,
@@ -324,6 +332,39 @@ projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
     ? parseInt(c.env.GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS, 10)
     : DEFAULT_GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS;
 
+  // ── Token caching: return cached token if still valid ──
+  // Cache key includes userId to prevent cross-user token leakage
+  const cacheKey = `identity-token-cache:${userId}:${workspaceId}:${audience}`;
+  const cachedToken = await c.env.KV.get(cacheKey);
+  if (cachedToken) {
+    return c.json({ token: cachedToken });
+  }
+
+  // ── Rate limit per workspace (only for new signing operations) ──
+  const rateLimitWindowSeconds = c.env.RATE_LIMIT_IDENTITY_TOKEN_WINDOW_SECONDS
+    ? parseInt(c.env.RATE_LIMIT_IDENTITY_TOKEN_WINDOW_SECONDS, 10)
+    : DEFAULT_WINDOW_SECONDS;
+  const rateLimitMax = getRateLimit(c.env, 'IDENTITY_TOKEN');
+  const windowStart = getCurrentWindowStart(rateLimitWindowSeconds);
+  const rlKey = createRateLimitKey('identity-token', workspaceId, windowStart);
+
+  const { allowed, remaining, resetAt } = await checkRateLimit(
+    c.env.KV,
+    rlKey,
+    rateLimitMax,
+    rateLimitWindowSeconds,
+  );
+
+  c.header('X-RateLimit-Limit', rateLimitMax.toString());
+  c.header('X-RateLimit-Remaining', remaining.toString());
+  c.header('X-RateLimit-Reset', resetAt.toString());
+
+  if (!allowed) {
+    const retryAfter = resetAt - Math.floor(Date.now() / 1000);
+    c.header('Retry-After', Math.max(1, retryAfter).toString());
+    throw new RateLimitError(retryAfter);
+  }
+
   const identityToken = await signIdentityToken(
     {
       userId,
@@ -334,6 +375,16 @@ projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
     c.env,
     expirySeconds,
   );
+
+  // Cache the signed token with TTL = expiry - buffer (min floor)
+  const cacheBuffer = c.env.IDENTITY_TOKEN_CACHE_BUFFER_SECONDS
+    ? parseInt(c.env.IDENTITY_TOKEN_CACHE_BUFFER_SECONDS, 10)
+    : 60;
+  const cacheMinTtl = c.env.IDENTITY_TOKEN_CACHE_MIN_TTL_SECONDS
+    ? parseInt(c.env.IDENTITY_TOKEN_CACHE_MIN_TTL_SECONDS, 10)
+    : 30;
+  const cacheTtl = Math.max(cacheMinTtl, expirySeconds - cacheBuffer);
+  await c.env.KV.put(cacheKey, identityToken, { expirationTtl: cacheTtl });
 
   return c.json({ token: identityToken });
 });

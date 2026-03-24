@@ -33,10 +33,11 @@ export const DEFAULT_RATE_LIMITS = {
   CREDENTIAL_UPDATE: 30,
   ANONYMOUS: 100,
   CLIENT_ERRORS: 200,
+  IDENTITY_TOKEN: 60,
 } as const;
 
 /** Default time window (1 hour in seconds) */
-const DEFAULT_WINDOW_SECONDS = 3600;
+export const DEFAULT_WINDOW_SECONDS = 3600;
 
 /**
  * KV entry for rate limit tracking.
@@ -76,14 +77,14 @@ function getClientIp(c: Context): string {
 /**
  * Create a rate limit key for KV storage.
  */
-function createRateLimitKey(prefix: string, identifier: string, windowStart: number): string {
+export function createRateLimitKey(prefix: string, identifier: string, windowStart: number): string {
   return `ratelimit:${prefix}:${identifier}:${windowStart}`;
 }
 
 /**
  * Calculate the current window start timestamp.
  */
-function getCurrentWindowStart(windowSeconds: number): number {
+export function getCurrentWindowStart(windowSeconds: number): number {
   const now = Math.floor(Date.now() / 1000);
   return Math.floor(now / windowSeconds) * windowSeconds;
 }
@@ -91,7 +92,7 @@ function getCurrentWindowStart(windowSeconds: number): number {
 /**
  * Check and update rate limit.
  */
-async function checkRateLimit(
+export async function checkRateLimit(
   kv: KVNamespace,
   key: string,
   limit: number,

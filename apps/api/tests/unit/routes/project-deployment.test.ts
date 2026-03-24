@@ -311,6 +311,174 @@ describe('GET /:id/deployment-identity-token', () => {
   });
 });
 
+// ─── Identity Token Rate Limiting & Caching ─────────────────────────────
+
+// Default limit from rate-limit.ts — used to derive expected values in tests
+const DEFAULT_IDENTITY_TOKEN_LIMIT = 60;
+
+describe('GET /:id/deployment-identity-token — rate limiting', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    chainMocks();
+  });
+
+  it('returns 429 with RATE_LIMIT_EXCEEDED body when rate limit is exceeded', async () => {
+    mockValidateMcpToken.mockResolvedValue({
+      projectId: 'proj-1',
+      userId: 'u1',
+      workspaceId: 'ws-1',
+    });
+    mockLimit.mockResolvedValue([CRED_ROW]);
+
+    // No cached token; rate limit entry at the limit (next request exceeds it)
+    mockKvGet.mockImplementation(async (key: string, format?: string) => {
+      if (typeof key === 'string' && key.startsWith('ratelimit:identity-token:')) {
+        if (format === 'json') {
+          return { count: DEFAULT_IDENTITY_TOKEN_LIMIT, windowStart: Math.floor(Date.now() / 1000 / 3600) * 3600 };
+        }
+      }
+      return null; // no cached token
+    });
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
+      mockEnv,
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBeTruthy();
+    expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
+
+    const body = await res.json();
+    expect(body.error).toBe('RATE_LIMIT_EXCEEDED');
+  });
+
+  it('sets rate limit headers on first request', async () => {
+    mockValidateMcpToken.mockResolvedValue({
+      projectId: 'proj-1',
+      userId: 'u1',
+      workspaceId: 'ws-1',
+    });
+    // No cached token and no rate limit entry (first request)
+    mockKvGet.mockResolvedValue(null);
+    mockLimit.mockResolvedValue([CRED_ROW]);
+    mockSignIdentityToken.mockResolvedValue('signed-jwt-rl');
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
+      mockEnv,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-RateLimit-Limit')).toBe(String(DEFAULT_IDENTITY_TOKEN_LIMIT));
+    expect(Number(res.headers.get('X-RateLimit-Remaining'))).toBe(DEFAULT_IDENTITY_TOKEN_LIMIT - 1);
+    expect(Number(res.headers.get('X-RateLimit-Reset'))).toBeGreaterThan(0);
+  });
+
+  it('allows requests under the rate limit with correct remaining count', async () => {
+    mockValidateMcpToken.mockResolvedValue({
+      projectId: 'proj-1',
+      userId: 'u1',
+      workspaceId: 'ws-1',
+    });
+    const previousCount = 5;
+    // No cached token; existing rate limit entry with 5 previous requests
+    mockKvGet.mockImplementation(async (key: string, format?: string) => {
+      if (typeof key === 'string' && key.startsWith('ratelimit:identity-token:')) {
+        if (format === 'json') {
+          return { count: previousCount, windowStart: Math.floor(Date.now() / 1000 / 3600) * 3600 };
+        }
+      }
+      return null; // no cached token
+    });
+    mockLimit.mockResolvedValue([CRED_ROW]);
+    mockSignIdentityToken.mockResolvedValue('signed-jwt-ok');
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
+      mockEnv,
+    );
+    expect(res.status).toBe(200);
+    // After this request, count becomes previousCount+1
+    expect(Number(res.headers.get('X-RateLimit-Remaining'))).toBe(DEFAULT_IDENTITY_TOKEN_LIMIT - (previousCount + 1));
+  });
+
+});
+
+describe('GET /:id/deployment-identity-token — token caching', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    chainMocks();
+  });
+
+  it('returns cached token without signing and without consuming rate limit', async () => {
+    mockValidateMcpToken.mockResolvedValue({
+      projectId: 'proj-1',
+      userId: 'u1',
+      workspaceId: 'ws-1',
+    });
+    // Cache returns a token (cache lookup happens before rate limit)
+    mockKvGet.mockImplementation(async (key: string, _format?: string) => {
+      if (typeof key === 'string' && key.startsWith('identity-token-cache:')) {
+        return 'cached-jwt-token';
+      }
+      return null;
+    });
+    mockLimit.mockResolvedValue([CRED_ROW]);
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
+      mockEnv,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ token: 'cached-jwt-token' });
+    // signIdentityToken should NOT have been called
+    expect(mockSignIdentityToken).not.toHaveBeenCalled();
+    // Rate limit counter should NOT have been incremented (cache hit returns early)
+    const rateLimitPuts = mockKvPut.mock.calls.filter(
+      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).startsWith('ratelimit:'),
+    );
+    expect(rateLimitPuts).toHaveLength(0);
+  });
+
+  it('signs and caches token on cache miss with correct TTL', async () => {
+    mockValidateMcpToken.mockResolvedValue({
+      projectId: 'proj-1',
+      userId: 'u1',
+      workspaceId: 'ws-1',
+    });
+    // No cached token, no rate limit entry
+    mockKvGet.mockResolvedValue(null);
+    mockLimit.mockResolvedValue([CRED_ROW]);
+    mockSignIdentityToken.mockResolvedValue('fresh-signed-jwt');
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
+      mockEnv,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ token: 'fresh-signed-jwt' });
+    expect(mockSignIdentityToken).toHaveBeenCalled();
+
+    // Verify the token was cached in KV with userId in key and correct TTL (600s - 60s = 540s)
+    expect(mockKvPut).toHaveBeenCalledWith(
+      expect.stringMatching(/^identity-token-cache:u1:ws-1:https:/),
+      'fresh-signed-jwt',
+      { expirationTtl: 540 },
+    );
+  });
+});
+
 // ─── GET credential ─────────────────────────────────────────────────────
 
 describe('GET /:id/deployment/gcp', () => {
