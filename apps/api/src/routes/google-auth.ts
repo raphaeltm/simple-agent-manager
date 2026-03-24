@@ -67,6 +67,12 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
     return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Missing authorization code or state')}`);
   }
 
+  // Validate state format before KV lookup (state is always a UUID)
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!UUID_RE.test(state)) {
+    return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid OAuth state')}`);
+  }
+
   // Validate CSRF state and extract userId
   const storedStateRaw = await c.env.KV.get(`google-oauth-state:${state}`);
   if (!storedStateRaw) {
@@ -107,8 +113,11 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
   });
 
   if (!tokenResponse.ok) {
-    const errorBody = await tokenResponse.text();
-    console.error('Google token exchange failed:', errorBody);
+    const errBody = await tokenResponse.json().catch(() => ({})) as { error?: string };
+    console.error('Google token exchange failed', {
+      status: tokenResponse.status,
+      error: errBody.error ?? 'unknown',
+    });
     return c.redirect(`${appUrl}?gcp_error=token_exchange_failed`);
   }
 

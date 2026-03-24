@@ -110,10 +110,11 @@ projectDeploymentRoutes.get(
 // ─── Setup + management (user session auth) ─────────────────────────────
 
 /**
- * GET /api/projects/:id/deployment/gcp/projects
+ * POST /api/projects/:id/deployment/gcp/projects
  * List user's GCP projects for deployment setup.
+ * Accepts the OAuth handle in the request body to avoid leaking it in URL query parameters.
  */
-projectDeploymentRoutes.get(
+projectDeploymentRoutes.post(
   '/:id/deployment/gcp/projects',
   requireAuth(),
   requireApproved(),
@@ -123,12 +124,12 @@ projectDeploymentRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
 
-    const handle = c.req.query('handle');
-    if (!handle) {
-      throw errors.badRequest('OAuth handle is required');
+    const body = await c.req.json<{ oauthHandle: string }>();
+    if (!body.oauthHandle) {
+      throw errors.badRequest('oauthHandle is required');
     }
 
-    const oauthToken = await resolveDeployOAuthToken(handle, c.env.KV);
+    const oauthToken = await resolveDeployOAuthToken(body.oauthHandle, c.env.KV);
     const timeoutMs = c.env.GCP_API_TIMEOUT_MS
       ? parseInt(c.env.GCP_API_TIMEOUT_MS, 10)
       : DEFAULT_GCP_API_TIMEOUT_MS;

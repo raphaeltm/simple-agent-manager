@@ -157,7 +157,10 @@ export interface GcpProject {
 }
 
 export async function listGcpProjects(oauthHandle: string): Promise<{ projects: GcpProject[] }> {
-  return request<{ projects: GcpProject[] }>(`/api/gcp/projects?handle=${encodeURIComponent(oauthHandle)}`);
+  return request<{ projects: GcpProject[] }>('/api/gcp/projects', {
+    method: 'POST',
+    body: JSON.stringify({ oauthHandle }),
+  });
 }
 
 export interface GcpSetupRequest {
@@ -1576,7 +1579,8 @@ export async function listGcpProjectsForDeploy(
   oauthHandle: string,
 ): Promise<{ projects: GcpProject[] }> {
   return request<{ projects: GcpProject[] }>(
-    `/api/projects/${projectId}/deployment/gcp/projects?handle=${encodeURIComponent(oauthHandle)}`,
+    `/api/projects/${projectId}/deployment/gcp/projects`,
+    { method: 'POST', body: JSON.stringify({ oauthHandle }) },
   );
 }
 
