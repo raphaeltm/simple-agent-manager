@@ -18,7 +18,11 @@ export function ProtectedRoute({ children, skipApprovalCheck }: ProtectedRoutePr
   // This prevents false redirects to login during transient network errors on mobile app resume.
   if (isLoading || (isRefetching && !isAuthenticated)) {
     return (
-      <div className="min-h-[var(--sam-app-height)] flex items-center justify-center bg-canvas">
+      <div
+        className="min-h-[var(--sam-app-height)] flex items-center justify-center bg-canvas"
+        role="status"
+        aria-label="Verifying your session"
+      >
         <Spinner size="lg" />
       </div>
     );

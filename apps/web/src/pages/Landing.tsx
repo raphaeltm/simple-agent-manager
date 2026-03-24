@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { signInWithGitHub } from '../lib/auth';
 import { useAuth } from '../components/AuthProvider';
@@ -11,18 +11,21 @@ export function Landing() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  // Capture state.from once on mount to avoid double-navigation when
+  // navigate(replace: true) clears the state and re-triggers the effect.
+  const fromRef = useRef((location.state as { from?: Location })?.from);
 
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
       // Respect the original page the user was on before being redirected to login.
       // ProtectedRoute passes this as location.state.from when redirecting.
-      const from = (location.state as { from?: Location })?.from;
+      const from = fromRef.current;
       const returnTo = from
         ? `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`
         : '/dashboard';
       navigate(returnTo, { replace: true });
     }
-  }, [isAuthenticated, isLoading, navigate, location.state]);
+  }, [isAuthenticated, isLoading, navigate]);
 
   const handleSignIn = async () => {
     try {
