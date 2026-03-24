@@ -104,6 +104,7 @@ export interface Env {
   RATE_LIMIT_TERMINAL_TOKEN?: string;
   RATE_LIMIT_CREDENTIAL_UPDATE?: string;
   RATE_LIMIT_ANONYMOUS?: string;
+  RATE_LIMIT_IDENTITY_TOKEN?: string;
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
   MAX_WORKSPACES_PER_NODE?: string;

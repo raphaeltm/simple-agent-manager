@@ -10,6 +10,13 @@ import { listGcpProjects } from '../services/gcp-setup';
 import { runGcpDeploySetup } from '../services/gcp-deploy-setup';
 import { signIdentityToken } from '../services/jwt';
 import { validateMcpToken } from '../services/mcp-token';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  getCurrentWindowStart,
+  getRateLimit,
+  RateLimitError,
+} from '../middleware/rate-limit';
 import * as schema from '../db/schema';
 import {
   DEFAULT_GCP_API_TIMEOUT_MS,
@@ -324,6 +331,13 @@ projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
     ? parseInt(c.env.GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS, 10)
     : DEFAULT_GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS;
 
+  // ── Token caching: return cached token if still valid ──
+  const cacheKey = `identity-token-cache:${workspaceId}:${audience}`;
+  const cachedToken = await c.env.KV.get(cacheKey);
+  if (cachedToken) {
+    return c.json({ token: cachedToken });
+  }
+
   const identityToken = await signIdentityToken(
     {
       userId,
@@ -334,6 +348,10 @@ projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
     c.env,
     expirySeconds,
   );
+
+  // Cache the signed token with TTL = expiry - 60s buffer (min 30s)
+  const cacheTtl = Math.max(30, expirySeconds - 60);
+  await c.env.KV.put(cacheKey, identityToken, { expirationTtl: cacheTtl });
 
   return c.json({ token: identityToken });
 });
