@@ -480,6 +480,29 @@ export async function cleanupWorkspaceActivity(
 }
 
 // =========================================================================
+// Cached Commands
+// =========================================================================
+
+export async function cacheCommands(
+  env: Env,
+  projectId: string,
+  agentType: string,
+  cmds: Array<{ name: string; description: string }>,
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  await stub.cacheCommands(agentType, cmds);
+}
+
+export async function getCachedCommands(
+  env: Env,
+  projectId: string,
+  agentType?: string,
+): Promise<Array<{ agentType: string; name: string; description: string; updatedAt: number }>> {
+  const stub = await getStub(env, projectId);
+  return stub.getCachedCommands(agentType);
+}
+
+// =========================================================================
 // WebSocket
 // =========================================================================
 

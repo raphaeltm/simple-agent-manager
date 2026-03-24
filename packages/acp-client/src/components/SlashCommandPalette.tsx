@@ -136,10 +136,12 @@ export const SlashCommandPalette = forwardRef<SlashCommandPaletteHandle, SlashCo
                       className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-medium ${
                         cmd.source === 'agent'
                           ? 'bg-purple-100 text-purple-700'
-                          : 'bg-gray-100 text-gray-600'
+                          : cmd.source === 'cached'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-gray-100 text-gray-600'
                       }`}
                     >
-                      {cmd.source === 'agent' ? 'Agent' : 'SAM'}
+                      {cmd.source === 'agent' ? 'Agent' : cmd.source === 'cached' ? 'Cached' : 'SAM'}
                     </span>
                   </div>
                   <span className="text-sm text-gray-500 leading-snug">{cmd.description}</span>

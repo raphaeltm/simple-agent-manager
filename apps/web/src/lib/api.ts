@@ -1579,3 +1579,35 @@ export async function listGcpProjectsForDeploy(
     `/api/projects/${projectId}/deployment/gcp/projects?handle=${encodeURIComponent(oauthHandle)}`,
   );
 }
+
+// -------------------------------------------------------------------------
+// Cached Commands
+// -------------------------------------------------------------------------
+
+export interface CachedCommandResponse {
+  agentType: string;
+  name: string;
+  description: string;
+  updatedAt: number;
+}
+
+export async function getCachedCommands(
+  projectId: string,
+  agentType?: string,
+): Promise<{ commands: CachedCommandResponse[] }> {
+  const qs = agentType ? `?agentType=${encodeURIComponent(agentType)}` : '';
+  return request<{ commands: CachedCommandResponse[] }>(
+    `/api/projects/${projectId}/cached-commands${qs}`,
+  );
+}
+
+export async function saveCachedCommands(
+  projectId: string,
+  agentType: string,
+  commands: Array<{ name: string; description: string }>,
+): Promise<{ cached: number }> {
+  return request<{ cached: number }>(`/api/projects/${projectId}/cached-commands`, {
+    method: 'POST',
+    body: JSON.stringify({ agentType, commands }),
+  });
+}

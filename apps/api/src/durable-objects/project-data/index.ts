@@ -18,6 +18,7 @@ import * as ideas from './ideas';
 import * as activity from './activity';
 import * as acpSessions from './acp-sessions';
 import * as idleCleanup from './idle-cleanup';
+import * as commands from './commands';
 
 export type { Env } from './types';
 
@@ -141,6 +142,16 @@ export class ProjectData extends DurableObject<Env> {
   async unlinkSessionIdea(sessionId: string, taskId: string): Promise<void> { ideas.unlinkSessionIdea(this.sql, sessionId, taskId); }
   getIdeasForSession(sessionId: string) { return ideas.getIdeasForSession(this.sql, sessionId); }
   getSessionsForIdea(taskId: string) { return ideas.getSessionsForIdea(this.sql, taskId); }
+
+  // --- Cached Commands ---
+
+  cacheCommands(agentType: string, cmds: Array<{ name: string; description: string }>): void {
+    commands.saveCachedCommands(this.sql, agentType, cmds);
+  }
+
+  getCachedCommands(agentType?: string) {
+    return commands.getCachedCommands(this.sql, agentType);
+  }
 
   // --- Activity Events ---
 

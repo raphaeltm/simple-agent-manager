@@ -294,6 +294,22 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_csi_task ON chat_session_ideas(task_id)`);
     },
   },
+  {
+    name: '013-cached-commands',
+    run: (sql) => {
+      // Per-project cache of agent slash commands discovered during ACP sessions.
+      // Allows the SlashCommandPalette to show known commands before a session starts.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS cached_commands (
+          agent_type TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          PRIMARY KEY (agent_type, name)
+        )
+      `);
+    },
+  },
 ];
 
 /**
