@@ -23,6 +23,7 @@ import {
 } from '../../lib/api';
 import { useToast } from '../../hooks/useToast';
 import { useProjectContext } from '../../pages/ProjectContext';
+import { DeploymentSettings } from '../DeploymentSettings';
 
 const VM_SIZES: { value: VMSize; label: string; description: string }[] = [
   { value: 'small', label: 'Small', description: '2 vCPUs, 4 GB RAM' },
@@ -612,6 +613,9 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                 </div>
               )}
             </section>
+
+            {/* Deploy to Cloud */}
+            <DeploymentSettings projectId={projectId} compact />
 
             {/* Project Views — power-user links to hidden routes */}
             <section className="grid gap-3">

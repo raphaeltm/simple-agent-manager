@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Spinner } from '@simple-agent-manager/ui';
+import { Button, Select, Spinner } from '@simple-agent-manager/ui';
 import type { GcpProject } from '../lib/api';
 import {
   getProjectDeploymentGcp,
@@ -10,14 +10,19 @@ import {
   type ProjectDeploymentGcpResponse,
 } from '../lib/api';
 import { useToast } from '../hooks/useToast';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+const GCP_CONSOLE_NEW_PROJECT_URL = 'https://console.cloud.google.com/projectcreate';
+
 interface DeploymentSettingsProps {
   projectId: string;
+  /** When true, uses h3/card-title heading (for drawer context). Defaults to h2/section-heading. */
+  compact?: boolean;
 }
 
-export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
+export function DeploymentSettings({ projectId, compact = false }: DeploymentSettingsProps) {
   const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -25,12 +30,18 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
   const [deploymentCred, setDeploymentCred] = useState<ProjectDeploymentGcpResponse | null>(null);
 
   // Setup flow state
-  const [phase, setPhase] = useState<'idle' | 'project-select' | 'setting-up' | 'done'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'loading-projects' | 'project-select' | 'setting-up'>('idle');
   const [gcpProjects, setGcpProjects] = useState<GcpProject[]>([]);
   const [selectedGcpProject, setSelectedGcpProject] = useState<string>('');
   const [oauthHandle, setOauthHandle] = useState<string>('');
   const [settingUp, setSettingUp] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+
+  // Disconnect confirmation dialog
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+
+  const HeadingTag = compact ? 'h3' : 'h2';
+  const headingClass = compact ? 'sam-type-card-title' : 'sam-type-section-heading';
 
   const loadDeploymentCred = useCallback(async () => {
     try {
@@ -65,6 +76,7 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
 
     if (handle) {
       setOauthHandle(handle);
+      setPhase('loading-projects');
       // Remove from URL
       setSearchParams((prev) => {
         prev.delete('gcp_deploy_setup');
@@ -82,6 +94,7 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
         })
         .catch((err) => {
           toast.error(err instanceof Error ? err.message : 'Failed to list GCP projects');
+          setPhase('idle');
         });
     }
   }, [searchParams, setSearchParams, projectId, toast]);
@@ -101,8 +114,9 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
         gcpProjectId: selectedGcpProject,
       });
       toast.success('GCP deployment connected');
-      setPhase('done');
+      // Stay in setting-up phase until credential reload completes (avoids blank flash)
       await loadDeploymentCred();
+      setPhase('idle');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'GCP setup failed');
       setPhase('project-select');
@@ -112,12 +126,12 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
   };
 
   const handleDisconnect = async () => {
-    if (!confirm('Disconnect GCP deployment credentials? Agents will no longer be able to deploy to GCP from this project.')) return;
     setDisconnecting(true);
     try {
       await deleteProjectDeploymentGcp(projectId);
       setDeploymentCred({ connected: false });
       setPhase('idle');
+      setShowDisconnectConfirm(false);
       toast.success('GCP deployment disconnected');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to disconnect');
@@ -129,10 +143,10 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
   if (loading) {
     return (
       <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
-        <h2 className="sam-type-section-heading m-0 text-fg-primary">
+        <HeadingTag className={`${headingClass} m-0 text-fg-primary`}>
           Deploy to Cloud
-        </h2>
-        <div className="flex items-center gap-2">
+        </HeadingTag>
+        <div className="flex items-center gap-2" role="status">
           <Spinner size="sm" />
           <span className="text-sm text-fg-muted">Loading deployment config...</span>
         </div>
@@ -143,9 +157,9 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
   return (
     <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
       <div>
-        <h2 className="sam-type-section-heading m-0 text-fg-primary">
+        <HeadingTag className={`${headingClass} m-0 text-fg-primary`}>
           Deploy to Cloud
-        </h2>
+        </HeadingTag>
         <p className="m-0 mt-1 text-xs text-fg-muted">
           Connect a GCP project for deployments via Defang. Agents use OIDC for short-lived credentials — no secrets stored.
         </p>
@@ -156,7 +170,7 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
         <div className="grid gap-3">
           <div className="border border-border-default rounded-sm p-3 bg-inset grid gap-2">
             <div className="flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-green-500 shrink-0" />
+              <span className="inline-block w-2 h-2 rounded-full bg-success shrink-0" />
               <span className="text-sm font-medium text-fg-primary">GCP Connected</span>
             </div>
             <div className="grid gap-1 text-xs text-fg-muted">
@@ -170,19 +184,30 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
               </div>
             </div>
           </div>
+
           <div className="flex gap-2">
             <Button
               variant="danger"
               size="sm"
-              loading={disconnecting}
-              disabled={disconnecting}
-              onClick={() => void handleDisconnect()}
+              onClick={() => setShowDisconnectConfirm(true)}
             >
               Disconnect
             </Button>
           </div>
         </div>
       ) : null}
+
+      {/* Disconnect confirmation dialog */}
+      <ConfirmDialog
+        isOpen={showDisconnectConfirm}
+        onClose={() => setShowDisconnectConfirm(false)}
+        onConfirm={() => void handleDisconnect()}
+        title="Disconnect GCP deployment?"
+        message="Agents will no longer be able to deploy to GCP from this project."
+        confirmLabel="Confirm Disconnect"
+        variant="danger"
+        loading={disconnecting}
+      />
 
       {/* Disconnected state */}
       {!deploymentCred?.connected && phase === 'idle' ? (
@@ -193,50 +218,89 @@ export function DeploymentSettings({ projectId }: DeploymentSettingsProps) {
         </div>
       ) : null}
 
+      {/* Loading projects after OAuth */}
+      {phase === 'loading-projects' ? (
+        <div className="flex items-center gap-2" role="status">
+          <Spinner size="sm" />
+          <span className="text-sm text-fg-muted">Loading GCP projects...</span>
+        </div>
+      ) : null}
+
       {/* Project selection */}
       {phase === 'project-select' ? (
         <div className="grid gap-3">
-          <div>
-            <label htmlFor="gcp-deploy-project" className="block text-xs font-medium text-fg-muted mb-1">
-              Select GCP Project
-            </label>
-            <select
-              id="gcp-deploy-project"
-              value={selectedGcpProject}
-              onChange={(e) => setSelectedGcpProject(e.target.value)}
-              className="w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit]"
-            >
-              {gcpProjects.map((p) => (
-                <option key={p.projectId} value={p.projectId}>
-                  {p.name} ({p.projectId})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              loading={settingUp}
-              disabled={settingUp || !selectedGcpProject}
-              onClick={() => void handleSetup()}
-            >
-              Set Up Deployment
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={settingUp}
-              onClick={() => setPhase('idle')}
-            >
-              Cancel
-            </Button>
-          </div>
+          {gcpProjects.length > 0 ? (
+            <>
+              <div>
+                <label htmlFor="gcp-deploy-project" className="block text-xs font-medium text-fg-muted mb-1">
+                  Select GCP Project
+                </label>
+                <Select
+                  id="gcp-deploy-project"
+                  value={selectedGcpProject}
+                  onChange={(e) => setSelectedGcpProject(e.target.value)}
+                >
+                  {gcpProjects.map((p) => (
+                    <option key={p.projectId} value={p.projectId}>
+                      {p.name} ({p.projectId})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  loading={settingUp}
+                  disabled={settingUp || !selectedGcpProject}
+                  onClick={() => void handleSetup()}
+                >
+                  Set Up Deployment
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={settingUp}
+                  onClick={() => setPhase('idle')}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          ) : (
+            /* Empty state: no GCP projects found */
+            <div className="border border-border-default rounded-sm p-3 bg-inset grid gap-2">
+              <p className="m-0 text-sm text-fg-primary">
+                No GCP projects found. Create a project in{' '}
+                <a
+                  href={GCP_CONSOLE_NEW_PROJECT_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent underline"
+                >
+                  Google Cloud Console
+                </a>{' '}
+                first, then try again.
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleConnectGcp}>
+                  Try Again
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setPhase('idle')}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
 
       {/* Setting up */}
       {phase === 'setting-up' ? (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" role="status">
           <Spinner size="sm" />
           <span className="text-sm text-fg-muted">
             Creating WIF pool, OIDC provider, and service account...
