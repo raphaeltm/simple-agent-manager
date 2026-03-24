@@ -406,12 +406,26 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     expect(location).toContain('gcp_deploy_error=');
   });
 
+  it('redirects with error when state is not a valid UUID', async () => {
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/deployment/gcp/callback?code=abc&state=not-a-uuid',
+      { method: 'GET', redirect: 'manual' },
+      mockEnv,
+    );
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    expect(location).toContain('gcp_deploy_error=');
+    // KV should never be queried with an invalid state format
+    expect(mockKvGet).not.toHaveBeenCalled();
+  });
+
   it('redirects with error when KV state is expired/missing', async () => {
     mockKvGet.mockResolvedValue(null);
 
     const app = createTestApp();
     const res = await app.request(
-      '/api/deployment/gcp/callback?code=abc&state=expired-state',
+      '/api/deployment/gcp/callback?code=abc&state=00000000-0000-0000-0000-000000000000',
       { method: 'GET', redirect: 'manual' },
       mockEnv,
     );
@@ -428,7 +442,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
 
     const app = createTestApp();
     const res = await app.request(
-      '/api/deployment/gcp/callback?code=abc&state=valid-state',
+      '/api/deployment/gcp/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
       { method: 'GET', redirect: 'manual' },
       mockEnv,
     );
@@ -454,7 +468,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
 
     const app = createTestApp();
     const res = await app.request(
-      '/api/deployment/gcp/callback?code=abc&state=valid-state',
+      '/api/deployment/gcp/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
       { method: 'GET', redirect: 'manual' },
       mockEnv,
     );

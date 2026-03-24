@@ -405,6 +405,12 @@ gcpDeployCallbackRoute.get(
       return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Missing authorization code or state')}`);
     }
 
+    // Validate state format before KV lookup (state is always a UUID)
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(state)) {
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid OAuth state')}`);
+    }
+
     // Validate CSRF state and extract project context
     const storedStateRaw = await c.env.KV.get(`gcp-deploy-oauth-state:${state}`);
     if (!storedStateRaw) {
@@ -434,6 +440,12 @@ gcpDeployCallbackRoute.get(
     await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
 
     const projectId = storedState.projectId;
+
+    // Defense-in-depth: verify the session user owns the project in the database,
+    // even though the KV state was created by an authenticated owner at authorize time
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireOwnedProject(db, projectId, sessionUserId);
+
     const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${projectId}/settings`;
 
     // Exchange auth code for access token
