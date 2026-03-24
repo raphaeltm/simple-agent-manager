@@ -1148,10 +1148,21 @@ function ChatInput({
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
   const isMobile = useIsMobile();
 
-  // Slash command palette state
+  // Slash command palette state.
+  // dismissedFilterRef tracks the exact filter string at the time the user pressed
+  // Escape — the palette stays closed until the filter changes (user types more).
+  const dismissedFilterRef = useRef<string | null>(null);
   const slashMatch = value.match(/^\/(\S*)$/);
-  const showPalette = !!slashMatch && (slashCommands?.length ?? 0) > 0;
   const slashFilter = slashMatch?.[1] ?? '';
+  // Clear the dismissed state whenever the input exits slash-command mode entirely
+  // (e.g., user cleared the field) so the next "/" still opens the palette.
+  if (!slashMatch && dismissedFilterRef.current !== null) {
+    dismissedFilterRef.current = null;
+  }
+  const showPalette =
+    !!slashMatch &&
+    (slashCommands?.length ?? 0) > 0 &&
+    dismissedFilterRef.current !== slashFilter;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -1183,9 +1194,11 @@ function ChatInput({
   );
 
   const handleDismissPalette = useCallback(() => {
-    // Clear the slash prefix so the palette closes
-    if (value.startsWith('/')) onChange('');
-  }, [value, onChange]);
+    // Record the current filter as dismissed so the palette stays closed until
+    // the user changes the input further. Does NOT clear the typed text.
+    dismissedFilterRef.current = slashFilter;
+    inputRef.current?.focus();
+  }, [slashFilter]);
 
   return (
     <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
@@ -1320,6 +1333,11 @@ function ChatInput({
           placeholder={placeholder}
           disabled={submitting}
           rows={1}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={showPalette}
+          aria-controls={showPalette ? 'slash-palette-listbox' : undefined}
+          aria-activedescendant={showPalette ? paletteRef.current?.activeDescendantId : undefined}
           className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto"
         />
         <VoiceButton
