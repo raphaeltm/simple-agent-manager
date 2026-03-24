@@ -745,9 +745,12 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       }
     }
 
-    // Check D1 for workspace status — catches cases where the callback succeeded
+    // Poll D1 for workspace status — catches cases where the callback succeeded
     // (updating D1) but the DO notification failed, or where the VM agent retried
     // the callback via heartbeat after initial failures.
+    if (!state.stepResults.workspaceId) {
+      throw new Error('handleWorkspaceReady: workspaceId is null — cannot poll D1');
+    }
     const wsRow = await this.env.DATABASE.prepare(
       `SELECT status, error_message FROM workspaces WHERE id = ?`
     ).bind(state.stepResults.workspaceId).first<{ status: string; error_message: string | null }>();
@@ -760,6 +763,12 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       });
       await this.advanceToStep(state, 'agent_session');
       return;
+    }
+    if (wsRow?.status === 'error') {
+      throw Object.assign(
+        new Error(wsRow.error_message || 'Workspace creation failed (D1 poll)'),
+        { permanent: true },
+      );
     }
 
     // Check timeout
