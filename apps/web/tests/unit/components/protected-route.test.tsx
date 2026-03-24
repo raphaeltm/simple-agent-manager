@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { ProtectedRoute } from '../../../src/components/ProtectedRoute';
 
 const mockUseAuth = vi.fn();
@@ -17,11 +17,22 @@ vi.mock('@simple-agent-manager/ui', () => ({
   Spinner: ({ size }: { size: string }) => <div data-testid="spinner" data-size={size} />,
 }));
 
+/** Captures location.state so we can verify ProtectedRoute passes state.from */
+function LandingWithState() {
+  const location = useLocation();
+  const from = (location.state as { from?: { pathname: string } })?.from;
+  return (
+    <div data-testid="landing">
+      {from && <span data-testid="from-path">{from.pathname}</span>}
+    </div>
+  );
+}
+
 function renderProtected(initialPath = '/protected') {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
-        <Route path="/" element={<div data-testid="landing" />} />
+        <Route path="/" element={<LandingWithState />} />
         <Route
           path="/protected"
           element={
@@ -81,6 +92,20 @@ describe('ProtectedRoute', () => {
     expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
   });
 
+  it('passes location.state.from when redirecting to login', () => {
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: false,
+      isLoading: false,
+      isApproved: false,
+      isRefetching: false,
+      user: null,
+    });
+    renderProtected('/protected');
+    // Verify the redirect includes state.from so Landing can navigate back
+    expect(screen.getByTestId('landing')).toBeInTheDocument();
+    expect(screen.getByTestId('from-path')).toHaveTextContent('/protected');
+  });
+
   it('renders children when authenticated', () => {
     mockUseAuth.mockReturnValue({
       isAuthenticated: true,
@@ -105,5 +130,45 @@ describe('ProtectedRoute', () => {
     // Refetching while authenticated should NOT show spinner or redirect
     expect(screen.getByTestId('protected-content')).toBeInTheDocument();
     expect(screen.queryByTestId('spinner')).not.toBeInTheDocument();
+  });
+
+  it('shows PendingApproval for unapproved pending user', () => {
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      isApproved: false,
+      isRefetching: false,
+      user: { id: 'u1', email: 'test@test.com', name: 'Test', role: 'user', status: 'pending' },
+    });
+    renderProtected();
+    expect(screen.getByTestId('pending-approval')).toBeInTheDocument();
+    expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
+  });
+
+  it('skips approval check when skipApprovalCheck is true', () => {
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      isApproved: false,
+      isRefetching: false,
+      user: { id: 'u1', email: 'test@test.com', name: 'Test', role: 'user', status: 'pending' },
+    });
+    render(
+      <MemoryRouter initialEntries={['/protected']}>
+        <Routes>
+          <Route path="/" element={<LandingWithState />} />
+          <Route
+            path="/protected"
+            element={
+              <ProtectedRoute skipApprovalCheck>
+                <div data-testid="protected-content" />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('protected-content')).toBeInTheDocument();
+    expect(screen.queryByTestId('pending-approval')).not.toBeInTheDocument();
   });
 });
