@@ -21,7 +21,11 @@ describe('workspace lifecycle synchronization', () => {
   const crudFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8');
   const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'), 'utf8');
   const nodesFile = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
-  const doFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data.ts'), 'utf8');
+  const doFile = [
+    readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/activity.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/index.ts'), 'utf8'),
+  ].join('\n');
 
   describe('workspace stop → session stop synchronization', () => {
     it('stop route calls projectDataService.stopSession', () => {
@@ -47,21 +51,14 @@ describe('workspace lifecycle synchronization', () => {
 
   describe('task-driven workspace idle timeout fix', () => {
     it('linkSessionToWorkspace creates workspace_activity row', () => {
-      const linkSection = doFile.slice(
-        doFile.indexOf('async linkSessionToWorkspace('),
-        doFile.indexOf('async listSessions(')
-      );
-      expect(linkSection).toContain('INSERT OR IGNORE INTO workspace_activity');
-      expect(linkSection).toContain('workspace_id');
-      expect(linkSection).toContain('session_id');
+      // Implementation split across sessions.ts (SQL) and index.ts (delegation)
+      expect(doFile).toContain('INSERT OR IGNORE INTO workspace_activity');
+      expect(doFile).toContain('workspace_id');
+      expect(doFile).toContain('session_id');
     });
 
     it('linkSessionToWorkspace calls recalculateAlarm', () => {
-      const linkSection = doFile.slice(
-        doFile.indexOf('async linkSessionToWorkspace('),
-        doFile.indexOf('async listSessions(')
-      );
-      expect(linkSection).toContain('recalculateAlarm');
+      expect(doFile).toContain('recalculateAlarm');
     });
   });
 

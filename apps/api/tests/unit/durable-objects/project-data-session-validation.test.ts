@@ -11,10 +11,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('ProjectData DO session validation contracts', () => {
-  const file = readFileSync(
-    resolve(process.cwd(), 'src/durable-objects/project-data.ts'),
-    'utf8'
-  );
+  const file = [
+    readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/index.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/messages.ts'), 'utf8'),
+  ].join('\n');
 
   describe('WebSocket message.send session tag validation', () => {
     it('retrieves WebSocket tags for session matching', () => {

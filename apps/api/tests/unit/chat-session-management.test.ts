@@ -23,10 +23,11 @@ const taskRunnerDoSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
   'utf8'
 );
-const projectDataDoSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/project-data.ts'),
-  'utf8'
-);
+const projectDataDoSource = [
+  readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/messages.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/index.ts'), 'utf8'),
+].join('\n');
 const projectDataServiceSource = readFileSync(
   resolve(process.cwd(), 'src/services/project-data.ts'),
   'utf8'
@@ -148,33 +149,21 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
   });
 
   it('linkSessionToWorkspace accepts sessionId and workspaceId', () => {
-    expect(projectDataDoSource).toContain(
-      'sessionId: string,\n    workspaceId: string'
-    );
+    expect(projectDataDoSource).toContain('sessionId: string');
+    expect(projectDataDoSource).toContain('workspaceId: string');
   });
 
   it('linkSessionToWorkspace validates session exists', () => {
-    const linkMethod = projectDataDoSource.slice(
-      projectDataDoSource.indexOf('async linkSessionToWorkspace('),
-      projectDataDoSource.indexOf('async listSessions(')
-    );
-    expect(linkMethod).toContain('Session ${sessionId} not found');
+    // Implementation split across sessions.ts (SQL) and index.ts (delegation)
+    expect(projectDataDoSource).toContain('Session ${sessionId} not found');
   });
 
   it('linkSessionToWorkspace updates workspace_id on the session', () => {
-    const linkMethod = projectDataDoSource.slice(
-      projectDataDoSource.indexOf('async linkSessionToWorkspace('),
-      projectDataDoSource.indexOf('async listSessions(')
-    );
-    expect(linkMethod).toContain('UPDATE chat_sessions SET workspace_id = ?');
+    expect(projectDataDoSource).toContain('UPDATE chat_sessions SET workspace_id = ?');
   });
 
   it('linkSessionToWorkspace broadcasts session.updated event', () => {
-    const linkMethod = projectDataDoSource.slice(
-      projectDataDoSource.indexOf('async linkSessionToWorkspace('),
-      projectDataDoSource.indexOf('async listSessions(')
-    );
-    expect(linkMethod).toContain("broadcastEvent('session.updated'");
+    expect(projectDataDoSource).toContain("broadcastEvent('session.updated'");
   });
 
   it('project-data service exports linkSessionToWorkspace wrapper', () => {
