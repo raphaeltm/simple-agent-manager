@@ -123,7 +123,8 @@ Dispatch reviewers **in parallel** covering each language and discipline touched
 | Go code (`packages/vm-agent/`) | `go-specialist` — concurrency, resource leaks, Go idioms |
 | TypeScript API (`apps/api/`) | `cloudflare-specialist` — D1, KV, Workers patterns |
 | UI code (`apps/web/`, `packages/ui/`) | `ui-ux-specialist` — accessibility, layout, interactions |
-| Auth, credentials, tokens | `security-auditor` — credential safety, OWASP, JWT |
+| Auth, credentials, tokens | `security-auditor` — credential safety, OWASP, JWT, multi-tenant IAM scope |
+| External service integration (OAuth, cloud IAM, WIF) | Manual design review — consumer simulation, static URIs, binding scope (see `19-external-service-integration.md`) |
 | Environment variables | `env-validator` — GH_ vs GITHUB_, deployment mapping |
 | Documentation changes | `doc-sync-validator` — docs match code reality |
 | Business logic, config | `constitution-validator` — no hardcoded values |
@@ -137,7 +138,9 @@ Each reviewer should:
 3. **Check test adequacy** — do the tests actually prove the fix/feature works, or are they too shallow?
 4. **Verify data flow completeness** — for multi-component changes, trace the primary data path from input to output. Ask: "Does the data actually arrive at its destination?" (see `10-e2e-verification.md`)
 5. **Identify missing tests** — what regression test would catch this if it broke again?
-6. **Flag any concern**, even minor ones — it's cheaper to address them now
+6. **Challenge the design, not just the implementation** — ask "should this work this way?" not just "does this code do what was intended?" If the spec is wrong, the code being correct doesn't help. (see `docs/notes/2026-03-24-gcp-oidc-review-postmortem.md`)
+7. **For external service integrations**: simulate the setup from a self-hoster's perspective. What do they need to register? Are URIs static? Are IAM bindings scoped per-entity? (see `19-external-service-integration.md`)
+8. **Flag any concern**, even minor ones — it's cheaper to address them now
 
 ### Acting on Review Findings
 

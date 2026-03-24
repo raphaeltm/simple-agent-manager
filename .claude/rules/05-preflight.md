@@ -17,6 +17,7 @@ This policy is defined in `docs/guides/agent-preflight-behavior.md` and enforced
 ## Required Behavioral Rules
 
 - **Up-to-date docs first**: For `external-api-change`, use Context7 when available. If unavailable, use official primary documentation and record what was used.
+- **External service integration design review first**: For features integrating with OAuth providers, cloud IAM (GCP WIF, AWS OIDC), or any service requiring out-of-band user configuration, complete the design checks in `19-external-service-integration.md` before writing code. Verify: static callback URIs, scoped IAM bindings, self-hoster setup documented, multi-tenant threat model answered.
 - **Cross-component impact first**: For `cross-component-change`, map dependencies and affected components before edits. Write a data flow trace (see `10-e2e-verification.md`) that cites specific code paths at each system boundary.
 - **Assumption verification first**: When a spec, task, or document claims "existing X works" or "X is functional," verify the claim with a test or manual check before building on it. Record what was verified and how. "I read the code and it looks right" is not verification.
 - **Code usage analysis first**: For business logic/contract changes, inspect existing usage and edge cases before implementation.
