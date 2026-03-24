@@ -272,8 +272,11 @@ describe('ProjectMessageView — auto-resume', () => {
     });
   });
 
-  it('does not show agent error banner while resuming', async () => {
-    // Make resume hang
+  it('shows resuming banner instead of agent offline during resume', async () => {
+    // When resuming, the "Resuming agent..." banner should be visible
+    // and the generic "Agent offline" banner should NOT appear.
+    // For idle sessions, the AgentErrorBanner wouldn't show anyway (guard: sessionState === 'active'),
+    // but the resuming banner IS the intended UX replacement for the disconnect state.
     mockResumeAgentSession.mockReturnValue(new Promise(() => {}));
 
     render(
@@ -295,7 +298,81 @@ describe('ProjectMessageView — auto-resume', () => {
       expect(screen.getByText('Resuming agent...')).toBeInTheDocument();
     });
 
-    // Should NOT show the agent offline banner while resuming
+    // Resuming banner is the active indicator — no error/offline banners
     expect(screen.queryByText(/agent offline/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/agent is not connected/i)).not.toBeInTheDocument();
+  });
+
+  it('flushes pending message when agent becomes active after resume', async () => {
+    // Start with agent inactive (idle session)
+    let resolveResume: (value: unknown) => void;
+    mockResumeAgentSession.mockReturnValue(new Promise((resolve) => { resolveResume = resolve; }));
+
+    const { rerender } = render(
+      <ProjectMessageView
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockGetChatSession).toHaveBeenCalled();
+    });
+
+    // Send a message that triggers resume
+    const input = await screen.findByPlaceholderText(/send a follow-up/i);
+    fireEvent.change(input, { target: { value: 'Queued message' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => {
+      expect(mockResumeAgentSession).toHaveBeenCalled();
+    });
+
+    // sendPrompt should NOT have been called yet (message is queued)
+    expect(mockAgentSession.sendPrompt).not.toHaveBeenCalled();
+
+    // Resolve the resume API call
+    resolveResume!({ id: AGENT_SESSION_ID, status: 'running' });
+
+    // Now simulate the agent becoming active (ACP WebSocket reconnected)
+    mockAgentSession.isAgentActive = true;
+    rerender(
+      <ProjectMessageView
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+      />
+    );
+
+    // The pending message should be flushed via sendPrompt
+    await waitFor(() => {
+      expect(mockAgentSession.sendPrompt).toHaveBeenCalledWith('Queued message');
+    });
+  });
+
+  it('sends directly via ACP when agent is already active (no resume)', async () => {
+    // Agent is already active — no resume needed
+    mockAgentSession.isAgentActive = true;
+
+    render(
+      <ProjectMessageView
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockGetChatSession).toHaveBeenCalled();
+    });
+
+    const input = await screen.findByPlaceholderText(/send a follow-up/i);
+    fireEvent.change(input, { target: { value: 'Direct message' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => {
+      expect(mockAgentSession.sendPrompt).toHaveBeenCalledWith('Direct message');
+    });
+
+    // resumeAgentSession should NOT have been called
+    expect(mockResumeAgentSession).not.toHaveBeenCalled();
   });
 });
