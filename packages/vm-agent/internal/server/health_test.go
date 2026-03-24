@@ -209,10 +209,11 @@ func TestHeartbeatRetriesPendingReadyCallback(t *testing.T) {
 	defer ts.Close()
 
 	cfg := &config.Config{
-		ControlPlaneURL:   ts.URL,
-		NodeID:            "test-node-retry",
-		CallbackToken:     "node-token",
-		HeartbeatInterval: time.Minute,
+		ControlPlaneURL:               ts.URL,
+		NodeID:                        "test-node-retry",
+		CallbackToken:                 "node-token",
+		HeartbeatInterval:             time.Minute,
+		WorkspaceReadyCallbackTimeout: 10 * time.Second,
 	}
 
 	s := &Server{
@@ -267,10 +268,11 @@ func TestHeartbeatRetrySkipsWhenNoPending(t *testing.T) {
 	defer ts.Close()
 
 	cfg := &config.Config{
-		ControlPlaneURL:   ts.URL,
-		NodeID:            "test-node-nopending",
-		CallbackToken:     "token",
-		HeartbeatInterval: time.Minute,
+		ControlPlaneURL:               ts.URL,
+		NodeID:                        "test-node-nopending",
+		CallbackToken:                 "token",
+		HeartbeatInterval:             time.Minute,
+		WorkspaceReadyCallbackTimeout: 10 * time.Second,
 	}
 
 	s := &Server{
@@ -313,10 +315,11 @@ func TestHeartbeatRetryPermanentErrorClearsPending(t *testing.T) {
 	defer ts.Close()
 
 	cfg := &config.Config{
-		ControlPlaneURL:   ts.URL,
-		NodeID:            "test-node-perm",
-		CallbackToken:     "node-token",
-		HeartbeatInterval: time.Minute,
+		ControlPlaneURL:               ts.URL,
+		NodeID:                        "test-node-perm",
+		CallbackToken:                 "node-token",
+		HeartbeatInterval:             time.Minute,
+		WorkspaceReadyCallbackTimeout: 10 * time.Second,
 	}
 
 	s := &Server{

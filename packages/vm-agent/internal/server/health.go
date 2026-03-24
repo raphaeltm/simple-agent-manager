@@ -195,7 +195,7 @@ func (s *Server) retryPendingReadyCallbacks() {
 		req.Header.Set("Authorization", "Bearer "+p.CallbackToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		resp, err := (&http.Client{Timeout: s.config.WorkspaceReadyCallbackTimeout}).Do(req)
 		if err != nil {
 			slog.Warn("Workspace-ready retry failed (will try again on next heartbeat)",
 				"workspace", p.WorkspaceID, "error", err)
