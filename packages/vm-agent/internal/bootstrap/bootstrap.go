@@ -218,7 +218,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
-		return err
+		return &CallbackError{Err: err, Status: readyStatus}
 	}
 	reporter.Log("workspace_ready", "completed", "Workspace is ready")
 

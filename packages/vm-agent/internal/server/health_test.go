@@ -232,12 +232,16 @@ func TestHeartbeatRetriesPendingReadyCallback(t *testing.T) {
 		done:          make(chan struct{}),
 	}
 
-	// Heartbeat should trigger the pending callback retry
+	// Heartbeat should trigger the pending callback retry (runs in background goroutine)
 	s.sendNodeHeartbeat()
 
 	if heartbeatCount != 1 {
 		t.Fatalf("expected 1 heartbeat, got %d", heartbeatCount)
 	}
+
+	// Wait for background retry goroutine to complete
+	time.Sleep(100 * time.Millisecond)
+
 	if !readyCalled {
 		t.Fatal("expected workspace-ready callback to be retried after heartbeat")
 	}
@@ -339,6 +343,9 @@ func TestHeartbeatRetryPermanentErrorClearsPending(t *testing.T) {
 	}
 
 	s.sendNodeHeartbeat()
+
+	// Wait for background retry goroutine to complete
+	time.Sleep(100 * time.Millisecond)
 
 	// Even on permanent error, pending should be cleared (stop retrying)
 	s.workspaceMu.RLock()

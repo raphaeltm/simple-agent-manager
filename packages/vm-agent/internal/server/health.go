@@ -157,8 +157,15 @@ func (s *Server) sendNodeHeartbeat() {
 	}
 
 	// Heartbeat succeeded — connectivity to the control plane is confirmed.
-	// Retry any workspace-ready callbacks that failed during provisioning.
-	s.retryPendingReadyCallbacks()
+	// Retry any pending workspace-ready callbacks in a background goroutine
+	// so the heartbeat ticker is not blocked by potentially slow HTTP calls.
+	go func() {
+		if !s.readyRetryMu.TryLock() {
+			return // previous retry run still in flight — skip this cycle
+		}
+		defer s.readyRetryMu.Unlock()
+		s.retryPendingReadyCallbacks()
+	}()
 }
 
 // retryPendingReadyCallbacks checks for workspaces whose ready callback was not

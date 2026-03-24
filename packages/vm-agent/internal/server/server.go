@@ -46,6 +46,7 @@ type Server struct {
 	sysInfoCollector    *sysinfo.Collector
 	workspaceMu         sync.RWMutex
 	workspaces          map[string]*WorkspaceRuntime
+	readyRetryMu        sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
 	eventMu             sync.RWMutex
 	nodeEvents          []EventRecord
 	workspaceEvents     map[string][]EventRecord
@@ -134,31 +135,31 @@ func (s *Server) markReadyCallbackPending(workspaceID, readyStatus string) {
 	}
 }
 
-// pendingReadyCallbacks returns workspace IDs and their ready statuses for all
-// workspaces whose ready callback has not been delivered.
-func (s *Server) pendingReadyCallbacks() []struct {
+// pendingCallbackEntry holds the data needed to retry a single workspace-ready callback.
+type pendingCallbackEntry struct {
 	WorkspaceID   string
 	CallbackToken string
 	Status        string
-} {
+}
+
+// pendingReadyCallbacks returns workspace IDs and their ready statuses for all
+// workspaces whose ready callback has not been delivered.
+func (s *Server) pendingReadyCallbacks() []pendingCallbackEntry {
+	// Read the node-level fallback token before entering workspaceMu
+	// to avoid a data race: callbackToken is protected by callbackTokenMu,
+	// not by workspaceMu.
+	nodeLevelToken := s.getCallbackToken()
+
 	s.workspaceMu.RLock()
 	defer s.workspaceMu.RUnlock()
-	var pending []struct {
-		WorkspaceID   string
-		CallbackToken string
-		Status        string
-	}
+	var pending []pendingCallbackEntry
 	for _, runtime := range s.workspaces {
 		if runtime.ReadyCallbackPending {
 			token := runtime.CallbackToken
 			if token == "" {
-				token = s.callbackToken
+				token = nodeLevelToken
 			}
-			pending = append(pending, struct {
-				WorkspaceID   string
-				CallbackToken string
-				Status        string
-			}{
+			pending = append(pending, pendingCallbackEntry{
 				WorkspaceID:   runtime.ID,
 				CallbackToken: token,
 				Status:        runtime.ReadyCallbackStatus,
