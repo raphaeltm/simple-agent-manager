@@ -18,6 +18,11 @@ const DEFAULT_MAX_AGENT_TYPE_LENGTH = 64;
 const DEFAULT_MAX_COMMAND_NAME_LENGTH = 128;
 const DEFAULT_MAX_COMMAND_DESC_LENGTH = 512;
 
+function parseIntSafe(value: string | undefined, fallback: number): number {
+  const parsed = parseInt(value || '', 10);
+  return isNaN(parsed) || parsed <= 0 ? fallback : parsed;
+}
+
 const cachedCommandRoutes = new Hono<{ Bindings: Env }>();
 
 cachedCommandRoutes.use('/*', requireAuth(), requireApproved());
@@ -36,7 +41,7 @@ cachedCommandRoutes.get('/', async (c) => {
   await requireOwnedProject(db, projectId, userId);
 
   const agentType = c.req.query('agentType') || undefined;
-  const maxAgentTypeLen = parseInt(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH || String(DEFAULT_MAX_AGENT_TYPE_LENGTH));
+  const maxAgentTypeLen = parseIntSafe(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH, DEFAULT_MAX_AGENT_TYPE_LENGTH);
   if (agentType && agentType.length > maxAgentTypeLen) {
     throw errors.badRequest('agentType exceeds maximum length');
   }
@@ -70,10 +75,10 @@ cachedCommandRoutes.post('/', async (c) => {
   }
 
   // Configurable limits (Constitution Principle XI)
-  const maxAgentTypeLen = parseInt(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH || String(DEFAULT_MAX_AGENT_TYPE_LENGTH));
-  const maxCommands = parseInt(c.env.CACHED_COMMANDS_MAX_PER_AGENT || String(DEFAULT_MAX_CACHED_COMMANDS));
-  const maxNameLen = parseInt(c.env.CACHED_COMMANDS_MAX_NAME_LENGTH || String(DEFAULT_MAX_COMMAND_NAME_LENGTH));
-  const maxDescLen = parseInt(c.env.CACHED_COMMANDS_MAX_DESC_LENGTH || String(DEFAULT_MAX_COMMAND_DESC_LENGTH));
+  const maxAgentTypeLen = parseIntSafe(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH, DEFAULT_MAX_AGENT_TYPE_LENGTH);
+  const maxCommands = parseIntSafe(c.env.CACHED_COMMANDS_MAX_PER_AGENT, DEFAULT_MAX_CACHED_COMMANDS);
+  const maxNameLen = parseIntSafe(c.env.CACHED_COMMANDS_MAX_NAME_LENGTH, DEFAULT_MAX_COMMAND_NAME_LENGTH);
+  const maxDescLen = parseIntSafe(c.env.CACHED_COMMANDS_MAX_DESC_LENGTH, DEFAULT_MAX_COMMAND_DESC_LENGTH);
 
   if (body.agentType.length > maxAgentTypeLen) {
     throw errors.badRequest('agentType exceeds maximum length');
