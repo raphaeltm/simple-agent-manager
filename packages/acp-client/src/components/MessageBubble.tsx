@@ -150,7 +150,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
-        className={`max-w-[80%] min-w-0 rounded-lg px-4 py-3 overflow-hidden ${
+        className={`max-w-[80%] min-w-0 rounded-lg px-4 py-3 ${
           isUser
             ? 'bg-blue-600 text-white'
             : 'bg-white border border-gray-200 text-gray-900'

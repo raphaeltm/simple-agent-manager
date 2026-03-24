@@ -830,6 +830,58 @@ describe('MessageActions', () => {
     });
   });
 
+  describe('accessibility — focus rings and touch targets', () => {
+    it('info button has focus-visible outline class', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+      const btn = screen.getByLabelText('Message info');
+      expect(btn.className).toContain('focus-visible:outline');
+    });
+
+    it('copy button has focus-visible outline class', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+      const btn = screen.getByLabelText('Copy message');
+      expect(btn.className).toContain('focus-visible:outline');
+    });
+
+    it('speaker button has focus-visible outline class', () => {
+      render(<MessageActions {...defaultProps} />);
+      const btn = screen.getByLabelText('Read aloud');
+      expect(btn.className).toContain('focus-visible:outline');
+    });
+
+    it('info button meets 44px minimum touch target', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+      const btn = screen.getByLabelText('Message info');
+      expect(btn.className).toContain('min-w-[44px]');
+      expect(btn.className).toContain('min-h-[44px]');
+    });
+
+    it('copy button meets 44px minimum touch target', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+      const btn = screen.getByLabelText('Copy message');
+      expect(btn.className).toContain('min-w-[44px]');
+      expect(btn.className).toContain('min-h-[44px]');
+    });
+  });
+
+  describe('popover alignment by variant', () => {
+    it('popover uses left-0 for default (agent) variant', () => {
+      render(<MessageActions {...defaultProps} />);
+      fireEvent.click(screen.getByLabelText('Message info'));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.className).toContain('left-0');
+      expect(dialog.className).not.toContain('right-0');
+    });
+
+    it('popover uses right-0 for on-dark (user) variant', () => {
+      render(<MessageActions {...defaultProps} variant="on-dark" hideTts />);
+      fireEvent.click(screen.getByLabelText('Message info'));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.className).toContain('right-0');
+      expect(dialog.className).not.toContain('left-0');
+    });
+  });
+
   describe('audio player controls', () => {
     it('has speed selector with correct options', async () => {
       // Use browser TTS to get player to show

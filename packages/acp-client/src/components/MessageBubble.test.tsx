@@ -249,14 +249,14 @@ describe('MessageBubble', () => {
   });
 
   describe('overflow protection', () => {
-    it('bubble container has overflow-hidden and min-w-0', () => {
+    it('bubble container has min-w-0 but NOT overflow-hidden (popover must not be clipped)', () => {
       const { container } = render(
         <MessageBubble text="Hello" role="agent" />
       );
 
       const bubble = container.querySelector('.max-w-\\[80\\%\\]');
       expect(bubble).not.toBeNull();
-      expect(bubble!.className).toContain('overflow-hidden');
+      expect(bubble!.className).not.toContain('overflow-hidden');
       expect(bubble!.className).toContain('min-w-0');
     });
 

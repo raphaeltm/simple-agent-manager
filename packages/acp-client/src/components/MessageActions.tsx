@@ -2,6 +2,9 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
 import { AudioPlayer } from './AudioPlayer';
 
+const FOCUS_RING =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring,#34d399)]';
+
 export interface MessageActionsProps {
   /** The plain text content of the message (used for TTS and word/char counts). */
   text: string;
@@ -132,7 +135,7 @@ export const MessageActions = React.memo(function MessageActions({
         <button
           type="button"
           onClick={toggleMeta}
-          className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
+          className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
           style={{
             color: showMeta ? colorActive : colorMuted,
           }}
@@ -169,7 +172,7 @@ export const MessageActions = React.memo(function MessageActions({
           <button
             type="button"
             onClick={audio.toggle}
-            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors"
+            className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
             style={{
               color: audio.state !== 'idle' ? colorActive : colorMuted,
               backgroundColor: audio.state === 'playing' ? 'var(--sam-color-bg-inset)' : undefined,
@@ -249,7 +252,7 @@ export const MessageActions = React.memo(function MessageActions({
           <button
             type="button"
             onClick={handleCopy}
-            className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
+            className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
             style={{
               color: copied ? colorActive : colorMuted,
             }}
@@ -313,7 +316,7 @@ export const MessageActions = React.memo(function MessageActions({
           id={popoverId}
           role="dialog"
           aria-label="Message metadata"
-          className="absolute left-0 top-full mt-1 z-10 rounded-md shadow-md px-3 py-2 text-xs max-w-[calc(100vw-2rem)] break-words"
+          className={`absolute ${isOnDark ? 'right-0' : 'left-0'} top-full mt-1 z-10 rounded-md shadow-md px-3 py-2 text-xs max-w-[calc(100vw-2rem)] break-words`}
           style={{
             backgroundColor: 'var(--sam-color-bg-surface, white)',
             borderColor: 'var(--sam-color-border-default, #e5e7eb)',
