@@ -187,6 +187,7 @@ export interface Env {
   CF_API_TIMEOUT_MS?: string;
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
   // Project data DO limits
+  CACHED_COMMANDS_MAX_PER_AGENT?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
   MESSAGE_SIZE_THRESHOLD?: string;

@@ -12,6 +12,9 @@ import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
 import * as projectDataService from '../services/project-data';
 
+/** Default max commands per agent type per POST. Override via CACHED_COMMANDS_MAX_PER_AGENT env var. */
+const DEFAULT_MAX_CACHED_COMMANDS = 200;
+
 const cachedCommandRoutes = new Hono<{ Bindings: Env }>();
 
 cachedCommandRoutes.use('/*', requireAuth(), requireApproved());
@@ -59,9 +62,13 @@ cachedCommandRoutes.post('/', async (c) => {
     throw errors.badRequest('commands must be an array');
   }
 
-  // Validate each command entry
+  // Validate and cap command count (configurable via env var)
+  const maxCommands = parseInt(
+    c.env.CACHED_COMMANDS_MAX_PER_AGENT || String(DEFAULT_MAX_CACHED_COMMANDS),
+  );
   const validCommands = body.commands
     .filter((cmd) => cmd.name && typeof cmd.name === 'string')
+    .slice(0, maxCommands)
     .map((cmd) => ({
       name: cmd.name.trim(),
       description: typeof cmd.description === 'string' ? cmd.description.trim() : '',
