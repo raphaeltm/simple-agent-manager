@@ -16,7 +16,7 @@ const SENSITIVE_PATTERNS = [
   /@.*\.iam\.gserviceaccount\.com/, // Service account emails
   /etag/, // IAM policy details
   /bindings/, // IAM binding details
-  /\"error\":\s*\{/, // Raw GCP JSON error objects
+  /"error":\s*\{/, // Raw GCP JSON error objects
   /operations\//, // Operation names
 ];
 
