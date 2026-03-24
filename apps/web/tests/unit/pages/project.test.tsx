@@ -63,6 +63,11 @@ vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu">user-menu</div>,
 }));
 
+const mockSetProjectName = vi.fn();
+vi.mock('../../../src/components/AppShell', () => ({
+  useAppShell: () => ({ setProjectName: mockSetProjectName }),
+}));
+
 import { Project } from '../../../src/pages/Project';
 import { ProjectTasks } from '../../../src/pages/ProjectTasks';
 import { ProjectSettings } from '../../../src/pages/ProjectSettings';
@@ -287,13 +292,11 @@ describe('Project page', () => {
     });
   });
 
-  it('shows project name in PageLayout but no status/settings buttons', async () => {
+  it('does not render a desktop header bar (project name is in the sidebar)', async () => {
     renderProjectPage();
     await screen.findByRole('link', { name: 'Draft task' });
-    // Project name appears in PageLayout heading
-    expect(screen.getByRole('heading', { name: 'Project One' })).toBeInTheDocument();
-    // Header bar status and settings buttons were removed
-    expect(screen.queryByRole('button', { name: 'Project status' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Project settings' })).not.toBeInTheDocument();
+    // No PageLayout header — project name is communicated to sidebar via AppShell context
+    expect(screen.queryByRole('heading', { name: 'Project One' })).not.toBeInTheDocument();
+    expect(mockSetProjectName).toHaveBeenCalledWith('Project One');
   });
 });

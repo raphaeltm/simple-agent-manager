@@ -3,6 +3,7 @@ import { Outlet, useLocation, useParams } from 'react-router-dom';
 import type { GitHubInstallation, ProjectDetailResponse } from '@simple-agent-manager/shared';
 import { Alert, PageLayout, Spinner } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
+import { useAppShell } from '../components/AppShell';
 import { SettingsDrawer } from '../components/project/SettingsDrawer';
 import { ProjectInfoPanel } from '../components/project/ProjectInfoPanel';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -13,6 +14,7 @@ export function Project() {
   const { id: projectId } = useParams<{ id: string }>();
   const location = useLocation();
   const isMobile = useIsMobile();
+  const { setProjectName } = useAppShell();
 
   const [project, setProject] = useState<ProjectDetailResponse | null>(null);
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
@@ -44,6 +46,12 @@ export function Project() {
       .then((response) => setInstallations(response))
       .catch(() => setInstallations([]));
   }, []);
+
+  // Push project name up to AppShell for sidebar display
+  useEffect(() => {
+    setProjectName(project?.name);
+    return () => setProjectName(undefined);
+  }, [project?.name, setProjectName]);
 
   const contextValue = {
     projectId: projectId!,
@@ -95,37 +103,43 @@ export function Project() {
   }
 
   // ---------------------------------------------------------------------------
-  // Non-chat routes: PageLayout wrapper
+  // Non-chat routes: content with max-width and padding (no desktop header bar)
   // ---------------------------------------------------------------------------
   return (
-    <PageLayout
-      title={project?.name ?? 'Project'}
-      maxWidth="xl"
-      headerRight={<UserMenu />}
-      compact={isMobile}
-    >
-      {error && (
-        <div className="mt-3">
-          <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
-        </div>
-      )}
+    <div className={`min-h-screen bg-canvas ${isMobile ? 'flex flex-col' : ''}`}>
+      <main
+        aria-label={project?.name ? `${project.name} — Project` : 'Project'}
+        className={`max-w-[80rem] mx-auto ${isMobile ? 'flex flex-col flex-1 min-h-0' : ''}`}
+        style={isMobile
+          ? { padding: 'var(--sam-space-3) var(--sam-space-3)' }
+          : { padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }
+        }
+      >
+        {error && (
+          <div className="mt-3">
+            <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+          </div>
+        )}
 
-      {projectLoading ? (
-        <div className="flex items-center gap-2 mt-4">
-          <Spinner size="md" />
-          <span>Loading project...</span>
-        </div>
-      ) : !project ? (
-        <div className="mt-4">
-          <Alert variant="error">Project not found.</Alert>
-        </div>
-      ) : (
-        <div className={`flex flex-col flex-1 min-h-0 ${isMobile ? 'mt-2' : 'mt-3'}`}>
-          <ProjectContext.Provider value={contextValue}>
-            <Outlet />
-          </ProjectContext.Provider>
-        </div>
-      )}
-    </PageLayout>
+        {projectLoading ? (
+          <div className="flex items-center gap-2 mt-4">
+            <Spinner size="md" />
+            <span>Loading project...</span>
+          </div>
+        ) : !project ? (
+          <div className="mt-4">
+            <Alert variant="error">Project not found.</Alert>
+          </div>
+        ) : (
+          <div className={`flex flex-col flex-1 min-h-0 ${isMobile ? 'mt-2' : 'mt-3'}`}>
+            <ProjectContext.Provider value={contextValue}>
+              <Outlet />
+              <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+              <ProjectInfoPanel projectId={projectId} open={infoPanelOpen} onClose={() => setInfoPanelOpen(false)} />
+            </ProjectContext.Provider>
+          </div>
+        )}
+      </main>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { Project } from '../../src/pages/Project';
 
 // Mock AuthProvider
@@ -8,6 +8,12 @@ vi.mock('../../src/components/AuthProvider', () => ({
   useAuth: () => ({
     user: { name: 'Test User', email: 'test@example.com', image: null },
   }),
+}));
+
+// Mock AppShell context
+const mockSetProjectName = vi.fn();
+vi.mock('../../src/components/AppShell', () => ({
+  useAppShell: () => ({ setProjectName: mockSetProjectName }),
 }));
 
 // Mock auth lib
@@ -58,15 +64,17 @@ function renderProject(path = '/projects/proj-1/overview') {
   );
 }
 
+beforeEach(() => {
+  mockSetProjectName.mockClear();
+});
+
 describe('Project shell (non-chat routes)', () => {
-  it('shows project name in PageLayout but no status/settings buttons', async () => {
+  it('does not render a desktop header bar (project name is in the sidebar)', async () => {
     renderProject();
     await screen.findByTestId('overview-content');
-    // Project name appears in PageLayout heading
-    expect(screen.getByRole('heading', { name: 'My Project' })).toBeInTheDocument();
-    // Header bar status and settings buttons were removed
-    expect(screen.queryByRole('button', { name: 'Project status' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Project settings' })).not.toBeInTheDocument();
+    // No PageLayout header — project name is communicated to sidebar via AppShell context
+    expect(screen.queryByRole('heading', { name: 'My Project' })).not.toBeInTheDocument();
+    expect(mockSetProjectName).toHaveBeenCalledWith('My Project');
   });
 
   it('renders child route content via Outlet', async () => {
