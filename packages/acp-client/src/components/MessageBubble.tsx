@@ -9,7 +9,7 @@ interface MessageBubbleProps {
   text: string;
   role: 'user' | 'agent';
   streaming?: boolean;
-  /** Unix-millisecond timestamp for metadata display (agent messages only). */
+  /** Unix-millisecond timestamp for metadata display. */
   timestamp?: number;
   /** TTS API base URL for server-side text-to-speech (e.g., "https://api.example.com/api/tts"). */
   ttsApiUrl?: string;
@@ -146,7 +146,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
   const isUser = role === 'user';
   const isAgent = role === 'agent';
   const components = isUser ? USER_MARKDOWN_COMPONENTS : AGENT_MARKDOWN_COMPONENTS;
-  const showActions = isAgent && !streaming && timestamp != null && timestamp > 0;
+  const showActions = !streaming && timestamp != null && timestamp > 0;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -169,7 +169,14 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
           <span className="inline-block mt-1 text-xs opacity-60 animate-pulse">...</span>
         )}
         {showActions && (
-          <MessageActions text={text} timestamp={timestamp} ttsApiUrl={ttsApiUrl} ttsStorageId={ttsStorageId} />
+          <MessageActions
+            text={text}
+            timestamp={timestamp}
+            ttsApiUrl={isUser ? undefined : ttsApiUrl}
+            ttsStorageId={isUser ? undefined : ttsStorageId}
+            hideTts={isUser}
+            variant={isUser ? 'on-dark' : 'default'}
+          />
         )}
       </div>
     </div>

@@ -225,11 +225,11 @@ describe('MessageBubble', () => {
       expect(screen.getByLabelText('Copy message')).toBeTruthy();
     });
 
-    it('does not show action buttons for user messages', () => {
+    it('shows info and copy buttons for user messages with timestamp (no TTS)', () => {
       render(<MessageBubble text="Hello" role="user" timestamp={1710288000000} />);
-      expect(screen.queryByLabelText('Message info')).toBeNull();
+      expect(screen.getByLabelText('Message info')).toBeTruthy();
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
       expect(screen.queryByLabelText('Read aloud')).toBeNull();
-      expect(screen.queryByLabelText('Copy message')).toBeNull();
     });
 
     it('does not show action buttons for streaming agent messages', () => {
