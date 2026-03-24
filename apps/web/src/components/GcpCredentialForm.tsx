@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { deleteCredential, listGcpProjects, runGcpSetup } from '../lib/api';
+import { deleteCredential, listGcpProjects, runGcpSetup, getGcpOAuthResult } from '../lib/api';
 import type { GcpProject } from '../lib/api';
 import { useToast } from '../hooks/useToast';
 import { Button, Alert } from '@simple-agent-manager/ui';
@@ -49,19 +49,28 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
   // Zone selection
   const [selectedZone, setSelectedZone] = useState('us-central1-a');
 
-  // Check for OAuth callback handle in URL
+  // Check for OAuth callback flag in URL — the handle is retrieved via an
+  // authenticated API call to avoid leaking it in browser history / Referer headers.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const handle = params.get('gcp_setup');
+    const setupFlag = params.get('gcp_setup');
     const gcpError = params.get('gcp_error');
 
-    if (handle) {
-      setOauthHandle(handle);
-      setPhase('project-select');
-      // Clean up URL
+    if (setupFlag) {
+      // Clean up URL immediately
       const url = new URL(window.location.href);
       url.searchParams.delete('gcp_setup');
       window.history.replaceState({}, '', url.toString());
+
+      // Retrieve handle via authenticated endpoint
+      void getGcpOAuthResult()
+        .then((result) => {
+          setOauthHandle(result.handle);
+          setPhase('project-select');
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : 'Failed to retrieve OAuth result');
+        });
     }
 
     if (gcpError) {

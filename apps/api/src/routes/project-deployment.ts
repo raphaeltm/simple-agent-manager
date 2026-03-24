@@ -76,6 +76,35 @@ projectDeploymentRoutes.get(
 
 // OAuth callback moved to gcpDeployCallbackRoute — see below
 
+/**
+ * GET /api/projects/:id/deployment/gcp/oauth-result
+ * Retrieve the OAuth handle after the callback redirect.
+ * The handle is stored server-side so it never appears in a URL.
+ * One-time use: the KV entry is deleted after retrieval.
+ */
+projectDeploymentRoutes.get(
+  '/:id/deployment/gcp/oauth-result',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const projectId = c.req.param('id');
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireOwnedProject(db, projectId, userId);
+
+    const kvKey = `gcp-deploy-oauth-result:${userId}:${projectId}`;
+    const handle = await c.env.KV.get(kvKey);
+    if (!handle) {
+      throw errors.notFound('No pending OAuth result — it may have expired or already been retrieved');
+    }
+
+    // One-time use: delete after retrieval
+    await c.env.KV.delete(kvKey);
+
+    return c.json({ handle });
+  },
+);
+
 // ─── Setup + management (user session auth) ─────────────────────────────
 
 /**
@@ -473,7 +502,7 @@ gcpDeployCallbackRoute.get(
 
     const tokenData = (await tokenResponse.json()) as { access_token: string };
 
-    // Store token in KV with opaque handle
+    // Store token in KV with opaque handle (for subsequent API calls)
     const handle = crypto.randomUUID();
     const tokenHandleTtl = c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS
       ? parseInt(c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS, 10)
@@ -482,7 +511,17 @@ gcpDeployCallbackRoute.get(
       expirationTtl: tokenHandleTtl,
     });
 
-    return c.redirect(`${appUrl}?gcp_deploy_setup=${encodeURIComponent(handle)}`);
+    // Store the handle reference in a user+project-scoped KV key so the frontend
+    // can retrieve it via an authenticated API call instead of from the URL.
+    // This prevents the handle from leaking in browser history, Referer headers, and logs.
+    await c.env.KV.put(
+      `gcp-deploy-oauth-result:${sessionUserId}:${projectId}`,
+      handle,
+      { expirationTtl: tokenHandleTtl },
+    );
+
+    // Redirect with only a flag — no sensitive token in the URL
+    return c.redirect(`${appUrl}?gcp_deploy_setup=ready`);
   },
 );
 

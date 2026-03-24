@@ -1580,6 +1580,24 @@ export async function listGcpProjectsForDeploy(
   );
 }
 
+/**
+ * Retrieve the OAuth handle after the GCP deployment callback redirect.
+ * The handle is stored server-side and never appears in the URL.
+ */
+export async function getDeployOAuthResult(projectId: string): Promise<{ handle: string }> {
+  return request<{ handle: string }>(
+    `/api/projects/${projectId}/deployment/gcp/oauth-result`,
+  );
+}
+
+/**
+ * Retrieve the OAuth handle after the GCP credential callback redirect.
+ * The handle is stored server-side and never appears in the URL.
+ */
+export async function getGcpOAuthResult(): Promise<{ handle: string }> {
+  return request<{ handle: string }>('/auth/google/oauth-result');
+}
+
 // -------------------------------------------------------------------------
 // Cached Commands
 // -------------------------------------------------------------------------
