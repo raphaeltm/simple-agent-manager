@@ -288,7 +288,9 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_idea');
       expect(toolNames).toContain('list_ideas');
       expect(toolNames).toContain('search_ideas');
-      expect(body.result.tools).toHaveLength(20);
+      // Deployment tools
+      expect(toolNames).toContain('get_deployment_credentials');
+      expect(body.result.tools).toHaveLength(21);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
