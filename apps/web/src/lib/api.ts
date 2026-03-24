@@ -157,7 +157,10 @@ export interface GcpProject {
 }
 
 export async function listGcpProjects(oauthHandle: string): Promise<{ projects: GcpProject[] }> {
-  return request<{ projects: GcpProject[] }>(`/api/gcp/projects?handle=${encodeURIComponent(oauthHandle)}`);
+  return request<{ projects: GcpProject[] }>('/api/gcp/projects', {
+    method: 'POST',
+    body: JSON.stringify({ oauthHandle }),
+  });
 }
 
 export interface GcpSetupRequest {
@@ -1576,8 +1579,27 @@ export async function listGcpProjectsForDeploy(
   oauthHandle: string,
 ): Promise<{ projects: GcpProject[] }> {
   return request<{ projects: GcpProject[] }>(
-    `/api/projects/${projectId}/deployment/gcp/projects?handle=${encodeURIComponent(oauthHandle)}`,
+    `/api/projects/${projectId}/deployment/gcp/projects`,
+    { method: 'POST', body: JSON.stringify({ oauthHandle }) },
   );
+}
+
+/**
+ * Retrieve the OAuth handle after the GCP deployment callback redirect.
+ * The handle is stored server-side and never appears in the URL.
+ */
+export async function getDeployOAuthResult(projectId: string): Promise<{ handle: string }> {
+  return request<{ handle: string }>(
+    `/api/projects/${projectId}/deployment/gcp/oauth-result`,
+  );
+}
+
+/**
+ * Retrieve the OAuth handle after the GCP credential callback redirect.
+ * The handle is stored server-side and never appears in the URL.
+ */
+export async function getGcpOAuthResult(): Promise<{ handle: string }> {
+  return request<{ handle: string }>('/auth/google/oauth-result');
 }
 
 // -------------------------------------------------------------------------

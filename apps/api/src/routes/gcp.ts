@@ -31,15 +31,15 @@ async function resolveOAuthToken(handle: string, kv: KVNamespace): Promise<strin
 }
 
 /**
- * GET /api/gcp/projects - List user's GCP projects
- * Requires a KV handle from the OAuth callback (passed as ?handle=...).
+ * POST /api/gcp/projects - List user's GCP projects
+ * Accepts the OAuth handle in the request body to avoid leaking it in URL query parameters.
  */
-gcpRoutes.get('/projects', async (c) => {
-  const handle = c.req.query('handle');
-  if (!handle) {
-    throw errors.badRequest('OAuth handle is required (pass as ?handle=...)');
+gcpRoutes.post('/projects', async (c) => {
+  const body = await c.req.json<{ oauthHandle: string }>();
+  if (!body.oauthHandle) {
+    throw errors.badRequest('oauthHandle is required');
   }
-  const oauthToken = await resolveOAuthToken(handle, c.env.KV);
+  const oauthToken = await resolveOAuthToken(body.oauthHandle, c.env.KV);
 
   const timeoutMs = c.env.GCP_API_TIMEOUT_MS
     ? parseInt(c.env.GCP_API_TIMEOUT_MS, 10)

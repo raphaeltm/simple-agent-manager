@@ -7,6 +7,7 @@ import {
   setupProjectDeploymentGcp,
   deleteProjectDeploymentGcp,
   listGcpProjectsForDeploy,
+  getDeployOAuthResult,
   type ProjectDeploymentGcpResponse,
 } from '../lib/api';
 import { useToast } from '../hooks/useToast';
@@ -60,9 +61,10 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
     void loadDeploymentCred();
   }, [loadDeploymentCred]);
 
-  // Handle OAuth callback
+  // Handle OAuth callback — the redirect only carries a flag (`?gcp_deploy_setup=ready`),
+  // the actual handle is retrieved via an authenticated API call to avoid URL leakage.
   useEffect(() => {
-    const handle = searchParams.get('gcp_deploy_setup');
+    const setupFlag = searchParams.get('gcp_deploy_setup');
     const error = searchParams.get('gcp_deploy_error');
 
     if (error) {
@@ -74,17 +76,20 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
       return;
     }
 
-    if (handle) {
-      setOauthHandle(handle);
+    if (setupFlag) {
       setPhase('loading-projects');
-      // Remove from URL
+      // Remove flag from URL immediately
       setSearchParams((prev) => {
         prev.delete('gcp_deploy_setup');
         return prev;
       });
 
-      // Fetch GCP projects
-      void listGcpProjectsForDeploy(projectId, handle)
+      // Retrieve the handle via authenticated endpoint, then fetch GCP projects
+      void getDeployOAuthResult(projectId)
+        .then((result) => {
+          setOauthHandle(result.handle);
+          return listGcpProjectsForDeploy(projectId, result.handle);
+        })
         .then((resp) => {
           setGcpProjects(resp.projects);
           if (resp.projects.length > 0) {

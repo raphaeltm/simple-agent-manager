@@ -679,7 +679,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
 
     // Redirect goes to the project from KV state, not from URL
     expect(location).toContain('/projects/proj-from-state/settings');
-    expect(location).toContain('gcp_deploy_setup=');
+    expect(location).toContain('gcp_deploy_setup=ready');
 
     // Token exchange uses the static redirect URI
     const fetchCall = mockFetch.mock.calls[0]!;
@@ -687,5 +687,85 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     expect(body.get('redirect_uri')).toBe('https://api.example.com/api/deployment/gcp/callback');
 
     mockFetch.mockRestore();
+  });
+
+  it('REGRESSION: redirect URL never contains the OAuth handle as a query parameter value', async () => {
+    mockKvGet.mockResolvedValue(
+      JSON.stringify({ projectId: 'proj-1', userId: 'test-user-id' }),
+    );
+
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ access_token: 'gcp-token-123' }), { status: 200 }),
+    );
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/deployment/gcp/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
+      { method: 'GET', redirect: 'manual' },
+      mockEnv,
+    );
+    const location = res.headers.get('Location')!;
+
+    // The redirect URL must NOT contain any UUID-shaped value as a query param
+    // (the handle is a UUID). Only 'ready' is allowed.
+    const url = new URL(location);
+    for (const [key, value] of url.searchParams.entries()) {
+      if (key === 'gcp_deploy_setup') {
+        expect(value).toBe('ready');
+      }
+      // No query param value should match a UUID pattern
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      expect(UUID_RE.test(value)).toBe(false);
+    }
+
+    // Handle should be stored server-side for pickup
+    expect(mockKvPut).toHaveBeenCalledWith(
+      expect.stringContaining('gcp-deploy-oauth-result:test-user-id:proj-1'),
+      expect.any(String),
+      expect.objectContaining({ expirationTtl: expect.any(Number) }),
+    );
+
+    mockFetch.mockRestore();
+  });
+});
+
+// ─── OAuth result pickup endpoint ────────────────────────────────────────
+
+describe('GET /:id/deployment/gcp/oauth-result', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    chainMocks();
+  });
+
+  it('returns the handle when a pending result exists', async () => {
+    mockKvGet.mockResolvedValue('test-handle-uuid');
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment/gcp/oauth-result',
+      { method: 'GET' },
+      mockEnv,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ handle: 'test-handle-uuid' });
+
+    // Should look up with correct key
+    expect(mockKvGet).toHaveBeenCalledWith('gcp-deploy-oauth-result:test-user-id:proj-1');
+
+    // Should delete after retrieval (one-time use)
+    expect(mockKvDelete).toHaveBeenCalledWith('gcp-deploy-oauth-result:test-user-id:proj-1');
+  });
+
+  it('returns 404 when no pending result exists', async () => {
+    mockKvGet.mockResolvedValue(null);
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment/gcp/oauth-result',
+      { method: 'GET' },
+      mockEnv,
+    );
+    expect(res.status).toBe(404);
   });
 });

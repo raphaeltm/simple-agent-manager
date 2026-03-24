@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   setupProjectDeploymentGcp: vi.fn(),
   deleteProjectDeploymentGcp: vi.fn(),
   listGcpProjectsForDeploy: vi.fn(),
+  getDeployOAuthResult: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -14,6 +15,7 @@ vi.mock('../../../src/lib/api', () => ({
   setupProjectDeploymentGcp: mocks.setupProjectDeploymentGcp,
   deleteProjectDeploymentGcp: mocks.deleteProjectDeploymentGcp,
   listGcpProjectsForDeploy: mocks.listGcpProjectsForDeploy,
+  getDeployOAuthResult: mocks.getDeployOAuthResult,
 }));
 
 const mockToast = vi.hoisted(() => ({
@@ -41,6 +43,7 @@ describe('DeploymentSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getProjectDeploymentGcp.mockResolvedValue({ connected: false });
+    mocks.getDeployOAuthResult.mockResolvedValue({ handle: 'handle-123' });
   });
 
   describe('initial loading', () => {
@@ -144,7 +147,7 @@ describe('DeploymentSettings', () => {
       mocks.listGcpProjectsForDeploy.mockReturnValue(new Promise(() => {})); // never resolves
       renderWithRouter(
         <DeploymentSettings projectId={projectId} />,
-        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+        { initialEntries: ['/settings?gcp_deploy_setup=ready'] }
       );
 
       await waitFor(() => {
@@ -162,7 +165,7 @@ describe('DeploymentSettings', () => {
 
       renderWithRouter(
         <DeploymentSettings projectId={projectId} />,
-        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+        { initialEntries: ['/settings?gcp_deploy_setup=ready'] }
       );
 
       await waitFor(() => {
@@ -180,7 +183,7 @@ describe('DeploymentSettings', () => {
 
       renderWithRouter(
         <DeploymentSettings projectId={projectId} />,
-        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+        { initialEntries: ['/settings?gcp_deploy_setup=ready'] }
       );
 
       await waitFor(() => {
@@ -204,7 +207,7 @@ describe('DeploymentSettings', () => {
 
       renderWithRouter(
         <DeploymentSettings projectId={projectId} />,
-        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+        { initialEntries: ['/settings?gcp_deploy_setup=ready'] }
       );
 
       await waitFor(() => {
@@ -228,7 +231,7 @@ describe('DeploymentSettings', () => {
 
       renderWithRouter(
         <DeploymentSettings projectId={projectId} />,
-        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+        { initialEntries: ['/settings?gcp_deploy_setup=ready'] }
       );
 
       await waitFor(() => {
@@ -257,7 +260,7 @@ describe('DeploymentSettings', () => {
 
       renderWithRouter(
         <DeploymentSettings projectId={projectId} />,
-        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+        { initialEntries: ['/settings?gcp_deploy_setup=ready'] }
       );
 
       await waitFor(() => {
@@ -287,7 +290,7 @@ describe('DeploymentSettings', () => {
 
       renderWithRouter(
         <DeploymentSettings projectId={projectId} />,
-        { initialEntries: ['/settings?gcp_deploy_setup=handle-456'] }
+        { initialEntries: ['/settings?gcp_deploy_setup=ready'] }
       );
 
       await waitFor(() => {
@@ -301,7 +304,7 @@ describe('DeploymentSettings', () => {
 
       await waitFor(() => {
         expect(mocks.setupProjectDeploymentGcp).toHaveBeenCalledWith(projectId, {
-          oauthHandle: 'handle-456',
+          oauthHandle: 'handle-123',
           gcpProjectId: 'proj-b',
         });
       });
@@ -314,7 +317,7 @@ describe('DeploymentSettings', () => {
 
       renderWithRouter(
         <DeploymentSettings projectId={projectId} />,
-        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+        { initialEntries: ['/settings?gcp_deploy_setup=ready'] }
       );
 
       await waitFor(() => {
@@ -361,7 +364,7 @@ describe('DeploymentSettings', () => {
 
       renderWithRouter(
         <DeploymentSettings projectId={projectId} />,
-        { initialEntries: ['/settings?gcp_deploy_setup=handle-123'] }
+        { initialEntries: ['/settings?gcp_deploy_setup=ready'] }
       );
 
       await waitFor(() => {

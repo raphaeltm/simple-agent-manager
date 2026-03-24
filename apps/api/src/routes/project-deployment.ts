@@ -84,13 +84,45 @@ projectDeploymentRoutes.get(
 
 // OAuth callback moved to gcpDeployCallbackRoute — see below
 
+/**
+ * GET /api/projects/:id/deployment/gcp/oauth-result
+ * Retrieve the OAuth handle after the callback redirect.
+ * The handle is stored server-side so it never appears in a URL.
+ * One-time use: the KV entry is deleted after retrieval.
+ */
+projectDeploymentRoutes.get(
+  '/:id/deployment/gcp/oauth-result',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const projectId = c.req.param('id');
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireOwnedProject(db, projectId, userId);
+
+    const kvKey = `gcp-deploy-oauth-result:${userId}:${projectId}`;
+    const handle = await c.env.KV.get(kvKey);
+    if (!handle) {
+      throw errors.notFound('No pending OAuth result — it may have expired or already been retrieved');
+    }
+
+    // One-time use: delete after retrieval.
+    // NOTE: get-then-delete is not atomic in KV — two simultaneous requests could
+    // both retrieve the handle. The TTL on the underlying token handle is the safety net.
+    await c.env.KV.delete(kvKey);
+
+    return c.json({ handle });
+  },
+);
+
 // ─── Setup + management (user session auth) ─────────────────────────────
 
 /**
- * GET /api/projects/:id/deployment/gcp/projects
+ * POST /api/projects/:id/deployment/gcp/projects
  * List user's GCP projects for deployment setup.
+ * Accepts the OAuth handle in the request body to avoid leaking it in URL query parameters.
  */
-projectDeploymentRoutes.get(
+projectDeploymentRoutes.post(
   '/:id/deployment/gcp/projects',
   requireAuth(),
   requireApproved(),
@@ -100,12 +132,12 @@ projectDeploymentRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
 
-    const handle = c.req.query('handle');
-    if (!handle) {
-      throw errors.badRequest('OAuth handle is required');
+    const body = await c.req.json<{ oauthHandle: string }>();
+    if (!body.oauthHandle) {
+      throw errors.badRequest('oauthHandle is required');
     }
 
-    const oauthToken = await resolveDeployOAuthToken(handle, c.env.KV);
+    const oauthToken = await resolveDeployOAuthToken(body.oauthHandle, c.env.KV);
     const timeoutMs = c.env.GCP_API_TIMEOUT_MS
       ? parseInt(c.env.GCP_API_TIMEOUT_MS, 10)
       : DEFAULT_GCP_API_TIMEOUT_MS;
@@ -502,7 +534,7 @@ gcpDeployCallbackRoute.get(
 
     const tokenData = (await tokenResponse.json()) as { access_token: string };
 
-    // Store token in KV with opaque handle
+    // Store token in KV with opaque handle (for subsequent API calls)
     const handle = crypto.randomUUID();
     const tokenHandleTtl = c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS
       ? parseInt(c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS, 10)
@@ -511,7 +543,17 @@ gcpDeployCallbackRoute.get(
       expirationTtl: tokenHandleTtl,
     });
 
-    return c.redirect(`${appUrl}?gcp_deploy_setup=${encodeURIComponent(handle)}`);
+    // Store the handle reference in a user+project-scoped KV key so the frontend
+    // can retrieve it via an authenticated API call instead of from the URL.
+    // This prevents the handle from leaking in browser history, Referer headers, and logs.
+    await c.env.KV.put(
+      `gcp-deploy-oauth-result:${sessionUserId}:${projectId}`,
+      handle,
+      { expirationTtl: tokenHandleTtl },
+    );
+
+    // Redirect with only a flag — no sensitive token in the URL
+    return c.redirect(`${appUrl}?gcp_deploy_setup=ready`);
   },
 );
 
