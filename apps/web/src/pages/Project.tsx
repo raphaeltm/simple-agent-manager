@@ -106,10 +106,10 @@ export function Project() {
   // Non-chat routes: content with max-width and padding (no desktop header bar)
   // ---------------------------------------------------------------------------
   return (
-    <div className={`min-h-screen bg-canvas ${isMobile ? 'flex flex-col' : ''}`}>
+    <div className={`min-h-screen bg-canvas overflow-x-hidden w-full max-w-full ${isMobile ? 'flex flex-col' : ''}`}>
       <main
         aria-label={project?.name ? `${project.name} — Project` : 'Project'}
-        className={`max-w-[80rem] mx-auto ${isMobile ? 'flex flex-col flex-1 min-h-0' : ''}`}
+        className={`max-w-[80rem] mx-auto overflow-x-hidden w-full ${isMobile ? 'flex flex-col flex-1 min-h-0' : ''}`}
         style={isMobile
           ? { padding: 'var(--sam-space-3) var(--sam-space-3)' }
           : { padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }
@@ -131,7 +131,7 @@ export function Project() {
             <Alert variant="error">Project not found.</Alert>
           </div>
         ) : (
-          <div className={`flex flex-col flex-1 min-h-0 ${isMobile ? 'mt-2' : 'mt-3'}`}>
+          <div className={`flex flex-col flex-1 min-h-0 min-w-0 w-full ${isMobile ? 'mt-2' : 'mt-3'}`}>
             <ProjectContext.Provider value={contextValue}>
               <Outlet />
               <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />

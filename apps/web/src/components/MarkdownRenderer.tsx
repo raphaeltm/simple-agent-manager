@@ -118,7 +118,7 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
   return (
     <Highlight theme={themes.nightOwl} code={content} language={language || 'text'}>
       {({ tokens, getLineProps, getTokenProps }) => (
-        <pre className="m-0 p-0 font-mono bg-transparent overflow-visible" style={{ fontSize: '0.8125rem', lineHeight: '1.5' }}>
+        <pre className="m-0 p-0 font-mono bg-transparent overflow-x-auto" style={{ fontSize: '0.8125rem', lineHeight: '1.5' }}>
           {tokens.map((line, lineIdx) => {
             const lineProps = getLineProps({ line });
             return (
@@ -157,7 +157,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
   return (
     <div
       className={inline
-        ? 'text-fg-primary leading-relaxed text-base break-words overflow-x-hidden'
+        ? 'text-fg-primary leading-relaxed text-base break-words overflow-x-hidden max-w-full'
         : 'max-w-[900px] mx-auto overflow-x-hidden p-4 text-fg-primary leading-relaxed text-base break-words'}
       style={style}
       data-testid="rendered-markdown"

@@ -240,7 +240,7 @@ export function IdeasPage() {
   }
 
   return (
-    <div className={`flex flex-col gap-4 overflow-x-hidden ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}>
+    <div className={`flex flex-col gap-4 overflow-x-hidden w-full max-w-full ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}>
       {/* Header */}
       <h1 className="text-xl font-semibold text-fg-primary m-0">Ideas</h1>
 

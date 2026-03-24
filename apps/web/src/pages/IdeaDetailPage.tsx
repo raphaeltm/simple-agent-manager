@@ -390,7 +390,7 @@ export function IdeaDetailPage() {
       </button>
 
       {/* Title */}
-      <h1 className="text-xl font-semibold text-fg-primary m-0 leading-tight break-words">
+      <h1 className="text-xl font-semibold text-fg-primary m-0 leading-tight break-words" style={{ overflowWrap: 'anywhere' }}>
         {idea.title}
       </h1>
 
@@ -417,7 +417,7 @@ export function IdeaDetailPage() {
   // Desktop: two-column layout
   if (!isMobile) {
     return (
-      <div className="flex gap-6 overflow-x-hidden px-6 py-4 h-full">
+      <div className="flex gap-6 overflow-x-hidden w-full max-w-full px-6 py-4 h-full">
         {/* Left column: header + markdown body */}
         <div className="flex-1 min-w-0 flex flex-col gap-3 overflow-y-auto">
           {headerContent}
@@ -450,7 +450,7 @@ export function IdeaDetailPage() {
 
   // Mobile: single column + FAB
   return (
-    <div className="flex flex-col gap-3 overflow-x-hidden px-4 py-3 pb-20">
+    <div className="flex flex-col gap-3 overflow-x-hidden w-full max-w-full px-4 py-3 pb-20">
       {headerContent}
 
       {/* Markdown body */}
