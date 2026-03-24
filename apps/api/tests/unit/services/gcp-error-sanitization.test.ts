@@ -142,6 +142,58 @@ describe('sanitizeGcpError', () => {
     expect(sanitized).not.toContain('sam-vm@my-project.iam.gserviceaccount.com');
   });
 
+  it('sanitizes GcpApiError with 409 status (conflict)', () => {
+    const err = new GcpApiError({
+      step: 'create_wif_pool',
+      message: 'Failed to create WIF pool (409)',
+      statusCode: 409,
+      rawBody: '{"error":{"code":409,"message":"Resource projects/123456789/locations/global/workloadIdentityPools/sam-pool already exists"}}',
+    });
+
+    const sanitized = sanitizeGcpError(err, 'test');
+    assertNoSensitiveData(sanitized);
+    expect(sanitized).not.toContain('123456789');
+    expect(sanitized).toContain('already exist');
+  });
+
+  it('sanitizes GcpApiError with 500 status (GCP internal error)', () => {
+    const err = new GcpApiError({
+      step: 'enable_apis',
+      message: 'Failed to enable APIs (500)',
+      statusCode: 500,
+      rawBody: '{"error":{"code":500,"message":"Internal server error","details":[{"stack_trace":"at com.google.cloud..."}]}}',
+    });
+
+    const sanitized = sanitizeGcpError(err, 'test');
+    assertNoSensitiveData(sanitized);
+    expect(sanitized).not.toContain('stack_trace');
+    expect(sanitized).toContain('internal error');
+  });
+
+  it('sanitizes GcpApiError with 503 status (GCP unavailable)', () => {
+    const err = new GcpApiError({
+      step: 'grant_project_roles',
+      message: 'Failed to set project IAM policy (503)',
+      statusCode: 503,
+      rawBody: '{"error":{"code":503,"message":"Service temporarily unavailable"}}',
+    });
+
+    const sanitized = sanitizeGcpError(err, 'test');
+    assertNoSensitiveData(sanitized);
+    expect(sanitized).toContain('unavailable');
+  });
+
+  it('sanitizes poll_operation timeout errors', () => {
+    const err = new GcpApiError({
+      step: 'poll_operation',
+      message: 'GCP operation timed out',
+    });
+
+    const sanitized = sanitizeGcpError(err, 'test');
+    assertNoSensitiveData(sanitized);
+    expect(sanitized).toContain('timed out');
+  });
+
   it('handles AbortError (timeout)', () => {
     const err = new DOMException('The operation was aborted', 'AbortError');
 

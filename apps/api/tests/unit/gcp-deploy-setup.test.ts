@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { GcpApiError, sanitizeGcpError } from '../../src/services/gcp-errors';
 
 /**
  * Unit tests for GCP deployment setup service.
@@ -150,5 +151,55 @@ describe('runGcpDeploySetup', () => {
     expect(result.wifPoolId).toBe('custom-pool');
     expect(result.wifProviderId).toBe('custom-provider');
     expect(result.serviceAccountEmail).toBe('custom@p1.iam.gserviceaccount.com');
+  });
+
+  it('propagates GcpApiError when getProjectNumber fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const rawBody = JSON.stringify({
+      error: { code: 403, message: "Permission denied on projects/secret-project-id" },
+    });
+    mockFetch.mockResolvedValueOnce(mockGcpResponse(JSON.parse(rawBody), 403));
+
+    try {
+      await runGcpDeploySetup('fake-token', 'my-project', mockEnv());
+      expect.fail('Should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(GcpApiError);
+      const gcpErr = err as GcpApiError;
+      expect(gcpErr.step).toBe('get_project_number');
+      expect(gcpErr.statusCode).toBe(403);
+      // rawBody preserves sensitive data for server-side logging
+      expect(gcpErr.rawBody).toContain('secret-project-id');
+      // sanitizeGcpError strips sensitive data for client
+      const sanitized = sanitizeGcpError(gcpErr);
+      expect(sanitized).not.toContain('secret-project-id');
+    }
+  });
+
+  it('propagates GcpApiError when mid-flow step (createWifPool) fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // 1. getProjectNumber succeeds
+    mockFetch.mockResolvedValueOnce(mockGcpResponse({ projectId: 'p1', projectNumber: '999' }));
+    // 2. enableApis succeeds
+    mockFetch.mockResolvedValueOnce(mockGcpResponse({ done: true }));
+    // 3. createWifPool fails with 403
+    const rawBody = JSON.stringify({
+      error: { code: 403, message: "Permission 'iam.workloadIdentityPools.create' denied on 'projects/999/locations/global'" },
+    });
+    mockFetch.mockResolvedValueOnce(mockGcpResponse(JSON.parse(rawBody), 403));
+
+    try {
+      await runGcpDeploySetup('fake-token', 'p1', mockEnv());
+      expect.fail('Should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(GcpApiError);
+      const gcpErr = err as GcpApiError;
+      expect(gcpErr.step).toBe('create_wif_pool');
+      expect(gcpErr.statusCode).toBe(403);
+      expect(gcpErr.rawBody).toContain('projects/999');
+      const sanitized = sanitizeGcpError(gcpErr);
+      expect(sanitized).not.toContain('999');
+      expect(sanitized).not.toContain('projects/');
+    }
   });
 });
