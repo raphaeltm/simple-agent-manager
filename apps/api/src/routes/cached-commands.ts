@@ -12,8 +12,11 @@ import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
 import * as projectDataService from '../services/project-data';
 
-/** Default max commands per agent type per POST. Override via CACHED_COMMANDS_MAX_PER_AGENT env var. */
+/** Default limits for cached commands. Override via env vars. */
 const DEFAULT_MAX_CACHED_COMMANDS = 200;
+const DEFAULT_MAX_AGENT_TYPE_LENGTH = 64;
+const DEFAULT_MAX_COMMAND_NAME_LENGTH = 128;
+const DEFAULT_MAX_COMMAND_DESC_LENGTH = 512;
 
 const cachedCommandRoutes = new Hono<{ Bindings: Env }>();
 
@@ -33,6 +36,10 @@ cachedCommandRoutes.get('/', async (c) => {
   await requireOwnedProject(db, projectId, userId);
 
   const agentType = c.req.query('agentType') || undefined;
+  const maxAgentTypeLen = parseInt(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH || String(DEFAULT_MAX_AGENT_TYPE_LENGTH));
+  if (agentType && agentType.length > maxAgentTypeLen) {
+    throw errors.badRequest('agentType exceeds maximum length');
+  }
   const commands = await projectDataService.getCachedCommands(c.env, projectId, agentType);
 
   return c.json({ commands });
@@ -62,16 +69,22 @@ cachedCommandRoutes.post('/', async (c) => {
     throw errors.badRequest('commands must be an array');
   }
 
-  // Validate and cap command count (configurable via env var)
-  const maxCommands = parseInt(
-    c.env.CACHED_COMMANDS_MAX_PER_AGENT || String(DEFAULT_MAX_CACHED_COMMANDS),
-  );
+  // Configurable limits (Constitution Principle XI)
+  const maxAgentTypeLen = parseInt(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH || String(DEFAULT_MAX_AGENT_TYPE_LENGTH));
+  const maxCommands = parseInt(c.env.CACHED_COMMANDS_MAX_PER_AGENT || String(DEFAULT_MAX_CACHED_COMMANDS));
+  const maxNameLen = parseInt(c.env.CACHED_COMMANDS_MAX_NAME_LENGTH || String(DEFAULT_MAX_COMMAND_NAME_LENGTH));
+  const maxDescLen = parseInt(c.env.CACHED_COMMANDS_MAX_DESC_LENGTH || String(DEFAULT_MAX_COMMAND_DESC_LENGTH));
+
+  if (body.agentType.length > maxAgentTypeLen) {
+    throw errors.badRequest('agentType exceeds maximum length');
+  }
+
   const validCommands = body.commands
     .filter((cmd) => cmd.name && typeof cmd.name === 'string')
     .slice(0, maxCommands)
     .map((cmd) => ({
-      name: cmd.name.trim(),
-      description: typeof cmd.description === 'string' ? cmd.description.trim() : '',
+      name: cmd.name.trim().slice(0, maxNameLen),
+      description: typeof cmd.description === 'string' ? cmd.description.trim().slice(0, maxDescLen) : '',
     }));
 
   await projectDataService.cacheCommands(c.env, projectId, body.agentType, validCommands);

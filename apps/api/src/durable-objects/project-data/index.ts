@@ -145,11 +145,13 @@ export class ProjectData extends DurableObject<Env> {
 
   // --- Cached Commands ---
 
-  cacheCommands(agentType: string, cmds: Array<{ name: string; description: string }>): void {
-    commands.saveCachedCommands(this.sql, agentType, cmds);
+  async cacheCommands(agentType: string, cmds: Array<{ name: string; description: string }>): Promise<void> {
+    this.ctx.storage.transactionSync(() => {
+      commands.saveCachedCommands(this.sql, agentType, cmds);
+    });
   }
 
-  getCachedCommands(agentType?: string) {
+  async getCachedCommands(agentType?: string): Promise<commands.CachedCommand[]> {
     return commands.getCachedCommands(this.sql, agentType);
   }
 

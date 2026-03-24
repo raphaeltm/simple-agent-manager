@@ -16,7 +16,7 @@ class MockSqlStorage {
       return { toArray: () => [] };
     }
 
-    if (normalized.startsWith('INSERT INTO CACHED_COMMANDS')) {
+    if (normalized.startsWith('INSERT') && normalized.includes('CACHED_COMMANDS')) {
       this.rows.push({
         agent_type: params[0] as string,
         name: params[1] as string,

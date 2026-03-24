@@ -13,7 +13,7 @@ export interface CachedCommand {
 
 /**
  * Replace all cached commands for a given agent type with a fresh set.
- * Uses DELETE + INSERT inside a transaction for atomicity.
+ * Caller MUST wrap in transactionSync for atomicity.
  */
 export function saveCachedCommands(
   sql: SqlStorage,
@@ -24,7 +24,7 @@ export function saveCachedCommands(
   const now = Date.now();
   for (const cmd of commands) {
     sql.exec(
-      'INSERT INTO cached_commands (agent_type, name, description, updated_at) VALUES (?, ?, ?, ?)',
+      'INSERT OR REPLACE INTO cached_commands (agent_type, name, description, updated_at) VALUES (?, ?, ?, ?)',
       agentType,
       cmd.name,
       cmd.description,
