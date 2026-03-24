@@ -359,6 +359,19 @@ export const DEFAULT_GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS = 600;
 /** Default token cache TTL for deployment (55 minutes). Override via GCP_DEPLOY_TOKEN_CACHE_TTL_SECONDS env var. */
 export const DEFAULT_GCP_DEPLOY_TOKEN_CACHE_TTL_SECONDS = 3300;
 
+/** Default GCP STS token URL. Override via GCP_STS_TOKEN_URL env var. */
+export const DEFAULT_GCP_STS_TOKEN_URL = 'https://sts.googleapis.com/v1/token';
+
+/** Default GCP IAM Credentials base URL for SA impersonation. Override via GCP_IAM_CREDENTIALS_BASE_URL env var. */
+export const DEFAULT_GCP_IAM_CREDENTIALS_BASE_URL =
+  'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts';
+
+/** Default OAuth state TTL in seconds (10 minutes). Override via GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS env var. */
+export const DEFAULT_GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS = 600;
+
+/** Default OAuth token handle TTL in seconds (5 minutes). Override via GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS env var. */
+export const DEFAULT_GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS = 300;
+
 // Note: GitHub App install URL is NOT provided as a constant.
 // It must be derived from the actual GitHub App configuration at runtime.
 // Format: https://github.com/apps/{app-slug}/installations/new

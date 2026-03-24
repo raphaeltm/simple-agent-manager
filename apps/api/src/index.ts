@@ -313,6 +313,10 @@ export interface Env {
   GCP_DEPLOY_SERVICE_ACCOUNT_ID?: string;
   GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS?: string;
   GCP_DEPLOY_TOKEN_CACHE_TTL_SECONDS?: string;
+  GCP_STS_TOKEN_URL?: string;
+  GCP_IAM_CREDENTIALS_BASE_URL?: string;
+  GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS?: string;
+  GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

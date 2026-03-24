@@ -16,6 +16,8 @@ import {
   DEFAULT_GCP_DEPLOY_WIF_POOL_ID,
   DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID,
   DEFAULT_GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS,
+  DEFAULT_GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS,
+  DEFAULT_GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -47,10 +49,13 @@ projectDeploymentRoutes.get(
 
     // Generate CSRF state token with project context
     const state = crypto.randomUUID();
+    const stateTtl = c.env.GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS
+      ? parseInt(c.env.GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS, 10)
+      : DEFAULT_GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS;
     await c.env.KV.put(
       `gcp-deploy-oauth-state:${state}`,
       JSON.stringify({ projectId, userId }),
-      { expirationTtl: 600 },
+      { expirationTtl: stateTtl },
     );
 
     const redirectUri = `https://api.${c.env.BASE_DOMAIN}/api/projects/${projectId}/deployment/gcp/callback`;
@@ -128,8 +133,11 @@ projectDeploymentRoutes.get('/:id/deployment/gcp/callback', async (c) => {
 
   // Store token in KV with opaque handle
   const handle = crypto.randomUUID();
+  const tokenHandleTtl = c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS
+    ? parseInt(c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS, 10)
+    : DEFAULT_GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS;
   await c.env.KV.put(`gcp-deploy-oauth-token:${handle}`, tokenData.access_token, {
-    expirationTtl: 300,
+    expirationTtl: tokenHandleTtl,
   });
 
   return c.redirect(`${appUrl}?gcp_deploy_setup=${encodeURIComponent(handle)}`);

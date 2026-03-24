@@ -12,6 +12,8 @@ import * as schema from '../../db/schema';
 import {
   DEFAULT_GCP_DEPLOY_WIF_POOL_ID,
   DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID,
+  DEFAULT_GCP_STS_TOKEN_URL,
+  DEFAULT_GCP_IAM_CREDENTIALS_BASE_URL,
 } from '@simple-agent-manager/shared';
 import {
   type McpTokenData,
@@ -66,7 +68,7 @@ export async function handleGetDeploymentCredentials(
     type: 'external_account',
     audience,
     subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
-    token_url: 'https://sts.googleapis.com/v1/token',
+    token_url: env.GCP_STS_TOKEN_URL || DEFAULT_GCP_STS_TOKEN_URL,
     credential_source: {
       url: identityTokenUrl,
       headers: {
@@ -78,7 +80,7 @@ export async function handleGetDeploymentCredentials(
       },
     },
     service_account_impersonation_url:
-      `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${cred.serviceAccountEmail}:generateAccessToken`,
+      `${env.GCP_IAM_CREDENTIALS_BASE_URL || DEFAULT_GCP_IAM_CREDENTIALS_BASE_URL}/${cred.serviceAccountEmail}:generateAccessToken`,
   };
 
   const instructions = [
