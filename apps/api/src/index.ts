@@ -306,6 +306,12 @@ export interface Env {
   GCP_IMAGE_FAMILY?: string;
   GCP_IMAGE_PROJECT?: string;
   GCP_DISK_SIZE_GB?: string;
+  // GCP deployment (project-level OIDC for Defang)
+  GCP_DEPLOY_WIF_POOL_ID?: string;
+  GCP_DEPLOY_WIF_PROVIDER_ID?: string;
+  GCP_DEPLOY_SERVICE_ACCOUNT_ID?: string;
+  GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS?: string;
+  GCP_DEPLOY_TOKEN_CACHE_TTL_SECONDS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

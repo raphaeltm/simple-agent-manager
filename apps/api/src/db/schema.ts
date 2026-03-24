@@ -283,6 +283,41 @@ export const projectRuntimeFiles = sqliteTable(
 );
 
 // =============================================================================
+// Project Deployment Credentials (GCP OIDC for Defang deployments)
+// =============================================================================
+export const projectDeploymentCredentials = sqliteTable(
+  'project_deployment_credentials',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull().default('gcp'), // Currently only 'gcp'
+    gcpProjectId: text('gcp_project_id').notNull(),
+    gcpProjectNumber: text('gcp_project_number').notNull(),
+    serviceAccountEmail: text('service_account_email').notNull(),
+    wifPoolId: text('wif_pool_id').notNull(),
+    wifProviderId: text('wif_provider_id').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectUnique: uniqueIndex('idx_project_deployment_creds_project').on(
+      table.projectId,
+      table.provider
+    ),
+    userIdx: index('idx_project_deployment_creds_user').on(table.userId),
+  })
+);
+
+// =============================================================================
 // Tasks
 // =============================================================================
 export const tasks = sqliteTable(
