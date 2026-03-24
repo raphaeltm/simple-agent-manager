@@ -340,6 +340,25 @@ export const DEFAULT_GCP_API_TIMEOUT_MS = 30_000;
 export const DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS = 3600;
 
 
+// =============================================================================
+// GCP Deployment (project-level OIDC for Defang)
+// =============================================================================
+
+/** Default WIF pool ID for deployment. Override via GCP_DEPLOY_WIF_POOL_ID env var. */
+export const DEFAULT_GCP_DEPLOY_WIF_POOL_ID = 'sam-deploy-pool';
+
+/** Default WIF provider ID for deployment. Override via GCP_DEPLOY_WIF_PROVIDER_ID env var. */
+export const DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID = 'sam-oidc';
+
+/** Default service account ID for deployment. Override via GCP_DEPLOY_SERVICE_ACCOUNT_ID env var. */
+export const DEFAULT_GCP_DEPLOY_SERVICE_ACCOUNT_ID = 'sam-deployer';
+
+/** Default identity token expiry for deployment (10 minutes). Override via GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS env var. */
+export const DEFAULT_GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS = 600;
+
+/** Default token cache TTL for deployment (55 minutes). Override via GCP_DEPLOY_TOKEN_CACHE_TTL_SECONDS env var. */
+export const DEFAULT_GCP_DEPLOY_TOKEN_CACHE_TTL_SECONDS = 3300;
+
 // Note: GitHub App install URL is NOT provided as a constant.
 // It must be derived from the actual GitHub App configuration at runtime.
 // Format: https://github.com/apps/{app-slug}/installations/new
