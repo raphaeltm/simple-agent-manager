@@ -1531,4 +1531,54 @@ describe('ProjectData Durable Object', () => {
       expect(typeof sessions[0]!.linkedAt).toBe('number');
     });
   });
+
+  // =========================================================================
+  // Cached Commands
+  // =========================================================================
+
+  describe('cached commands', () => {
+    it('caches and retrieves commands for an agent type', async () => {
+      const stub = getStub('project-cache-cmds-1');
+      stub.cacheCommands('claude-code', [
+        { name: 'compact', description: 'Compact conversation' },
+        { name: 'help', description: 'Show help' },
+      ]);
+
+      const result = stub.getCachedCommands('claude-code');
+      expect(result).toHaveLength(2);
+      expect(result[0]!.name).toBe('compact');
+      expect(result[1]!.name).toBe('help');
+      expect(result[0]!.agentType).toBe('claude-code');
+    });
+
+    it('replaces commands on re-cache', async () => {
+      const stub = getStub('project-cache-cmds-2');
+      stub.cacheCommands('claude-code', [
+        { name: 'old-cmd', description: 'Old' },
+      ]);
+
+      stub.cacheCommands('claude-code', [
+        { name: 'new-cmd', description: 'New' },
+      ]);
+
+      const result = stub.getCachedCommands('claude-code');
+      expect(result).toHaveLength(1);
+      expect(result[0]!.name).toBe('new-cmd');
+    });
+
+    it('returns all commands when no agent type filter', async () => {
+      const stub = getStub('project-cache-cmds-3');
+      stub.cacheCommands('claude-code', [{ name: 'cmd1', description: 'D1' }]);
+      stub.cacheCommands('other-agent', [{ name: 'cmd2', description: 'D2' }]);
+
+      const all = stub.getCachedCommands();
+      expect(all).toHaveLength(2);
+    });
+
+    it('returns empty array when no commands cached', async () => {
+      const stub = getStub('project-cache-cmds-4');
+      const result = stub.getCachedCommands('claude-code');
+      expect(result).toEqual([]);
+    });
+  });
 });
