@@ -786,6 +786,102 @@ describe('MessageActions', () => {
     });
   });
 
+  describe('hideTts prop', () => {
+    it('hides speaker button when hideTts is true', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+
+      expect(screen.getByLabelText('Message info')).toBeTruthy();
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
+      expect(screen.queryByLabelText('Read aloud')).toBeNull();
+    });
+
+    it('hides audio player when hideTts is true', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+
+      expect(screen.queryByRole('region', { name: 'Audio player' })).toBeNull();
+    });
+  });
+
+  describe('variant prop (on-dark)', () => {
+    it('uses white-ish colors for buttons on dark backgrounds', () => {
+      render(<MessageActions {...defaultProps} variant="on-dark" hideTts />);
+
+      const infoBtn = screen.getByLabelText('Message info');
+      expect(infoBtn.style.color).toBe('rgba(255, 255, 255, 0.7)');
+    });
+
+    it('uses white for active info button on dark backgrounds', () => {
+      render(<MessageActions {...defaultProps} variant="on-dark" hideTts />);
+
+      fireEvent.click(screen.getByLabelText('Message info'));
+      const infoBtn = screen.getByLabelText('Message info');
+      expect(infoBtn.style.color).toBe('rgb(255, 255, 255)');
+    });
+
+    it('uses white for copied state on dark backgrounds', async () => {
+      render(<MessageActions {...defaultProps} variant="on-dark" hideTts />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Copy message'));
+      });
+
+      const copyBtn = screen.getByLabelText('Copied');
+      expect(copyBtn.style.color).toBe('rgb(255, 255, 255)');
+    });
+  });
+
+  describe('accessibility — focus rings and touch targets', () => {
+    it('info button has focus-visible outline class', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+      const btn = screen.getByLabelText('Message info');
+      expect(btn.className).toContain('focus-visible:outline');
+    });
+
+    it('copy button has focus-visible outline class', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+      const btn = screen.getByLabelText('Copy message');
+      expect(btn.className).toContain('focus-visible:outline');
+    });
+
+    it('speaker button has focus-visible outline class', () => {
+      render(<MessageActions {...defaultProps} />);
+      const btn = screen.getByLabelText('Read aloud');
+      expect(btn.className).toContain('focus-visible:outline');
+    });
+
+    it('info button meets 44px minimum touch target', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+      const btn = screen.getByLabelText('Message info');
+      expect(btn.className).toContain('min-w-[44px]');
+      expect(btn.className).toContain('min-h-[44px]');
+    });
+
+    it('copy button meets 44px minimum touch target', () => {
+      render(<MessageActions {...defaultProps} hideTts />);
+      const btn = screen.getByLabelText('Copy message');
+      expect(btn.className).toContain('min-w-[44px]');
+      expect(btn.className).toContain('min-h-[44px]');
+    });
+  });
+
+  describe('popover alignment by variant', () => {
+    it('popover uses left-0 for default (agent) variant', () => {
+      render(<MessageActions {...defaultProps} />);
+      fireEvent.click(screen.getByLabelText('Message info'));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.className).toContain('left-0');
+      expect(dialog.className).not.toContain('right-0');
+    });
+
+    it('popover uses right-0 for on-dark (user) variant', () => {
+      render(<MessageActions {...defaultProps} variant="on-dark" hideTts />);
+      fireEvent.click(screen.getByLabelText('Message info'));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.className).toContain('right-0');
+      expect(dialog.className).not.toContain('left-0');
+    });
+  });
+
   describe('audio player controls', () => {
     it('has speed selector with correct options', async () => {
       // Use browser TTS to get player to show

@@ -2,6 +2,9 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
 import { AudioPlayer } from './AudioPlayer';
 
+const FOCUS_RING =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring,#34d399)]';
+
 export interface MessageActionsProps {
   /** The plain text content of the message (used for TTS and word/char counts). */
   text: string;
@@ -13,6 +16,10 @@ export interface MessageActionsProps {
   ttsApiUrl?: string;
   /** Unique storage ID for caching TTS audio (e.g., message ID). Required when ttsApiUrl is set. */
   ttsStorageId?: string;
+  /** When true, hides the TTS speaker button and audio player. Used for user messages. */
+  hideTts?: boolean;
+  /** Color variant. 'default' for light backgrounds, 'on-dark' for dark (e.g., blue) backgrounds. */
+  variant?: 'default' | 'on-dark';
 }
 
 /** Strips markdown syntax for a cleaner word/char count and TTS reading. */
@@ -40,19 +47,24 @@ function formatTimestamp(ts: number): string {
 }
 
 /**
- * Action buttons displayed below agent messages.
+ * Action buttons displayed below messages.
  * - Info icon: shows metadata popover (timestamp, word count, char count)
  * - Speaker icon: reads the message aloud via server-side TTS (preferred) or Web Speech API (fallback)
  * - Copy icon: copies message text to clipboard
  *
  * When audio playback starts, an AudioPlayer component is shown with seek,
  * speed control, and skip forward/backward.
+ *
+ * Use `hideTts` to suppress TTS (e.g., for user messages).
+ * Use `variant="on-dark"` when rendered on a dark background (e.g., blue user bubbles).
  */
 export const MessageActions = React.memo(function MessageActions({
   text,
   timestamp,
   ttsApiUrl,
   ttsStorageId,
+  hideTts,
+  variant = 'default',
 }: MessageActionsProps) {
   const [showMeta, setShowMeta] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -66,8 +78,12 @@ export const MessageActions = React.memo(function MessageActions({
   const words = plain ? plain.split(/\s+/).filter(Boolean).length : 0;
   const chars = plain.length;
 
-  const showPlayer = audio.state !== 'idle' || !!audio.lastError;
-  const showSpeaker = audio.hasServerTTS || (typeof window !== 'undefined' && !!window.speechSynthesis);
+  const isOnDark = variant === 'on-dark';
+  const colorMuted = isOnDark ? 'rgba(255,255,255,0.7)' : 'var(--sam-color-fg-muted)';
+  const colorActive = isOnDark ? '#ffffff' : 'var(--sam-color-accent-primary)';
+
+  const showPlayer = !hideTts && (audio.state !== 'idle' || !!audio.lastError);
+  const showSpeaker = !hideTts && (audio.hasServerTTS || (typeof window !== 'undefined' && !!window.speechSynthesis));
 
   // Close metadata popover on outside click or Escape key
   useEffect(() => {
@@ -119,9 +135,9 @@ export const MessageActions = React.memo(function MessageActions({
         <button
           type="button"
           onClick={toggleMeta}
-          className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
+          className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
           style={{
-            color: showMeta ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
+            color: showMeta ? colorActive : colorMuted,
           }}
           aria-label="Message info"
           title="Message info"
@@ -156,9 +172,9 @@ export const MessageActions = React.memo(function MessageActions({
           <button
             type="button"
             onClick={audio.toggle}
-            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors"
+            className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
             style={{
-              color: audio.state !== 'idle' ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
+              color: audio.state !== 'idle' ? colorActive : colorMuted,
               backgroundColor: audio.state === 'playing' ? 'var(--sam-color-bg-inset)' : undefined,
               opacity: audio.state === 'loading' ? 0.7 : 1,
             }}
@@ -236,9 +252,9 @@ export const MessageActions = React.memo(function MessageActions({
           <button
             type="button"
             onClick={handleCopy}
-            className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
+            className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
             style={{
-              color: copied ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
+              color: copied ? colorActive : colorMuted,
             }}
             aria-label={copied ? 'Copied' : 'Copy message'}
             title={copied ? 'Copied' : 'Copy message'}
@@ -300,7 +316,7 @@ export const MessageActions = React.memo(function MessageActions({
           id={popoverId}
           role="dialog"
           aria-label="Message metadata"
-          className="absolute left-0 top-full mt-1 z-10 rounded-md shadow-md px-3 py-2 text-xs max-w-[calc(100vw-2rem)] break-words"
+          className={`absolute ${isOnDark ? 'right-0' : 'left-0'} top-full mt-1 z-10 rounded-md shadow-md px-3 py-2 text-xs max-w-[calc(100vw-2rem)] break-words`}
           style={{
             backgroundColor: 'var(--sam-color-bg-surface, white)',
             borderColor: 'var(--sam-color-border-default, #e5e7eb)',

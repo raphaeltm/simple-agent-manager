@@ -225,11 +225,11 @@ describe('MessageBubble', () => {
       expect(screen.getByLabelText('Copy message')).toBeTruthy();
     });
 
-    it('does not show action buttons for user messages', () => {
+    it('shows info and copy buttons for user messages with timestamp (no TTS)', () => {
       render(<MessageBubble text="Hello" role="user" timestamp={1710288000000} />);
-      expect(screen.queryByLabelText('Message info')).toBeNull();
+      expect(screen.getByLabelText('Message info')).toBeTruthy();
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
       expect(screen.queryByLabelText('Read aloud')).toBeNull();
-      expect(screen.queryByLabelText('Copy message')).toBeNull();
     });
 
     it('does not show action buttons for streaming agent messages', () => {
@@ -249,14 +249,14 @@ describe('MessageBubble', () => {
   });
 
   describe('overflow protection', () => {
-    it('bubble container has overflow-hidden and min-w-0', () => {
+    it('bubble container has min-w-0 but NOT overflow-hidden (popover must not be clipped)', () => {
       const { container } = render(
         <MessageBubble text="Hello" role="agent" />
       );
 
       const bubble = container.querySelector('.max-w-\\[80\\%\\]');
       expect(bubble).not.toBeNull();
-      expect(bubble!.className).toContain('overflow-hidden');
+      expect(bubble!.className).not.toContain('overflow-hidden');
       expect(bubble!.className).toContain('min-w-0');
     });
 
