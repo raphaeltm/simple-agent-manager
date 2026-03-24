@@ -81,7 +81,11 @@ gcpRoutes.post('/setup', async (c) => {
   const oauthToken = await resolveOAuthToken(body.oauthHandle, c.env.KV);
 
   try {
-    // Run the full setup orchestration
+    // Run the full setup orchestration.
+    // SECURITY: samProjectId is intentionally NOT passed here. User-level GCP credentials
+    // are scoped to the user (not a specific SAM project) and may serve multiple SAM projects
+    // for VM provisioning. The pool-wide wildcard binding is correct for this trust model.
+    // Project-scoped bindings are enforced in the deployment flow (project-deployment.ts).
     const credential = await runGcpSetup(
       oauthToken,
       body.gcpProjectId,

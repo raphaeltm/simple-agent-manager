@@ -23,6 +23,17 @@ interface GcpProjectListResponse {
   nextPageToken?: string;
 }
 
+/**
+ * Validate a value is safe for interpolation into a GCP CEL attribute condition.
+ * SAM project IDs are ULIDs (alphanumeric), but this guard enforces the invariant
+ * at the function boundary to prevent injection if a non-ULID value is ever passed.
+ */
+function assertSafeCelValue(value: string, fieldName: string): void {
+  if (!/^[a-zA-Z0-9_:.-]+$/.test(value)) {
+    throw new Error(`${fieldName} contains characters unsafe for CEL interpolation: ${value}`);
+  }
+}
+
 /** Status callback for setup progress reporting */
 export type SetupProgressCallback = (step: string, status: 'pending' | 'in_progress' | 'done' | 'error') => void;
 
@@ -177,10 +188,20 @@ export async function createOidcProvider(
   providerId: string,
   issuerUri: string,
   timeoutMs: number,
+  samProjectId?: string,
 ): Promise<void> {
   // The OIDC provider's allowedAudiences must match the JWT aud claim (https:// scheme).
   // GCP STS uses the protocol-relative format (//iam.googleapis.com/...) separately in gcp-sts.ts.
   const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+
+  // Enforce both issuer and SAM project ID in the attribute condition to prevent
+  // cross-project impersonation within the same WIF pool.
+  if (samProjectId) {
+    assertSafeCelValue(samProjectId, 'samProjectId');
+  }
+  const attributeCondition = samProjectId
+    ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
+    : `assertion.iss == '${issuerUri}'`;
 
   const url = `${IAM_URL}/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers?workloadIdentityPoolProviderId=${providerId}`;
   const res = await fetchWithTimeout(url, {
@@ -197,7 +218,7 @@ export async function createOidcProvider(
         'attribute.sam_user': 'assertion.user_id',
         'attribute.sam_project': 'assertion.project_id',
       },
-      attributeCondition: `assertion.iss == '${issuerUri}'`,
+      attributeCondition,
       oidc: {
         issuerUri,
         allowedAudiences: [wifAudience],
@@ -207,7 +228,7 @@ export async function createOidcProvider(
 
   if (res.status === 409) {
     // Already exists — update instead
-    await updateOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs);
+    await updateOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs, samProjectId);
     return;
   }
 
@@ -232,8 +253,16 @@ export async function updateOidcProvider(
   providerId: string,
   issuerUri: string,
   timeoutMs: number,
+  samProjectId?: string,
 ): Promise<void> {
   const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+
+  if (samProjectId) {
+    assertSafeCelValue(samProjectId, 'samProjectId');
+  }
+  const attributeCondition = samProjectId
+    ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
+    : `assertion.iss == '${issuerUri}'`;
 
   const name = `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
   const url = `${IAM_URL}/${name}?updateMask=attributeMapping,attributeCondition,oidc`;
@@ -249,7 +278,7 @@ export async function updateOidcProvider(
         'attribute.sam_user': 'assertion.user_id',
         'attribute.sam_project': 'assertion.project_id',
       },
-      attributeCondition: `assertion.iss == '${issuerUri}'`,
+      attributeCondition,
       oidc: {
         issuerUri,
         allowedAudiences: [wifAudience],
@@ -317,7 +346,13 @@ export async function grantWifUserOnSa(
   saEmail: string,
   poolId: string,
   timeoutMs: number,
+  samProjectId?: string,
 ): Promise<void> {
+  // Validate early, before any network calls (fail-fast pattern).
+  if (samProjectId) {
+    assertSafeCelValue(samProjectId, 'samProjectId');
+  }
+
   const saResource = `projects/${projectId}/serviceAccounts/${saEmail}`;
 
   // Read current policy
@@ -341,7 +376,12 @@ export async function grantWifUserOnSa(
     etag: string;
   };
 
-  const member = `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/*`;
+  // Use subject-scoped principal to prevent cross-project impersonation.
+  // The `sub` claim in the identity token is `project:${samProjectId}`, so the principal
+  // matches only tokens issued for this specific SAM project.
+  const member = samProjectId
+    ? `principal://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/subject/project:${samProjectId}`
+    : `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/*`;
   const role = 'roles/iam.workloadIdentityUser';
 
   // Check if binding already exists
@@ -464,6 +504,7 @@ export async function runGcpSetup(
   defaultZone: string,
   env: Env,
   onProgress?: SetupProgressCallback,
+  samProjectId?: string,
 ): Promise<GcpOidcCredential> {
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
@@ -490,7 +531,7 @@ export async function runGcpSetup(
 
   // Step 4: Create OIDC provider
   onProgress?.('create_oidc_provider', 'in_progress');
-  await createOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs);
+  await createOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs, samProjectId);
   onProgress?.('create_oidc_provider', 'done');
 
   // Step 5: Create service account
@@ -500,7 +541,7 @@ export async function runGcpSetup(
 
   // Step 6: Grant WIF user on SA
   onProgress?.('grant_wif_user', 'in_progress');
-  await grantWifUserOnSa(oauthToken, gcpProjectId, projectNumber, saEmail, poolId, timeoutMs);
+  await grantWifUserOnSa(oauthToken, gcpProjectId, projectNumber, saEmail, poolId, timeoutMs, samProjectId);
   onProgress?.('grant_wif_user', 'done');
 
   // Step 7: Grant project roles (compute admin + Vertex AI)
