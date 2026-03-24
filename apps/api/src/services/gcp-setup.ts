@@ -177,10 +177,17 @@ export async function createOidcProvider(
   providerId: string,
   issuerUri: string,
   timeoutMs: number,
+  samProjectId?: string,
 ): Promise<void> {
   // The OIDC provider's allowedAudiences must match the JWT aud claim (https:// scheme).
   // GCP STS uses the protocol-relative format (//iam.googleapis.com/...) separately in gcp-sts.ts.
   const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+
+  // Enforce both issuer and SAM project ID in the attribute condition to prevent
+  // cross-project impersonation within the same WIF pool.
+  const attributeCondition = samProjectId
+    ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
+    : `assertion.iss == '${issuerUri}'`;
 
   const url = `${IAM_URL}/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers?workloadIdentityPoolProviderId=${providerId}`;
   const res = await fetchWithTimeout(url, {
@@ -197,7 +204,7 @@ export async function createOidcProvider(
         'attribute.sam_user': 'assertion.user_id',
         'attribute.sam_project': 'assertion.project_id',
       },
-      attributeCondition: `assertion.iss == '${issuerUri}'`,
+      attributeCondition,
       oidc: {
         issuerUri,
         allowedAudiences: [wifAudience],
@@ -207,7 +214,7 @@ export async function createOidcProvider(
 
   if (res.status === 409) {
     // Already exists — update instead
-    await updateOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs);
+    await updateOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs, samProjectId);
     return;
   }
 
@@ -232,8 +239,13 @@ export async function updateOidcProvider(
   providerId: string,
   issuerUri: string,
   timeoutMs: number,
+  samProjectId?: string,
 ): Promise<void> {
   const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+
+  const attributeCondition = samProjectId
+    ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
+    : `assertion.iss == '${issuerUri}'`;
 
   const name = `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
   const url = `${IAM_URL}/${name}?updateMask=attributeMapping,attributeCondition,oidc`;
@@ -249,7 +261,7 @@ export async function updateOidcProvider(
         'attribute.sam_user': 'assertion.user_id',
         'attribute.sam_project': 'assertion.project_id',
       },
-      attributeCondition: `assertion.iss == '${issuerUri}'`,
+      attributeCondition,
       oidc: {
         issuerUri,
         allowedAudiences: [wifAudience],
@@ -317,6 +329,7 @@ export async function grantWifUserOnSa(
   saEmail: string,
   poolId: string,
   timeoutMs: number,
+  samProjectId?: string,
 ): Promise<void> {
   const saResource = `projects/${projectId}/serviceAccounts/${saEmail}`;
 
@@ -341,7 +354,12 @@ export async function grantWifUserOnSa(
     etag: string;
   };
 
-  const member = `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/*`;
+  // Use subject-scoped principal to prevent cross-project impersonation.
+  // The `sub` claim in the identity token is `project:${samProjectId}`, so the principal
+  // matches only tokens issued for this specific SAM project.
+  const member = samProjectId
+    ? `principal://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/subject/project:${samProjectId}`
+    : `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/*`;
   const role = 'roles/iam.workloadIdentityUser';
 
   // Check if binding already exists
@@ -464,6 +482,7 @@ export async function runGcpSetup(
   defaultZone: string,
   env: Env,
   onProgress?: SetupProgressCallback,
+  samProjectId?: string,
 ): Promise<GcpOidcCredential> {
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
@@ -490,7 +509,7 @@ export async function runGcpSetup(
 
   // Step 4: Create OIDC provider
   onProgress?.('create_oidc_provider', 'in_progress');
-  await createOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs);
+  await createOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs, samProjectId);
   onProgress?.('create_oidc_provider', 'done');
 
   // Step 5: Create service account
@@ -500,7 +519,7 @@ export async function runGcpSetup(
 
   // Step 6: Grant WIF user on SA
   onProgress?.('grant_wif_user', 'in_progress');
-  await grantWifUserOnSa(oauthToken, gcpProjectId, projectNumber, saEmail, poolId, timeoutMs);
+  await grantWifUserOnSa(oauthToken, gcpProjectId, projectNumber, saEmail, poolId, timeoutMs, samProjectId);
   onProgress?.('grant_wif_user', 'done');
 
   // Step 7: Grant project roles (compute admin + Vertex AI)

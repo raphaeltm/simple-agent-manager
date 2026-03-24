@@ -47,6 +47,7 @@ export async function runGcpDeploySetup(
   gcpProjectId: string,
   env: Env,
   onProgress?: SetupProgressCallback,
+  samProjectId?: string,
 ): Promise<Omit<ProjectDeploymentCredential, 'id' | 'userId' | 'createdAt' | 'updatedAt'>> {
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
@@ -73,7 +74,7 @@ export async function runGcpDeploySetup(
 
   // Step 4: Create OIDC provider
   onProgress?.('create_oidc_provider', 'in_progress');
-  await createOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs);
+  await createOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs, samProjectId);
   onProgress?.('create_oidc_provider', 'done');
 
   // Step 5: Create service account
@@ -87,7 +88,7 @@ export async function runGcpDeploySetup(
 
   // Step 6: Grant WIF user on SA
   onProgress?.('grant_wif_user', 'in_progress');
-  await grantWifUserOnSa(oauthToken, gcpProjectId, projectNumber, saEmail, poolId, timeoutMs);
+  await grantWifUserOnSa(oauthToken, gcpProjectId, projectNumber, saEmail, poolId, timeoutMs, samProjectId);
   onProgress?.('grant_wif_user', 'done');
 
   // Step 7: Grant deployment roles

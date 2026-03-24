@@ -68,6 +68,7 @@ describe('runGcpDeploySetup', () => {
       'my-project',
       mockEnv(),
       (step, status) => progressSteps.push({ step, status }),
+      'sam-project-123',
     );
 
     // Verify result
@@ -104,6 +105,22 @@ describe('runGcpDeploySetup', () => {
     const createSaCall = mockFetch.mock.calls[4];
     const createSaBody = JSON.parse(createSaCall![1]!.body as string);
     expect(createSaBody.serviceAccount.displayName).toBe('SAM Deployer');
+
+    // Verify OIDC provider uses project-scoped attributeCondition
+    const oidcProviderCall = mockFetch.mock.calls[3];
+    const oidcBody = JSON.parse(oidcProviderCall![1]!.body as string);
+    expect(oidcBody.attributeCondition).toBe(
+      "assertion.iss == 'https://api.example.com' && assertion.project_id == 'sam-project-123'",
+    );
+
+    // Verify IAM binding uses subject-scoped principal (not wildcard)
+    const setIamCall = mockFetch.mock.calls[6];
+    const iamBody = JSON.parse(setIamCall![1]!.body as string);
+    const wifBinding = iamBody.policy.bindings.find(
+      (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser',
+    );
+    expect(wifBinding.members[0]).toContain('subject/project:sam-project-123');
+    expect(wifBinding.members[0]).not.toContain('/*');
   });
 
   it('uses configurable env vars for pool/provider/sa IDs', async () => {

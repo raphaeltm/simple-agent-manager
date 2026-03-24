@@ -215,7 +215,7 @@ projectDeploymentRoutes.post(
 
     const oauthToken = await resolveDeployOAuthToken(body.oauthHandle, c.env.KV);
 
-    const result = await runGcpDeploySetup(oauthToken, body.gcpProjectId, c.env);
+    const result = await runGcpDeploySetup(oauthToken, body.gcpProjectId, c.env, undefined, projectId);
 
     // Consume the OAuth token after successful setup (one-time use)
     await c.env.KV.delete(`gcp-deploy-oauth-token:${body.oauthHandle}`);
