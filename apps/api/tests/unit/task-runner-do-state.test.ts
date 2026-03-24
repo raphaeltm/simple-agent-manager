@@ -313,26 +313,25 @@ describe('TaskRunner DO step handlers', () => {
       expect(doSource).toContain('this.getWorkspaceReadyTimeoutMs()');
     });
 
-    it('does NOT poll D1 periodically in handleWorkspaceReady (TDF-5)', () => {
-      // D1 periodic polling removed from handleWorkspaceReady;
-      // single D1 check at timeout boundary for defense-in-depth
+    it('polls D1 periodically as safety net for callback delivery failures', () => {
+      // D1 polling catches cases where the callback succeeded (updating D1)
+      // but the DO notification failed, or where the VM agent retried via heartbeat.
       const wsReadySection = doSource.slice(
         doSource.indexOf('private async handleWorkspaceReady('),
         doSource.indexOf('private async handleAgentSession(')
       );
       expect(wsReadySection).not.toContain('getAgentPollIntervalMs');
-      expect(wsReadySection).toContain('workspace_ready_from_d1_at_timeout');
+      expect(wsReadySection).toContain('workspace_ready_from_d1_poll');
+      expect(wsReadySection).toContain('getWorkspaceReadyPollIntervalMs');
     });
 
-    it('schedules timeout alarm when waiting for callback', () => {
-      // After TDF-5, the alarm is scheduled at the remaining timeout boundary
-      // instead of polling D1 at a fixed interval
+    it('schedules alarm using poll interval capped by remaining timeout', () => {
       const section = doSource.slice(
         doSource.indexOf('private async handleWorkspaceReady('),
         doSource.indexOf('private async handleAgentSession(')
       );
-      expect(section).toContain('const remaining = Math.max(timeoutMs - elapsed, 0)');
-      expect(section).toContain('setAlarm(Date.now() + remaining)');
+      expect(section).toContain('Math.min(pollIntervalMs');
+      expect(section).toContain('setAlarm(Date.now() + nextPollMs)');
     });
 
     it('advances to agent_session on ready', () => {

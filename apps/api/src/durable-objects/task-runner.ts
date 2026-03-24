@@ -33,6 +33,7 @@ import {
   DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
   DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS,
+  DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
@@ -62,6 +63,7 @@ type TaskRunnerEnv = {
   TASK_RUNNER_AGENT_POLL_INTERVAL_MS?: string;
   TASK_RUNNER_AGENT_READY_TIMEOUT_MS?: string;
   TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS?: string;
+  TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS?: string;
   TASK_RUNNER_PROVISION_POLL_INTERVAL_MS?: string;
   // Env vars passed through for services
   BASE_DOMAIN: string;
@@ -743,40 +745,41 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       }
     }
 
+    // Check D1 for workspace status — catches cases where the callback succeeded
+    // (updating D1) but the DO notification failed, or where the VM agent retried
+    // the callback via heartbeat after initial failures.
+    const wsRow = await this.env.DATABASE.prepare(
+      `SELECT status, error_message FROM workspaces WHERE id = ?`
+    ).bind(state.stepResults.workspaceId).first<{ status: string; error_message: string | null }>();
+
+    if (wsRow?.status === 'running' || wsRow?.status === 'recovery') {
+      log.info('task_runner_do.step.workspace_ready_from_d1_poll', {
+        taskId: state.taskId,
+        workspaceId: state.stepResults.workspaceId,
+        status: wsRow.status,
+      });
+      await this.advanceToStep(state, 'agent_session');
+      return;
+    }
+
     // Check timeout
     const timeoutMs = this.getWorkspaceReadyTimeoutMs();
     const elapsed = Date.now() - state.workspaceReadyStartedAt;
     if (elapsed > timeoutMs) {
-      // Last-resort D1 check: the /ready handler updates D1 before notifying
-      // the DO. If all callback retries failed but D1 has the correct status,
-      // advance instead of failing (defense-in-depth safety net).
-      const wsRow = await this.env.DATABASE.prepare(
-        `SELECT status, error_message FROM workspaces WHERE id = ?`
-      ).bind(state.stepResults.workspaceId).first<{ status: string; error_message: string | null }>();
-
-      if (wsRow?.status === 'running' || wsRow?.status === 'recovery') {
-        log.info('task_runner_do.step.workspace_ready_from_d1_at_timeout', {
-          taskId: state.taskId,
-          workspaceId: state.stepResults.workspaceId,
-          status: wsRow.status,
-        });
-        await this.advanceToStep(state, 'agent_session');
-        return;
-      }
-
       throw Object.assign(
         new Error(`Workspace did not become ready within ${timeoutMs}ms`),
         { permanent: true },
       );
     }
 
-    // No callback yet and not timed out — schedule alarm at remaining timeout
-    // boundary. The callback (advanceWorkspaceReady RPC) is the sole advancement
-    // mechanism; D1 polling has been removed (TDF-5). The VM agent retries the
-    // callback with exponential backoff (TDF-4), so the timeout alarm is only
-    // a safety net for the case where all retries are exhausted.
-    const remaining = Math.max(timeoutMs - elapsed, 0);
-    await this.ctx.storage.setAlarm(Date.now() + remaining);
+    // No callback yet and not timed out — schedule next poll.
+    // The primary advancement mechanism is the VM agent callback
+    // (advanceWorkspaceReady RPC). Periodic polling is a safety net for cases
+    // where the callback updates D1 but the DO notification fails, or where
+    // the VM agent retries the callback via heartbeat after initial failures.
+    const pollIntervalMs = this.getWorkspaceReadyPollIntervalMs();
+    const nextPollMs = Math.min(pollIntervalMs, Math.max(timeoutMs - elapsed, 0));
+    await this.ctx.storage.setAlarm(Date.now() + nextPollMs);
   }
 
   private async handleAgentSession(state: TaskRunnerState): Promise<void> {
@@ -1503,6 +1506,13 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS,
       DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS,
+    );
+  }
+
+  private getWorkspaceReadyPollIntervalMs(): number {
+    return parseEnvInt(
+      this.env.TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS,
     );
   }
 
