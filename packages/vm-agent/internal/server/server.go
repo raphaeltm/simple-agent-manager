@@ -94,6 +94,15 @@ type WorkspaceRuntime struct {
 	GitHubID            string
 	Lightweight         bool // Skip devcontainer build, use fallback image for faster startup
 	PTY                 *pty.Manager
+
+	// ReadyCallbackPending is true when the workspace provisioned successfully but
+	// the workspace-ready callback to the control plane failed (e.g., transient
+	// network issue). The heartbeat loop retries the callback when connectivity
+	// is restored.
+	ReadyCallbackPending bool
+	// ReadyCallbackStatus is the status to report when retrying the callback
+	// ("running" or "recovery").
+	ReadyCallbackStatus string
 }
 
 type EventRecord struct {
@@ -112,6 +121,61 @@ func defaultWorkspaceScope(workspaceID, nodeID string) string {
 		return workspaceID
 	}
 	return nodeID
+}
+
+// markReadyCallbackPending flags a workspace's ready callback as undelivered so
+// the heartbeat loop can retry it when connectivity is restored.
+func (s *Server) markReadyCallbackPending(workspaceID, readyStatus string) {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	if runtime, ok := s.workspaces[workspaceID]; ok {
+		runtime.ReadyCallbackPending = true
+		runtime.ReadyCallbackStatus = readyStatus
+	}
+}
+
+// pendingReadyCallbacks returns workspace IDs and their ready statuses for all
+// workspaces whose ready callback has not been delivered.
+func (s *Server) pendingReadyCallbacks() []struct {
+	WorkspaceID   string
+	CallbackToken string
+	Status        string
+} {
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	var pending []struct {
+		WorkspaceID   string
+		CallbackToken string
+		Status        string
+	}
+	for _, runtime := range s.workspaces {
+		if runtime.ReadyCallbackPending {
+			token := runtime.CallbackToken
+			if token == "" {
+				token = s.callbackToken
+			}
+			pending = append(pending, struct {
+				WorkspaceID   string
+				CallbackToken string
+				Status        string
+			}{
+				WorkspaceID:   runtime.ID,
+				CallbackToken: token,
+				Status:        runtime.ReadyCallbackStatus,
+			})
+		}
+	}
+	return pending
+}
+
+// clearReadyCallbackPending clears the pending callback flag for a workspace.
+func (s *Server) clearReadyCallbackPending(workspaceID string) {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	if runtime, ok := s.workspaces[workspaceID]; ok {
+		runtime.ReadyCallbackPending = false
+		runtime.ReadyCallbackStatus = ""
+	}
 }
 
 // effectivePromptTimeout returns the prompt timeout based on session type.

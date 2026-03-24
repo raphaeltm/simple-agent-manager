@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -186,6 +187,41 @@ func (s *Server) startWorkspaceProvision(
 		}
 
 		if err != nil {
+			// Check if the workspace actually provisioned fine but only the
+			// control-plane callback failed (transient network issue).
+			var cbErr *bootstrap.CallbackError
+			if errors.As(err, &cbErr) {
+				// Workspace is functional — transition to the ready state and
+				// mark the callback as pending so the heartbeat loop retries it.
+				nextStatus := cbErr.Status
+				if nextStatus == "" {
+					nextStatus = "running"
+				}
+				s.casWorkspaceStatus(runtime.ID, []string{"creating"}, nextStatus)
+				s.markReadyCallbackPending(runtime.ID, nextStatus)
+
+				slog.Warn("Workspace ready but callback failed — will retry on next heartbeat",
+					"workspace", runtime.ID,
+					"status", nextStatus,
+					"callbackError", cbErr.Err,
+				)
+
+				successDetail := make(map[string]interface{}, len(detail)+2)
+				for key, value := range detail {
+					successDetail[key] = value
+				}
+				successDetail["callbackPending"] = true
+				if nextStatus == "recovery" {
+					successDetail["recoveryMode"] = true
+				}
+				s.appendNodeEvent(runtime.ID, "warn", successType, successMessage+" (callback pending)", successDetail)
+
+				// Start port scanner — workspace is functional
+				s.StartPortScanner(runtime.ID)
+				return
+			}
+
+			// Real provisioning failure.
 			// CAS: only transition to error if still in "creating" state.
 			// If the workspace was stopped/deleted while provisioning, skip.
 			s.casWorkspaceStatus(runtime.ID, []string{"creating"}, "error")

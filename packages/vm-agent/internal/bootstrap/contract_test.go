@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -183,5 +184,76 @@ func TestReadyCallbackURLConstruction(t *testing.T) {
 	}
 	if receivedPath != "/api/workspaces/ws-url-test/ready" {
 		t.Fatalf("unexpected path: %s", receivedPath)
+	}
+}
+
+// =============================================================================
+// CallbackError — Sentinel Type for Callback-Only Failures
+// =============================================================================
+
+func TestCallbackErrorWrapsUnderlyingError(t *testing.T) {
+	t.Parallel()
+
+	inner := context.DeadlineExceeded
+	cbErr := &CallbackError{Err: inner, Status: "running"}
+
+	if !strings.Contains(cbErr.Error(), "running") {
+		t.Errorf("expected error string to contain status, got %q", cbErr.Error())
+	}
+	if !strings.Contains(cbErr.Error(), inner.Error()) {
+		t.Errorf("expected error string to contain inner error, got %q", cbErr.Error())
+	}
+	if cbErr.Unwrap() != inner {
+		t.Error("expected Unwrap to return the inner error")
+	}
+}
+
+func TestCallbackErrorIsDistinguishableFromPlainError(t *testing.T) {
+	t.Parallel()
+
+	cbErr := &CallbackError{Err: context.DeadlineExceeded, Status: "recovery"}
+	var target *CallbackError
+	if !errors.As(cbErr, &target) {
+		t.Fatal("expected errors.As to match CallbackError")
+	}
+	if target.Status != "recovery" {
+		t.Errorf("expected status 'recovery', got %q", target.Status)
+	}
+}
+
+func TestPrepareWorkspaceReturnsCallbackErrorOnReadyFailure(t *testing.T) {
+	t.Parallel()
+
+	// Control plane returns 500 on /ready — simulates network issue
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/ready") {
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL: ts.URL,
+		WorkspaceID:     "ws-callback-err-test",
+		CallbackToken:   "test-token",
+		ContainerMode:   false,
+	}
+
+	_, err := PrepareWorkspace(ctx, cfg, ProvisionState{}, nil)
+	if err == nil {
+		t.Fatal("expected error from PrepareWorkspace")
+	}
+
+	var cbErr *CallbackError
+	if !errors.As(err, &cbErr) {
+		t.Fatalf("expected CallbackError, got %T: %v", err, err)
+	}
+	if cbErr.Status != "running" {
+		t.Errorf("expected status 'running', got %q", cbErr.Status)
 	}
 }
