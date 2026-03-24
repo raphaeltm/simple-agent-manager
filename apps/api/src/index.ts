@@ -31,6 +31,7 @@ import { clientErrorsRoutes } from './routes/client-errors';
 import { projectsRoutes } from './routes/projects';
 import { tasksRoutes } from './routes/tasks';
 import { chatRoutes } from './routes/chat';
+import { cachedCommandRoutes } from './routes/cached-commands';
 import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
 import { dashboardRoutes } from './routes/dashboard';
@@ -186,6 +187,10 @@ export interface Env {
   CF_API_TIMEOUT_MS?: string;
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
   // Project data DO limits
+  CACHED_COMMANDS_MAX_PER_AGENT?: string;
+  CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH?: string;
+  CACHED_COMMANDS_MAX_NAME_LENGTH?: string;
+  CACHED_COMMANDS_MAX_DESC_LENGTH?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
   MESSAGE_SIZE_THRESHOLD?: string;
@@ -621,6 +626,7 @@ app.route('/api/client-errors', clientErrorsRoutes);
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
+app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/projects', projectDeploymentRoutes);

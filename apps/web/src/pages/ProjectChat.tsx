@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight, X, Lightbulb } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
-import { VoiceButton } from '@simple-agent-manager/acp-client';
+import { VoiceButton, SlashCommandPalette } from '@simple-agent-manager/acp-client';
+import type { SlashCommandPaletteHandle, SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, WorkspaceProfile, TaskMode } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
@@ -28,6 +29,7 @@ import { useProjectContext } from './ProjectContext';
 import { stripMarkdown } from '../lib/text-utils';
 import { ForkDialog } from '../components/project/ForkDialog';
 import { useProjectWebSocket } from '../hooks/useProjectWebSocket';
+import { useAvailableCommands } from '../hooks/useAvailableCommands';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -147,6 +149,9 @@ export function ProjectChat() {
   // Agent type selection
   const [configuredAgents, setConfiguredAgents] = useState<AgentInfo[]>([]);
   const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
+
+  // Slash command cache for pre-session autocomplete
+  const { commands: slashCommands } = useAvailableCommands(projectId);
 
   // Workspace profile selection — defaults to project setting or platform default
   const [selectedWorkspaceProfile, setSelectedWorkspaceProfile] = useState<WorkspaceProfile>(
@@ -685,6 +690,7 @@ export function ProjectChat() {
               onWorkspaceProfileChange={setSelectedWorkspaceProfile}
               selectedTaskMode={selectedTaskMode}
               onTaskModeChange={(mode: TaskMode) => { userSetTaskModeRef.current = true; setSelectedTaskMode(mode); }}
+              slashCommands={slashCommands}
             />
           </div>
         ) : (
@@ -1120,6 +1126,7 @@ function ChatInput({
   onWorkspaceProfileChange,
   selectedTaskMode,
   onTaskModeChange,
+  slashCommands,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -1135,9 +1142,27 @@ function ChatInput({
   onWorkspaceProfileChange: (profile: WorkspaceProfile) => void;
   selectedTaskMode: TaskMode;
   onTaskModeChange: (mode: TaskMode) => void;
+  slashCommands?: SlashCommand[];
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const paletteRef = useRef<SlashCommandPaletteHandle>(null);
   const isMobile = useIsMobile();
+
+  // Slash command palette state.
+  // dismissedFilterRef tracks the exact filter string at the time the user pressed
+  // Escape — the palette stays closed until the filter changes (user types more).
+  const dismissedFilterRef = useRef<string | null>(null);
+  const slashMatch = value.match(/^\/(\S*)$/);
+  const slashFilter = slashMatch?.[1] ?? '';
+  // Clear the dismissed state whenever the input exits slash-command mode entirely
+  // (e.g., user cleared the field) so the next "/" still opens the palette.
+  if (!slashMatch && dismissedFilterRef.current !== null) {
+    dismissedFilterRef.current = null;
+  }
+  const showPalette =
+    !!slashMatch &&
+    (slashCommands?.length ?? 0) > 0 &&
+    dismissedFilterRef.current !== slashFilter;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -1160,12 +1185,37 @@ function ChatInput({
     [value, onChange],
   );
 
+  const handleCommandSelect = useCallback(
+    (cmd: SlashCommand) => {
+      onChange(`/${cmd.name} `);
+      inputRef.current?.focus();
+    },
+    [onChange],
+  );
+
+  const handleDismissPalette = useCallback(() => {
+    // Record the current filter as dismissed so the palette stays closed until
+    // the user changes the input further. Does NOT clear the typed text.
+    dismissedFilterRef.current = slashFilter;
+    inputRef.current?.focus();
+  }, [slashFilter]);
+
   return (
     <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
       {error && (
         <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
         </div>
+      )}
+      {slashCommands && slashCommands.length > 0 && (
+        <SlashCommandPalette
+          ref={paletteRef}
+          commands={slashCommands}
+          filter={slashFilter}
+          onSelect={handleCommandSelect}
+          onDismiss={handleDismissPalette}
+          visible={showPalette}
+        />
       )}
       {isMobile ? (
         /* Mobile: compact pill bar — no labels, single row */
@@ -1273,6 +1323,8 @@ function ChatInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
+            // Delegate to slash command palette first
+            if (paletteRef.current?.handleKeyDown(e as unknown as React.KeyboardEvent)) return;
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !submitting) {
               e.preventDefault();
               onSubmit();
@@ -1281,6 +1333,11 @@ function ChatInput({
           placeholder={placeholder}
           disabled={submitting}
           rows={1}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={showPalette}
+          aria-controls={showPalette ? 'slash-palette-listbox' : undefined}
+          aria-activedescendant={showPalette ? paletteRef.current?.activeDescendantId : undefined}
           className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto"
         />
         <VoiceButton

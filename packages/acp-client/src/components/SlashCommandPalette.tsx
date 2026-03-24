@@ -20,6 +20,8 @@ export interface SlashCommandPaletteProps {
 export interface SlashCommandPaletteHandle {
   /** Handle keyboard events for navigation. Returns true if the event was consumed. */
   handleKeyDown: (e: React.KeyboardEvent) => boolean;
+  /** ID of the currently selected option element (for aria-activedescendant) */
+  activeDescendantId: string | undefined;
 }
 
 /**
@@ -93,7 +95,9 @@ export const SlashCommandPalette = forwardRef<SlashCommandPaletteHandle, SlashCo
       [visible, filtered, selectedIndex, onSelect, onDismiss]
     );
 
-    useImperativeHandle(ref, () => ({ handleKeyDown }), [handleKeyDown]);
+    const activeDescendantId = filtered[selectedIndex] ? `slash-cmd-${filtered[selectedIndex].name}` : undefined;
+
+    useImperativeHandle(ref, () => ({ handleKeyDown, activeDescendantId }), [handleKeyDown, activeDescendantId]);
 
     if (!visible || filtered.length === 0) return null;
 
@@ -101,48 +105,83 @@ export const SlashCommandPalette = forwardRef<SlashCommandPaletteHandle, SlashCo
     const maxHeight = MAX_VISIBLE_ITEMS * 44;
 
     return (
-      <div
-        className="mb-2"
-        role="listbox"
-        aria-label="Slash commands"
-      >
+      <div className="mb-2">
+        {/* Border uses semantic token; background uses --sam-color-bg-surface from the design system */}
         <div
-          className="bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden"
-          style={{ maxHeight }}
+          className="rounded-lg shadow-lg"
+          style={{
+            backgroundColor: 'var(--sam-color-bg-surface)',
+            border: '1px solid var(--sam-color-border-default)',
+          }}
         >
           <ul
             ref={listRef}
+            id="slash-palette-listbox"
+            role="listbox"
+            aria-label="Slash commands"
             className="overflow-y-auto"
             style={{ maxHeight }}
           >
             {filtered.map((cmd, idx) => (
               <li
                 key={`${cmd.source}-${cmd.name}`}
+                id={`slash-cmd-${cmd.name}`}
                 role="option"
                 aria-selected={idx === selectedIndex}
-                className={`flex items-start gap-2 px-3 py-2 cursor-pointer select-none ${
-                  idx === selectedIndex
-                    ? 'bg-blue-50 text-blue-900'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-                style={{ minHeight: 44 }}
+                className="flex items-start gap-2 px-3 py-2 cursor-pointer select-none"
+                style={{
+                  minHeight: 44,
+                  backgroundColor:
+                    idx === selectedIndex
+                      ? 'var(--sam-color-bg-surface-hover)'
+                      : 'transparent',
+                  color:
+                    idx === selectedIndex
+                      ? 'var(--sam-color-fg-primary)'
+                      : 'var(--sam-color-fg-primary)',
+                }}
                 onClick={() => onSelect(cmd)}
                 onMouseEnter={() => setSelectedIndex(idx)}
               >
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-medium shrink-0">/{cmd.name}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span
-                      className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                        cmd.source === 'agent'
-                          ? 'bg-purple-100 text-purple-700'
-                          : 'bg-gray-100 text-gray-600'
-                      }`}
+                      className="font-mono text-sm font-medium shrink-0"
+                      style={{ color: 'var(--sam-color-fg-primary)' }}
                     >
-                      {cmd.source === 'agent' ? 'Agent' : 'SAM'}
+                      /{cmd.name}
+                    </span>
+                    <span
+                      className="shrink-0 text-xs px-1.5 py-0.5 rounded-full font-medium"
+                      style={
+                        cmd.source === 'agent'
+                          ? {
+                              /* Purple tint — uses Tokyo Night purple, subdued */
+                              backgroundColor: 'rgba(187,154,247,0.15)',
+                              color: 'var(--sam-color-tn-purple)',
+                            }
+                          : cmd.source === 'cached'
+                            ? {
+                                /* Amber tint — warning palette */
+                                backgroundColor: 'rgba(245,158,11,0.15)',
+                                color: 'var(--sam-color-warning)',
+                              }
+                            : {
+                                /* Muted — fg-muted on inset bg */
+                                backgroundColor: 'var(--sam-color-bg-inset)',
+                                color: 'var(--sam-color-fg-muted)',
+                              }
+                      }
+                    >
+                      {cmd.source === 'agent' ? 'Agent' : cmd.source === 'cached' ? 'Cached' : 'SAM'}
                     </span>
                   </div>
-                  <span className="text-sm text-gray-500 leading-snug">{cmd.description}</span>
+                  <span
+                    className="text-sm leading-snug"
+                    style={{ color: 'var(--sam-color-fg-muted)' }}
+                  >
+                    {cmd.description}
+                  </span>
                 </div>
               </li>
             ))}

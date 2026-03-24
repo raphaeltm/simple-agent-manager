@@ -42,6 +42,14 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
       Voice
     </button>
   ),
+  SlashCommandPalette: () => null,
+  CLIENT_COMMANDS: [],
+  getAllStaticCommands: () => [],
+  getStaticCommands: () => [],
+}));
+
+vi.mock('../../../src/hooks/useAvailableCommands', () => ({
+  useAvailableCommands: () => ({ commands: [], isLoading: false, persistCommands: vi.fn() }),
 }));
 
 vi.mock('../../../src/hooks/useProjectWebSocket', () => ({

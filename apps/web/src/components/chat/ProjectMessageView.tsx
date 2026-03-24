@@ -16,7 +16,7 @@ import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, Che
 import { TruncatedSummary } from './TruncatedSummary';
 import { mergeMessages } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
-import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession, saveCachedCommands } from '../../lib/api';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import type { WorkspaceResponse, NodeResponse, VMSize, DetectedPort } from '@simple-agent-manager/shared';
@@ -428,6 +428,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       acpGraceTimerRef.current = null;
     }
   }, [sessionId]);
+
+  // Persist agent commands to cache when received from ACP
+  const prevCommandCountRef = useRef(0);
+  useEffect(() => {
+    const cmds = agentSession.messages.availableCommands;
+    if (cmds.length === 0 || cmds.length === prevCommandCountRef.current) return;
+    prevCommandCountRef.current = cmds.length;
+    // Determine agent type from the session (falls back to 'claude-code')
+    const agentType = agentSession.session.agentType ?? 'claude-code';
+    saveCachedCommands(projectId, agentType, cmds.map((c) => ({ name: c.name, description: c.description }))).catch(() => { /* best-effort */ });
+  }, [agentSession.messages.availableCommands, agentSession.session.agentType, projectId]);
 
   // Track isPrompting transitions to manage ACP→DO handoff grace period
   useEffect(() => {

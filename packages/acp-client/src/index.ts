@@ -8,6 +8,9 @@ export * from './errors';
 export * from './transport/types';
 export * from './transport/websocket';
 
+// Commands
+export { getStaticCommands, getAllStaticCommands } from './commands/registry';
+
 // Hooks
 export * from './hooks/useAcpSession';
 export * from './hooks/useAcpMessages';
