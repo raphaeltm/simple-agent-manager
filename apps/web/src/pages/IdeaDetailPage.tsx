@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -9,6 +9,8 @@ import {
   Play,
   Check,
   Archive,
+  Search,
+  X,
 } from 'lucide-react';
 import type { TaskDetailResponse, TaskStatus } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
@@ -16,6 +18,7 @@ import { getProjectTask, getTaskSessions } from '../lib/api';
 import type { TaskSessionLink } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { RenderedMarkdown } from '../components/MarkdownRenderer';
 
 // ---------------------------------------------------------------------------
 // Status mapping (mirrors IdeasPage)
@@ -98,7 +101,7 @@ function SessionRow({ session, onClick }: SessionRowProps) {
           {session.topic || 'Untitled conversation'}
         </p>
         {session.context && (
-          <p className="text-xs text-fg-muted m-0 mt-0.5 line-clamp-2">
+          <p className="text-xs text-fg-muted m-0 mt-0.5 line-clamp-2 break-words">
             {session.context}
           </p>
         )}
@@ -115,12 +118,148 @@ function SessionRow({ session, onClick }: SessionRowProps) {
         >
           {isActive ? 'Active' : 'Stopped'}
         </span>
-        <span className="inline-flex items-center gap-1">
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
           <Clock size={11} />
           {timeAgo(session.linkedAt)}
         </span>
       </div>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Conversations panel (shared between desktop sidebar and mobile modal)
+// ---------------------------------------------------------------------------
+
+interface ConversationsPanelProps {
+  sessions: TaskSessionLink[];
+  onSessionClick: (sessionId: string) => void;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+}
+
+function ConversationsPanel({ sessions, onSessionClick, searchQuery, onSearchChange }: ConversationsPanelProps) {
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return sessions;
+    const q = searchQuery.toLowerCase();
+    return sessions.filter(
+      (s) =>
+        (s.topic || '').toLowerCase().includes(q) ||
+        (s.context || '').toLowerCase().includes(q),
+    );
+  }, [sessions, searchQuery]);
+
+  return (
+    <div className="flex flex-col gap-3 h-full">
+      {/* Search */}
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none" />
+        <input
+          type="text"
+          placeholder="Search conversations..."
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          className="w-full pl-8 pr-3 py-2 text-sm bg-page border border-border-default rounded-lg text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent/60 min-h-[44px]"
+          aria-label="Search conversations"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => onSearchChange('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer"
+            aria-label="Clear search"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* Session list */}
+      {filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <Lightbulb size={28} className="text-fg-muted mb-2 opacity-30" aria-hidden="true" />
+          <p className="text-sm text-fg-muted m-0 max-w-xs">
+            {sessions.length === 0
+              ? 'No conversations linked yet. Start chatting to discuss this idea.'
+              : 'No conversations match your search.'}
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5 overflow-y-auto flex-1 min-h-0" role="list" aria-label="Linked conversations">
+          {filtered.map((session) => (
+            <div key={session.sessionId} role="listitem">
+              <SessionRow
+                session={session}
+                onClick={() => onSessionClick(session.sessionId)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mobile conversations modal
+// ---------------------------------------------------------------------------
+
+interface MobileConversationsModalProps {
+  open: boolean;
+  onClose: () => void;
+  sessions: TaskSessionLink[];
+  onSessionClick: (sessionId: string) => void;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+}
+
+function MobileConversationsModal({
+  open,
+  onClose,
+  sessions,
+  onSessionClick,
+  searchQuery,
+  onSearchChange,
+}: MobileConversationsModalProps) {
+  if (!open) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-overlay z-drawer-backdrop"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      {/* Panel */}
+      <div
+        className="fixed inset-x-0 bottom-0 max-h-[80vh] bg-surface border-t border-border-default rounded-t-2xl z-drawer flex flex-col overflow-hidden"
+        role="dialog"
+        aria-label="Linked conversations"
+      >
+        {/* Header + close */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border-default shrink-0">
+          <h2 className="text-sm font-semibold text-fg-primary m-0">
+            Conversations {sessions.length > 0 && `(${sessions.length})`}
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center"
+            aria-label="Close conversations panel"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
+          <ConversationsPanel
+            sessions={sessions}
+            onSessionClick={onSessionClick}
+            searchQuery={searchQuery}
+            onSearchChange={onSearchChange}
+          />
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -138,6 +277,8 @@ export function IdeaDetailPage() {
   const [sessions, setSessions] = useState<TaskSessionLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showMobileConversations, setShowMobileConversations] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!taskId) return;
@@ -168,13 +309,14 @@ export function IdeaDetailPage() {
 
   const handleSessionClick = useCallback(
     (sessionId: string) => {
+      setShowMobileConversations(false);
       navigate(`/projects/${projectId}/chat/${sessionId}`);
     },
     [projectId, navigate],
   );
 
   // ---------------------------------------------------------------------------
-  // Render
+  // Render: Loading
   // ---------------------------------------------------------------------------
 
   if (loading) {
@@ -184,6 +326,10 @@ export function IdeaDetailPage() {
       </div>
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Render: Error / Not Found
+  // ---------------------------------------------------------------------------
 
   if (error || !idea) {
     return (
@@ -216,9 +362,13 @@ export function IdeaDetailPage() {
   const ideaStatus = STATUS_FROM_TASK[idea.status];
   const statusConfig = STATUS_CONFIG[ideaStatus];
 
-  return (
-    <div className={`flex flex-col gap-5 overflow-x-hidden ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}>
-      {/* Back link — min-h-[44px] satisfies touch target requirement */}
+  // ---------------------------------------------------------------------------
+  // Render: Idea detail
+  // ---------------------------------------------------------------------------
+
+  const headerContent = (
+    <>
+      {/* Back link */}
       <button
         onClick={handleBack}
         className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer py-3 pr-3 pl-0 -ml-1 self-start min-h-[44px]"
@@ -227,66 +377,104 @@ export function IdeaDetailPage() {
         Back to Ideas
       </button>
 
-      {/* Idea header */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-start gap-3">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-semibold text-fg-primary m-0 leading-tight">
-              {idea.title}
-            </h1>
-            {idea.description && (
-              <p className="text-sm text-fg-muted m-0 mt-1.5 line-clamp-3">
-                {idea.description}
-              </p>
-            )}
-          </div>
-        </div>
+      {/* Title */}
+      <h1 className="text-xl font-semibold text-fg-primary m-0 leading-tight break-words">
+        {idea.title}
+      </h1>
 
-        {/* Meta row */}
-        <div className="flex items-center gap-3 text-xs text-fg-muted">
-          <span
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wider"
-            style={{
-              background: `color-mix(in srgb, ${statusConfig.color} 15%, transparent)`,
-              color: statusConfig.color,
-            }}
-          >
-            {statusConfig.icon}
-            {statusConfig.label}
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <Clock size={12} />
-            Created {formatDate(idea.createdAt)}
-          </span>
-        </div>
+      {/* Status pill + date (no description here) */}
+      <div className="flex items-center gap-3 text-xs text-fg-muted">
+        <span
+          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wider"
+          style={{
+            background: `color-mix(in srgb, ${statusConfig.color} 15%, transparent)`,
+            color: statusConfig.color,
+          }}
+        >
+          {statusConfig.icon}
+          {statusConfig.label}
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Clock size={12} />
+          Created {formatDate(idea.createdAt)}
+        </span>
       </div>
+    </>
+  );
 
-      {/* Conversations section */}
-      <section aria-labelledby="conversations-heading" className="flex flex-col gap-3">
-        <h2 id="conversations-heading" className="text-sm font-semibold text-fg-secondary m-0 uppercase tracking-wider">
-          {sessions.length > 0 ? `Conversations (${sessions.length})` : 'Conversations'}
-        </h2>
+  // Desktop: two-column layout
+  if (!isMobile) {
+    return (
+      <div className="flex gap-6 overflow-x-hidden px-6 py-4 h-full">
+        {/* Left column: header + markdown body */}
+        <div className="flex-1 min-w-0 flex flex-col gap-3 overflow-y-auto">
+          {headerContent}
 
-        {sessions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Lightbulb size={32} className="text-fg-muted mb-3 opacity-30" aria-hidden="true" />
-            <p className="text-sm text-fg-muted m-0 max-w-xs">
-              No conversations linked yet. Start chatting to discuss this idea.
-            </p>
+          {/* Markdown body */}
+          {idea.description && (
+            <div className="mt-2 border-t border-border-default pt-4">
+              <RenderedMarkdown content={idea.description} inline />
+            </div>
+          )}
+        </div>
+
+        {/* Right column: conversations panel */}
+        <aside className="w-80 shrink-0 flex flex-col gap-3 border-l border-border-default pl-6 overflow-hidden">
+          <h2 className="text-sm font-semibold text-fg-secondary m-0 uppercase tracking-wider shrink-0">
+            {sessions.length > 0 ? `Conversations (${sessions.length})` : 'Conversations'}
+          </h2>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <ConversationsPanel
+              sessions={sessions}
+              onSessionClick={handleSessionClick}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+            />
           </div>
-        ) : (
-          <div className="flex flex-col gap-1.5" role="list" aria-label="Linked conversations">
-            {sessions.map((session) => (
-              <div key={session.sessionId} role="listitem">
-                <SessionRow
-                  session={session}
-                  onClick={() => handleSessionClick(session.sessionId)}
-                />
-              </div>
-            ))}
-          </div>
+        </aside>
+      </div>
+    );
+  }
+
+  // Mobile: single column + FAB
+  return (
+    <div className="flex flex-col gap-3 overflow-x-hidden px-4 py-3 pb-20">
+      {headerContent}
+
+      {/* Markdown body */}
+      {idea.description && (
+        <div className="mt-2 border-t border-border-default pt-4">
+          <RenderedMarkdown content={idea.description} inline />
+        </div>
+      )}
+
+      {/* FAB for conversations — z-[5] keeps it below main nav (z-sticky = 10) */}
+      <button
+        onClick={() => setShowMobileConversations(true)}
+        className="fixed bottom-5 right-5 z-[5] flex items-center justify-center w-14 h-14 rounded-full shadow-lg hover:opacity-90 transition-opacity cursor-pointer border-none"
+        style={{ backgroundColor: 'var(--sam-color-accent-primary)', color: 'white' }}
+        aria-label={`Show conversations${sessions.length > 0 ? ` (${sessions.length})` : ''}`}
+      >
+        <MessageSquare size={22} />
+        {sessions.length > 0 && (
+          <span
+            className="absolute -top-1 -right-1 flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full text-[11px] font-bold"
+            style={{ backgroundColor: 'white', color: 'var(--sam-color-accent-primary)' }}
+          >
+            {sessions.length}
+          </span>
         )}
-      </section>
+      </button>
+
+      {/* Mobile conversations modal */}
+      <MobileConversationsModal
+        open={showMobileConversations}
+        onClose={() => setShowMobileConversations(false)}
+        sessions={sessions}
+        onSessionClick={handleSessionClick}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      />
     </div>
   );
 }
