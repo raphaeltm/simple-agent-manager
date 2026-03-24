@@ -64,13 +64,13 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
   }
 
   if (!code || !state) {
-    throw errors.badRequest('Missing authorization code or state');
+    return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Missing authorization code or state')}`);
   }
 
   // Validate CSRF state and extract userId
   const storedStateRaw = await c.env.KV.get(`google-oauth-state:${state}`);
   if (!storedStateRaw) {
-    throw errors.badRequest('Invalid or expired OAuth state');
+    return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid or expired OAuth state')}`);
   }
 
   let storedState: { userId: string };
@@ -78,7 +78,7 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
     storedState = JSON.parse(storedStateRaw) as { userId: string };
   } catch {
     await c.env.KV.delete(`google-oauth-state:${state}`);
-    throw errors.badRequest('Invalid OAuth state format');
+    return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid OAuth state format')}`);
   }
 
   // Verify the session user matches the user who initiated the flow
@@ -148,7 +148,11 @@ googleAuthRoutes.get('/oauth-result', requireAuth(), requireApproved(), async (c
     throw errors.notFound('No pending OAuth result — it may have expired or already been retrieved');
   }
 
-  // One-time use: delete after retrieval
+  // One-time use: delete after retrieval.
+  // NOTE: get-then-delete is not atomic in KV — two simultaneous requests could
+  // both retrieve the handle. The TTL on the underlying token handle is the safety net.
+  // User-scoped key (no projectId) means concurrent flows for the same user use
+  // last-writer-wins — acceptable for this user-level setup wizard.
   await c.env.KV.delete(kvKey);
 
   return c.json({ handle });

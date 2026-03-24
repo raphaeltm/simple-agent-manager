@@ -98,7 +98,9 @@ projectDeploymentRoutes.get(
       throw errors.notFound('No pending OAuth result — it may have expired or already been retrieved');
     }
 
-    // One-time use: delete after retrieval
+    // One-time use: delete after retrieval.
+    // NOTE: get-then-delete is not atomic in KV — two simultaneous requests could
+    // both retrieve the handle. The TTL on the underlying token handle is the safety net.
     await c.env.KV.delete(kvKey);
 
     return c.json({ handle });
