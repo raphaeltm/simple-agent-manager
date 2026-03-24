@@ -210,6 +210,8 @@ gcpRoutes.post('/verify', async (c) => {
     await verifyGcpOidcSetup(userId, 'verification', gcpCred, c.env);
     return c.json({ success: true, verified: true });
   } catch (err) {
+    // Intentional 200-with-error pattern: verification is a check, not a mutation.
+    // The UI displays the result inline rather than treating it as an HTTP error.
     return c.json({
       success: false,
       verified: false,

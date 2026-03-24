@@ -9,6 +9,7 @@ import { ProviderError } from '@simple-agent-manager/providers';
 import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
 import { signNodeCallbackToken } from './jwt';
 import { createProviderForUser } from './provider-credentials';
+import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { log } from '../lib/logger';
 import { persistError } from './observability';
 import { getCredentialEncryptionKey } from '../lib/secrets';
@@ -192,7 +193,10 @@ export async function provisionNode(
       })
       .where(eq(schema.nodes.id, node.id));
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+    // Sanitize GCP errors to prevent leaking resource paths in client-visible errorMessage
+    const errorMessage = err instanceof GcpApiError
+      ? sanitizeGcpError(err, 'node-provisioning')
+      : (err instanceof Error ? err.message : String(err));
     const providerName = targetProvider ?? 'unknown';
     const statusCode = err instanceof ProviderError ? err.statusCode : undefined;
 

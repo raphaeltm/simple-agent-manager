@@ -31,7 +31,7 @@ interface GcpProjectListResponse {
  */
 function assertSafeCelValue(value: string, fieldName: string): void {
   if (!/^[a-zA-Z0-9_:.-]+$/.test(value)) {
-    throw new Error(`${fieldName} contains characters unsafe for CEL interpolation: ${value}`);
+    throw new Error(`${fieldName} contains characters unsafe for CEL interpolation`);
   }
 }
 
