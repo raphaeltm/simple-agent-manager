@@ -110,6 +110,23 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
         "assertion.iss == 'https://api.example.com' && assertion.project_id == 'proj-xyz-789'",
       );
     });
+
+    it('uses issuer-only attributeCondition when samProjectId is not provided', async () => {
+      mockFetch.mockResolvedValueOnce(mockGcpResponse({ name: 'op/1', done: true }));
+
+      await updateOidcProvider(
+        'token',
+        '123456',
+        'sam-pool',
+        'sam-oidc',
+        'https://api.example.com',
+        5000,
+      );
+
+      const call = mockFetch.mock.calls[0];
+      const body = JSON.parse(call![1]!.body as string);
+      expect(body.attributeCondition).toBe("assertion.iss == 'https://api.example.com'");
+    });
   });
 
   describe('grantWifUserOnSa', () => {
@@ -168,21 +185,89 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
       );
     });
 
-    it('an identity token for Project A cannot match Project B binding', async () => {
-      // This test verifies the logical invariant: when two projects (A and B) each
-      // create their own subject-scoped bindings, the principals are different strings
-      // that GCP IAM will not conflate.
-      const projectAMember =
-        'principal://iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/sam-pool/subject/project:project-a';
-      const projectBMember =
-        'principal://iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/sam-pool/subject/project:project-b';
+    it('two projects sharing a GCP project get non-overlapping principals', async () => {
+      // Call grantWifUserOnSa for two different SAM projects and verify
+      // the IAM binding members are distinct (not wildcards).
+      const members: string[] = [];
 
-      expect(projectAMember).not.toBe(projectBMember);
+      for (const projectId of ['project-a', 'project-b']) {
+        mockFetch.mockResolvedValueOnce(mockGcpResponse({ bindings: [], etag: 'abc' }));
+        mockFetch.mockResolvedValueOnce(mockGcpResponse({ etag: 'def' }));
 
-      // Verify the principal format matches what the identity token's sub claim produces.
-      // signIdentityToken sets sub to `project:${projectId}` — the principal must match exactly.
-      expect(projectAMember).toContain('subject/project:project-a');
-      expect(projectBMember).toContain('subject/project:project-b');
+        await grantWifUserOnSa(
+          'token',
+          'my-gcp-project',
+          '123456',
+          'sa@my-gcp-project.iam.gserviceaccount.com',
+          'sam-pool',
+          5000,
+          projectId,
+        );
+
+        const setCall = mockFetch.mock.calls.at(-1);
+        const setBody = JSON.parse(setCall![1]!.body as string);
+        const binding = setBody.policy.bindings.find(
+          (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser',
+        );
+        members.push(binding.members[0]);
+      }
+
+      // Principals must be different and neither must be a wildcard
+      expect(members[0]).not.toBe(members[1]);
+      expect(members[0]).not.toContain('/*');
+      expect(members[1]).not.toContain('/*');
+      // Each must contain the respective project ID in the subject
+      expect(members[0]).toContain('subject/project:project-a');
+      expect(members[1]).toContain('subject/project:project-b');
+    });
+  });
+
+  describe('CEL injection prevention', () => {
+    it('rejects samProjectId with single quotes (CEL injection)', async () => {
+      mockFetch.mockResolvedValueOnce(mockGcpResponse({ name: 'op/1', done: true }));
+
+      await expect(
+        createOidcProvider(
+          'token',
+          '123456',
+          'sam-pool',
+          'sam-oidc',
+          'https://api.example.com',
+          5000,
+          "x' || true || 'y",
+        ),
+      ).rejects.toThrow('unsafe for CEL interpolation');
+    });
+
+    it('rejects samProjectId with spaces', async () => {
+      await expect(
+        grantWifUserOnSa(
+          'token',
+          'my-gcp-project',
+          '123456',
+          'sa@x.com',
+          'sam-pool',
+          5000,
+          'project with spaces',
+        ),
+      ).rejects.toThrow('unsafe for CEL interpolation');
+    });
+
+    it('accepts valid ULID-format samProjectId', async () => {
+      mockFetch.mockResolvedValueOnce(mockGcpResponse({ name: 'op/1', done: true }));
+
+      // Should not throw — ULIDs are alphanumeric
+      await expect(
+        createOidcProvider(
+          'token',
+          '123456',
+          'sam-pool',
+          'sam-oidc',
+          'https://api.example.com',
+          5000,
+          '01KHRJGANBBWGDY1NZ0KVF0D4J',
+        ),
+      ).resolves.toBeUndefined();
     });
   });
 });

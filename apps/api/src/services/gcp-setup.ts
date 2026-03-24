@@ -23,6 +23,17 @@ interface GcpProjectListResponse {
   nextPageToken?: string;
 }
 
+/**
+ * Validate a value is safe for interpolation into a GCP CEL attribute condition.
+ * SAM project IDs are ULIDs (alphanumeric), but this guard enforces the invariant
+ * at the function boundary to prevent injection if a non-ULID value is ever passed.
+ */
+function assertSafeCelValue(value: string, fieldName: string): void {
+  if (!/^[a-zA-Z0-9_:.\-]+$/.test(value)) {
+    throw new Error(`${fieldName} contains characters unsafe for CEL interpolation: ${value}`);
+  }
+}
+
 /** Status callback for setup progress reporting */
 export type SetupProgressCallback = (step: string, status: 'pending' | 'in_progress' | 'done' | 'error') => void;
 
@@ -185,6 +196,9 @@ export async function createOidcProvider(
 
   // Enforce both issuer and SAM project ID in the attribute condition to prevent
   // cross-project impersonation within the same WIF pool.
+  if (samProjectId) {
+    assertSafeCelValue(samProjectId, 'samProjectId');
+  }
   const attributeCondition = samProjectId
     ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
     : `assertion.iss == '${issuerUri}'`;
@@ -243,6 +257,9 @@ export async function updateOidcProvider(
 ): Promise<void> {
   const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
 
+  if (samProjectId) {
+    assertSafeCelValue(samProjectId, 'samProjectId');
+  }
   const attributeCondition = samProjectId
     ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
     : `assertion.iss == '${issuerUri}'`;
@@ -331,6 +348,11 @@ export async function grantWifUserOnSa(
   timeoutMs: number,
   samProjectId?: string,
 ): Promise<void> {
+  // Validate early, before any network calls (fail-fast pattern).
+  if (samProjectId) {
+    assertSafeCelValue(samProjectId, 'samProjectId');
+  }
+
   const saResource = `projects/${projectId}/serviceAccounts/${saEmail}`;
 
   // Read current policy
