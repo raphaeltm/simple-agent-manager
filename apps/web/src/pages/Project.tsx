@@ -99,7 +99,7 @@ export function Project() {
   // ---------------------------------------------------------------------------
   return (
     <PageLayout
-      title="Project"
+      title={project?.name ?? 'Project'}
       maxWidth="xl"
       headerRight={<UserMenu />}
       compact={isMobile}
@@ -120,7 +120,7 @@ export function Project() {
           <Alert variant="error">Project not found.</Alert>
         </div>
       ) : (
-        <div className="flex flex-col flex-1 min-h-0 mt-2">
+        <div className={`flex flex-col flex-1 min-h-0 ${isMobile ? 'mt-2' : 'mt-3'}`}>
           <ProjectContext.Provider value={contextValue}>
             <Outlet />
           </ProjectContext.Provider>
