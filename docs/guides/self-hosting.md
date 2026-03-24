@@ -105,6 +105,8 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `GOOGLE_CLIENT_ID` | Google Cloud Console OAuth 2.0 client ID (enables "Connect Google Cloud" in Settings) |
 | `GOOGLE_CLIENT_SECRET` | Google Cloud Console OAuth 2.0 client secret |
 
+> **GCP OAuth Redirect URI**: When creating a Google OAuth 2.0 client, add `https://api.<YOUR_BASE_DOMAIN>/api/deployment/gcp/callback` as an authorized redirect URI. This is a single static URI shared by all projects — no per-project URIs needed.
+
 **Optional GCP deployment configuration** (env vars, not secrets — sensible defaults provided):
 
 | Variable | Default | Description |

@@ -79,7 +79,7 @@ vi.mock('../../../src/services/gcp-setup', () => ({
   listGcpProjects: vi.fn().mockResolvedValue([]),
 }));
 
-const { projectDeploymentRoutes } = await import(
+const { projectDeploymentRoutes, gcpDeployCallbackRoute } = await import(
   '../../../src/routes/project-deployment'
 );
 
@@ -95,6 +95,7 @@ function createTestApp() {
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
   app.route('/api/projects', projectDeploymentRoutes);
+  app.route('/api/deployment', gcpDeployCallbackRoute);
   return app;
 }
 
@@ -346,7 +347,7 @@ describe('GET /:id/deployment/gcp/authorize', () => {
     chainMocks();
   });
 
-  it('redirects to Google OAuth with correct params', async () => {
+  it('redirects to Google OAuth with correct params and static redirect URI', async () => {
     const app = createTestApp();
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp/authorize',
@@ -360,6 +361,10 @@ describe('GET /:id/deployment/gcp/authorize', () => {
     expect(location).toContain('scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform');
     expect(location).toContain('access_type=online');
 
+    // Redirect URI must be static (no project ID) so a single URI works for all projects
+    const redirectUri = encodeURIComponent('https://api.example.com/api/deployment/gcp/callback');
+    expect(location).toContain(`redirect_uri=${redirectUri}`);
+
     // Should have stored state in KV
     expect(mockKvPut).toHaveBeenCalledWith(
       expect.stringContaining('gcp-deploy-oauth-state:'),
@@ -371,7 +376,7 @@ describe('GET /:id/deployment/gcp/authorize', () => {
 
 // ─── OAuth callback ─────────────────────────────────────────────────────
 
-describe('GET /:id/deployment/gcp/callback', () => {
+describe('GET /api/deployment/gcp/callback (static URI)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     chainMocks();
@@ -380,7 +385,7 @@ describe('GET /:id/deployment/gcp/callback', () => {
   it('redirects with error when Google returns error param', async () => {
     const app = createTestApp();
     const res = await app.request(
-      '/api/projects/proj-1/deployment/gcp/callback?error=access_denied',
+      '/api/deployment/gcp/callback?error=access_denied',
       { method: 'GET', redirect: 'manual' },
       mockEnv,
     );
@@ -392,21 +397,35 @@ describe('GET /:id/deployment/gcp/callback', () => {
   it('redirects with error when code or state is missing', async () => {
     const app = createTestApp();
     const res = await app.request(
-      '/api/projects/proj-1/deployment/gcp/callback?code=abc',
+      '/api/deployment/gcp/callback?code=abc',
       { method: 'GET', redirect: 'manual' },
       mockEnv,
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
     expect(location).toContain('gcp_deploy_error=');
+  });
+
+  it('redirects with error when state is not a valid UUID', async () => {
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/deployment/gcp/callback?code=abc&state=not-a-uuid',
+      { method: 'GET', redirect: 'manual' },
+      mockEnv,
+    );
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    expect(location).toContain('gcp_deploy_error=');
+    // KV should never be queried with an invalid state format
+    expect(mockKvGet).not.toHaveBeenCalled();
   });
 
   it('redirects with error when KV state is expired/missing', async () => {
-    mockKvGet.mockResolvedValue(null); // State expired
+    mockKvGet.mockResolvedValue(null);
 
     const app = createTestApp();
     const res = await app.request(
-      '/api/projects/proj-1/deployment/gcp/callback?code=abc&state=expired-state',
+      '/api/deployment/gcp/callback?code=abc&state=00000000-0000-0000-0000-000000000000',
       { method: 'GET', redirect: 'manual' },
       mockEnv,
     );
@@ -415,19 +434,56 @@ describe('GET /:id/deployment/gcp/callback', () => {
     expect(location).toContain('gcp_deploy_error=');
   });
 
-  it('redirects with error when state projectId does not match route param', async () => {
+  it('redirects with error when state userId does not match session and preserves state token', async () => {
+    // KV returns state with a different userId than the session (test-user-id)
     mockKvGet.mockResolvedValue(
-      JSON.stringify({ projectId: 'different-project', userId: 'u1' }),
+      JSON.stringify({ projectId: 'proj-1', userId: 'different-user' }),
     );
 
     const app = createTestApp();
     const res = await app.request(
-      '/api/projects/proj-1/deployment/gcp/callback?code=abc&state=valid-state',
+      '/api/deployment/gcp/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
       { method: 'GET', redirect: 'manual' },
       mockEnv,
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
     expect(location).toContain('gcp_deploy_error=');
+    expect(location).toContain('user%20mismatch');
+
+    // State token must NOT be deleted on user mismatch — the legitimate user can still retry
+    expect(mockKvDelete).not.toHaveBeenCalled();
+  });
+
+  it('redirects to correct project settings using projectId from KV state', async () => {
+    // KV state has projectId — this is the ONLY source of project context
+    mockKvGet.mockResolvedValue(
+      JSON.stringify({ projectId: 'proj-from-state', userId: 'test-user-id' }),
+    );
+
+    // Mock successful token exchange
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ access_token: 'gcp-token-123' }), { status: 200 }),
+    );
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/deployment/gcp/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
+      { method: 'GET', redirect: 'manual' },
+      mockEnv,
+    );
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+
+    // Redirect goes to the project from KV state, not from URL
+    expect(location).toContain('/projects/proj-from-state/settings');
+    expect(location).toContain('gcp_deploy_setup=');
+
+    // Token exchange uses the static redirect URI
+    const fetchCall = mockFetch.mock.calls[0]!;
+    const body = fetchCall[1]!.body as URLSearchParams;
+    expect(body.get('redirect_uri')).toBe('https://api.example.com/api/deployment/gcp/callback');
+
+    mockFetch.mockRestore();
   });
 });
