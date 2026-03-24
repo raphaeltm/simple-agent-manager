@@ -356,9 +356,6 @@ export const DEFAULT_GCP_DEPLOY_SERVICE_ACCOUNT_ID = 'sam-deployer';
 /** Default identity token expiry for deployment (10 minutes). Override via GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS env var. */
 export const DEFAULT_GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS = 600;
 
-/** Default token cache TTL for deployment (55 minutes). Override via GCP_DEPLOY_TOKEN_CACHE_TTL_SECONDS env var. */
-export const DEFAULT_GCP_DEPLOY_TOKEN_CACHE_TTL_SECONDS = 3300;
-
 /** Default GCP STS token URL. Override via GCP_STS_TOKEN_URL env var. */
 export const DEFAULT_GCP_STS_TOKEN_URL = 'https://sts.googleapis.com/v1/token';
 

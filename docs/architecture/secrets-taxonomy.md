@@ -66,6 +66,19 @@ These override `ENCRYPTION_KEY` for their respective domain, providing secret is
 | `GITHUB_APP_ID` | GitHub App integration | For repo access |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App authentication | For repo access |
 
+### Optional Runtime Configuration (Not Secrets)
+
+These are env vars with sensible defaults — override only if needed:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GCP_DEPLOY_WIF_POOL_ID` | `sam-deploy-pool` | WIF pool ID for project-level GCP deployment |
+| `GCP_DEPLOY_WIF_PROVIDER_ID` | `sam-oidc` | OIDC provider ID within the deploy WIF pool |
+| `GCP_DEPLOY_SERVICE_ACCOUNT_ID` | `sam-deployer` | Service account for deployment operations |
+| `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS` | `600` | SAM-issued identity token lifetime (10 min) |
+| `GCP_STS_TOKEN_URL` | `https://sts.googleapis.com/v1/token` | GCP STS endpoint (override for VPC Service Controls) |
+| `GCP_IAM_CREDENTIALS_BASE_URL` | `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts` | GCP IAM SA impersonation base URL |
+
 ### How Platform Secrets Are Set
 
 ```bash
