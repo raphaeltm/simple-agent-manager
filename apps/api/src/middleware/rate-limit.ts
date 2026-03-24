@@ -37,7 +37,7 @@ export const DEFAULT_RATE_LIMITS = {
 } as const;
 
 /** Default time window (1 hour in seconds) */
-const DEFAULT_WINDOW_SECONDS = 3600;
+export const DEFAULT_WINDOW_SECONDS = 3600;
 
 /**
  * KV entry for rate limit tracking.

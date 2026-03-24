@@ -13,6 +13,7 @@ import { validateMcpToken } from '../services/mcp-token';
 import {
   checkRateLimit,
   createRateLimitKey,
+  DEFAULT_WINDOW_SECONDS,
   getCurrentWindowStart,
   getRateLimit,
   RateLimitError,
@@ -349,8 +350,14 @@ projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
     expirySeconds,
   );
 
-  // Cache the signed token with TTL = expiry - 60s buffer (min 30s)
-  const cacheTtl = Math.max(30, expirySeconds - 60);
+  // Cache the signed token with TTL = expiry - buffer (min floor)
+  const cacheBuffer = c.env.IDENTITY_TOKEN_CACHE_BUFFER_SECONDS
+    ? parseInt(c.env.IDENTITY_TOKEN_CACHE_BUFFER_SECONDS, 10)
+    : 60;
+  const cacheMinTtl = c.env.IDENTITY_TOKEN_CACHE_MIN_TTL_SECONDS
+    ? parseInt(c.env.IDENTITY_TOKEN_CACHE_MIN_TTL_SECONDS, 10)
+    : 30;
+  const cacheTtl = Math.max(cacheMinTtl, expirySeconds - cacheBuffer);
   await c.env.KV.put(cacheKey, identityToken, { expirationTtl: cacheTtl });
 
   return c.json({ token: identityToken });
