@@ -246,7 +246,7 @@ export function IdeasPage() {
 
       {/* Search + Filter bar — always single row */}
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
+        <div className="relative flex-1 min-w-0">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none" />
           <input
             type="text"
@@ -260,7 +260,7 @@ export function IdeasPage() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as IdeaStatus | 'all')}
           aria-label="Filter by status"
-          className="px-3 py-2 text-sm rounded-lg border border-border-default bg-surface-inset text-fg-primary focus:outline-none focus:border-accent cursor-pointer shrink-0"
+          className="w-[140px] px-3 py-2 text-sm rounded-lg border border-border-default bg-surface-inset text-fg-primary focus:outline-none focus:border-accent cursor-pointer shrink-0"
         >
           <option value="all">All statuses</option>
           {STATUS_ORDER.map((status) => (
