@@ -389,29 +389,33 @@ describe('GET /:id/deployment/gcp/callback', () => {
     expect(location).toContain('gcp_deploy_error=access_denied');
   });
 
-  it('returns 400 when code or state is missing', async () => {
+  it('redirects with error when code or state is missing', async () => {
     const app = createTestApp();
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp/callback?code=abc',
-      { method: 'GET' },
+      { method: 'GET', redirect: 'manual' },
       mockEnv,
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    expect(location).toContain('gcp_deploy_error=');
   });
 
-  it('returns 400 when KV state is expired/missing', async () => {
+  it('redirects with error when KV state is expired/missing', async () => {
     mockKvGet.mockResolvedValue(null); // State expired
 
     const app = createTestApp();
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp/callback?code=abc&state=expired-state',
-      { method: 'GET' },
+      { method: 'GET', redirect: 'manual' },
       mockEnv,
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    expect(location).toContain('gcp_deploy_error=');
   });
 
-  it('returns 400 when state projectId does not match route param', async () => {
+  it('redirects with error when state projectId does not match route param', async () => {
     mockKvGet.mockResolvedValue(
       JSON.stringify({ projectId: 'different-project', userId: 'u1' }),
     );
@@ -419,9 +423,11 @@ describe('GET /:id/deployment/gcp/callback', () => {
     const app = createTestApp();
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp/callback?code=abc&state=valid-state',
-      { method: 'GET' },
+      { method: 'GET', redirect: 'manual' },
       mockEnv,
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    expect(location).toContain('gcp_deploy_error=');
   });
 });

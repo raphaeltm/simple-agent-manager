@@ -56,7 +56,9 @@ export async function handleGetDeploymentCredentials(
   // Build the identity token endpoint URL
   const identityTokenUrl = `https://api.${env.BASE_DOMAIN}/api/projects/${tokenData.projectId}/deployment-identity-token`;
 
-  // Build WIF audience URI (protocol-relative for STS)
+  // Build WIF audience URI — uses protocol-relative `//` format for the STS `audience` field.
+  // NOTE: This is intentionally different from the JWT `aud` claim in the identity token endpoint
+  // (project-deployment.ts), which uses `https://`. Both forms are per GCP WIF spec.
   const poolId = cred.wifPoolId || env.GCP_DEPLOY_WIF_POOL_ID || DEFAULT_GCP_DEPLOY_WIF_POOL_ID;
   const providerId = cred.wifProviderId || env.GCP_DEPLOY_WIF_PROVIDER_ID || DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID;
   const audience = `//iam.googleapis.com/projects/${cred.gcpProjectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;

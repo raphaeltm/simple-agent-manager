@@ -95,19 +95,19 @@ projectDeploymentRoutes.get('/:id/deployment/gcp/callback', async (c) => {
   }
 
   if (!code || !state) {
-    throw errors.badRequest('Missing authorization code or state');
+    return c.redirect(`${appUrl}?gcp_deploy_error=${encodeURIComponent('Missing authorization code or state')}`);
   }
 
   // Validate CSRF state
   const storedStateRaw = await c.env.KV.get(`gcp-deploy-oauth-state:${state}`);
   if (!storedStateRaw) {
-    throw errors.badRequest('Invalid or expired OAuth state');
+    return c.redirect(`${appUrl}?gcp_deploy_error=${encodeURIComponent('Invalid or expired OAuth state')}`);
   }
   await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
 
   const storedState = JSON.parse(storedStateRaw) as { projectId: string; userId: string };
   if (storedState.projectId !== projectId) {
-    throw errors.badRequest('OAuth state project mismatch');
+    return c.redirect(`${appUrl}?gcp_deploy_error=${encodeURIComponent('OAuth state project mismatch')}`);
   }
 
   // Exchange auth code for access token
@@ -335,6 +335,7 @@ projectDeploymentRoutes.delete(
  */
 projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
   const projectId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
 
   // Authenticate via Bearer token (callback token or MCP token)
   const authHeader = c.req.header('Authorization');
@@ -363,7 +364,6 @@ projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
     }
 
     // Verify workspace belongs to project
-    const db = drizzle(c.env.DATABASE, { schema });
     const wsRows = await db
       .select()
       .from(schema.workspaces)
@@ -380,8 +380,6 @@ projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
     userId = workspace.userId;
     workspaceId = cbWorkspaceId;
   }
-
-  const db = drizzle(c.env.DATABASE, { schema });
 
   // Look up deployment credential
   const credRows = await db
@@ -400,7 +398,10 @@ projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
     throw errors.notFound('No GCP deployment credential configured for this project');
   }
 
-  // Build the WIF audience URI
+  // Build the WIF audience URI.
+  // NOTE: The JWT `aud` claim uses the full `https://` scheme, which is what GCP expects
+  // for identity tokens. The STS `audience` field in the credential config (deployment-tools.ts)
+  // uses the protocol-relative `//` format. Both forms are intentionally different per GCP WIF spec.
   const poolId = cred.wifPoolId || c.env.GCP_DEPLOY_WIF_POOL_ID || DEFAULT_GCP_DEPLOY_WIF_POOL_ID;
   const providerId = cred.wifProviderId || c.env.GCP_DEPLOY_WIF_PROVIDER_ID || DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID;
   const audience = `https://iam.googleapis.com/projects/${cred.gcpProjectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
