@@ -155,6 +155,9 @@ type Config struct {
 	FileFindTimeout    time.Duration // Timeout for recursive file find (default: 15s)
 	FileFindMaxEntries int           // Max entries returned by file find (default: 5000)
 
+	// Callback retry settings - configurable per constitution principle XI
+	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 10s)
+
 	// Error reporting settings - configurable per constitution principle XI
 	ErrorReportFlushInterval time.Duration // Background flush interval (default: 30s)
 	ErrorReportMaxBatchSize  int           // Immediate flush threshold (default: 10)
@@ -322,6 +325,9 @@ func Load() (*Config, error) {
 		FileListMaxEntries: getEnvInt("FILE_LIST_MAX_ENTRIES", 1000),
 		FileFindTimeout:    getEnvDuration("FILE_FIND_TIMEOUT", 15*time.Second),
 		FileFindMaxEntries: getEnvInt("FILE_FIND_MAX_ENTRIES", 5000),
+
+		// Callback retry settings - configurable per constitution principle XI
+		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", 10*time.Second),
 
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval: getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),

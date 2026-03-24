@@ -155,6 +155,76 @@ func (s *Server) sendNodeHeartbeat() {
 		s.setCallbackToken(hbResp.RefreshedToken)
 		slog.Info("Callback token refreshed via heartbeat response")
 	}
+
+	// Heartbeat succeeded — connectivity to the control plane is confirmed.
+	// Retry any pending workspace-ready callbacks in a background goroutine
+	// so the heartbeat ticker is not blocked by potentially slow HTTP calls.
+	go func() {
+		if !s.readyRetryMu.TryLock() {
+			return // previous retry run still in flight — skip this cycle
+		}
+		defer s.readyRetryMu.Unlock()
+		s.retryPendingReadyCallbacks()
+	}()
+}
+
+// retryPendingReadyCallbacks checks for workspaces whose ready callback was not
+// delivered and retries them. Called after a successful heartbeat proves that
+// outbound connectivity to the control plane has been restored.
+func (s *Server) retryPendingReadyCallbacks() {
+	pending := s.pendingReadyCallbacks()
+	if len(pending) == 0 {
+		return
+	}
+
+	for _, p := range pending {
+		status := p.Status
+		if status == "" {
+			status = "running"
+		}
+
+		body, err := json.Marshal(map[string]string{"status": status})
+		if err != nil {
+			slog.Error("Failed to marshal workspace-ready retry payload",
+				"workspace", p.WorkspaceID, "error", err)
+			continue
+		}
+
+		endpoint := strings.TrimRight(s.config.ControlPlaneURL, "/") +
+			"/api/workspaces/" + p.WorkspaceID + "/ready"
+
+		req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			slog.Error("Failed to create workspace-ready retry request",
+				"workspace", p.WorkspaceID, "error", err)
+			continue
+		}
+		req.Header.Set("Authorization", "Bearer "+p.CallbackToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := (&http.Client{Timeout: s.config.WorkspaceReadyCallbackTimeout}).Do(req)
+		if err != nil {
+			slog.Warn("Workspace-ready retry failed (will try again on next heartbeat)",
+				"workspace", p.WorkspaceID, "error", err)
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			s.clearReadyCallbackPending(p.WorkspaceID)
+			slog.Info("Workspace-ready callback delivered on heartbeat retry",
+				"workspace", p.WorkspaceID, "status", status)
+		} else if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			// Permanent failure (e.g., workspace was already stopped/deleted)
+			// — stop retrying.
+			s.clearReadyCallbackPending(p.WorkspaceID)
+			slog.Warn("Workspace-ready retry got permanent error, giving up",
+				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode)
+		} else {
+			slog.Warn("Workspace-ready retry got transient error (will try again)",
+				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode)
+		}
+	}
 }
 
 func (s *Server) activeWorkspaceCount() int {

@@ -37,6 +37,23 @@ const (
 
 var projectEnvKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// CallbackError wraps an error that occurred during the workspace-ready callback,
+// NOT during actual provisioning. The workspace is functional but the control plane
+// was not notified. Callers should transition the workspace to the ready state and
+// retry the callback when connectivity is restored.
+type CallbackError struct {
+	Err    error
+	Status string // "running" or "recovery"
+}
+
+func (e *CallbackError) Error() string {
+	return fmt.Sprintf("workspace ready (status=%s) but callback failed: %s", e.Status, e.Err)
+}
+
+func (e *CallbackError) Unwrap() error {
+	return e.Err
+}
+
 // VolumeNameForWorkspace returns the Docker named volume name for a workspace.
 // Exported so that workspace deletion can also remove the volume.
 func VolumeNameForWorkspace(workspaceID string) string {
@@ -201,7 +218,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
-		return err
+		return &CallbackError{Err: err, Status: readyStatus}
 	}
 	reporter.Log("workspace_ready", "completed", "Workspace is ready")
 
@@ -328,7 +345,10 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
-		return recoveryMode, err
+		// Workspace is fully provisioned — only the callback to the control plane
+		// failed. Return a CallbackError so the caller can distinguish this from
+		// a real provisioning failure and retry the callback later.
+		return recoveryMode, &CallbackError{Err: err, Status: readyStatus}
 	}
 	reporter.Log("workspace_ready", "completed", "Workspace is ready")
 

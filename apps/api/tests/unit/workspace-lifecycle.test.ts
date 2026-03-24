@@ -1,11 +1,14 @@
 /**
  * TDF-5: Workspace Lifecycle — Event-Driven Readiness Tests
  *
- * Validates that the workspace-ready flow is purely callback-driven:
- * - handleWorkspaceReady() does NOT poll D1
+ * Validates that the workspace-ready flow is callback-driven with periodic
+ * D1 polling as a safety net:
+ * - handleWorkspaceReady() polls D1 periodically to catch cases where the
+ *   callback succeeded (updating D1) but the DO notification failed, or
+ *   where the VM agent retried the callback via heartbeat after initial failures
  * - /ready and /provisioning-failed handlers notify the DO inline (not waitUntil)
  * - advanceWorkspaceReady() handles all race conditions correctly
- * - Timeout alarm is the only fallback
+ * - Timeout alarm catches permanent callback delivery failures
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -24,19 +27,20 @@ const routeSource = [
 // handleWorkspaceReady — Pure Callback-Driven (No D1 Polling)
 // ============================================================================
 
-describe('handleWorkspaceReady — pure callback-driven (TDF-5)', () => {
+describe('handleWorkspaceReady — callback-driven with D1 polling safety net', () => {
   // Extract the handleWorkspaceReady method section for precise assertions
   const wsReadySection = doSource.slice(
     doSource.indexOf('private async handleWorkspaceReady('),
     doSource.indexOf('private async handleAgentSession(')
   );
 
-  it('does NOT poll D1 for workspace status on a schedule', () => {
-    // TDF-5: D1 periodic polling removed. A single D1 check at timeout
-    // boundary provides defense-in-depth without active polling.
+  it('polls D1 for workspace status as a safety net', () => {
+    // D1 polling catches cases where the callback succeeded (updating D1) but
+    // the DO notification failed, or where the VM agent retried the callback via
+    // heartbeat after initial failures.
     expect(wsReadySection).not.toContain('getAgentPollIntervalMs');
-    // D1 check exists only inside the timeout block (safety net)
-    expect(wsReadySection).toContain('workspace_ready_from_d1_at_timeout');
+    expect(wsReadySection).toContain('workspace_ready_from_d1_poll');
+    expect(wsReadySection).toContain('getWorkspaceReadyPollIntervalMs');
   });
 
   it('checks callback-received flag (workspaceReadyReceived)', () => {
@@ -73,9 +77,10 @@ describe('handleWorkspaceReady — pure callback-driven (TDF-5)', () => {
     expect(wsReadySection).toContain('state.workspaceReadyStartedAt = Date.now()');
   });
 
-  it('schedules alarm at remaining timeout boundary (not fixed poll interval)', () => {
-    expect(wsReadySection).toContain('const remaining = Math.max(timeoutMs - elapsed, 0)');
-    expect(wsReadySection).toContain('setAlarm(Date.now() + remaining)');
+  it('schedules next alarm using poll interval capped by remaining timeout', () => {
+    expect(wsReadySection).toContain('getWorkspaceReadyPollIntervalMs()');
+    expect(wsReadySection).toContain('Math.min(pollIntervalMs');
+    expect(wsReadySection).toContain('setAlarm(Date.now() + nextPollMs)');
   });
 
   it('does NOT use agent poll interval for workspace ready step', () => {
@@ -87,14 +92,9 @@ describe('handleWorkspaceReady — pure callback-driven (TDF-5)', () => {
     expect(wsReadySection).toContain("updateD1ExecutionStep(state.taskId, 'workspace_ready')");
   });
 
-  it('references TDF-5 in comment explaining D1 polling removal', () => {
-    expect(wsReadySection).toContain('TDF-5');
-    expect(wsReadySection).toContain('D1 polling has been removed');
-  });
-
-  it('references TDF-4 callback retry in comment', () => {
-    expect(wsReadySection).toContain('TDF-4');
-    expect(wsReadySection).toContain('exponential backoff');
+  it('explains periodic polling as a safety net in comments', () => {
+    expect(wsReadySection).toContain('safety net');
+    expect(wsReadySection).toContain('heartbeat');
   });
 });
 
@@ -361,35 +361,30 @@ describe('workspace lifecycle race condition handling', () => {
 });
 
 // ============================================================================
-// No Residual D1 Polling in DO
+// D1 Polling in handleWorkspaceReady (Periodic Safety Net)
 // ============================================================================
 
-describe('no D1 polling in handleWorkspaceReady (single timeout check only)', () => {
+describe('D1 polling in handleWorkspaceReady (periodic safety net)', () => {
   const wsReadySection = doSource.slice(
     doSource.indexOf('private async handleWorkspaceReady('),
     doSource.indexOf('private async handleAgentSession(')
   );
 
-  it('does not poll D1 in a loop or on a schedule', () => {
-    // No getAgentPollIntervalMs or setInterval-style polling
+  it('does not use agent poll interval (has its own workspace-ready poll interval)', () => {
+    // Uses getWorkspaceReadyPollIntervalMs, not getAgentPollIntervalMs
     expect(wsReadySection).not.toContain('getAgentPollIntervalMs');
+    expect(wsReadySection).toContain('getWorkspaceReadyPollIntervalMs');
   });
 
-  it('has a single D1 safety check only at timeout boundary', () => {
-    // The only D1 query (besides updateD1ExecutionStep) should be the
-    // last-resort check inside the timeout block
-    expect(wsReadySection).toContain('workspace_ready_from_d1_at_timeout');
+  it('polls D1 for workspace status on each alarm', () => {
+    expect(wsReadySection).toContain('workspace_ready_from_d1_poll');
     expect(wsReadySection).toContain('SELECT status, error_message FROM workspaces');
   });
 
-  it('uses D1 status to recover at timeout instead of failing', () => {
-    // If D1 says running/recovery, advance instead of throwing
-    const timeoutBlock = wsReadySection.slice(
-      wsReadySection.indexOf('if (elapsed > timeoutMs)'),
-      wsReadySection.indexOf('// No callback yet')
-    );
-    expect(timeoutBlock).toContain("wsRow?.status === 'running'");
-    expect(timeoutBlock).toContain('advanceToStep');
+  it('advances to agent_session if D1 shows running or recovery', () => {
+    expect(wsReadySection).toContain("wsRow?.status === 'running'");
+    expect(wsReadySection).toContain("wsRow?.status === 'recovery'");
+    expect(wsReadySection).toContain('advanceToStep');
   });
 
   it('uses updateD1ExecutionStep at step entry', () => {
@@ -401,18 +396,16 @@ describe('no D1 polling in handleWorkspaceReady (single timeout check only)', ()
 // Timeout Alarm Strategy
 // ============================================================================
 
-describe('workspace ready timeout alarm strategy', () => {
+describe('workspace ready timeout and polling alarm strategy', () => {
   const wsReadySection = doSource.slice(
     doSource.indexOf('private async handleWorkspaceReady('),
     doSource.indexOf('private async handleAgentSession(')
   );
 
-  it('calculates remaining time until timeout (clamped to 0)', () => {
-    expect(wsReadySection).toContain('const remaining = Math.max(timeoutMs - elapsed, 0)');
-  });
-
-  it('schedules alarm at remaining time boundary', () => {
-    expect(wsReadySection).toContain('setAlarm(Date.now() + remaining)');
+  it('schedules alarm using poll interval capped by remaining timeout', () => {
+    expect(wsReadySection).toContain('const pollIntervalMs = this.getWorkspaceReadyPollIntervalMs()');
+    expect(wsReadySection).toContain('Math.min(pollIntervalMs');
+    expect(wsReadySection).toContain('Math.max(timeoutMs - elapsed, 0)');
   });
 
   it('uses permanent error flag for timeout', () => {

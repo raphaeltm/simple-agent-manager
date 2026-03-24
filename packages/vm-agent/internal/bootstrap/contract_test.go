@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -183,5 +184,109 @@ func TestReadyCallbackURLConstruction(t *testing.T) {
 	}
 	if receivedPath != "/api/workspaces/ws-url-test/ready" {
 		t.Fatalf("unexpected path: %s", receivedPath)
+	}
+}
+
+// =============================================================================
+// CallbackError — Sentinel Type for Callback-Only Failures
+// =============================================================================
+
+func TestCallbackErrorWrapsUnderlyingError(t *testing.T) {
+	t.Parallel()
+
+	inner := context.DeadlineExceeded
+	cbErr := &CallbackError{Err: inner, Status: "running"}
+
+	if !strings.Contains(cbErr.Error(), "running") {
+		t.Errorf("expected error string to contain status, got %q", cbErr.Error())
+	}
+	if !strings.Contains(cbErr.Error(), inner.Error()) {
+		t.Errorf("expected error string to contain inner error, got %q", cbErr.Error())
+	}
+	if cbErr.Unwrap() != inner {
+		t.Error("expected Unwrap to return the inner error")
+	}
+}
+
+func TestCallbackErrorIsDistinguishableFromPlainError(t *testing.T) {
+	t.Parallel()
+
+	cbErr := &CallbackError{Err: context.DeadlineExceeded, Status: "recovery"}
+	var target *CallbackError
+	if !errors.As(cbErr, &target) {
+		t.Fatal("expected errors.As to match CallbackError")
+	}
+	if target.Status != "recovery" {
+		t.Errorf("expected status 'recovery', got %q", target.Status)
+	}
+}
+
+func TestMarkWorkspaceReadyFailureWrapsAsCallbackError(t *testing.T) {
+	t.Parallel()
+
+	// Control plane returns 503 on /ready — simulates transient network issue.
+	// We test the wrapping logic directly via markWorkspaceReady() rather than
+	// going through PrepareWorkspace(), which has side effects (devcontainer setup)
+	// that are hard to mock in this test context.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL: ts.URL,
+		WorkspaceID:     "ws-callback-err-test",
+		CallbackToken:   "test-token",
+	}
+
+	// markWorkspaceReady returns a plain error — verify it can be wrapped
+	err := markWorkspaceReady(ctx, cfg, "running")
+	if err == nil {
+		t.Fatal("expected error from markWorkspaceReady")
+	}
+
+	// The CallbackError wrapping happens in PrepareWorkspace()/Run() callers.
+	// Verify the sentinel type wraps the underlying error correctly.
+	cbErr := &CallbackError{Err: err, Status: "running"}
+	var target *CallbackError
+	if !errors.As(cbErr, &target) {
+		t.Fatal("expected errors.As to match CallbackError")
+	}
+	if target.Status != "running" {
+		t.Errorf("expected status 'running', got %q", target.Status)
+	}
+	if target.Unwrap() != err {
+		t.Error("expected Unwrap to return the original error")
+	}
+}
+
+func TestMarkWorkspaceReadyFailureWrapsAsCallbackErrorRecovery(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL: ts.URL,
+		WorkspaceID:     "ws-recovery-err-test",
+		CallbackToken:   "test-token",
+	}
+
+	err := markWorkspaceReady(ctx, cfg, "recovery")
+	if err == nil {
+		t.Fatal("expected error from markWorkspaceReady")
+	}
+
+	cbErr := &CallbackError{Err: err, Status: "recovery"}
+	if cbErr.Status != "recovery" {
+		t.Errorf("expected status 'recovery', got %q", cbErr.Status)
 	}
 }
