@@ -59,39 +59,19 @@ function renderProject(path = '/projects/proj-1/overview') {
 }
 
 describe('Project shell (non-chat routes)', () => {
-  it('renders project name as heading after loading', async () => {
+  it('shows project name in PageLayout but no status/settings buttons', async () => {
     renderProject();
-    expect(await screen.findByRole('heading', { name: 'My Project' })).toBeInTheDocument();
-  });
-
-  it('does not render breadcrumb (sidebar provides navigation)', async () => {
-    renderProject();
-    await screen.findByRole('heading', { name: 'My Project' });
-    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument();
-  });
-
-  it('renders repository link', async () => {
-    renderProject();
-    await screen.findByRole('heading', { name: 'My Project' });
-    expect(screen.getByText('owner/repo')).toBeInTheDocument();
-  });
-
-  it('does not render tab navigation (chat-first layout)', async () => {
-    renderProject();
-    await screen.findByRole('heading', { name: 'My Project' });
-    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    await screen.findByTestId('overview-content');
+    // Project name appears in PageLayout heading
+    expect(screen.getByRole('heading', { name: 'My Project' })).toBeInTheDocument();
+    // Header bar status and settings buttons were removed
+    expect(screen.queryByRole('button', { name: 'Project status' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Project settings' })).not.toBeInTheDocument();
   });
 
   it('renders child route content via Outlet', async () => {
     renderProject('/projects/proj-1/overview');
     expect(await screen.findByTestId('overview-content')).toBeInTheDocument();
-  });
-
-  it('renders settings gear button', async () => {
-    renderProject();
-    await screen.findByRole('heading', { name: 'My Project' });
-    expect(screen.getByRole('button', { name: 'Project settings' })).toBeInTheDocument();
   });
 });
 
