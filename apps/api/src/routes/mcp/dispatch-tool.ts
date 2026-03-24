@@ -444,7 +444,7 @@ export async function handleDispatchTask(
   });
 
   const appDomain = `app.${env.BASE_DOMAIN}`;
-  const taskUrl = `https://${appDomain}/projects/${tokenData.projectId}?task=${taskId}`;
+  const taskUrl = `https://${appDomain}/projects/${tokenData.projectId}/ideas/${taskId}`;
 
   return jsonRpcSuccess(requestId, {
     content: [{
