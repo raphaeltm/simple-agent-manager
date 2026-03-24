@@ -41,29 +41,29 @@ The fix separates callback delivery failure from actual provisioning failure usi
 
 ## Implementation Checklist
 
-- [ ] **bootstrap.go**: Add `CallbackError` sentinel type wrapping callback-only failures
-- [ ] **bootstrap.go**: `PrepareWorkspace()` returns `CallbackError` (not plain error) when `markWorkspaceReady()` fails
-- [ ] **server.go**: Add `ReadyCallbackPending` and `ReadyCallbackStatus` fields to `WorkspaceRuntime`
-- [ ] **server.go**: Add `markReadyCallbackPending()`, `pendingReadyCallbacks()`, `clearReadyCallbackPending()` helpers
-- [ ] **workspaces.go**: In `startWorkspaceProvision()`, detect `CallbackError` and transition workspace to running (not error), track pending callback
-- [ ] **health.go**: Add `retryPendingReadyCallbacks()` — called after successful heartbeat, retries pending callbacks
-- [ ] **health.go**: Wire retry into `sendNodeHeartbeat()` after successful response
-- [ ] **constants.ts**: Add `DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS` (30s)
-- [ ] **task-runner.ts**: Add `TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS` env var and getter
-- [ ] **task-runner.ts**: Change `handleWorkspaceReady()` to poll D1 every 30s instead of single alarm at timeout boundary
-- [ ] **Tests**: Go tests for heartbeat callback retry (success, no-pending, permanent error)
-- [ ] **Tests**: Go test for `CallbackError` sentinel type
-- [ ] **Tests**: Update existing TypeScript tests that assert "no D1 polling" to reflect periodic polling
+- [x] **bootstrap.go**: Add `CallbackError` sentinel type wrapping callback-only failures
+- [x] **bootstrap.go**: `PrepareWorkspace()` returns `CallbackError` (not plain error) when `markWorkspaceReady()` fails
+- [x] **server.go**: Add `ReadyCallbackPending` and `ReadyCallbackStatus` fields to `WorkspaceRuntime`
+- [x] **server.go**: Add `markReadyCallbackPending()`, `pendingReadyCallbacks()`, `clearReadyCallbackPending()` helpers
+- [x] **workspaces.go**: In `startWorkspaceProvision()`, detect `CallbackError` and transition workspace to running (not error), track pending callback
+- [x] **health.go**: Add `retryPendingReadyCallbacks()` — called after successful heartbeat, retries pending callbacks
+- [x] **health.go**: Wire retry into `sendNodeHeartbeat()` after successful response
+- [x] **constants.ts**: Add `DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS` (30s)
+- [x] **task-runner.ts**: Add `TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS` env var and getter
+- [x] **task-runner.ts**: Change `handleWorkspaceReady()` to poll D1 every 30s instead of single alarm at timeout boundary
+- [x] **Tests**: Go tests for heartbeat callback retry (success, no-pending, permanent error)
+- [x] **Tests**: Go test for `CallbackError` sentinel type
+- [x] **Tests**: Update existing TypeScript tests that assert "no D1 polling" to reflect periodic polling
 
 ## Acceptance Criteria
 
-- [ ] When workspace-ready callback fails but workspace is functional, workspace status on VM is `running` (not `error`)
-- [ ] When heartbeat succeeds after callback failure, workspace-ready callback is retried
-- [ ] On successful retry, pending flag is cleared and control plane is notified
-- [ ] On permanent error (4xx), retry stops (workspace may have been deleted)
-- [ ] TaskRunner polls D1 every 30s during `workspace_ready` step (catches callback that updates D1 but fails DO notification)
-- [ ] All existing tests pass with updated assertions
-- [ ] New tests cover the retry mechanism
+- [x] When workspace-ready callback fails but workspace is functional, workspace status on VM is `running` (not `error`)
+- [x] When heartbeat succeeds after callback failure, workspace-ready callback is retried
+- [x] On successful retry, pending flag is cleared and control plane is notified
+- [x] On permanent error (4xx), retry stops (workspace may have been deleted)
+- [x] TaskRunner polls D1 every 30s during `workspace_ready` step (catches callback that updates D1 but fails DO notification)
+- [x] All existing tests pass with updated assertions
+- [x] New tests cover the retry mechanism
 
 ## References
 
