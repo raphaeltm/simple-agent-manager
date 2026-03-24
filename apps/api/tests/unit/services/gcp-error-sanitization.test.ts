@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { GcpApiError, sanitizeGcpError } from '../../../src/services/gcp-errors';
+import { GcpApiError, sanitizeGcpError, toSanitizedAppError } from '../../../src/services/gcp-errors';
+import { AppError } from '../../../src/middleware/error';
 
 /**
  * Tests for GCP error sanitization.
@@ -284,5 +285,67 @@ describe('end-to-end sanitization: raw GCP errors produce safe output', () => {
     expect(sanitized).not.toContain('BwYM/abc=');
     expect(sanitized).not.toContain('compute.instanceAdmin');
     expect(sanitized).toContain('project permissions');
+  });
+});
+
+describe('toSanitizedAppError', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('returns HTTP 400 for client-side GCP errors (403)', () => {
+    const err = new GcpApiError({ step: 'create_wif_pool', message: 'test', statusCode: 403 });
+    const appErr = toSanitizedAppError(err, 'test');
+    expect(appErr).toBeInstanceOf(AppError);
+    expect(appErr.statusCode).toBe(400);
+  });
+
+  it('returns HTTP 400 for GCP 401 (auth expired)', () => {
+    const err = new GcpApiError({ step: 'enable_apis', message: 'test', statusCode: 401 });
+    const appErr = toSanitizedAppError(err, 'test');
+    expect(appErr.statusCode).toBe(400);
+  });
+
+  it('returns HTTP 502 for GCP 500 (upstream failure)', () => {
+    const err = new GcpApiError({ step: 'enable_apis', message: 'test', statusCode: 500 });
+    const appErr = toSanitizedAppError(err, 'test');
+    expect(appErr).toBeInstanceOf(AppError);
+    expect(appErr.statusCode).toBe(502);
+    expect(appErr.error).toBe('GCP_UPSTREAM_ERROR');
+  });
+
+  it('returns HTTP 502 for GCP 503 (unavailable)', () => {
+    const err = new GcpApiError({ step: 'create_wif_pool', message: 'test', statusCode: 503 });
+    const appErr = toSanitizedAppError(err, 'test');
+    expect(appErr.statusCode).toBe(502);
+  });
+
+  it('returns HTTP 502 for GCP 429 (rate limit)', () => {
+    const err = new GcpApiError({ step: 'grant_project_roles', message: 'test', statusCode: 429 });
+    const appErr = toSanitizedAppError(err, 'test');
+    expect(appErr.statusCode).toBe(502);
+  });
+
+  it('returns HTTP 502 for timeout errors', () => {
+    const err = new DOMException('aborted', 'AbortError');
+    const appErr = toSanitizedAppError(err, 'test');
+    expect(appErr.statusCode).toBe(502);
+  });
+
+  it('returns HTTP 502 for unknown errors', () => {
+    const appErr = toSanitizedAppError('some random error', 'test');
+    expect(appErr.statusCode).toBe(502);
+  });
+
+  it('sanitized message has no sensitive data', () => {
+    const err = new GcpApiError({
+      step: 'sa_impersonation',
+      message: 'test',
+      statusCode: 403,
+      rawBody: 'projects/-/serviceAccounts/sa@proj.iam.gserviceaccount.com',
+    });
+    const appErr = toSanitizedAppError(err, 'test');
+    expect(appErr.message).not.toContain('sa@proj');
+    expect(appErr.message).not.toContain('gserviceaccount');
   });
 });

@@ -6,6 +6,8 @@
  * resource paths, IAM policies, or service account details.
  */
 
+import { AppError } from '../middleware/error';
+
 /**
  * Custom error class for GCP API failures.
  * Preserves full diagnostic context for server-side logging while carrying
@@ -64,6 +66,37 @@ const STEP_HINTS: Record<string, string> = {
   sts_exchange: 'Google Cloud token exchange failed. The OIDC setup may need to be reconfigured.',
   sa_impersonation: 'Failed to authenticate with the service account.',
 };
+
+/**
+ * Returns true if the GCP error represents an upstream/server failure
+ * (as opposed to a client-side permission or input issue).
+ */
+function isUpstreamFailure(err: unknown): boolean {
+  if (err instanceof GcpApiError) {
+    const s = err.statusCode;
+    return s !== undefined && (s >= 500 || s === 429);
+  }
+  if (err instanceof Error && err.name === 'AbortError') {
+    return true;
+  }
+  return true; // Unknown errors are treated as upstream failures
+}
+
+/**
+ * Create an AppError with the appropriate HTTP status from a GCP error.
+ *
+ * - Client-side GCP errors (400, 401, 403, 404) → HTTP 400
+ * - Upstream GCP errors (429, 500, 503, timeout) → HTTP 502
+ * - Unknown errors → HTTP 502
+ */
+export function toSanitizedAppError(err: unknown, context?: string): AppError {
+  const message = sanitizeGcpError(err, context);
+
+  if (isUpstreamFailure(err)) {
+    return new AppError(502, 'GCP_UPSTREAM_ERROR', message);
+  }
+  return new AppError(400, 'BAD_REQUEST', message);
+}
 
 /**
  * Sanitize a GCP error for client-facing responses.

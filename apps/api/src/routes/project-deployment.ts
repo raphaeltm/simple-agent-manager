@@ -8,7 +8,7 @@ import { errors } from '../middleware/error';
 import { ulid } from '../lib/ulid';
 import { listGcpProjects } from '../services/gcp-setup';
 import { runGcpDeploySetup } from '../services/gcp-deploy-setup';
-import { sanitizeGcpError } from '../services/gcp-errors';
+import { toSanitizedAppError } from '../services/gcp-errors';
 import { signIdentityToken } from '../services/jwt';
 import { validateMcpToken } from '../services/mcp-token';
 import {
@@ -147,7 +147,7 @@ projectDeploymentRoutes.post(
       const projects = await listGcpProjects(oauthToken, timeoutMs);
       return c.json({ projects });
     } catch (err) {
-      throw errors.badRequest(sanitizeGcpError(err, 'deploy-list-projects'));
+      throw toSanitizedAppError(err, 'deploy-list-projects');
     }
   },
 );
@@ -184,7 +184,7 @@ projectDeploymentRoutes.post(
     try {
       result = await runGcpDeploySetup(oauthToken, body.gcpProjectId, c.env, undefined, projectId);
     } catch (err) {
-      throw errors.badRequest(sanitizeGcpError(err, 'deploy-setup'));
+      throw toSanitizedAppError(err, 'deploy-setup');
     }
 
     // Consume the OAuth token after successful setup (one-time use)

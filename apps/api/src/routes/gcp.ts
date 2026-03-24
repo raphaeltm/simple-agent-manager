@@ -8,7 +8,7 @@ import { errors } from '../middleware/error';
 import { encrypt } from '../services/encryption';
 import { listGcpProjects, runGcpSetup } from '../services/gcp-setup';
 import { verifyGcpOidcSetup } from '../services/gcp-sts';
-import { sanitizeGcpError } from '../services/gcp-errors';
+import { sanitizeGcpError, toSanitizedAppError } from '../services/gcp-errors';
 import { serializeCredentialToken } from '../services/provider-credentials';
 import * as schema from '../db/schema';
 import { DEFAULT_GCP_API_TIMEOUT_MS } from '@simple-agent-manager/shared';
@@ -50,7 +50,7 @@ gcpRoutes.post('/projects', async (c) => {
     const projects = await listGcpProjects(oauthToken, timeoutMs);
     return c.json({ projects });
   } catch (err) {
-    throw errors.badRequest(sanitizeGcpError(err, 'list-projects'));
+    throw toSanitizedAppError(err, 'list-projects');
   }
 });
 
@@ -172,7 +172,7 @@ gcpRoutes.post('/setup', async (c) => {
       },
     });
   } catch (err) {
-    throw errors.badRequest(sanitizeGcpError(err, 'gcp-setup'));
+    throw toSanitizedAppError(err, 'gcp-setup');
   }
 });
 
