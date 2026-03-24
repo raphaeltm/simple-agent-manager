@@ -59,11 +59,12 @@ function renderProject(path = '/projects/proj-1/overview') {
 }
 
 describe('Project shell (non-chat routes)', () => {
-  it('does not render project header bar (removed as clutter)', async () => {
+  it('shows project name in PageLayout but no status/settings buttons', async () => {
     renderProject();
     await screen.findByTestId('overview-content');
-    // Header bar with title, status, and settings buttons was removed
-    expect(screen.queryByRole('heading', { name: 'My Project' })).not.toBeInTheDocument();
+    // Project name appears in PageLayout heading
+    expect(screen.getByRole('heading', { name: 'My Project' })).toBeInTheDocument();
+    // Header bar status and settings buttons were removed
     expect(screen.queryByRole('button', { name: 'Project status' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Project settings' })).not.toBeInTheDocument();
   });

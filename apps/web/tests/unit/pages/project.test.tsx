@@ -287,11 +287,12 @@ describe('Project page', () => {
     });
   });
 
-  it('does not render project header bar on non-chat routes', async () => {
+  it('shows project name in PageLayout but no status/settings buttons', async () => {
     renderProjectPage();
     await screen.findByRole('link', { name: 'Draft task' });
-    // Header bar with title, status, and settings buttons was removed
-    expect(screen.queryByRole('heading', { name: 'Project One' })).not.toBeInTheDocument();
+    // Project name appears in PageLayout heading
+    expect(screen.getByRole('heading', { name: 'Project One' })).toBeInTheDocument();
+    // Header bar status and settings buttons were removed
     expect(screen.queryByRole('button', { name: 'Project status' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Project settings' })).not.toBeInTheDocument();
   });
