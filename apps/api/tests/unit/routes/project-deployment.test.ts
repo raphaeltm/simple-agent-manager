@@ -234,18 +234,9 @@ describe('GET /:id/deployment-identity-token', () => {
     );
   });
 
-  it('falls back to callback token when MCP token is invalid', async () => {
-    mockValidateMcpToken.mockResolvedValue(null); // MCP invalid
-    mockVerifyCallbackToken.mockResolvedValue({ workspace: 'ws-1' });
-
-    // First limit call: workspace lookup
-    mockLimit.mockResolvedValueOnce([
-      { id: 'ws-1', projectId: 'proj-1', userId: 'u1' },
-    ]);
-    // Second limit call: credential lookup
-    mockLimit.mockResolvedValueOnce([CRED_ROW]);
-
-    mockSignIdentityToken.mockResolvedValue('signed-jwt-456');
+  it('rejects callback tokens — only MCP tokens are accepted', async () => {
+    // MCP validation returns null for non-MCP tokens (including callback tokens)
+    mockValidateMcpToken.mockResolvedValue(null);
 
     const app = createTestApp();
     const res = await app.request(
@@ -253,24 +244,24 @@ describe('GET /:id/deployment-identity-token', () => {
       { method: 'GET', headers: { Authorization: 'Bearer callback-token-1' } },
       mockEnv,
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body).toEqual({ token: 'signed-jwt-456' });
+    expect(body.message).toContain('MCP token');
+
+    // Callback token verification should NOT have been attempted
+    expect(mockVerifyCallbackToken).not.toHaveBeenCalled();
+    // Identity token should NOT have been signed
+    expect(mockSignIdentityToken).not.toHaveBeenCalled();
   });
 
-  it('returns 403 when callback token workspace belongs to different project', async () => {
+  it('rejects any non-MCP bearer token with 403', async () => {
+    // Any random bearer token that isn't a valid MCP token gets rejected
     mockValidateMcpToken.mockResolvedValue(null);
-    mockVerifyCallbackToken.mockResolvedValue({ workspace: 'ws-1' });
-
-    // Workspace belongs to a different project
-    mockLimit.mockResolvedValueOnce([
-      { id: 'ws-1', projectId: 'other-project', userId: 'u1' },
-    ]);
 
     const app = createTestApp();
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
-      { method: 'GET', headers: { Authorization: 'Bearer callback-token-1' } },
+      { method: 'GET', headers: { Authorization: 'Bearer random-invalid-token' } },
       mockEnv,
     );
     expect(res.status).toBe(403);
