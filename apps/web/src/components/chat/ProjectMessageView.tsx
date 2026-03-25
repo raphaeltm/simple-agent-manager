@@ -892,7 +892,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               }}
             />
 
-            {/* Scroll to bottom button */}
+            {/* Scroll to bottom button — shifts up when cancel bar is visible to avoid overlap */}
             {showScrollButton && (
               <button
                 type="button"
@@ -902,7 +902,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                     behavior: 'smooth',
                   });
                 }}
-                className="absolute bottom-3 right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-colors"
+                className={`absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-all duration-200 ${agentSession.isPrompting ? 'bottom-14' : 'bottom-3'}`}
                 aria-label="Scroll to bottom"
               >
                 <ChevronDown size={16} className="text-fg-muted" />
