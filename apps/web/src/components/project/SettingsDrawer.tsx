@@ -629,7 +629,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
               </div>
               <div className="grid gap-1">
                 {[
-                  { label: 'Cloud Providers', description: 'Connect Hetzner, GCP, or Scaleway', path: '/settings/cloud-providers' },
+                  { label: 'Cloud Providers', description: 'Connect Hetzner, GCP, or Scaleway', path: '/settings/cloud-provider' },
                   { label: 'Tasks', description: 'Task list & management', path: `/projects/${projectId}/tasks` },
                   { label: 'Activity', description: 'Project event feed', path: `/projects/${projectId}/activity` },
                 ].map((link) => (
