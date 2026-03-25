@@ -40,7 +40,7 @@ import { mcpRoutes } from './routes/mcp';
 import { notificationRoutes } from './routes/notifications';
 import { gcpRoutes } from './routes/gcp';
 import { googleAuthRoutes } from './routes/google-auth';
-import { projectDeploymentRoutes, gcpDeployCallbackRoute } from './routes/project-deployment';
+import { projectDeploymentRoutes, gcpDeployCallbackRoute, deploymentIdentityTokenRoute } from './routes/project-deployment';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
@@ -637,6 +637,13 @@ app.route('/api/transcribe', transcribeRoutes);
 app.route('/api/tts', ttsRoutes);
 app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
+// ORDERING IS CRITICAL: deploymentIdentityTokenRoute MUST be mounted before
+// projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
+// all siblings at the same base path — mounting identity token route first
+// causes it to match and return before the session auth middleware runs.
+// Reversing this order silently breaks GCP agent deployments with 401.
+// See docs/notes/2026-03-25-deployment-identity-token-middleware-leak-postmortem.md
+app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
