@@ -25,11 +25,15 @@ const (
 )
 
 // samEnvFiles are the paths inside the devcontainer where SAM and project
-// environment variables are persisted during bootstrap. Both use the same
-// shell `export KEY="value"` format.
+// environment variables are persisted during bootstrap. The two files use
+// different quoting conventions:
+//   - /etc/sam/env          uses Go %q double-quoting (buildSAMStaticEnv)
+//   - /etc/sam/project-env  uses shellSingleQuote() (buildProjectRuntimeEnvScript)
+//
+// Both are parsed by parseEnvExportLines which handles both quoting styles.
 var samEnvFiles = []string{
-	"/etc/sam/env",         // SAM platform vars (GH_TOKEN, SAM_WORKSPACE_ID, etc.)
-	"/etc/sam/project-env", // Project-specific vars configured by the user
+	"/etc/sam/env",         // SAM platform vars (GH_TOKEN, SAM_WORKSPACE_ID, etc.) — double-quoted
+	"/etc/sam/project-env", // Project-specific vars configured by the user — single-quoted
 }
 
 // ReadContainerEnvFiles reads SAM env files from inside the container and
@@ -48,7 +52,9 @@ func ReadContainerEnvFiles(ctx context.Context, containerID string) []string {
 	return result
 }
 
-// parseEnvExportLines parses shell `export KEY="value"` lines into KEY=value pairs.
+// parseEnvExportLines parses shell `export KEY="value"` and `export KEY='value'`
+// lines into KEY=value pairs. Single-quoted values are unescaped by reversing
+// the shellSingleQuote() encoding (replacing `'"'"'` back to `'`).
 func parseEnvExportLines(content string) []string {
 	var result []string
 	for _, line := range strings.Split(content, "\n") {
@@ -58,7 +64,7 @@ func parseEnvExportLines(content string) []string {
 		}
 		// Strip "export " prefix
 		line = strings.TrimPrefix(line, "export ")
-		// Parse KEY="value" or KEY=value
+		// Parse KEY="value", KEY='value', or KEY=value
 		eqIdx := strings.Index(line, "=")
 		if eqIdx <= 0 {
 			continue
@@ -68,6 +74,11 @@ func parseEnvExportLines(content string) []string {
 		// Unquote if surrounded by double quotes
 		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
 			value = value[1 : len(value)-1]
+		} else if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+			// Unquote single-quoted values and reverse shellSingleQuote() escaping:
+			// shellSingleQuote() replaces ' with '"'"', so we reverse that here.
+			value = value[1 : len(value)-1]
+			value = strings.ReplaceAll(value, "'\"'\"'", "'")
 		}
 		result = append(result, key+"="+value)
 	}

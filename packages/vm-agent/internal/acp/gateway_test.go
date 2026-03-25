@@ -631,6 +631,52 @@ export SAM_WORKSPACE_ID="ws-123"
 			content: "export NOEQUALS\n",
 			want:    nil,
 		},
+		{
+			name:    "single-quoted value",
+			content: "export API_KEY='sk-abc123'\n",
+			want:    []string{"API_KEY=sk-abc123"},
+		},
+		{
+			name:    "single-quoted value with embedded single quote",
+			content: "export MSG='it'\"'\"'s a test'\n",
+			want:    []string{"MSG=it's a test"},
+		},
+		{
+			name:    "empty single-quoted value",
+			content: "export EMPTY=''\n",
+			want:    []string{"EMPTY="},
+		},
+		{
+			name:    "single-quoted value with multiple embedded quotes",
+			content: "export S='can'\"'\"'t stop'\"'\"'t quit'\n",
+			want:    []string{"S=can't stop't quit"},
+		},
+		{
+			name:    "single-quoted value with double quotes inside",
+			content: "export X='say \"hello\"'\n",
+			want:    []string{`X=say "hello"`},
+		},
+		{
+			name: "mixed single and double quoted values",
+			content: `export A="double-quoted"
+export B='single-quoted'
+export C=unquoted
+`,
+			want: []string{"A=double-quoted", "B=single-quoted", "C=unquoted"},
+		},
+		{
+			name: "project runtime env file format (single-quoted)",
+			content: `# Project runtime environment variables (auto-generated)
+export API_KEY='sk-abc123'
+export DATABASE_URL='postgres://user:pass@host/db'
+export MSG='it'` + `"'"` + `'s fine'
+`,
+			want: []string{
+				"API_KEY=sk-abc123",
+				"DATABASE_URL=postgres://user:pass@host/db",
+				"MSG=it's fine",
+			},
+		},
 	}
 
 	for _, tt := range tests {
