@@ -280,15 +280,28 @@ export async function handleCreateIdea(
 
 // ─── Idea status transition validation ───────────────────────────────────────
 
-/** Allowed status transitions for ideas. Terminal statuses have no outgoing transitions. */
+/**
+ * Allowed status transitions for the idea lifecycle. This intentionally diverges
+ * from the full task lifecycle in task-status.ts because ideas follow a simpler
+ * state machine:
+ *   draft → ready → completed (or cancelled at any non-terminal stage)
+ *
+ * Notably:
+ * - ready → completed is allowed here but not in task-status.ts (which requires
+ *   going through queued/delegated/in_progress first). For ideas, "completed"
+ *   means "the idea was executed," not that a task runner finished.
+ * - ready → draft allows un-promoting an idea back to exploring.
+ * - queued/delegated/in_progress are execution-layer statuses set by the task
+ *   runner, not by the idea lifecycle MCP tool.
+ */
 const IDEA_STATUS_TRANSITIONS: Record<string, string[]> = {
   draft: ['ready', 'cancelled'],
   ready: ['draft', 'completed', 'cancelled'],
   // completed and cancelled are terminal — no transitions out
 };
 
-/** Statuses that can be updated (non-terminal). */
-const UPDATABLE_IDEA_STATUSES = ['draft', 'ready'];
+/** Statuses that can be updated (derived from transition map keys). */
+const UPDATABLE_IDEA_STATUSES = Object.keys(IDEA_STATUS_TRANSITIONS);
 
 export function validateIdeaStatusTransition(
   currentStatus: string,
@@ -335,6 +348,7 @@ export async function handleUpdateIdea(
   const bindValues: unknown[] = [];
 
   // Status transition
+  let statusTransition: { from: string; to: string } | null = null;
   if (typeof params.status === 'string') {
     const newStatus = params.status.trim();
     const transitionError = validateIdeaStatusTransition(existing.status, newStatus);
@@ -343,6 +357,7 @@ export async function handleUpdateIdea(
     }
     updates.push('status = ?');
     bindValues.push(newStatus);
+    statusTransition = { from: existing.status, to: newStatus };
   }
 
   // Title update
@@ -385,14 +400,27 @@ export async function handleUpdateIdea(
   bindValues.push(now);
   bindValues.push(ideaId, tokenData.projectId);
 
-  await env.DATABASE.prepare(
+  const updateStmt = env.DATABASE.prepare(
     `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`,
-  ).bind(...bindValues).run();
+  ).bind(...bindValues);
+
+  // Use D1 batch to atomically update the task and record the status event
+  if (statusTransition) {
+    const eventId = ulid();
+    const eventStmt = env.DATABASE.prepare(
+      `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+       VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`,
+    ).bind(eventId, ideaId, statusTransition.from, statusTransition.to, tokenData.userId, now, now);
+    await env.DATABASE.batch([updateStmt, eventStmt]);
+  } else {
+    await updateStmt.run();
+  }
 
   log.info('mcp.update_idea', {
     ideaId,
     projectId: tokenData.projectId,
     updatedFields: updates.filter((u) => !u.startsWith('updated_at')).map((u) => u.split(' = ')[0]),
+    ...(statusTransition ? { statusTransition: `${statusTransition.from} → ${statusTransition.to}` } : {}),
   });
 
   return jsonRpcSuccess(requestId, {
