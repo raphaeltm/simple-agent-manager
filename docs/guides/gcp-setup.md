@@ -43,6 +43,8 @@ Set these as Cloudflare Worker secrets (or GitHub Environment secrets for automa
 | `GOOGLE_CLIENT_ID` | Your OAuth 2.0 Client ID |
 | `GOOGLE_CLIENT_SECRET` | Your OAuth 2.0 Client Secret |
 
+> **Naming**: Google OAuth secrets use `GOOGLE_*` directly in both GitHub and Cloudflare — they do NOT follow the `GH_` → `GITHUB_` prefix mapping used by GitHub integration secrets.
+
 ```bash
 # Via wrangler (manual)
 wrangler secret put GOOGLE_CLIENT_ID --env production
@@ -52,8 +54,6 @@ wrangler secret put GOOGLE_CLIENT_SECRET --env production
 # Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET as secrets
 # in your GitHub Environment named "production"
 ```
-
-> **Note**: Unlike GitHub secrets (which use the `GH_` → `GITHUB_` prefix mapping), Google OAuth secrets use the `GOOGLE_*` prefix directly — no mapping is needed.
 
 ---
 

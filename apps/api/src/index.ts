@@ -312,6 +312,7 @@ export interface Env {
   GCP_OPERATION_POLL_TIMEOUT_MS?: string;
   GCP_STS_SCOPE?: string;
   GCP_SA_IMPERSONATION_SCOPES?: string;
+  GCP_SA_TOKEN_LIFETIME_SECONDS?: string;
   GCP_WIF_POOL_ID?: string;
   GCP_WIF_PROVIDER_ID?: string;
   GCP_SERVICE_ACCOUNT_ID?: string;
