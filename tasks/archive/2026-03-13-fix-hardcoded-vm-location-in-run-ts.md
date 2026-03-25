@@ -12,8 +12,12 @@ The sister file `submit.ts` correctly imports and uses `DEFAULT_VM_LOCATION` fro
 
 **Discovered by**: Constitution validator (Principle XI — No Hardcoded Values) during PR #370 review.
 
+## Resolution
+
+Already fixed in the current codebase. `run.ts` imports `DEFAULT_VM_LOCATION` from `@simple-agent-manager/shared` (line 17) and uses it on line 160. Both `run.ts` and `submit.ts` now use the same default pattern for vmSize, vmLocation, and workspaceProfile.
+
 ## Acceptance Criteria
 
-- [ ] Import `DEFAULT_VM_LOCATION` in `apps/api/src/routes/tasks/run.ts`
-- [ ] Replace `?? 'nbg1'` with `?? DEFAULT_VM_LOCATION` on the vmLocation line
-- [ ] Verify `submit.ts` and `run.ts` use the same default pattern for all three config values (vmSize, vmLocation, workspaceProfile)
+- [x] Import `DEFAULT_VM_LOCATION` in `apps/api/src/routes/tasks/run.ts`
+- [x] Replace `?? 'nbg1'` with `?? DEFAULT_VM_LOCATION` on the vmLocation line
+- [x] Verify `submit.ts` and `run.ts` use the same default pattern for all three config values (vmSize, vmLocation, workspaceProfile)
