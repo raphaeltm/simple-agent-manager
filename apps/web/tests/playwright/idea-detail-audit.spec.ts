@@ -422,6 +422,9 @@ async function screenshot(page: Page, name: string) {
   });
 }
 
+// Note: this check catches layout-level overflow (page scrolling horizontally).
+// Elements using overflow-x: auto (tables, code blocks) contain their overflow
+// internally and will not be detected here — this is intentional behavior.
 async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(() => ({
     docOverflow: document.documentElement.scrollWidth > window.innerWidth,
@@ -601,7 +604,7 @@ test.describe('IdeaDetailPage — Mobile (375px)', () => {
   test('extreme unbroken content does not cause horizontal overflow', async ({ page }) => {
     await setupMocks(page, { taskDetail: TASK_EXTREME_OVERFLOW, taskSessions: [] });
     await page.goto('/projects/proj-test-1/ideas/idea-extreme');
-    await page.waitForTimeout(1500);
+    await page.waitForSelector('[data-testid="rendered-markdown"]');
     await screenshot(page, 'idea-detail-mobile-extreme-overflow');
 
     await assertNoOverflow(page);
@@ -742,7 +745,7 @@ test.describe('IdeaDetailPage — Desktop (1280px)', () => {
   test('extreme unbroken content does not cause horizontal overflow on desktop', async ({ page }) => {
     await setupMocks(page, { taskDetail: TASK_EXTREME_OVERFLOW, taskSessions: [] });
     await page.goto('/projects/proj-test-1/ideas/idea-extreme');
-    await page.waitForTimeout(1500);
+    await page.waitForSelector('[data-testid="rendered-markdown"]', { timeout: 5000 }).catch(() => {});
     await screenshot(page, 'idea-detail-desktop-extreme-overflow');
 
     await assertNoOverflow(page);
