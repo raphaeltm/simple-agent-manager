@@ -121,8 +121,9 @@ The service account created by SAM's automated setup has these roles:
 
 | Role | Purpose |
 |------|---------|
-| `roles/compute.admin` | Create, manage, and delete Compute Engine VMs |
-| `roles/aiplatform.user` | Access AI Platform APIs (for Workers AI integration) |
+| `roles/compute.instanceAdmin.v1` | VM lifecycle management (create, start, stop, delete) |
+| `roles/compute.securityAdmin` | Firewall rule management (not included in instanceAdmin) |
+| `roles/aiplatform.user` | Vertex AI access (e.g., Gemini CLI) |
 
 The service account also has `roles/iam.workloadIdentityUser` on itself, allowing the WIF pool to impersonate it.
 

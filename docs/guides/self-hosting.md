@@ -107,7 +107,16 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 
 > **GCP OAuth Redirect URI**: When creating a Google OAuth 2.0 client, add `https://api.<YOUR_BASE_DOMAIN>/api/deployment/gcp/callback` as an authorized redirect URI. This is a single static URI shared by all projects — no per-project URIs needed.
 
-**Optional GCP configuration** (env vars, not secrets — sensible defaults provided):
+**Optional GCP VM provisioning configuration** (env vars, not secrets — sensible defaults provided):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GCP_STS_SCOPE` | `https://www.googleapis.com/auth/cloud-platform` | OAuth scope for STS token exchange |
+| `GCP_SA_IMPERSONATION_SCOPES` | `https://www.googleapis.com/auth/compute` | Comma-separated scopes for SA impersonation |
+
+For the full list of GCP configuration variables, see the [GCP Setup Guide](./gcp-setup.md#configuration-reference).
+
+**Optional GCP deployment configuration** (for project-level Defang deployment — sensible defaults provided):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -115,8 +124,6 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `GCP_DEPLOY_WIF_PROVIDER_ID` | `sam-oidc` | OIDC provider within the deploy pool |
 | `GCP_DEPLOY_SERVICE_ACCOUNT_ID` | `sam-deployer` | Service account for deployment operations |
 | `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS` | `600` | Identity token lifetime in seconds |
-| `GCP_STS_SCOPE` | `https://www.googleapis.com/auth/cloud-platform` | OAuth scope for STS token exchange |
-| `GCP_SA_IMPERSONATION_SCOPES` | `https://www.googleapis.com/auth/compute` | Comma-separated scopes for SA impersonation |
 
 > **Naming Convention**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets. Google OAuth secrets use `GOOGLE_*` directly (no prefix mapping needed).
 
