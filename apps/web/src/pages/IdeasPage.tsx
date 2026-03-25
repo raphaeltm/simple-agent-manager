@@ -245,7 +245,7 @@ export function IdeasPage() {
       <h1 className="text-xl font-semibold text-fg-primary m-0">Ideas</h1>
 
       {/* Search + Filter bar — always single row */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-w-0">
         <div className="relative flex-1 min-w-0">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none" />
           <input
