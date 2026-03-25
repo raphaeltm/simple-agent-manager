@@ -47,6 +47,12 @@ const CHAT_SESSION_LIST_LIMIT = parseInt(
   import.meta.env.VITE_CHAT_SESSION_LIST_LIMIT || String(DEFAULT_CHAT_SESSION_LIST_LIMIT),
 );
 
+/** Prompt template for executing an idea. Override via VITE_EXECUTE_IDEA_PROMPT_TEMPLATE. Use {ideaId} placeholder. */
+const DEFAULT_EXECUTE_IDEA_PROMPT_TEMPLATE =
+  'Read idea {ideaId} using the get_idea tool for full context, then execute it using the /do skill.';
+const EXECUTE_IDEA_PROMPT_TEMPLATE =
+  import.meta.env.VITE_EXECUTE_IDEA_PROMPT_TEMPLATE || DEFAULT_EXECUTE_IDEA_PROMPT_TEMPLATE;
+
 /** Max tasks to load for idea tagging. Override via VITE_CHAT_TASK_LIST_LIMIT. */
 const DEFAULT_CHAT_TASK_LIST_LIMIT = 200;
 const CHAT_TASK_LIST_LIMIT = parseInt(
@@ -258,9 +264,7 @@ export function ProjectChat() {
   useEffect(() => {
     if (executeIdeaId && !sessionId) {
       executeIdeaIdRef.current = executeIdeaId;
-      setMessage(
-        `Read idea ${executeIdeaId} using the get_idea tool for full context, then execute it using the /do skill.`,
-      );
+      setMessage(EXECUTE_IDEA_PROMPT_TEMPLATE.replace('{ideaId}', executeIdeaId));
       // Clear the query param so it doesn't persist on refresh
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
