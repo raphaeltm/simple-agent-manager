@@ -33,7 +33,8 @@ const DEPLOY_APIS = [
  * Roles granted to the deployment service account.
  * Defang acts as a cloud manager requiring broad GCP access across many services
  * (Cloud Run, Storage, Artifact Registry, Cloud Build, IAM, networking, etc.).
- * Per Defang's official documentation, roles/owner is the recommended role.
+ * Per Defang's official documentation, roles/owner is the recommended role:
+ * https://docs.defang.io/docs/tutorials/deploying-from-github-actions/to-gcp#configure-provider-attributes
  * Granular roles cause deployment failures as Defang's permission requirements evolve.
  */
 const DEPLOY_SA_PROJECT_ROLES = ['roles/owner'];
