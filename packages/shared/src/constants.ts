@@ -339,6 +339,12 @@ export const DEFAULT_GCP_API_TIMEOUT_MS = 30_000;
 /** Default GCP SA access token lifetime in seconds (1 hour). Override via GCP_SA_TOKEN_LIFETIME_SECONDS env var. */
 export const DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS = 3600;
 
+/** Default scope for GCP STS token exchange. Override via GCP_STS_SCOPE env var. */
+export const DEFAULT_GCP_STS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
+
+/** Default scopes for GCP SA impersonation (comma-separated). Override via GCP_SA_IMPERSONATION_SCOPES env var. */
+export const DEFAULT_GCP_SA_IMPERSONATION_SCOPES = 'https://www.googleapis.com/auth/compute';
+
 
 // =============================================================================
 // GCP Deployment (project-level OIDC for Defang)

@@ -310,6 +310,8 @@ export interface Env {
   GCP_TOKEN_CACHE_TTL_SECONDS?: string;
   GCP_API_TIMEOUT_MS?: string;
   GCP_OPERATION_POLL_TIMEOUT_MS?: string;
+  GCP_STS_SCOPE?: string;
+  GCP_SA_IMPERSONATION_SCOPES?: string;
   GCP_WIF_POOL_ID?: string;
   GCP_WIF_PROVIDER_ID?: string;
   GCP_SERVICE_ACCOUNT_ID?: string;

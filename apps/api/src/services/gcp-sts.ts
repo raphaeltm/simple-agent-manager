@@ -4,6 +4,8 @@ import {
   DEFAULT_GCP_TOKEN_CACHE_TTL_SECONDS,
   DEFAULT_GCP_API_TIMEOUT_MS,
   DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS,
+  DEFAULT_GCP_STS_SCOPE,
+  DEFAULT_GCP_SA_IMPERSONATION_SCOPES,
 } from '@simple-agent-manager/shared';
 import { signIdentityToken } from './jwt';
 import { GcpApiError } from './gcp-errors';
@@ -70,11 +72,12 @@ export async function getGcpAccessToken(
   );
 
   // Step 2: Exchange SAM JWT for GCP STS federated token
+  const stsScope = env.GCP_STS_SCOPE || DEFAULT_GCP_STS_SCOPE;
   const stsBody = {
     audience: stsAudience,
     grantType: 'urn:ietf:params:oauth:grant-type:token-exchange',
     requestedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
-    scope: 'https://www.googleapis.com/auth/cloud-platform',
+    scope: stsScope,
     subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
     subjectToken: identityToken,
   };
@@ -102,7 +105,9 @@ export async function getGcpAccessToken(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      scope: ['https://www.googleapis.com/auth/compute'],
+      scope: (env.GCP_SA_IMPERSONATION_SCOPES || DEFAULT_GCP_SA_IMPERSONATION_SCOPES)
+        .split(',')
+        .map((s) => s.trim()),
       lifetime: `${DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS}s`,
     }),
   }, timeoutMs);
