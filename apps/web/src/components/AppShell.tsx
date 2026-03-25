@@ -134,7 +134,7 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto flex flex-col">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
           {children ?? <Outlet />}
         </main>
 
@@ -201,7 +201,7 @@ export function AppShell({ children }: AppShellProps) {
         )}
       </aside>
 
-      <main className="flex-1 overflow-y-auto flex flex-col">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
         {children ?? <Outlet />}
       </main>
 

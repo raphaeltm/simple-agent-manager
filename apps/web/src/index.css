@@ -39,6 +39,8 @@
 
   html, body, #root {
     min-height: var(--sam-app-height);
+    overflow-x: hidden;
+    max-width: 100vw;
   }
 
   body {

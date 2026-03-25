@@ -106,10 +106,10 @@ export function Project() {
   // Non-chat routes: content with max-width and padding (no desktop header bar)
   // ---------------------------------------------------------------------------
   return (
-    <div className={`min-h-screen bg-canvas ${isMobile ? 'flex flex-col' : ''}`}>
+    <div className={`min-h-screen bg-canvas min-w-0 overflow-x-hidden ${isMobile ? 'flex flex-col' : ''}`}>
       <main
         aria-label={project?.name ? `${project.name} — Project` : 'Project'}
-        className={`max-w-[80rem] mx-auto ${isMobile ? 'flex flex-col flex-1 min-h-0' : ''}`}
+        className={`max-w-[80rem] w-full mx-auto min-w-0 ${isMobile ? 'flex flex-col flex-1 min-h-0' : ''}`}
         style={isMobile
           ? { padding: 'var(--sam-space-3) var(--sam-space-3)' }
           : { padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }
