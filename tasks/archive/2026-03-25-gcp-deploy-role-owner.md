@@ -13,14 +13,14 @@ The GCP deployment setup in `gcp-deploy-setup.ts` grants 5 granular IAM roles to
 
 ## Implementation Checklist
 
-- [ ] Replace `DEPLOY_SA_PROJECT_ROLES` array with `['roles/owner']` in `gcp-deploy-setup.ts`
-- [ ] Update comment to explain why Owner is used (Defang acts as cloud manager; per Defang docs)
-- [ ] Verify tests still pass (they don't assert on specific roles)
-- [ ] Run lint, typecheck, build
+- [x] Replace `DEPLOY_SA_PROJECT_ROLES` array with `['roles/owner']` in `gcp-deploy-setup.ts`
+- [x] Update comment to explain why Owner is used (Defang acts as cloud manager; per Defang docs)
+- [x] Verify tests still pass (they don't assert on specific roles)
+- [x] Run lint, typecheck, build
 
 ## Acceptance Criteria
 
-- [ ] `DEPLOY_SA_PROJECT_ROLES` contains only `roles/owner`
-- [ ] Comment explains rationale (Defang cloud manager, broad access needed)
-- [ ] All tests pass
-- [ ] Lint and typecheck clean
+- [x] `DEPLOY_SA_PROJECT_ROLES` contains only `roles/owner`
+- [x] Comment explains rationale (Defang cloud manager, broad access needed)
+- [x] All tests pass
+- [x] Lint and typecheck clean
