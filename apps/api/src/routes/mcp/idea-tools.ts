@@ -278,6 +278,32 @@ export async function handleCreateIdea(
   });
 }
 
+// ─── Idea status transition validation ───────────────────────────────────────
+
+/** Allowed status transitions for ideas. Terminal statuses have no outgoing transitions. */
+const IDEA_STATUS_TRANSITIONS: Record<string, string[]> = {
+  draft: ['ready', 'cancelled'],
+  ready: ['draft', 'completed', 'cancelled'],
+  // completed and cancelled are terminal — no transitions out
+};
+
+/** Statuses that can be updated (non-terminal). */
+const UPDATABLE_IDEA_STATUSES = ['draft', 'ready'];
+
+export function validateIdeaStatusTransition(
+  currentStatus: string,
+  newStatus: string,
+): string | null {
+  const allowed = IDEA_STATUS_TRANSITIONS[currentStatus];
+  if (!allowed) {
+    return `Cannot update idea in terminal status '${currentStatus}'`;
+  }
+  if (!allowed.includes(newStatus)) {
+    return `Invalid status transition: ${currentStatus} → ${newStatus}. Allowed: ${allowed.join(', ')}`;
+  }
+  return null;
+}
+
 export async function handleUpdateIdea(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -291,18 +317,33 @@ export async function handleUpdateIdea(
     return jsonRpcError(requestId, INVALID_PARAMS, 'ideaId is required');
   }
 
-  // Fetch the existing idea — must be draft status and in this project
+  // Fetch the existing idea — must be in a non-terminal status and in this project
   const existing = await env.DATABASE.prepare(
-    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ? AND status = ?',
-  ).bind(ideaId, tokenData.projectId, 'draft').first<{ id: string; title: string; description: string | null; status: string; priority: number }>();
+    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ?',
+  ).bind(ideaId, tokenData.projectId).first<{ id: string; title: string; description: string | null; status: string; priority: number }>();
 
   if (!existing) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found or not in draft status: ${ideaId}`);
+    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}`);
+  }
+
+  if (!UPDATABLE_IDEA_STATUSES.includes(existing.status)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, `Cannot update idea in terminal status '${existing.status}'`);
   }
 
   // Build update fields
   const updates: string[] = [];
   const bindValues: unknown[] = [];
+
+  // Status transition
+  if (typeof params.status === 'string') {
+    const newStatus = params.status.trim();
+    const transitionError = validateIdeaStatusTransition(existing.status, newStatus);
+    if (transitionError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, transitionError);
+    }
+    updates.push('status = ?');
+    bindValues.push(newStatus);
+  }
 
   // Title update
   if (typeof params.title === 'string') {
@@ -336,16 +377,16 @@ export async function handleUpdateIdea(
   }
 
   if (updates.length === 0) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'No fields to update. Provide at least one of: title, content, priority.');
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No fields to update. Provide at least one of: title, content, priority, status.');
   }
 
   updates.push('updated_at = ?');
   const now = new Date().toISOString();
   bindValues.push(now);
-  bindValues.push(ideaId, tokenData.projectId, 'draft');
+  bindValues.push(ideaId, tokenData.projectId);
 
   await env.DATABASE.prepare(
-    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ? AND status = ?`,
+    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`,
   ).bind(...bindValues).run();
 
   log.info('mcp.update_idea', {
@@ -378,8 +419,8 @@ export async function handleGetIdea(
   }
 
   const idea = await env.DATABASE.prepare(
-    'SELECT id, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ? AND status = ?',
-  ).bind(ideaId, tokenData.projectId, 'draft').first<{
+    'SELECT id, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?',
+  ).bind(ideaId, tokenData.projectId).first<{
     id: string;
     title: string;
     description: string | null;
@@ -390,7 +431,7 @@ export async function handleGetIdea(
   }>();
 
   if (!idea) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}. Note: only draft tasks are returned by this tool — use get_task_details for non-draft tasks.`);
+    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}`);
   }
 
   return jsonRpcSuccess(requestId, {
