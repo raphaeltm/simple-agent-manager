@@ -40,7 +40,7 @@ import { mcpRoutes } from './routes/mcp';
 import { notificationRoutes } from './routes/notifications';
 import { gcpRoutes } from './routes/gcp';
 import { googleAuthRoutes } from './routes/google-auth';
-import { projectDeploymentRoutes, gcpDeployCallbackRoute } from './routes/project-deployment';
+import { projectDeploymentRoutes, gcpDeployCallbackRoute, deploymentIdentityTokenRoute } from './routes/project-deployment';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
@@ -637,6 +637,10 @@ app.route('/api/transcribe', transcribeRoutes);
 app.route('/api/tts', ttsRoutes);
 app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
+// Mount identity token route BEFORE projectsRoutes — it uses MCP Bearer token auth,
+// not session cookies. projectsRoutes has use('/*', requireAuth()) which would leak
+// and block this endpoint. See docs/notes/2026-03-25-deployment-identity-token-middleware-leak-postmortem.md
+app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);

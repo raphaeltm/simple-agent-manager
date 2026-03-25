@@ -312,6 +312,13 @@ projectDeploymentRoutes.delete(
 );
 
 // ─── Identity token endpoint (MCP token auth only) ──────────────────────
+// Mounted as a SEPARATE Hono instance to avoid middleware leak from projectsRoutes.
+// Both projectsRoutes and projectDeploymentRoutes mount at /api/projects — Hono merges
+// routes, so projectsRoutes.use('/*', requireAuth()) leaks to all siblings.
+// This endpoint uses MCP Bearer token auth (not session cookies), so it MUST be isolated.
+// See docs/notes/2026-03-25-deployment-identity-token-middleware-leak-postmortem.md
+
+const deploymentIdentityTokenRoute = new Hono<{ Bindings: Env }>();
 
 /**
  * GET /api/projects/:id/deployment-identity-token
@@ -319,7 +326,7 @@ projectDeploymentRoutes.delete(
  * Auth: MCP token ONLY — callback tokens are rejected to prevent privilege escalation.
  * Called by GCP client libraries via external_account credential config.
  */
-projectDeploymentRoutes.get('/:id/deployment-identity-token', async (c) => {
+deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => {
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
@@ -567,4 +574,4 @@ gcpDeployCallbackRoute.get(
   },
 );
 
-export { projectDeploymentRoutes, gcpDeployCallbackRoute };
+export { projectDeploymentRoutes, gcpDeployCallbackRoute, deploymentIdentityTokenRoute };

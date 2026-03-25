@@ -82,7 +82,7 @@ vi.mock('../../../src/services/gcp-setup', () => ({
   listGcpProjects: vi.fn().mockResolvedValue([]),
 }));
 
-const { projectDeploymentRoutes, gcpDeployCallbackRoute } = await import(
+const { projectDeploymentRoutes, gcpDeployCallbackRoute, deploymentIdentityTokenRoute } = await import(
   '../../../src/routes/project-deployment'
 );
 
@@ -97,6 +97,7 @@ function createTestApp() {
     }
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
+  app.route('/api/projects', deploymentIdentityTokenRoute);
   app.route('/api/projects', projectDeploymentRoutes);
   app.route('/api/deployment', gcpDeployCallbackRoute);
   return app;
