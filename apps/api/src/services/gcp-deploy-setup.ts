@@ -29,14 +29,14 @@ const DEPLOY_APIS = [
   'cloudbuild.googleapis.com',
 ];
 
-/** Roles granted to the deployment service account. */
-const DEPLOY_SA_PROJECT_ROLES = [
-  'roles/run.admin', // Cloud Run deployment
-  'roles/storage.admin', // Cloud Storage for build artifacts
-  'roles/artifactregistry.admin', // Artifact Registry for container images
-  'roles/iam.serviceAccountUser', // Act as service account for Cloud Run
-  'roles/cloudbuild.builds.editor', // Cloud Build for building containers
-];
+/**
+ * Roles granted to the deployment service account.
+ * Defang acts as a cloud manager requiring broad GCP access across many services
+ * (Cloud Run, Storage, Artifact Registry, Cloud Build, IAM, networking, etc.).
+ * Per Defang's official documentation, roles/owner is the recommended role.
+ * Granular roles cause deployment failures as Defang's permission requirements evolve.
+ */
+const DEPLOY_SA_PROJECT_ROLES = ['roles/owner'];
 
 /**
  * Run GCP deployment setup for a project.
