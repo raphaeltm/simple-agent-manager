@@ -107,7 +107,8 @@ export async function getGcpAccessToken(
     body: JSON.stringify({
       scope: (env.GCP_SA_IMPERSONATION_SCOPES || DEFAULT_GCP_SA_IMPERSONATION_SCOPES)
         .split(',')
-        .map((s) => s.trim()),
+        .map((s) => s.trim())
+        .filter(Boolean),
       lifetime: `${DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS}s`,
     }),
   }, timeoutMs);

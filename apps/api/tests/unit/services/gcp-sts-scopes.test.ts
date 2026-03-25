@@ -26,7 +26,7 @@ describe('GCP SA impersonation scopes parsing', () => {
   // Test the same parsing logic to ensure multi-scope support works correctly.
 
   function parseScopes(envValue: string | undefined, defaultValue: string): string[] {
-    return (envValue || defaultValue).split(',').map((s) => s.trim());
+    return (envValue || defaultValue).split(',').map((s) => s.trim()).filter(Boolean);
   }
 
   it('returns default scope as single-element array when env var is not set', () => {
@@ -62,6 +62,11 @@ describe('GCP SA impersonation scopes parsing', () => {
       'https://www.googleapis.com/auth/compute',
       'https://www.googleapis.com/auth/devstorage.read_only',
     ]);
+  });
+
+  it('filters out empty strings from whitespace-only entries', () => {
+    const scopes = parseScopes('  ,  ', DEFAULT_GCP_SA_IMPERSONATION_SCOPES);
+    expect(scopes).toEqual([]);
   });
 
   it('uses default when env var is empty string', () => {
