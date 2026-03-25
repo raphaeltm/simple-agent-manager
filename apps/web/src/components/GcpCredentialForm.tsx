@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { deleteCredential, listGcpProjects, runGcpSetup, getGcpOAuthResult } from '../lib/api';
 import type { GcpProject } from '../lib/api';
 import { useToast } from '../hooks/useToast';
-import { Button, Alert } from '@simple-agent-manager/ui';
+import { Button, Alert, Select, Spinner } from '@simple-agent-manager/ui';
 import type { CredentialResponse } from '@simple-agent-manager/shared';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const GCP_ZONES = [
   { id: 'us-central1-a', label: 'Iowa (us-central1-a)' },
@@ -31,7 +32,7 @@ interface GcpCredentialFormProps {
   onUpdate: () => void;
 }
 
-type SetupPhase = 'idle' | 'oauth' | 'project-select' | 'zone-select' | 'setting-up' | 'done';
+type SetupPhase = 'idle' | 'oauth' | 'loading-projects' | 'project-select' | 'zone-select' | 'setting-up';
 
 export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormProps) {
   const toast = useToast();
@@ -49,6 +50,10 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
   // Zone selection
   const [selectedZone, setSelectedZone] = useState('us-central1-a');
 
+  // Disconnect confirmation dialog
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
   // Check for OAuth callback flag in URL — the handle is retrieved via an
   // authenticated API call to avoid leaking it in browser history / Referer headers.
   useEffect(() => {
@@ -57,19 +62,22 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
     const gcpError = params.get('gcp_error');
 
     if (setupFlag) {
+      // Show loading state immediately instead of jumping to project-select
+      setPhase('loading-projects');
       // Clean up URL immediately
       const url = new URL(window.location.href);
       url.searchParams.delete('gcp_setup');
       window.history.replaceState({}, '', url.toString());
 
-      // Retrieve handle via authenticated endpoint
+      // Retrieve handle via authenticated endpoint — keep loading-projects phase
+      // so fetchProjects useEffect triggers when handle becomes available
       void getGcpOAuthResult()
         .then((result) => {
           setOauthHandle(result.handle);
-          setPhase('project-select');
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : 'Failed to retrieve OAuth result');
+          setPhase('idle');
         });
     }
 
@@ -92,16 +100,18 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
       if (result.projects.length === 1 && result.projects[0]) {
         setSelectedProject(result.projects[0].projectId);
       }
+      setPhase('project-select');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load GCP projects');
+      setPhase('idle');
     } finally {
       setLoading(false);
     }
   }, [oauthHandle]);
 
   useEffect(() => {
-    if (phase === 'project-select' && oauthHandle) {
-      fetchProjects();
+    if (phase === 'loading-projects' && oauthHandle) {
+      void fetchProjects();
     }
   }, [phase, oauthHandle, fetchProjects]);
 
@@ -131,10 +141,11 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
       });
 
       if (result.success) {
-        setPhase('done');
         toast.success(result.verified
           ? 'GCP connected successfully!'
           : 'GCP setup complete (verification pending)');
+        // Transition to idle so the connected state renders when credential prop updates
+        setPhase('idle');
         onUpdate();
       }
     } catch (err) {
@@ -145,19 +156,19 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm('Are you sure you want to disconnect Google Cloud?')) return;
-    setLoading(true);
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
     setError(null);
     try {
       await deleteCredential('gcp');
       toast.success('Google Cloud disconnected');
       setPhase('idle');
+      setShowDisconnectConfirm(false);
       onUpdate();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to disconnect');
     } finally {
-      setLoading(false);
+      setDisconnecting(false);
     }
   };
 
@@ -179,15 +190,38 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
               </p>
             </div>
           </div>
-          <button
-            onClick={handleDelete}
-            disabled={loading}
-            className={`py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-danger ${loading ? 'opacity-50' : 'opacity-100'}`}
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => setShowDisconnectConfirm(true)}
           >
-            {loading ? 'Removing...' : 'Disconnect'}
-          </button>
+            Disconnect
+          </Button>
         </div>
         {error && <Alert variant="error">{error}</Alert>}
+
+        <ConfirmDialog
+          isOpen={showDisconnectConfirm}
+          onClose={() => setShowDisconnectConfirm(false)}
+          onConfirm={() => void handleDisconnect()}
+          title="Disconnect Google Cloud?"
+          message="This will remove your GCP credentials. You will need to re-authenticate to provision nodes on Google Cloud."
+          confirmLabel="Confirm Disconnect"
+          variant="danger"
+          loading={disconnecting}
+        />
+      </div>
+    );
+  }
+
+  // Loading projects after OAuth redirect
+  if (phase === 'loading-projects') {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <Spinner size="sm" />
+          <span className="text-sm text-fg-muted">Loading GCP projects...</span>
+        </div>
       </div>
     );
   }
@@ -197,33 +231,32 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
     return (
       <div className="flex flex-col gap-4">
         <p className="text-sm text-fg-muted">Select a GCP project to connect:</p>
-        {loading ? (
-          <p className="text-sm text-fg-muted">Loading projects...</p>
-        ) : (
-          <>
-            <select
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              className="w-full p-2 bg-bg-secondary border border-border rounded-md text-fg-primary"
-            >
-              <option value="">Select a project...</option>
-              {projects.map((p) => (
-                <option key={p.projectId} value={p.projectId}>
-                  {p.name} ({p.projectId})
-                </option>
-              ))}
-            </select>
-            {error && <Alert variant="error">{error}</Alert>}
-            <div className="flex gap-3">
-              <Button onClick={handleProjectSelect} disabled={!selectedProject}>
-                Next
-              </Button>
-              <Button variant="secondary" onClick={() => { setPhase('idle'); setOauthHandle(null); }}>
-                Cancel
-              </Button>
-            </div>
-          </>
-        )}
+        <div>
+          <label htmlFor="gcp-project-select" className="block text-xs font-medium text-fg-muted mb-1">
+            GCP Project
+          </label>
+          <Select
+            id="gcp-project-select"
+            value={selectedProject}
+            onChange={(e) => setSelectedProject(e.target.value)}
+          >
+            <option value="">Select a project...</option>
+            {projects.map((p) => (
+              <option key={p.projectId} value={p.projectId}>
+                {p.name} ({p.projectId})
+              </option>
+            ))}
+          </Select>
+        </div>
+        {error && <Alert variant="error">{error}</Alert>}
+        <div className="flex gap-3">
+          <Button onClick={handleProjectSelect} disabled={!selectedProject}>
+            Next
+          </Button>
+          <Button variant="secondary" onClick={() => { setPhase('idle'); setOauthHandle(null); }}>
+            Cancel
+          </Button>
+        </div>
       </div>
     );
   }
@@ -235,17 +268,22 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
         <p className="text-sm text-fg-muted">
           Select a default zone for project <strong>{selectedProject}</strong>:
         </p>
-        <select
-          value={selectedZone}
-          onChange={(e) => setSelectedZone(e.target.value)}
-          className="w-full p-2 bg-bg-secondary border border-border rounded-md text-fg-primary"
-        >
-          {GCP_ZONES.map((z) => (
-            <option key={z.id} value={z.id}>
-              {z.label}
-            </option>
-          ))}
-        </select>
+        <div>
+          <label htmlFor="gcp-zone-select" className="block text-xs font-medium text-fg-muted mb-1">
+            Default Zone
+          </label>
+          <Select
+            id="gcp-zone-select"
+            value={selectedZone}
+            onChange={(e) => setSelectedZone(e.target.value)}
+          >
+            {GCP_ZONES.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.label}
+              </option>
+            ))}
+          </Select>
+        </div>
         {error && <Alert variant="error">{error}</Alert>}
         <div className="flex gap-3">
           <Button onClick={handleSetup} disabled={loading} loading={loading}>
@@ -273,15 +311,6 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
           ))}
         </div>
         {error && <Alert variant="error">{error}</Alert>}
-      </div>
-    );
-  }
-
-  // Done phase
-  if (phase === 'done') {
-    return (
-      <div className="flex flex-col gap-4">
-        <Alert variant="success">GCP connected! You can now provision nodes on Google Cloud.</Alert>
       </div>
     );
   }
