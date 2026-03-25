@@ -2315,19 +2315,130 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('Idea not found');
     });
 
-    it('should reject non-draft task (filtered out by SQL status check)', async () => {
-      // When status != 'draft', the SQL query with AND status = 'draft' returns null
-      mockD1._stmt.first.mockResolvedValueOnce(null);
+    it('should reject idea in terminal status (completed)', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Done idea',
+        description: 'Content',
+        status: 'completed',
+        priority: 0,
+      });
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'update_idea',
-        arguments: { ideaId: 'task-1', content: 'New content' },
+        arguments: { ideaId: 'idea-1', content: 'New content' },
       }));
 
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.error).toBeDefined();
-      expect(body.error.message).toContain('Idea not found or not in draft status');
+      expect(body.error.message).toContain("terminal status 'completed'");
+    });
+
+    it('should reject idea in terminal status (cancelled)', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Cancelled idea',
+        description: 'Content',
+        status: 'cancelled',
+        priority: 0,
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', content: 'New content' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain("terminal status 'cancelled'");
+    });
+
+    it('should transition draft → ready', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'My idea',
+        description: 'Content',
+        status: 'draft',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', status: 'ready' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+      expect(data.updatedFields).toContain('status');
+    });
+
+    it('should transition ready → completed', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Ready idea',
+        description: 'Content',
+        status: 'ready',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', status: 'completed' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+      expect(data.updatedFields).toContain('status');
+    });
+
+    it('should reject invalid transition draft → completed', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Draft idea',
+        description: 'Content',
+        status: 'draft',
+        priority: 0,
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', status: 'completed' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Invalid status transition: draft → completed');
+    });
+
+    it('should allow updating ready idea fields', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Ready idea',
+        description: 'Content',
+        status: 'ready',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', title: 'Updated title' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+      expect(data.updatedFields).toContain('title');
     });
 
     it('should append content by default', async () => {
@@ -2499,12 +2610,12 @@ describe('MCP Routes', () => {
       expect(body.error.code).toBe(-32602);
     });
 
-    it('should return idea not found for non-draft task', async () => {
+    it('should return idea not found for nonexistent task', async () => {
       mockD1._stmt.first.mockResolvedValueOnce(null);
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'get_idea',
-        arguments: { ideaId: 'task-completed' },
+        arguments: { ideaId: 'nonexistent' },
       }));
 
       expect(res.status).toBe(200);
@@ -2538,6 +2649,29 @@ describe('MCP Routes', () => {
       expect(data.contentLength).toBe(42);
       expect(data.priority).toBe(3);
       expect(data.status).toBe('draft');
+    });
+
+    it('should return idea in any status (not just draft)', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-completed',
+        title: 'Completed idea',
+        description: 'Done',
+        status: 'completed',
+        priority: 0,
+        created_at: '2026-03-22T00:00:00Z',
+        updated_at: '2026-03-25T00:00:00Z',
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_idea',
+        arguments: { ideaId: 'idea-completed' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideaId).toBe('idea-completed');
+      expect(data.status).toBe('completed');
     });
 
     it('should return null content and contentLength 0 for idea with no description', async () => {
