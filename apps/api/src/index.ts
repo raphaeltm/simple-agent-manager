@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from './db/schema';
 import { AppError } from './middleware/error';
+import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { authRoutes } from './routes/auth';
 import { credentialsRoutes } from './routes/credentials';
 import { providersRoutes } from './routes/providers';
@@ -337,6 +338,12 @@ app.onError((err, c) => {
 
   if (err instanceof AppError) {
     return c.json(err.toJSON(), err.statusCode as any);
+  }
+
+  // Defense-in-depth: sanitize GcpApiError if it escapes route-level catch blocks
+  if (err instanceof GcpApiError) {
+    const safe = sanitizeGcpError(err, 'global-handler');
+    return c.json({ error: 'GCP_UPSTREAM_ERROR', message: safe }, 502);
   }
 
   const message = err instanceof Error ? err.message : 'Unknown error';

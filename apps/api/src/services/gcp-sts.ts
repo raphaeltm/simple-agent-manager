@@ -6,6 +6,7 @@ import {
   DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS,
 } from '@simple-agent-manager/shared';
 import { signIdentityToken } from './jwt';
+import { GcpApiError } from './gcp-errors';
 
 const GCP_STS_URL = 'https://sts.googleapis.com/v1/token';
 const GCP_IAM_CREDENTIALS_URL = 'https://iamcredentials.googleapis.com/v1';
@@ -86,7 +87,7 @@ export async function getGcpAccessToken(
 
   if (!stsResponse.ok) {
     const errorBody = await stsResponse.text();
-    throw new Error(`GCP STS token exchange failed (${stsResponse.status}): ${errorBody}`);
+    throw new GcpApiError({ step: 'sts_exchange', message: `GCP STS token exchange failed (${stsResponse.status})`, statusCode: stsResponse.status, rawBody: errorBody });
   }
 
   const stsData = (await stsResponse.json()) as StsTokenResponse;
@@ -108,7 +109,7 @@ export async function getGcpAccessToken(
 
   if (!saResponse.ok) {
     const errorBody = await saResponse.text();
-    throw new Error(`GCP SA impersonation failed (${saResponse.status}): ${errorBody}`);
+    throw new GcpApiError({ step: 'sa_impersonation', message: `GCP SA impersonation failed (${saResponse.status})`, statusCode: saResponse.status, rawBody: errorBody });
   }
 
   const saData = (await saResponse.json()) as SaTokenResponse;

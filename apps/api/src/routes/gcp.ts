@@ -8,6 +8,7 @@ import { errors } from '../middleware/error';
 import { encrypt } from '../services/encryption';
 import { listGcpProjects, runGcpSetup } from '../services/gcp-setup';
 import { verifyGcpOidcSetup } from '../services/gcp-sts';
+import { sanitizeGcpError, toSanitizedAppError } from '../services/gcp-errors';
 import { serializeCredentialToken } from '../services/provider-credentials';
 import * as schema from '../db/schema';
 import { DEFAULT_GCP_API_TIMEOUT_MS } from '@simple-agent-manager/shared';
@@ -49,9 +50,7 @@ gcpRoutes.post('/projects', async (c) => {
     const projects = await listGcpProjects(oauthToken, timeoutMs);
     return c.json({ projects });
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error('Failed to list GCP projects:', detail);
-    throw errors.badRequest(`Failed to list GCP projects: ${detail}`);
+    throw toSanitizedAppError(err, 'list-projects');
   }
 });
 
@@ -173,10 +172,7 @@ gcpRoutes.post('/setup', async (c) => {
       },
     });
   } catch (err) {
-    console.error('GCP setup failed:', err instanceof Error ? err.message : err);
-    throw errors.badRequest(
-      `GCP setup failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-    );
+    throw toSanitizedAppError(err, 'gcp-setup');
   }
 });
 
@@ -214,10 +210,12 @@ gcpRoutes.post('/verify', async (c) => {
     await verifyGcpOidcSetup(userId, 'verification', gcpCred, c.env);
     return c.json({ success: true, verified: true });
   } catch (err) {
+    // Intentional 200-with-error pattern: verification is a check, not a mutation.
+    // The UI displays the result inline rather than treating it as an HTTP error.
     return c.json({
       success: false,
       verified: false,
-      error: err instanceof Error ? err.message : 'Verification failed',
+      error: sanitizeGcpError(err, 'gcp-verify'),
     });
   }
 });
