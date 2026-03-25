@@ -25,11 +25,15 @@ const (
 )
 
 // samEnvFiles are the paths inside the devcontainer where SAM and project
-// environment variables are persisted during bootstrap. Both use the same
-// shell `export KEY="value"` format.
+// environment variables are persisted during bootstrap. The two files use
+// different quoting conventions:
+//   - /etc/sam/env          uses Go %q double-quoting (buildSAMStaticEnv)
+//   - /etc/sam/project-env  uses shellSingleQuote() (buildProjectRuntimeEnvScript)
+//
+// Both are parsed by parseEnvExportLines which handles both quoting styles.
 var samEnvFiles = []string{
-	"/etc/sam/env",         // SAM platform vars (GH_TOKEN, SAM_WORKSPACE_ID, etc.)
-	"/etc/sam/project-env", // Project-specific vars configured by the user
+	"/etc/sam/env",         // SAM platform vars (GH_TOKEN, SAM_WORKSPACE_ID, etc.) — double-quoted
+	"/etc/sam/project-env", // Project-specific vars configured by the user — single-quoted
 }
 
 // ReadContainerEnvFiles reads SAM env files from inside the container and
