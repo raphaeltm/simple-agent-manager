@@ -98,7 +98,7 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `CREDENTIAL_ENCRYPTION_KEY` | AES-GCM encryption of user cloud credentials (overrides `ENCRYPTION_KEY` for credential storage) |
 | `GITHUB_WEBHOOK_SECRET` | GitHub webhook HMAC-SHA256 verification (overrides `ENCRYPTION_KEY`; must match GitHub App webhook secret) |
 
-**Optional secrets** (for GCP OIDC integration):
+**Optional secrets** (for GCP OIDC integration — see [GCP Setup Guide](./gcp-setup.md) for full instructions):
 
 | Secret | Description |
 |--------|-------------|
@@ -107,7 +107,16 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 
 > **GCP OAuth Redirect URI**: When creating a Google OAuth 2.0 client, add `https://api.<YOUR_BASE_DOMAIN>/api/deployment/gcp/callback` as an authorized redirect URI. This is a single static URI shared by all projects — no per-project URIs needed.
 
-**Optional GCP deployment configuration** (env vars, not secrets — sensible defaults provided):
+**Optional GCP VM provisioning configuration** (env vars, not secrets — sensible defaults provided):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GCP_STS_SCOPE` | `https://www.googleapis.com/auth/cloud-platform` | OAuth scope for STS token exchange |
+| `GCP_SA_IMPERSONATION_SCOPES` | `https://www.googleapis.com/auth/compute` | Comma-separated scopes for SA impersonation |
+
+For the full list of GCP configuration variables, see the [GCP Setup Guide](./gcp-setup.md#configuration-reference).
+
+**Optional GCP deployment configuration** (for project-level Defang deployment — sensible defaults provided):
 
 | Variable | Default | Description |
 |----------|---------|-------------|

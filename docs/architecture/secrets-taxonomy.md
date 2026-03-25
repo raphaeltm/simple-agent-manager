@@ -78,6 +78,8 @@ These are env vars with sensible defaults — override only if needed:
 | `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS` | `600` | SAM-issued identity token lifetime (10 min) |
 | `GCP_STS_TOKEN_URL` | `https://sts.googleapis.com/v1/token` | GCP STS endpoint (override for VPC Service Controls) |
 | `GCP_IAM_CREDENTIALS_BASE_URL` | `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts` | GCP IAM SA impersonation base URL |
+| `GCP_STS_SCOPE` | `https://www.googleapis.com/auth/cloud-platform` | OAuth scope for STS token exchange |
+| `GCP_SA_IMPERSONATION_SCOPES` | `https://www.googleapis.com/auth/compute` | Comma-separated scopes for SA impersonation |
 
 ### How Platform Secrets Are Set
 
@@ -201,4 +203,5 @@ Set via `wrangler secret put` or deployment workflow:
 ## Related Documentation
 
 - [Credential Security](./credential-security.md) - Encryption details
+- [GCP Setup Guide](../guides/gcp-setup.md) - Google Cloud OIDC federation setup
 - [CLAUDE.md](../../CLAUDE.md) - Environment variable reference

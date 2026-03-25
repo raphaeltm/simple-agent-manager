@@ -617,18 +617,19 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
             {/* Deploy to Cloud */}
             <DeploymentSettings projectId={projectId} compact />
 
-            {/* Project Views — power-user links to hidden routes */}
+            {/* Quick Links — navigation to related settings and project views */}
             <section className="grid gap-3">
               <div>
                 <h3 className="sam-type-card-title m-0 text-fg-primary">
-                  Project Views
+                  Quick Links
                 </h3>
                 <p className="m-0 mt-1 text-xs text-fg-muted">
-                  Advanced views for managing workspaces, tasks, and activity.
+                  Cloud provider setup, tasks, and activity.
                 </p>
               </div>
               <div className="grid gap-1">
                 {[
+                  { label: 'Cloud Providers', description: 'Connect Hetzner, GCP, or Scaleway', path: '/settings/cloud-provider' },
                   { label: 'Tasks', description: 'Task list & management', path: `/projects/${projectId}/tasks` },
                   { label: 'Activity', description: 'Project event feed', path: `/projects/${projectId}/activity` },
                 ].map((link) => (

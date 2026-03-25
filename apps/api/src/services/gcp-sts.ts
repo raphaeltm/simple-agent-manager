@@ -4,12 +4,13 @@ import {
   DEFAULT_GCP_TOKEN_CACHE_TTL_SECONDS,
   DEFAULT_GCP_API_TIMEOUT_MS,
   DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS,
+  DEFAULT_GCP_STS_SCOPE,
+  DEFAULT_GCP_SA_IMPERSONATION_SCOPES,
+  DEFAULT_GCP_STS_TOKEN_URL,
+  DEFAULT_GCP_IAM_CREDENTIALS_BASE_URL,
 } from '@simple-agent-manager/shared';
 import { signIdentityToken } from './jwt';
 import { GcpApiError } from './gcp-errors';
-
-const GCP_STS_URL = 'https://sts.googleapis.com/v1/token';
-const GCP_IAM_CREDENTIALS_URL = 'https://iamcredentials.googleapis.com/v1';
 
 interface StsTokenResponse {
   access_token: string;
@@ -51,6 +52,11 @@ export async function getGcpAccessToken(
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
     : DEFAULT_GCP_API_TIMEOUT_MS;
+  const gcpStsUrl = env.GCP_STS_TOKEN_URL || DEFAULT_GCP_STS_TOKEN_URL;
+  const gcpIamCredentialsBaseUrl = env.GCP_IAM_CREDENTIALS_BASE_URL || DEFAULT_GCP_IAM_CREDENTIALS_BASE_URL;
+  const saTokenLifetime = env.GCP_SA_TOKEN_LIFETIME_SECONDS
+    ? parseInt(env.GCP_SA_TOKEN_LIFETIME_SECONDS, 10)
+    : DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS;
 
   // Step 1: Sign a SAM identity token
   // GCP requires different audience formats for the JWT vs the STS request:
@@ -70,16 +76,17 @@ export async function getGcpAccessToken(
   );
 
   // Step 2: Exchange SAM JWT for GCP STS federated token
+  const stsScope = env.GCP_STS_SCOPE || DEFAULT_GCP_STS_SCOPE;
   const stsBody = {
     audience: stsAudience,
     grantType: 'urn:ietf:params:oauth:grant-type:token-exchange',
     requestedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
-    scope: 'https://www.googleapis.com/auth/cloud-platform',
+    scope: stsScope,
     subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
     subjectToken: identityToken,
   };
 
-  const stsResponse = await fetchWithTimeout(GCP_STS_URL, {
+  const stsResponse = await fetchWithTimeout(gcpStsUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(stsBody),
@@ -93,7 +100,7 @@ export async function getGcpAccessToken(
   const stsData = (await stsResponse.json()) as StsTokenResponse;
 
   // Step 3: Impersonate service account for Compute Engine access
-  const saUrl = `${GCP_IAM_CREDENTIALS_URL}/projects/-/serviceAccounts/${credential.serviceAccountEmail}:generateAccessToken`;
+  const saUrl = `${gcpIamCredentialsBaseUrl}/${credential.serviceAccountEmail}:generateAccessToken`;
 
   const saResponse = await fetchWithTimeout(saUrl, {
     method: 'POST',
@@ -102,8 +109,11 @@ export async function getGcpAccessToken(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      scope: ['https://www.googleapis.com/auth/compute'],
-      lifetime: `${DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS}s`,
+      scope: (env.GCP_SA_IMPERSONATION_SCOPES || DEFAULT_GCP_SA_IMPERSONATION_SCOPES)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      lifetime: `${saTokenLifetime}s`,
     }),
   }, timeoutMs);
 
