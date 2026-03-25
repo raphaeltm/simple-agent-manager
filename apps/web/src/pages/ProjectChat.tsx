@@ -437,6 +437,7 @@ export function ProjectChat() {
 
   const handleNewChat = useCallback(() => {
     newChatIntentRef.current = true;
+    executeIdeaIdRef.current = null;
     navigate(`/projects/${projectId}/chat`, { replace: true });
     setMessage('');
     setSubmitError(null);

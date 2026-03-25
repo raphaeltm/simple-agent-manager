@@ -403,7 +403,7 @@ export function IdeaDetailPage() {
         {ideaStatus !== 'done' && ideaStatus !== 'parked' && (
           <button
             onClick={handleExecute}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer shrink-0 min-h-[44px] transition-opacity hover:opacity-90"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer shrink-0 min-h-[44px] transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             style={{
               backgroundColor: 'var(--sam-color-accent-primary)',
               color: 'white',
