@@ -200,8 +200,10 @@ describe('deployment-identity-token auth routing (regression)', () => {
     });
 
     // The key invariant: the request was NOT intercepted by session auth middleware.
-    // It reaches the identity token handler which may fail due to missing env bindings,
-    // but the error will NOT be "Authentication required" from requireAuth().
+    // It reaches the identity token handler which either returns its own auth error
+    // or fails on missing env bindings — but NOT "Authentication required" from requireAuth().
+    // NOTE: Cannot assert status=401 because drizzle(c.env.DATABASE) is called before the
+    // auth check and c.env.DATABASE is undefined in unit tests, causing a 500.
     const body = await res.json();
     expect(body.message).not.toBe('Authentication required');
   });

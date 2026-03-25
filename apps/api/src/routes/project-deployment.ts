@@ -336,6 +336,9 @@ deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => 
     throw errors.unauthorized('Missing or invalid Authorization header');
   }
   const token = authHeader.slice(7);
+  if (!token) {
+    throw errors.unauthorized('Missing or invalid Authorization header');
+  }
 
   // Validate MCP token — callback tokens are NOT accepted here.
   // Callback tokens are operational credentials for node-to-API communication

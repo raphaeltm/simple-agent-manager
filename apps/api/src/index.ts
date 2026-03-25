@@ -637,9 +637,12 @@ app.route('/api/transcribe', transcribeRoutes);
 app.route('/api/tts', ttsRoutes);
 app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
-// Mount identity token route BEFORE projectsRoutes — it uses MCP Bearer token auth,
-// not session cookies. projectsRoutes has use('/*', requireAuth()) which would leak
-// and block this endpoint. See docs/notes/2026-03-25-deployment-identity-token-middleware-leak-postmortem.md
+// ORDERING IS CRITICAL: deploymentIdentityTokenRoute MUST be mounted before
+// projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
+// all siblings at the same base path — mounting identity token route first
+// causes it to match and return before the session auth middleware runs.
+// Reversing this order silently breaks GCP agent deployments with 401.
+// See docs/notes/2026-03-25-deployment-identity-token-middleware-leak-postmortem.md
 app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
