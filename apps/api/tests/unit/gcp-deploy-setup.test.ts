@@ -122,6 +122,15 @@ describe('runGcpDeploySetup', () => {
     );
     expect(wifBinding.members[0]).toContain('subject/project:sam-project-123');
     expect(wifBinding.members[0]).not.toContain('/*');
+
+    // Verify deployment SA gets roles/owner (Defang requires broad access)
+    const grantRolesSetIamCall = mockFetch.mock.calls[8];
+    const grantRolesBody = JSON.parse(grantRolesSetIamCall![1]!.body as string);
+    const ownerBinding = grantRolesBody.policy.bindings.find(
+      (b: { role: string }) => b.role === 'roles/owner',
+    );
+    expect(ownerBinding).toBeDefined();
+    expect(ownerBinding.members).toContain(`serviceAccount:sam-deployer@my-project.iam.gserviceaccount.com`);
   });
 
   it('uses configurable env vars for pool/provider/sa IDs', async () => {
