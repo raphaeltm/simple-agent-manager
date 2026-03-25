@@ -4,9 +4,12 @@ package acp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -85,6 +88,62 @@ func parseEnvExportLines(content string) []string {
 	return result
 }
 
+// secretEnvNames are well-known secret environment variable names that must
+// not appear in docker exec command-line arguments (visible in /proc/*/cmdline).
+var secretEnvNames = map[string]bool{
+	"ANTHROPIC_API_KEY":       true,
+	"CLAUDE_CODE_OAUTH_TOKEN": true,
+	"OPENAI_API_KEY":          true,
+	"GH_TOKEN":                true,
+	"GEMINI_API_KEY":          true,
+	"MISTRAL_API_KEY":         true,
+}
+
+// secretEnvSubstrings are substrings in env var names that indicate a secret.
+var secretEnvSubstrings = []string{"_KEY", "_TOKEN", "_SECRET"}
+
+// isSecretEnvVar returns true if the KEY=VALUE entry contains a secret that
+// should not be exposed in command-line arguments.
+func isSecretEnvVar(entry string) bool {
+	eqIdx := strings.Index(entry, "=")
+	if eqIdx <= 0 {
+		return false
+	}
+	name := entry[:eqIdx]
+	if secretEnvNames[name] {
+		return true
+	}
+	upper := strings.ToUpper(name)
+	for _, sub := range secretEnvSubstrings {
+		if strings.Contains(upper, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// envFileDir is the directory used for temporary env files. /dev/shm is a
+// tmpfs on Linux — files never hit disk. Overridable in tests.
+var envFileDir = "/dev/shm"
+
+// writeSecretEnvFile writes secret env vars to a temp file suitable for
+// docker exec --env-file. Returns the file path, or an error.
+func writeSecretEnvFile(secrets []string) (string, error) {
+	// Generate a unique filename
+	var idBytes [8]byte
+	if _, err := rand.Read(idBytes[:]); err != nil {
+		return "", fmt.Errorf("failed to generate random id: %w", err)
+	}
+	fileName := fmt.Sprintf("sam-env-%s", hex.EncodeToString(idBytes[:]))
+	filePath := envFileDir + "/" + fileName
+
+	// Write with mode 0600 — owner-only read/write
+	if err := os.WriteFile(filePath, []byte(strings.Join(secrets, "\n")+"\n"), 0600); err != nil {
+		return "", fmt.Errorf("failed to write env file: %w", err)
+	}
+	return filePath, nil
+}
+
 // hasEnvVar checks whether a KEY=value list contains a non-empty value for key.
 func hasEnvVar(envVars []string, key string) bool {
 	prefix := key + "="
@@ -149,7 +208,7 @@ type ProcessConfig struct {
 // The process is placed in its own process group (Setpgid) so that Stop()
 // can signal the entire tree reliably.
 func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
-	// Build docker exec command: docker exec -i [-u user] [-w dir] [-e VAR=val...] container command args...
+	// Build docker exec command: docker exec -i [-u user] [-w dir] [-e VAR=val...] [--env-file path] container command args...
 	args := []string{"exec", "-i"}
 
 	if cfg.ContainerUser != "" {
@@ -158,8 +217,37 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	if cfg.WorkDir != "" {
 		args = append(args, "-w", cfg.WorkDir)
 	}
+
+	// Separate secret env vars from non-secret ones. Secrets are written to
+	// a tmpfs-backed file and passed via --env-file to avoid exposing them
+	// in /proc/<pid>/cmdline on the host.
+	var secrets, nonSecrets []string
 	for _, env := range cfg.EnvVars {
+		if isSecretEnvVar(env) {
+			secrets = append(secrets, env)
+		} else {
+			nonSecrets = append(nonSecrets, env)
+		}
+	}
+
+	for _, env := range nonSecrets {
 		args = append(args, "-e", env)
+	}
+
+	// Write secrets to env file; fall back to -e flags on failure.
+	var envFilePath string
+	if len(secrets) > 0 {
+		path, err := writeSecretEnvFile(secrets)
+		if err != nil {
+			slog.Warn("Failed to write secret env file, falling back to -e flags",
+				"error", err, "secretCount", len(secrets))
+			for _, env := range secrets {
+				args = append(args, "-e", env)
+			}
+		} else {
+			envFilePath = path
+			args = append(args, "--env-file", envFilePath)
+		}
 	}
 
 	args = append(args, cfg.ContainerID, cfg.AcpCommand)
@@ -173,12 +261,18 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		if envFilePath != "" {
+			os.Remove(envFilePath)
+		}
 		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		stdin.Close()
+		if envFilePath != "" {
+			os.Remove(envFilePath)
+		}
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
@@ -186,6 +280,9 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	if err != nil {
 		stdin.Close()
 		stdout.Close()
+		if envFilePath != "" {
+			os.Remove(envFilePath)
+		}
 		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
@@ -193,7 +290,18 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stdin.Close()
 		stdout.Close()
 		stderr.Close()
+		if envFilePath != "" {
+			os.Remove(envFilePath)
+		}
 		return nil, fmt.Errorf("failed to start agent process: %w", err)
+	}
+
+	// Clean up the env file now that docker has read it. The process already
+	// has the env vars in its environment; the file is no longer needed.
+	if envFilePath != "" {
+		if removeErr := os.Remove(envFilePath); removeErr != nil {
+			slog.Warn("Failed to remove secret env file", "path", envFilePath, "error", removeErr)
+		}
 	}
 
 	slog.Info("ACP agent process started", "command", cfg.AcpCommand, "container", cfg.ContainerID, "pid", cmd.Process.Pid)
