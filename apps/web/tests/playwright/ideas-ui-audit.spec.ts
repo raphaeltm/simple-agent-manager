@@ -121,6 +121,34 @@ const LONG_TEXT_TASKS = [
   }),
 ];
 
+// Tasks with unbroken strings that aggressively test overflow
+const UNBROKEN_STRING_TASKS = [
+  makeTask({
+    id: 'ub1',
+    title: 'x'.repeat(500),
+    status: 'draft',
+    description: 'y'.repeat(600),
+  }),
+  makeTask({
+    id: 'ub2',
+    title: 'https://example.com/this-is-an-extremely-long-url-that-should-not-cause-horizontal-overflow-even-on-mobile-devices-with-narrow-viewports?param1=value1&param2=value2&param3=value3',
+    status: 'ready',
+    description: 'Description with a long URL: https://example.com/another/very/long/path/that/keeps/going/and/going/without/any/natural/break/points/at/all/whatsoever/even/though/it/really/should/wrap/properly',
+  }),
+  makeTask({
+    id: 'ub3',
+    title: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.repeat(20),
+    status: 'in_progress',
+    description: '0123456789'.repeat(60),
+  }),
+  makeTask({
+    id: 'ub4',
+    title: 'Title with mixed content and ' + 'verylongword'.repeat(30) + ' in the middle',
+    status: 'completed',
+    description: 'Description with ' + 'anotherverylongword'.repeat(25) + ' embedded',
+  }),
+];
+
 const MANY_TASKS = Array.from({ length: 30 }, (_, i) => {
   const statuses = ['draft', 'ready', 'queued', 'delegated', 'in_progress', 'completed', 'failed', 'cancelled'];
   return makeTask({
@@ -364,6 +392,18 @@ async function setupApiMocks(page: Page, options: {
   });
 }
 
+async function assertNoOverflow(page: Page) {
+  const overflow = await page.evaluate(() => ({
+    docOverflow: document.documentElement.scrollWidth > window.innerWidth,
+    bodyOverflow: document.body.scrollWidth > window.innerWidth,
+    docWidth: document.documentElement.scrollWidth,
+    bodyWidth: document.body.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }));
+  expect(overflow.docOverflow, `Document scrollWidth (${overflow.docWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
+  expect(overflow.bodyOverflow, `Body scrollWidth (${overflow.bodyWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
+}
+
 async function takeScreenshot(page: Page, name: string) {
   // Wait for any loading spinners to disappear
   await page.waitForTimeout(500);
@@ -386,6 +426,7 @@ test.describe('IdeasPage - Mobile Audit', () => {
 
     // Verify empty state message is visible
     await expect(page.getByText('Ideas emerge from your conversations')).toBeVisible();
+    await assertNoOverflow(page);
   });
 
   test('normal data with mixed statuses', async ({ page }) => {
@@ -397,6 +438,7 @@ test.describe('IdeasPage - Mobile Audit', () => {
 
     // Verify status groups are visible (use role to avoid matching <option> elements)
     await expect(page.getByRole('button', { name: /Exploring/i })).toBeVisible();
+    await assertNoOverflow(page);
     await expect(page.getByRole('button', { name: /Executing/i })).toBeVisible();
   });
 
@@ -409,6 +451,18 @@ test.describe('IdeasPage - Mobile Audit', () => {
 
     // Verify layout is not broken - check that search bar is still visible
     await expect(page.getByPlaceholder('Search ideas...')).toBeVisible();
+    await assertNoOverflow(page);
+  });
+
+  test('unbroken strings do not cause horizontal overflow', async ({ page }) => {
+    await setupApiMocks(page, { tasks: UNBROKEN_STRING_TASKS, sessions: [] });
+    await page.goto('/projects/proj-test-1/ideas');
+    await page.waitForSelector('text=Ideas');
+    await page.waitForTimeout(500);
+    await takeScreenshot(page, 'ideas-unbroken-strings');
+
+    await expect(page.getByPlaceholder('Search ideas...')).toBeVisible();
+    await assertNoOverflow(page);
   });
 
   test('many items (30 tasks)', async ({ page }) => {
