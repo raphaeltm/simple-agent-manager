@@ -554,6 +554,18 @@ export async function getTaskSessions(
   return request<TaskSessionsResponse>(`/api/projects/${projectId}/tasks/${taskId}/sessions`);
 }
 
+export async function linkSessionIdea(
+  projectId: string,
+  sessionId: string,
+  taskId: string,
+  context?: string,
+): Promise<{ linked: boolean }> {
+  return request<{ linked: boolean }>(`/api/projects/${projectId}/sessions/${sessionId}/ideas`, {
+    method: 'POST',
+    body: JSON.stringify({ taskId, ...(context ? { context } : {}) }),
+  });
+}
+
 // =============================================================================
 // Chat Sessions (Project DO)
 // =============================================================================
