@@ -636,23 +636,19 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return;
   }, [sessionState, cleanupAt, agentCompletedAt, isResuming]);
 
-  // Flush pending follow-up message once agent becomes active after resume
+  // When agent becomes active after a resume, either flush the queued message
+  // or simply clear the resuming indicator. Single effect to avoid fragile
+  // ordering between two effects reacting to the same isAgentActive transition.
   useEffect(() => {
-    if (!agentSession.isAgentActive || !pendingFollowUpRef.current) return;
-    const queued = pendingFollowUpRef.current;
-    pendingFollowUpRef.current = null;
+    if (!agentSession.isAgentActive || !isResuming) return;
+    if (pendingFollowUpRef.current) {
+      const queued = pendingFollowUpRef.current;
+      pendingFollowUpRef.current = null;
+      agentSession.sendPrompt(queued);
+    }
     setIsResuming(false);
     setResumeError(null);
-    agentSession.sendPrompt(queued);
-  }, [agentSession.isAgentActive, agentSession.sendPrompt]);
-
-  // Clear resuming state when agent becomes active after auto-resume (no pending message)
-  useEffect(() => {
-    if (agentSession.isAgentActive && isResuming && !pendingFollowUpRef.current) {
-      setIsResuming(false);
-      setResumeError(null);
-    }
-  }, [agentSession.isAgentActive, isResuming]);
+  }, [agentSession.isAgentActive, agentSession.sendPrompt, isResuming]);
 
   // Auto-resume: when the user views an idle session where the agent is disconnected,
   // proactively call the resume API and force ACP WebSocket reconnection. This handles
@@ -855,16 +851,30 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Resuming agent banner — shown during auto-resume of idle/suspended sessions */}
       {isResuming && (
-        <div role="status" aria-label="Resuming agent" className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted">
+        <div role="status" aria-label="Agent resume status" className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted">
           <Spinner size="sm" />
           <span>Resuming agent...</span>
+          <button
+            type="button"
+            className="ml-auto px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer hover:bg-surface-raised"
+            onClick={() => { setIsResuming(false); setResumeError(null); pendingFollowUpRef.current = null; }}
+          >
+            Cancel
+          </button>
         </div>
       )}
 
       {/* Resume error banner */}
       {resumeError && (
-        <div role="alert" className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
-          {resumeError}
+        <div role="alert" className="flex items-center gap-2 px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
+          <span>{resumeError}</span>
+          <button
+            type="button"
+            className="ml-auto px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer hover:bg-surface-raised"
+            onClick={() => { setResumeError(null); hasAttemptedAutoResumeRef.current = false; }}
+          >
+            Retry
+          </button>
         </div>
       )}
 
