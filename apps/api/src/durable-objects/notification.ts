@@ -203,6 +203,7 @@ export class NotificationService extends DurableObject<Env> {
       limit?: number;
       filter?: 'all' | 'unread';
       type?: NotificationType;
+      projectId?: string;
     } = {}
   ): Promise<{
     notifications: NotificationResponse[];
@@ -223,6 +224,10 @@ export class NotificationService extends DurableObject<Env> {
     if (options.type) {
       query += ` AND type = ?`;
       params.push(options.type);
+    }
+    if (options.projectId) {
+      query += ` AND project_id = ?`;
+      params.push(options.projectId);
     }
     if (options.cursor) {
       query += ` AND created_at < ?`;

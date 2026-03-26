@@ -263,9 +263,16 @@ export async function notifyProgress(
     taskId: string;
     taskTitle: string;
     message: string;
+    fullMessage?: string;
     sessionId?: string | null;
   }
 ): Promise<void> {
+  const metadata: Record<string, unknown> = {
+    projectName: opts.projectName,
+  };
+  if (opts.fullMessage) {
+    metadata.fullMessage = opts.fullMessage;
+  }
   await sendNotification(env, userId, {
     type: 'progress',
     urgency: NOTIFICATION_TYPE_URGENCY.progress ?? 'low',
@@ -275,9 +282,7 @@ export async function notifyProgress(
     taskId: opts.taskId,
     sessionId: opts.sessionId,
     actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
-    metadata: {
-      projectName: opts.projectName,
-    },
+    metadata,
   });
 }
 
