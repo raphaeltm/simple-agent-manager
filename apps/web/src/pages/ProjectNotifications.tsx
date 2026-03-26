@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
+  Bell,
   CheckCircle2,
   MessageSquare,
   GitPullRequest,
@@ -61,23 +62,27 @@ export function ProjectNotifications() {
   const navigate = useNavigate();
 
   const [notifications, setNotifications] = useState<NotificationResponse[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<NotificationType | 'all'>('all');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-  const notificationsRef = useRef(notifications);
-  notificationsRef.current = notifications;
+  const nextCursorRef = useRef<string | null>(null);
 
   const loadNotifications = useCallback(async (loadMore = false, filterType?: NotificationType | 'all') => {
     try {
-      setLoading(true);
+      const isInitial = !loadMore && notifications.length === 0;
+      if (isInitial) {
+        setInitialLoading(true);
+      } else {
+        setIsRefreshing(true);
+      }
       const activeFilter = filterType ?? typeFilter;
       const result = await listNotifications({
         projectId,
         limit: 50,
-        cursor: loadMore ? nextCursor ?? undefined : undefined,
+        cursor: loadMore ? nextCursorRef.current ?? undefined : undefined,
         type: activeFilter === 'all' ? undefined : activeFilter,
       });
       if (loadMore) {
@@ -85,20 +90,21 @@ export function ProjectNotifications() {
       } else {
         setNotifications(result.notifications);
       }
-      setNextCursor(result.nextCursor);
+      nextCursorRef.current = result.nextCursor;
       setHasMore(result.nextCursor !== null);
     } catch {
       // Best-effort
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setIsRefreshing(false);
     }
-  }, [projectId, typeFilter, nextCursor]);
+  }, [projectId, typeFilter, notifications.length]);
 
   useEffect(() => { void loadNotifications(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTypeFilterChange = (newFilter: NotificationType | 'all') => {
     setTypeFilter(newFilter);
-    setNextCursor(null);
+    nextCursorRef.current = null;
     void loadNotifications(false, newFilter);
   };
 
@@ -133,6 +139,7 @@ export function ProjectNotifications() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-fg-primary">Notifications</h1>
+        {isRefreshing && <Spinner size="sm" />}
       </div>
 
       {/* Type filter chips */}
@@ -141,7 +148,7 @@ export function ProjectNotifications() {
           <button
             key={opt.value}
             onClick={() => handleTypeFilterChange(opt.value)}
-            className={`px-3 py-1 text-xs rounded-full border cursor-pointer transition-colors ${
+            className={`px-3 py-2 min-h-[44px] text-xs rounded-full border cursor-pointer transition-colors flex items-center ${
               typeFilter === opt.value
                 ? 'bg-accent text-white border-accent'
                 : 'bg-surface border-border-default text-fg-secondary hover:bg-surface-hover'
@@ -154,14 +161,15 @@ export function ProjectNotifications() {
 
       {/* Notification list */}
       <section className="border border-border-default rounded-md bg-surface overflow-hidden">
-        {loading && notifications.length === 0 ? (
+        {initialLoading && notifications.length === 0 ? (
           <div className="flex items-center justify-center py-12 gap-2">
             <Spinner size="md" />
             <span className="text-sm text-fg-muted">Loading notifications...</span>
           </div>
         ) : notifications.length === 0 ? (
-          <div className="text-center py-12 text-fg-muted text-sm">
-            No notifications yet.
+          <div className="flex flex-col items-center justify-center py-12 gap-2 text-fg-muted">
+            <Bell size={24} className="opacity-40" />
+            <span className="text-sm">No notifications yet.</span>
           </div>
         ) : (
           <>
@@ -190,11 +198,16 @@ export function ProjectNotifications() {
 
                   {/* Content */}
                   <div
-                    className="flex-1 min-w-0 cursor-pointer"
+                    className="flex-1 min-w-0 cursor-pointer rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                     onClick={() => handleNotificationClick(notification)}
                     role="button"
                     tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleNotificationClick(notification); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleNotificationClick(notification);
+                      }
+                    }}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <p className={`text-sm leading-tight ${isUnread ? 'font-medium text-fg-primary' : 'text-fg-secondary'}`}>
@@ -212,7 +225,7 @@ export function ProjectNotifications() {
                     {isLong && (
                       <button
                         onClick={(e) => { e.stopPropagation(); toggleExpand(notification.id); }}
-                        className="text-xs text-accent mt-1 bg-transparent border-none cursor-pointer hover:underline p-0"
+                        className="text-xs text-accent mt-1 bg-transparent border-none cursor-pointer hover:underline p-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                       >
                         {isExpanded ? (
                           <span className="flex items-center gap-1"><ChevronDown size={12} /> Show less</span>
@@ -228,12 +241,12 @@ export function ProjectNotifications() {
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex-shrink-0 flex flex-col gap-1 opacity-0 group-hover:opacity-100">
+                  {/* Actions — visible on mobile, hover-revealed on desktop */}
+                  <div className="flex-shrink-0 flex flex-col gap-1 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                     {isUnread && (
                       <button
                         onClick={() => void handleMarkRead(notification.id)}
-                        className="p-0.5 bg-transparent border-none text-fg-muted cursor-pointer hover:text-fg-primary"
+                        className="p-1 min-w-[44px] min-h-[44px] sm:p-0.5 sm:min-w-0 sm:min-h-0 bg-transparent border-none text-fg-muted cursor-pointer hover:text-fg-primary flex items-center justify-center"
                         aria-label="Mark as read"
                         title="Mark as read"
                       >
@@ -242,7 +255,7 @@ export function ProjectNotifications() {
                     )}
                     <button
                       onClick={() => void handleDismiss(notification.id)}
-                      className="p-0.5 bg-transparent border-none text-fg-muted cursor-pointer hover:text-danger-fg"
+                      className="p-1 min-w-[44px] min-h-[44px] sm:p-0.5 sm:min-w-0 sm:min-h-0 bg-transparent border-none text-fg-muted cursor-pointer hover:text-danger-fg flex items-center justify-center"
                       aria-label="Dismiss"
                       title="Dismiss"
                     >
@@ -258,10 +271,10 @@ export function ProjectNotifications() {
               <div className="flex justify-center py-3">
                 <button
                   onClick={() => void loadNotifications(true)}
-                  disabled={loading}
-                  className="text-sm text-accent bg-transparent border-none cursor-pointer hover:underline disabled:opacity-50"
+                  disabled={isRefreshing}
+                  className="text-sm text-accent bg-transparent border-none cursor-pointer hover:underline disabled:opacity-50 min-h-[44px]"
                 >
-                  {loading ? 'Loading...' : 'Load more'}
+                  {isRefreshing ? 'Loading...' : 'Load more'}
                 </button>
               </div>
             )}
