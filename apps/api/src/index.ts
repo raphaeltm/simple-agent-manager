@@ -303,6 +303,7 @@ export interface Env {
   NOTIFICATION_PAGE_SIZE?: string;
   NOTIFICATION_PROGRESS_BATCH_WINDOW_MS?: string;
   NOTIFICATION_DEDUP_WINDOW_MS?: string;
+  NOTIFICATION_FULL_BODY_LENGTH?: string;
   // Google OAuth (for GCP OIDC integration)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

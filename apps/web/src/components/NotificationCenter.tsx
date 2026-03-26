@@ -213,6 +213,10 @@ export function NotificationCenter() {
                     onNotificationClick={handleNotificationClick}
                     onDismiss={dismiss}
                     onMarkRead={markRead}
+                    onViewInProject={(pid) => {
+                      navigate(`/projects/${pid}/notifications`);
+                      setIsOpen(false);
+                    }}
                   />
                 ))}
                 {hasMore && (
@@ -239,6 +243,10 @@ export function NotificationCenter() {
                       e.stopPropagation();
                       markRead(notification.id);
                     }}
+                    onViewInProject={notification.projectId ? () => {
+                      navigate(`/projects/${notification.projectId}/notifications`);
+                      setIsOpen(false);
+                    } : undefined}
                   />
                 ))}
                 {hasMore && (
@@ -264,11 +272,13 @@ function NotificationItem({
   onClick,
   onDismiss,
   onMarkRead,
+  onViewInProject,
 }: {
   notification: NotificationResponse;
   onClick: () => void;
   onDismiss: (e: React.MouseEvent) => void;
   onMarkRead: (e: React.MouseEvent) => void;
+  onViewInProject?: () => void;
 }) {
   const config = NOTIFICATION_TYPE_CONFIG[notification.type] || NOTIFICATION_TYPE_CONFIG.progress;
   const Icon = config.icon;
@@ -309,8 +319,22 @@ function NotificationItem({
         )}
         <div className="flex items-center gap-2 mt-1">
           <span className="text-[10px] text-fg-muted">{timeAgo}</span>
-          <span className="text-[10px] text-fg-muted">·</span>
+          <span className="text-[10px] text-fg-muted">&middot;</span>
           <span className="text-[10px] text-fg-muted">{config.label}</span>
+          {onViewInProject && (
+            <>
+              <span className="text-[10px] text-fg-muted">&middot;</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewInProject();
+                }}
+                className="text-[10px] text-accent bg-transparent border-none cursor-pointer hover:underline p-0"
+              >
+                View in project
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -345,12 +369,14 @@ function NotificationGroup({
   onNotificationClick,
   onDismiss,
   onMarkRead,
+  onViewInProject,
 }: {
   projectName: string;
   notifications: NotificationResponse[];
   onNotificationClick: (notification: NotificationResponse) => void;
   onDismiss: (id: string) => Promise<void>;
   onMarkRead: (id: string) => Promise<void>;
+  onViewInProject?: (projectId: string) => void;
 }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const unreadInGroup = notifications.filter((n) => !n.readAt).length;
@@ -388,6 +414,9 @@ function NotificationGroup({
             e.stopPropagation();
             onMarkRead(notification.id);
           }}
+          onViewInProject={notification.projectId && onViewInProject
+            ? () => onViewInProject(notification.projectId!)
+            : undefined}
         />
       ))}
     </div>

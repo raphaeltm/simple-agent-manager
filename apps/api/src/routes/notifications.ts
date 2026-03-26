@@ -43,12 +43,13 @@ notificationRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!) : undefined;
   const filter = c.req.query('filter') as 'all' | 'unread' | undefined;
   const type = c.req.query('type') as NotificationType | undefined;
+  const projectId = c.req.query('projectId');
 
   if (type && !NOTIFICATION_TYPES.includes(type as any)) {
     throw errors.badRequest(`Invalid notification type: ${type}`);
   }
 
-  const result = await stub.listNotifications(userId, { cursor, limit, filter, type });
+  const result = await stub.listNotifications(userId, { cursor, limit, filter, type, projectId });
   return c.json(result);
 });
 

@@ -563,6 +563,12 @@ export const MAX_HUMAN_INPUT_OPTION_LENGTH = 200;
 /** Maximum length for notification body text */
 export const MAX_NOTIFICATION_BODY_LENGTH = 500;
 
+/** Maximum length for full notification message stored in metadata. Override via NOTIFICATION_FULL_BODY_LENGTH env var. */
+export const DEFAULT_NOTIFICATION_FULL_BODY_LENGTH = 5000;
+
+/** Number of characters shown in notification detail view before collapsing with "Show more" */
+export const NOTIFICATION_PREVIEW_LENGTH = 300;
+
 /** Maximum length for notification title text (after prefix) */
 export const MAX_NOTIFICATION_TITLE_LENGTH = 80;
 

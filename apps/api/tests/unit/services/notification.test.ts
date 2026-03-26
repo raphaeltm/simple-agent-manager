@@ -395,6 +395,36 @@ describe('Notification Service', () => {
       const call = createNotificationMock.mock.calls[0]![1];
       expect(call.body!.length).toBeLessThanOrEqual(MAX_NOTIFICATION_BODY_LENGTH);
     });
+
+    it('should store fullMessage in metadata when provided', async () => {
+      const fullText = 'This is a very long progress update that exceeds the body limit';
+      await notifyProgress(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Task',
+        message: 'Short body',
+        fullMessage: fullText,
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.metadata.fullMessage).toBe(fullText);
+      expect(call.metadata.projectName).toBe('My Project');
+    });
+
+    it('should not include fullMessage in metadata when not provided', async () => {
+      await notifyProgress(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Task',
+        message: 'Short body',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.metadata.fullMessage).toBeUndefined();
+      expect(call.metadata.projectName).toBe('My Project');
+    });
   });
 
   describe('buildActionUrl', () => {

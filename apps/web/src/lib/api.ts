@@ -1508,12 +1508,14 @@ export async function listNotifications(opts?: {
   limit?: number;
   filter?: 'all' | 'unread';
   type?: NotificationType;
+  projectId?: string;
 }): Promise<ListNotificationsResponse> {
   const params = new URLSearchParams();
   if (opts?.cursor) params.set('cursor', opts.cursor);
   if (opts?.limit) params.set('limit', String(opts.limit));
   if (opts?.filter) params.set('filter', opts.filter);
   if (opts?.type) params.set('type', opts.type);
+  if (opts?.projectId) params.set('projectId', opts.projectId);
   const qs = params.toString();
   return request<ListNotificationsResponse>(`/api/notifications${qs ? `?${qs}` : ''}`);
 }
