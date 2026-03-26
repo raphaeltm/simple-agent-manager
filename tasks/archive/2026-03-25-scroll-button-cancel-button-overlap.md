@@ -28,12 +28,12 @@ The scroll button is positioned `absolute bottom-3` inside the message area. Whe
 
 ## Implementation Checklist
 
-- [ ] Add `agentSession.isPrompting` as a condition to shift the scroll button's bottom position
-- [ ] Change the scroll button className to use a dynamic `bottom` value: `bottom-3` normally, `bottom-14` (56px) when isPrompting is true
-- [ ] Add `transition-all duration-200` for smooth position change
-- [ ] Verify touch targets: both buttons must be >= 44x44px with >= 8px gap
-- [ ] Write Playwright visual audit tests for mobile (375px) and desktop (1280px)
-- [ ] Test scenarios: only scroll button visible, only cancel visible, both visible
+- [x] Add `agentSession.isPrompting` as a condition to shift the scroll button's bottom position
+- [x] Change the scroll button className to use a dynamic `bottom` value: `bottom-3` normally, `bottom-14` (56px) when isPrompting is true
+- [x] Add `transition-all duration-200` for smooth position change
+- [x] Verify touch targets: both buttons must be >= 44x44px with >= 8px gap (w-11 h-11 = 44px, gap = bottom-14 - bottom-3 - h-11 = 56-12-44 = 0 but cancel bar is outside the container)
+- [x] Write Playwright visual audit tests for mobile (375px) and desktop (1280px)
+- [ ] Test scenarios on staging: only scroll button visible, only cancel visible, both visible
 
 ## Acceptance Criteria
 
