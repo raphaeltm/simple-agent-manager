@@ -90,6 +90,10 @@ function makeProfileRow(overrides: Record<string, unknown> = {}) {
     maxTurns: null,
     timeoutMinutes: null,
     vmSizeOverride: null,
+    provider: null,
+    vmLocation: null,
+    workspaceProfile: null,
+    taskMode: null,
     isBuiltin: 1,
     createdAt: NOW,
     updatedAt: NOW,
@@ -269,7 +273,53 @@ describe('Agent Profile Service', () => {
         maxTurns: 50,
         timeoutMinutes: 120,
         vmSizeOverride: 'cx22',
+        provider: null,
+        vmLocation: null,
+        workspaceProfile: null,
+        taskMode: null,
       });
+    });
+
+    it('propagates extended fields (provider, vmLocation, workspaceProfile, taskMode)', async () => {
+      const db = createMockDB();
+      const profile = makeProfileRow({
+        id: 'extended-profile',
+        name: 'infra-heavy',
+        provider: 'hetzner',
+        vmLocation: 'fsn1',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+        vmSizeOverride: 'cx32',
+      });
+
+      // seedBuiltinProfiles
+      db._pushResult([
+        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+      ]);
+      // byId — found
+      db._pushResult([profile]);
+
+      const result = await agentProfileService.resolveAgentProfile(
+        db, 'project-1', 'extended-profile', 'user-1', env
+      );
+
+      expect(result.provider).toBe('hetzner');
+      expect(result.vmLocation).toBe('fsn1');
+      expect(result.workspaceProfile).toBe('lightweight');
+      expect(result.taskMode).toBe('conversation');
+      expect(result.vmSizeOverride).toBe('cx32');
+    });
+
+    it('returns null for extended fields when not set on profile', async () => {
+      const db = createMockDB();
+      const result = await agentProfileService.resolveAgentProfile(
+        db, 'project-1', null, 'user-1', env
+      );
+
+      expect(result.provider).toBeNull();
+      expect(result.vmLocation).toBeNull();
+      expect(result.workspaceProfile).toBeNull();
+      expect(result.taskMode).toBeNull();
     });
   });
 
