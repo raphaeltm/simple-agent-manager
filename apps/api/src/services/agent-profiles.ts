@@ -79,6 +79,10 @@ function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
     maxTurns: row.maxTurns,
     timeoutMinutes: row.timeoutMinutes,
     vmSizeOverride: row.vmSizeOverride,
+    provider: row.provider,
+    vmLocation: row.vmLocation,
+    workspaceProfile: row.workspaceProfile,
+    taskMode: row.taskMode,
     isBuiltin: row.isBuiltin === 1,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -237,6 +241,10 @@ export async function createProfile(
     maxTurns: body.maxTurns ?? null,
     timeoutMinutes: body.timeoutMinutes ?? null,
     vmSizeOverride: body.vmSizeOverride ?? null,
+    provider: body.provider ?? null,
+    vmLocation: body.vmLocation ?? null,
+    workspaceProfile: body.workspaceProfile ?? null,
+    taskMode: body.taskMode ?? null,
     isBuiltin: 0,
   });
 
@@ -300,6 +308,10 @@ export async function updateProfile(
   if (body.maxTurns !== undefined) updates.maxTurns = body.maxTurns;
   if (body.timeoutMinutes !== undefined) updates.timeoutMinutes = body.timeoutMinutes;
   if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
+  if (body.provider !== undefined) updates.provider = body.provider;
+  if (body.vmLocation !== undefined) updates.vmLocation = body.vmLocation;
+  if (body.workspaceProfile !== undefined) updates.workspaceProfile = body.workspaceProfile;
+  if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
 
   await db
     .update(schema.agentProfiles)
@@ -343,6 +355,25 @@ export async function resolveAgentProfile(
   userId: string,
   env: ProfileEnv
 ): Promise<ResolvedAgentProfile> {
+  // Helper to convert a DB row into a ResolvedAgentProfile
+  function rowToResolved(p: schema.AgentProfileRow): ResolvedAgentProfile {
+    return {
+      profileId: p.id,
+      profileName: p.name,
+      agentType: p.agentType,
+      model: p.model,
+      permissionMode: p.permissionMode,
+      systemPromptAppend: p.systemPromptAppend,
+      maxTurns: p.maxTurns,
+      timeoutMinutes: p.timeoutMinutes,
+      vmSizeOverride: p.vmSizeOverride,
+      provider: p.provider,
+      vmLocation: p.vmLocation,
+      workspaceProfile: p.workspaceProfile,
+      taskMode: p.taskMode,
+    };
+  }
+
   // No profile hint → return platform defaults
   if (!profileNameOrId) {
     return {
@@ -355,6 +386,10 @@ export async function resolveAgentProfile(
       maxTurns: null,
       timeoutMinutes: null,
       vmSizeOverride: null,
+      provider: null,
+      vmLocation: null,
+      workspaceProfile: null,
+      taskMode: null,
     };
   }
 
@@ -380,18 +415,7 @@ export async function resolveAgentProfile(
     .limit(1);
 
   if (byId[0]) {
-    const p = byId[0];
-    return {
-      profileId: p.id,
-      profileName: p.name,
-      agentType: p.agentType,
-      model: p.model,
-      permissionMode: p.permissionMode,
-      systemPromptAppend: p.systemPromptAppend,
-      maxTurns: p.maxTurns,
-      timeoutMinutes: p.timeoutMinutes,
-      vmSizeOverride: p.vmSizeOverride,
-    };
+    return rowToResolved(byId[0]);
   }
 
   // Try by name in project scope
@@ -407,18 +431,7 @@ export async function resolveAgentProfile(
     .limit(1);
 
   if (byNameProject[0]) {
-    const p = byNameProject[0];
-    return {
-      profileId: p.id,
-      profileName: p.name,
-      agentType: p.agentType,
-      model: p.model,
-      permissionMode: p.permissionMode,
-      systemPromptAppend: p.systemPromptAppend,
-      maxTurns: p.maxTurns,
-      timeoutMinutes: p.timeoutMinutes,
-      vmSizeOverride: p.vmSizeOverride,
-    };
+    return rowToResolved(byNameProject[0]);
   }
 
   // Try by name in global scope (user's profiles with no project)
@@ -435,18 +448,7 @@ export async function resolveAgentProfile(
     .limit(1);
 
   if (byNameGlobal[0]) {
-    const p = byNameGlobal[0];
-    return {
-      profileId: p.id,
-      profileName: p.name,
-      agentType: p.agentType,
-      model: p.model,
-      permissionMode: p.permissionMode,
-      systemPromptAppend: p.systemPromptAppend,
-      maxTurns: p.maxTurns,
-      timeoutMinutes: p.timeoutMinutes,
-      vmSizeOverride: p.vmSizeOverride,
-    };
+    return rowToResolved(byNameGlobal[0]);
   }
 
   // No matching profile found — return defaults with the hint as agent type if valid
@@ -464,5 +466,9 @@ export async function resolveAgentProfile(
     maxTurns: null,
     timeoutMinutes: null,
     vmSizeOverride: null,
+    provider: null,
+    vmLocation: null,
+    workspaceProfile: null,
+    taskMode: null,
   };
 }

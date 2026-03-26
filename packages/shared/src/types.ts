@@ -635,6 +635,9 @@ export interface SubmitTaskRequest {
   /** Task execution mode. 'task' (default): agent pushes, creates PR, calls complete_task.
    * 'conversation': agent responds conversationally, human controls lifecycle. */
   taskMode?: TaskMode;
+  /** ID of an agent profile to use for this task. Profile settings override project defaults
+   * but are overridden by explicit task-level fields. */
+  agentProfileId?: string;
 }
 
 /** Response from the session summarize endpoint. */
@@ -1432,6 +1435,10 @@ export interface AgentProfile {
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
+  provider: string | null;
+  vmLocation: string | null;
+  workspaceProfile: string | null;
+  taskMode: string | null;
   isBuiltin: boolean;
   createdAt: string;
   updatedAt: string;
@@ -1448,6 +1455,10 @@ export interface CreateAgentProfileRequest {
   maxTurns?: number | null;
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
+  provider?: string | null;
+  vmLocation?: string | null;
+  workspaceProfile?: string | null;
+  taskMode?: string | null;
 }
 
 /** Request body for PUT /api/projects/:projectId/agent-profiles/:profileId */
@@ -1461,6 +1472,10 @@ export interface UpdateAgentProfileRequest {
   maxTurns?: number | null;
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
+  provider?: string | null;
+  vmLocation?: string | null;
+  workspaceProfile?: string | null;
+  taskMode?: string | null;
 }
 
 /** Resolved agent profile for task execution */
@@ -1474,6 +1489,10 @@ export interface ResolvedAgentProfile {
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
+  provider: string | null;
+  vmLocation: string | null;
+  workspaceProfile: string | null;
+  taskMode: string | null;
 }
 
 // =============================================================================

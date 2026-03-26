@@ -52,6 +52,10 @@ export async function startTaskRunnerDO(
     cloudProvider?: CredentialProvider | null;
     /** Task execution mode. 'task' = push/PR/complete. 'conversation' = human-controlled. */
     taskMode?: TaskMode;
+    /** Model override from agent profile. Null = use agent default. */
+    model?: string | null;
+    /** Permission mode override from agent profile. Null = use agent default. */
+    permissionMode?: string | null;
   },
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
@@ -79,6 +83,8 @@ export async function startTaskRunnerDO(
       workspaceProfile: input.workspaceProfile ?? null,
       cloudProvider: input.cloudProvider ?? null,
       taskMode: input.taskMode ?? 'task',
+      model: input.model ?? null,
+      permissionMode: input.permissionMode ?? null,
     },
   };
 

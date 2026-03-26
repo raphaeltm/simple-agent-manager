@@ -185,6 +185,12 @@ type GatewayConfig struct {
 	// When non-empty, these are converted to acpsdk.McpServer entries
 	// and passed in NewSession/LoadSession requests.
 	McpServers []McpServerEntry
+	// ModelOverride, if non-empty, overrides the model fetched from user agent settings.
+	// Set by the control plane when an agent profile specifies a model.
+	ModelOverride string
+	// PermissionModeOverride, if non-empty, overrides the permission mode fetched from
+	// user agent settings. Set by the control plane when an agent profile specifies a permission mode.
+	PermissionModeOverride string
 }
 
 // McpServerEntry is a lightweight MCP server config passed from the control

@@ -381,6 +381,10 @@ export async function handleDispatchTask(
       agentType: project.defaultAgentType ?? null,
       workspaceProfile: resolvedWorkspaceProfile,
       cloudProvider: resolvedProvider,
+      // Agent profile resolution is not supported on the MCP dispatch path — tasks
+      // use project defaults. Profile support deferred to a future PR.
+      model: null,
+      permissionMode: null,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed

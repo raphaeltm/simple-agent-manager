@@ -36,6 +36,13 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+// profileOverrides holds model/permissionMode overrides from agent profiles.
+// Passed from the control plane in the start-agent-session request.
+type profileOverrides struct {
+	Model          string
+	PermissionMode string
+}
+
 // Server is the HTTP server for the VM Agent.
 type Server struct {
 	config              *config.Config
@@ -55,6 +62,7 @@ type Server struct {
 	sessionHostMu       sync.Mutex
 	sessionHosts        map[string]*acp.SessionHost
 	sessionMcpServers   map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
+	sessionProfileOvr   map[string]profileOverrides     // hostKey → model/permissionMode overrides from agent profiles
 	store               *persistence.Store
 	errorReporter       *errorreport.Reporter
 	messageReportersMu  sync.RWMutex
@@ -352,6 +360,7 @@ func New(cfg *config.Config) (*Server, error) {
 		acpConfig:           acpGatewayConfig,
 		sessionHosts:        make(map[string]*acp.SessionHost),
 		sessionMcpServers:   make(map[string][]acp.McpServerEntry),
+		sessionProfileOvr:   make(map[string]profileOverrides),
 		store:               store,
 		errorReporter:       errorReporter,
 		messageReporters:    messageReporters,

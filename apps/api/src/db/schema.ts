@@ -604,6 +604,10 @@ export const agentProfiles = sqliteTable(
     maxTurns: integer('max_turns'),
     timeoutMinutes: integer('timeout_minutes'),
     vmSizeOverride: text('vm_size_override'),
+    provider: text('provider'),
+    vmLocation: text('vm_location'),
+    workspaceProfile: text('workspace_profile'),
+    taskMode: text('task_mode'),
     isBuiltin: integer('is_builtin').notNull().default(0),
     createdAt: text('created_at')
       .notNull()

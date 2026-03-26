@@ -465,6 +465,21 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 		slog.Info("Agent settings loaded", "model", settings.Model, "permissionMode", settings.PermissionMode)
 	}
 
+	// Apply profile overrides from the control plane (take precedence over fetched settings)
+	if h.config.ModelOverride != "" || h.config.PermissionModeOverride != "" {
+		if settings == nil {
+			settings = &agentSettingsPayload{}
+		}
+		if h.config.ModelOverride != "" {
+			settings.Model = h.config.ModelOverride
+			slog.Info("Agent model overridden by profile", "model", h.config.ModelOverride)
+		}
+		if h.config.PermissionModeOverride != "" {
+			settings.PermissionMode = h.config.PermissionModeOverride
+			slog.Info("Agent permission mode overridden by profile", "permissionMode", h.config.PermissionModeOverride)
+		}
+	}
+
 	// Only attempt LoadSession if reconnecting with the same agent type
 	loadSessionID := ""
 	if previousAcpSessionID != "" && previousAgentType == agentType {

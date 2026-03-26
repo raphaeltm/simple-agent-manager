@@ -72,6 +72,7 @@ describe('task-runner-do service', () => {
       'userName', 'userEmail', 'githubId', 'taskTitle',
       'taskDescription', 'repository', 'installationId',
       'outputBranch', 'projectDefaultVmSize', 'agentType',
+      'model', 'permissionMode',
     ];
     for (const field of configFields) {
       expect(serviceSource).toContain(field);

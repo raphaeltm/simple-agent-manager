@@ -46,6 +46,10 @@ describe('agent profiles integration wiring', () => {
     expect(schemaFile).toContain("text('system_prompt_append')");
     expect(schemaFile).toContain("integer('is_builtin')");
     expect(schemaFile).toContain("text('vm_size_override')");
+    expect(schemaFile).toContain("text('provider')");
+    expect(schemaFile).toContain("text('vm_location')");
+    expect(schemaFile).toContain("text('workspace_profile')");
+    expect(schemaFile).toContain("text('task_mode')");
   });
 
   it('service guards built-in profiles against modification and deletion', () => {

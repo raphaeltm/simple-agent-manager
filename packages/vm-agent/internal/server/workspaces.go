@@ -25,6 +25,7 @@ func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 		delete(s.sessionHosts, hostKey)
 	}
 	delete(s.sessionMcpServers, hostKey)
+	delete(s.sessionProfileOvr, hostKey)
 	s.sessionHostMu.Unlock()
 
 	// Clean up persisted MCP servers (best-effort).
@@ -82,6 +83,7 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 		host.Stop()
 		delete(s.sessionHosts, key)
 		delete(s.sessionMcpServers, key)
+		delete(s.sessionProfileOvr, key)
 	}
 	s.sessionHostMu.Unlock()
 
@@ -680,9 +682,11 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	}
 
 	var body struct {
-		AgentType     string               `json:"agentType"`
-		InitialPrompt string               `json:"initialPrompt"`
-		McpServers    []acp.McpServerEntry  `json:"mcpServers,omitempty"`
+		AgentType      string               `json:"agentType"`
+		InitialPrompt  string               `json:"initialPrompt"`
+		McpServers     []acp.McpServerEntry  `json:"mcpServers,omitempty"`
+		Model          string               `json:"model,omitempty"`
+		PermissionMode string               `json:"permissionMode,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -748,6 +752,20 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 
 		slog.Info("MCP servers registered for agent session",
 			"workspace", workspaceID, "session", sessionID, "count", len(body.McpServers))
+	}
+
+	// Always store profile overrides so getOrCreateSessionHost can apply them.
+	// Even empty overrides are stored to distinguish "no profile" from "not set".
+	s.sessionHostMu.Lock()
+	s.sessionProfileOvr[hostKey] = profileOverrides{
+		Model:          body.Model,
+		PermissionMode: body.PermissionMode,
+	}
+	s.sessionHostMu.Unlock()
+	if body.Model != "" || body.PermissionMode != "" {
+		slog.Info("Profile overrides registered for agent session",
+			"workspace", workspaceID, "session", sessionID,
+			"model", body.Model, "permissionMode", body.PermissionMode)
 	}
 
 	// Create or retrieve the SessionHost for this session.
@@ -955,6 +973,10 @@ func (s *Server) handleAutoSuspend(workspaceID, sessionID string) {
 	s.sessionHostMu.Lock()
 	delete(s.sessionHosts, hostKey)
 	delete(s.sessionMcpServers, hostKey)
+	// Note: sessionProfileOvr is intentionally NOT deleted on suspend so that
+	// overrides survive suspend/resume cycles (same rationale as MCP servers
+	// in SQLite — profile overrides are re-read from the in-memory map when
+	// getOrCreateSessionHost rebuilds the SessionHost on resume).
 	s.sessionHostMu.Unlock()
 
 	// Transition the in-memory session to suspended.

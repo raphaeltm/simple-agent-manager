@@ -32,6 +32,7 @@ import { generateBranchName } from '../../services/branch-name';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import * as projectDataService from '../../services/project-data';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
+import { resolveAgentProfile } from '../../services/agent-profiles';
 import { parsePositiveInt } from '../../lib/route-helpers';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
@@ -162,16 +163,27 @@ submitRoutes.post('/submit', async (c) => {
     maxLength: branchMaxLength,
   });
 
-  // Determine VM config
+  // Resolve agent profile if specified.
+  // Precedence: explicit task field > profile value > project default > platform default.
+  const resolvedProfile = body.agentProfileId
+    ? await resolveAgentProfile(db, projectId, body.agentProfileId, userId, c.env)
+    : null;
+
+  // Determine VM config (with profile overrides in the middle of the precedence chain)
   const vmSize: VMSize = body.vmSize
+    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? DEFAULT_VM_LOCATION;
+  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
+    ?? (resolvedProfile?.vmLocation as VMLocation | null)
+    ?? DEFAULT_VM_LOCATION;
   const workspaceProfile: WorkspaceProfile = body.workspaceProfile
+    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
-  // Determine cloud provider: explicit override > project default > null (system picks)
+  // Determine cloud provider: explicit override > profile > project default > null (system picks)
   const provider: CredentialProvider | null = body.provider
+    ?? (resolvedProfile?.provider as CredentialProvider | null)
     ?? (project.defaultProvider as CredentialProvider | null)
     ?? null;
 
@@ -179,8 +191,10 @@ submitRoutes.post('/submit', async (c) => {
     throw errors.badRequest(`provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
   }
 
-  // Determine task mode: explicit override > inferred from workspace profile > default 'task'
-  const taskMode = body.taskMode ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
+  // Determine task mode: explicit override > profile > inferred from workspace profile > default 'task'
+  const taskMode = body.taskMode
+    ?? (resolvedProfile?.taskMode as import('@simple-agent-manager/shared').TaskMode | null)
+    ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
 
   // Use parent task's output branch if forking, otherwise use project default
   const branch = parentBranch || project.defaultBranch;
@@ -337,10 +351,12 @@ submitRoutes.post('/submit', async (c) => {
       outputBranch: branchName,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
-      agentType: body.agentType ?? project.defaultAgentType ?? null,
+      agentType: body.agentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
       workspaceProfile,
       cloudProvider: provider,
       taskMode,
+      model: resolvedProfile?.model ?? null,
+      permissionMode: resolvedProfile?.permissionMode ?? null,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed.
