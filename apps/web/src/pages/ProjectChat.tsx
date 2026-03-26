@@ -4,7 +4,7 @@ import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight,
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton, SlashCommandPalette } from '@simple-agent-manager/acp-client';
 import type { SlashCommandPaletteHandle, SlashCommand } from '@simple-agent-manager/acp-client';
-import type { AgentInfo, WorkspaceProfile, TaskMode } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, WorkspaceProfile, TaskMode } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -16,6 +16,7 @@ import {
 } from '@simple-agent-manager/shared';
 import {
   listAgents,
+  listAgentProfiles,
   listChatSessions,
   listCredentials,
   listProjectTasks,
@@ -29,6 +30,7 @@ import type { ChatSessionResponse } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 import { stripMarkdown } from '../lib/text-utils';
 import { ForkDialog } from '../components/project/ForkDialog';
+import { ProfileSelector } from '../components/agent-profiles/ProfileSelector';
 import { useProjectWebSocket } from '../hooks/useProjectWebSocket';
 import { useAvailableCommands } from '../hooks/useAvailableCommands';
 
@@ -162,6 +164,10 @@ export function ProjectChat() {
   const [configuredAgents, setConfiguredAgents] = useState<AgentInfo[]>([]);
   const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
 
+  // Agent profile selection
+  const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+
   // Slash command cache for pre-session autocomplete
   const { commands: slashCommands } = useAvailableCommands(projectId);
 
@@ -259,6 +265,17 @@ export function ProjectChat() {
       .catch(() => { /* best-effort */ });
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load agent profiles for the project
+  useEffect(() => {
+    let cancelled = false;
+    void listAgentProfiles(projectId)
+      .then((data) => {
+        if (!cancelled) setAgentProfiles(data);
+      })
+      .catch(() => { /* best-effort */ });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   // Pre-fill message when navigating from idea Execute button
   useEffect(() => {
@@ -402,6 +419,7 @@ export function ProjectChat() {
       const result = await submitTask(projectId, {
         message: trimmed,
         ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+        ...(selectedProfileId ? { agentProfileId: selectedProfileId } : {}),
         workspaceProfile: selectedWorkspaceProfile,
         taskMode: selectedTaskMode,
       });
@@ -460,6 +478,7 @@ export function ProjectChat() {
         parentTaskId,
         contextSummary,
         ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+        ...(selectedProfileId ? { agentProfileId: selectedProfileId } : {}),
         workspaceProfile: selectedWorkspaceProfile,
         taskMode: selectedTaskMode,
       });
@@ -723,6 +742,9 @@ export function ProjectChat() {
               agents={configuredAgents}
               selectedAgentType={selectedAgentType}
               onAgentTypeChange={setSelectedAgentType}
+              agentProfiles={agentProfiles}
+              selectedProfileId={selectedProfileId}
+              onProfileChange={setSelectedProfileId}
               selectedWorkspaceProfile={selectedWorkspaceProfile}
               onWorkspaceProfileChange={setSelectedWorkspaceProfile}
               selectedTaskMode={selectedTaskMode}
@@ -1159,6 +1181,9 @@ function ChatInput({
   agents,
   selectedAgentType,
   onAgentTypeChange,
+  agentProfiles,
+  selectedProfileId,
+  onProfileChange,
   selectedWorkspaceProfile,
   onWorkspaceProfileChange,
   selectedTaskMode,
@@ -1175,6 +1200,9 @@ function ChatInput({
   agents: AgentInfo[];
   selectedAgentType: string | null;
   onAgentTypeChange: (agentType: string) => void;
+  agentProfiles: AgentProfile[];
+  selectedProfileId: string | null;
+  onProfileChange: (profileId: string | null) => void;
   selectedWorkspaceProfile: WorkspaceProfile;
   onWorkspaceProfileChange: (profile: WorkspaceProfile) => void;
   selectedTaskMode: TaskMode;
@@ -1256,7 +1284,17 @@ function ChatInput({
       )}
       {isMobile ? (
         /* Mobile: compact pill bar — no labels, single row */
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
+          {agentProfiles.length > 0 && (
+            <ProfileSelector
+              profiles={agentProfiles}
+              selectedProfileId={selectedProfileId}
+              onChange={onProfileChange}
+              disabled={submitting}
+              compact
+              className="min-w-0 flex-1 min-h-[44px]"
+            />
+          )}
           {agents.length > 1 && (
             <select
               value={selectedAgentType ?? ''}
@@ -1302,6 +1340,19 @@ function ChatInput({
       ) : (
         /* Desktop: labeled selects with wrapping */
         <div className="flex items-center gap-4 mb-2 flex-wrap">
+          {agentProfiles.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label htmlFor="profile-select" className="text-xs text-fg-muted whitespace-nowrap">Profile:</label>
+              <ProfileSelector
+                id="profile-select"
+                profiles={agentProfiles}
+                selectedProfileId={selectedProfileId}
+                onChange={onProfileChange}
+                disabled={submitting}
+                compact
+              />
+            </div>
+          )}
           {agents.length > 1 && (
             <div className="flex items-center gap-2">
               <label htmlFor="agent-type-select" className="text-xs text-fg-muted whitespace-nowrap">Agent:</label>

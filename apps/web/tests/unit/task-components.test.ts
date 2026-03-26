@@ -52,12 +52,12 @@ describe('TaskSubmitForm', () => {
     expect(source).toContain('advanced options');
   });
 
-  it('advanced options include priority, VM size, and agent hint', () => {
+  it('advanced options include priority, VM size, and agent profile', () => {
     expect(source).toContain('Priority');
     expect(source).toContain('VM Size');
-    expect(source).toContain('Agent Hint');
+    expect(source).toContain('Agent Profile');
     expect(source).toContain('vmSize');
-    expect(source).toContain('agentProfileHint');
+    expect(source).toContain('agentProfileId');
   });
 
   it('clears form on successful submission', () => {

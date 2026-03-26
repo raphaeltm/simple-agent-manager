@@ -1,17 +1,20 @@
-import { useState, type FormEvent } from 'react';
-import type { Task } from '@simple-agent-manager/shared';
+import { useState, useEffect, type FormEvent } from 'react';
+import type { AgentProfile, Task } from '@simple-agent-manager/shared';
 import { Button, Input } from '@simple-agent-manager/ui';
+import { ProfileSelector } from '../agent-profiles/ProfileSelector';
+import { listAgentProfiles } from '../../lib/api';
 
 export interface TaskFormValues {
   title: string;
   description: string;
   priority: number;
   parentTaskId: string;
-  agentProfileHint: string;
+  agentProfileId: string;
 }
 
 interface TaskFormProps {
   mode: 'create' | 'edit';
+  projectId: string;
   tasks: Task[];
   currentTaskId?: string;
   initialValues?: Partial<TaskFormValues>;
@@ -23,6 +26,7 @@ interface TaskFormProps {
 
 export function TaskForm({
   mode,
+  projectId,
   tasks,
   currentTaskId,
   initialValues,
@@ -36,9 +40,19 @@ export function TaskForm({
     description: initialValues?.description ?? '',
     priority: initialValues?.priority ?? 0,
     parentTaskId: initialValues?.parentTaskId ?? '',
-    agentProfileHint: initialValues?.agentProfileHint ?? '',
+    agentProfileId: initialValues?.agentProfileId ?? '',
   });
   const [error, setError] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+
+  // Load profiles
+  useEffect(() => {
+    let cancelled = false;
+    void listAgentProfiles(projectId)
+      .then((data) => { if (!cancelled) setProfiles(data); })
+      .catch(() => { /* best-effort */ });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   const candidateParents = tasks.filter((task) => task.id !== currentTaskId);
   const updateField = <K extends keyof TaskFormValues>(field: K, value: TaskFormValues[K]) => {
@@ -59,7 +73,7 @@ export function TaskForm({
       description: values.description,
       priority: values.priority,
       parentTaskId: values.parentTaskId,
-      agentProfileHint: values.agentProfileHint,
+      agentProfileId: values.agentProfileId,
     });
   };
 
@@ -128,18 +142,17 @@ export function TaskForm({
         </select>
       </label>
 
-      <label className="grid gap-1.5">
-        <span className="text-sm text-fg-muted">Agent hint</span>
-        <Input
-          value={values.agentProfileHint}
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-            updateField('agentProfileHint', value);
-          }}
-          placeholder="Optional agent profile hint"
-          disabled={submitting}
-        />
-      </label>
+      {profiles.length > 0 && (
+        <div className="grid gap-1.5">
+          <span className="text-sm text-fg-muted">Agent Profile</span>
+          <ProfileSelector
+            profiles={profiles}
+            selectedProfileId={values.agentProfileId || null}
+            onChange={(id) => updateField('agentProfileId', id ?? '')}
+            disabled={submitting}
+          />
+        </div>
+      )}
 
       {error && (
         <div role="alert" className="text-danger text-sm">

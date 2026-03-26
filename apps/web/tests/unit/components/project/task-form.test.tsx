@@ -1,7 +1,34 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Task } from '@simple-agent-manager/shared';
 import { TaskForm } from '../../../../src/components/project/TaskForm';
+
+// Mock the API module so listAgentProfiles doesn't make real requests
+vi.mock('../../../../src/lib/api', () => ({
+  listAgentProfiles: vi.fn().mockResolvedValue([
+    {
+      id: 'prof-1',
+      projectId: 'proj-1',
+      userId: 'user-1',
+      name: 'Fast Implementer',
+      description: null,
+      agentType: 'claude-code',
+      model: 'claude-sonnet-4-5-20250929',
+      permissionMode: null,
+      systemPromptAppend: null,
+      maxTurns: null,
+      timeoutMinutes: null,
+      vmSizeOverride: null,
+      provider: null,
+      vmLocation: null,
+      workspaceProfile: null,
+      taskMode: null,
+      isBuiltin: false,
+      createdAt: '2026-03-15T00:00:00Z',
+      updatedAt: '2026-03-15T00:00:00Z',
+    },
+  ]),
+}));
 
 const taskA: Task = {
   id: 'task-a',
@@ -32,9 +59,10 @@ describe('TaskForm', () => {
     render(
       <TaskForm
         mode="create"
+        projectId="proj-1"
         tasks={[taskA]}
         onSubmit={onSubmit}
-      />
+      />,
     );
 
     fireEvent.change(screen.getByPlaceholderText('Task title'), { target: { value: 'Write tests' } });
@@ -43,9 +71,12 @@ describe('TaskForm', () => {
     });
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Priority' }), { target: { value: '12' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Parent task' }), { target: { value: 'task-a' } });
-    fireEvent.change(screen.getByPlaceholderText('Optional agent profile hint'), {
-      target: { value: 'frontend-specialist' },
+
+    // Wait for profiles to load and select one
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent profile')).toBeInTheDocument();
     });
+    fireEvent.change(screen.getByLabelText('Agent profile'), { target: { value: 'prof-1' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
 
@@ -54,7 +85,7 @@ describe('TaskForm', () => {
       description: 'Cover critical user flows',
       priority: 12,
       parentTaskId: 'task-a',
-      agentProfileHint: 'frontend-specialist',
+      agentProfileId: 'prof-1',
     });
   });
 
@@ -62,14 +93,14 @@ describe('TaskForm', () => {
     render(
       <TaskForm
         mode="create"
+        projectId="proj-1"
         tasks={[]}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     const titleInput = screen.getByPlaceholderText('Task title') as HTMLInputElement;
     const descriptionInput = screen.getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
-    const hintInput = screen.getByPlaceholderText('Optional agent profile hint') as HTMLInputElement;
 
     fireEvent.change(titleInput, { target: { value: 'a' } });
     fireEvent.change(titleInput, { target: { value: 'ab' } });
@@ -79,12 +110,30 @@ describe('TaskForm', () => {
     fireEvent.change(descriptionInput, { target: { value: 'xy' } });
     fireEvent.change(descriptionInput, { target: { value: 'xyz' } });
 
-    fireEvent.change(hintInput, { target: { value: 'm' } });
-    fireEvent.change(hintInput, { target: { value: 'mo' } });
-    fireEvent.change(hintInput, { target: { value: 'mod' } });
-
     expect(titleInput.value).toBe('abc');
     expect(descriptionInput.value).toBe('xyz');
-    expect(hintInput.value).toBe('mod');
+  });
+
+  it('submits with empty agentProfileId when no profile is selected', async () => {
+    const onSubmit = vi.fn();
+
+    render(
+      <TaskForm
+        mode="create"
+        projectId="proj-1"
+        tasks={[]}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Task title'), { target: { value: 'Simple task' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Simple task',
+        agentProfileId: '',
+      }),
+    );
   });
 });
