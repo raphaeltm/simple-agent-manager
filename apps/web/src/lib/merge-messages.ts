@@ -101,6 +101,11 @@ export function mergeMessages(
 /**
  * Replace strategy: incoming is authoritative. Build a new map from incoming,
  * then add any unconfirmed optimistic messages from prev.
+ *
+ * Note: content-based user message dedup (hasConfirmedDuplicate) is intentionally
+ * NOT applied here. The REST API snapshot is the ground truth — if the server has
+ * duplicate rows, they should be shown. The server-side content dedup in
+ * persistMessageBatch prevents new duplicates from being created.
  */
 function mergeReplace(
   prev: ChatMessageResponse[],
