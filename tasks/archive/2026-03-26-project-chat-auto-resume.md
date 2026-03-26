@@ -36,8 +36,8 @@ The workspace chat (`Workspace.tsx`) handles this correctly by calling `resumeAg
 
 ## Implementation Checklist
 
-- [ ] 1. **Add `reconnect` to `useProjectAgentSession` return type** — expose it directly for cleaner API
-- [ ] 2. **Add auto-resume effect in `ProjectMessageView.tsx`**:
+- [x] 1. **Add `reconnect` to `useProjectAgentSession` return type** — expose it directly for cleaner API
+- [x] 2. **Add auto-resume effect in `ProjectMessageView.tsx`**:
   - Trigger when: `sessionState === 'idle'` AND `!agentSession.isAgentActive` AND `!agentSession.isConnecting` AND `!isResuming` AND `!isProvisioning` AND `session?.workspaceId` AND `agentSessionId`
   - Use a ref guard (`hasAttemptedAutoResumeRef`) to prevent repeated attempts for the same session
   - Wait ~2 seconds to let the ACP WebSocket's own reconnection succeed first
@@ -46,15 +46,9 @@ The workspace chat (`Workspace.tsx`) handles this correctly by calling `resumeAg
   - Show "Resuming agent..." banner during the process
   - Handle errors (workspace deleted, node down)
   - Reset guard when `sessionId` changes
-- [ ] 3. **Coordinate with existing follow-up resume** — ensure `handleSendFollowUp` doesn't double-resume if auto-resume is already in progress
-- [ ] 4. **Add behavioral tests** for auto-resume:
-  - Test: renders idle session with disconnected agent → auto-resumes after delay
-  - Test: shows "Resuming agent..." banner during resume
-  - Test: handles resume failure with error banner
-  - Test: doesn't auto-resume if agent is already active/connecting
-  - Test: doesn't auto-resume during provisioning
-  - Test: resets auto-resume state on session change
-- [ ] 5. **Verify idle countdown pauses during auto-resume** — already handled by line 605 (`isResuming` check), just verify in tests
+- [x] 3. **Coordinate with existing follow-up resume** — ensure `handleSendFollowUp` doesn't double-resume if auto-resume is already in progress
+- [x] 4. **Add behavioral tests** for auto-resume (9 new tests, all passing)
+- [x] 5. **Verify idle countdown pauses during auto-resume** — verified: line 605 already checks `isResuming`
 
 ## Acceptance Criteria
 
