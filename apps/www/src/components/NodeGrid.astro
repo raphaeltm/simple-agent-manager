@@ -1,29 +1,23 @@
 ---
-// Generate plenty of nodes — CSS auto-fill tiles them; overflow hidden clips edges
-const NODE_COUNT = 200;
+// Agent count pattern for the 2x2 sub-grids inside each node
 const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
 ---
 
 <div class="node-grid" aria-hidden="true">
-  <div class="node-grid-inner" id="node-grid-inner">
-    {Array.from({ length: NODE_COUNT }, (_, i) => {
-      const count = AGENT_COUNTS[i % AGENT_COUNTS.length];
-      const slots = [true, count >= 2, count >= 3, count >= 4];
-      return (
-        <div class="grid-node dormant" data-node={i}>
-          <div class="node-agent-grid">
-            {slots.map((filled, s) => (
-              filled
-                ? <div class="agent-square" data-agent={`${i}-${s}`} />
-                : <div class="agent-empty" />
-            ))}
-          </div>
-        </div>
-      );
-    })}
-  </div>
+  <div class="node-grid-inner" id="node-grid-inner"></div>
   <svg class="connection-svg" id="connection-svg" xmlns="http://www.w3.org/2000/svg"></svg>
 </div>
+
+<template id="node-template">
+  <div class="grid-node dormant">
+    <div class="node-agent-grid">
+      <div class="agent-square"></div>
+      <div class="agent-square"></div>
+      <div class="agent-square"></div>
+      <div class="agent-square"></div>
+    </div>
+  </div>
+</template>
 
 <style>
   .node-grid {
@@ -31,10 +25,12 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     top: 0;
     left: 0;
     width: 100%;
-    height: 100%;
+    /* height set dynamically by JS based on button position + 250px */
     pointer-events: none;
     z-index: 0;
     overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
   }
 
   /* ---- Grid: brick-pattern offset, no padding, bleeds past edges ---- */
@@ -44,7 +40,7 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     top: -30px;
     left: -30px;
     width: calc(100% + 60px);
-    height: calc(100% + 60px);
+    /* height set dynamically by JS */
     display: grid;
     grid-template-columns: repeat(auto-fill, 52px);
     grid-auto-rows: 52px;
@@ -60,7 +56,7 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
       top: -40px;
       left: -40px;
       width: calc(100% + 80px);
-      height: calc(100% + 80px);
+      /* height set dynamically by JS */
     }
   }
 
@@ -151,28 +147,101 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
 
 <script>
   /* ================================================================
-     Node Grid – lifecycle animation
+     Node Grid – dynamically sized to extend 250px below hero buttons
      ================================================================ */
 
+  const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
+  const OVERFLOW_PX = 250; // how far below the buttons the grid should extend
+
+  const gridContainer = document.querySelector('.node-grid') as HTMLElement;
   const gridInner = document.getElementById('node-grid-inner')!;
   const svg = document.getElementById('connection-svg') as unknown as SVGSVGElement;
-  const allNodes = Array.from(gridInner.querySelectorAll('.grid-node')) as HTMLElement[];
+  const nodeTemplate = document.getElementById('node-template') as HTMLTemplateElement;
+
+  // ---- Measure layout and compute required node count ----
+  function getGridDimensions(): { cellSize: number; gap: number; bleed: number } {
+    const isDesktop = window.innerWidth >= 768;
+    return {
+      cellSize: isDesktop ? 76 : 52,
+      gap: isDesktop ? 12 : 8,
+      bleed: isDesktop ? 40 : 30,
+    };
+  }
+
+  function computeRequiredHeight(): number {
+    const heroSection = gridContainer.closest('.hero') as HTMLElement;
+    const heroActions = heroSection?.querySelector('.hero-actions') as HTMLElement;
+    if (!heroActions || !heroSection) {
+      // Fallback: use the hero section's full height + overflow
+      return (heroSection?.offsetHeight ?? window.innerHeight) + OVERFLOW_PX;
+    }
+    // Measure from the top of the hero to the bottom of the buttons, plus 250px
+    const heroRect = heroSection.getBoundingClientRect();
+    const actionsRect = heroActions.getBoundingClientRect();
+    const buttonsBottomRelative = actionsRect.bottom - heroRect.top;
+    return buttonsBottomRelative + OVERFLOW_PX;
+  }
+
+  function populateGrid() {
+    const { cellSize, gap, bleed } = getGridDimensions();
+    const gridWidth = window.innerWidth + bleed * 2;
+    const requiredHeight = computeRequiredHeight() + bleed * 2;
+
+    const cols = Math.ceil(gridWidth / (cellSize + gap)) + 1; // +1 for brick offset
+    const rows = Math.ceil(requiredHeight / (cellSize + gap));
+    const nodeCount = cols * rows;
+
+    // Set explicit grid height to cover the required area
+    gridInner.style.height = `${requiredHeight}px`;
+    gridContainer.style.height = `${requiredHeight - bleed}px`;
+
+    // Only rebuild if count changed significantly (avoid thrashing on small resizes)
+    const currentCount = gridInner.children.length;
+    if (Math.abs(currentCount - nodeCount) < cols) return;
+
+    gridInner.innerHTML = '';
+
+    const fragment = document.createDocumentFragment();
+    for (let i = 0; i < nodeCount; i++) {
+      const agentCount = AGENT_COUNTS[i % AGENT_COUNTS.length];
+      const clone = nodeTemplate.content.cloneNode(true) as DocumentFragment;
+      const nodeEl = clone.querySelector('.grid-node') as HTMLElement;
+      nodeEl.setAttribute('data-node', String(i));
+
+      // Hide excess agent squares based on pattern
+      const agents = nodeEl.querySelectorAll('.agent-square');
+      agents.forEach((agent, s) => {
+        if (s >= agentCount) {
+          agent.classList.add('agent-empty-slot');
+          (agent as HTMLElement).style.visibility = 'hidden';
+        }
+        agent.setAttribute('data-agent', `${i}-${s}`);
+      });
+
+      fragment.appendChild(clone);
+    }
+    gridInner.appendChild(fragment);
+
+    // Re-init lifecycle tracking
+    initLifecycles();
+    applyBrickOffset();
+  }
 
   // ---- Brick-pattern row offset ----
   function applyBrickOffset() {
-    if (allNodes.length === 0) return;
-    const firstRect = allNodes[0].getBoundingClientRect();
+    const nodes = Array.from(gridInner.querySelectorAll('.grid-node')) as HTMLElement[];
+    if (nodes.length === 0) return;
+    const firstRect = nodes[0].getBoundingClientRect();
     const cellW = firstRect.width;
     let currentRow = 0;
     let lastTop = firstRect.top;
 
-    for (const node of allNodes) {
+    for (const node of nodes) {
       const rect = node.getBoundingClientRect();
       if (rect.top - lastTop > cellW * 0.5) {
         currentRow++;
         lastTop = rect.top;
       }
-      // Offset odd rows by half a cell + half a gap
       if (currentRow % 2 === 1) {
         node.style.transform = `translateX(${cellW * 0.5 + 4}px)`;
       } else {
@@ -180,12 +249,6 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
       }
     }
   }
-
-  applyBrickOffset();
-  window.addEventListener('resize', () => {
-    applyBrickOffset();
-    svg.innerHTML = '';
-  });
 
   // ---- State machine ----
   type NodeState = 'dormant' | 'waking' | 'active' | 'winding_down';
@@ -196,27 +259,31 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     agents: HTMLElement[];
     visibleAgents: Set<HTMLElement>;
     stateStart: number;
-    activeDuration: number; // how long to stay active (ms)
+    activeDuration: number;
   }
 
-  const lifecycles: NodeLifecycle[] = allNodes.map((el) => ({
-    el,
-    state: 'dormant',
-    agents: Array.from(el.querySelectorAll('.agent-square')) as HTMLElement[],
-    visibleAgents: new Set(),
-    stateStart: 0,
-    activeDuration: 0,
-  }));
+  let lifecycles: NodeLifecycle[] = [];
+
+  function initLifecycles() {
+    const allNodes = Array.from(gridInner.querySelectorAll('.grid-node')) as HTMLElement[];
+    lifecycles = allNodes.map((el) => ({
+      el,
+      state: 'dormant',
+      agents: Array.from(el.querySelectorAll('.agent-square:not(.agent-empty-slot)')) as HTMLElement[],
+      visibleAgents: new Set(),
+      stateStart: 0,
+      activeDuration: 0,
+    }));
+  }
 
   function getActiveCount(): number {
     return lifecycles.filter((n) => n.state !== 'dormant').length;
   }
 
   function getTargetActive(): number {
-    return Math.max(3, Math.floor(allNodes.length * 0.25));
+    return Math.max(3, Math.floor(lifecycles.length * 0.25));
   }
 
-  // ---- Wake a dormant node ----
   function wakeNode(lc: NodeLifecycle, now: number) {
     lc.state = 'waking';
     lc.stateStart = now;
@@ -224,25 +291,21 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     lc.el.classList.add('active');
   }
 
-  // ---- Spawn agents one by one ----
   function spawnAgents(lc: NodeLifecycle) {
     lc.state = 'active';
-    lc.activeDuration = 8000 + Math.random() * 12000; // 8-20s active
+    lc.activeDuration = 8000 + Math.random() * 12000;
     lc.stateStart = performance.now();
 
-    // Shuffle agent order
     const order = [...lc.agents].sort(() => Math.random() - 0.5);
     order.forEach((agent, i) => {
       setTimeout(() => {
         agent.classList.add('visible', 'breathing');
-        // Randomize breathing phase
         agent.style.animationDelay = `${Math.random() * 3}s`;
         lc.visibleAgents.add(agent);
       }, 400 + i * (500 + Math.random() * 1000));
     });
   }
 
-  // ---- Wind down: despawn agents, then go dormant ----
   function windDown(lc: NodeLifecycle) {
     lc.state = 'winding_down';
     lc.stateStart = performance.now();
@@ -255,7 +318,6 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
       }, i * (400 + Math.random() * 800));
     });
 
-    // After all agents gone, go dormant
     const totalDelay = order.length * 900 + 600;
     setTimeout(() => {
       lc.el.classList.remove('active');
@@ -264,26 +326,22 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     }, totalDelay);
   }
 
-  // ---- Main lifecycle tick ----
   function lifecycleTick() {
     const now = performance.now();
     const target = getTargetActive();
     const active = getActiveCount();
 
-    // Wake dormant nodes if under target
     if (active < target) {
       const dormant = lifecycles.filter((n) => n.state === 'dormant');
       if (dormant.length > 0) {
         const pick = dormant[Math.floor(Math.random() * dormant.length)];
         wakeNode(pick, now);
-        // After wake transition, start spawning agents
         setTimeout(() => {
           if (pick.state === 'waking') spawnAgents(pick);
         }, 800);
       }
     }
 
-    // Wind down nodes that have been active long enough
     for (const lc of lifecycles) {
       if (lc.state === 'active' && now - lc.stateStart > lc.activeDuration) {
         windDown(lc);
@@ -316,7 +374,6 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     const visible = getVisibleAgents();
     if (visible.length < 2) return;
 
-    // Pick two agents from different nodes
     let from, to;
     let tries = 0;
     do {
@@ -330,7 +387,6 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     const fp = agentCenter(from.el);
     const tp = agentCenter(to.el);
 
-    // Right-angle path
     const midX = fp.x + (tp.x - fp.x) / 2 + (Math.random() - 0.5) * 6;
     const d = `M ${fp.x} ${fp.y} H ${midX} V ${tp.y} H ${tp.x}`;
 
@@ -350,18 +406,15 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     path.style.transition = 'stroke-dashoffset 1.6s ease-in-out';
     path.style.strokeDashoffset = '0';
 
-    // Flash source agent
     from.el.classList.remove('flash');
     void from.el.offsetWidth;
     from.el.classList.add('flash');
 
-    // Traveling dot
     const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     dot.setAttribute('r', '2.5');
     dot.setAttribute('fill', 'rgba(34, 197, 94, 0.9)');
     svg.appendChild(dot);
 
-    // Glow behind dot
     const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     glow.setAttribute('r', '6');
     glow.setAttribute('fill', 'rgba(34, 197, 94, 0.15)');
@@ -390,7 +443,6 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
       } else {
         dot.remove();
         glow.remove();
-        // Flash destination agent
         to.el.classList.remove('flash');
         void to.el.offsetWidth;
         to.el.classList.add('flash');
@@ -398,7 +450,6 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     }
     requestAnimationFrame(animateDot);
 
-    // Fade out line, then allow next connection
     setTimeout(() => {
       path.style.transition = 'opacity 0.8s ease-out';
       path.style.opacity = '0';
@@ -409,17 +460,27 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     }, 2200);
   }
 
+  // ---- Initialize ----
+  populateGrid();
+
+  // Rebuild on resize (debounced)
+  let resizeTimer: ReturnType<typeof setTimeout>;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      populateGrid();
+      svg.innerHTML = '';
+    }, 200);
+  });
+
   // ---- Boot sequence ----
-  // Stagger initial wake-ups so it doesn't all happen at once
   const target = getTargetActive();
   for (let i = 0; i < target; i++) {
     setTimeout(() => lifecycleTick(), i * 600 + Math.random() * 400);
   }
 
-  // Ongoing lifecycle tick
   setInterval(lifecycleTick, 1500);
 
-  // Connection pulse every 2-4s
   function scheduleConnection() {
     const delay = 2000 + Math.random() * 2000;
     setTimeout(() => {
