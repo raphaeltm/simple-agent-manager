@@ -1,6 +1,8 @@
-import { type FC, useState } from 'react';
-import type { VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { type FC, useState, useEffect } from 'react';
+import type { AgentProfile, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { SplitButton } from '../ui/SplitButton';
+import { ProfileSelector } from '../agent-profiles/ProfileSelector';
+import { listAgentProfiles } from '../../lib/api';
 
 export interface TaskSubmitFormProps {
   projectId: string;
@@ -12,12 +14,13 @@ export interface TaskSubmitFormProps {
 export interface TaskSubmitOptions {
   description?: string;
   priority?: number;
-  agentProfileHint?: string;
+  agentProfileId?: string;
   vmSize?: VMSize;
   workspaceProfile?: WorkspaceProfile;
 }
 
 export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
+  projectId,
   hasCloudCredentials,
   onRunNow,
   onSaveToBacklog,
@@ -26,18 +29,37 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState(0);
-  const [agentProfileHint, setAgentProfileHint] = useState('');
+  const [agentProfileId, setAgentProfileId] = useState<string | null>(null);
   const [vmSize, setVmSize] = useState<VMSize | ''>('');
   const [workspaceProfile, setWorkspaceProfile] = useState<WorkspaceProfile | ''>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+
+  // Load profiles
+  useEffect(() => {
+    let cancelled = false;
+    void listAgentProfiles(projectId)
+      .then((data) => { if (!cancelled) setProfiles(data); })
+      .catch(() => { /* best-effort */ });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   const options: TaskSubmitOptions = {
     description: description.trim() || undefined,
     priority: priority || undefined,
-    agentProfileHint: agentProfileHint.trim() || undefined,
+    agentProfileId: agentProfileId ?? undefined,
     vmSize: vmSize || undefined,
     workspaceProfile: workspaceProfile || undefined,
+  };
+
+  const resetForm = () => {
+    setTitle('');
+    setDescription('');
+    setPriority(0);
+    setAgentProfileId(null);
+    setVmSize('');
+    setWorkspaceProfile('');
   };
 
   const handleRunNow = async () => {
@@ -54,12 +76,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       setError(null);
       setSubmitting(true);
       await onRunNow(trimmed, options);
-      setTitle('');
-      setDescription('');
-      setPriority(0);
-      setAgentProfileHint('');
-      setVmSize('');
-      setWorkspaceProfile('');
+      resetForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run task');
     } finally {
@@ -77,12 +94,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       setError(null);
       setSubmitting(true);
       await onSaveToBacklog(trimmed, options);
-      setTitle('');
-      setDescription('');
-      setPriority(0);
-      setAgentProfileHint('');
-      setVmSize('');
-      setWorkspaceProfile('');
+      resetForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save task');
     } finally {
@@ -153,6 +165,21 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           </div>
 
           <div className="flex gap-3 flex-wrap">
+            {profiles.length > 0 && (
+              <div>
+                <label className="text-xs text-fg-muted block mb-1">
+                  Agent Profile
+                </label>
+                <ProfileSelector
+                  profiles={profiles}
+                  selectedProfileId={agentProfileId}
+                  onChange={setAgentProfileId}
+                  disabled={submitting}
+                  compact
+                />
+              </div>
+            )}
+
             <div>
               <label className="text-xs text-fg-muted block mb-1">
                 Priority
@@ -198,19 +225,6 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                 <option value="full">Full</option>
                 <option value="lightweight">Lightweight</option>
               </select>
-            </div>
-
-            <div>
-              <label className="text-xs text-fg-muted block mb-1">
-                Agent Hint
-              </label>
-              <input
-                type="text"
-                value={agentProfileHint}
-                onChange={(e) => setAgentProfileHint(e.target.value)}
-                placeholder="e.g. claude-code"
-                className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm w-[140px]"
-              />
             </div>
           </div>
         </div>

@@ -97,7 +97,7 @@ export function ProjectTasks() {
         description: values.description || undefined,
         priority: values.priority,
         parentTaskId: values.parentTaskId || undefined,
-        agentProfileHint: values.agentProfileHint || undefined,
+        agentProfileHint: values.agentProfileId || undefined,
       });
       toast.success('Task created');
       setShowTaskCreate(false);
@@ -164,6 +164,7 @@ export function ProjectTasks() {
         <h2 className="m-0 mb-3 text-base font-semibold text-fg-primary">New Task</h2>
         <TaskForm
           mode="create"
+          projectId={projectId}
           tasks={tasks}
           submitting={savingTask}
           onSubmit={handleTaskCreate}

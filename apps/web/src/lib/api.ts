@@ -64,6 +64,9 @@ import type {
   NotificationPreferencesResponse,
   UpdateNotificationPreferenceRequest,
   DetectedPort,
+  AgentProfile,
+  CreateAgentProfileRequest,
+  UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -362,6 +365,7 @@ export interface SubmitTaskRequest {
   parentTaskId?: string;
   contextSummary?: string;
   taskMode?: 'task' | 'conversation';
+  agentProfileId?: string;
 }
 
 export interface SubmitTaskResponse {
@@ -1643,5 +1647,45 @@ export async function saveCachedCommands(
   return request<{ cached: number }>(`/api/projects/${projectId}/cached-commands`, {
     method: 'POST',
     body: JSON.stringify({ agentType, commands }),
+  });
+}
+
+// =============================================================================
+// Agent Profiles
+// =============================================================================
+
+export async function listAgentProfiles(
+  projectId: string,
+): Promise<AgentProfile[]> {
+  return request<AgentProfile[]>(`/api/projects/${projectId}/agent-profiles`);
+}
+
+export async function createAgentProfile(
+  projectId: string,
+  data: CreateAgentProfileRequest,
+): Promise<AgentProfile> {
+  return request<AgentProfile>(`/api/projects/${projectId}/agent-profiles`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAgentProfile(
+  projectId: string,
+  profileId: string,
+  data: UpdateAgentProfileRequest,
+): Promise<AgentProfile> {
+  return request<AgentProfile>(`/api/projects/${projectId}/agent-profiles/${profileId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAgentProfile(
+  projectId: string,
+  profileId: string,
+): Promise<void> {
+  await request(`/api/projects/${projectId}/agent-profiles/${profileId}`, {
+    method: 'DELETE',
   });
 }
