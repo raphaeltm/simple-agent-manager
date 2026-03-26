@@ -24,6 +24,7 @@ import { IdeasPage } from './pages/IdeasPage';
 import { IdeaDetailPage } from './pages/IdeaDetailPage';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectActivity } from './pages/ProjectActivity';
+import { ProjectNotifications } from './pages/ProjectNotifications';
 import { TaskDetail } from './pages/TaskDetail';
 import { ProjectChat } from './pages/ProjectChat';
 import { ProjectCreate } from './pages/ProjectCreate';
@@ -71,6 +72,7 @@ export default function App() {
               <Route path="tasks/:taskId" element={<TaskDetail />} />
               <Route path="settings" element={<ProjectSettings />} />
               <Route path="activity" element={<ProjectActivity />} />
+              <Route path="notifications" element={<ProjectNotifications />} />
             </Route>
 
             <Route path="/nodes" element={<Nodes />} />

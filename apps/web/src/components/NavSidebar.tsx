@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Lightbulb,
   Activity,
+  Bell,
   ArrowLeft,
   ChevronDown,
   ChevronRight,
@@ -34,6 +35,7 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
   { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
+  { label: 'Notifications', path: 'notifications', icon: <Bell size={18} /> },
   { label: 'Settings', path: 'settings', icon: <Settings size={18} /> },
 ];
 

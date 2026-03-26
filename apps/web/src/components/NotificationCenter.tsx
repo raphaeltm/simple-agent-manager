@@ -309,8 +309,23 @@ function NotificationItem({
         )}
         <div className="flex items-center gap-2 mt-1">
           <span className="text-[10px] text-fg-muted">{timeAgo}</span>
-          <span className="text-[10px] text-fg-muted">·</span>
+          <span className="text-[10px] text-fg-muted">&middot;</span>
           <span className="text-[10px] text-fg-muted">{config.label}</span>
+          {notification.projectId && (
+            <>
+              <span className="text-[10px] text-fg-muted">&middot;</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/projects/${notification.projectId}/notifications`);
+                  setIsOpen(false);
+                }}
+                className="text-[10px] text-accent bg-transparent border-none cursor-pointer hover:underline p-0"
+              >
+                View in project
+              </button>
+            </>
+          )}
         </div>
       </div>
 
