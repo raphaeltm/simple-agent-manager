@@ -754,14 +754,15 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 			"workspace", workspaceID, "session", sessionID, "count", len(body.McpServers))
 	}
 
-	// Store profile overrides (model/permissionMode) if provided by the control plane.
+	// Always store profile overrides so getOrCreateSessionHost can apply them.
+	// Even empty overrides are stored to distinguish "no profile" from "not set".
+	s.sessionHostMu.Lock()
+	s.sessionProfileOvr[hostKey] = profileOverrides{
+		Model:          body.Model,
+		PermissionMode: body.PermissionMode,
+	}
+	s.sessionHostMu.Unlock()
 	if body.Model != "" || body.PermissionMode != "" {
-		s.sessionHostMu.Lock()
-		s.sessionProfileOvr[hostKey] = profileOverrides{
-			Model:          body.Model,
-			PermissionMode: body.PermissionMode,
-		}
-		s.sessionHostMu.Unlock()
 		slog.Info("Profile overrides registered for agent session",
 			"workspace", workspaceID, "session", sessionID,
 			"model", body.Model, "permissionMode", body.PermissionMode)
@@ -972,7 +973,10 @@ func (s *Server) handleAutoSuspend(workspaceID, sessionID string) {
 	s.sessionHostMu.Lock()
 	delete(s.sessionHosts, hostKey)
 	delete(s.sessionMcpServers, hostKey)
-	delete(s.sessionProfileOvr, hostKey)
+	// Note: sessionProfileOvr is intentionally NOT deleted on suspend so that
+	// overrides survive suspend/resume cycles (same rationale as MCP servers
+	// in SQLite — profile overrides are re-read from the in-memory map when
+	// getOrCreateSessionHost rebuilds the SessionHost on resume).
 	s.sessionHostMu.Unlock()
 
 	// Transition the in-memory session to suspended.

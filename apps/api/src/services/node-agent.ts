@@ -296,10 +296,10 @@ export async function startAgentSessionOnNode(
       },
     ];
   }
-  if (overrides?.model) {
+  if (overrides?.model != null) {
     body.model = overrides.model;
   }
-  if (overrides?.permissionMode) {
+  if (overrides?.permissionMode != null) {
     body.permissionMode = overrides.permissionMode;
   }
   return nodeAgentRequest(

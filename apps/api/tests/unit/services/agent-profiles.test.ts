@@ -436,6 +436,33 @@ describe('Agent Profile Service', () => {
       expect(db.update).toHaveBeenCalledTimes(1);
     });
 
+    it('updates extended fields (provider, vmLocation, workspaceProfile, taskMode)', async () => {
+      const db = createMockDB();
+      const existingRow = makeProfileRow({ id: 'profile-1', name: 'custom', isBuiltin: 0 });
+      db._pushResult([existingRow]);
+      db._pushResult([]);
+      db._pushResult([makeProfileRow({
+        id: 'profile-1',
+        name: 'custom',
+        isBuiltin: 0,
+        provider: 'scaleway',
+        vmLocation: 'nl-ams-1',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      })]);
+
+      const result = await agentProfileService.updateProfile(
+        db, 'project-1', 'profile-1', 'user-1',
+        { provider: 'scaleway', vmLocation: 'nl-ams-1', workspaceProfile: 'lightweight', taskMode: 'conversation' }
+      );
+
+      expect(result.provider).toBe('scaleway');
+      expect(result.vmLocation).toBe('nl-ams-1');
+      expect(result.workspaceProfile).toBe('lightweight');
+      expect(result.taskMode).toBe('conversation');
+      expect(db.update).toHaveBeenCalledTimes(1);
+    });
+
     it('rejects updates to built-in profiles', async () => {
       const db = createMockDB();
       const builtinRow = makeProfileRow({ id: 'profile-1', isBuiltin: 1 });

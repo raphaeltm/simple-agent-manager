@@ -251,6 +251,8 @@ runRoutes.post('/:taskId/run', async (c) => {
       agentType: project.defaultAgentType ?? null,
       workspaceProfile,
       cloudProvider: (project.defaultProvider as CredentialProvider | null) ?? null,
+      // Agent profile resolution is not supported on the kanban Run path — tasks
+      // re-run with project defaults. Profile support deferred to a future PR.
       model: null,
       permissionMode: null,
     });
