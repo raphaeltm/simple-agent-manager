@@ -93,6 +93,8 @@ const DEFAULT_MCP_IDEA_LIST_MAX = 100;
 const DEFAULT_MCP_IDEA_SEARCH_MAX = 20;
 /** Max length for idea title. Override via MCP_IDEA_TITLE_MAX_LENGTH env var. */
 const DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH = 200;
+/** Max length for session topic. Override via MCP_SESSION_TOPIC_MAX_LENGTH env var. */
+const DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH = 200;
 
 export function getMcpLimits(env: Env) {
   return {
@@ -124,6 +126,7 @@ export function getMcpLimits(env: Env) {
     ideaListMax: parsePositiveInt(env.MCP_IDEA_LIST_MAX as string, DEFAULT_MCP_IDEA_LIST_MAX),
     ideaSearchMax: parsePositiveInt(env.MCP_IDEA_SEARCH_MAX as string, DEFAULT_MCP_IDEA_SEARCH_MAX),
     ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH as string, DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH),
+    sessionTopicMaxLength: parsePositiveInt(env.MCP_SESSION_TOPIC_MAX_LENGTH as string, DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH),
   };
 }
 
@@ -238,6 +241,23 @@ export async function authenticateMcpRequest(
   }
   const data = await validateMcpToken(kv, token);
   return data ? [data, token] : [null, null];
+}
+
+// ─── Session resolution ─────────────────────────────────────────────────────
+
+/**
+ * Resolve the current chat session ID from the workspace ID in the MCP token.
+ * Returns null if the workspace has no linked session.
+ */
+export async function resolveSessionId(env: Env, workspaceId: string): Promise<string | null> {
+  try {
+    const row = await env.DATABASE.prepare('SELECT chat_session_id FROM workspaces WHERE id = ?')
+      .bind(workspaceId)
+      .first<{ chat_session_id: string | null }>();
+    return row?.chat_session_id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // Re-export tool definitions from dedicated file

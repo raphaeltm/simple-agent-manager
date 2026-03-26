@@ -195,6 +195,28 @@ export function getSession(
   return mapSessionRow(row);
 }
 
+export function updateSessionTopic(
+  sql: SqlStorage,
+  sessionId: string,
+  topic: string
+): boolean {
+  const session = sql
+    .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
+    .toArray()[0];
+
+  if (!session) return false;
+  if ((session.status as string) !== 'active') return false;
+
+  const now = Date.now();
+  sql.exec(
+    'UPDATE chat_sessions SET topic = ?, updated_at = ? WHERE id = ?',
+    topic,
+    now,
+    sessionId
+  );
+  return true;
+}
+
 export function markAgentCompleted(sql: SqlStorage, sessionId: string): number {
   const now = Date.now();
   sql.exec(

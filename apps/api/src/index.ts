@@ -274,6 +274,7 @@ export interface Env {
   MCP_IDEA_LIST_MAX?: string;                      // Max page size for list_ideas (default: 100)
   MCP_IDEA_SEARCH_MAX?: string;                    // Max results for search_ideas (default: 20)
   MCP_IDEA_TITLE_MAX_LENGTH?: string;              // Max length for idea title (default: 200)
+  MCP_SESSION_TOPIC_MAX_LENGTH?: string;           // Max length for session topic (default: 200)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;

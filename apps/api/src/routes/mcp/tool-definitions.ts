@@ -249,6 +249,24 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
+  // ─── Session management tools ───────────────────────────────────────
+  {
+    name: 'update_session_topic',
+    description:
+      'Update the topic (title) of your current chat session. Use this when you understand the conversation\'s true subject after a few messages, ' +
+      'or when the conversation changes direction. The topic is displayed in the session list and helps users identify what each session is about.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        topic: {
+          type: 'string',
+          description: 'New topic/title for the session. Should be concise and descriptive (max 200 chars).',
+        },
+      },
+      required: ['topic'],
+      additionalProperties: false,
+    },
+  },
   // ─── Session–Idea linking tools ──────────────────────────────────────
   {
     name: 'link_idea',

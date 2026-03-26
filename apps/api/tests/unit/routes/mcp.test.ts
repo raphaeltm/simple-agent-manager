@@ -52,6 +52,7 @@ const mockDoStub = {
   unlinkSessionIdea: vi.fn(),
   getIdeasForSession: vi.fn().mockReturnValue([]),
   getSessionsForIdea: vi.fn().mockReturnValue([]),
+  updateSessionTopic: vi.fn().mockResolvedValue(true),
 };
 const mockProjectData = {
   idFromName: vi.fn().mockReturnValue('do-id'),
@@ -274,6 +275,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_sessions');
       expect(toolNames).toContain('get_session_messages');
       expect(toolNames).toContain('search_messages');
+      expect(toolNames).toContain('update_session_topic');
       expect(toolNames).toContain('dispatch_task');
       // Agent-initiated notifications
       expect(toolNames).toContain('request_human_input');
@@ -290,7 +292,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('search_ideas');
       // Deployment tools
       expect(toolNames).toContain('get_deployment_credentials');
-      expect(body.result.tools).toHaveLength(21);
+      expect(body.result.tools).toHaveLength(22);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -1954,6 +1956,113 @@ describe('MCP Routes', () => {
         'user-789',
         expect.objectContaining({ type: 'session_ended' }),
       );
+    });
+  });
+
+  // ─── update_session_topic ──────────────────────────────────────────
+
+  describe('update_session_topic', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing topic', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_session_topic',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('topic is required');
+    });
+
+    it('should reject empty topic', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_session_topic',
+        arguments: { topic: '   ' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('topic is required');
+    });
+
+    it('should reject when no session found for workspace', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_session_topic',
+        arguments: { topic: 'New discussion topic' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('No chat session found');
+    });
+
+    it('should update session topic successfully', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'session-1' });
+      mockDoStub.updateSessionTopic.mockResolvedValueOnce(true);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_session_topic',
+        arguments: { topic: 'Debugging auth flow' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+      expect(data.sessionId).toBe('session-1');
+      expect(data.topic).toBe('Debugging auth flow');
+    });
+
+    it('should return error when session is not active', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'session-1' });
+      mockDoStub.updateSessionTopic.mockResolvedValueOnce(false);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_session_topic',
+        arguments: { topic: 'New topic' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('no longer active');
+    });
+
+    it('should truncate topic to max length', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'session-1' });
+      mockDoStub.updateSessionTopic.mockResolvedValueOnce(true);
+
+      const longTopic = 'A'.repeat(300);
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_session_topic',
+        arguments: { topic: longTopic },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.topic.length).toBeLessThanOrEqual(200);
+    });
+
+    it('should call DO with correct arguments', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'session-1' });
+      mockDoStub.updateSessionTopic.mockResolvedValueOnce(true);
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_session_topic',
+        arguments: { topic: 'New topic' },
+      }));
+
+      expect(mockDoStub.updateSessionTopic).toHaveBeenCalledWith('session-1', 'New topic');
     });
   });
 
