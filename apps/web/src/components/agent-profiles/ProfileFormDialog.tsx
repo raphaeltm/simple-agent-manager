@@ -1,7 +1,10 @@
 import { type FC, useState, useEffect } from 'react';
 import type { AgentProfile, CreateAgentProfileRequest, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG } from '@simple-agent-manager/shared';
+import { AGENT_CATALOG, VALID_PERMISSION_MODES, AGENT_PERMISSION_MODE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Input, Dialog } from '@simple-agent-manager/ui';
+
+/** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
+const DEFAULT_AGENT_TYPE = AGENT_CATALOG[0]!.id;
 
 interface ProfileFormDialogProps {
   isOpen: boolean;
@@ -12,12 +15,12 @@ interface ProfileFormDialogProps {
 }
 
 const PERMISSION_MODES = [
-  { value: '', label: 'Default' },
-  { value: 'default', label: 'Default (ask)' },
-  { value: 'acceptEdits', label: 'Accept edits' },
-  { value: 'plan', label: 'Plan only' },
-  { value: 'bypassPermissions', label: 'Bypass permissions' },
-] as const;
+  { value: '', label: 'No override' },
+  ...VALID_PERMISSION_MODES.map((mode) => ({
+    value: mode,
+    label: AGENT_PERMISSION_MODE_LABELS[mode] ?? mode,
+  })),
+];
 
 const VM_SIZES = [
   { value: '', label: 'Default' },
@@ -48,7 +51,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [agentType, setAgentType] = useState('claude-code');
+  const [agentType, setAgentType] = useState(DEFAULT_AGENT_TYPE);
   const [model, setModel] = useState('');
   const [permissionMode, setPermissionMode] = useState('');
   const [systemPromptAppend, setSystemPromptAppend] = useState('');
@@ -77,7 +80,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     } else if (isOpen) {
       setName('');
       setDescription('');
-      setAgentType('claude-code');
+      setAgentType(DEFAULT_AGENT_TYPE);
       setModel('');
       setPermissionMode('');
       setSystemPromptAppend('');
@@ -103,7 +106,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       const data: CreateAgentProfileRequest = {
         name: trimmedName,
         description: description.trim() || null,
-        agentType: agentType || 'claude-code',
+        agentType: agentType || DEFAULT_AGENT_TYPE,
         model: model.trim() || null,
         permissionMode: permissionMode || null,
         systemPromptAppend: systemPromptAppend.trim() || null,
