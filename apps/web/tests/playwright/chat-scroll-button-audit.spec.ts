@@ -186,7 +186,7 @@ test.describe('Chat scroll button — Mobile', () => {
     const isVisible = await scrollButton.isVisible().catch(() => false);
     if (isVisible) {
       const classes = await scrollButton.getAttribute('class');
-      expect(classes).toContain('transition-all');
+      expect(classes).toContain('transition-[bottom]');
       expect(classes).toContain('duration-200');
       // Should have either bottom-3 or bottom-14 (not both)
       const hasBottom3 = classes?.includes('bottom-3');
@@ -224,7 +224,7 @@ test.describe('Chat scroll button — Desktop', () => {
     const isVisible = await scrollButton.isVisible().catch(() => false);
     if (isVisible) {
       const classes = await scrollButton.getAttribute('class');
-      expect(classes).toContain('transition-all');
+      expect(classes).toContain('transition-[bottom]');
       expect(classes).toContain('duration-200');
       expect(classes).toContain('right-4');
       // Touch target: w-11 h-11 = 44px
