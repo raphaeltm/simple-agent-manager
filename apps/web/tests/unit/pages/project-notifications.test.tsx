@@ -232,7 +232,7 @@ describe('ProjectNotifications', () => {
     expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-test/chat/session-1');
   });
 
-  it('marks notification as read via action button', async () => {
+  it('marks notification as read via action button and removes unread indicator', async () => {
     mocks.listNotifications.mockResolvedValue(
       makeListResponse([
         makeNotification({ id: 'n-read', readAt: null }),
@@ -249,12 +249,17 @@ describe('ProjectNotifications', () => {
 
     await user.click(screen.getByLabelText('Mark as read'));
     expect(mocks.markNotificationRead).toHaveBeenCalledWith('n-read');
+
+    // Optimistic update: "Mark as read" button should disappear
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Mark as read')).not.toBeInTheDocument();
+    });
   });
 
-  it('dismisses notification via action button', async () => {
+  it('dismisses notification via action button and removes it from DOM', async () => {
     mocks.listNotifications.mockResolvedValue(
       makeListResponse([
-        makeNotification({ id: 'n-dismiss' }),
+        makeNotification({ id: 'n-dismiss', title: 'Dismissable notification' }),
       ])
     );
     mocks.dismissNotification.mockResolvedValue(undefined);
@@ -263,11 +268,16 @@ describe('ProjectNotifications', () => {
     const user = userEvent.setup();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Dismiss')).toBeInTheDocument();
+      expect(screen.getByText('Dismissable notification')).toBeInTheDocument();
     });
 
     await user.click(screen.getByLabelText('Dismiss'));
     expect(mocks.dismissNotification).toHaveBeenCalledWith('n-dismiss');
+
+    // Optimistic update: notification should be removed from the list
+    await waitFor(() => {
+      expect(screen.queryByText('Dismissable notification')).not.toBeInTheDocument();
+    });
   });
 
   it('passes projectId to API for project-scoped queries', async () => {
