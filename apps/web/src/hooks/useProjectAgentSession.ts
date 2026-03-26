@@ -74,6 +74,8 @@ export interface UseProjectAgentSessionReturn {
   sendPrompt: (text: string) => void;
   /** Cancel the current agent prompt via ACP */
   cancelPrompt: () => void;
+  /** Manually trigger ACP WebSocket reconnection (resets backoff, restarts agent if errored) */
+  reconnect: () => void;
   /** Transcription API URL for voice input */
   transcribeApiUrl: string;
 }
@@ -239,6 +241,12 @@ export function useProjectAgentSession({
     });
   }, [isPrompting, acpSession]);
 
+  // Expose reconnect for callers that need to force an ACP WebSocket reconnection
+  // (e.g., after resuming a suspended agent session via the control plane API).
+  const reconnect = useCallback(() => {
+    acpSession.reconnect();
+  }, [acpSession]);
+
   return {
     session: acpSession,
     messages: acpMessages,
@@ -247,6 +255,7 @@ export function useProjectAgentSession({
     isConnecting,
     sendPrompt,
     cancelPrompt,
+    reconnect,
     transcribeApiUrl,
   };
 }

@@ -351,6 +351,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [isResuming, setIsResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const pendingFollowUpRef = useRef<string | null>(null);
+  // Guard: prevent repeated auto-resume attempts for the same session
+  const hasAttemptedAutoResumeRef = useRef(false);
 
   // Grace period: keep showing ACP view after prompting ends so DO can catch up
   // (VM agent batches messages with ~2s delay before persisting to DO)
@@ -423,6 +425,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     setIsResuming(false);
     setResumeError(null);
     pendingFollowUpRef.current = null;
+    hasAttemptedAutoResumeRef.current = false;
     if (acpGraceTimerRef.current) {
       clearTimeout(acpGraceTimerRef.current);
       acpGraceTimerRef.current = null;
@@ -635,6 +638,66 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     agentSession.sendPrompt(queued);
   }, [agentSession.isAgentActive, agentSession.sendPrompt]);
 
+  // Clear resuming state when agent becomes active after auto-resume (no pending message)
+  useEffect(() => {
+    if (agentSession.isAgentActive && isResuming && !pendingFollowUpRef.current) {
+      setIsResuming(false);
+      setResumeError(null);
+    }
+  }, [agentSession.isAgentActive, isResuming]);
+
+  // Auto-resume: when the user views an idle session where the agent is disconnected,
+  // proactively call the resume API and force ACP WebSocket reconnection. This handles
+  // the case where the VM agent auto-suspended the session after IdleSuspendTimeout
+  // and the ACP hook's own reconnection didn't recover.
+  useEffect(() => {
+    if (
+      sessionState !== 'idle' ||
+      agentSession.isAgentActive ||
+      agentSession.isConnecting ||
+      isResuming ||
+      isProvisioning ||
+      !session?.workspaceId ||
+      !agentSessionId ||
+      hasAttemptedAutoResumeRef.current
+    ) {
+      return;
+    }
+
+    // Wait briefly to let the ACP WebSocket's own reconnection succeed first
+    // (e.g., via visibility change handler + VM agent auto-resume on WS attach)
+    const timer = setTimeout(() => {
+      // Re-check: agent may have reconnected during the delay
+      if (hasAttemptedAutoResumeRef.current) return;
+      hasAttemptedAutoResumeRef.current = true;
+      setIsResuming(true);
+      setResumeError(null);
+
+      resumeAgentSession(session.workspaceId!, agentSessionId)
+        .then(() => {
+          // Resume API succeeded — update session state and force ACP reconnect
+          setSession((prev) => {
+            if (!prev) return prev;
+            return { ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
+          });
+          agentSession.reconnect();
+        })
+        .catch((err) => {
+          setIsResuming(false);
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
+            setResumeError('Could not resume agent \u2014 workspace may have been cleaned up.');
+          } else {
+            console.error('Auto-resume failed:', msg);
+            setResumeError('Could not resume agent \u2014 please try again.');
+          }
+        });
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally exclude agentSession to avoid re-triggering
+  }, [sessionState, agentSession.isAgentActive, agentSession.isConnecting, isResuming, isProvisioning, session?.workspaceId, agentSessionId]);
+
   // Send follow-up message via DO WebSocket (persistence) + ACP (agent prompt)
   const handleSendFollowUp = async () => {
     const trimmed = followUp.trim();
@@ -686,21 +749,25 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       if (agentSession.isAgentActive) {
         // Also send via ACP so the agent processes the prompt
         agentSession.sendPrompt(trimmed);
+      } else if (isResuming) {
+        // Auto-resume already in progress — just queue the message for delivery
+        pendingFollowUpRef.current = trimmed;
       } else if (sessionState === 'idle' && session?.workspaceId && agentSessionId) {
         // Agent is idle/suspended — auto-resume and queue the message
+        hasAttemptedAutoResumeRef.current = true; // prevent auto-resume effect from double-firing
         pendingFollowUpRef.current = trimmed;
         setIsResuming(true);
         setResumeError(null);
         resumeAgentSession(session.workspaceId, agentSessionId)
           .then(() => {
             // Resume API succeeded — D1 status updated + node notified.
-            // The ACP WebSocket (already enabled for idle sessions) will
-            // reconnect and the pending message will be flushed by the
-            // effect that watches isAgentActive.
+            // Force ACP WebSocket reconnection and flush pending message
+            // once agent becomes active (watched by the isAgentActive effect).
             setSession((prev) => {
               if (!prev) return prev;
               return { ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
             });
+            agentSession.reconnect();
           })
           .catch((err) => {
             setIsResuming(false);
