@@ -74,6 +74,79 @@ describe('mergeMessages', () => {
       expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c']);
     });
 
+    it('deduplicates confirmed user messages with same content but different IDs (dual-delivery)', () => {
+      // Simulates: DO WebSocket persists user message (server-123), then VM agent
+      // batch-persists the same content with a different ID (batch-456)
+      const prev = [
+        msg({ id: 'server-123', role: 'user', content: 'Hello world', createdAt: 1 }),
+      ];
+      const incoming = [
+        msg({ id: 'batch-456', role: 'user', content: 'Hello world', createdAt: 2 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'append');
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe('server-123');
+    });
+
+    it('does not deduplicate non-user messages with same content', () => {
+      // Assistant messages with same content are NOT deduplicated (they could be
+      // legitimately repeated responses)
+      const prev = [
+        msg({ id: 'a', role: 'assistant', content: 'I can help with that', createdAt: 1 }),
+      ];
+      const incoming = [
+        msg({ id: 'b', role: 'assistant', content: 'I can help with that', createdAt: 2 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'append');
+      expect(result).toHaveLength(2);
+    });
+
+    it('suppresses repeated user content via append (known limitation, acceptable trade-off)', () => {
+      // If a user sends the exact same text in a later turn, the append strategy
+      // will suppress it via content dedup. This is an acceptable trade-off:
+      // - The replace strategy (polling) will show both messages from server data
+      // - The next poll cycle corrects the client state within 3 seconds
+      // - The alternative (not deduping) causes 100% of follow-ups to appear twice
+      const prev = [
+        msg({ id: 'msg-1', role: 'user', content: 'yes', createdAt: 1 }),
+        msg({ id: 'msg-2', role: 'assistant', content: 'Done.', createdAt: 2 }),
+      ];
+      const incoming = [
+        msg({ id: 'msg-3', role: 'user', content: 'yes', createdAt: 3 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'append');
+      // Suppressed by content dedup — the next poll (replace) will correct this
+      expect(result).toHaveLength(2);
+    });
+
+    it('full dual-delivery scenario: optimistic → WS confirmed → batch confirmed', () => {
+      // Step 1: User sends follow-up → optimistic added
+      const afterOptimistic = mergeMessages(
+        [],
+        [msg({ id: 'optimistic-abc', role: 'user', content: 'Fix the bug', createdAt: 1 })],
+        'append',
+      );
+      expect(afterOptimistic).toHaveLength(1);
+
+      // Step 2: DO WebSocket broadcasts confirmed message → replaces optimistic
+      const afterWsBroadcast = mergeMessages(
+        afterOptimistic,
+        [msg({ id: 'ws-123', role: 'user', content: 'Fix the bug', createdAt: 1 })],
+        'append',
+      );
+      expect(afterWsBroadcast).toHaveLength(1);
+      expect(afterWsBroadcast[0]!.id).toBe('ws-123');
+
+      // Step 3: VM agent batch broadcasts same message with different ID → should be skipped
+      const afterBatch = mergeMessages(
+        afterWsBroadcast,
+        [msg({ id: 'batch-456', role: 'user', content: 'Fix the bug', createdAt: 2 })],
+        'append',
+      );
+      expect(afterBatch).toHaveLength(1);
+      expect(afterBatch[0]!.id).toBe('ws-123');
+    });
+
     it('reconciles optimistic AND appends new message in a single incoming batch', () => {
       const prev = [
         msg({ id: 'optimistic-abc', role: 'user', content: 'Hello', createdAt: 1 }),
@@ -141,6 +214,20 @@ describe('mergeMessages', () => {
       const incoming = [msg({ id: 'b', createdAt: 2 }), msg({ id: 'a', createdAt: 1 })];
       const result = mergeMessages(prev, incoming, 'replace');
       expect(result.map((m) => m.id)).toEqual(['a', 'b']);
+    });
+
+    it('does not content-deduplicate user messages (relies on server-side dedup)', () => {
+      // Replace trusts the server's authoritative data. If the server returns
+      // two user messages with the same content (a server-side bug), the client
+      // renders both — it's the server's job to prevent this via content dedup
+      // in persistMessageBatch.
+      const prev: ChatMessageResponse[] = [];
+      const incoming = [
+        msg({ id: 'ws-123', role: 'user', content: 'Fix the bug', createdAt: 1 }),
+        msg({ id: 'batch-456', role: 'user', content: 'Fix the bug', createdAt: 2 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'replace');
+      expect(result).toHaveLength(2);
     });
   });
 

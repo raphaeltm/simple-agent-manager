@@ -196,7 +196,8 @@ describe('DO Migrations', () => {
       // idle_cleanup_schedule: 1 (cleanup_at from migration 005)
       // acp_sessions: 5 (chat, workspace, node, parent, status) from migration 008
       // acp_session_events: 1 (session+created) from migration 008
-      expect(indexes.length).toBe(19);
+      // chat_messages: 1 (user content dedup) from migration 014
+      expect(indexes.length).toBe(20);
     });
   });
 });

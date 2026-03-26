@@ -310,6 +310,20 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '014-user-message-content-dedup-index',
+    run: (sql) => {
+      // Partial index for content-based dedup of user messages in persistMessageBatch.
+      // The VM agent batch-persists user messages with a different ID than the one
+      // already stored via the DO WebSocket (message.send). This index makes the
+      // content-dedup SELECT a point lookup instead of a full session scan.
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_user_content
+          ON chat_messages(session_id, content)
+          WHERE role = 'user'
+      `);
+    },
+  },
 ];
 
 /**

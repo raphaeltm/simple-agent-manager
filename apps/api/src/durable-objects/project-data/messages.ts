@@ -137,6 +137,10 @@ export function persistMessageBatch(
     sequence: number;
   }> = [];
 
+  // Track user message content seen within this batch to avoid redundant
+  // DB queries when the same user content appears multiple times in one batch.
+  const seenUserContent = new Set<string>();
+
   for (const msg of messages) {
     const existing = sql
       .exec('SELECT id FROM chat_messages WHERE id = ?', msg.messageId)
@@ -145,6 +149,36 @@ export function persistMessageBatch(
     if (existing) {
       duplicates++;
       continue;
+    }
+
+    // Content-based dedup for user messages: the same user message may arrive
+    // via both the DO WebSocket (message.send → persistMessage) and the VM
+    // agent batch (ExtractMessages generates a new UUID). The ID-based check
+    // above misses this because the two paths use different IDs for the same
+    // content. Skip batch user messages whose content is already persisted.
+    //
+    // Ordering guarantee: persistMessage (WebSocket path) always runs before
+    // persistMessageBatch (VM agent batch path) because the WebSocket handler
+    // persists synchronously on receipt, while the batch arrives after the VM
+    // agent processes the prompt, extracts messages, and flushes (~2-5s later).
+    if (msg.role === 'user') {
+      if (seenUserContent.has(msg.content)) {
+        duplicates++;
+        continue;
+      }
+      const contentDup = sql
+        .exec(
+          'SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1',
+          sessionId,
+          msg.role,
+          msg.content
+        )
+        .toArray()[0];
+      if (contentDup) {
+        duplicates++;
+        continue;
+      }
+      seenUserContent.add(msg.content);
     }
 
     const currentCount = (session.message_count as number) + persisted;
