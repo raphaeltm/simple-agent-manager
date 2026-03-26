@@ -96,14 +96,28 @@ class MockSqlStorage {
       return { toArray: () => matched };
     }
 
-    // UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?
+    // UPDATE notifications SET body = ?, title = ?, metadata = ?, read_at = NULL WHERE id = ?
+    // Also handles: UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?
     if (q.startsWith('UPDATE NOTIFICATIONS SET')) {
-      const [bodyParam, titleParam, idParam] = params as [string, string, string];
-      for (const r of this.rows) {
-        if (r.id === idParam) {
-          r.body = bodyParam;
-          r.title = titleParam;
-          r.read_at = null;
+      const hasMetadata = q.includes('METADATA');
+      if (hasMetadata) {
+        const [bodyParam, titleParam, metadataParam, idParam] = params as [string, string, string | null, string];
+        for (const r of this.rows) {
+          if (r.id === idParam) {
+            r.body = bodyParam;
+            r.title = titleParam;
+            r.metadata = metadataParam;
+            r.read_at = null;
+          }
+        }
+      } else {
+        const [bodyParam, titleParam, idParam] = params as [string, string, string];
+        for (const r of this.rows) {
+          if (r.id === idParam) {
+            r.body = bodyParam;
+            r.title = titleParam;
+            r.read_at = null;
+          }
         }
       }
       return { toArray: () => [] };
