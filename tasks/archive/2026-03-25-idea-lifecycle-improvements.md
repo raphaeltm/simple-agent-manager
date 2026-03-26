@@ -28,19 +28,19 @@ Ideas (draft tasks) lack lifecycle management:
 
 ## Implementation Checklist
 
-- [ ] 1. Add `status` param to `update_idea` MCP tool definition (tool-definitions.ts)
-- [ ] 2. Add status transition validation in `handleUpdateIdea` (idea-tools.ts) — allow draft→ready, draft→cancelled, ready→draft, ready→completed, ready→cancelled, completed/cancelled as terminal (no transitions out)
-- [ ] 3. Remove draft-only restriction from `handleUpdateIdea` (allow updating ideas in non-terminal statuses)
-- [ ] 4. Relax `get_idea` to work on any status (not just draft)
-- [ ] 5. Add `linkSessionIdea` API client function in web app (api.ts)
-- [ ] 6. Add "Execute" button to IdeaDetailPage header
-- [ ] 7. Wire Execute button to navigate to `/projects/:id/chat?executeIdea=<ideaId>` with pre-filled message
-- [ ] 8. In ProjectChat.tsx, read `executeIdea` query param and pre-fill message input
-- [ ] 9. After task submit in handleSubmit, if executeIdea context is present, call link API
-- [ ] 10. Show linked sessions / execution status on IdeaDetailPage (already has ConversationsPanel — enhance with status)
-- [ ] 11. Unit tests for status transition validation in MCP tool
-- [ ] 12. Unit test for execute flow navigation (IdeaDetailPage)
-- [ ] 13. Unit test for auto-linking on submit (ProjectChat)
+- [x] 1. Add `status` param to `update_idea` MCP tool definition (tool-definitions.ts)
+- [x] 2. Add status transition validation in `handleUpdateIdea` (idea-tools.ts) — allow draft→ready, draft→cancelled, ready→draft, ready→completed, ready→cancelled, completed/cancelled as terminal (no transitions out)
+- [x] 3. Remove draft-only restriction from `handleUpdateIdea` (allow updating ideas in non-terminal statuses)
+- [x] 4. Relax `get_idea` to work on any status (not just draft)
+- [x] 5. Add `linkSessionIdea` API client function in web app (api.ts)
+- [x] 6. Add "Execute" button to IdeaDetailPage header
+- [x] 7. Wire Execute button to navigate to `/projects/:id/chat?executeIdea=<ideaId>` with pre-filled message
+- [x] 8. In ProjectChat.tsx, read `executeIdea` query param and pre-fill message input
+- [x] 9. After task submit in handleSubmit, if executeIdea context is present, call link API
+- [x] 10. Show linked sessions / execution status on IdeaDetailPage (already exists via ConversationsPanel with status pills)
+- [x] 11. Unit tests for status transition validation in MCP tool
+- [ ] 12. Unit test for execute flow navigation (IdeaDetailPage) — deferred: requires full React testing setup not present for this page
+- [ ] 13. Unit test for auto-linking on submit (ProjectChat) — deferred: requires full React testing setup not present for this page
 
 ## Acceptance Criteria
 

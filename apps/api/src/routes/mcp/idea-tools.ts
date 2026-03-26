@@ -278,6 +278,45 @@ export async function handleCreateIdea(
   });
 }
 
+// ─── Idea status transition validation ───────────────────────────────────────
+
+/**
+ * Allowed status transitions for the idea lifecycle. This intentionally diverges
+ * from the full task lifecycle in task-status.ts because ideas follow a simpler
+ * state machine:
+ *   draft → ready → completed (or cancelled at any non-terminal stage)
+ *
+ * Notably:
+ * - ready → completed is allowed here but not in task-status.ts (which requires
+ *   going through queued/delegated/in_progress first). For ideas, "completed"
+ *   means "the idea was executed," not that a task runner finished.
+ * - ready → draft allows un-promoting an idea back to exploring.
+ * - queued/delegated/in_progress are execution-layer statuses set by the task
+ *   runner, not by the idea lifecycle MCP tool.
+ */
+const IDEA_STATUS_TRANSITIONS: Record<string, string[]> = {
+  draft: ['ready', 'cancelled'],
+  ready: ['draft', 'completed', 'cancelled'],
+  // completed and cancelled are terminal — no transitions out
+};
+
+/** Statuses that can be updated (derived from transition map keys). */
+const UPDATABLE_IDEA_STATUSES = Object.keys(IDEA_STATUS_TRANSITIONS);
+
+export function validateIdeaStatusTransition(
+  currentStatus: string,
+  newStatus: string,
+): string | null {
+  const allowed = IDEA_STATUS_TRANSITIONS[currentStatus];
+  if (!allowed) {
+    return `Cannot update idea in terminal status '${currentStatus}'`;
+  }
+  if (!allowed.includes(newStatus)) {
+    return `Invalid status transition: ${currentStatus} → ${newStatus}. Allowed: ${allowed.join(', ')}`;
+  }
+  return null;
+}
+
 export async function handleUpdateIdea(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -291,18 +330,35 @@ export async function handleUpdateIdea(
     return jsonRpcError(requestId, INVALID_PARAMS, 'ideaId is required');
   }
 
-  // Fetch the existing idea — must be draft status and in this project
+  // Fetch the existing idea — must be in a non-terminal status and in this project
   const existing = await env.DATABASE.prepare(
-    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ? AND status = ?',
-  ).bind(ideaId, tokenData.projectId, 'draft').first<{ id: string; title: string; description: string | null; status: string; priority: number }>();
+    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ?',
+  ).bind(ideaId, tokenData.projectId).first<{ id: string; title: string; description: string | null; status: string; priority: number }>();
 
   if (!existing) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found or not in draft status: ${ideaId}`);
+    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}`);
+  }
+
+  if (!UPDATABLE_IDEA_STATUSES.includes(existing.status)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, `Cannot update idea in terminal status '${existing.status}'`);
   }
 
   // Build update fields
   const updates: string[] = [];
   const bindValues: unknown[] = [];
+
+  // Status transition
+  let statusTransition: { from: string; to: string } | null = null;
+  if (typeof params.status === 'string') {
+    const newStatus = params.status.trim();
+    const transitionError = validateIdeaStatusTransition(existing.status, newStatus);
+    if (transitionError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, transitionError);
+    }
+    updates.push('status = ?');
+    bindValues.push(newStatus);
+    statusTransition = { from: existing.status, to: newStatus };
+  }
 
   // Title update
   if (typeof params.title === 'string') {
@@ -336,22 +392,35 @@ export async function handleUpdateIdea(
   }
 
   if (updates.length === 0) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'No fields to update. Provide at least one of: title, content, priority.');
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No fields to update. Provide at least one of: title, content, priority, status.');
   }
 
   updates.push('updated_at = ?');
   const now = new Date().toISOString();
   bindValues.push(now);
-  bindValues.push(ideaId, tokenData.projectId, 'draft');
+  bindValues.push(ideaId, tokenData.projectId);
 
-  await env.DATABASE.prepare(
-    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ? AND status = ?`,
-  ).bind(...bindValues).run();
+  const updateStmt = env.DATABASE.prepare(
+    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`,
+  ).bind(...bindValues);
+
+  // Use D1 batch to atomically update the task and record the status event
+  if (statusTransition) {
+    const eventId = ulid();
+    const eventStmt = env.DATABASE.prepare(
+      `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+       VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`,
+    ).bind(eventId, ideaId, statusTransition.from, statusTransition.to, tokenData.userId, now, now);
+    await env.DATABASE.batch([updateStmt, eventStmt]);
+  } else {
+    await updateStmt.run();
+  }
 
   log.info('mcp.update_idea', {
     ideaId,
     projectId: tokenData.projectId,
     updatedFields: updates.filter((u) => !u.startsWith('updated_at')).map((u) => u.split(' = ')[0]),
+    ...(statusTransition ? { statusTransition: `${statusTransition.from} → ${statusTransition.to}` } : {}),
   });
 
   return jsonRpcSuccess(requestId, {
@@ -378,8 +447,8 @@ export async function handleGetIdea(
   }
 
   const idea = await env.DATABASE.prepare(
-    'SELECT id, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ? AND status = ?',
-  ).bind(ideaId, tokenData.projectId, 'draft').first<{
+    'SELECT id, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?',
+  ).bind(ideaId, tokenData.projectId).first<{
     id: string;
     title: string;
     description: string | null;
@@ -390,7 +459,7 @@ export async function handleGetIdea(
   }>();
 
   if (!idea) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}. Note: only draft tasks are returned by this tool — use get_task_details for non-draft tasks.`);
+    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}`);
   }
 
   return jsonRpcSuccess(requestId, {

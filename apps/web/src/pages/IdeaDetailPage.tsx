@@ -11,6 +11,7 @@ import {
   Archive,
   Search,
   X,
+  Rocket,
 } from 'lucide-react';
 import type { TaskDetailResponse, TaskStatus } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
@@ -327,6 +328,11 @@ export function IdeaDetailPage() {
     [projectId, navigate],
   );
 
+  const handleExecute = useCallback(() => {
+    if (!taskId) return;
+    navigate(`/projects/${projectId}/chat?executeIdea=${encodeURIComponent(taskId)}`);
+  }, [projectId, taskId, navigate]);
+
   // ---------------------------------------------------------------------------
   // Render: Loading
   // ---------------------------------------------------------------------------
@@ -389,13 +395,29 @@ export function IdeaDetailPage() {
         Back to Ideas
       </button>
 
-      {/* Title */}
-      <h1 className="text-xl font-semibold text-fg-primary m-0 leading-tight break-words">
-        {idea.title}
-      </h1>
+      {/* Title + Execute button */}
+      <div className="flex items-start justify-between gap-3">
+        <h1 className="text-xl font-semibold text-fg-primary m-0 leading-tight break-words min-w-0 flex-1">
+          {idea.title}
+        </h1>
+        {ideaStatus !== 'done' && ideaStatus !== 'parked' && (
+          <button
+            onClick={handleExecute}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer shrink-0 min-h-[44px] transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            style={{
+              backgroundColor: 'var(--sam-color-accent-primary)',
+              color: 'white',
+            }}
+            aria-label="Execute this idea"
+          >
+            <Rocket size={14} aria-hidden="true" />
+            Execute
+          </button>
+        )}
+      </div>
 
-      {/* Status pill + date (no description here) */}
-      <div className="flex items-center gap-3 text-xs text-fg-muted">
+      {/* Status pill + date */}
+      <div className="flex items-center gap-3 text-xs text-fg-muted flex-wrap">
         <span
           className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wider"
           style={{

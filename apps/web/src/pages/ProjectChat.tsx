@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight, X, Lightbulb } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton, SlashCommandPalette } from '@simple-agent-manager/acp-client';
@@ -20,6 +20,7 @@ import {
   listCredentials,
   listProjectTasks,
   submitTask,
+  linkSessionIdea,
   getProjectTask,
   getTranscribeApiUrl,
   closeConversationTask,
@@ -45,6 +46,12 @@ const DEFAULT_CHAT_SESSION_LIST_LIMIT = 100;
 const CHAT_SESSION_LIST_LIMIT = parseInt(
   import.meta.env.VITE_CHAT_SESSION_LIST_LIMIT || String(DEFAULT_CHAT_SESSION_LIST_LIMIT),
 );
+
+/** Prompt template for executing an idea. Override via VITE_EXECUTE_IDEA_PROMPT_TEMPLATE. Use {ideaId} placeholder. */
+const DEFAULT_EXECUTE_IDEA_PROMPT_TEMPLATE =
+  'Read idea {ideaId} using the get_idea tool for full context, then execute it using the /do skill.';
+const EXECUTE_IDEA_PROMPT_TEMPLATE =
+  import.meta.env.VITE_EXECUTE_IDEA_PROMPT_TEMPLATE || DEFAULT_EXECUTE_IDEA_PROMPT_TEMPLATE;
 
 /** Max tasks to load for idea tagging. Override via VITE_CHAT_TASK_LIST_LIMIT. */
 const DEFAULT_CHAT_TASK_LIST_LIMIT = 200;
@@ -124,8 +131,13 @@ function isTerminal(status: TaskStatus): boolean {
 export function ProjectChat() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { projectId, project, settingsOpen, setSettingsOpen, infoPanelOpen, setInfoPanelOpen } = useProjectContext();
   const isMobile = useIsMobile();
+
+  // Execute-idea flow: pre-fill message and track ideaId for auto-linking
+  const executeIdeaId = searchParams.get('executeIdea');
+  const executeIdeaIdRef = useRef<string | null>(null);
 
   const [sessions, setSessions] = useState<ChatSessionResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -247,6 +259,20 @@ export function ProjectChat() {
       .catch(() => { /* best-effort */ });
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-fill message when navigating from idea Execute button
+  useEffect(() => {
+    if (executeIdeaId && !sessionId) {
+      executeIdeaIdRef.current = executeIdeaId;
+      setMessage(EXECUTE_IDEA_PROMPT_TEMPLATE.replace('{ideaId}', executeIdeaId));
+      // Clear the query param so it doesn't persist on refresh
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('executeIdea');
+        return next;
+      }, { replace: true });
+    }
+  }, [executeIdeaId, sessionId, setSearchParams]);
 
   const loadSessions = useCallback(async () => {
     if (hasLoadedRef.current) {
@@ -389,6 +415,16 @@ export function ProjectChat() {
         errorMessage: null,
         startedAt: Date.now(),
       });
+
+      // Auto-link idea to the new session if this submit came from an execute-idea flow
+      if (executeIdeaIdRef.current) {
+        const ideaId = executeIdeaIdRef.current;
+        executeIdeaIdRef.current = null;
+        void linkSessionIdea(projectId, result.sessionId, ideaId, 'Executed from idea detail page').catch((err) => {
+          console.warn('Failed to auto-link idea to session:', err);
+        });
+      }
+
       newChatIntentRef.current = false;
       navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
       void loadSessions();
@@ -401,6 +437,7 @@ export function ProjectChat() {
 
   const handleNewChat = useCallback(() => {
     newChatIntentRef.current = true;
+    executeIdeaIdRef.current = null;
     navigate(`/projects/${projectId}/chat`, { replace: true });
     setMessage('');
     setSubmitError(null);

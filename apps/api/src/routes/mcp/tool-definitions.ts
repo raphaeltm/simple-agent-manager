@@ -374,6 +374,12 @@ export const MCP_TOOLS = [
           type: 'number',
           description: 'New priority (optional — only updates if provided)',
         },
+        status: {
+          type: 'string',
+          description:
+            'Transition the idea to a new status. Allowed transitions: draft→ready, draft→cancelled, ready→draft, ready→completed, ready→cancelled. Terminal statuses (completed, cancelled) cannot be changed.',
+          enum: ['draft', 'ready', 'completed', 'cancelled'],
+        },
       },
       required: ['ideaId'],
       additionalProperties: false,
@@ -382,7 +388,7 @@ export const MCP_TOOLS = [
   {
     name: 'get_idea',
     description:
-      'Get full details of a specific idea, including its complete content. Use this to read the full text of an idea before updating it.',
+      'Get full details of a specific idea, including its complete content. Works for ideas in any status.',
     inputSchema: {
       type: 'object' as const,
       properties: {
