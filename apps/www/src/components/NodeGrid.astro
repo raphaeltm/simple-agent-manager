@@ -1,0 +1,441 @@
+---
+// Generate plenty of nodes — CSS auto-fill tiles them; overflow hidden clips edges
+const NODE_COUNT = 80;
+const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
+---
+
+<div class="node-grid" aria-hidden="true">
+  <div class="node-grid-inner" id="node-grid-inner">
+    {Array.from({ length: NODE_COUNT }, (_, i) => {
+      const count = AGENT_COUNTS[i % AGENT_COUNTS.length];
+      const slots = [true, count >= 2, count >= 3, count >= 4];
+      return (
+        <div class="grid-node dormant" data-node={i}>
+          <div class="node-agent-grid">
+            {slots.map((filled, s) => (
+              filled
+                ? <div class="agent-square" data-agent={`${i}-${s}`} />
+                : <div class="agent-empty" />
+            ))}
+          </div>
+        </div>
+      );
+    })}
+  </div>
+  <svg class="connection-svg" id="connection-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+
+<style>
+  .node-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  /* ---- Grid: brick-pattern offset, no padding, bleeds past edges ---- */
+  .node-grid-inner {
+    position: absolute;
+    /* Overflow past all edges for "infinite" feel */
+    top: -30px;
+    left: -30px;
+    width: calc(100% + 60px);
+    height: calc(100% + 60px);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 52px);
+    grid-auto-rows: 52px;
+    gap: 8px;
+    justify-content: center;
+  }
+
+  @media (min-width: 768px) {
+    .node-grid-inner {
+      grid-template-columns: repeat(auto-fill, 76px);
+      grid-auto-rows: 76px;
+      gap: 12px;
+      top: -40px;
+      left: -40px;
+      width: calc(100% + 80px);
+      height: calc(100% + 80px);
+    }
+  }
+
+  /* ---- Node states ---- */
+  .grid-node {
+    width: 100%;
+    height: 100%;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18%;
+    transition: border-color 0.8s ease, background-color 0.8s ease;
+  }
+
+  .grid-node.dormant {
+    border: 1px solid rgba(22, 163, 74, 0.08);
+    background: rgba(22, 163, 74, 0.015);
+  }
+
+  .grid-node.active {
+    border: 1px solid rgba(22, 163, 74, 0.3);
+    background: rgba(22, 163, 74, 0.05);
+  }
+
+  /* Brick-pattern: offset odd rows by half a cell */
+  .grid-node:nth-child(even of .brick-odd) {
+    /* handled by JS transform */
+  }
+
+  /* ---- 2×2 agent grid ---- */
+  .node-agent-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 3px;
+    width: 100%;
+    height: 100%;
+  }
+
+  @media (min-width: 768px) {
+    .node-agent-grid { gap: 4px; }
+  }
+
+  .agent-square {
+    background: rgba(34, 197, 94, 0.25);
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+
+  .agent-square.visible {
+    opacity: 1;
+  }
+
+  .agent-square.breathing {
+    animation: breathe 3s ease-in-out infinite;
+  }
+
+  .agent-square.flash {
+    animation: agent-flash 0.6s ease-in-out;
+  }
+
+  .agent-empty {}
+
+  /* ---- SVG connections ---- */
+  .connection-svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  /* ---- Keyframes ---- */
+  @keyframes breathe {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1; }
+  }
+
+  @keyframes agent-flash {
+    0%   { background: rgba(34, 197, 94, 0.25); }
+    35%  { background: rgba(34, 197, 94, 0.95); box-shadow: 0 0 8px rgba(34, 197, 94, 0.5); }
+    100% { background: rgba(34, 197, 94, 0.25); }
+  }
+</style>
+
+<script>
+  /* ================================================================
+     Node Grid – lifecycle animation
+     ================================================================ */
+
+  const gridInner = document.getElementById('node-grid-inner')!;
+  const svg = document.getElementById('connection-svg') as unknown as SVGSVGElement;
+  const allNodes = Array.from(gridInner.querySelectorAll('.grid-node')) as HTMLElement[];
+
+  // ---- Brick-pattern row offset ----
+  function applyBrickOffset() {
+    if (allNodes.length === 0) return;
+    const firstRect = allNodes[0].getBoundingClientRect();
+    const cellW = firstRect.width;
+    let currentRow = 0;
+    let lastTop = firstRect.top;
+
+    for (const node of allNodes) {
+      const rect = node.getBoundingClientRect();
+      if (rect.top - lastTop > cellW * 0.5) {
+        currentRow++;
+        lastTop = rect.top;
+      }
+      // Offset odd rows by half a cell + half a gap
+      if (currentRow % 2 === 1) {
+        node.style.transform = `translateX(${cellW * 0.5 + 4}px)`;
+      } else {
+        node.style.transform = '';
+      }
+    }
+  }
+
+  applyBrickOffset();
+  window.addEventListener('resize', () => {
+    applyBrickOffset();
+    svg.innerHTML = '';
+  });
+
+  // ---- State machine ----
+  type NodeState = 'dormant' | 'waking' | 'active' | 'winding_down';
+
+  interface NodeLifecycle {
+    el: HTMLElement;
+    state: NodeState;
+    agents: HTMLElement[];
+    visibleAgents: Set<HTMLElement>;
+    stateStart: number;
+    activeDuration: number; // how long to stay active (ms)
+  }
+
+  const lifecycles: NodeLifecycle[] = allNodes.map((el) => ({
+    el,
+    state: 'dormant',
+    agents: Array.from(el.querySelectorAll('.agent-square')) as HTMLElement[],
+    visibleAgents: new Set(),
+    stateStart: 0,
+    activeDuration: 0,
+  }));
+
+  function getActiveCount(): number {
+    return lifecycles.filter((n) => n.state !== 'dormant').length;
+  }
+
+  function getTargetActive(): number {
+    return Math.max(3, Math.floor(allNodes.length * 0.25));
+  }
+
+  // ---- Wake a dormant node ----
+  function wakeNode(lc: NodeLifecycle, now: number) {
+    lc.state = 'waking';
+    lc.stateStart = now;
+    lc.el.classList.remove('dormant');
+    lc.el.classList.add('active');
+  }
+
+  // ---- Spawn agents one by one ----
+  function spawnAgents(lc: NodeLifecycle) {
+    lc.state = 'active';
+    lc.activeDuration = 8000 + Math.random() * 12000; // 8-20s active
+    lc.stateStart = performance.now();
+
+    // Shuffle agent order
+    const order = [...lc.agents].sort(() => Math.random() - 0.5);
+    order.forEach((agent, i) => {
+      setTimeout(() => {
+        agent.classList.add('visible', 'breathing');
+        // Randomize breathing phase
+        agent.style.animationDelay = `${Math.random() * 3}s`;
+        lc.visibleAgents.add(agent);
+      }, 400 + i * (500 + Math.random() * 1000));
+    });
+  }
+
+  // ---- Wind down: despawn agents, then go dormant ----
+  function windDown(lc: NodeLifecycle) {
+    lc.state = 'winding_down';
+    lc.stateStart = performance.now();
+
+    const order = [...lc.visibleAgents].sort(() => Math.random() - 0.5);
+    order.forEach((agent, i) => {
+      setTimeout(() => {
+        agent.classList.remove('visible', 'breathing');
+        lc.visibleAgents.delete(agent);
+      }, i * (400 + Math.random() * 800));
+    });
+
+    // After all agents gone, go dormant
+    const totalDelay = order.length * 900 + 600;
+    setTimeout(() => {
+      lc.el.classList.remove('active');
+      lc.el.classList.add('dormant');
+      lc.state = 'dormant';
+    }, totalDelay);
+  }
+
+  // ---- Main lifecycle tick ----
+  function lifecycleTick() {
+    const now = performance.now();
+    const target = getTargetActive();
+    const active = getActiveCount();
+
+    // Wake dormant nodes if under target
+    if (active < target) {
+      const dormant = lifecycles.filter((n) => n.state === 'dormant');
+      if (dormant.length > 0) {
+        const pick = dormant[Math.floor(Math.random() * dormant.length)];
+        wakeNode(pick, now);
+        // After wake transition, start spawning agents
+        setTimeout(() => {
+          if (pick.state === 'waking') spawnAgents(pick);
+        }, 800);
+      }
+    }
+
+    // Wind down nodes that have been active long enough
+    for (const lc of lifecycles) {
+      if (lc.state === 'active' && now - lc.stateStart > lc.activeDuration) {
+        windDown(lc);
+      }
+    }
+  }
+
+  // ---- Connection pulses ----
+  let connectionBusy = false;
+
+  function getVisibleAgents(): { el: HTMLElement; nodeEl: HTMLElement }[] {
+    const result: { el: HTMLElement; nodeEl: HTMLElement }[] = [];
+    for (const lc of lifecycles) {
+      if (lc.state !== 'active') continue;
+      for (const a of lc.visibleAgents) {
+        result.push({ el: a, nodeEl: lc.el });
+      }
+    }
+    return result;
+  }
+
+  function agentCenter(el: HTMLElement): { x: number; y: number } {
+    const r = el.getBoundingClientRect();
+    const s = svg.getBoundingClientRect();
+    return { x: r.left + r.width / 2 - s.left, y: r.top + r.height / 2 - s.top };
+  }
+
+  function spawnConnection() {
+    if (connectionBusy) return;
+    const visible = getVisibleAgents();
+    if (visible.length < 2) return;
+
+    // Pick two agents from different nodes
+    let from, to;
+    let tries = 0;
+    do {
+      from = visible[Math.floor(Math.random() * visible.length)];
+      to = visible[Math.floor(Math.random() * visible.length)];
+      tries++;
+    } while (from.nodeEl === to.nodeEl && tries < 30);
+    if (from.nodeEl === to.nodeEl) return;
+
+    connectionBusy = true;
+    const fp = agentCenter(from.el);
+    const tp = agentCenter(to.el);
+
+    // Right-angle path
+    const midX = fp.x + (tp.x - fp.x) / 2 + (Math.random() - 0.5) * 6;
+    const d = `M ${fp.x} ${fp.y} H ${midX} V ${tp.y} H ${tp.x}`;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'rgba(34, 197, 94, 0.2)');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+
+    const length = path.getTotalLength();
+    path.style.strokeDasharray = `${length}`;
+    path.style.strokeDashoffset = `${length}`;
+    path.getBoundingClientRect();
+    path.style.transition = 'stroke-dashoffset 1.6s ease-in-out';
+    path.style.strokeDashoffset = '0';
+
+    // Flash source agent
+    from.el.classList.remove('flash');
+    void from.el.offsetWidth;
+    from.el.classList.add('flash');
+
+    // Traveling dot
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('r', '2.5');
+    dot.setAttribute('fill', 'rgba(34, 197, 94, 0.9)');
+    svg.appendChild(dot);
+
+    // Glow behind dot
+    const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    glow.setAttribute('r', '6');
+    glow.setAttribute('fill', 'rgba(34, 197, 94, 0.15)');
+    svg.appendChild(glow);
+
+    const duration = 1600;
+    const startTime = performance.now();
+
+    function animateDot(now: number) {
+      const t = Math.min(1, (now - startTime) / duration);
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      const point = path.getPointAtLength(eased * length);
+      dot.setAttribute('cx', String(point.x));
+      dot.setAttribute('cy', String(point.y));
+      glow.setAttribute('cx', String(point.x));
+      glow.setAttribute('cy', String(point.y));
+
+      if (t > 0.8) {
+        const fade = String(Math.max(0, (1 - t) / 0.2));
+        dot.style.opacity = fade;
+        glow.style.opacity = fade;
+      }
+
+      if (t < 1) {
+        requestAnimationFrame(animateDot);
+      } else {
+        dot.remove();
+        glow.remove();
+        // Flash destination agent
+        to.el.classList.remove('flash');
+        void to.el.offsetWidth;
+        to.el.classList.add('flash');
+      }
+    }
+    requestAnimationFrame(animateDot);
+
+    // Fade out line, then allow next connection
+    setTimeout(() => {
+      path.style.transition = 'opacity 0.8s ease-out';
+      path.style.opacity = '0';
+      setTimeout(() => {
+        path.remove();
+        connectionBusy = false;
+      }, 800);
+    }, 2200);
+  }
+
+  // ---- Boot sequence ----
+  // Stagger initial wake-ups so it doesn't all happen at once
+  const target = getTargetActive();
+  for (let i = 0; i < target; i++) {
+    setTimeout(() => lifecycleTick(), i * 600 + Math.random() * 400);
+  }
+
+  // Ongoing lifecycle tick
+  setInterval(lifecycleTick, 1500);
+
+  // Connection pulse every 2-4s
+  function scheduleConnection() {
+    const delay = 2000 + Math.random() * 2000;
+    setTimeout(() => {
+      spawnConnection();
+      scheduleConnection();
+    }, delay);
+  }
+  setTimeout(scheduleConnection, 2500);
+
+  // ---- Reduced motion ----
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const s = document.createElement('style');
+    s.textContent = `
+      .agent-square { animation: none !important; transition: none !important; }
+      .grid-node { transition: none !important; }
+    `;
+    document.head.appendChild(s);
+  }
+</script>
