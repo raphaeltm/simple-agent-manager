@@ -260,7 +260,7 @@ export const MCP_TOOLS = [
       properties: {
         topic: {
           type: 'string',
-          description: 'New topic/title for the session. Should be concise and descriptive (max 200 chars).',
+          description: 'New topic/title for the session. Should be concise and descriptive.',
         },
       },
       required: ['topic'],
