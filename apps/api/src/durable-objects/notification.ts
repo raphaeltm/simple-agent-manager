@@ -92,9 +92,10 @@ export class NotificationService extends DurableObject<Env> {
       if (existing.length > 0) {
         const existingId = existing[0]!.id as string;
         this.sql.exec(
-          `UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?`,
+          `UPDATE notifications SET body = ?, title = ?, metadata = ?, read_at = NULL WHERE id = ?`,
           request.body ?? null,
           request.title,
+          request.metadata ? JSON.stringify(request.metadata) : null,
           existingId
         );
         const updated = this.getNotificationById(existingId);
