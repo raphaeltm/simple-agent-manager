@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import type { NotificationResponse, NotificationType } from '@simple-agent-manager/shared';
-import { NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
+import { NOTIFICATION_TYPES, NOTIFICATION_PREVIEW_LENGTH } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import {
   listNotifications,
@@ -170,10 +170,10 @@ export function ProjectNotifications() {
               const Icon = config.icon;
               const isUnread = !notification.readAt;
               const fullMessage = getFullMessage(notification);
-              const isLong = fullMessage != null && fullMessage.length > 300;
+              const isLong = fullMessage != null && fullMessage.length > NOTIFICATION_PREVIEW_LENGTH;
               const isExpanded = expandedIds.has(notification.id);
               const displayMessage = isLong && !isExpanded
-                ? fullMessage.slice(0, 300) + '\u2026'
+                ? fullMessage.slice(0, NOTIFICATION_PREVIEW_LENGTH) + '\u2026'
                 : fullMessage;
 
               return (

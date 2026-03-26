@@ -7,7 +7,7 @@
 import { and, eq, like, or, desc } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { MAX_NOTIFICATION_BODY_LENGTH, MAX_NOTIFICATION_FULL_BODY_LENGTH } from '@simple-agent-manager/shared';
+import { MAX_NOTIFICATION_BODY_LENGTH, DEFAULT_NOTIFICATION_FULL_BODY_LENGTH } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
@@ -99,6 +99,7 @@ export async function handleUpdateTaskStatus(
         notificationService.getChatSessionId(env, tokenData.workspaceId),
       ]);
       const trimmedMessage = message.trim();
+      const maxFullBodyLength = parseInt(env.NOTIFICATION_FULL_BODY_LENGTH || '') || DEFAULT_NOTIFICATION_FULL_BODY_LENGTH;
       await notificationService.notifyProgress(env as any, tokenData.userId, {
         projectId: tokenData.projectId,
         projectName,
@@ -106,7 +107,7 @@ export async function handleUpdateTaskStatus(
         taskTitle: task.title,
         message: trimmedMessage.slice(0, MAX_NOTIFICATION_BODY_LENGTH),
         fullMessage: trimmedMessage.length > MAX_NOTIFICATION_BODY_LENGTH
-          ? trimmedMessage.slice(0, MAX_NOTIFICATION_FULL_BODY_LENGTH)
+          ? trimmedMessage.slice(0, maxFullBodyLength)
           : undefined,
         sessionId,
       });
