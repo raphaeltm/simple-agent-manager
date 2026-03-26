@@ -172,7 +172,6 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   const { context, contextActions } = useCommandPaletteContext({
     chatSessions,
     projects,
-    onClose,
   });
 
   // Fetch projects, nodes, and chat sessions on mount

@@ -5,12 +5,10 @@ import {
   Lightbulb,
   Activity,
   Settings,
-  MessageSquarePlus,
   Monitor,
   ExternalLink,
   Eye,
 } from 'lucide-react';
-import { createElement } from 'react';
 import { extractProjectId } from '../components/NavSidebar';
 import type { ChatSessionResponse } from '../lib/api';
 
@@ -51,21 +49,17 @@ function extractTaskId(pathname: string): string | undefined {
   return match?.[1];
 }
 
-/** Icon helper — creates React elements from Lucide components */
-function icon(Component: typeof MessageSquare, size = 14): React.ReactNode {
-  return createElement(Component, { size });
-}
-
 // ── Hook ──
 
 interface UseCommandPaletteContextOptions {
   chatSessions: Array<ChatSessionResponse & { projectId: string; projectName: string }>;
   projects: Array<{ id: string; name: string }>;
-  onClose: () => void;
 }
 
 /**
  * Extracts URL context and builds context-aware actions for the command palette.
+ *
+ * Actions do NOT call onClose() — the palette's executeResult() handles closing.
  *
  * Returns:
  * - `context`: current projectId/sessionId/taskId from URL
@@ -74,7 +68,6 @@ interface UseCommandPaletteContextOptions {
 export function useCommandPaletteContext({
   chatSessions,
   projects,
-  onClose,
 }: UseCommandPaletteContextOptions) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -99,32 +92,26 @@ export function useCommandPaletteContext({
       {
         id: 'ctx-project-chat',
         label: `${prefix}Go to Chat`,
-        icon: icon(MessageSquare),
-        action: () => { navigate(`/projects/${projectId}/chat`); onClose(); },
+        icon: <MessageSquare size={14} />,
+        action: () => navigate(`/projects/${projectId}/chat`),
       },
       {
         id: 'ctx-project-ideas',
         label: `${prefix}Go to Ideas`,
-        icon: icon(Lightbulb),
-        action: () => { navigate(`/projects/${projectId}/ideas`); onClose(); },
+        icon: <Lightbulb size={14} />,
+        action: () => navigate(`/projects/${projectId}/ideas`),
       },
       {
         id: 'ctx-project-activity',
         label: `${prefix}Go to Activity`,
-        icon: icon(Activity),
-        action: () => { navigate(`/projects/${projectId}/activity`); onClose(); },
+        icon: <Activity size={14} />,
+        action: () => navigate(`/projects/${projectId}/activity`),
       },
       {
         id: 'ctx-project-settings',
         label: `${prefix}Go to Settings`,
-        icon: icon(Settings),
-        action: () => { navigate(`/projects/${projectId}/settings`); onClose(); },
-      },
-      {
-        id: 'ctx-new-chat',
-        label: `${prefix}New Chat`,
-        icon: icon(MessageSquarePlus),
-        action: () => { navigate(`/projects/${projectId}/chat`); onClose(); },
+        icon: <Settings size={14} />,
+        action: () => navigate(`/projects/${projectId}/settings`),
       },
     );
 
@@ -138,11 +125,8 @@ export function useCommandPaletteContext({
         actions.push({
           id: 'ctx-go-to-workspace',
           label: 'Go to Workspace',
-          icon: icon(Monitor),
-          action: () => {
-            window.open(session.workspaceUrl!, '_blank');
-            onClose();
-          },
+          icon: <Monitor size={14} />,
+          action: () => window.open(session.workspaceUrl!, '_blank'),
         });
       }
 
@@ -150,11 +134,8 @@ export function useCommandPaletteContext({
         actions.push({
           id: 'ctx-view-task',
           label: 'View Task',
-          icon: icon(Eye),
-          action: () => {
-            navigate(`/projects/${projectId}/ideas/${session.taskId}`);
-            onClose();
-          },
+          icon: <Eye size={14} />,
+          action: () => navigate(`/projects/${projectId}/ideas/${session.taskId}`),
         });
       }
 
@@ -162,11 +143,8 @@ export function useCommandPaletteContext({
         actions.push({
           id: 'ctx-open-pr',
           label: 'Open PR',
-          icon: icon(ExternalLink),
-          action: () => {
-            window.open(session.task!.outputPrUrl!, '_blank');
-            onClose();
-          },
+          icon: <ExternalLink size={14} />,
+          action: () => window.open(session.task!.outputPrUrl!, '_blank'),
         });
       }
     }
@@ -182,22 +160,16 @@ export function useCommandPaletteContext({
         actions.push({
           id: 'ctx-go-to-chat',
           label: 'Go to Linked Chat',
-          icon: icon(MessageSquare),
-          action: () => {
-            navigate(`/projects/${projectId}/chat/${linkedSession.id}`);
-            onClose();
-          },
+          icon: <MessageSquare size={14} />,
+          action: () => navigate(`/projects/${projectId}/chat/${linkedSession.id}`),
         });
 
         if (linkedSession.workspaceUrl) {
           actions.push({
             id: 'ctx-task-workspace',
-            label: 'Go to Workspace',
-            icon: icon(Monitor),
-            action: () => {
-              window.open(linkedSession.workspaceUrl!, '_blank');
-              onClose();
-            },
+            label: "Go to Task's Workspace",
+            icon: <Monitor size={14} />,
+            action: () => window.open(linkedSession.workspaceUrl!, '_blank'),
           });
         }
       }
@@ -210,17 +182,14 @@ export function useCommandPaletteContext({
         actions.push({
           id: 'ctx-task-pr',
           label: 'Open PR',
-          icon: icon(ExternalLink),
-          action: () => {
-            window.open(sessionWithPr.task!.outputPrUrl!, '_blank');
-            onClose();
-          },
+          icon: <ExternalLink size={14} />,
+          action: () => window.open(sessionWithPr.task!.outputPrUrl!, '_blank'),
         });
       }
     }
 
     return actions.slice(0, MAX_CONTEXT_RESULTS);
-  }, [context, projects, chatSessions, navigate, onClose]);
+  }, [context, projects, chatSessions, navigate]);
 
   return { context, contextActions };
 }

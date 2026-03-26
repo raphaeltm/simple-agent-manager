@@ -57,15 +57,13 @@ function renderContextHook(options?: {
   chatSessions?: Array<ChatSessionResponse & { projectId: string; projectName: string }>;
   projects?: Array<{ id: string; name: string }>;
 }) {
-  const onClose = vi.fn();
   const result = renderHook(() =>
     useCommandPaletteContext({
       chatSessions: options?.chatSessions ?? [],
       projects: options?.projects ?? defaultProjects,
-      onClose,
     }),
   );
-  return { ...result, onClose };
+  return { ...result };
 }
 
 // ── Tests ──
@@ -149,18 +147,16 @@ describe('useCommandPaletteContext', () => {
     expect(labels).toContain('My Project: Go to Ideas');
     expect(labels).toContain('My Project: Go to Activity');
     expect(labels).toContain('My Project: Go to Settings');
-    expect(labels).toContain('My Project: New Chat');
   });
 
   it('project actions navigate correctly', () => {
     mockPathname = '/projects/p1/chat';
-    const { result, onClose } = renderContextHook();
+    const { result } = renderContextHook();
 
     const chatAction = result.current.contextActions.find((a) => a.id === 'ctx-project-ideas');
     chatAction?.action();
 
     expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/ideas');
-    expect(onClose).toHaveBeenCalled();
   });
 
   // ── Context Actions: Session Scope ──
@@ -237,7 +233,7 @@ describe('useCommandPaletteContext', () => {
     expect(labels).toContain('Go to Linked Chat');
   });
 
-  it('shows "Go to Workspace" in task context when linked session has workspaceUrl', () => {
+  it('shows "Go to Task\'s Workspace" in task context when linked session has workspaceUrl', () => {
     mockPathname = '/projects/p1/ideas/task-42';
 
     const sessions = [
@@ -251,7 +247,7 @@ describe('useCommandPaletteContext', () => {
 
     const { result } = renderContextHook({ chatSessions: sessions });
     const labels = result.current.contextActions.map((a) => a.label);
-    expect(labels).toContain('Go to Workspace');
+    expect(labels).toContain("Go to Task's Workspace");
   });
 
   it('does not show task-scoped actions when no linked session exists', () => {
@@ -289,9 +285,9 @@ describe('useCommandPaletteContext', () => {
     ];
 
     const { result } = renderContextHook({ chatSessions: sessions });
-    // Default cap is 10, and we have 5 project + 3 session = 8 actions (all fit)
+    // Default cap is 10, and we have 4 project + 3 session = 7 actions (all fit)
     expect(result.current.contextActions.length).toBeLessThanOrEqual(10);
-    expect(result.current.contextActions.length).toBe(8);
+    expect(result.current.contextActions.length).toBe(7);
   });
 
   // ── window.open assertions ──
