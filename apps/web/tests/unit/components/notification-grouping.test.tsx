@@ -111,8 +111,8 @@ describe('NotificationCenter grouping logic', () => {
       ];
       renderNotificationCenter(notifications);
 
-      // No group headers (Folder icon label) should appear
-      expect(screen.queryByRole('button', { name: /project/i })).toBeNull();
+      // No group headers (Folder icon label) should appear — group headers have aria-labels like "Project A — 2 notifications"
+      expect(screen.queryByRole('button', { name: /\d+ notifications/i })).toBeNull();
       // Both notification titles should appear directly
       expect(screen.getAllByText('Task completed')).toHaveLength(2);
     });
