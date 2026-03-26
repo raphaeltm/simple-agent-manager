@@ -406,6 +406,38 @@ describe('ProjectMessageView — auto-resume', () => {
       expect(mockAgentSession.reconnect).toHaveBeenCalled();
     });
   });
+
+  it('shows error when agent is not connected and session is not idle', async () => {
+    // Session is active (not idle), agent is disconnected — the else branch
+    mockGetChatSession.mockResolvedValue({
+      session: makeSessionResponse({ isIdle: false, agentCompletedAt: null, status: 'active' }),
+      messages: [{ id: 'msg-1', sessionId: SESSION_ID, role: 'user', content: 'Hello', toolMetadata: null, createdAt: Date.now() - 10_000 }],
+      hasMore: false,
+    });
+    mockAgentSession.isAgentActive = false;
+
+    render(
+      <ProjectMessageView
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockGetChatSession).toHaveBeenCalled();
+    });
+
+    const input = await screen.findByPlaceholderText(/send a message/i);
+    fireEvent.change(input, { target: { value: 'Hello agent' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/agent is not connected/i)).toBeInTheDocument();
+    });
+
+    // resumeAgentSession should NOT have been called (not idle)
+    expect(mockResumeAgentSession).not.toHaveBeenCalled();
+  });
 });
 
 describe('ProjectMessageView — auto-resume on page visit', () => {
@@ -654,6 +686,109 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
 
     // Should NOT call resumeAgentSession again (already in progress)
     // The call count should still be 1 (from auto-resume)
+    expect(mockResumeAgentSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows generic error when auto-resume fails with non-404 error', async () => {
+    mockResumeAgentSession.mockRejectedValue(new Error('Network timeout'));
+
+    render(
+      <ProjectMessageView
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockGetChatSession).toHaveBeenCalled();
+    });
+
+    await act(async () => { vi.advanceTimersByTime(2100); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/could not resume agent.*please try again/i)).toBeInTheDocument();
+    });
+  });
+
+  it('resets auto-resume state when session ID changes', async () => {
+    // Make first auto-resume hang
+    mockResumeAgentSession.mockReturnValue(new Promise(() => {}));
+
+    const { rerender } = render(
+      <ProjectMessageView
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockGetChatSession).toHaveBeenCalled();
+    });
+
+    // Trigger auto-resume for first session
+    await act(async () => { vi.advanceTimersByTime(2100); });
+
+    await waitFor(() => {
+      expect(screen.getByText('Resuming agent...')).toBeInTheDocument();
+    });
+
+    // Switch to a different session — should reset resume state
+    const NEW_SESSION_ID = 'sess-new';
+    mockGetChatSession.mockResolvedValue({
+      session: makeSessionResponse({ id: NEW_SESSION_ID, isIdle: true, agentCompletedAt: Date.now() - 5_000 }),
+      messages: [],
+      hasMore: false,
+    });
+    mockResumeAgentSession.mockClear();
+    mockResumeAgentSession.mockResolvedValue({ id: AGENT_SESSION_ID, status: 'running' });
+
+    rerender(
+      <ProjectMessageView
+        projectId={PROJECT_ID}
+        sessionId={NEW_SESSION_ID}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockGetChatSession).toHaveBeenCalledTimes(2);
+    });
+
+    // Auto-resume should fire for the new session after the delay
+    await act(async () => { vi.advanceTimersByTime(2100); });
+
+    await waitFor(() => {
+      expect(mockResumeAgentSession).toHaveBeenCalled();
+    });
+  });
+
+  it('does not double-resume when follow-up sent before auto-resume timer fires', async () => {
+    mockResumeAgentSession.mockResolvedValue({ id: AGENT_SESSION_ID, status: 'running' });
+
+    render(
+      <ProjectMessageView
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockGetChatSession).toHaveBeenCalled();
+    });
+
+    // Send a follow-up BEFORE the 2s auto-resume timer fires
+    // This triggers the handleSendFollowUp resume path which sets hasAttemptedAutoResumeRef
+    const input = await screen.findByPlaceholderText(/send a message/i);
+    fireEvent.change(input, { target: { value: 'Early message' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => {
+      expect(mockResumeAgentSession).toHaveBeenCalledTimes(1);
+    });
+
+    // Now advance past the auto-resume timer — it should NOT fire a second resume
+    await act(async () => { vi.advanceTimersByTime(2100); });
+
+    // Still only 1 call (from the follow-up, not from auto-resume)
     expect(mockResumeAgentSession).toHaveBeenCalledTimes(1);
   });
 });
