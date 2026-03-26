@@ -16,7 +16,7 @@ import type { ChatSessionResponse } from '../lib/api';
 
 // ── Configurable limits ──
 
-const DEFAULT_MAX_CONTEXT_RESULTS = 5;
+const DEFAULT_MAX_CONTEXT_RESULTS = 10;
 
 const MAX_CONTEXT_RESULTS = parseInt(
   import.meta.env.VITE_CMD_PALETTE_MAX_CONTEXT_RESULTS ||
