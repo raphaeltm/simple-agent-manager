@@ -51,7 +51,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [agentType, setAgentType] = useState(DEFAULT_AGENT_TYPE);
+  const [agentType, setAgentType] = useState<string>(DEFAULT_AGENT_TYPE);
   const [model, setModel] = useState('');
   const [permissionMode, setPermissionMode] = useState('');
   const [systemPromptAppend, setSystemPromptAppend] = useState('');
@@ -129,12 +129,13 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
   return (
     <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg">
+      <form onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
       <h2 id="dialog-title" className="text-lg font-semibold text-fg-primary mb-4">
         {isEdit ? 'Edit Profile' : 'Create Agent Profile'}
       </h2>
 
       {error && (
-        <div className="py-2 px-3 mb-3 rounded-sm bg-danger-tint text-danger text-sm">
+        <div role="alert" className="py-2 px-3 mb-3 rounded-sm bg-danger-tint text-danger text-sm">
           {error}
         </div>
       )}
@@ -314,13 +315,14 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
       {/* Actions */}
       <div className="flex gap-2 mt-6 justify-end">
-        <Button variant="secondary" onClick={onClose} disabled={saving}>
+        <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
           Cancel
         </Button>
-        <Button onClick={() => void handleSubmit()} disabled={saving}>
-          {saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Profile'}
+        <Button type="submit" disabled={saving} loading={saving}>
+          {isEdit ? 'Save Changes' : 'Create Profile'}
         </Button>
       </div>
+      </form>
     </Dialog>
   );
 };

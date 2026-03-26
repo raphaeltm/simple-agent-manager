@@ -1657,7 +1657,8 @@ export async function saveCachedCommands(
 export async function listAgentProfiles(
   projectId: string,
 ): Promise<AgentProfile[]> {
-  return request<AgentProfile[]>(`/api/projects/${projectId}/agent-profiles`);
+  const res = await request<{ items: AgentProfile[] }>(`/api/projects/${projectId}/agent-profiles`);
+  return res.items;
 }
 
 export async function createAgentProfile(
