@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   listChatSessions: vi.fn(),
   getProviderCatalog: vi.fn(),
   listCredentials: vi.fn(),
+  listAgentProfiles: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -57,6 +58,7 @@ vi.mock('../../../src/lib/api', () => ({
   listChatSessions: mocks.listChatSessions,
   getProviderCatalog: mocks.getProviderCatalog,
   listCredentials: mocks.listCredentials,
+  listAgentProfiles: mocks.listAgentProfiles,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -168,6 +170,7 @@ describe('Project page', () => {
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listCredentials.mockResolvedValue([]);
+    mocks.listAgentProfiles.mockResolvedValue([]);
   });
 
   it('loads project details and renders task backlog on tasks tab', async () => {
@@ -249,9 +252,6 @@ describe('Project page', () => {
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Priority' }), {
       target: { value: '11' },
     });
-    fireEvent.change(screen.getByPlaceholderText('Optional agent profile hint'), {
-      target: { value: 'qa-reviewer' },
-    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
 
@@ -261,7 +261,7 @@ describe('Project page', () => {
         description: 'Document edge cases for typing flows',
         priority: 11,
         parentTaskId: undefined,
-        agentProfileHint: 'qa-reviewer',
+        agentProfileHint: undefined,
       });
     });
   });

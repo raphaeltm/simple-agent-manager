@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/lib/api', () => ({
   listAgents: mocks.listAgents,
+  listAgentProfiles: vi.fn().mockResolvedValue([]),
   listChatSessions: mocks.listChatSessions,
   listCredentials: mocks.listCredentials,
   listProjectTasks: mocks.listProjectTasks,
@@ -24,6 +25,7 @@ vi.mock('../../../src/lib/api', () => ({
   getProjectTask: mocks.getProjectTask,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   closeConversationTask: mocks.closeConversationTask,
+  linkSessionIdea: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
