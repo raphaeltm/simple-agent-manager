@@ -45,6 +45,14 @@ const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_ACP_GRACE_MS = 3_000;
 const ACP_GRACE_MS = parseInt(import.meta.env.VITE_ACP_GRACE_MS || String(DEFAULT_ACP_GRACE_MS), 10);
 
+/**
+ * Delay (ms) before the auto-resume effect calls the resume API. Gives the
+ * ACP WebSocket's own visibility-change reconnection a chance to succeed first.
+ * Configurable via VITE_AUTO_RESUME_DELAY_MS environment variable.
+ */
+const DEFAULT_AUTO_RESUME_DELAY_MS = 2_000;
+const AUTO_RESUME_DELAY_MS = parseInt(import.meta.env.VITE_AUTO_RESUME_DELAY_MS || String(DEFAULT_AUTO_RESUME_DELAY_MS), 10);
+
 /** True for placeholder content that adds no user value. */
 function isPlaceholderContent(content: string): boolean {
   const trimmed = content.trim();
@@ -692,7 +700,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             setResumeError('Could not resume agent \u2014 please try again.');
           }
         });
-    }, 2000);
+    }, AUTO_RESUME_DELAY_MS);
 
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally exclude agentSession to avoid re-triggering
