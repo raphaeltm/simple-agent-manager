@@ -87,6 +87,42 @@ describe('ProjectData Durable Object', () => {
   });
 
   // =========================================================================
+  // updateSessionTopic
+  // =========================================================================
+
+  describe('updateSessionTopic', () => {
+    it('updates the topic of an active session', async () => {
+      const stub = getStub('project-update-topic');
+      const sessionId = await stub.createSession(null, 'Original topic');
+
+      const result = await stub.updateSessionTopic(sessionId, 'Updated topic');
+      expect(result).toBe(true);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.topic).toBe('Updated topic');
+    });
+
+    it('returns false for a non-existent session', async () => {
+      const stub = getStub('project-update-topic-missing');
+
+      const result = await stub.updateSessionTopic('nonexistent-id', 'New topic');
+      expect(result).toBe(false);
+    });
+
+    it('returns false for a stopped session', async () => {
+      const stub = getStub('project-update-topic-stopped');
+      const sessionId = await stub.createSession(null, 'Will stop');
+      await stub.stopSession(sessionId);
+
+      const result = await stub.updateSessionTopic(sessionId, 'New topic');
+      expect(result).toBe(false);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.topic).toBe('Will stop');
+    });
+  });
+
+  // =========================================================================
   // Session with taskId
   // =========================================================================
 
