@@ -63,6 +63,15 @@ export class ProjectData extends DurableObject<Env> {
     return id;
   }
 
+  async updateSessionTopic(sessionId: string, topic: string): Promise<boolean> {
+    const updated = sessions.updateSessionTopic(this.sql, sessionId, topic);
+    if (updated) {
+      this.scheduleSummarySync();
+      this.broadcastEvent('session.updated', { sessionId, topic }, sessionId);
+    }
+    return updated;
+  }
+
   async stopSession(sessionId: string): Promise<void> {
     const result = sessions.stopSession(this.sql, sessionId);
     if (result) {

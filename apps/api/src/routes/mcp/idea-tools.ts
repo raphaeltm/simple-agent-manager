@@ -15,24 +15,8 @@ import {
   INVALID_PARAMS,
   sanitizeUserInput,
   getMcpLimits,
+  resolveSessionId,
 } from './_helpers';
-
-// ─── Session–Idea linking handlers ────────────────────────────────────────────
-
-/**
- * Resolve the current chat session ID from the workspace ID in the MCP token.
- * Returns null if the workspace has no linked session.
- */
-async function resolveSessionId(env: Env, workspaceId: string): Promise<string | null> {
-  try {
-    const row = await env.DATABASE.prepare('SELECT chat_session_id FROM workspaces WHERE id = ?')
-      .bind(workspaceId)
-      .first<{ chat_session_id: string | null }>();
-    return row?.chat_session_id ?? null;
-  } catch {
-    return null;
-  }
-}
 
 export async function handleLinkIdea(
   requestId: string | number | null,

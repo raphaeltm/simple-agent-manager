@@ -35,6 +35,7 @@ import {
   handleListSessions,
   handleGetSessionMessages,
   handleSearchMessages,
+  handleUpdateSessionTopic,
 } from './session-tools';
 import { handleGetDeploymentCredentials } from './deployment-tools';
 import {
@@ -138,6 +139,8 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleGetSessionMessages(requestId, toolArgs, tokenData, c.env));
         case 'search_messages':
           return c.json(await handleSearchMessages(requestId, toolArgs, tokenData, c.env));
+        case 'update_session_topic':
+          return c.json(await handleUpdateSessionTopic(requestId, toolArgs, tokenData, c.env));
         case 'link_idea':
           return c.json(await handleLinkIdea(requestId, toolArgs, tokenData, c.env));
         case 'unlink_idea':

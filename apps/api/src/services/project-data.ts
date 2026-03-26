@@ -58,6 +58,16 @@ export async function stopSession(
   return stub.stopSession(sessionId);
 }
 
+export async function updateSessionTopic(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  topic: string
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.updateSessionTopic(sessionId, topic);
+}
+
 export async function persistMessage(
   env: Env,
   projectId: string,

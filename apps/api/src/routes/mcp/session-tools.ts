@@ -1,5 +1,5 @@
 /**
- * MCP session tools — list_sessions, get_session_messages, search_messages.
+ * MCP session tools — list_sessions, get_session_messages, search_messages, update_session_topic.
  *
  * Also exports TokenRow and groupTokensIntoMessages for use by tests and other modules.
  */
@@ -14,6 +14,8 @@ import {
   VALID_MESSAGE_ROLES,
   getMcpLimits,
   validateRoles,
+  sanitizeUserInput,
+  resolveSessionId,
 } from './_helpers';
 
 export async function handleListSessions(
@@ -197,6 +199,57 @@ export async function handleSearchMessages(
         })),
         count: results.length,
         query,
+      }, null, 2),
+    }],
+  });
+}
+
+export async function handleUpdateSessionTopic(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const rawTopic = typeof params.topic === 'string' ? params.topic.trim() : '';
+  if (!rawTopic) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'topic is required and must be a non-empty string');
+  }
+
+  const limits = getMcpLimits(env);
+  const topic = sanitizeUserInput(rawTopic).slice(0, limits.sessionTopicMaxLength);
+
+  if (!topic) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'topic must contain visible characters after sanitization');
+  }
+
+  // Resolve session ID from workspace
+  const sessionId = await resolveSessionId(env, tokenData.workspaceId);
+  if (!sessionId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No chat session found for the current workspace');
+  }
+
+  const updated = await projectDataService.updateSessionTopic(
+    env,
+    tokenData.projectId,
+    sessionId,
+    topic,
+  );
+
+  if (!updated) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Session not found or is no longer active. Only active sessions can be renamed.',
+    );
+  }
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        updated: true,
+        sessionId,
+        topic,
       }, null, 2),
     }],
   });
