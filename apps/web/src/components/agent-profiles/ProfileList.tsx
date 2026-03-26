@@ -121,7 +121,7 @@ export const ProfileList: FC<ProfileListProps> = ({
                     type="button"
                     onClick={() => handleEdit(profile)}
                     aria-label={`Edit ${profile.name}`}
-                    className="p-1.5 rounded text-fg-muted hover:text-fg-primary hover:bg-surface cursor-pointer"
+                    className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-fg-muted hover:text-fg-primary hover:bg-surface cursor-pointer"
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
@@ -130,14 +130,16 @@ export const ProfileList: FC<ProfileListProps> = ({
                       <button
                         type="button"
                         onClick={() => void handleDelete(profile.id)}
-                        className="px-2 py-1 rounded text-xs text-danger bg-danger-tint hover:bg-danger hover:text-white cursor-pointer"
+                        aria-label={`Confirm delete ${profile.name}`}
+                        className="px-3 py-2 min-h-[44px] rounded text-xs text-danger bg-danger-tint hover:bg-danger hover:text-white cursor-pointer"
                       >
                         Confirm
                       </button>
                       <button
                         type="button"
                         onClick={() => { setDeleteConfirmId(null); setDeleteError(null); }}
-                        className="px-2 py-1 rounded text-xs text-fg-muted hover:text-fg-primary cursor-pointer"
+                        aria-label="Cancel delete"
+                        className="px-3 py-2 min-h-[44px] rounded text-xs text-fg-muted hover:text-fg-primary cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -147,7 +149,7 @@ export const ProfileList: FC<ProfileListProps> = ({
                       type="button"
                       onClick={() => { setDeleteConfirmId(profile.id); setDeleteError(null); }}
                       aria-label={`Delete ${profile.name}`}
-                      className="p-1.5 rounded text-fg-muted hover:text-danger hover:bg-danger-tint cursor-pointer"
+                      className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-fg-muted hover:text-danger hover:bg-danger-tint cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -160,7 +162,7 @@ export const ProfileList: FC<ProfileListProps> = ({
       )}
 
       {deleteError && (
-        <div className="mt-2 py-2 px-3 rounded-sm bg-danger-tint text-danger text-xs">
+        <div role="alert" className="mt-2 py-2 px-3 rounded-sm bg-danger-tint text-danger text-xs">
           {deleteError}
         </div>
       )}

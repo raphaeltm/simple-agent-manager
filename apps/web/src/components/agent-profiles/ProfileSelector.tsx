@@ -9,6 +9,8 @@ interface ProfileSelectorProps {
   /** Compact mode for inline use (chat input bar) */
   compact?: boolean;
   className?: string;
+  /** HTML id for label association */
+  id?: string;
 }
 
 /**
@@ -22,6 +24,7 @@ export const ProfileSelector: FC<ProfileSelectorProps> = ({
   disabled = false,
   compact = false,
   className = '',
+  id,
 }) => {
   const baseClasses = compact
     ? 'px-2 py-1.5 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]'
@@ -29,6 +32,7 @@ export const ProfileSelector: FC<ProfileSelectorProps> = ({
 
   return (
     <select
+      id={id}
       value={selectedProfileId ?? ''}
       onChange={(e) => onChange(e.target.value || null)}
       disabled={disabled}
