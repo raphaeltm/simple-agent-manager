@@ -263,7 +263,7 @@ describe('Message Materialization', () => {
 
   describe('Migration 011', () => {
     it('should be the 11th migration', () => {
-      expect(MIGRATIONS).toHaveLength(13);
+      expect(MIGRATIONS).toHaveLength(14);
       expect(MIGRATIONS[10].name).toBe('011-message-materialization-fts5');
     });
 
