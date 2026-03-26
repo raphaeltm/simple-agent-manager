@@ -2053,6 +2053,18 @@ describe('MCP Routes', () => {
       expect(data.topic.length).toBeLessThanOrEqual(200);
     });
 
+    it('should reject topic that is empty after sanitization', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_session_topic',
+        arguments: { topic: '\x01\x02\x03' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('visible characters');
+    });
+
     it('should call DO with correct arguments', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'session-1' });
       mockDoStub.updateSessionTopic.mockResolvedValueOnce(true);

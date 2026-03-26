@@ -255,7 +255,8 @@ export async function resolveSessionId(env: Env, workspaceId: string): Promise<s
       .bind(workspaceId)
       .first<{ chat_session_id: string | null }>();
     return row?.chat_session_id ?? null;
-  } catch {
+  } catch (err) {
+    console.error('resolveSessionId: D1 query failed', { workspaceId, error: String(err) });
     return null;
   }
 }
