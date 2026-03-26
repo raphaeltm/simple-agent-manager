@@ -18,6 +18,7 @@ import { useAuth } from './AuthProvider';
 import { listProjects, listNodes, listChatSessions } from '../lib/api';
 import type { ChatSessionResponse } from '../lib/api';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
+import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
 
 // ── Configurable limits ──
 
@@ -167,6 +168,12 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   >([]);
   const [loading, setLoading] = useState(true);
 
+  // Context-aware actions based on current URL
+  const { context, contextActions } = useCommandPaletteContext({
+    chatSessions,
+    projects,
+  });
+
   // Fetch projects, nodes, and chat sessions on mount
   useEffect(() => {
     let cancelled = false;
@@ -245,6 +252,42 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   // Build results with fuzzy matching
   const groups = useMemo(() => {
     const result: CategoryGroup[] = [];
+    const currentProjectId = context.projectId;
+
+    // Context — URL-aware actions shown first
+    if (contextActions.length > 0) {
+      const ctxResults: ActionResult[] = [];
+      for (const ctxAction of contextActions) {
+        if (!query) {
+          ctxResults.push({
+            kind: 'action',
+            id: ctxAction.id,
+            label: ctxAction.label,
+            action: ctxAction.action,
+            icon: ctxAction.icon,
+            score: 0,
+            matches: [],
+          });
+        } else {
+          const m = fuzzyMatch(query, ctxAction.label);
+          if (m) {
+            ctxResults.push({
+              kind: 'action',
+              id: ctxAction.id,
+              label: ctxAction.label,
+              action: ctxAction.action,
+              icon: ctxAction.icon,
+              score: m.score,
+              matches: m.matches,
+            });
+          }
+        }
+      }
+      ctxResults.sort((a, b) => b.score - a.score);
+      if (ctxResults.length > 0) {
+        result.push({ category: 'Context', results: ctxResults });
+      }
+    }
 
     // Navigation
     const navResults: NavigationResult[] = [];
@@ -329,8 +372,17 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
           }
         }
       }
-      // Sort by score first, then by recency (createdAt DESC) for tie-breaking
-      chatResults.sort((a, b) => b.score - a.score || b.createdAt - a.createdAt);
+      // Sort: when inside a project, prioritize that project's chats.
+      // Within same-project group, sort by score then recency.
+      chatResults.sort((a, b) => {
+        if (currentProjectId) {
+          const aIsCurrentProject = chatSessions.find((s) => s.id === a.id)?.projectId === currentProjectId;
+          const bIsCurrentProject = chatSessions.find((s) => s.id === b.id)?.projectId === currentProjectId;
+          if (aIsCurrentProject && !bIsCurrentProject) return -1;
+          if (!aIsCurrentProject && bIsCurrentProject) return 1;
+        }
+        return b.score - a.score || b.createdAt - a.createdAt;
+      });
       const cappedChats = chatResults.slice(0, MAX_RESULTS_PER_CATEGORY);
       if (cappedChats.length > 0) {
         result.push({ category: 'Chats', results: cappedChats });
@@ -415,7 +467,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
     }
 
     return result;
-  }, [query, navigationItems, projects, nodes, chatSessions, actionItems]);
+  }, [query, navigationItems, projects, nodes, chatSessions, actionItems, contextActions, context.projectId]);
 
   // Flatten results for keyboard navigation
   const flatResults = useMemo(() => {
