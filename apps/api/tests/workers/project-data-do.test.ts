@@ -675,6 +675,27 @@ describe('ProjectData Durable Object', () => {
       expect(result.persisted).toBe(1);
       expect(result.duplicates).toBe(0);
     });
+
+    it('deduplicates user messages by content across two batch calls (retry scenario)', async () => {
+      const stub = getStub('project-batch-cross-batch-dedup');
+      const sessionId = await stub.createSession(null, null);
+
+      // First batch includes user message
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'user', content: 'Fix the bug', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      // Second batch (VM agent retry) includes the same user content with a different ID
+      const result = await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'user', content: 'Fix the bug', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      expect(result.persisted).toBe(0);
+      expect(result.duplicates).toBe(1);
+
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages.filter((m) => m.role === 'user')).toHaveLength(1);
+    });
   });
 
   // =========================================================================
