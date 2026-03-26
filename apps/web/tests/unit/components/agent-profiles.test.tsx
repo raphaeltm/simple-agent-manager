@@ -126,7 +126,6 @@ describe('ProfileSelector', () => {
 // ---------------------------------------------------------------------------
 
 describe('ProfileList', () => {
-  const noop = vi.fn();
   const defaultProps = {
     profiles: PROFILES,
     loading: false,
