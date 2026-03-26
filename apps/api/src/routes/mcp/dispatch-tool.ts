@@ -381,6 +381,8 @@ export async function handleDispatchTask(
       agentType: project.defaultAgentType ?? null,
       workspaceProfile: resolvedWorkspaceProfile,
       cloudProvider: resolvedProvider,
+      model: null,
+      permissionMode: null,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed

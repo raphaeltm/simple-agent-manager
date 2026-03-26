@@ -295,6 +295,12 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 			"workspace", workspaceID, "sessionId", sessionID, "count", len(prefetchedMcpServers))
 	}
 
+	// Inject per-session profile overrides (model/permissionMode from agent profiles).
+	if ovr, ok := s.sessionProfileOvr[hostKey]; ok {
+		cfg.ModelOverride = ovr.Model
+		cfg.PermissionModeOverride = ovr.PermissionMode
+	}
+
 	hostCfg := acp.SessionHostConfig{
 		GatewayConfig:         cfg,
 		MessageBufferSize:     s.config.ACPMessageBufferSize,
@@ -305,6 +311,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	s.sessionHosts[hostKey] = host
 
 	slog.Info("SessionHost created", "workspace", workspaceID, "sessionId", sessionID,
-		"mcpServers", len(cfg.McpServers))
+		"mcpServers", len(cfg.McpServers),
+		"modelOverride", cfg.ModelOverride, "permissionModeOverride", cfg.PermissionModeOverride)
 	return host
 }

@@ -251,6 +251,8 @@ runRoutes.post('/:taskId/run', async (c) => {
       agentType: project.defaultAgentType ?? null,
       workspaceProfile,
       cloudProvider: (project.defaultProvider as CredentialProvider | null) ?? null,
+      model: null,
+      permissionMode: null,
     });
   } catch (err) {
     const failedAt = new Date().toISOString();

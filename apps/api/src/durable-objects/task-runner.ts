@@ -123,6 +123,10 @@ interface TaskRunConfig {
   cloudProvider: CredentialProvider | null;
   /** Task execution mode. 'task' = push/PR/complete lifecycle. 'conversation' = human-controlled. */
   taskMode: TaskMode;
+  /** Model override from agent profile (forwarded to VM agent). Null = use agent default. */
+  model: string | null;
+  /** Permission mode override from agent profile (forwarded to VM agent). Null = use agent default. */
+  permissionMode: string | null;
 }
 
 export interface TaskRunnerState {
@@ -913,6 +917,10 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         {
           url: mcpServerUrl,
           token: state.stepResults.mcpToken!,
+        },
+        {
+          model: state.config.model,
+          permissionMode: state.config.permissionMode,
         },
       );
 

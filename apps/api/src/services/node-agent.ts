@@ -270,6 +270,12 @@ export interface McpServerConfig {
   token: string;
 }
 
+/** Optional overrides for agent model and permission mode, resolved from agent profiles. */
+export interface AgentSessionOverrides {
+  model?: string | null;
+  permissionMode?: string | null;
+}
+
 export async function startAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,
@@ -279,6 +285,7 @@ export async function startAgentSessionOnNode(
   env: Env,
   userId: string,
   mcpServer?: McpServerConfig,
+  overrides?: AgentSessionOverrides,
 ): Promise<unknown> {
   const body: Record<string, unknown> = { agentType, initialPrompt };
   if (mcpServer) {
@@ -288,6 +295,12 @@ export async function startAgentSessionOnNode(
         token: mcpServer.token,
       },
     ];
+  }
+  if (overrides?.model) {
+    body.model = overrides.model;
+  }
+  if (overrides?.permissionMode) {
+    body.permissionMode = overrides.permissionMode;
   }
   return nodeAgentRequest(
     nodeId,
