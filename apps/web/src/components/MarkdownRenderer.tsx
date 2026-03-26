@@ -118,7 +118,7 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
   return (
     <Highlight theme={themes.nightOwl} code={content} language={language || 'text'}>
       {({ tokens, getLineProps, getTokenProps }) => (
-        <pre className="m-0 p-0 font-mono bg-transparent overflow-visible" style={{ fontSize: '0.8125rem', lineHeight: '1.5' }}>
+        <pre className="m-0 p-0 font-mono bg-transparent" style={{ fontSize: '0.8125rem', lineHeight: '1.5', overflow: 'inherit' }}>
           {tokens.map((line, lineIdx) => {
             const lineProps = getLineProps({ line });
             return (
@@ -157,9 +157,9 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
   return (
     <div
       className={inline
-        ? 'text-fg-primary leading-relaxed text-base break-words overflow-x-hidden'
-        : 'max-w-[900px] mx-auto overflow-x-hidden p-4 text-fg-primary leading-relaxed text-base break-words'}
-      style={style}
+        ? 'text-fg-primary leading-relaxed text-base overflow-x-hidden min-w-0 w-full'
+        : 'max-w-[900px] mx-auto overflow-x-hidden p-4 text-fg-primary leading-relaxed text-base min-w-0 w-full'}
+      style={{ ...style, overflowWrap: 'anywhere' }}
       data-testid="rendered-markdown"
     >
       <ReactMarkdown
@@ -184,12 +184,12 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
             </blockquote>
           ),
           a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="text-tn-blue">
+            <a href={href} target="_blank" rel="noreferrer" className="text-tn-blue" style={{ overflowWrap: 'anywhere' }}>
               {children}
             </a>
           ),
           table: ({ children }) => (
-            <div className="overflow-x-auto mb-3">
+            <div className="overflow-x-auto mb-3 max-w-full">
               <table className="border-collapse w-full min-w-80">
                 {children}
               </table>
@@ -216,7 +216,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
             if (codeChild?.properties?.className?.includes('language-mermaid')) {
               return <>{children}</>;
             }
-            return <pre className="m-0">{children}</pre>;
+            return <pre className="m-0 overflow-x-auto max-w-full">{children}</pre>;
           },
           code: ({
             className,
@@ -242,7 +242,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
               <code
                 {...props}
                 className="bg-info-tint rounded-sm font-mono"
-                style={{ padding: '1px 5px', fontSize: '0.85em' }}
+                style={{ padding: '1px 5px', fontSize: '0.85em', overflowWrap: 'anywhere' }}
               >
                 {children}
               </code>

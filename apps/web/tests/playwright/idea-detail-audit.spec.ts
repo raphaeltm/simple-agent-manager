@@ -205,6 +205,59 @@ E = mc² | α β γ δ | ∑ ∏ ∫ ∂
 
 [Link with special chars](https://example.com/path?q=hello+world&lang=en#section-1)`;
 
+// Extremely aggressive unbroken content to test overflow protection
+const LONG_CELL = 'CellData'.repeat(5);
+const TABLE_ROW = Array.from({ length: 10 }, () => LONG_CELL).join(' | ');
+const EXTREME_OVERFLOW_DESCRIPTION = [
+  '# Overflow Stress Test',
+  '',
+  'x'.repeat(500),
+  '',
+  'Paragraph with a ' + 'verylongword'.repeat(40) + ' embedded in the middle of text.',
+  '',
+  '## Links',
+  '',
+  '[A link with normal text](https://example.com/short)',
+  '',
+  'Here is a bare URL: https://example.com/' + 'path/'.repeat(60) + 'endpoint?' + 'param=value&'.repeat(20) + 'final=true',
+  '',
+  '## Inline Code',
+  '',
+  'This has `' + 'longInlineCode'.repeat(30) + '` in a paragraph.',
+  '',
+  '## Table with Many Columns',
+  '',
+  '| ' + Array.from({ length: 10 }, (_, i) => `Col${i}`).join(' | ') + ' |',
+  '| ' + Array.from({ length: 10 }, () => '---').join(' | ') + ' |',
+  '| ' + TABLE_ROW + ' |',
+  '',
+  '## Deeply Nested Lists',
+  '',
+  '- Level 1',
+  '  - Level 2',
+  '    - Level 3',
+  '      - Level 4',
+  '        - Level 5 with ' + 'deepnestedcontent'.repeat(20),
+  '          - Level 6',
+  '',
+  '## Code Block',
+  '',
+  '```',
+  'x'.repeat(400),
+  '```',
+  '',
+  '## Blockquote',
+  '',
+  '> ' + 'Blockquotecontent'.repeat(30),
+].join('\n');
+
+const TASK_EXTREME_OVERFLOW = makeTask({
+  id: 'idea-extreme',
+  title: 'x'.repeat(500),
+  status: 'draft',
+  description: EXTREME_OVERFLOW_DESCRIPTION,
+});
+
 const TASK_NORMAL = makeTask({
   id: 'idea-1',
   title: 'Implement user authentication',
@@ -369,11 +422,19 @@ async function screenshot(page: Page, name: string) {
   });
 }
 
+// Note: this check catches layout-level overflow (page scrolling horizontally).
+// Elements using overflow-x: auto (tables, code blocks) contain their overflow
+// internally and will not be detected here — this is intentional behavior.
 async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
-  );
-  expect(overflow).toBe(false);
+  const overflow = await page.evaluate(() => ({
+    docOverflow: document.documentElement.scrollWidth > window.innerWidth,
+    bodyOverflow: document.body.scrollWidth > window.innerWidth,
+    docWidth: document.documentElement.scrollWidth,
+    bodyWidth: document.body.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }));
+  expect(overflow.docOverflow, `Document scrollWidth (${overflow.docWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
+  expect(overflow.bodyOverflow, `Body scrollWidth (${overflow.bodyWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +601,15 @@ test.describe('IdeaDetailPage — Mobile (375px)', () => {
     await assertNoOverflow(page);
   });
 
+  test('extreme unbroken content does not cause horizontal overflow', async ({ page }) => {
+    await setupMocks(page, { taskDetail: TASK_EXTREME_OVERFLOW, taskSessions: [] });
+    await page.goto('/projects/proj-test-1/ideas/idea-extreme');
+    await page.waitForSelector('[data-testid="rendered-markdown"]');
+    await screenshot(page, 'idea-detail-mobile-extreme-overflow');
+
+    await assertNoOverflow(page);
+  });
+
   test('single character title and description', async ({ page }) => {
     await setupMocks(page, { taskDetail: TASK_SINGLE_CHAR, taskSessions: [] });
     await page.goto('/projects/proj-test-1/ideas/idea-single');
@@ -668,6 +738,15 @@ test.describe('IdeaDetailPage — Desktop (1280px)', () => {
     await page.goto('/projects/proj-test-1/ideas/idea-1');
     await page.waitForSelector('text=Conversations (12)');
     await screenshot(page, 'idea-detail-desktop-many-sessions');
+
+    await assertNoOverflow(page);
+  });
+
+  test('extreme unbroken content does not cause horizontal overflow on desktop', async ({ page }) => {
+    await setupMocks(page, { taskDetail: TASK_EXTREME_OVERFLOW, taskSessions: [] });
+    await page.goto('/projects/proj-test-1/ideas/idea-extreme');
+    await page.waitForSelector('[data-testid="rendered-markdown"]', { timeout: 5000 }).catch(() => {});
+    await screenshot(page, 'idea-detail-desktop-extreme-overflow');
 
     await assertNoOverflow(page);
   });
