@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { ProfileSelector } from '../../../src/components/agent-profiles/ProfileSelector';
 import { ProfileList } from '../../../src/components/agent-profiles/ProfileList';
+import { ProfileFormDialog } from '../../../src/components/agent-profiles/ProfileFormDialog';
 
 // ---------------------------------------------------------------------------
 // Test data
@@ -221,5 +222,166 @@ describe('ProfileList', () => {
     expect(screen.getAllByText('claude-code').length).toBeGreaterThan(0);
     expect(screen.getAllByText('claude-sonnet-4-5-20250929').length).toBeGreaterThan(0);
     expect(screen.getAllByText('acceptEdits').length).toBeGreaterThan(0);
+  });
+
+  it('shows delete error in role="alert" when onDeleteProfile rejects', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn().mockRejectedValue(new Error('Cannot delete: in use'));
+    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />);
+    await user.click(screen.getByLabelText('Delete Fast Implementer'));
+    await user.click(screen.getByText('Confirm'));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent('Cannot delete: in use');
+  });
+
+  it('calls onCreateProfile via dialog form submission', async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue(makeProfile({ id: 'prof-new', name: 'New Prof' }));
+    render(<ProfileList {...defaultProps} onCreateProfile={onCreate} />);
+    await user.click(screen.getByText(/new profile/i));
+    // Fill the name field
+    const nameInput = screen.getByPlaceholderText('e.g. Fast Implementer');
+    await user.type(nameInput, 'New Prof');
+    // Submit
+    await user.click(screen.getByText('Create Profile'));
+    await waitFor(() => {
+      expect(onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'New Prof' }),
+      );
+    });
+  });
+
+  it('calls onUpdateProfile via dialog edit submission', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn().mockResolvedValue(makeProfile());
+    render(<ProfileList {...defaultProps} onUpdateProfile={onUpdate} />);
+    await user.click(screen.getByLabelText('Edit Fast Implementer'));
+    // Name should be pre-filled
+    const nameInput = screen.getByDisplayValue('Fast Implementer');
+    expect(nameInput).toBeInTheDocument();
+    // Change the name
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Renamed');
+    await user.click(screen.getByText('Save Changes'));
+    await waitFor(() => {
+      expect(onUpdate).toHaveBeenCalledWith(
+        'prof-1',
+        expect.objectContaining({ name: 'Renamed' }),
+      );
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ProfileFormDialog
+// ---------------------------------------------------------------------------
+
+describe('ProfileFormDialog', () => {
+  const defaultOnSave = vi.fn().mockResolvedValue(undefined);
+  const defaultOnClose = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows validation error when name is empty on submit', async () => {
+    const user = userEvent.setup();
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+    );
+    await user.click(screen.getByText('Create Profile'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Profile name is required');
+    expect(defaultOnSave).not.toHaveBeenCalled();
+  });
+
+  it('shows validation error when name is only whitespace', async () => {
+    const user = userEvent.setup();
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+    );
+    const nameInput = screen.getByPlaceholderText('e.g. Fast Implementer');
+    await user.type(nameInput, '   ');
+    await user.click(screen.getByText('Create Profile'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Profile name is required');
+    expect(defaultOnSave).not.toHaveBeenCalled();
+  });
+
+  it('calls onSave with correct payload in create mode', async () => {
+    const user = userEvent.setup();
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+    );
+    await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Test Profile');
+    await user.type(screen.getByPlaceholderText('What this profile is for...'), 'A test');
+    await user.click(screen.getByText('Create Profile'));
+    await waitFor(() => {
+      expect(defaultOnSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Test Profile',
+          description: 'A test',
+          maxTurns: null,
+          timeoutMinutes: null,
+          vmSizeOverride: null,
+        }),
+      );
+    });
+  });
+
+  it('pre-populates fields in edit mode', () => {
+    const profile = makeProfile({ name: 'My Profile', description: 'desc', model: 'claude-opus-4-6', maxTurns: 5 });
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} />,
+    );
+    expect(screen.getByDisplayValue('My Profile')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('desc')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('claude-opus-4-6')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('5')).toBeInTheDocument();
+  });
+
+  it('shows error when onSave rejects', async () => {
+    const user = userEvent.setup();
+    const failingSave = vi.fn().mockRejectedValue(new Error('Server error'));
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={failingSave} />,
+    );
+    await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Test');
+    await user.click(screen.getByText('Create Profile'));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent('Server error');
+    // Dialog should still be open
+    expect(screen.getByText('Create Agent Profile')).toBeInTheDocument();
+  });
+
+  it('calls onClose when Cancel is clicked without saving', async () => {
+    const user = userEvent.setup();
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+    );
+    await user.click(screen.getByText('Cancel'));
+    expect(defaultOnClose).toHaveBeenCalled();
+    expect(defaultOnSave).not.toHaveBeenCalled();
+  });
+
+  it('parses numeric fields correctly', async () => {
+    const user = userEvent.setup();
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+    );
+    await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Numeric Test');
+    // Set max turns and timeout
+    const maxTurnsInput = screen.getByLabelText('Max Turns');
+    const timeoutInput = screen.getByLabelText('Timeout (minutes)');
+    await user.type(maxTurnsInput, '10');
+    await user.type(timeoutInput, '30');
+    await user.click(screen.getByText('Create Profile'));
+    await waitFor(() => {
+      expect(defaultOnSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Numeric Test',
+          maxTurns: 10,
+          timeoutMinutes: 30,
+        }),
+      );
+    });
   });
 });

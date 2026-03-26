@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
+  listAgentProfiles: vi.fn(),
   listChatSessions: vi.fn(),
   listCredentials: vi.fn(),
   listProjectTasks: vi.fn(),
@@ -17,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/lib/api', () => ({
   listAgents: mocks.listAgents,
-  listAgentProfiles: vi.fn().mockResolvedValue([]),
+  listAgentProfiles: mocks.listAgentProfiles,
   listChatSessions: mocks.listChatSessions,
   listCredentials: mocks.listCredentials,
   listProjectTasks: mocks.listProjectTasks,
@@ -137,6 +138,7 @@ describe('ProjectChat new chat button', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
@@ -275,6 +277,7 @@ describe('ProjectChat voice input', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
@@ -327,6 +330,7 @@ describe('ProjectChat agent type selection', () => {
     mocks.listCredentials.mockResolvedValue([
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
+    mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
@@ -410,6 +414,7 @@ describe('ProjectChat workspace profile selection', () => {
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
@@ -569,6 +574,7 @@ describe('ProjectChat close conversation button', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue({ agents: [{ agentType: 'claude-code', label: 'Claude Code' }] });
+    mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.closeConversationTask.mockResolvedValue({});
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
@@ -619,6 +625,7 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
@@ -678,6 +685,7 @@ describe('ProjectChat idea tags on sessions', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listAgentProfiles.mockResolvedValue([]);
   });
 
   it('shows idea tag on sessions linked to a task', async () => {
@@ -712,5 +720,97 @@ describe('ProjectChat idea tags on sessions', () => {
 
     // No idea tags should be rendered
     expect(screen.queryByTitle(/^Idea:/)).not.toBeInTheDocument();
+  });
+});
+
+describe('ProjectChat agent profile selection', () => {
+  const TEST_PROFILES = [
+    {
+      id: 'prof-1',
+      projectId: PROJECT_ID,
+      userId: 'user-1',
+      name: 'Fast Implementer',
+      description: null,
+      agentType: 'claude-code',
+      model: 'claude-sonnet-4-5-20250929',
+      permissionMode: null,
+      systemPromptAppend: null,
+      maxTurns: null,
+      timeoutMinutes: null,
+      vmSizeOverride: null,
+      provider: null,
+      vmLocation: null,
+      workspaceProfile: null,
+      taskMode: null,
+      isBuiltin: false,
+      createdAt: '2026-03-15T00:00:00Z',
+      updatedAt: '2026-03-15T00:00:00Z',
+    },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listAgentProfiles.mockResolvedValue(TEST_PROFILES);
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    mocks.submitTask.mockResolvedValue({
+      taskId: 'task-prof',
+      sessionId: 'session-prof',
+      branchName: 'sam/task-prof',
+      status: 'queued',
+    });
+    mocks.getProjectTask.mockResolvedValue({
+      id: 'task-prof',
+      status: 'queued',
+      executionStep: null,
+      errorMessage: null,
+    });
+  });
+
+  it('submits task with agentProfileId when a profile is selected', async () => {
+    renderProjectChat();
+
+    // Wait for profiles to load and the selector to appear
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent profile')).toBeInTheDocument();
+    });
+
+    // Select the profile
+    fireEvent.change(screen.getByLabelText('Agent profile'), { target: { value: 'prof-1' } });
+
+    // Type and submit
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'Build a feature' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        message: 'Build a feature',
+        agentProfileId: 'prof-1',
+      }));
+    });
+  });
+
+  it('does not include agentProfileId when default is selected', async () => {
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent profile')).toBeInTheDocument();
+    });
+
+    // Leave on default (no profile)
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'Quick task' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.not.objectContaining({
+        agentProfileId: expect.anything(),
+      }));
+    });
   });
 });
