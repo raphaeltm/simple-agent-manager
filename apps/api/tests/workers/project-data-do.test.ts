@@ -636,6 +636,45 @@ describe('ProjectData Durable Object', () => {
       const sessionAfter = await stub.getSession(sessionId);
       expect(sessionAfter!.messageCount).toBe(sessionBefore!.messageCount);
     });
+
+    it('deduplicates user messages by content (dual-delivery from WebSocket + batch)', async () => {
+      const stub = getStub('project-batch-content-dedup');
+      const sessionId = await stub.createSession(null, null);
+
+      // Simulate: user message persisted via DO WebSocket (message.send)
+      await stub.persistMessage(sessionId, 'user', 'Fix the login bug', null);
+
+      // Simulate: VM agent batch includes same user message with a different ID
+      const result = await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'user', content: 'Fix the login bug', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Looking into it...', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      // User message should be skipped (content duplicate), assistant should be persisted
+      expect(result.persisted).toBe(1);
+      expect(result.duplicates).toBe(1);
+
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages).toHaveLength(2); // 1 from persistMessage + 1 assistant from batch
+      const userMsgs = messages.filter((m) => m.role === 'user');
+      expect(userMsgs).toHaveLength(1);
+    });
+
+    it('does not content-deduplicate non-user messages', async () => {
+      const stub = getStub('project-batch-no-content-dedup-assistant');
+      const sessionId = await stub.createSession(null, null);
+
+      // Persist an assistant message
+      await stub.persistMessage(sessionId, 'assistant', 'I can help with that', null);
+
+      // Batch includes assistant message with same content — should NOT be skipped
+      const result = await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'I can help with that', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      expect(result.persisted).toBe(1);
+      expect(result.duplicates).toBe(0);
+    });
   });
 
   // =========================================================================

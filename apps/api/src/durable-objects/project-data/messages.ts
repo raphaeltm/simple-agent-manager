@@ -147,6 +147,26 @@ export function persistMessageBatch(
       continue;
     }
 
+    // Content-based dedup for user messages: the same user message may arrive
+    // via both the DO WebSocket (message.send → persistMessage) and the VM
+    // agent batch (ExtractMessages generates a new UUID). The ID-based check
+    // above misses this because the two paths use different IDs for the same
+    // content. Skip batch user messages whose content is already persisted.
+    if (msg.role === 'user') {
+      const contentDup = sql
+        .exec(
+          'SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1',
+          sessionId,
+          msg.role,
+          msg.content
+        )
+        .toArray()[0];
+      if (contentDup) {
+        duplicates++;
+        continue;
+      }
+    }
+
     const currentCount = (session.message_count as number) + persisted;
     if (currentCount >= maxMessages) {
       break;

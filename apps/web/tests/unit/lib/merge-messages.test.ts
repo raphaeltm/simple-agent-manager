@@ -74,6 +74,61 @@ describe('mergeMessages', () => {
       expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c']);
     });
 
+    it('deduplicates confirmed user messages with same content but different IDs (dual-delivery)', () => {
+      // Simulates: DO WebSocket persists user message (server-123), then VM agent
+      // batch-persists the same content with a different ID (batch-456)
+      const prev = [
+        msg({ id: 'server-123', role: 'user', content: 'Hello world', createdAt: 1 }),
+      ];
+      const incoming = [
+        msg({ id: 'batch-456', role: 'user', content: 'Hello world', createdAt: 2 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'append');
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe('server-123');
+    });
+
+    it('does not deduplicate non-user messages with same content', () => {
+      // Assistant messages with same content are NOT deduplicated (they could be
+      // legitimately repeated responses)
+      const prev = [
+        msg({ id: 'a', role: 'assistant', content: 'I can help with that', createdAt: 1 }),
+      ];
+      const incoming = [
+        msg({ id: 'b', role: 'assistant', content: 'I can help with that', createdAt: 2 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'append');
+      expect(result).toHaveLength(2);
+    });
+
+    it('full dual-delivery scenario: optimistic → WS confirmed → batch confirmed', () => {
+      // Step 1: User sends follow-up → optimistic added
+      const afterOptimistic = mergeMessages(
+        [],
+        [msg({ id: 'optimistic-abc', role: 'user', content: 'Fix the bug', createdAt: 1 })],
+        'append',
+      );
+      expect(afterOptimistic).toHaveLength(1);
+
+      // Step 2: DO WebSocket broadcasts confirmed message → replaces optimistic
+      const afterWsBroadcast = mergeMessages(
+        afterOptimistic,
+        [msg({ id: 'ws-123', role: 'user', content: 'Fix the bug', createdAt: 1 })],
+        'append',
+      );
+      expect(afterWsBroadcast).toHaveLength(1);
+      expect(afterWsBroadcast[0]!.id).toBe('ws-123');
+
+      // Step 3: VM agent batch broadcasts same message with different ID → should be skipped
+      const afterBatch = mergeMessages(
+        afterWsBroadcast,
+        [msg({ id: 'batch-456', role: 'user', content: 'Fix the bug', createdAt: 2 })],
+        'append',
+      );
+      expect(afterBatch).toHaveLength(1);
+      expect(afterBatch[0]!.id).toBe('ws-123');
+    });
+
     it('reconciles optimistic AND appends new message in a single incoming batch', () => {
       const prev = [
         msg({ id: 'optimistic-abc', role: 'user', content: 'Hello', createdAt: 1 }),

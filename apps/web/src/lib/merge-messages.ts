@@ -50,6 +50,26 @@ function findMatchingOptimistic(
 }
 
 /**
+ * Check if a confirmed user message with the same content already exists in
+ * the map. This catches dual-delivery duplication: the DO WebSocket persists
+ * the user message (message.send → message.new broadcast), then the VM agent
+ * batch-persists the same content with a different ID (ExtractMessages
+ * generates a new UUID → messages.batch broadcast).
+ */
+function hasConfirmedDuplicate(
+  map: Map<string, ChatMessageResponse>,
+  msg: ChatMessageResponse,
+): boolean {
+  if (msg.role !== 'user') return false;
+  for (const existing of map.values()) {
+    if (!isOptimistic(existing) && existing.role === 'user' && existing.content === msg.content) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Merge incoming messages into the existing message array, deduplicating by ID.
  *
  * Strategies:
@@ -134,6 +154,15 @@ function mergeAppend(
     const optimisticId = findMatchingOptimistic(map, msg);
     if (optimisticId) {
       map.delete(optimisticId);
+      map.set(msg.id, msg);
+      continue;
+    }
+
+    // Skip confirmed user messages that duplicate existing confirmed messages
+    // by content. Catches dual-delivery: DO WebSocket (message.send) persists
+    // the user message, then VM agent batch also persists it with a different ID.
+    if (hasConfirmedDuplicate(map, msg)) {
+      continue;
     }
 
     map.set(msg.id, msg);
