@@ -202,9 +202,9 @@ export function useCommandPaletteContext({
         }
       }
 
-      // Find task's PR URL from any session with this taskId
+      // Find task's PR URL from a session with this taskId in the same project
       const sessionWithPr = chatSessions.find(
-        (s) => s.taskId === taskId && s.task?.outputPrUrl,
+        (s) => s.taskId === taskId && s.projectId === projectId && s.task?.outputPrUrl,
       );
       if (sessionWithPr?.task?.outputPrUrl) {
         actions.push({

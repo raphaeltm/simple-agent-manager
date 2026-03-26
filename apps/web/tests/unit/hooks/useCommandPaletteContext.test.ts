@@ -293,4 +293,123 @@ describe('useCommandPaletteContext', () => {
     expect(result.current.contextActions.length).toBeLessThanOrEqual(10);
     expect(result.current.contextActions.length).toBe(8);
   });
+
+  // ── window.open assertions ──
+
+  it('"Go to Workspace" calls window.open with correct URL', () => {
+    mockPathname = '/projects/p1/chat/sess-1';
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    const sessions = [
+      makeSession({
+        id: 'sess-1',
+        projectId: 'p1',
+        workspaceUrl: 'https://ws-abc.example.com',
+      }),
+    ];
+
+    const { result } = renderContextHook({ chatSessions: sessions });
+    const wsAction = result.current.contextActions.find((a) => a.id === 'ctx-go-to-workspace');
+    wsAction?.action();
+
+    expect(openSpy).toHaveBeenCalledWith('https://ws-abc.example.com', '_blank');
+    openSpy.mockRestore();
+  });
+
+  it('"Open PR" calls window.open with correct URL', () => {
+    mockPathname = '/projects/p1/chat/sess-1';
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    const sessions = [
+      makeSession({
+        id: 'sess-1',
+        projectId: 'p1',
+        taskId: 'task-42',
+        task: {
+          outputPrUrl: 'https://github.com/org/repo/pull/123',
+          outputBranch: null,
+          outputSummary: null,
+          finalizedAt: null,
+          executionStep: null,
+          errorMessage: null,
+        },
+      }),
+    ];
+
+    const { result } = renderContextHook({ chatSessions: sessions });
+    const prAction = result.current.contextActions.find((a) => a.id === 'ctx-open-pr');
+    prAction?.action();
+
+    expect(openSpy).toHaveBeenCalledWith('https://github.com/org/repo/pull/123', '_blank');
+    openSpy.mockRestore();
+  });
+
+  // ── Cross-project isolation ──
+
+  it('does not show PR from a different project for same taskId', () => {
+    mockPathname = '/projects/p1/ideas/task-42';
+
+    const sessions = [
+      // This session has the same taskId but belongs to project p2
+      makeSession({
+        id: 'sess-wrong',
+        projectId: 'p2',
+        taskId: 'task-42',
+        task: {
+          outputPrUrl: 'https://github.com/org/repo/pull/999',
+          outputBranch: null,
+          outputSummary: null,
+          finalizedAt: null,
+          executionStep: null,
+          errorMessage: null,
+        },
+      }),
+    ];
+
+    const { result } = renderContextHook({ chatSessions: sessions });
+    const labels = result.current.contextActions.map((a) => a.label);
+    expect(labels).not.toContain('Open PR');
+    expect(labels).not.toContain('Go to Linked Chat');
+  });
+
+  it('does not show session actions when session belongs to wrong project', () => {
+    mockPathname = '/projects/p1/chat/sess-1';
+
+    const sessions = [
+      makeSession({ id: 'sess-1', projectId: 'p2', workspaceUrl: 'https://ws-abc.example.com' }),
+    ];
+
+    const { result } = renderContextHook({ chatSessions: sessions });
+    const labels = result.current.contextActions.map((a) => a.label);
+    expect(labels).not.toContain('Go to Workspace');
+  });
+
+  // ── Empty sessions on session URL (initial load) ──
+
+  it('returns only project actions when chatSessions is empty on a session URL', () => {
+    mockPathname = '/projects/p1/chat/sess-1';
+
+    const { result } = renderContextHook({ chatSessions: [] });
+    const labels = result.current.contextActions.map((a) => a.label);
+
+    // Project actions present
+    expect(labels).toContain('My Project: Go to Chat');
+    // Session actions absent
+    expect(labels).not.toContain('Go to Workspace');
+    expect(labels).not.toContain('View Task');
+    expect(labels).not.toContain('Open PR');
+  });
+
+  // ── Unknown project (not in projects list) ──
+
+  it('shows actions without project name prefix when project is not in list', () => {
+    mockPathname = '/projects/unknown-id/chat';
+
+    const { result } = renderContextHook({ chatSessions: [], projects: [] });
+    const labels = result.current.contextActions.map((a) => a.label);
+
+    // Actions present without prefix
+    expect(labels).toContain('Go to Chat');
+    expect(labels).toContain('Go to Ideas');
+  });
 });
