@@ -1753,6 +1753,7 @@ export interface AnalyticsRetentionResponse {
     weeks: Array<{ week: number; users: number; rate: number }>;
   }>;
   weeks: number;
+  truncated?: boolean;
 }
 
 export async function fetchAnalyticsFeatureAdoption(period?: string): Promise<AnalyticsFeatureAdoptionResponse> {

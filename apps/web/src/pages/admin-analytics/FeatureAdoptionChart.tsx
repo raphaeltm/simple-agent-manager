@@ -51,15 +51,22 @@ export const FeatureAdoptionChart: FC<Props> = ({ data }) => {
               {label}
             </div>
             <div className="flex-1 flex items-center gap-2">
-              <div className="flex-1 h-7 bg-surface-secondary rounded-sm overflow-hidden">
+              {/* Bar track — count is shown outside the bar to avoid overflow on small values */}
+              <div
+                className="flex-1 h-7 bg-surface-secondary rounded-sm overflow-hidden"
+                role="img"
+                aria-label={`${label}: ${item.count.toLocaleString()} total events`}
+              >
                 <div
-                  className="h-full bg-accent-emphasis rounded-sm flex items-center px-2 text-xs text-white font-medium transition-all"
-                  style={{ width: `${widthPercent}%`, minWidth: 'fit-content' }}
-                >
-                  {item.count.toLocaleString()}
-                </div>
+                  className="h-full bg-accent-emphasis rounded-sm transition-all"
+                  style={{ width: `${widthPercent}%` }}
+                  aria-hidden="true"
+                />
               </div>
-              {sparkData.length > 1 && <Sparkline data={sparkData} />}
+              <div className="w-12 text-xs text-fg-secondary tabular-nums text-right flex-shrink-0">
+                {item.count.toLocaleString()}
+              </div>
+              {sparkData.length > 1 && <Sparkline data={sparkData} label={label} />}
             </div>
             <div className="w-16 text-xs text-fg-muted text-right tabular-nums">
               {item.unique_users.toLocaleString()} users
@@ -71,7 +78,7 @@ export const FeatureAdoptionChart: FC<Props> = ({ data }) => {
   );
 };
 
-const Sparkline: FC<{ data: Array<{ date: string; count: number }> }> = ({ data }) => {
+const Sparkline: FC<{ data: Array<{ date: string; count: number }>; label: string }> = ({ data, label }) => {
   const max = Math.max(...data.map((d) => d.count), 1);
   const width = 60;
   const height = 20;
@@ -81,14 +88,27 @@ const Sparkline: FC<{ data: Array<{ date: string; count: number }> }> = ({ data 
     return `${x},${y}`;
   }).join(' ');
 
+  // Build a human-readable trend summary for screen readers
+  const first = data[0]?.count ?? 0;
+  const last = data[data.length - 1]?.count ?? 0;
+  const trend = last > first ? 'trending up' : last < first ? 'trending down' : 'flat';
+
   return (
-    <svg width={width} height={height} className="flex-shrink-0">
+    <svg
+      width={width}
+      height={height}
+      className="flex-shrink-0"
+      role="img"
+      aria-label={`${label} trend over time: ${trend}`}
+    >
+      <title>{`${label} trend: ${trend} (from ${first} to ${last})`}</title>
       <polyline
         points={points}
         fill="none"
         stroke="currentColor"
         strokeWidth="1.5"
         className="text-accent-emphasis"
+        aria-hidden="true"
       />
     </svg>
   );

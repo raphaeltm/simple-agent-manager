@@ -36,16 +36,24 @@ export const FunnelChart: FC<{ data: Array<{ event_name: string; unique_users: n
         return (
           <div key={step.name} className="flex items-center gap-3">
             <div className="w-36 text-sm text-fg-secondary truncate">{step.label}</div>
-            <div className="flex-1 h-8 bg-surface-secondary rounded-sm overflow-hidden">
+            <div
+              className="flex-1 h-8 bg-surface-secondary rounded-sm overflow-hidden"
+              role="img"
+              aria-label={`${step.label}: ${step.users.toLocaleString()} users${conversionRate ? `, ${conversionRate} conversion from previous step` : ''}`}
+            >
               <div
-                className="h-full bg-accent-emphasis rounded-sm flex items-center px-2 text-xs text-white font-medium transition-all"
-                style={{ width: `${widthPercent}%`, minWidth: 'fit-content' }}
-              >
-                {step.users.toLocaleString()}
-              </div>
+                className="h-full bg-accent-emphasis rounded-sm transition-all"
+                style={{ width: `${widthPercent}%` }}
+                aria-hidden="true"
+              />
             </div>
-            {conversionRate && (
+            <div className="w-16 text-xs text-fg-secondary tabular-nums text-right flex-shrink-0">
+              {step.users.toLocaleString()}
+            </div>
+            {conversionRate ? (
               <div className="w-12 text-xs text-fg-muted text-right">{conversionRate}</div>
+            ) : (
+              <div className="w-12" aria-hidden="true" />
             )}
           </div>
         );

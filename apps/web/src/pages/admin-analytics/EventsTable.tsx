@@ -13,10 +13,10 @@ export const EventsTable: FC<{
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border-default text-left text-fg-muted">
-            <th className="py-2 pr-4 font-medium">Event</th>
-            <th className="py-2 pr-4 font-medium text-right">Count</th>
-            <th className="py-2 pr-4 font-medium text-right">Users</th>
-            <th className="py-2 font-medium text-right">Avg (ms)</th>
+            <th scope="col" className="py-2 pr-4 font-medium">Event</th>
+            <th scope="col" className="py-2 pr-4 font-medium text-right">Count</th>
+            <th scope="col" className="py-2 pr-4 font-medium text-right">Users</th>
+            <th scope="col" className="py-2 font-medium text-right">Avg (ms)</th>
           </tr>
         </thead>
         <tbody>

@@ -25,13 +25,19 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
         return (
           <div key={row.country} className="flex items-center gap-3">
             <div className="w-12 text-sm font-mono text-fg-secondary">{row.country}</div>
-            <div className="flex-1 h-6 bg-surface-secondary rounded-sm overflow-hidden">
+            <div
+              className="flex-1 h-6 bg-surface-secondary rounded-sm overflow-hidden"
+              role="img"
+              aria-label={`${row.country}: ${row.unique_users.toLocaleString()} users, ${sharePercent}% of total`}
+            >
               <div
-                className="h-full bg-accent-emphasis rounded-sm flex items-center px-2 text-xs text-white font-medium transition-all"
-                style={{ width: `${widthPercent}%`, minWidth: 'fit-content' }}
-              >
-                {row.unique_users.toLocaleString()}
-              </div>
+                className="h-full bg-accent-emphasis rounded-sm transition-all"
+                style={{ width: `${widthPercent}%` }}
+                aria-hidden="true"
+              />
+            </div>
+            <div className="w-12 text-xs text-fg-secondary tabular-nums text-right flex-shrink-0">
+              {row.unique_users.toLocaleString()}
             </div>
             <div className="w-20 text-xs text-fg-muted text-right tabular-nums">
               {row.event_count.toLocaleString()} events

@@ -66,7 +66,7 @@ export function AdminAnalytics() {
       {/* DAU Chart */}
       <Card>
         <div className="p-4">
-          <h3 className="text-sm font-medium text-fg-secondary mb-3">
+          <h3 className="text-base font-semibold text-fg-primary mb-3">
             Daily Active Users ({dau?.periodDays ?? 30}d)
           </h3>
           <DauChart data={dau?.dau ?? []} />
@@ -76,7 +76,7 @@ export function AdminAnalytics() {
       {/* Conversion Funnel */}
       <Card>
         <div className="p-4">
-          <h3 className="text-sm font-medium text-fg-secondary mb-3">
+          <h3 className="text-base font-semibold text-fg-primary mb-3">
             Conversion Funnel ({funnel?.periodDays ?? 30}d)
           </h3>
           <FunnelChart data={funnel?.funnel ?? []} />
@@ -86,7 +86,7 @@ export function AdminAnalytics() {
       {/* Feature Adoption */}
       <Card>
         <div className="p-4">
-          <h3 className="text-sm font-medium text-fg-secondary mb-3">
+          <h3 className="text-base font-semibold text-fg-primary mb-3">
             Feature Adoption ({featureAdoption?.period ?? '30d'})
           </h3>
           <FeatureAdoptionChart data={featureAdoption} />
@@ -96,7 +96,7 @@ export function AdminAnalytics() {
       {/* Geographic Distribution */}
       <Card>
         <div className="p-4">
-          <h3 className="text-sm font-medium text-fg-secondary mb-3">
+          <h3 className="text-base font-semibold text-fg-primary mb-3">
             Geographic Distribution ({geo?.period ?? '30d'})
           </h3>
           <GeoDistribution data={geo} />
@@ -106,7 +106,7 @@ export function AdminAnalytics() {
       {/* Retention Cohorts */}
       <Card>
         <div className="p-4">
-          <h3 className="text-sm font-medium text-fg-secondary mb-3">
+          <h3 className="text-base font-semibold text-fg-primary mb-3">
             Weekly Retention Cohorts ({retention?.weeks ?? 12}w)
           </h3>
           <RetentionCohorts data={retention} />
@@ -116,7 +116,7 @@ export function AdminAnalytics() {
       {/* Top Events */}
       <Card>
         <div className="p-4">
-          <h3 className="text-sm font-medium text-fg-secondary mb-3">Top Events</h3>
+          <h3 className="text-base font-semibold text-fg-primary mb-3">Top Events</h3>
           <EventsTable data={events?.events ?? []} />
         </div>
       </Card>

@@ -7,12 +7,13 @@ const PERIODS = [
 ];
 
 export const PeriodSelector: FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => (
-  <div className="flex gap-1">
+  <div className="flex gap-1" role="group" aria-label="Time period">
     {PERIODS.map((p) => (
       <button
         key={p.value}
         onClick={() => onChange(p.value)}
-        className={`px-3 py-1 text-xs rounded-sm border transition-colors ${
+        aria-pressed={value === p.value}
+        className={`px-3 py-2 text-xs rounded-sm border transition-colors min-h-[36px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 focus-visible:ring-offset-bg-canvas ${
           value === p.value
             ? 'bg-accent-emphasis text-white border-accent-emphasis'
             : 'border-border-default text-fg-secondary hover:bg-surface-secondary'

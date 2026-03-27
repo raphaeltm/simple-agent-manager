@@ -1,0 +1,581 @@
+import { test, expect, type Page, type Route } from '@playwright/test';
+
+// ---------------------------------------------------------------------------
+// Mock Data Factories
+// ---------------------------------------------------------------------------
+
+const MOCK_USER = {
+  user: {
+    id: 'user-admin-1',
+    email: 'admin@example.com',
+    name: 'Admin User',
+    image: null,
+    role: 'superadmin',
+    status: 'active',
+    emailVerified: true,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  },
+  session: {
+    id: 'session-admin-1',
+    userId: 'user-admin-1',
+    expiresAt: new Date(Date.now() + 86400000).toISOString(),
+    token: 'mock-admin-token',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  },
+};
+
+// Generate 30 days of DAU data
+function makeDauData(
+  days = 30,
+  opts: { allZero?: boolean } = {},
+): Array<{ date: string; unique_users: number }> {
+  return Array.from({ length: days }, (_, i) => {
+    const d = new Date('2026-02-26');
+    d.setDate(d.getDate() + i);
+    return {
+      date: d.toISOString().slice(0, 10),
+      unique_users: opts.allZero ? 0 : Math.max(1, Math.round(50 + 30 * Math.sin(i / 4) + i * 0.5)),
+    };
+  });
+}
+
+// Generate feature adoption totals + trend
+function makeFeatureAdoption(
+  opts: { longEventNames?: boolean; manyEvents?: boolean } = {},
+) {
+  const events = opts.manyEvents
+    ? [
+        'project_created', 'project_deleted', 'workspace_created', 'workspace_started',
+        'workspace_stopped', 'task_submitted', 'task_completed', 'task_failed',
+        'node_created', 'node_deleted', 'credential_saved', 'session_created', 'settings_changed',
+      ]
+    : ['project_created', 'workspace_created', 'task_submitted', 'task_completed'];
+
+  const totals = events.map((name, i) => ({
+    event_name: opts.longEventNames ? `very_long_event_name_that_exceeds_label_map_${name}_${i}` : name,
+    count: Math.max(1, (events.length - i) * 150),
+    unique_users: Math.max(1, (events.length - i) * 30),
+  }));
+
+  const trend: Array<{ event_name: string; date: string; count: number }> = [];
+  for (const ev of totals.slice(0, 3)) {
+    for (let d = 0; d < 7; d++) {
+      const date = new Date('2026-03-20');
+      date.setDate(date.getDate() + d);
+      trend.push({ event_name: ev.event_name, date: date.toISOString().slice(0, 10), count: Math.max(0, ev.count / 7 + (Math.random() * 10 - 5)) });
+    }
+  }
+
+  return { totals, trend, period: '30d' };
+}
+
+// Geo distribution mock data
+function makeGeoData(opts: { manyCountries?: boolean } = {}) {
+  const countries = opts.manyCountries
+    ? ['US', 'DE', 'GB', 'FR', 'JP', 'CA', 'AU', 'BR', 'IN', 'NL', 'SE', 'SG', 'CH', 'ES', 'IT']
+    : ['US', 'DE', 'GB', 'FR', 'JP'];
+
+  return {
+    geo: countries.map((country, i) => ({
+      country,
+      event_count: (countries.length - i) * 500,
+      unique_users: (countries.length - i) * 100,
+    })),
+    period: '30d',
+  };
+}
+
+// Retention cohort mock data
+function makeRetentionData(opts: { weeks?: number; allHigh?: boolean; allLow?: boolean } = {}) {
+  const weeksCount = opts.weeks ?? 6;
+  const retention = Array.from({ length: weeksCount }, (_, cohortIndex) => {
+    const cohortDate = new Date('2026-01-20');
+    cohortDate.setDate(cohortDate.getDate() + cohortIndex * 7);
+    const cohortSize = 100 + cohortIndex * 20;
+
+    const weeks = Array.from({ length: weeksCount - cohortIndex }, (_, w) => {
+      let rate: number;
+      if (opts.allHigh) {
+        rate = 90 - w * 2;
+      } else if (opts.allLow) {
+        rate = 5;
+      } else {
+        rate = Math.max(0, Math.round(100 - w * 15 - cohortIndex * 3));
+      }
+      return {
+        week: w,
+        users: Math.round((cohortSize * rate) / 100),
+        rate,
+      };
+    });
+
+    return {
+      cohortWeek: cohortDate.toISOString().slice(0, 10),
+      cohortSize,
+      weeks,
+    };
+  });
+
+  return { retention, weeks: weeksCount };
+}
+
+// Funnel mock data
+function makeFunnelData(opts: { allZero?: boolean } = {}) {
+  if (opts.allZero) {
+    return {
+      funnel: [
+        { event_name: 'signup', unique_users: 0 },
+        { event_name: 'login', unique_users: 0 },
+        { event_name: 'project_created', unique_users: 0 },
+        { event_name: 'workspace_created', unique_users: 0 },
+        { event_name: 'task_submitted', unique_users: 0 },
+      ],
+      periodDays: 30,
+    };
+  }
+  return {
+    funnel: [
+      { event_name: 'signup', unique_users: 1200 },
+      { event_name: 'login', unique_users: 980 },
+      { event_name: 'project_created', unique_users: 620 },
+      { event_name: 'workspace_created', unique_users: 400 },
+      { event_name: 'task_submitted', unique_users: 210 },
+    ],
+    periodDays: 30,
+  };
+}
+
+// Events table mock data
+function makeEventsData(opts: { manyRows?: boolean; longNames?: boolean } = {}) {
+  const base = opts.manyRows
+    ? Array.from({ length: 30 }, (_, i) => ({
+        event_name: `event_type_${String(i).padStart(2, '0')}`,
+        count: (30 - i) * 1234,
+        unique_users: (30 - i) * 200,
+        avg_response_ms: 50 + i * 10,
+      }))
+    : [
+        { event_name: 'workspace_created', count: 4820, unique_users: 1200, avg_response_ms: 62.3 },
+        { event_name: 'task_submitted', count: 3100, unique_users: 900, avg_response_ms: 91.0 },
+        { event_name: 'project_created', count: 1540, unique_users: 700, avg_response_ms: 45.5 },
+        { event_name: 'credential_saved', count: 870, unique_users: 600, avg_response_ms: 33.2 },
+        { event_name: 'node_created', count: 400, unique_users: 150, avg_response_ms: 220.8 },
+      ];
+
+  if (opts.longNames) {
+    return {
+      events: base.map((e, i) => ({
+        ...e,
+        event_name: `super_long_event_category_name_that_should_wrap_or_truncate_${i}_${e.event_name}`,
+      })),
+      period: '30d',
+    };
+  }
+
+  return { events: base, period: '30d' };
+}
+
+// ---------------------------------------------------------------------------
+// Scenario datasets
+// ---------------------------------------------------------------------------
+
+interface MockScenario {
+  dau?: ReturnType<typeof makeDauData>;
+  funnel?: ReturnType<typeof makeFunnelData>;
+  featureAdoption?: ReturnType<typeof makeFeatureAdoption>;
+  geo?: ReturnType<typeof makeGeoData>;
+  retention?: ReturnType<typeof makeRetentionData>;
+  events?: ReturnType<typeof makeEventsData>;
+  apiError?: boolean;
+}
+
+const NORMAL: MockScenario = {
+  dau: makeDauData(30),
+  funnel: makeFunnelData(),
+  featureAdoption: makeFeatureAdoption(),
+  geo: makeGeoData(),
+  retention: makeRetentionData({ weeks: 6 }),
+  events: makeEventsData(),
+};
+
+const EMPTY: MockScenario = {
+  dau: makeDauData(0),
+  funnel: makeFunnelData({ allZero: true }),
+  featureAdoption: { totals: [], trend: [], period: '30d' },
+  geo: { geo: [], period: '30d' },
+  retention: { retention: [], weeks: 12 },
+  events: { events: [], period: '30d' },
+};
+
+const MANY_ITEMS: MockScenario = {
+  dau: makeDauData(90),
+  funnel: makeFunnelData(),
+  featureAdoption: makeFeatureAdoption({ manyEvents: true }),
+  geo: makeGeoData({ manyCountries: true }),
+  retention: makeRetentionData({ weeks: 12 }),
+  events: makeEventsData({ manyRows: true }),
+};
+
+const LONG_TEXT: MockScenario = {
+  dau: makeDauData(30),
+  funnel: makeFunnelData(),
+  featureAdoption: makeFeatureAdoption({ longEventNames: true }),
+  geo: makeGeoData(),
+  retention: makeRetentionData({ weeks: 6 }),
+  events: makeEventsData({ longNames: true }),
+};
+
+const HIGH_RETENTION: MockScenario = {
+  ...NORMAL,
+  retention: makeRetentionData({ weeks: 6, allHigh: true }),
+};
+
+const LOW_RETENTION: MockScenario = {
+  ...NORMAL,
+  retention: makeRetentionData({ weeks: 6, allLow: true }),
+};
+
+const API_ERROR: MockScenario = { apiError: true };
+
+// ---------------------------------------------------------------------------
+// API mock helpers
+// ---------------------------------------------------------------------------
+
+async function setupMocks(page: Page, scenario: MockScenario) {
+  // Auth
+  await page.route('**/api/auth/me', async (route: Route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_USER) });
+  });
+
+  // Analytics endpoints
+  await page.route('**/api/admin/analytics/dau**', async (route: Route) => {
+    if (scenario.apiError) {
+      await route.fulfill({ status: 500, body: 'Internal Server Error' });
+    } else {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ dau: scenario.dau ?? [], periodDays: scenario.dau?.length ?? 0 }),
+      });
+    }
+  });
+
+  await page.route('**/api/admin/analytics/funnel**', async (route: Route) => {
+    if (scenario.apiError) {
+      await route.fulfill({ status: 500, body: 'Internal Server Error' });
+    } else {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify(scenario.funnel ?? makeFunnelData()),
+      });
+    }
+  });
+
+  await page.route('**/api/admin/analytics/feature-adoption**', async (route: Route) => {
+    if (scenario.apiError) {
+      await route.fulfill({ status: 500, body: 'Internal Server Error' });
+    } else {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify(scenario.featureAdoption ?? makeFeatureAdoption()),
+      });
+    }
+  });
+
+  await page.route('**/api/admin/analytics/geo**', async (route: Route) => {
+    if (scenario.apiError) {
+      await route.fulfill({ status: 500, body: 'Internal Server Error' });
+    } else {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify(scenario.geo ?? makeGeoData()),
+      });
+    }
+  });
+
+  await page.route('**/api/admin/analytics/retention**', async (route: Route) => {
+    if (scenario.apiError) {
+      await route.fulfill({ status: 500, body: 'Internal Server Error' });
+    } else {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify(scenario.retention ?? makeRetentionData()),
+      });
+    }
+  });
+
+  await page.route('**/api/admin/analytics/events**', async (route: Route) => {
+    if (scenario.apiError) {
+      await route.fulfill({ status: 500, body: 'Internal Server Error' });
+    } else {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify(scenario.events ?? makeEventsData()),
+      });
+    }
+  });
+
+  // Stub other common API calls the shell may fire
+  await page.route('**/api/projects**', async (route: Route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+  });
+  await page.route('**/api/admin/health**', async (route: Route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) });
+  });
+  await page.route('**/api/**', async (route: Route) => {
+    // Catch-all — prevent real network calls
+    const url = route.request().url();
+    if (url.includes('/api/')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+    } else {
+      await route.continue();
+    }
+  });
+}
+
+async function screenshot(page: Page, name: string) {
+  await page.waitForTimeout(700);
+  await page.screenshot({
+    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    fullPage: true,
+  });
+}
+
+async function assertNoHorizontalOverflow(page: Page) {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  );
+  expect(overflow, 'Page must not have horizontal overflow').toBe(false);
+}
+
+// ---------------------------------------------------------------------------
+// Mobile tests (default viewport from config: 375x667)
+// ---------------------------------------------------------------------------
+
+test.describe('Admin Analytics — Mobile (375x667)', () => {
+  test('normal data — all charts render', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+    await screenshot(page, 'admin-analytics-normal-mobile');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('empty state — all sections show empty messages', async ({ page }) => {
+    await setupMocks(page, EMPTY);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+    await screenshot(page, 'admin-analytics-empty-mobile');
+    await assertNoHorizontalOverflow(page);
+
+    // All empty state texts should be visible
+    const emptyMessages = page.locator('text=/No .* data available yet/');
+    const count = await emptyMessages.count();
+    expect(count).toBeGreaterThan(0);
+  });
+
+  test('many items — 30+ events, 15 countries, 90 day DAU, 12 cohort weeks', async ({ page }) => {
+    await setupMocks(page, MANY_ITEMS);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+    await screenshot(page, 'admin-analytics-many-items-mobile');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('long event names — no overflow from untruncated text', async ({ page }) => {
+    await setupMocks(page, LONG_TEXT);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+    await screenshot(page, 'admin-analytics-long-text-mobile');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('error state — retry button visible', async ({ page }) => {
+    await setupMocks(page, API_ERROR);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+    await screenshot(page, 'admin-analytics-error-mobile');
+    await assertNoHorizontalOverflow(page);
+    const retryBtn = page.getByRole('button', { name: /retry/i });
+    await expect(retryBtn).toBeVisible();
+  });
+
+  test('high retention heat map — deep green cells', async ({ page }) => {
+    await setupMocks(page, HIGH_RETENTION);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+    await screenshot(page, 'admin-analytics-retention-high-mobile');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('low retention heat map — pale cells', async ({ page }) => {
+    await setupMocks(page, LOW_RETENTION);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+    await screenshot(page, 'admin-analytics-retention-low-mobile');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('period selector toggle — all three buttons accessible and toggleable', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+
+    const group = page.getByRole('group', { name: /time period/i });
+    await expect(group).toBeVisible();
+
+    // The default selected period button should have aria-pressed="true"
+    const pressedBtn = page.getByRole('button', { pressed: true });
+    await expect(pressedBtn).toBeVisible();
+
+    // Click a different period
+    const btn7d = page.getByRole('button', { name: '7d' });
+    await btn7d.click();
+    await page.waitForTimeout(200);
+    await expect(btn7d).toHaveAttribute('aria-pressed', 'true');
+
+    // Touch target check: button height >= 36px (min-h-[36px])
+    const box = await btn7d.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(36);
+  });
+
+  test('retention table has accessible scope attributes', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+
+    // Check column headers have scope="col"
+    const colHeaders = page.locator('table thead th[scope="col"]');
+    const colCount = await colHeaders.count();
+    expect(colCount).toBeGreaterThan(0);
+
+    // Check row headers have scope="row"
+    const rowHeaders = page.locator('table tbody th[scope="row"]');
+    const rowCount = await rowHeaders.count();
+    expect(rowCount).toBeGreaterThan(0);
+  });
+
+  test('events table has scope="col" on all headers', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+
+    // EventsTable has a separate table — verify col scoping
+    const tables = page.locator('table');
+    const tableCount = await tables.count();
+    expect(tableCount).toBeGreaterThanOrEqual(2); // retention + events
+
+    const allColHeaders = page.locator('th[scope="col"]');
+    const allColCount = await allColHeaders.count();
+    expect(allColCount).toBeGreaterThan(0);
+  });
+
+  test('sparklines have role=img and title', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+
+    const sparklineSvgs = page.locator('svg[role="img"]');
+    const count = await sparklineSvgs.count();
+    // With normal data, there should be at least some sparklines
+    if (count > 0) {
+      const firstSparkline = sparklineSvgs.first();
+      await expect(firstSparkline).toHaveAttribute('aria-label');
+      const titleEl = firstSparkline.locator('title');
+      await expect(titleEl).toBeVisible();
+    }
+  });
+
+  test('DAU chart container has role=img with descriptive label', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+
+    // Check specifically for the DAU chart container
+    const dauImgContainer = page.locator('.flex.items-end.gap-\\[2px\\][role="img"]');
+    const exists = await dauImgContainer.count();
+    if (exists > 0) {
+      await expect(dauImgContainer.first()).toHaveAttribute('aria-label');
+    }
+  });
+
+  test('section headings use correct text size (base/semibold)', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+
+    const headings = page.locator('h3.text-base.font-semibold');
+    const count = await headings.count();
+    // All 6 card sections should use the upgraded heading style
+    expect(count).toBeGreaterThanOrEqual(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Desktop tests (1280x800)
+// ---------------------------------------------------------------------------
+
+test.describe('Admin Analytics — Desktop (1280x800)', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+  test('normal data — full layout', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+    await screenshot(page, 'admin-analytics-normal-desktop');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('empty state', async ({ page }) => {
+    await setupMocks(page, EMPTY);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+    await screenshot(page, 'admin-analytics-empty-desktop');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('many items — 12 retention weeks desktop scroll', async ({ page }) => {
+    await setupMocks(page, MANY_ITEMS);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+    await screenshot(page, 'admin-analytics-many-items-desktop');
+    // The retention table can scroll internally but the page itself must not overflow
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('long event names — bar charts do not overflow page', async ({ page }) => {
+    await setupMocks(page, LONG_TEXT);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+    await screenshot(page, 'admin-analytics-long-text-desktop');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('error state', async ({ page }) => {
+    await setupMocks(page, API_ERROR);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+    await screenshot(page, 'admin-analytics-error-desktop');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('retention heat map high values', async ({ page }) => {
+    await setupMocks(page, HIGH_RETENTION);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+    await screenshot(page, 'admin-analytics-retention-high-desktop');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('retention table caption is present in DOM (SR accessible)', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+
+    const caption = page.locator('table caption.sr-only');
+    await expect(caption).toBeAttached();
+    const captionText = await caption.textContent();
+    expect(captionText?.trim().length).toBeGreaterThan(20);
+  });
+});

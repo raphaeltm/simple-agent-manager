@@ -9,6 +9,8 @@ const DEFAULT_DATASET = 'sam_analytics';
 const DEFAULT_TOP_EVENTS_LIMIT = 50;
 const DEFAULT_GEO_LIMIT = 50;
 const DEFAULT_RETENTION_WEEKS = 12;
+/** Analytics Engine hard cap on result rows; queries without explicit LIMIT silently truncate here. */
+const MAX_RETENTION_QUERY_ROWS = 10_000;
 
 /** Parse an integer env var with validation; returns fallback on NaN or non-positive values. */
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -248,32 +250,37 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
   const weeks = parsePositiveInt(c.req.query('weeks') || c.env.ANALYTICS_RETENTION_WEEKS, DEFAULT_RETENTION_WEEKS);
 
-  // Get per-user first-seen week and active weeks
-  // Analytics Engine supports toStartOfWeek and we use a two-query approach:
+  // Two-query approach:
   // 1. Get cohort week (first activity) per user
   // 2. Get all active weeks per user
-  // Then compute retention on the client side (API layer) for flexibility.
+  // Then compute retention on the API layer for flexibility.
+  //
+  // NOTE: Analytics Engine SQL does not support toStartOfWeek — use
+  // toStartOfInterval(timestamp, INTERVAL 7 DAY) which buckets into
+  // epoch-aligned 7-day intervals.
 
   const cohortSql = `
     SELECT
       index1 AS user_id,
-      min(toStartOfWeek(timestamp)) AS cohort_week
+      min(toStartOfInterval(timestamp, INTERVAL 7 DAY)) AS cohort_week
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${weeks * 7}' DAY
       AND index1 != 'anonymous'
       AND blob1 != ''
     GROUP BY user_id
+    LIMIT ${MAX_RETENTION_QUERY_ROWS}
   `;
 
   const activitySql = `
     SELECT
       index1 AS user_id,
-      toStartOfWeek(timestamp) AS active_week
+      toStartOfInterval(timestamp, INTERVAL 7 DAY) AS active_week
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${weeks * 7}' DAY
       AND index1 != 'anonymous'
       AND blob1 != ''
     GROUP BY user_id, active_week
+    LIMIT ${MAX_RETENTION_QUERY_ROWS}
   `;
 
   const [cohortData, activityData] = await Promise.all([
@@ -327,7 +334,11 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
       return { cohortWeek, cohortSize, weeks: weekOffsets };
     });
 
-  return c.json({ retention, weeks });
+  const truncated =
+    cohortData.length >= MAX_RETENTION_QUERY_ROWS ||
+    activityData.length >= MAX_RETENTION_QUERY_ROWS;
+
+  return c.json({ retention, weeks, truncated });
 });
 
 export { adminAnalyticsRoutes };
