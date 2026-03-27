@@ -63,7 +63,7 @@ export interface Env {
   R2: R2Bucket;
   // Workers AI for speech-to-text transcription
   AI: Ai;
-  // Analytics Engine for usage tracking (optional — absent in local dev)
+  // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)
   OBSERVABILITY_DATABASE: D1Database;
