@@ -363,6 +363,10 @@ export interface Env {
   GA4_API_SECRET?: string;                        // GA4 API secret
   GA4_API_URL?: string;                           // GA4 Measurement Protocol endpoint (default: https://www.google-analytics.com/mp/collect)
   GA4_MAX_BATCH_SIZE?: string;                    // Max events per GA4 request (default: 25)
+  ANALYTICS_FORWARD_SQL_LIMIT?: string;           // Max rows per forwarding query (default: 10000)
+  ANALYTICS_SQL_FETCH_TIMEOUT_MS?: string;        // Timeout for Analytics Engine SQL API fetch (default: 30000)
+  SEGMENT_FETCH_TIMEOUT_MS?: string;              // Timeout for Segment API fetch (default: 30000)
+  GA4_FETCH_TIMEOUT_MS?: string;                  // Timeout for GA4 API fetch (default: 30000)
 }
 
 const app = new Hono<{ Bindings: Env }>();

@@ -23,6 +23,8 @@ const DEFAULT_GA4_API_URL = 'https://www.google-analytics.com/mp/collect';
 const DEFAULT_GA4_MAX_BATCH = 25;
 const DEFAULT_ANALYTICS_SQL_API_URL = 'https://api.cloudflare.com/client/v4/accounts';
 const DEFAULT_DATASET = 'sam_analytics';
+const DEFAULT_FORWARD_SQL_LIMIT = 10_000;
+const DEFAULT_FORWARD_FETCH_TIMEOUT_MS = 30_000;
 
 // ─── Types ───
 
@@ -74,6 +76,8 @@ export async function queryConversionEvents(
 
   // Build IN clause for event names
   const eventList = eventNames.map(e => `'${e.replace(/'/g, "''")}'`).join(', ');
+  const sqlLimit = parsePositiveInt(env.ANALYTICS_FORWARD_SQL_LIMIT, DEFAULT_FORWARD_SQL_LIMIT);
+  const fetchTimeoutMs = parsePositiveInt(env.ANALYTICS_SQL_FETCH_TIMEOUT_MS, DEFAULT_FORWARD_FETCH_TIMEOUT_MS);
 
   const sql = `
     SELECT
@@ -93,12 +97,13 @@ export async function queryConversionEvents(
       AND timestamp >= '${sinceIso}'
       AND index1 != 'anonymous'
     ORDER BY timestamp ASC
-    LIMIT 10000
+    LIMIT ${sqlLimit}
   `;
 
   const url = `${baseUrl}/${accountId}/analytics_engine/sql`;
   const response = await fetch(url, {
     method: 'POST',
+    signal: AbortSignal.timeout(fetchTimeoutMs),
     headers: {
       'Authorization': `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': 'text/plain',
@@ -147,6 +152,7 @@ function formatSegmentBatch(events: AnalyticsEvent[]): SegmentTrackCall[] {
       statusCode: e.statusCode,
     },
     context: {
+      // Constitution XI: library identifier tied to deployment artifact — invariant
       library: { name: 'sam-analytics-forward', version: '1.0.0' },
     },
   }));
@@ -163,6 +169,7 @@ export async function forwardToSegment(
 
   const apiUrl = env.SEGMENT_API_URL ?? DEFAULT_SEGMENT_API_URL;
   const maxBatch = parsePositiveInt(env.SEGMENT_MAX_BATCH_SIZE, DEFAULT_SEGMENT_MAX_BATCH);
+  const fetchTimeoutMs = parsePositiveInt(env.SEGMENT_FETCH_TIMEOUT_MS, DEFAULT_FORWARD_FETCH_TIMEOUT_MS);
   const authHeader = `Basic ${btoa(writeKey + ':')}`;
 
   let totalSent = 0;
@@ -174,6 +181,7 @@ export async function forwardToSegment(
 
     const response = await fetch(apiUrl, {
       method: 'POST',
+      signal: AbortSignal.timeout(fetchTimeoutMs),
       headers: {
         'Authorization': authHeader,
         'Content-Type': 'application/json',
@@ -252,6 +260,7 @@ export async function forwardToGA4(
 
   const baseUrl = env.GA4_API_URL ?? DEFAULT_GA4_API_URL;
   const maxBatch = parsePositiveInt(env.GA4_MAX_BATCH_SIZE, DEFAULT_GA4_MAX_BATCH);
+  const fetchTimeoutMs = parsePositiveInt(env.GA4_FETCH_TIMEOUT_MS, DEFAULT_FORWARD_FETCH_TIMEOUT_MS);
   const url = `${baseUrl}?measurement_id=${encodeURIComponent(measurementId)}&api_secret=${encodeURIComponent(apiSecret)}`;
 
   let totalSent = 0;
@@ -272,6 +281,7 @@ export async function forwardToGA4(
 
       const response = await fetch(url, {
         method: 'POST',
+        signal: AbortSignal.timeout(fetchTimeoutMs),
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
