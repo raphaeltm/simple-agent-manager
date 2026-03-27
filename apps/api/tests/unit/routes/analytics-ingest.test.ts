@@ -223,6 +223,43 @@ describe('analytics-ingest routes', () => {
     expect(writtenBlobs[0]).toContain('...');
   });
 
+  it('uses anon-IP fallback when both userId and visitorId are absent', async () => {
+    const { makeRequest } = createApp();
+    await makeRequest({
+      body: JSON.stringify({
+        events: [{ event: 'anon_event', page: '/landing' }],
+      }),
+    });
+
+    await mockWaitUntil.mock.calls[0][0];
+    const index = mockWriteDataPoint.mock.calls[0][0].indexes[0];
+    expect(index).toMatch(/^anon-/);
+  });
+
+  it('rejects when events field is not an array', async () => {
+    const { makeRequest } = createApp();
+    const res = await makeRequest({
+      body: JSON.stringify({ events: 'not-an-array' }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.message).toContain('array');
+  });
+
+  it('rejects negative durationMs values', async () => {
+    const { makeRequest } = createApp();
+    await makeRequest({
+      body: JSON.stringify({
+        events: [{ event: 'test', durationMs: -500 }],
+      }),
+    });
+
+    await mockWaitUntil.mock.calls[0][0];
+    const writtenDoubles = mockWriteDataPoint.mock.calls[0][0].doubles;
+    expect(writtenDoubles[0]).toBe(0); // clamped to 0
+  });
+
   it('handles Analytics Engine write failure gracefully', async () => {
     const failingWrite = vi.fn(() => { throw new Error('AE unavailable'); });
     const { makeRequest } = createApp({ ANALYTICS: { writeDataPoint: failingWrite } });
