@@ -58,6 +58,13 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** Validate that a string is a valid ISO 8601 timestamp to prevent SQL injection via corrupted cursor. */
+function assertIsoTimestamp(value: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(value)) {
+    throw new Error(`Invalid ISO timestamp for cursor: ${value}`);
+  }
+}
+
 /**
  * Query Analytics Engine SQL API for conversion events since a given timestamp.
  */
@@ -74,8 +81,12 @@ export async function queryConversionEvents(
     throw new Error('CF_ACCOUNT_ID is not configured');
   }
 
+  // Validate sinceIso to prevent SQL injection via corrupted KV cursor
+  assertIsoTimestamp(sinceIso);
+
   // Build IN clause for event names
   const eventList = eventNames.map(e => `'${e.replace(/'/g, "''")}'`).join(', ');
+  // SQL LIMIT is the memory-safety guard for downstream in-memory grouping (GA4 Map)
   const sqlLimit = parsePositiveInt(env.ANALYTICS_FORWARD_SQL_LIMIT, DEFAULT_FORWARD_SQL_LIMIT);
   const fetchTimeoutMs = parsePositiveInt(env.ANALYTICS_SQL_FETCH_TIMEOUT_MS, DEFAULT_FORWARD_FETCH_TIMEOUT_MS);
 
@@ -120,8 +131,21 @@ export async function queryConversionEvents(
     throw new Error(`Analytics Engine query failed: ${response.status}`);
   }
 
-  const body = await response.json() as { data?: AnalyticsEvent[] };
-  return body.data ?? [];
+  const body = await response.json() as { data?: unknown[] };
+  const rows = body.data ?? [];
+
+  // Validate shape: first row must have the expected fields
+  if (rows.length > 0) {
+    const first = rows[0] as Record<string, unknown>;
+    if (typeof first.timestamp !== 'string' || typeof first.userId !== 'string') {
+      console.error('Analytics forward: unexpected SQL API response shape', {
+        firstRowKeys: Object.keys(first),
+      });
+      return [];
+    }
+  }
+
+  return rows as AnalyticsEvent[];
 }
 
 // ─── Segment Forwarding ───
@@ -360,25 +384,33 @@ export async function runAnalyticsForward(env: Env): Promise<ForwardResult> {
   }
 
   // Forward to enabled destinations
+  const segmentEnabled = !!env.SEGMENT_WRITE_KEY;
+  const ga4Enabled = !!(env.GA4_MEASUREMENT_ID && env.GA4_API_SECRET);
   const segmentResult = await forwardToSegment(env, events);
   const ga4Result = await forwardToGA4(env, events);
 
-  // Update cursor to the latest event timestamp (only if at least one destination succeeded)
-  const anySuccess = segmentResult.sent > 0 || ga4Result.sent > 0;
+  // Only advance cursor when ALL enabled destinations succeed without error.
+  // This prevents silent data loss: if Segment succeeds but GA4 fails, we
+  // re-query the same window next run so GA4 can retry. The trade-off is that
+  // Segment may receive duplicate events on retry (idempotent for analytics).
+  const segmentOk = !segmentEnabled || !segmentResult.error;
+  const ga4Ok = !ga4Enabled || !ga4Result.error;
+  const allEnabledSucceeded = (segmentOk && ga4Ok) && (segmentResult.sent > 0 || ga4Result.sent > 0);
   let newCursor = sinceIso;
-  if (anySuccess) {
+  if (allEnabledSucceeded) {
     // Use the timestamp of the last event as the new cursor
     const lastEvent = events[events.length - 1];
     newCursor = lastEvent?.timestamp ?? sinceIso;
+    // Cursor is intentionally long-lived (no TTL) — persists until next successful forward
     await env.KV.put(cursorKey, newCursor);
   }
 
   return {
     enabled: true,
     eventsQueried: events.length,
-    segment: { ...segmentResult, enabled: !!env.SEGMENT_WRITE_KEY },
-    ga4: { ...ga4Result, enabled: !!(env.GA4_MEASUREMENT_ID && env.GA4_API_SECRET) },
-    cursorUpdated: anySuccess,
+    segment: { ...segmentResult, enabled: segmentEnabled },
+    ga4: { ...ga4Result, enabled: ga4Enabled },
+    cursorUpdated: allEnabledSucceeded,
     newCursor,
   };
 }

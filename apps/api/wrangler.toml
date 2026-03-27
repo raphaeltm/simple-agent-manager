@@ -117,6 +117,9 @@ binding = "AI"
 # Cron triggers:
 # - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery
 # - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
+# NOTE: The daily cron string "0 3 * * *" is matched exactly in index.ts:scheduled()
+# to distinguish the daily forward job from the 5-minute sweep. If you change it here,
+# update the comparison in the scheduled handler too.
 [triggers]
 crons = ["*/5 * * * *", "0 3 * * *"]
 
@@ -138,3 +141,5 @@ crons = ["*/5 * * * *", "0 3 * * *"]
 # - ORIGIN_CA_KEY (Origin CA private key for VM agent TLS)
 # - GOOGLE_CLIENT_ID (optional — Google Cloud Console OAuth client ID, enables GCP OIDC integration)
 # - GOOGLE_CLIENT_SECRET (optional — Google Cloud Console OAuth client secret)
+# - SEGMENT_WRITE_KEY (optional — Segment.io write key, enables Segment event forwarding)
+# - GA4_API_SECRET (optional — Google Analytics 4 API secret, enables GA4 forwarding; NOTE: GA4 Measurement Protocol requires api_secret as a query parameter — ensure outbound request URLs are not logged)

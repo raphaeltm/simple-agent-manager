@@ -104,6 +104,24 @@ describe('queryConversionEvents', () => {
     expect(events).toEqual([]);
   });
 
+  it('rejects invalid ISO timestamps to prevent SQL injection', async () => {
+    const env = makeEnv();
+    await expect(queryConversionEvents(env, "'; DROP TABLE --", ['signup']))
+      .rejects.toThrow('Invalid ISO timestamp for cursor');
+  });
+
+  it('accepts valid ISO timestamps', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: [] }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const env = makeEnv();
+    const events = await queryConversionEvents(env, '2026-03-27T10:00:00Z', ['signup']);
+    expect(events).toEqual([]);
+  });
+
   it('escapes single quotes in event names', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -409,6 +427,37 @@ describe('runAnalyticsForward', () => {
     expect(sql).toContain("'custom_event'");
     expect(sql).toContain("'another_event'");
     expect(sql).not.toContain("'signup'");
+  });
+
+  it('does not advance cursor when one enabled destination fails (partial failure)', async () => {
+    const events = [makeEvent()];
+
+    // First call: Analytics Engine query; second call: Segment succeeds; third: GA4 fails
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: events }),
+      })
+      .mockResolvedValueOnce({ ok: true }) // Segment succeeds
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve('GA4 error'),
+      }); // GA4 fails
+    vi.stubGlobal('fetch', mockFetch);
+
+    const env = makeEnv({
+      ANALYTICS_FORWARD_ENABLED: 'true',
+      SEGMENT_WRITE_KEY: 'test-key',
+      GA4_MEASUREMENT_ID: 'G-123',
+      GA4_API_SECRET: 'secret',
+    });
+    const result = await runAnalyticsForward(env);
+
+    expect(result.segment.sent).toBe(1);
+    expect(result.ga4.error).toBeDefined();
+    expect(result.cursorUpdated).toBe(false);
+    expect(env.KV.put).not.toHaveBeenCalled();
   });
 
   it('uses custom cursor key from ANALYTICS_FORWARD_CURSOR_KEY', async () => {

@@ -741,7 +741,7 @@ export default {
   async scheduled(
     controller: ScheduledController,
     env: Env,
-    _ctx: ExecutionContext
+    ctx: ExecutionContext
   ): Promise<void> {
     const isDailyForward = controller.cron === '0 3 * * *';
 
@@ -753,21 +753,24 @@ export default {
       type: isDailyForward ? 'daily-forward' : 'sweep',
     }));
 
-    // Daily analytics forwarding (Phase 4)
+    // Daily analytics forwarding (Phase 4) — use ctx.waitUntil to keep the
+    // isolate alive for the full duration of multi-step external API calls.
     if (isDailyForward) {
-      const forward = await runAnalyticsForwardJob(env);
-      console.log(JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: 'info',
-        event: 'cron.completed',
-        cron: controller.cron,
-        type: 'daily-forward',
-        forwardEnabled: forward.enabled,
-        forwardEventsQueried: forward.eventsQueried,
-        forwardSegmentSent: forward.segment.sent,
-        forwardGA4Sent: forward.ga4.sent,
-        forwardCursorUpdated: forward.cursorUpdated,
-      }));
+      ctx.waitUntil((async () => {
+        const forward = await runAnalyticsForwardJob(env);
+        console.log(JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: 'info',
+          event: 'cron.completed',
+          cron: controller.cron,
+          type: 'daily-forward',
+          forwardEnabled: forward.enabled,
+          forwardEventsQueried: forward.eventsQueried,
+          forwardSegmentSent: forward.segment.sent,
+          forwardGA4Sent: forward.ga4.sent,
+          forwardCursorUpdated: forward.cursorUpdated,
+        }));
+      })());
       return;
     }
 
