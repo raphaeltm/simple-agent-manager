@@ -218,6 +218,26 @@ describe('forwardToSegment', () => {
     expect(result.sent).toBe(0);
     expect(result.error).toContain('429');
   });
+
+  it('returns partial sent count and error when a mid-run batch fails', async () => {
+    let batchCount = 0;
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      batchCount++;
+      if (batchCount === 2) {
+        return { ok: false, status: 429, text: () => Promise.resolve('Rate limited') };
+      }
+      return { ok: true };
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const env = makeEnv({ SEGMENT_WRITE_KEY: 'test-key', SEGMENT_MAX_BATCH_SIZE: '1' });
+    const result = await forwardToSegment(env, [makeEvent(), makeEvent(), makeEvent()]);
+
+    expect(result.sent).toBe(1);
+    expect(result.batches).toBe(1);
+    expect(result.error).toContain('429');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -281,6 +301,28 @@ describe('forwardToGA4', () => {
     expect(result.sent).toBe(3);
     // 2 requests: one for user-1 (2 events), one for user-2 (1 event)
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('chunks per-user events when they exceed GA4_MAX_BATCH_SIZE', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const env = makeEnv({ GA4_MEASUREMENT_ID: 'G-123', GA4_API_SECRET: 'secret', GA4_MAX_BATCH_SIZE: '2' });
+    const events = [
+      makeEvent({ userId: 'user-1', event: 'a' }),
+      makeEvent({ userId: 'user-1', event: 'b' }),
+      makeEvent({ userId: 'user-1', event: 'c' }),
+    ];
+    const result = await forwardToGA4(env, events);
+
+    expect(result.sent).toBe(3);
+    expect(result.batches).toBe(2);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const firstPayload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(firstPayload.events).toHaveLength(2);
+    const secondPayload = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(secondPayload.events).toHaveLength(1);
   });
 
   it('uses custom GA4_API_URL when provided', async () => {
@@ -458,6 +500,25 @@ describe('runAnalyticsForward', () => {
     expect(result.ga4.error).toBeDefined();
     expect(result.cursorUpdated).toBe(false);
     expect(env.KV.put).not.toHaveBeenCalled();
+  });
+
+  it('falls back to lookback window when KV.get throws', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: [] }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const env = makeEnv({
+      ANALYTICS_FORWARD_ENABLED: 'true',
+      KV: {
+        get: vi.fn().mockRejectedValue(new Error('KV unavailable')),
+        put: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    // KV.get failure should propagate — the orchestrator does not swallow it
+    await expect(runAnalyticsForward(env)).rejects.toThrow('KV unavailable');
   });
 
   it('uses custom cursor key from ANALYTICS_FORWARD_CURSOR_KEY', async () => {

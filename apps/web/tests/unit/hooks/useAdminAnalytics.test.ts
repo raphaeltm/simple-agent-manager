@@ -89,6 +89,7 @@ describe('useAdminAnalytics', () => {
     expect(result.current.featureAdoption).toEqual(ADOPTION_FIXTURE);
     expect(result.current.geo).toEqual(GEO_FIXTURE);
     expect(result.current.retention).toEqual(RETENTION_FIXTURE);
+    expect(result.current.forwardStatus).toEqual(FORWARD_STATUS_FIXTURE);
     expect(result.current.error).toBeNull();
   });
 
