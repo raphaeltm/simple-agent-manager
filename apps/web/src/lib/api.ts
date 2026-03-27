@@ -1771,6 +1771,34 @@ export async function fetchAnalyticsRetention(weeks?: number): Promise<Analytics
   return request<AnalyticsRetentionResponse>(`/api/admin/analytics/retention${params}`);
 }
 
+// Website traffic analytics
+
+export interface WebsiteTrafficSection {
+  name: string;
+  views: number;
+  unique_visitors: number;
+  topPages: Array<{ page: string; views: number; unique_visitors: number }>;
+}
+
+export interface WebsiteTrafficHost {
+  host: string;
+  totalViews: number;
+  uniqueVisitors: number;
+  uniqueSessions: number;
+  sections: WebsiteTrafficSection[];
+}
+
+export interface AnalyticsWebsiteTrafficResponse {
+  hosts: WebsiteTrafficHost[];
+  trend: Array<{ host: string; date: string; views: number }>;
+  period: string;
+}
+
+export async function fetchAnalyticsWebsiteTraffic(period?: string): Promise<AnalyticsWebsiteTrafficResponse> {
+  const params = period ? `?period=${period}` : '';
+  return request<AnalyticsWebsiteTrafficResponse>(`/api/admin/analytics/website-traffic${params}`);
+}
+
 // Analytics forwarding status (Phase 4)
 export interface AnalyticsForwardStatusResponse {
   enabled: boolean;

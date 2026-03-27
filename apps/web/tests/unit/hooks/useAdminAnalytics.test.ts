@@ -3,7 +3,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { useAdminAnalytics } from '../../../src/hooks/useAdminAnalytics';
 
 // ---------------------------------------------------------------------------
-// Mock all seven analytics API functions (Phase 3 + Phase 4 forward status)
+// Mock all eight analytics API functions (Phase 3 + Phase 4 forward status + website traffic)
 // ---------------------------------------------------------------------------
 const mockFetchDau = vi.fn();
 const mockFetchEvents = vi.fn();
@@ -12,6 +12,7 @@ const mockFetchFeatureAdoption = vi.fn();
 const mockFetchGeo = vi.fn();
 const mockFetchRetention = vi.fn();
 const mockFetchForwardStatus = vi.fn();
+const mockFetchWebsiteTraffic = vi.fn();
 
 vi.mock('../../../src/lib/api', () => ({
   fetchAnalyticsDau: (...args: unknown[]) => mockFetchDau(...args),
@@ -21,6 +22,7 @@ vi.mock('../../../src/lib/api', () => ({
   fetchAnalyticsGeo: (...args: unknown[]) => mockFetchGeo(...args),
   fetchAnalyticsRetention: (...args: unknown[]) => mockFetchRetention(...args),
   fetchAnalyticsForwardStatus: (...args: unknown[]) => mockFetchForwardStatus(...args),
+  fetchAnalyticsWebsiteTraffic: (...args: unknown[]) => mockFetchWebsiteTraffic(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -33,6 +35,7 @@ const ADOPTION_FIXTURE = { totals: [{ event_name: 'task_submitted', count: 42, u
 const GEO_FIXTURE = { geo: [{ country: 'US', event_count: 100, unique_users: 20 }], period: '30d' };
 const RETENTION_FIXTURE = { retention: [{ cohortWeek: '2026-03-10', cohortSize: 5, weeks: [{ week: 0, users: 5, rate: 100 }] }], weeks: 12 };
 const FORWARD_STATUS_FIXTURE = { enabled: false, lastForwardedAt: null, destinations: { segment: { configured: false }, ga4: { configured: false } }, events: ['signup', 'login'] };
+const WEBSITE_TRAFFIC_FIXTURE = { hosts: [{ host: 'www.example.com', totalViews: 100, uniqueVisitors: 50, uniqueSessions: 60, sections: [] }], trend: [], period: '7d' };
 
 function setupSuccessMocks() {
   mockFetchDau.mockResolvedValue(DAU_FIXTURE);
@@ -42,6 +45,7 @@ function setupSuccessMocks() {
   mockFetchGeo.mockResolvedValue(GEO_FIXTURE);
   mockFetchRetention.mockResolvedValue(RETENTION_FIXTURE);
   mockFetchForwardStatus.mockResolvedValue(FORWARD_STATUS_FIXTURE);
+  mockFetchWebsiteTraffic.mockResolvedValue(WEBSITE_TRAFFIC_FIXTURE);
 }
 
 describe('useAdminAnalytics', () => {
@@ -64,6 +68,7 @@ describe('useAdminAnalytics', () => {
     expect(result.current.featureAdoption).toBeNull();
     expect(result.current.geo).toBeNull();
     expect(result.current.retention).toBeNull();
+    expect(result.current.websiteTraffic).toBeNull();
     expect(result.current.error).toBeNull();
   });
 
@@ -77,7 +82,7 @@ describe('useAdminAnalytics', () => {
   // Successful fetch
   // -------------------------------------------------------------------------
 
-  it('fetches all seven data sources on mount and populates state', async () => {
+  it('fetches all eight data sources on mount and populates state', async () => {
     setupSuccessMocks();
     const { result } = renderHook(() => useAdminAnalytics(0));
 
@@ -90,7 +95,17 @@ describe('useAdminAnalytics', () => {
     expect(result.current.geo).toEqual(GEO_FIXTURE);
     expect(result.current.retention).toEqual(RETENTION_FIXTURE);
     expect(result.current.forwardStatus).toEqual(FORWARD_STATUS_FIXTURE);
+    expect(result.current.websiteTraffic).toEqual(WEBSITE_TRAFFIC_FIXTURE);
     expect(result.current.error).toBeNull();
+  });
+
+  it('passes the current eventPeriod to fetchAnalyticsWebsiteTraffic', async () => {
+    setupSuccessMocks();
+    const { result } = renderHook(() => useAdminAnalytics(0));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(mockFetchWebsiteTraffic).toHaveBeenCalledWith('7d');
   });
 
   it('passes the current eventPeriod to fetchAnalyticsEvents', async () => {
@@ -150,6 +165,7 @@ describe('useAdminAnalytics', () => {
     mockFetchGeo.mockResolvedValue(GEO_FIXTURE);
     mockFetchRetention.mockResolvedValue(RETENTION_FIXTURE);
     mockFetchForwardStatus.mockResolvedValue(FORWARD_STATUS_FIXTURE);
+    mockFetchWebsiteTraffic.mockResolvedValue(WEBSITE_TRAFFIC_FIXTURE);
 
     const { result } = renderHook(() => useAdminAnalytics(0));
 
@@ -166,6 +182,7 @@ describe('useAdminAnalytics', () => {
     mockFetchGeo.mockResolvedValue(GEO_FIXTURE);
     mockFetchRetention.mockResolvedValue(RETENTION_FIXTURE);
     mockFetchForwardStatus.mockResolvedValue(FORWARD_STATUS_FIXTURE);
+    mockFetchWebsiteTraffic.mockResolvedValue(WEBSITE_TRAFFIC_FIXTURE);
 
     const { result } = renderHook(() => useAdminAnalytics(0));
 
@@ -182,6 +199,7 @@ describe('useAdminAnalytics', () => {
     mockFetchGeo.mockResolvedValue(GEO_FIXTURE);
     mockFetchRetention.mockResolvedValue(RETENTION_FIXTURE);
     mockFetchForwardStatus.mockResolvedValue(FORWARD_STATUS_FIXTURE);
+    mockFetchWebsiteTraffic.mockResolvedValue(WEBSITE_TRAFFIC_FIXTURE);
 
     const { result } = renderHook(() => useAdminAnalytics(0));
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -269,7 +287,7 @@ describe('useAdminAnalytics', () => {
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
   });
 
-  it('refresh calls all seven fetchers again', async () => {
+  it('refresh calls all eight fetchers again', async () => {
     setupSuccessMocks();
     const { result } = renderHook(() => useAdminAnalytics(0));
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -285,6 +303,7 @@ describe('useAdminAnalytics', () => {
     expect(mockFetchGeo).toHaveBeenCalledTimes(2);
     expect(mockFetchRetention).toHaveBeenCalledTimes(2);
     expect(mockFetchForwardStatus).toHaveBeenCalledTimes(2);
+    expect(mockFetchWebsiteTraffic).toHaveBeenCalledTimes(2);
   });
 
   // -------------------------------------------------------------------------

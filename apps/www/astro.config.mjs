@@ -78,6 +78,14 @@ export default defineConfig({
             crossorigin: '',
           },
         },
+        {
+          tag: 'script',
+          attrs: {
+            src: '/scripts/tracker.js',
+            'data-api': `https://api.${process.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org'}/api/t`,
+            defer: true,
+          },
+        },
       ],
       disable404Route: true,
     }),
