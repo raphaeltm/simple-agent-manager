@@ -346,6 +346,7 @@ export interface Env {
   ANALYTICS_TOP_EVENTS_LIMIT?: string;          // Max events in top events query (default: 50)
   ANALYTICS_GEO_LIMIT?: string;                 // Max countries in geo distribution (default: 50)
   ANALYTICS_RETENTION_WEEKS?: string;           // Retention cohort lookback weeks (default: 12)
+  ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT?: string; // Max top pages per section in website traffic (default: 20)
   // Analytics ingest endpoint (Phase 2 — client-side events)
   ANALYTICS_INGEST_ENABLED?: string;             // "true" (default) or "false"
   RATE_LIMIT_ANALYTICS_INGEST?: string;          // Rate limit per IP per hour (default: 500)

@@ -7,6 +7,7 @@ import {
   fetchAnalyticsGeo,
   fetchAnalyticsRetention,
   fetchAnalyticsForwardStatus,
+  fetchAnalyticsWebsiteTraffic,
   type AnalyticsDauResponse,
   type AnalyticsEventsResponse,
   type AnalyticsFunnelResponse,
@@ -14,6 +15,7 @@ import {
   type AnalyticsGeoResponse,
   type AnalyticsRetentionResponse,
   type AnalyticsForwardStatusResponse,
+  type AnalyticsWebsiteTrafficResponse,
 } from '../lib/api';
 
 export interface UseAdminAnalyticsReturn {
@@ -24,6 +26,7 @@ export interface UseAdminAnalyticsReturn {
   geo: AnalyticsGeoResponse | null;
   retention: AnalyticsRetentionResponse | null;
   forwardStatus: AnalyticsForwardStatusResponse | null;
+  websiteTraffic: AnalyticsWebsiteTrafficResponse | null;
   loading: boolean;
   isRefreshing: boolean;
   error: string | null;
@@ -42,6 +45,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
   const [geo, setGeo] = useState<AnalyticsGeoResponse | null>(null);
   const [retention, setRetention] = useState<AnalyticsRetentionResponse | null>(null);
   const [forwardStatus, setForwardStatus] = useState<AnalyticsForwardStatusResponse | null>(null);
+  const [websiteTraffic, setWebsiteTraffic] = useState<AnalyticsWebsiteTrafficResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +65,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
     }
     try {
       setError(null);
-      const [dauRes, eventsRes, funnelRes, adoptionRes, geoRes, retentionRes, forwardRes] = await Promise.all([
+      const [dauRes, eventsRes, funnelRes, adoptionRes, geoRes, retentionRes, forwardRes, websiteTrafficRes] = await Promise.all([
         fetchAnalyticsDau(),
         fetchAnalyticsEvents(period),
         fetchAnalyticsFunnel(),
@@ -69,6 +73,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
         fetchAnalyticsGeo(period),
         fetchAnalyticsRetention(),
         fetchAnalyticsForwardStatus(),
+        fetchAnalyticsWebsiteTraffic(period),
       ]);
 
       if (!mountedRef.current) return;
@@ -80,6 +85,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
       setGeo(geoRes);
       setRetention(retentionRes);
       setForwardStatus(forwardRes);
+      setWebsiteTraffic(websiteTrafficRes);
     } catch (err) {
       if (mountedRef.current) {
         setError(err instanceof Error ? err.message : 'Failed to load analytics data');
@@ -110,7 +116,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
   }, [fetchAll, eventPeriod]);
 
   return {
-    dau, events, funnel, featureAdoption, geo, retention, forwardStatus,
+    dau, events, funnel, featureAdoption, geo, retention, forwardStatus, websiteTraffic,
     loading, isRefreshing, error, eventPeriod, setEventPeriod, refresh,
   };
 }

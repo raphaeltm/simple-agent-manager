@@ -6,3 +6,4 @@ export { FeatureAdoptionChart } from './FeatureAdoptionChart';
 export { GeoDistribution } from './GeoDistribution';
 export { RetentionCohorts } from './RetentionCohorts';
 export { ForwardingStatus } from './ForwardingStatus';
+export { WebsiteTraffic } from './WebsiteTraffic';

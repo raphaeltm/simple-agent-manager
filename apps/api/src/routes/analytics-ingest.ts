@@ -22,6 +22,7 @@ const DEFAULT_MAX_REFERRER_LENGTH = 1024;
 const DEFAULT_MAX_UTM_LENGTH = 256;
 const DEFAULT_MAX_SESSION_ID_LENGTH = 64;
 const DEFAULT_MAX_ENTITY_ID_LENGTH = 128;
+const DEFAULT_MAX_HOST_LENGTH = 256;
 
 /** Max duration in milliseconds (configurable via MAX_ANALYTICS_DURATION_MS). Clamps to 1 hour. */
 const DEFAULT_MAX_DURATION_MS = 3_600_000;
@@ -50,6 +51,7 @@ function validateEvent(raw: unknown): {
   entityId: string;
   durationMs: number;
   visitorId: string;
+  host: string;
 } | null {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -70,6 +72,7 @@ function validateEvent(raw: unknown): {
     durationMs: typeof e.durationMs === 'number' && isFinite(e.durationMs) && e.durationMs >= 0
       ? Math.min(e.durationMs, DEFAULT_MAX_DURATION_MS) : 0,
     visitorId: typeof e.visitorId === 'string' ? truncate(e.visitorId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
+    host: typeof e.host === 'string' ? truncate(e.host, DEFAULT_MAX_HOST_LENGTH) : '',
   };
 }
 
@@ -165,6 +168,13 @@ analyticsIngestRoutes.post('/', async (c) => {
   const country = cfData?.country ?? '';
   const ip = getClientIp(c);
 
+  // Derive host from Origin or Referer header as server-side fallback
+  const originHeader = c.req.header('origin') || c.req.header('referer') || '';
+  let serverHost = '';
+  try {
+    if (originHeader) serverHost = new URL(originHeader).hostname;
+  } catch { /* malformed origin — ignore */ }
+
   // Write each valid event to Analytics Engine (fire-and-forget via waitUntil)
   const writeAll = async () => {
     try {
@@ -176,11 +186,14 @@ analyticsIngestRoutes.post('/', async (c) => {
         // Unauthenticated: always use server-derived IP prefix (never trust client visitorId)
         const index = userId ?? `anon-${ip}`;
 
+        // Use client-provided host if present, fall back to server-derived from Origin/Referer
+        const host = validated.host || serverHost;
+
         c.env.ANALYTICS!.writeDataPoint({
           indexes: [index],
           blobs: [
             validated.event,       // blob1: event name
-            '',                    // blob2: projectId (client events don't have this)
+            host,                  // blob2: host (e.g. www.example.com, app.example.com)
             validated.page,        // blob3: page/route
             validated.referrer,    // blob4: referrer
             validated.utmSource,   // blob5

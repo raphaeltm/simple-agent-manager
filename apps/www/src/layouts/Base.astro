@@ -37,6 +37,9 @@ const {
 
     <!-- Preload font -->
     <link rel="preload" href="/fonts/Chillax-Variable.woff2" as="font" type="font/woff2" crossorigin />
+
+    <!-- Analytics -->
+    <script src="/scripts/tracker.js" data-api={`https://api.${import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org'}/api/t`} defer></script>
   </head>
   <body>
     <slot />
