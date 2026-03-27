@@ -364,7 +364,10 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
     DEFAULT_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT,
   );
 
-  // Section totals: group page_view events by host and path prefix
+  // Section totals: group page_view events by host and path prefix.
+  // NOTE: blob2 = host for client-side events (page_view), blob2 = projectId for API events.
+  // The blob1='page_view' filter isolates client events since only the tracker sends this event.
+  // blob8 = sessionId for client events (browser session), requestId for API events.
   const sectionsSql = `
     SELECT
       blob2 AS host,
@@ -379,7 +382,7 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
     ORDER BY total_views DESC
   `;
 
-  // Top pages across all hosts
+  // Top pages across all hosts (approximate: fetches topPagesLimit*5 globally, then groups in-memory)
   const topPagesSql = `
     SELECT
       blob2 AS host,
@@ -396,7 +399,7 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
     LIMIT ${topPagesLimit * 5}
   `;
 
-  // Daily trend for sparkline
+  // Daily trend for sparkline (capped at 500 rows to stay within AE limits)
   const trendSql = `
     SELECT
       blob2 AS host,
@@ -408,6 +411,7 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
       AND blob2 != ''
     GROUP BY host, date
     ORDER BY host, date ASC
+    LIMIT 500
   `;
 
   const [hostTotals, topPagesData, trendData] = await Promise.all([

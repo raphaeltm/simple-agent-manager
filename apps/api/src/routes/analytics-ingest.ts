@@ -186,8 +186,9 @@ analyticsIngestRoutes.post('/', async (c) => {
         // Unauthenticated: always use server-derived IP prefix (never trust client visitorId)
         const index = userId ?? `anon-${ip}`;
 
-        // Use client-provided host if present, fall back to server-derived from Origin/Referer
-        const host = validated.host || serverHost;
+        // Server-derived host from Origin/Referer is more trustworthy than client-provided
+        // (browsers enforce Origin on cross-origin requests; client JSON body is untrusted)
+        const host = serverHost || validated.host;
 
         c.env.ANALYTICS!.writeDataPoint({
           indexes: [index],

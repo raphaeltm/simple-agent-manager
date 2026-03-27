@@ -118,7 +118,7 @@ describe('analytics ingest — host field via route handler', () => {
     expect(args.blobs[1]).toBe('docs.example.com');
   });
 
-  it('client host takes precedence over Origin header', async () => {
+  it('server-derived Origin takes precedence over client host (security)', async () => {
     const app = createApp();
     const res = await app.request('/api/t', {
       method: 'POST',
@@ -140,7 +140,30 @@ describe('analytics ingest — host field via route handler', () => {
 
     expect(mockWriteDataPoint).toHaveBeenCalledTimes(1);
     const args = mockWriteDataPoint.mock.calls[0][0];
-    expect(args.blobs[1]).toBe('www.client-host.com');
+    // Server-derived host from Origin header is more trustworthy than client-provided
+    expect(args.blobs[1]).toBe('www.origin-host.com');
+  });
+
+  it('falls back to client host when no Origin/Referer header', async () => {
+    const app = createApp();
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        events: [{
+          event: 'page_view',
+          page: '/',
+          host: 'www.fallback-host.com',
+        }],
+      }),
+    });
+
+    expect(res.status).toBe(204);
+    await flush();
+
+    expect(mockWriteDataPoint).toHaveBeenCalledTimes(1);
+    const args = mockWriteDataPoint.mock.calls[0][0];
+    expect(args.blobs[1]).toBe('www.fallback-host.com');
   });
 
   it('blob2 is empty when no host or Origin/Referer provided', async () => {
