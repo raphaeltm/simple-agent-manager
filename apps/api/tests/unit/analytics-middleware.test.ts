@@ -96,7 +96,7 @@ describe('analyticsMiddleware', () => {
 
     app.get('/health', (c) => c.text('ok'));
     app.get('/api/projects', (c) => c.json({ projects: [] }));
-    app.post('/api/projects', (c) => {
+    app.post('/api/projects', (_c) => {
       return new Response(JSON.stringify({ id: '123' }), {
         status: 201,
         headers: { 'Content-Type': 'application/json' },
