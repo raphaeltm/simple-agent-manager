@@ -56,6 +56,9 @@ const EVENT_NAME_MAP: Record<string, string> = {
   'GET /api/admin/analytics/dau': 'admin_analytics_dau',
   'GET /api/admin/analytics/events': 'admin_analytics_events',
   'GET /api/admin/analytics/funnel': 'admin_analytics_funnel',
+  'GET /api/admin/analytics/feature-adoption': 'admin_analytics_feature_adoption',
+  'GET /api/admin/analytics/geo': 'admin_analytics_geo',
+  'GET /api/admin/analytics/retention': 'admin_analytics_retention',
 
   // Notifications
   'GET /api/notifications': 'notifications_viewed',

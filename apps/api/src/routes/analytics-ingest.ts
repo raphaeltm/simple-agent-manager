@@ -176,7 +176,7 @@ analyticsIngestRoutes.post('/', async (c) => {
         // Unauthenticated: always use server-derived IP prefix (never trust client visitorId)
         const index = userId ?? `anon-${ip}`;
 
-        c.env.ANALYTICS.writeDataPoint({
+        c.env.ANALYTICS!.writeDataPoint({
           indexes: [index],
           blobs: [
             validated.event,       // blob1: event name
