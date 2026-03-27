@@ -68,6 +68,19 @@ describe('bucketUserAgent', () => {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Edg/120.0',
     )).toBe('edge-desktop');
   });
+
+  it('returns other-desktop for unknown desktop browser', () => {
+    expect(bucketUserAgent('SomeUnknownBrowser/1.0 (Windows)')).toBe('other-desktop');
+  });
+
+  it('returns other-mobile for unknown mobile browser', () => {
+    expect(bucketUserAgent('SomeUnknownBrowser/1.0 Mobile')).toBe('other-mobile');
+  });
+
+  it('detects crawler and spider bots', () => {
+    expect(bucketUserAgent('Mozilla/5.0 (compatible; AhrefsCrawler/7.0)')).toBe('bot');
+    expect(bucketUserAgent('Mozilla/5.0 (compatible; YandexSpider/3.0)')).toBe('bot');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -198,5 +211,50 @@ describe('analyticsMiddleware', () => {
 
     const call = mockWriteDataPoint.mock.calls[0][0];
     expect(call.doubles[1]).toBe(201);
+  });
+
+  it('writes the full 11-blob schema', async () => {
+    const { makeRequest } = createApp();
+    await makeRequest('/api/projects');
+
+    await Promise.all(mockWaitUntil.mock.calls.map((c: unknown[]) => c[0]));
+
+    const call = mockWriteDataPoint.mock.calls[0][0];
+    expect(call.blobs).toHaveLength(11);
+    expect(call.doubles).toHaveLength(3);
+    expect(call.indexes).toHaveLength(1);
+  });
+
+  it('extracts entity ID from path into blob11', async () => {
+    mockWriteDataPoint = vi.fn();
+    mockWaitUntil = vi.fn((promise: Promise<unknown>) => promise);
+
+    const env = {
+      ANALYTICS: { writeDataPoint: mockWriteDataPoint },
+      ANALYTICS_ENABLED: 'true',
+    };
+    const executionCtx = { waitUntil: mockWaitUntil, passThroughOnException: vi.fn() };
+
+    const app = new Hono();
+    app.use('*', analyticsMiddleware());
+    app.get('/api/workspaces/:id', (c) => c.json({ id: c.req.param('id') }));
+
+    const req = new Request('http://localhost/api/workspaces/ws-abc123');
+    await app.fetch(req, env, executionCtx);
+
+    await Promise.all(mockWaitUntil.mock.calls.map((c: unknown[]) => c[0]));
+
+    const call = mockWriteDataPoint.mock.calls[0][0];
+    // blob11 is entity ID extracted from path
+    expect(call.blobs[10]).toBe('ws-abc123');
+  });
+
+  it('skips path prefix routes (not just exact match)', async () => {
+    const { makeRequest } = createApp();
+    await makeRequest('/health/check');
+
+    await Promise.all(mockWaitUntil.mock.calls.map((c: unknown[]) => c[0]));
+
+    expect(mockWriteDataPoint).not.toHaveBeenCalled();
   });
 });

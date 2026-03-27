@@ -6,6 +6,7 @@ import { errors } from '../middleware/error';
 const DEFAULT_ANALYTICS_SQL_API_URL = 'https://api.cloudflare.com/client/v4/accounts';
 const DEFAULT_PERIOD_DAYS = 30;
 const DEFAULT_DATASET = 'sam_analytics';
+const DEFAULT_TOP_EVENTS_LIMIT = 50;
 
 const adminAnalyticsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -97,6 +98,11 @@ adminAnalyticsRoutes.get('/events', async (c) => {
       break;
   }
 
+  const topEventsLimit = parseInt(
+    c.env.ANALYTICS_TOP_EVENTS_LIMIT || String(DEFAULT_TOP_EVENTS_LIMIT),
+    10,
+  );
+
   const sql = `
     SELECT
       blob1 AS event_name,
@@ -108,7 +114,7 @@ adminAnalyticsRoutes.get('/events', async (c) => {
       AND blob1 != ''
     GROUP BY event_name
     ORDER BY count DESC
-    LIMIT 50
+    LIMIT ${topEventsLimit}
   `;
 
   const result = await queryAnalyticsEngine(c.env, sql);

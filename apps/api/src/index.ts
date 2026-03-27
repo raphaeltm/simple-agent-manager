@@ -341,6 +341,7 @@ export interface Env {
   ANALYTICS_SQL_API_URL?: string;               // Override Analytics Engine SQL API URL
   ANALYTICS_DEFAULT_PERIOD_DAYS?: string;       // Default query period (default: 30)
   ANALYTICS_DATASET?: string;                   // Dataset name (default: "sam_analytics")
+  ANALYTICS_TOP_EVENTS_LIMIT?: string;          // Max events in top events query (default: 50)
 }
 
 const app = new Hono<{ Bindings: Env }>();

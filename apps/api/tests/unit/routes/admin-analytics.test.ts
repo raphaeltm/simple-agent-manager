@@ -125,4 +125,65 @@ describe('admin-analytics routes', () => {
     const [url] = mockFetch.mock.calls[0];
     expect(url).toContain('custom.api.example.com');
   });
+
+  it('GET /events?period=30d uses 30 day interval', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+
+    const app = createApp();
+    await app.request('/api/admin/analytics/events?period=30d');
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.body).toContain("INTERVAL '30' DAY");
+  });
+
+  it('GET /dau returns correct JSON shape', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [{ date: '2026-03-27', unique_users: 5 }] }), { status: 200 }));
+
+    const app = createApp();
+    const res = await app.request('/api/admin/analytics/dau');
+    const json = await res.json() as Record<string, unknown>;
+
+    expect(json).toHaveProperty('dau');
+    expect(json).toHaveProperty('periodDays');
+  });
+
+  it('GET /events returns correct JSON shape', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+
+    const app = createApp();
+    const res = await app.request('/api/admin/analytics/events');
+    const json = await res.json() as Record<string, unknown>;
+
+    expect(json).toHaveProperty('events');
+    expect(json).toHaveProperty('period');
+  });
+
+  it('GET /funnel returns correct JSON shape', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+
+    const app = createApp();
+    const res = await app.request('/api/admin/analytics/funnel');
+    const json = await res.json() as Record<string, unknown>;
+
+    expect(json).toHaveProperty('funnel');
+    expect(json).toHaveProperty('periodDays');
+  });
+
+  it('returns 500 when fetch rejects (network error)', async () => {
+    mockFetch.mockRejectedValue(new Error('network error'));
+
+    const app = createApp();
+    const res = await app.request('/api/admin/analytics/dau');
+    expect(res.status).toBe(500);
+  });
+
+  it('uses custom ANALYTICS_TOP_EVENTS_LIMIT from env', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+
+    const app = createApp({ ANALYTICS_TOP_EVENTS_LIMIT: '25' });
+    await app.request('/api/admin/analytics/events');
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.body).toContain('LIMIT 25');
+  });
 });
