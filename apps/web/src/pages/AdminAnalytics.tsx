@@ -213,7 +213,7 @@ export function AdminAnalytics() {
           <h3 className="text-sm font-medium text-fg-secondary mb-3">
             Daily Active Users ({dau?.periodDays ?? 30}d)
           </h3>
-          <DauChart data={dau?.dau?.data ?? []} />
+          <DauChart data={dau?.dau ?? []} />
         </div>
       </Card>
 
@@ -224,7 +224,7 @@ export function AdminAnalytics() {
             <h3 className="text-sm font-medium text-fg-secondary">Top Events</h3>
             <PeriodSelector value={eventPeriod} onChange={setEventPeriod} />
           </div>
-          <EventsTable data={events?.events?.data ?? []} />
+          <EventsTable data={events?.events ?? []} />
         </div>
       </Card>
 
@@ -234,7 +234,7 @@ export function AdminAnalytics() {
           <h3 className="text-sm font-medium text-fg-secondary mb-3">
             Conversion Funnel ({funnel?.periodDays ?? 30}d)
           </h3>
-          <FunnelChart data={funnel?.funnel?.data ?? []} />
+          <FunnelChart data={funnel?.funnel ?? []} />
         </div>
       </Card>
     </div>

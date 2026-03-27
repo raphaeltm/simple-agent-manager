@@ -175,9 +175,13 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
     if (!enabled) return;
 
     // Check if the binding exists (graceful degradation for local dev)
-    if (!c.env.ANALYTICS) return;
+    const analytics = c.env.ANALYTICS;
+    if (!analytics) return;
 
     const path = new URL(c.req.url).pathname;
+
+    // Skip CORS preflight requests — they are noise
+    if (c.req.method === 'OPTIONS') return;
 
     // Parse extra skip patterns from env
     const extraSkip = c.env.ANALYTICS_SKIP_ROUTES
@@ -226,7 +230,7 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
         const responseTimeMs = Date.now() - startTime;
         const statusCode = c.res.status;
 
-        c.env.ANALYTICS.writeDataPoint({
+        await analytics.writeDataPoint({
           indexes: [userId],
           blobs: [
             eventName,       // blob1

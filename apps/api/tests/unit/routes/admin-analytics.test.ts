@@ -136,37 +136,41 @@ describe('admin-analytics routes', () => {
     expect(opts.body).toContain("INTERVAL '30' DAY");
   });
 
-  it('GET /dau returns correct JSON shape', async () => {
+  it('GET /dau returns correct JSON shape with data array', async () => {
     mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [{ date: '2026-03-27', unique_users: 5 }] }), { status: 200 }));
 
     const app = createApp();
     const res = await app.request('/api/admin/analytics/dau');
-    const json = await res.json() as Record<string, unknown>;
+    const json = await res.json() as { dau: unknown[]; periodDays: number };
 
     expect(json).toHaveProperty('dau');
     expect(json).toHaveProperty('periodDays');
+    expect(Array.isArray(json.dau)).toBe(true);
+    expect(json.dau).toHaveLength(1);
   });
 
-  it('GET /events returns correct JSON shape', async () => {
+  it('GET /events returns correct JSON shape with data array', async () => {
     mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
 
     const app = createApp();
     const res = await app.request('/api/admin/analytics/events');
-    const json = await res.json() as Record<string, unknown>;
+    const json = await res.json() as { events: unknown[]; period: string };
 
     expect(json).toHaveProperty('events');
     expect(json).toHaveProperty('period');
+    expect(Array.isArray(json.events)).toBe(true);
   });
 
-  it('GET /funnel returns correct JSON shape', async () => {
+  it('GET /funnel returns correct JSON shape with data array', async () => {
     mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
 
     const app = createApp();
     const res = await app.request('/api/admin/analytics/funnel');
-    const json = await res.json() as Record<string, unknown>;
+    const json = await res.json() as { funnel: unknown[]; periodDays: number };
 
     expect(json).toHaveProperty('funnel');
     expect(json).toHaveProperty('periodDays');
+    expect(Array.isArray(json.funnel)).toBe(true);
   });
 
   it('returns 500 when fetch rejects (network error)', async () => {

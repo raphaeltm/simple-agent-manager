@@ -1698,17 +1698,17 @@ export async function deleteAgentProfile(
 // ---------------------------------------------------------------------------
 
 export interface AnalyticsDauResponse {
-  dau: { data: Array<{ date: string; unique_users: number }> };
+  dau: Array<{ date: string; unique_users: number }>;
   periodDays: number;
 }
 
 export interface AnalyticsEventsResponse {
-  events: { data: Array<{ event_name: string; count: number; unique_users: number; avg_response_ms: number }> };
+  events: Array<{ event_name: string; count: number; unique_users: number; avg_response_ms: number }>;
   period: string;
 }
 
 export interface AnalyticsFunnelResponse {
-  funnel: { data: Array<{ event_name: string; unique_users: number }> };
+  funnel: Array<{ event_name: string; unique_users: number }>;
   periodDays: number;
 }
 

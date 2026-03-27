@@ -8,6 +8,12 @@ const DEFAULT_PERIOD_DAYS = 30;
 const DEFAULT_DATASET = 'sam_analytics';
 const DEFAULT_TOP_EVENTS_LIMIT = 50;
 
+/** Parse an integer env var with validation; returns fallback on NaN or non-positive values. */
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = parseInt(value || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 const adminAnalyticsRoutes = new Hono<{ Bindings: Env }>();
 
 // All analytics routes require superadmin
@@ -47,17 +53,16 @@ async function queryAnalyticsEngine(
     throw errors.internal(`Analytics Engine query failed: ${response.status}`);
   }
 
-  return response.json();
+  const body = await response.json() as { data?: unknown[]; meta?: unknown[] };
+  // Return only the data rows — do not leak internal column metadata to the client
+  return body.data ?? [];
 }
 
 /**
  * GET /api/admin/analytics/dau — Daily active users (last N days)
  */
 adminAnalyticsRoutes.get('/dau', async (c) => {
-  const periodDays = parseInt(
-    c.env.ANALYTICS_DEFAULT_PERIOD_DAYS || String(DEFAULT_PERIOD_DAYS),
-    10,
-  );
+  const periodDays = parsePositiveInt(c.env.ANALYTICS_DEFAULT_PERIOD_DAYS, DEFAULT_PERIOD_DAYS);
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
 
   const sql = `
@@ -72,8 +77,8 @@ adminAnalyticsRoutes.get('/dau', async (c) => {
     ORDER BY date ASC
   `;
 
-  const result = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ dau: result, periodDays });
+  const data = await queryAnalyticsEngine(c.env, sql);
+  return c.json({ dau: data, periodDays });
 });
 
 /**
@@ -98,10 +103,7 @@ adminAnalyticsRoutes.get('/events', async (c) => {
       break;
   }
 
-  const topEventsLimit = parseInt(
-    c.env.ANALYTICS_TOP_EVENTS_LIMIT || String(DEFAULT_TOP_EVENTS_LIMIT),
-    10,
-  );
+  const topEventsLimit = parsePositiveInt(c.env.ANALYTICS_TOP_EVENTS_LIMIT, DEFAULT_TOP_EVENTS_LIMIT);
 
   const sql = `
     SELECT
@@ -117,8 +119,8 @@ adminAnalyticsRoutes.get('/events', async (c) => {
     LIMIT ${topEventsLimit}
   `;
 
-  const result = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ events: result, period });
+  const data = await queryAnalyticsEngine(c.env, sql);
+  return c.json({ events: data, period });
 });
 
 /**
@@ -126,10 +128,7 @@ adminAnalyticsRoutes.get('/events', async (c) => {
  * signup → project_created → workspace_created → task_submitted
  */
 adminAnalyticsRoutes.get('/funnel', async (c) => {
-  const periodDays = parseInt(
-    c.env.ANALYTICS_DEFAULT_PERIOD_DAYS || String(DEFAULT_PERIOD_DAYS),
-    10,
-  );
+  const periodDays = parsePositiveInt(c.env.ANALYTICS_DEFAULT_PERIOD_DAYS, DEFAULT_PERIOD_DAYS);
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
 
   const sql = `
@@ -143,8 +142,8 @@ adminAnalyticsRoutes.get('/funnel', async (c) => {
     GROUP BY event_name
   `;
 
-  const result = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ funnel: result, periodDays });
+  const data = await queryAnalyticsEngine(c.env, sql);
+  return c.json({ funnel: data, periodDays });
 });
 
 export { adminAnalyticsRoutes };
