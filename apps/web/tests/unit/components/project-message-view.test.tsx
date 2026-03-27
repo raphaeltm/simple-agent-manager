@@ -235,12 +235,16 @@ describe('ProjectMessageView — session isolation', () => {
     // Advance past the 3s poll interval. Use advanceTimersByTimeAsync to
     // properly process microtasks (the polling effect starts asynchronously
     // after session state is committed to the DOM).
+    // Use waitFor to handle timing variance — on slower CI machines the
+    // polling effect may set up the interval slightly later.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(3500);
     });
 
-    // Verify the poll fired and we captured a signal
-    expect(pollSignal).toBeDefined();
+    // Retry assertion — the poll callback may execute on a later microtask
+    await waitFor(() => {
+      expect(pollSignal).toBeDefined();
+    });
     expect(pollSignal!.aborted).toBe(false);
 
     const sessionBResponse = makeSessionResponse('session-B', [

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
@@ -130,6 +130,12 @@ describe('AgentSettingsSection', () => {
       expect(defaultRadio.checked).toBe(true);
     });
 
+    // Flush any pending effects (the settings useEffect may be queued but
+    // not yet executed). Without this, the useEffect can fire AFTER the
+    // click below and reset permissionMode back to 'default', hiding the
+    // warning. This race caused flaky CI failures.
+    await act(async () => {});
+
     const bypassRadio = screen.getByTestId('permission-mode-claude-code-bypassPermissions');
     fireEvent.click(bypassRadio);
 
@@ -157,6 +163,9 @@ describe('AgentSettingsSection', () => {
       const defaultRadio = screen.getByTestId('permission-mode-claude-code-default') as HTMLInputElement;
       expect(defaultRadio.checked).toBe(true);
     });
+
+    // Flush pending effects to avoid race with settings sync useEffect
+    await act(async () => {});
 
     const modelInput = screen.getByTestId('model-input-claude-code');
     fireEvent.change(modelInput, { target: { value: 'claude-opus-4-6' } });
