@@ -11,13 +11,17 @@ const DEFAULT_MAX_BODY_BYTES = 65_536;
 /** Default max batch size (configurable via MAX_ANALYTICS_INGEST_BATCH_SIZE) */
 const DEFAULT_MAX_BATCH_SIZE = 25;
 
-/** Max length for string fields in events */
-const MAX_EVENT_NAME_LENGTH = 128;
-const MAX_PAGE_LENGTH = 512;
-const MAX_REFERRER_LENGTH = 1024;
-const MAX_UTM_LENGTH = 256;
-const MAX_SESSION_ID_LENGTH = 64;
-const MAX_ENTITY_ID_LENGTH = 128;
+/**
+ * Max length for string fields in events.
+ * These are tied to Analytics Engine blob slot capacity (max ~2KB per blob).
+ * Schema-coupled invariants — not deployment-configurable.
+ */
+const DEFAULT_MAX_EVENT_NAME_LENGTH = 128;
+const DEFAULT_MAX_PAGE_LENGTH = 512;
+const DEFAULT_MAX_REFERRER_LENGTH = 1024;
+const DEFAULT_MAX_UTM_LENGTH = 256;
+const DEFAULT_MAX_SESSION_ID_LENGTH = 64;
+const DEFAULT_MAX_ENTITY_ID_LENGTH = 128;
 
 function truncate(value: string, maxLength: number): string {
   return value.length > maxLength ? value.slice(0, maxLength) + '...' : value;
@@ -51,16 +55,16 @@ function validateEvent(raw: unknown): {
   if (typeof e.event !== 'string' || e.event.length === 0) return null;
 
   return {
-    event: truncate(e.event, MAX_EVENT_NAME_LENGTH),
-    page: typeof e.page === 'string' ? truncate(e.page, MAX_PAGE_LENGTH) : '',
-    referrer: typeof e.referrer === 'string' ? truncate(e.referrer, MAX_REFERRER_LENGTH) : '',
-    utmSource: typeof e.utmSource === 'string' ? truncate(e.utmSource, MAX_UTM_LENGTH) : '',
-    utmMedium: typeof e.utmMedium === 'string' ? truncate(e.utmMedium, MAX_UTM_LENGTH) : '',
-    utmCampaign: typeof e.utmCampaign === 'string' ? truncate(e.utmCampaign, MAX_UTM_LENGTH) : '',
-    sessionId: typeof e.sessionId === 'string' ? truncate(e.sessionId, MAX_SESSION_ID_LENGTH) : '',
-    entityId: typeof e.entityId === 'string' ? truncate(e.entityId, MAX_ENTITY_ID_LENGTH) : '',
+    event: truncate(e.event, DEFAULT_MAX_EVENT_NAME_LENGTH),
+    page: typeof e.page === 'string' ? truncate(e.page, DEFAULT_MAX_PAGE_LENGTH) : '',
+    referrer: typeof e.referrer === 'string' ? truncate(e.referrer, DEFAULT_MAX_REFERRER_LENGTH) : '',
+    utmSource: typeof e.utmSource === 'string' ? truncate(e.utmSource, DEFAULT_MAX_UTM_LENGTH) : '',
+    utmMedium: typeof e.utmMedium === 'string' ? truncate(e.utmMedium, DEFAULT_MAX_UTM_LENGTH) : '',
+    utmCampaign: typeof e.utmCampaign === 'string' ? truncate(e.utmCampaign, DEFAULT_MAX_UTM_LENGTH) : '',
+    sessionId: typeof e.sessionId === 'string' ? truncate(e.sessionId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
+    entityId: typeof e.entityId === 'string' ? truncate(e.entityId, DEFAULT_MAX_ENTITY_ID_LENGTH) : '',
     durationMs: typeof e.durationMs === 'number' && isFinite(e.durationMs) ? e.durationMs : 0,
-    visitorId: typeof e.visitorId === 'string' ? truncate(e.visitorId, MAX_SESSION_ID_LENGTH) : '',
+    visitorId: typeof e.visitorId === 'string' ? truncate(e.visitorId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
   };
 }
 

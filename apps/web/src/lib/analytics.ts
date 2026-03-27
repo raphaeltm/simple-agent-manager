@@ -33,10 +33,23 @@ export interface TrackProps {
   [key: string]: string | number | undefined;
 }
 
-// --- Constants ---
-const MAX_QUEUE_SIZE = 100;
-const FLUSH_THRESHOLD = 10;
+// --- Constants (configurable via Vite build-time env vars) ---
+const DEFAULT_MAX_QUEUE_SIZE = 100;
+const DEFAULT_FLUSH_THRESHOLD = 10;
 const DEFAULT_FLUSH_INTERVAL_MS = 5_000;
+
+const MAX_QUEUE_SIZE = parseInt(
+  import.meta.env.VITE_ANALYTICS_MAX_QUEUE_SIZE || String(DEFAULT_MAX_QUEUE_SIZE),
+  10
+);
+const FLUSH_THRESHOLD = parseInt(
+  import.meta.env.VITE_ANALYTICS_FLUSH_THRESHOLD || String(DEFAULT_FLUSH_THRESHOLD),
+  10
+);
+const FLUSH_INTERVAL_MS = parseInt(
+  import.meta.env.VITE_ANALYTICS_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS),
+  10
+);
 const SESSION_ID_KEY = 'sam_analytics_session_id';
 const VISITOR_ID_KEY = 'sam_analytics_visitor_id';
 const UTM_KEY = 'sam_analytics_utm';
@@ -207,7 +220,7 @@ export function initAnalytics(apiUrl: string): void {
   _initialReferrer = document.referrer ?? '';
 
   // Periodic flush
-  _flushTimer = setInterval(flush, DEFAULT_FLUSH_INTERVAL_MS);
+  _flushTimer = setInterval(flush, FLUSH_INTERVAL_MS);
 
   // Flush on page visibility change (tab hidden) and unload
   document.addEventListener('visibilitychange', () => {
