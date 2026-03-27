@@ -442,6 +442,11 @@ export interface MigrationEntry {
   new_classes?: string[];
 }
 
+export interface AnalyticsEngineDatasetBinding {
+  binding: string;
+  dataset: string;
+}
+
 export interface ObservabilityConfig {
   enabled: boolean;
   logs?: {
@@ -459,6 +464,7 @@ export interface WranglerEnvConfig {
   r2_buckets?: WranglerTomlBindings["r2_buckets"];
   durable_objects?: DurableObjectsConfig;
   ai?: AIBinding;
+  analytics_engine_datasets?: AnalyticsEngineDatasetBinding[];
   tail_consumers?: TailConsumer[];
   migrations?: MigrationEntry[];
   observability?: ObservabilityConfig;

@@ -34,6 +34,7 @@ import { AdminErrors } from './pages/AdminErrors';
 import { AdminOverview } from './pages/AdminOverview';
 import { AdminLogs } from './pages/AdminLogs';
 import { AdminStream } from './pages/AdminStream';
+import { AdminAnalytics } from './pages/AdminAnalytics';
 
 function ProtectedLayout() {
   return (
@@ -95,6 +96,7 @@ export default function App() {
               <Route path="overview" element={<AdminOverview />} />
               <Route path="logs" element={<AdminLogs />} />
               <Route path="stream" element={<AdminStream />} />
+              <Route path="analytics" element={<AdminAnalytics />} />
             </Route>
           </Route>
 

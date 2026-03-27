@@ -24,6 +24,7 @@ import type {
   WranglerEnvConfig,
   DurableObjectsConfig,
   AIBinding,
+  AnalyticsEngineDatasetBinding,
   MigrationEntry,
   TailWorkerWranglerToml,
 } from "./types.js";
@@ -85,11 +86,13 @@ async function checkTailWorkerExists(accountId: string, tailWorkerName: string):
 function extractStaticBindings(topLevel: WranglerToml): {
   durable_objects: DurableObjectsConfig | undefined;
   ai: AIBinding | undefined;
+  analytics_engine_datasets: AnalyticsEngineDatasetBinding[] | undefined;
   migrations: MigrationEntry[] | undefined;
 } {
   return {
     durable_objects: topLevel.durable_objects as DurableObjectsConfig | undefined,
     ai: topLevel.ai as AIBinding | undefined,
+    analytics_engine_datasets: topLevel.analytics_engine_datasets as AnalyticsEngineDatasetBinding[] | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
   };
 }
@@ -184,6 +187,7 @@ function generateApiWorkerEnv(
     // Static bindings copied from top-level config
     ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
     ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
+    ...(staticBindings.analytics_engine_datasets ? { analytics_engine_datasets: staticBindings.analytics_engine_datasets } : {}),
     ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)

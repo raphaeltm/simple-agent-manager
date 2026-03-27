@@ -10,6 +10,7 @@ const ADMIN_TABS: Tab[] = [
   { id: 'overview', label: 'Overview', path: 'overview' },
   { id: 'logs', label: 'Logs', path: 'logs' },
   { id: 'stream', label: 'Stream', path: 'stream' },
+  { id: 'analytics', label: 'Analytics', path: 'analytics' },
 ];
 
 export function Admin() {

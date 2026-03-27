@@ -100,6 +100,11 @@ new_classes = ["TaskRunner"]
 tag = "v5"
 new_sqlite_classes = ["NotificationService"]
 
+# Analytics Engine for usage tracking (Phase 1 — server-side analytics)
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "sam_analytics"
+
 # Workers AI for speech-to-text transcription
 [ai]
 binding = "AI"
