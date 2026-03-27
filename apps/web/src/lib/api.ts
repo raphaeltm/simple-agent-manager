@@ -1157,6 +1157,14 @@ export function getClientErrorsApiUrl(): string {
   return `${API_URL}/api/client-errors`;
 }
 
+/**
+ * Get the full URL for the analytics ingest endpoint.
+ * Used by the client-side analytics tracker to send batched events.
+ */
+export function getAnalyticsApiUrl(): string {
+  return `${API_URL}/api/t`;
+}
+
 // =============================================================================
 // Agent Settings
 // =============================================================================

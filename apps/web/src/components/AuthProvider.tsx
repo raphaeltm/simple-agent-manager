@@ -1,5 +1,6 @@
-import { createContext, useContext, useRef, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, ReactNode } from 'react';
 import { useSession } from '../lib/auth';
+import { setUserId } from '../lib/analytics';
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 
 interface User {
@@ -74,6 +75,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const enrichedUser: User | null = user
     ? { ...user, role, status }
     : null;
+
+  // Sync authenticated userId to analytics tracker
+  useEffect(() => {
+    setUserId(enrichedUser?.id ?? null);
+  }, [enrichedUser?.id]);
 
   const value: AuthContextValue = {
     user: enrichedUser,

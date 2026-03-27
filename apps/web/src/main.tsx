@@ -6,13 +6,15 @@ import './index.css';
 import { registerAppServiceWorker } from './lib/pwa';
 import { startMobileViewportSync } from './lib/mobile-viewport';
 import { initErrorReporter } from './lib/error-reporter';
-import { getClientErrorsApiUrl } from './lib/api';
+import { initAnalytics } from './lib/analytics';
+import { getClientErrorsApiUrl, getAnalyticsApiUrl } from './lib/api';
 
 document.documentElement.setAttribute('data-ui-theme', 'sam');
 
 const stopViewportSync = startMobileViewportSync();
 registerAppServiceWorker({ enabled: import.meta.env.PROD });
 initErrorReporter(getClientErrorsApiUrl());
+initAnalytics(getAnalyticsApiUrl());
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
