@@ -3,7 +3,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { useAdminAnalytics } from '../../../src/hooks/useAdminAnalytics';
 
 // ---------------------------------------------------------------------------
-// Mock all six Phase-3 API functions
+// Mock all seven analytics API functions (Phase 3 + Phase 4 forward status)
 // ---------------------------------------------------------------------------
 const mockFetchDau = vi.fn();
 const mockFetchEvents = vi.fn();
@@ -11,6 +11,7 @@ const mockFetchFunnel = vi.fn();
 const mockFetchFeatureAdoption = vi.fn();
 const mockFetchGeo = vi.fn();
 const mockFetchRetention = vi.fn();
+const mockFetchForwardStatus = vi.fn();
 
 vi.mock('../../../src/lib/api', () => ({
   fetchAnalyticsDau: (...args: unknown[]) => mockFetchDau(...args),
@@ -19,6 +20,7 @@ vi.mock('../../../src/lib/api', () => ({
   fetchAnalyticsFeatureAdoption: (...args: unknown[]) => mockFetchFeatureAdoption(...args),
   fetchAnalyticsGeo: (...args: unknown[]) => mockFetchGeo(...args),
   fetchAnalyticsRetention: (...args: unknown[]) => mockFetchRetention(...args),
+  fetchAnalyticsForwardStatus: (...args: unknown[]) => mockFetchForwardStatus(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -30,6 +32,7 @@ const FUNNEL_FIXTURE = { funnel: [{ event_name: 'signup', unique_users: 100 }], 
 const ADOPTION_FIXTURE = { totals: [{ event_name: 'task_submitted', count: 42, unique_users: 10 }], trend: [], period: '30d' };
 const GEO_FIXTURE = { geo: [{ country: 'US', event_count: 100, unique_users: 20 }], period: '30d' };
 const RETENTION_FIXTURE = { retention: [{ cohortWeek: '2026-03-10', cohortSize: 5, weeks: [{ week: 0, users: 5, rate: 100 }] }], weeks: 12 };
+const FORWARD_STATUS_FIXTURE = { enabled: false, lastForwardedAt: null, destinations: { segment: { configured: false }, ga4: { configured: false } }, events: ['signup', 'login'] };
 
 function setupSuccessMocks() {
   mockFetchDau.mockResolvedValue(DAU_FIXTURE);
@@ -38,6 +41,7 @@ function setupSuccessMocks() {
   mockFetchFeatureAdoption.mockResolvedValue(ADOPTION_FIXTURE);
   mockFetchGeo.mockResolvedValue(GEO_FIXTURE);
   mockFetchRetention.mockResolvedValue(RETENTION_FIXTURE);
+  mockFetchForwardStatus.mockResolvedValue(FORWARD_STATUS_FIXTURE);
 }
 
 describe('useAdminAnalytics', () => {
@@ -73,7 +77,7 @@ describe('useAdminAnalytics', () => {
   // Successful fetch
   // -------------------------------------------------------------------------
 
-  it('fetches all six data sources on mount and populates state', async () => {
+  it('fetches all seven data sources on mount and populates state', async () => {
     setupSuccessMocks();
     const { result } = renderHook(() => useAdminAnalytics(0));
 
@@ -144,6 +148,7 @@ describe('useAdminAnalytics', () => {
     mockFetchFeatureAdoption.mockRejectedValue(new Error('feature-adoption failed'));
     mockFetchGeo.mockResolvedValue(GEO_FIXTURE);
     mockFetchRetention.mockResolvedValue(RETENTION_FIXTURE);
+    mockFetchForwardStatus.mockResolvedValue(FORWARD_STATUS_FIXTURE);
 
     const { result } = renderHook(() => useAdminAnalytics(0));
 
@@ -159,6 +164,7 @@ describe('useAdminAnalytics', () => {
     mockFetchFeatureAdoption.mockResolvedValue(ADOPTION_FIXTURE);
     mockFetchGeo.mockResolvedValue(GEO_FIXTURE);
     mockFetchRetention.mockResolvedValue(RETENTION_FIXTURE);
+    mockFetchForwardStatus.mockResolvedValue(FORWARD_STATUS_FIXTURE);
 
     const { result } = renderHook(() => useAdminAnalytics(0));
 
@@ -174,6 +180,7 @@ describe('useAdminAnalytics', () => {
     mockFetchFeatureAdoption.mockResolvedValue(ADOPTION_FIXTURE);
     mockFetchGeo.mockResolvedValue(GEO_FIXTURE);
     mockFetchRetention.mockResolvedValue(RETENTION_FIXTURE);
+    mockFetchForwardStatus.mockResolvedValue(FORWARD_STATUS_FIXTURE);
 
     const { result } = renderHook(() => useAdminAnalytics(0));
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -261,7 +268,7 @@ describe('useAdminAnalytics', () => {
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
   });
 
-  it('refresh calls all six fetchers again', async () => {
+  it('refresh calls all seven fetchers again', async () => {
     setupSuccessMocks();
     const { result } = renderHook(() => useAdminAnalytics(0));
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -276,6 +283,7 @@ describe('useAdminAnalytics', () => {
     expect(mockFetchFeatureAdoption).toHaveBeenCalledTimes(2);
     expect(mockFetchGeo).toHaveBeenCalledTimes(2);
     expect(mockFetchRetention).toHaveBeenCalledTimes(2);
+    expect(mockFetchForwardStatus).toHaveBeenCalledTimes(2);
   });
 
   // -------------------------------------------------------------------------
