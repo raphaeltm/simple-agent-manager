@@ -63,6 +63,32 @@ function assertIsoTimestamp(value: string): void {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(value)) {
     throw new Error(`Invalid ISO timestamp for cursor: ${value}`);
   }
+  // Semantic validity: regex alone accepts 2026-99-99T99:99:99Z
+  if (isNaN(new Date(value).getTime())) {
+    throw new Error(`Invalid ISO timestamp for cursor: ${value}`);
+  }
+}
+
+/** Validate event name against a strict allowlist pattern to prevent SQL injection. */
+const EVENT_NAME_RE = /^[a-z][a-z0-9_]{0,63}$/;
+function assertValidEventName(name: string): void {
+  if (!EVENT_NAME_RE.test(name)) {
+    throw new Error(`Invalid event name for analytics forward: ${name}`);
+  }
+}
+
+/** Allowed URL prefixes for external API overrides — prevents SSRF via env var misconfiguration. */
+const ALLOWED_URL_PREFIXES: Record<string, string[]> = {
+  segment: ['https://api.segment.io/', 'https://api.segment.com/'],
+  ga4: ['https://www.google-analytics.com/', 'https://analytics.google.com/'],
+  analytics_sql: ['https://api.cloudflare.com/'],
+};
+
+function assertAllowedUrl(url: string, service: keyof typeof ALLOWED_URL_PREFIXES): void {
+  const prefixes = ALLOWED_URL_PREFIXES[service]!;
+  if (!prefixes.some(prefix => url.startsWith(prefix))) {
+    throw new Error(`Disallowed ${service} API URL: ${url}. Must start with one of: ${prefixes.join(', ')}`);
+  }
 }
 
 /**
@@ -74,6 +100,7 @@ export async function queryConversionEvents(
   eventNames: string[],
 ): Promise<AnalyticsEvent[]> {
   const baseUrl = env.ANALYTICS_SQL_API_URL ?? DEFAULT_ANALYTICS_SQL_API_URL;
+  assertAllowedUrl(baseUrl, 'analytics_sql');
   const accountId = env.CF_ACCOUNT_ID;
   const dataset = env.ANALYTICS_DATASET ?? DEFAULT_DATASET;
 
@@ -84,7 +111,12 @@ export async function queryConversionEvents(
   // Validate sinceIso to prevent SQL injection via corrupted KV cursor
   assertIsoTimestamp(sinceIso);
 
-  // Build IN clause for event names
+  // Validate event names against strict allowlist pattern (prevents SQL injection via -- ; /* etc.)
+  for (const name of eventNames) {
+    assertValidEventName(name);
+  }
+
+  // Build IN clause for event names (already validated — single-quote escape is defense-in-depth)
   const eventList = eventNames.map(e => `'${e.replace(/'/g, "''")}'`).join(', ');
   // SQL LIMIT is the memory-safety guard for downstream in-memory grouping (GA4 Map)
   const sqlLimit = parsePositiveInt(env.ANALYTICS_FORWARD_SQL_LIMIT, DEFAULT_FORWARD_SQL_LIMIT);
@@ -192,8 +224,10 @@ export async function forwardToSegment(
   }
 
   const apiUrl = env.SEGMENT_API_URL ?? DEFAULT_SEGMENT_API_URL;
+  assertAllowedUrl(apiUrl, 'segment');
   const maxBatch = parsePositiveInt(env.SEGMENT_MAX_BATCH_SIZE, DEFAULT_SEGMENT_MAX_BATCH);
   const fetchTimeoutMs = parsePositiveInt(env.SEGMENT_FETCH_TIMEOUT_MS, DEFAULT_FORWARD_FETCH_TIMEOUT_MS);
+  // Note: authHeader contains Base64-encoded write key — NEVER log this value
   const authHeader = `Basic ${btoa(writeKey + ':')}`;
 
   let totalSent = 0;
@@ -283,8 +317,10 @@ export async function forwardToGA4(
   }
 
   const baseUrl = env.GA4_API_URL ?? DEFAULT_GA4_API_URL;
+  assertAllowedUrl(baseUrl, 'ga4');
   const maxBatch = parsePositiveInt(env.GA4_MAX_BATCH_SIZE, DEFAULT_GA4_MAX_BATCH);
   const fetchTimeoutMs = parsePositiveInt(env.GA4_FETCH_TIMEOUT_MS, DEFAULT_FORWARD_FETCH_TIMEOUT_MS);
+  // Note: api_secret is a query parameter per GA4 Measurement Protocol spec — NEVER log the assembled URL
   const url = `${baseUrl}?measurement_id=${encodeURIComponent(measurementId)}&api_secret=${encodeURIComponent(apiSecret)}`;
 
   let totalSent = 0;
@@ -429,7 +465,16 @@ export async function getForwardStatus(env: Env): Promise<{
 }> {
   const enabled = (env.ANALYTICS_FORWARD_ENABLED ?? 'false').toLowerCase() === 'true';
   const cursorKey = env.ANALYTICS_FORWARD_CURSOR_KEY ?? DEFAULT_CURSOR_KEY;
-  const lastForwardedAt = await env.KV.get(cursorKey);
+  const rawCursor = await env.KV.get(cursorKey);
+  let lastForwardedAt: string | null = null;
+  if (rawCursor) {
+    try {
+      assertIsoTimestamp(rawCursor);
+      lastForwardedAt = rawCursor;
+    } catch {
+      console.warn('Analytics forward: invalid cursor in KV, treating as absent', { rawCursor: rawCursor.slice(0, 100) });
+    }
+  }
   const events = (env.ANALYTICS_FORWARD_EVENTS ?? DEFAULT_FORWARD_EVENTS)
     .split(',')
     .map(e => e.trim())

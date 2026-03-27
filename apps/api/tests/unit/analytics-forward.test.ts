@@ -122,18 +122,34 @@ describe('queryConversionEvents', () => {
     expect(events).toEqual([]);
   });
 
-  it('escapes single quotes in event names', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ data: [] }),
-    });
-    vi.stubGlobal('fetch', mockFetch);
-
+  it('rejects event names containing SQL comment sequences', async () => {
     const env = makeEnv();
-    await queryConversionEvents(env, '2026-03-26T00:00:00Z', ["event'name"]);
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup--']))
+      .rejects.toThrow('Invalid event name');
+  });
 
-    const sql = mockFetch.mock.calls[0][1].body;
-    expect(sql).toContain("'event''name'");
+  it('rejects event names with semicolons', async () => {
+    const env = makeEnv();
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup;DROP']))
+      .rejects.toThrow('Invalid event name');
+  });
+
+  it('rejects event names starting with uppercase', async () => {
+    const env = makeEnv();
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['Signup']))
+      .rejects.toThrow('Invalid event name');
+  });
+
+  it('rejects semantically invalid ISO timestamps', async () => {
+    const env = makeEnv();
+    await expect(queryConversionEvents(env, '2026-99-99T99:99:99Z', ['signup']))
+      .rejects.toThrow('Invalid ISO timestamp for cursor');
+  });
+
+  it('rejects event names with special characters (single quotes)', async () => {
+    const env = makeEnv();
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ["event'name"]))
+      .rejects.toThrow('Invalid event name');
   });
 });
 
@@ -191,17 +207,25 @@ describe('forwardToSegment', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
-  it('uses custom SEGMENT_API_URL when provided', async () => {
+  it('uses custom SEGMENT_API_URL when it matches allowed prefix', async () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', mockFetch);
 
     const env = makeEnv({
       SEGMENT_WRITE_KEY: 'test-key',
-      SEGMENT_API_URL: 'https://custom.segment.io/v1/batch',
+      SEGMENT_API_URL: 'https://api.segment.io/v2/batch',
     });
     await forwardToSegment(env, [makeEvent()]);
 
-    expect(mockFetch.mock.calls[0][0]).toBe('https://custom.segment.io/v1/batch');
+    expect(mockFetch.mock.calls[0][0]).toBe('https://api.segment.io/v2/batch');
+  });
+
+  it('rejects disallowed SEGMENT_API_URL to prevent SSRF', async () => {
+    const env = makeEnv({
+      SEGMENT_WRITE_KEY: 'test-key',
+      SEGMENT_API_URL: 'https://evil.example.com/steal-key',
+    });
+    await expect(forwardToSegment(env, [makeEvent()])).rejects.toThrow('Disallowed segment API URL');
   });
 
   it('returns error on API failure', async () => {
@@ -325,18 +349,27 @@ describe('forwardToGA4', () => {
     expect(secondPayload.events).toHaveLength(1);
   });
 
-  it('uses custom GA4_API_URL when provided', async () => {
+  it('uses custom GA4_API_URL when it matches allowed prefix', async () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', mockFetch);
 
     const env = makeEnv({
       GA4_MEASUREMENT_ID: 'G-123',
       GA4_API_SECRET: 'secret',
-      GA4_API_URL: 'https://custom.ga4.example/mp/collect',
+      GA4_API_URL: 'https://www.google-analytics.com/debug/mp/collect',
     });
     await forwardToGA4(env, [makeEvent()]);
 
-    expect(mockFetch.mock.calls[0][0]).toContain('https://custom.ga4.example/mp/collect');
+    expect(mockFetch.mock.calls[0][0]).toContain('https://www.google-analytics.com/debug/mp/collect');
+  });
+
+  it('rejects disallowed GA4_API_URL to prevent SSRF', async () => {
+    const env = makeEnv({
+      GA4_MEASUREMENT_ID: 'G-123',
+      GA4_API_SECRET: 'secret',
+      GA4_API_URL: 'https://evil.example.com/steal-secret',
+    });
+    await expect(forwardToGA4(env, [makeEvent()])).rejects.toThrow('Disallowed ga4 API URL');
   });
 
   it('returns error on API failure', async () => {
@@ -578,6 +611,18 @@ describe('getForwardStatus', () => {
     const status = await getForwardStatus(env);
 
     expect(status.lastForwardedAt).toBe('2026-03-27T03:00:00Z');
+  });
+
+  it('returns null for lastForwardedAt when KV cursor is invalid', async () => {
+    const env = makeEnv({
+      KV: {
+        get: vi.fn().mockResolvedValue('not-a-valid-timestamp'),
+        put: vi.fn(),
+      },
+    });
+    const status = await getForwardStatus(env);
+
+    expect(status.lastForwardedAt).toBeNull();
   });
 
   it('uses custom event list', async () => {
