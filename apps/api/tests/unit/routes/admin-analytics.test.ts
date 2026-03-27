@@ -48,7 +48,7 @@ describe('admin-analytics routes', () => {
     expect(url).toContain(`${CF_ACCOUNT_ID}/analytics_engine/sql`);
     expect(opts.method).toBe('POST');
     expect(opts.headers.Authorization).toBe(`Bearer ${CF_API_TOKEN}`);
-    expect(opts.body).toContain('uniq(index1)');
+    expect(opts.body).toContain('count(DISTINCT index1)');
     expect(opts.body).toContain('sam_analytics');
   });
 
