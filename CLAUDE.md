@@ -7,7 +7,9 @@ A serverless monorepo platform for ephemeral AI coding agent environments on Clo
 ```
 apps/
 ├── api/          # Cloudflare Worker API (Hono)
-└── web/          # Control plane UI (React + Vite)
+├── web/          # Control plane UI (React + Vite)
+├── www/          # Marketing website, blog & docs (Astro + Starlight) — simple-agent-manager.org
+└── tail-worker/  # Cloudflare Tail Worker (observability)
 packages/
 ├── shared/       # Shared types and utilities
 ├── providers/    # Cloud provider abstraction (Hetzner, Scaleway)
@@ -40,6 +42,18 @@ pnpm --filter @simple-agent-manager/shared build
 pnpm --filter @simple-agent-manager/providers build
 pnpm --filter @simple-agent-manager/api build
 ```
+
+## Website vs App (IMPORTANT)
+
+This monorepo has TWO separate web surfaces. Do NOT confuse them:
+
+| Surface | Directory | Domain | Stack | What it is |
+|---------|-----------|--------|-------|------------|
+| **Marketing website** | `apps/www/` | `simple-agent-manager.org` | Astro + Starlight | Public website, landing pages, blog, docs |
+| **App (control plane)** | `apps/web/` | `app.simple-agent-manager.org` | React + Vite | Authenticated SaaS UI (dashboard, projects, settings) |
+
+When the user mentions **website, marketing, landing page, blog, docs site, or public pages** → look in `apps/www/`.
+When the user mentions **app, dashboard, projects, settings, or UI** → look in `apps/web/`.
 
 ## Development Approach
 
