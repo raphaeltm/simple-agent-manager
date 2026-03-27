@@ -1692,3 +1692,35 @@ export async function deleteAgentProfile(
     method: 'DELETE',
   });
 }
+
+// ---------------------------------------------------------------------------
+// Admin Analytics
+// ---------------------------------------------------------------------------
+
+export interface AnalyticsDauResponse {
+  dau: Array<{ date: string; unique_users: number }>;
+  periodDays: number;
+}
+
+export interface AnalyticsEventsResponse {
+  events: Array<{ event_name: string; count: number; unique_users: number; avg_response_ms: number }>;
+  period: string;
+}
+
+export interface AnalyticsFunnelResponse {
+  funnel: Array<{ event_name: string; unique_users: number }>;
+  periodDays: number;
+}
+
+export async function fetchAnalyticsDau(): Promise<AnalyticsDauResponse> {
+  return request<AnalyticsDauResponse>('/api/admin/analytics/dau');
+}
+
+export async function fetchAnalyticsEvents(period?: string): Promise<AnalyticsEventsResponse> {
+  const params = period ? `?period=${period}` : '';
+  return request<AnalyticsEventsResponse>(`/api/admin/analytics/events${params}`);
+}
+
+export async function fetchAnalyticsFunnel(): Promise<AnalyticsFunnelResponse> {
+  return request<AnalyticsFunnelResponse>('/api/admin/analytics/funnel');
+}

@@ -35,12 +35,14 @@ import { chatRoutes } from './routes/chat';
 import { cachedCommandRoutes } from './routes/cached-commands';
 import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
+import { adminAnalyticsRoutes } from './routes/admin-analytics';
 import { dashboardRoutes } from './routes/dashboard';
 import { mcpRoutes } from './routes/mcp';
 import { notificationRoutes } from './routes/notifications';
 import { gcpRoutes } from './routes/gcp';
 import { googleAuthRoutes } from './routes/google-auth';
 import { projectDeploymentRoutes, gcpDeployCallbackRoute, deploymentIdentityTokenRoute } from './routes/project-deployment';
+import { analyticsMiddleware } from './middleware/analytics';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
@@ -61,6 +63,8 @@ export interface Env {
   R2: R2Bucket;
   // Workers AI for speech-to-text transcription
   AI: Ai;
+  // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
+  ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)
   OBSERVABILITY_DATABASE: D1Database;
   // Durable Objects
@@ -331,6 +335,13 @@ export interface Env {
   GCP_IAM_CREDENTIALS_BASE_URL?: string;
   GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS?: string;
   GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS?: string;
+  // Analytics Engine configuration
+  ANALYTICS_ENABLED?: string;                   // "true" (default) or "false"
+  ANALYTICS_SKIP_ROUTES?: string;               // Comma-separated route patterns to skip
+  ANALYTICS_SQL_API_URL?: string;               // Override Analytics Engine SQL API URL
+  ANALYTICS_DEFAULT_PERIOD_DAYS?: string;       // Default query period (default: 30)
+  ANALYTICS_DATASET?: string;                   // Dataset name (default: "sam_analytics")
+  ANALYTICS_TOP_EVENTS_LIMIT?: string;          // Max events in top events query (default: 50)
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -535,6 +546,10 @@ app.use('*', async (c, next) => {
 
 // Hono built-in logger (kept for dev convenience, can be removed in production)
 app.use('*', logger());
+
+// Analytics Engine — writes one data point per request (non-blocking, fire-and-forget)
+app.use('*', analyticsMiddleware());
+
 app.use('*', cors({
   origin: (origin, c) => {
     if (!origin) return null;
@@ -655,6 +670,7 @@ app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/projects', projectDeploymentRoutes);
 app.route('/api/deployment', gcpDeployCallbackRoute);
 app.route('/api/admin', adminRoutes);
+app.route('/api/admin/analytics', adminAnalyticsRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/notifications', notificationRoutes);
 app.route('/api/gcp', gcpRoutes);

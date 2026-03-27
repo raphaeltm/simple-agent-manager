@@ -72,6 +72,12 @@ These are env vars with sensible defaults — override only if needed:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `ANALYTICS_ENABLED` | `true` | Set to `"false"` to disable Analytics Engine writes |
+| `ANALYTICS_SKIP_ROUTES` | (empty) | Comma-separated additional route prefixes to skip |
+| `ANALYTICS_SQL_API_URL` | (CF default) | Override Cloudflare Analytics Engine SQL API base URL |
+| `ANALYTICS_DEFAULT_PERIOD_DAYS` | `30` | Default DAU query period in days |
+| `ANALYTICS_DATASET` | `sam_analytics` | Analytics Engine dataset name |
+| `ANALYTICS_TOP_EVENTS_LIMIT` | `50` | Max rows returned by top-events admin query |
 | `GCP_DEPLOY_WIF_POOL_ID` | `sam-deploy-pool` | WIF pool ID for project-level GCP deployment |
 | `GCP_DEPLOY_WIF_PROVIDER_ID` | `sam-oidc` | OIDC provider ID within the deploy WIF pool |
 | `GCP_DEPLOY_SERVICE_ACCOUNT_ID` | `sam-deployer` | Service account for deployment operations |
