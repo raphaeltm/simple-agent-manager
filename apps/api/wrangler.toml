@@ -114,9 +114,11 @@ binding = "AI"
 # tail_consumers are also generated (and intentionally absent from top-level config
 # because they break Vitest — Cloudflare issue #9343).
 
-# Cron trigger for provisioning timeout checks + warm node cleanup (every 5 minutes)
+# Cron triggers:
+# - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery
+# - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 * * * *", "0 3 * * *"]
 
 # Secrets (set via wrangler secret put):
 # - GITHUB_CLIENT_ID
