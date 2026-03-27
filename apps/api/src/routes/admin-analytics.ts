@@ -81,7 +81,7 @@ async function queryAnalyticsEngine(
       body: body.slice(0, 500),
       sql: sql.slice(0, 300),
     });
-    throw errors.internal(`Analytics Engine query failed: ${response.status} — ${body.slice(0, 200)}`);
+    throw errors.internal(`Analytics Engine query failed: ${response.status}`);
   }
 
   const body = await response.json() as { data?: unknown[]; meta?: unknown[] };
@@ -258,13 +258,13 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
   // Then compute retention on the API layer for flexibility.
   //
   // NOTE: Analytics Engine SQL does not support toStartOfWeek — use
-  // toStartOfInterval(timestamp, INTERVAL 7 DAY) which buckets into
+  // toStartOfInterval(timestamp, INTERVAL '7' DAY) which buckets into
   // epoch-aligned 7-day intervals.
 
   const cohortSql = `
     SELECT
       index1 AS user_id,
-      min(toStartOfInterval(timestamp, INTERVAL 7 DAY)) AS cohort_week
+      min(toStartOfInterval(timestamp, INTERVAL '7' DAY)) AS cohort_week
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${weeks * 7}' DAY
       AND index1 != 'anonymous'
@@ -276,7 +276,7 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
   const activitySql = `
     SELECT
       index1 AS user_id,
-      toStartOfInterval(timestamp, INTERVAL 7 DAY) AS active_week
+      toStartOfInterval(timestamp, INTERVAL '7' DAY) AS active_week
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${weeks * 7}' DAY
       AND index1 != 'anonymous'
