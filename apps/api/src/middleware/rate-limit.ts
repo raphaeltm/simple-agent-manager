@@ -34,6 +34,7 @@ export const DEFAULT_RATE_LIMITS = {
   ANONYMOUS: 100,
   CLIENT_ERRORS: 200,
   IDENTITY_TOKEN: 60,
+  ANALYTICS_INGEST: 500,
 } as const;
 
 /** Default time window (1 hour in seconds) */

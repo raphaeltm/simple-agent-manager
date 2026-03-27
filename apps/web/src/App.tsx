@@ -35,6 +35,7 @@ import { AdminOverview } from './pages/AdminOverview';
 import { AdminLogs } from './pages/AdminLogs';
 import { AdminStream } from './pages/AdminStream';
 import { AdminAnalytics } from './pages/AdminAnalytics';
+import { PageViewTracker } from './components/PageViewTracker';
 
 function ProtectedLayout() {
   return (
@@ -52,6 +53,7 @@ export default function App() {
     <AuthProvider>
     <ToastProvider>
       <BrowserRouter>
+        <PageViewTracker />
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Landing />} />

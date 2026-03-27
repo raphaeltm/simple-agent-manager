@@ -36,6 +36,7 @@ import { cachedCommandRoutes } from './routes/cached-commands';
 import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
 import { adminAnalyticsRoutes } from './routes/admin-analytics';
+import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { dashboardRoutes } from './routes/dashboard';
 import { mcpRoutes } from './routes/mcp';
 import { notificationRoutes } from './routes/notifications';
@@ -342,6 +343,11 @@ export interface Env {
   ANALYTICS_DEFAULT_PERIOD_DAYS?: string;       // Default query period (default: 30)
   ANALYTICS_DATASET?: string;                   // Dataset name (default: "sam_analytics")
   ANALYTICS_TOP_EVENTS_LIMIT?: string;          // Max events in top events query (default: 50)
+  // Analytics ingest endpoint (Phase 2 — client-side events)
+  ANALYTICS_INGEST_ENABLED?: string;             // "true" (default) or "false"
+  RATE_LIMIT_ANALYTICS_INGEST?: string;          // Rate limit per IP per hour (default: 500)
+  MAX_ANALYTICS_INGEST_BATCH_SIZE?: string;      // Max events per batch (default: 25)
+  MAX_ANALYTICS_INGEST_BODY_BYTES?: string;      // Max request body bytes (default: 65536)
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -654,6 +660,7 @@ app.route('/api/transcribe', transcribeRoutes);
 app.route('/api/tts', ttsRoutes);
 app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
+app.route('/api/t', analyticsIngestRoutes);
 // ORDERING IS CRITICAL: deploymentIdentityTokenRoute MUST be mounted before
 // projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
 // all siblings at the same base path — mounting identity token route first
