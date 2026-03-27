@@ -1770,3 +1770,18 @@ export async function fetchAnalyticsRetention(weeks?: number): Promise<Analytics
   const params = weeks ? `?weeks=${weeks}` : '';
   return request<AnalyticsRetentionResponse>(`/api/admin/analytics/retention${params}`);
 }
+
+// Analytics forwarding status (Phase 4)
+export interface AnalyticsForwardStatusResponse {
+  enabled: boolean;
+  lastForwardedAt: string | null;
+  destinations: {
+    segment: { configured: boolean };
+    ga4: { configured: boolean };
+  };
+  events: string[];
+}
+
+export async function fetchAnalyticsForwardStatus(): Promise<AnalyticsForwardStatusResponse> {
+  return request<AnalyticsForwardStatusResponse>('/api/admin/analytics/forward-status');
+}

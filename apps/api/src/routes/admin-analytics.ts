@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../index';
 import { requireAuth, requireApproved, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { getForwardStatus } from '../services/analytics-forward';
 
 const DEFAULT_ANALYTICS_SQL_API_URL = 'https://api.cloudflare.com/client/v4/accounts';
 const DEFAULT_PERIOD_DAYS = 30;
@@ -339,6 +340,14 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
     activityData.length >= MAX_RETENTION_QUERY_ROWS;
 
   return c.json({ retention, weeks, truncated });
+});
+
+/**
+ * GET /api/admin/analytics/forward-status — Forwarding configuration and cursor state
+ */
+adminAnalyticsRoutes.get('/forward-status', async (c) => {
+  const status = await getForwardStatus(c.env);
+  return c.json(status);
 });
 
 export { adminAnalyticsRoutes };

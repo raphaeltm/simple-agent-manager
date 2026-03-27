@@ -49,6 +49,7 @@ import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
 import { runObservabilityPurge } from './scheduled/observability-purge';
+import { runAnalyticsForwardJob } from './scheduled/analytics-forward';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
@@ -350,6 +351,22 @@ export interface Env {
   RATE_LIMIT_ANALYTICS_INGEST?: string;          // Rate limit per IP per hour (default: 500)
   MAX_ANALYTICS_INGEST_BATCH_SIZE?: string;      // Max events per batch (default: 25)
   MAX_ANALYTICS_INGEST_BODY_BYTES?: string;      // Max request body bytes (default: 65536)
+  // Analytics forwarding (Phase 4 — external event export)
+  ANALYTICS_FORWARD_ENABLED?: string;             // "true" to enable forwarding (default: "false")
+  ANALYTICS_FORWARD_EVENTS?: string;              // Comma-separated event names to forward (default: key conversions)
+  ANALYTICS_FORWARD_LOOKBACK_HOURS?: string;      // Hours of data to query per run (default: 25)
+  ANALYTICS_FORWARD_CURSOR_KEY?: string;          // KV key for last-forwarded timestamp (default: "analytics-forward-cursor")
+  SEGMENT_WRITE_KEY?: string;                     // Segment write key (enables Segment forwarding)
+  SEGMENT_API_URL?: string;                       // Segment batch endpoint (default: https://api.segment.io/v1/batch)
+  SEGMENT_MAX_BATCH_SIZE?: string;                // Max events per Segment batch (default: 100)
+  GA4_MEASUREMENT_ID?: string;                    // GA4 measurement ID (enables GA4 forwarding)
+  GA4_API_SECRET?: string;                        // GA4 API secret
+  GA4_API_URL?: string;                           // GA4 Measurement Protocol endpoint (default: https://www.google-analytics.com/mp/collect)
+  GA4_MAX_BATCH_SIZE?: string;                    // Max events per GA4 request (default: 25)
+  ANALYTICS_FORWARD_SQL_LIMIT?: string;           // Max rows per forwarding query (default: 10000)
+  ANALYTICS_SQL_FETCH_TIMEOUT_MS?: string;        // Timeout for Analytics Engine SQL API fetch (default: 30000)
+  SEGMENT_FETCH_TIMEOUT_MS?: string;              // Timeout for Segment API fetch (default: 30000)
+  GA4_FETCH_TIMEOUT_MS?: string;                  // Timeout for GA4 API fetch (default: 30000)
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -717,19 +734,47 @@ export default {
 
   /**
    * Scheduled (cron) handler for background tasks.
-   * Runs every 5 minutes (configured in wrangler.toml).
+   * Two cron schedules:
+   * - Every 5 minutes: operational cleanup (provisioning, nodes, tasks, observability)
+   * - Daily at 03:00 UTC: analytics event forwarding to external platforms
    */
   async scheduled(
-    _controller: ScheduledController,
+    controller: ScheduledController,
     env: Env,
-    _ctx: ExecutionContext
+    ctx: ExecutionContext
   ): Promise<void> {
+    const isDailyForward = controller.cron === '0 3 * * *';
+
     console.log(JSON.stringify({
       timestamp: new Date().toISOString(),
       level: 'info',
       event: 'cron.started',
+      cron: controller.cron,
+      type: isDailyForward ? 'daily-forward' : 'sweep',
     }));
 
+    // Daily analytics forwarding (Phase 4) — use ctx.waitUntil to keep the
+    // isolate alive for the full duration of multi-step external API calls.
+    if (isDailyForward) {
+      ctx.waitUntil((async () => {
+        const forward = await runAnalyticsForwardJob(env);
+        console.log(JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: 'info',
+          event: 'cron.completed',
+          cron: controller.cron,
+          type: 'daily-forward',
+          forwardEnabled: forward.enabled,
+          forwardEventsQueried: forward.eventsQueried,
+          forwardSegmentSent: forward.segment.sent,
+          forwardGA4Sent: forward.ga4.sent,
+          forwardCursorUpdated: forward.cursorUpdated,
+        }));
+      })());
+      return;
+    }
+
+    // 5-minute operational sweep
     // Check for stuck provisioning workspaces
     const timedOut = await checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE);
 
@@ -750,6 +795,8 @@ export default {
       timestamp: new Date().toISOString(),
       level: 'info',
       event: 'cron.completed',
+      cron: controller.cron,
+      type: 'sweep',
       provisioningTimedOut: timedOut,
       workspacesMigrated: migrated,
       staleNodesDestroyed: nodeCleanup.staleDestroyed,

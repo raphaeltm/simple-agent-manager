@@ -8,6 +8,7 @@ import {
   FeatureAdoptionChart,
   GeoDistribution,
   RetentionCohorts,
+  ForwardingStatus,
 } from './admin-analytics';
 
 export function AdminAnalytics() {
@@ -18,6 +19,7 @@ export function AdminAnalytics() {
     featureAdoption,
     geo,
     retention,
+    forwardStatus,
     loading,
     isRefreshing,
     error,
@@ -118,6 +120,16 @@ export function AdminAnalytics() {
         <div className="p-4">
           <h3 className="text-base font-semibold text-fg-primary mb-3">Top Events</h3>
           <EventsTable data={events?.events ?? []} />
+        </div>
+      </Card>
+
+      {/* Forwarding Status */}
+      <Card>
+        <div className="p-4">
+          <h3 className="text-base font-semibold text-fg-primary mb-3">
+            Event Forwarding
+          </h3>
+          <ForwardingStatus data={forwardStatus} />
         </div>
       </Card>
     </div>
