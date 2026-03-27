@@ -81,7 +81,7 @@ async function queryAnalyticsEngine(
       body: body.slice(0, 500),
       sql: sql.slice(0, 300),
     });
-    throw errors.internal(`Analytics Engine query failed: ${response.status} — ${body.slice(0, 300)}`);
+    throw errors.internal(`Analytics Engine query failed: ${response.status}`);
   }
 
   const body = await response.json() as { data?: unknown[]; meta?: unknown[] };
@@ -99,7 +99,7 @@ adminAnalyticsRoutes.get('/dau', async (c) => {
   const sql = `
     SELECT
       toDate(timestamp) AS date,
-      uniq(index1) AS unique_users
+      count(DISTINCT index1) AS unique_users
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${periodDays}' DAY
       AND blob1 != ''
@@ -126,7 +126,7 @@ adminAnalyticsRoutes.get('/events', async (c) => {
     SELECT
       blob1 AS event_name,
       count() AS count,
-      uniq(index1) AS unique_users,
+      count(DISTINCT index1) AS unique_users,
       avg(double1) AS avg_response_ms
     FROM ${dataset}
     WHERE timestamp >= NOW() - ${intervalExpr}
@@ -151,7 +151,7 @@ adminAnalyticsRoutes.get('/funnel', async (c) => {
   const sql = `
     SELECT
       blob1 AS event_name,
-      uniq(index1) AS unique_users
+      count(DISTINCT index1) AS unique_users
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${periodDays}' DAY
       AND blob1 IN ('signup', 'login', 'project_created', 'workspace_created', 'task_submitted')
@@ -181,7 +181,7 @@ adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
     SELECT
       blob1 AS event_name,
       count() AS count,
-      uniq(index1) AS unique_users
+      count(DISTINCT index1) AS unique_users
     FROM ${dataset}
     WHERE timestamp >= NOW() - ${intervalExpr}
       AND blob1 IN (${eventList})
@@ -226,7 +226,7 @@ adminAnalyticsRoutes.get('/geo', async (c) => {
     SELECT
       blob10 AS country,
       count() AS event_count,
-      uniq(index1) AS unique_users
+      count(DISTINCT index1) AS unique_users
     FROM ${dataset}
     WHERE timestamp >= NOW() - ${intervalExpr}
       AND blob10 != ''
