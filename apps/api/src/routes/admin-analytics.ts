@@ -79,8 +79,9 @@ async function queryAnalyticsEngine(
     console.error('Analytics Engine SQL API error', {
       status: response.status,
       body: body.slice(0, 500),
+      sql: sql.slice(0, 300),
     });
-    throw errors.internal(`Analytics Engine query failed: ${response.status}`);
+    throw errors.internal(`Analytics Engine query failed: ${response.status} — ${body.slice(0, 300)}`);
   }
 
   const body = await response.json() as { data?: unknown[]; meta?: unknown[] };
