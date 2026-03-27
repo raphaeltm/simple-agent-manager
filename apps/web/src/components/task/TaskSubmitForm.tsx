@@ -1,8 +1,10 @@
-import { type FC, useState, useEffect } from 'react';
-import type { AgentProfile, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { type FC, useState, useEffect, useCallback } from 'react';
+import type { AgentProfile, VMSize, WorkspaceProfile, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
+import { Settings } from 'lucide-react';
 import { SplitButton } from '../ui/SplitButton';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
-import { listAgentProfiles } from '../../lib/api';
+import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
+import { listAgentProfiles, updateAgentProfile } from '../../lib/api';
 
 export interface TaskSubmitFormProps {
   projectId: string;
@@ -35,23 +37,41 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+
+  const hasProfile = !!agentProfileId;
+  const selectedProfile = hasProfile
+    ? profiles.find((p) => p.id === agentProfileId) ?? null
+    : null;
 
   // Load profiles
-  useEffect(() => {
-    let cancelled = false;
+  const loadProfiles = useCallback(() => {
     void listAgentProfiles(projectId)
-      .then((data) => { if (!cancelled) setProfiles(data); })
+      .then((data) => setProfiles(data))
       .catch(() => { /* best-effort */ });
-    return () => { cancelled = true; };
   }, [projectId]);
 
-  const options: TaskSubmitOptions = {
-    description: description.trim() || undefined,
-    priority: priority || undefined,
-    agentProfileId: agentProfileId ?? undefined,
-    vmSize: vmSize || undefined,
-    workspaceProfile: workspaceProfile || undefined,
-  };
+  useEffect(() => {
+    loadProfiles();
+  }, [loadProfiles]);
+
+  const handleUpdateProfile = useCallback(async (_profileId: string, data: UpdateAgentProfileRequest) => {
+    await updateAgentProfile(projectId, _profileId, data);
+    loadProfiles();
+  }, [projectId, loadProfiles]);
+
+  const options: TaskSubmitOptions = hasProfile
+    ? {
+        description: description.trim() || undefined,
+        priority: priority || undefined,
+        agentProfileId: agentProfileId ?? undefined,
+      }
+    : {
+        description: description.trim() || undefined,
+        priority: priority || undefined,
+        vmSize: vmSize || undefined,
+        workspaceProfile: workspaceProfile || undefined,
+      };
 
   const resetForm = () => {
     setTitle('');
@@ -164,19 +184,32 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             />
           </div>
 
-          <div className="flex gap-3 flex-wrap">
+          <div className="flex gap-3 flex-wrap items-end">
             {profiles.length > 0 && (
-              <div>
-                <label className="text-xs text-fg-muted block mb-1">
-                  Agent Profile
-                </label>
-                <ProfileSelector
-                  profiles={profiles}
-                  selectedProfileId={agentProfileId}
-                  onChange={setAgentProfileId}
-                  disabled={submitting}
-                  compact
-                />
+              <div className="flex items-end gap-1">
+                <div>
+                  <label className="text-xs text-fg-muted block mb-1">
+                    Agent Profile
+                  </label>
+                  <ProfileSelector
+                    profiles={profiles}
+                    selectedProfileId={agentProfileId}
+                    onChange={setAgentProfileId}
+                    disabled={submitting}
+                    compact
+                  />
+                </div>
+                {hasProfile && (
+                  <button
+                    type="button"
+                    onClick={() => setEditProfileOpen(true)}
+                    disabled={submitting}
+                    aria-label="Edit profile settings"
+                    className="shrink-0 p-1.5 border border-border-default rounded-sm bg-surface text-fg-muted hover:text-fg-primary cursor-pointer disabled:opacity-50"
+                  >
+                    <Settings size={14} />
+                  </button>
+                )}
               </div>
             )}
 
@@ -196,38 +229,52 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
               </select>
             </div>
 
-            <div>
-              <label className="text-xs text-fg-muted block mb-1">
-                VM Size
-              </label>
-              <select
-                value={vmSize}
-                onChange={(e) => setVmSize(e.target.value as VMSize | '')}
-                className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm"
-              >
-                <option value="">Default</option>
-                <option value="small">Small</option>
-                <option value="medium">Medium</option>
-                <option value="large">Large</option>
-              </select>
-            </div>
+            {!hasProfile && (
+              <>
+                <div>
+                  <label className="text-xs text-fg-muted block mb-1">
+                    VM Size
+                  </label>
+                  <select
+                    value={vmSize}
+                    onChange={(e) => setVmSize(e.target.value as VMSize | '')}
+                    className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm"
+                  >
+                    <option value="">Default</option>
+                    <option value="small">Small</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Large</option>
+                  </select>
+                </div>
 
-            <div>
-              <label className="text-xs text-fg-muted block mb-1">
-                Workspace
-              </label>
-              <select
-                value={workspaceProfile}
-                onChange={(e) => setWorkspaceProfile(e.target.value as WorkspaceProfile | '')}
-                className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm"
-              >
-                <option value="">Default</option>
-                <option value="full">Full</option>
-                <option value="lightweight">Lightweight</option>
+                <div>
+                  <label className="text-xs text-fg-muted block mb-1">
+                    Workspace
+                  </label>
+                  <select
+                    value={workspaceProfile}
+                    onChange={(e) => setWorkspaceProfile(e.target.value as WorkspaceProfile | '')}
+                    className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm"
+                  >
+                    <option value="">Default</option>
+                    <option value="full">Full</option>
+                    <option value="lightweight">Lightweight</option>
               </select>
-            </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
+      )}
+      {selectedProfile && (
+        <ProfileFormDialog
+          isOpen={editProfileOpen}
+          onClose={() => setEditProfileOpen(false)}
+          profile={selectedProfile}
+          onSave={async (data) => {
+            await handleUpdateProfile(selectedProfile.id, data as UpdateAgentProfileRequest);
+          }}
+        />
       )}
     </div>
   );
