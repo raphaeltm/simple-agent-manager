@@ -207,7 +207,7 @@ describe('analytics-ingest routes', () => {
     expect(res.status).toBe(204);
   });
 
-  it('truncates long string fields', async () => {
+  it('truncates long string fields within budget', async () => {
     const { makeRequest } = createApp();
     const longEvent = 'x'.repeat(200);
     await makeRequest({
@@ -218,8 +218,8 @@ describe('analytics-ingest routes', () => {
 
     await mockWaitUntil.mock.calls[0][0];
     const writtenBlobs = mockWriteDataPoint.mock.calls[0][0].blobs;
-    // Event name should be truncated to 128 chars + '...'
-    expect(writtenBlobs[0].length).toBeLessThanOrEqual(131);
+    // Event name should be truncated to exactly 128 chars (125 chars + '...')
+    expect(writtenBlobs[0].length).toBe(128);
     expect(writtenBlobs[0]).toContain('...');
   });
 

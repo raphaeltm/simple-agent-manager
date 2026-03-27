@@ -24,7 +24,8 @@ const DEFAULT_MAX_SESSION_ID_LENGTH = 64;
 const DEFAULT_MAX_ENTITY_ID_LENGTH = 128;
 
 function truncate(value: string, maxLength: number): string {
-  return value.length > maxLength ? value.slice(0, maxLength) + '...' : value;
+  if (value.length <= maxLength) return value;
+  return maxLength > 3 ? value.slice(0, maxLength - 3) + '...' : value.slice(0, maxLength);
 }
 
 function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
@@ -63,7 +64,7 @@ function validateEvent(raw: unknown): {
     utmCampaign: typeof e.utmCampaign === 'string' ? truncate(e.utmCampaign, DEFAULT_MAX_UTM_LENGTH) : '',
     sessionId: typeof e.sessionId === 'string' ? truncate(e.sessionId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
     entityId: typeof e.entityId === 'string' ? truncate(e.entityId, DEFAULT_MAX_ENTITY_ID_LENGTH) : '',
-    durationMs: typeof e.durationMs === 'number' && isFinite(e.durationMs) ? e.durationMs : 0,
+    durationMs: typeof e.durationMs === 'number' && isFinite(e.durationMs) && e.durationMs >= 0 ? e.durationMs : 0,
     visitorId: typeof e.visitorId === 'string' ? truncate(e.visitorId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
   };
 }
@@ -111,16 +112,22 @@ analyticsIngestRoutes.post('/', async (c) => {
     10
   );
 
-  // Check Content-Length before reading body
-  const contentLength = parseInt(c.req.header('Content-Length') || '0', 10);
-  if (contentLength > maxBodyBytes) {
+  // Read raw body and enforce size limit (Content-Length can be omitted or forged)
+  let rawBody: ArrayBuffer;
+  try {
+    rawBody = await c.req.arrayBuffer();
+  } catch {
+    throw errors.badRequest('Failed to read request body');
+  }
+
+  if (rawBody.byteLength > maxBodyBytes) {
     throw errors.badRequest(`Request body too large (max ${maxBodyBytes} bytes)`);
   }
 
   // Parse JSON body
   let body: unknown;
   try {
-    body = await c.req.json();
+    body = JSON.parse(new TextDecoder().decode(rawBody));
   } catch {
     throw errors.badRequest('Invalid JSON body');
   }
@@ -154,8 +161,8 @@ analyticsIngestRoutes.post('/', async (c) => {
   const country = cfData?.country ?? '';
   const ip = getClientIp(c);
 
-  // Write each valid event to Analytics Engine (fire-and-forget)
-  const writePromise = (async () => {
+  // Write each valid event to Analytics Engine (fire-and-forget via waitUntil)
+  const writeAll = async () => {
     try {
       for (const raw of events) {
         const validated = validateEvent(raw);
@@ -189,9 +196,9 @@ analyticsIngestRoutes.post('/', async (c) => {
     } catch (err) {
       console.warn('analytics-ingest: write failed', err instanceof Error ? err.message : String(err));
     }
-  })();
+  };
 
-  try { c.executionCtx.waitUntil(writePromise); } catch { /* no exec ctx in tests */ }
+  try { c.executionCtx.waitUntil(writeAll()); } catch { /* no exec ctx in tests */ }
 
   return c.body(null, 204);
 });
