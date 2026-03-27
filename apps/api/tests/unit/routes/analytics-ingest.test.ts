@@ -97,7 +97,7 @@ describe('analytics-ingest routes', () => {
     await mockWaitUntil.mock.calls[0][0];
 
     expect(mockWriteDataPoint).toHaveBeenCalledWith({
-      indexes: ['visitor-789'],
+      indexes: ['anon-unknown'],  // unauthenticated: server-side IP fallback (visitorId ignored)
       blobs: [
         'page_view',        // blob1: event name
         '',                 // blob2: projectId (empty for client events)
@@ -258,6 +258,33 @@ describe('analytics-ingest routes', () => {
     await mockWaitUntil.mock.calls[0][0];
     const writtenDoubles = mockWriteDataPoint.mock.calls[0][0].doubles;
     expect(writtenDoubles[0]).toBe(0); // clamped to 0
+  });
+
+  it('clamps durationMs to upper bound (1 hour)', async () => {
+    const { makeRequest } = createApp();
+    await makeRequest({
+      body: JSON.stringify({
+        events: [{ event: 'test', durationMs: 9_999_999 }],
+      }),
+    });
+
+    await mockWaitUntil.mock.calls[0][0];
+    const writtenDoubles = mockWriteDataPoint.mock.calls[0][0].doubles;
+    expect(writtenDoubles[0]).toBe(3_600_000); // clamped to 1 hour
+  });
+
+  it('ignores client-provided visitorId for unauthenticated requests', async () => {
+    const { makeRequest } = createApp();
+    await makeRequest({
+      body: JSON.stringify({
+        events: [{ event: 'test', visitorId: 'spoofed-id' }],
+      }),
+    });
+
+    await mockWaitUntil.mock.calls[0][0];
+    const index = mockWriteDataPoint.mock.calls[0][0].indexes[0];
+    expect(index).toMatch(/^anon-/); // server-side IP, not client visitorId
+    expect(index).not.toBe('spoofed-id');
   });
 
   it('handles Analytics Engine write failure gracefully', async () => {

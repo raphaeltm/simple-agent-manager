@@ -23,6 +23,9 @@ const DEFAULT_MAX_UTM_LENGTH = 256;
 const DEFAULT_MAX_SESSION_ID_LENGTH = 64;
 const DEFAULT_MAX_ENTITY_ID_LENGTH = 128;
 
+/** Max duration in milliseconds (configurable via MAX_ANALYTICS_DURATION_MS). Clamps to 1 hour. */
+const DEFAULT_MAX_DURATION_MS = 3_600_000;
+
 function truncate(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   return maxLength > 3 ? value.slice(0, maxLength - 3) + '...' : value.slice(0, maxLength);
@@ -64,7 +67,8 @@ function validateEvent(raw: unknown): {
     utmCampaign: typeof e.utmCampaign === 'string' ? truncate(e.utmCampaign, DEFAULT_MAX_UTM_LENGTH) : '',
     sessionId: typeof e.sessionId === 'string' ? truncate(e.sessionId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
     entityId: typeof e.entityId === 'string' ? truncate(e.entityId, DEFAULT_MAX_ENTITY_ID_LENGTH) : '',
-    durationMs: typeof e.durationMs === 'number' && isFinite(e.durationMs) && e.durationMs >= 0 ? e.durationMs : 0,
+    durationMs: typeof e.durationMs === 'number' && isFinite(e.durationMs) && e.durationMs >= 0
+      ? Math.min(e.durationMs, DEFAULT_MAX_DURATION_MS) : 0,
     visitorId: typeof e.visitorId === 'string' ? truncate(e.visitorId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
   };
 }
@@ -168,8 +172,9 @@ analyticsIngestRoutes.post('/', async (c) => {
         const validated = validateEvent(raw);
         if (!validated) continue;
 
-        // Use authenticated userId, then client-provided visitorId, then IP hash
-        const index = userId ?? (validated.visitorId || `anon-${ip}`);
+        // Authenticated: use server-verified userId
+        // Unauthenticated: always use server-derived IP prefix (never trust client visitorId)
+        const index = userId ?? `anon-${ip}`;
 
         c.env.ANALYTICS.writeDataPoint({
           indexes: [index],
