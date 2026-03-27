@@ -1732,3 +1732,40 @@ export async function fetchAnalyticsEvents(period?: string): Promise<AnalyticsEv
 export async function fetchAnalyticsFunnel(): Promise<AnalyticsFunnelResponse> {
   return request<AnalyticsFunnelResponse>('/api/admin/analytics/funnel');
 }
+
+// Phase 3: Feature adoption, geo distribution, retention cohorts
+
+export interface AnalyticsFeatureAdoptionResponse {
+  totals: Array<{ event_name: string; count: number; unique_users: number }>;
+  trend: Array<{ event_name: string; date: string; count: number }>;
+  period: string;
+}
+
+export interface AnalyticsGeoResponse {
+  geo: Array<{ country: string; event_count: number; unique_users: number }>;
+  period: string;
+}
+
+export interface AnalyticsRetentionResponse {
+  retention: Array<{
+    cohortWeek: string;
+    cohortSize: number;
+    weeks: Array<{ week: number; users: number; rate: number }>;
+  }>;
+  weeks: number;
+}
+
+export async function fetchAnalyticsFeatureAdoption(period?: string): Promise<AnalyticsFeatureAdoptionResponse> {
+  const params = period ? `?period=${period}` : '';
+  return request<AnalyticsFeatureAdoptionResponse>(`/api/admin/analytics/feature-adoption${params}`);
+}
+
+export async function fetchAnalyticsGeo(period?: string): Promise<AnalyticsGeoResponse> {
+  const params = period ? `?period=${period}` : '';
+  return request<AnalyticsGeoResponse>(`/api/admin/analytics/geo${params}`);
+}
+
+export async function fetchAnalyticsRetention(weeks?: number): Promise<AnalyticsRetentionResponse> {
+  const params = weeks ? `?weeks=${weeks}` : '';
+  return request<AnalyticsRetentionResponse>(`/api/admin/analytics/retention${params}`);
+}
