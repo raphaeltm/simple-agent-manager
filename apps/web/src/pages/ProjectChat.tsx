@@ -4,7 +4,7 @@ import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight,
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton, SlashCommandPalette } from '@simple-agent-manager/acp-client';
 import type { SlashCommandPaletteHandle, SlashCommand } from '@simple-agent-manager/acp-client';
-import type { AgentInfo, AgentProfile, WorkspaceProfile, TaskMode } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, WorkspaceProfile, TaskMode, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -17,6 +17,7 @@ import {
 import {
   listAgents,
   listAgentProfiles,
+  updateAgentProfile,
   listChatSessions,
   listCredentials,
   listProjectTasks,
@@ -31,6 +32,7 @@ import { useProjectContext } from './ProjectContext';
 import { stripMarkdown } from '../lib/text-utils';
 import { ForkDialog } from '../components/project/ForkDialog';
 import { ProfileSelector } from '../components/agent-profiles/ProfileSelector';
+import { ProfileFormDialog } from '../components/agent-profiles/ProfileFormDialog';
 import { useProjectWebSocket } from '../hooks/useProjectWebSocket';
 import { useAvailableCommands } from '../hooks/useAvailableCommands';
 
@@ -267,15 +269,20 @@ export function ProjectChat() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load agent profiles for the project
-  useEffect(() => {
-    let cancelled = false;
+  const loadProfiles = useCallback(() => {
     void listAgentProfiles(projectId)
-      .then((data) => {
-        if (!cancelled) setAgentProfiles(data);
-      })
+      .then((data) => setAgentProfiles(data))
       .catch(() => { /* best-effort */ });
-    return () => { cancelled = true; };
   }, [projectId]);
+
+  useEffect(() => {
+    loadProfiles();
+  }, [loadProfiles]);
+
+  const handleUpdateProfile = useCallback(async (profileId: string, data: UpdateAgentProfileRequest) => {
+    await updateAgentProfile(projectId, profileId, data);
+    loadProfiles();
+  }, [projectId, loadProfiles]);
 
   // Pre-fill message when navigating from idea Execute button
   useEffect(() => {
@@ -416,13 +423,15 @@ export function ProjectChat() {
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const result = await submitTask(projectId, {
-        message: trimmed,
-        ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
-        ...(selectedProfileId ? { agentProfileId: selectedProfileId } : {}),
-        workspaceProfile: selectedWorkspaceProfile,
-        taskMode: selectedTaskMode,
-      });
+      const result = await submitTask(projectId, selectedProfileId
+        ? { message: trimmed, agentProfileId: selectedProfileId }
+        : {
+            message: trimmed,
+            ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+            workspaceProfile: selectedWorkspaceProfile,
+            taskMode: selectedTaskMode,
+          },
+      );
       setMessage('');
       setProvisioning({
         taskId: result.taskId,
@@ -473,15 +482,17 @@ export function ProjectChat() {
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const result = await submitTask(projectId, {
-        message: forkMessage,
-        parentTaskId,
-        contextSummary,
-        ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
-        ...(selectedProfileId ? { agentProfileId: selectedProfileId } : {}),
-        workspaceProfile: selectedWorkspaceProfile,
-        taskMode: selectedTaskMode,
-      });
+      const result = await submitTask(projectId, selectedProfileId
+        ? { message: forkMessage, parentTaskId, contextSummary, agentProfileId: selectedProfileId }
+        : {
+            message: forkMessage,
+            parentTaskId,
+            contextSummary,
+            ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+            workspaceProfile: selectedWorkspaceProfile,
+            taskMode: selectedTaskMode,
+          },
+      );
       setProvisioning({
         taskId: result.taskId,
         sessionId: result.sessionId,
@@ -745,6 +756,7 @@ export function ProjectChat() {
               agentProfiles={agentProfiles}
               selectedProfileId={selectedProfileId}
               onProfileChange={setSelectedProfileId}
+              onUpdateProfile={handleUpdateProfile}
               selectedWorkspaceProfile={selectedWorkspaceProfile}
               onWorkspaceProfileChange={setSelectedWorkspaceProfile}
               selectedTaskMode={selectedTaskMode}
@@ -1184,6 +1196,7 @@ function ChatInput({
   agentProfiles,
   selectedProfileId,
   onProfileChange,
+  onUpdateProfile,
   selectedWorkspaceProfile,
   onWorkspaceProfileChange,
   selectedTaskMode,
@@ -1203,6 +1216,7 @@ function ChatInput({
   agentProfiles: AgentProfile[];
   selectedProfileId: string | null;
   onProfileChange: (profileId: string | null) => void;
+  onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<void>;
   selectedWorkspaceProfile: WorkspaceProfile;
   onWorkspaceProfileChange: (profile: WorkspaceProfile) => void;
   selectedTaskMode: TaskMode;
@@ -1212,6 +1226,12 @@ function ChatInput({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
   const isMobile = useIsMobile();
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+
+  const hasProfile = !!selectedProfileId;
+  const selectedProfile = hasProfile
+    ? agentProfiles.find((p) => p.id === selectedProfileId) ?? null
+    : null;
 
   // Slash command palette state.
   // dismissedFilterRef tracks the exact filter string at the time the user pressed
@@ -1286,56 +1306,73 @@ function ChatInput({
         /* Mobile: compact pill bar — no labels, single row */
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           {agentProfiles.length > 0 && (
-            <ProfileSelector
-              profiles={agentProfiles}
-              selectedProfileId={selectedProfileId}
-              onChange={onProfileChange}
-              disabled={submitting}
-              compact
-              className="min-w-0 flex-1 min-h-[44px]"
-            />
+            <>
+              <ProfileSelector
+                profiles={agentProfiles}
+                selectedProfileId={selectedProfileId}
+                onChange={onProfileChange}
+                disabled={submitting}
+                compact
+                className="min-w-0 flex-1 min-h-[44px]"
+              />
+              {hasProfile && (
+                <button
+                  type="button"
+                  onClick={() => setEditProfileOpen(true)}
+                  disabled={submitting}
+                  aria-label="Edit profile settings"
+                  className="shrink-0 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center border border-border-default rounded-md bg-page text-fg-muted hover:text-fg-primary cursor-pointer disabled:opacity-50"
+                >
+                  <Settings size={16} />
+                </button>
+              )}
+            </>
           )}
-          {agents.length > 1 && (
-            <select
-              value={selectedAgentType ?? ''}
-              onChange={(e) => onAgentTypeChange(e.target.value)}
-              disabled={submitting}
-              aria-label="Agent"
-              className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-            >
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
+          {!hasProfile && (
+            <>
+              {agents.length > 1 && (
+                <select
+                  value={selectedAgentType ?? ''}
+                  onChange={(e) => onAgentTypeChange(e.target.value)}
+                  disabled={submitting}
+                  aria-label="Agent"
+                  className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+                >
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <select
+                value={selectedWorkspaceProfile}
+                onChange={(e) => onWorkspaceProfileChange(e.target.value as WorkspaceProfile)}
+                disabled={submitting}
+                aria-label="Workspace profile"
+                className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+              >
+                <option value="full">Full</option>
+                <option value="lightweight">Lightweight</option>
+              </select>
+              <select
+                value={selectedTaskMode}
+                onChange={(e) => onTaskModeChange(e.target.value as TaskMode)}
+                disabled={submitting}
+                aria-label="Run mode"
+                aria-describedby="mobile-task-mode-desc"
+                className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+              >
+                <option value="task">Task</option>
+                <option value="conversation">Conversation</option>
+              </select>
+              <span id="mobile-task-mode-desc" className="sr-only">
+                {selectedTaskMode === 'task'
+                  ? 'Agent will do the work, push changes, and create a PR'
+                  : 'Chat with an agent. You decide when it\'s done.'}
+              </span>
+            </>
           )}
-          <select
-            value={selectedWorkspaceProfile}
-            onChange={(e) => onWorkspaceProfileChange(e.target.value as WorkspaceProfile)}
-            disabled={submitting}
-            aria-label="Workspace profile"
-            className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-          >
-            <option value="full">Full</option>
-            <option value="lightweight">Lightweight</option>
-          </select>
-          <select
-            value={selectedTaskMode}
-            onChange={(e) => onTaskModeChange(e.target.value as TaskMode)}
-            disabled={submitting}
-            aria-label="Run mode"
-            aria-describedby="mobile-task-mode-desc"
-            className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-          >
-            <option value="task">Task</option>
-            <option value="conversation">Conversation</option>
-          </select>
-          <span id="mobile-task-mode-desc" className="sr-only">
-            {selectedTaskMode === 'task'
-              ? 'Agent will do the work, push changes, and create a PR'
-              : 'Chat with an agent. You decide when it\'s done.'}
-          </span>
         </div>
       ) : (
         /* Desktop: labeled selects with wrapping */
@@ -1351,58 +1388,73 @@ function ChatInput({
                 disabled={submitting}
                 compact
               />
+              {hasProfile && (
+                <button
+                  type="button"
+                  onClick={() => setEditProfileOpen(true)}
+                  disabled={submitting}
+                  aria-label="Edit profile settings"
+                  className="shrink-0 p-1 border border-border-default rounded-md bg-page text-fg-muted hover:text-fg-primary cursor-pointer disabled:opacity-50"
+                >
+                  <Settings size={14} />
+                </button>
+              )}
             </div>
           )}
-          {agents.length > 1 && (
-            <div className="flex items-center gap-2">
-              <label htmlFor="agent-type-select" className="text-xs text-fg-muted whitespace-nowrap">Agent:</label>
-              <select
-                id="agent-type-select"
-                value={selectedAgentType ?? ''}
-                onChange={(e) => onAgentTypeChange(e.target.value)}
-                disabled={submitting}
-                className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-              >
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {!hasProfile && (
+            <>
+              {agents.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <label htmlFor="agent-type-select" className="text-xs text-fg-muted whitespace-nowrap">Agent:</label>
+                  <select
+                    id="agent-type-select"
+                    value={selectedAgentType ?? ''}
+                    onChange={(e) => onAgentTypeChange(e.target.value)}
+                    disabled={submitting}
+                    className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+                  >
+                    {agents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {agent.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <label htmlFor="workspace-profile-select" className="text-xs text-fg-muted whitespace-nowrap">Workspace:</label>
+                <select
+                  id="workspace-profile-select"
+                  value={selectedWorkspaceProfile}
+                  onChange={(e) => onWorkspaceProfileChange(e.target.value as WorkspaceProfile)}
+                  disabled={submitting}
+                  className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+                >
+                  <option value="full">Full</option>
+                  <option value="lightweight">Lightweight</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label htmlFor="task-mode-select" className="text-xs text-fg-muted whitespace-nowrap">Run mode:</label>
+                <select
+                  id="task-mode-select"
+                  value={selectedTaskMode}
+                  onChange={(e) => onTaskModeChange(e.target.value as TaskMode)}
+                  disabled={submitting}
+                  className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+                  aria-describedby="task-mode-desc"
+                >
+                  <option value="task">Task</option>
+                  <option value="conversation">Conversation</option>
+                </select>
+                <span id="task-mode-desc" className="sr-only">
+                  {selectedTaskMode === 'task'
+                    ? 'Agent will do the work, push changes, and create a PR'
+                    : 'Chat with an agent. You decide when it\'s done.'}
+                </span>
+              </div>
+            </>
           )}
-          <div className="flex items-center gap-2">
-            <label htmlFor="workspace-profile-select" className="text-xs text-fg-muted whitespace-nowrap">Workspace:</label>
-            <select
-              id="workspace-profile-select"
-              value={selectedWorkspaceProfile}
-              onChange={(e) => onWorkspaceProfileChange(e.target.value as WorkspaceProfile)}
-              disabled={submitting}
-              className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-            >
-              <option value="full">Full</option>
-              <option value="lightweight">Lightweight</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label htmlFor="task-mode-select" className="text-xs text-fg-muted whitespace-nowrap">Run mode:</label>
-            <select
-              id="task-mode-select"
-              value={selectedTaskMode}
-              onChange={(e) => onTaskModeChange(e.target.value as TaskMode)}
-              disabled={submitting}
-              className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-              aria-describedby="task-mode-desc"
-            >
-              <option value="task">Task</option>
-              <option value="conversation">Conversation</option>
-            </select>
-            <span id="task-mode-desc" className="sr-only">
-              {selectedTaskMode === 'task'
-                ? 'Agent will do the work, push changes, and create a PR'
-                : 'Chat with an agent. You decide when it\'s done.'}
-            </span>
-          </div>
         </div>
       )}
       <div className="flex gap-2 items-end">
@@ -1451,6 +1503,16 @@ function ChatInput({
         <div className="sam-type-caption text-fg-muted mt-1">
           Press Ctrl+Enter to send, Enter for new line
         </div>
+      )}
+      {selectedProfile && (
+        <ProfileFormDialog
+          isOpen={editProfileOpen}
+          onClose={() => setEditProfileOpen(false)}
+          profile={selectedProfile}
+          onSave={async (data) => {
+            await onUpdateProfile(selectedProfile.id, data as UpdateAgentProfileRequest);
+          }}
+        />
       )}
     </div>
   );
