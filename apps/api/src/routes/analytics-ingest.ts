@@ -216,7 +216,8 @@ analyticsIngestRoutes.post('/', async (c) => {
     }
   };
 
-  try { c.executionCtx.waitUntil(writeAll()); } catch { /* no exec ctx in tests */ }
+  const writePromise = writeAll();
+  try { c.executionCtx.waitUntil(writePromise); } catch { /* no exec ctx in tests */ }
 
   return c.body(null, 204);
 });

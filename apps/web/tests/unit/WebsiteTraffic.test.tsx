@@ -92,6 +92,25 @@ describe('WebsiteTraffic component', () => {
     expect(screen.getByText('app.example.com')).toBeDefined();
   });
 
+  it('renders "No section data" when host has empty sections', () => {
+    const data: AnalyticsWebsiteTrafficResponse = {
+      hosts: [
+        {
+          host: 'empty.example.com',
+          totalViews: 10,
+          uniqueVisitors: 5,
+          uniqueSessions: 5,
+          sections: [],
+        },
+      ],
+      trend: [],
+      period: '7d',
+    };
+    render(<WebsiteTraffic data={data} />);
+
+    expect(screen.getByText('No section data')).toBeDefined();
+  });
+
   it('renders section bars with correct aria labels', () => {
     const data: AnalyticsWebsiteTrafficResponse = {
       hosts: [

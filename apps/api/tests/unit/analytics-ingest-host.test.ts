@@ -1,19 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { Hono } from 'hono';
+import { analyticsIngestRoutes } from '../../src/routes/analytics-ingest';
 
 /**
- * Tests for the host field in analytics ingest.
+ * Integration tests for the host field in analytics ingest.
  *
- * These tests validate that the ingest endpoint correctly handles the `host`
- * field — accepting it from client payloads, falling back to the Origin header,
- * and storing it in blob2 of the Analytics Engine data point.
+ * These tests exercise the actual POST /api/t route handler to verify:
+ * - Client-provided host is stored in blob2
+ * - Server-derived host from Origin/Referer is used as fallback
+ * - Client host takes precedence over server-derived host
+ * - ANALYTICS_INGEST_ENABLED=false returns 204 without writing
  */
 
-// Mock the analytics middleware export used by the ingest route
-vi.mock('../../src/middleware/analytics', () => ({
-  bucketUserAgent: () => 'chrome-desktop',
-}));
-
-// Minimal mock for optionalAuth and rate-limit
+// Mock auth middleware
 vi.mock('../../src/middleware/auth', () => ({
   optionalAuth: () => async (_c: unknown, next: () => Promise<void>) => next(),
 }));
@@ -22,82 +21,234 @@ vi.mock('../../src/middleware/rate-limit', () => ({
   getRateLimit: () => 500,
 }));
 
-describe('analytics ingest — host field', () => {
-  // We test the validateEvent function indirectly by importing it
-  // Since it's not exported, we test the behavior through the route
+describe('analytics ingest — host field via route handler', () => {
+  let mockWriteDataPoint: ReturnType<typeof vi.fn>;
 
-  it('includes host in validated event schema', async () => {
-    // Dynamically import to respect mocks
-    const mod = await import('../../src/routes/analytics-ingest');
-    expect(mod.analyticsIngestRoutes).toBeDefined();
+  function createApp(envOverrides: Record<string, unknown> = {}) {
+    const app = new Hono();
+
+    app.use('*', async (c, next) => {
+      (c.env as Record<string, unknown>) = {
+        ANALYTICS: { writeDataPoint: mockWriteDataPoint },
+        ...envOverrides,
+      };
+      await next();
+    });
+
+    app.route('/api/t', analyticsIngestRoutes);
+    return app;
+  }
+
+  beforeEach(() => {
+    mockWriteDataPoint = vi.fn();
   });
 
-  it('validateEvent accepts and truncates host field', async () => {
-    // We can't directly test validateEvent (it's private), but we can
-    // verify the endpoint behavior via the route handler
-    // For unit testing the validation logic, we extract and test the pattern:
-    const DEFAULT_MAX_HOST_LENGTH = 256;
+  // Allow the fire-and-forget writeAll() promise to settle
+  async function flush() {
+    await new Promise((r) => setTimeout(r, 10));
+  }
 
-    function truncate(value: string, maxLength: number): string {
-      if (value.length <= maxLength) return value;
-      return maxLength > 3 ? value.slice(0, maxLength - 3) + '...' : value.slice(0, maxLength);
-    }
+  it('stores client-provided host in blob2', async () => {
+    const app = createApp();
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        events: [{
+          event: 'page_view',
+          page: '/blog/post-1',
+          host: 'www.simple-agent-manager.org',
+        }],
+      }),
+    });
 
-    // Normal host
-    const host = 'www.simple-agent-manager.org';
-    expect(truncate(host, DEFAULT_MAX_HOST_LENGTH)).toBe(host);
+    expect(res.status).toBe(204);
+    await flush();
 
-    // Overly long host gets truncated
-    const longHost = 'a'.repeat(300);
-    const truncated = truncate(longHost, DEFAULT_MAX_HOST_LENGTH);
-    expect(truncated.length).toBe(DEFAULT_MAX_HOST_LENGTH);
-    expect(truncated.endsWith('...')).toBe(true);
+    expect(mockWriteDataPoint).toHaveBeenCalledTimes(1);
+    const args = mockWriteDataPoint.mock.calls[0][0];
+    expect(args.blobs[1]).toBe('www.simple-agent-manager.org');
   });
 
-  it('derives host from Origin header when not provided in event', () => {
-    const originHeader = 'https://www.simple-agent-manager.org';
-    let serverHost = '';
-    try {
-      if (originHeader) serverHost = new URL(originHeader).hostname;
-    } catch { /* ignore */ }
+  it('derives host from Origin header when client host is empty', async () => {
+    const app = createApp();
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://www.example.com',
+      },
+      body: JSON.stringify({
+        events: [{
+          event: 'page_view',
+          page: '/',
+        }],
+      }),
+    });
 
-    expect(serverHost).toBe('www.simple-agent-manager.org');
+    expect(res.status).toBe(204);
+    await flush();
+
+    expect(mockWriteDataPoint).toHaveBeenCalledTimes(1);
+    const args = mockWriteDataPoint.mock.calls[0][0];
+    expect(args.blobs[1]).toBe('www.example.com');
   });
 
-  it('derives host from Referer header as fallback', () => {
-    const refererHeader = 'https://www.example.com/blog/post-1';
-    let serverHost = '';
-    try {
-      if (refererHeader) serverHost = new URL(refererHeader).hostname;
-    } catch { /* ignore */ }
+  it('derives host from Referer header when Origin is absent', async () => {
+    const app = createApp();
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Referer': 'https://docs.example.com/guide',
+      },
+      body: JSON.stringify({
+        events: [{
+          event: 'page_view',
+          page: '/docs/overview',
+        }],
+      }),
+    });
 
-    expect(serverHost).toBe('www.example.com');
+    expect(res.status).toBe(204);
+    await flush();
+
+    expect(mockWriteDataPoint).toHaveBeenCalledTimes(1);
+    const args = mockWriteDataPoint.mock.calls[0][0];
+    expect(args.blobs[1]).toBe('docs.example.com');
   });
 
-  it('handles malformed Origin header gracefully', () => {
-    const malformedOrigin = 'not-a-url';
-    let serverHost = '';
-    try {
-      if (malformedOrigin) serverHost = new URL(malformedOrigin).hostname;
-    } catch { /* ignore */ }
+  it('client host takes precedence over Origin header', async () => {
+    const app = createApp();
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://www.origin-host.com',
+      },
+      body: JSON.stringify({
+        events: [{
+          event: 'page_view',
+          page: '/',
+          host: 'www.client-host.com',
+        }],
+      }),
+    });
 
-    expect(serverHost).toBe('');
+    expect(res.status).toBe(204);
+    await flush();
+
+    expect(mockWriteDataPoint).toHaveBeenCalledTimes(1);
+    const args = mockWriteDataPoint.mock.calls[0][0];
+    expect(args.blobs[1]).toBe('www.client-host.com');
   });
 
-  it('client-provided host takes precedence over server-derived host', () => {
-    const clientHost = 'www.custom-domain.com';
-    const serverHost = 'www.simple-agent-manager.org';
+  it('blob2 is empty when no host or Origin/Referer provided', async () => {
+    const app = createApp();
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        events: [{
+          event: 'page_view',
+          page: '/',
+        }],
+      }),
+    });
 
-    // This mirrors the logic: validated.host || serverHost
-    const result = clientHost || serverHost;
-    expect(result).toBe('www.custom-domain.com');
+    expect(res.status).toBe(204);
+    await flush();
+
+    expect(mockWriteDataPoint).toHaveBeenCalledTimes(1);
+    const args = mockWriteDataPoint.mock.calls[0][0];
+    expect(args.blobs[1]).toBe('');
   });
 
-  it('falls back to server host when client host is empty', () => {
-    const clientHost = '';
-    const serverHost = 'www.simple-agent-manager.org';
+  it('returns 204 without writing when ANALYTICS_INGEST_ENABLED=false', async () => {
+    const app = createApp({ ANALYTICS_INGEST_ENABLED: 'false' });
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        events: [{ event: 'page_view', page: '/' }],
+      }),
+    });
 
-    const result = clientHost || serverHost;
-    expect(result).toBe('www.simple-agent-manager.org');
+    expect(res.status).toBe(204);
+    await flush();
+    expect(mockWriteDataPoint).not.toHaveBeenCalled();
+  });
+
+  it('returns 204 without writing when ANALYTICS binding is missing', async () => {
+    const app = createApp({ ANALYTICS: undefined });
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        events: [{ event: 'page_view', page: '/' }],
+      }),
+    });
+
+    expect(res.status).toBe(204);
+    await flush();
+    expect(mockWriteDataPoint).not.toHaveBeenCalled();
+  });
+
+  it('rejects batch exceeding MAX_ANALYTICS_INGEST_BATCH_SIZE', async () => {
+    const app = createApp({ MAX_ANALYTICS_INGEST_BATCH_SIZE: '2' });
+    // Mount error handler like the main app does
+    app.onError((err, c) => {
+      const status = (err as { statusCode?: number }).statusCode ?? 500;
+      return c.json({ error: err.message }, status as 400);
+    });
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        events: [
+          { event: 'page_view', page: '/a' },
+          { event: 'page_view', page: '/b' },
+          { event: 'page_view', page: '/c' },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('Batch too large');
+  });
+
+  it('correctly stores all blob fields including host', async () => {
+    const app = createApp();
+    const res = await app.request('/api/t', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        events: [{
+          event: 'page_view',
+          page: '/blog/post-1',
+          referrer: 'https://google.com',
+          host: 'www.sam.org',
+          utmSource: 'twitter',
+          utmMedium: 'social',
+          utmCampaign: 'launch',
+          sessionId: 'sess-123',
+          entityId: 'ent-456',
+        }],
+      }),
+    });
+
+    expect(res.status).toBe(204);
+    await flush();
+
+    const args = mockWriteDataPoint.mock.calls[0][0];
+    expect(args.blobs[0]).toBe('page_view');     // blob1: event
+    expect(args.blobs[1]).toBe('www.sam.org');    // blob2: host
+    expect(args.blobs[2]).toBe('/blog/post-1');   // blob3: page
+    expect(args.blobs[3]).toBe('https://google.com'); // blob4: referrer
+    expect(args.blobs[4]).toBe('twitter');        // blob5: utmSource
+    expect(args.blobs[5]).toBe('social');         // blob6: utmMedium
+    expect(args.blobs[6]).toBe('launch');         // blob7: utmCampaign
+    expect(args.blobs[7]).toBe('sess-123');       // blob8: sessionId
   });
 });

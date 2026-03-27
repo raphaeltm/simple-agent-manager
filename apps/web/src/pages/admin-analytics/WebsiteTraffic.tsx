@@ -49,7 +49,7 @@ const SectionCard: FC<{ section: WebsiteTrafficSection; maxViews: number }> = ({
       {/* Top pages within this section */}
       {section.topPages.length > 0 && (
         <div className="ml-36 flex flex-col gap-0.5">
-          {section.topPages.slice(0, 5).map((p) => (
+          {section.topPages.map((p) => (
             <div key={p.page} className="flex items-center gap-2 text-xs">
               <span className="text-fg-muted truncate flex-1" title={p.page}>
                 {p.page}
