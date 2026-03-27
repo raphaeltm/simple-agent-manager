@@ -79,6 +79,7 @@ async function queryAnalyticsEngine(
     console.error('Analytics Engine SQL API error', {
       status: response.status,
       body: body.slice(0, 500),
+      sql: sql.slice(0, 300),
     });
     throw errors.internal(`Analytics Engine query failed: ${response.status}`);
   }
@@ -98,7 +99,7 @@ adminAnalyticsRoutes.get('/dau', async (c) => {
   const sql = `
     SELECT
       toDate(timestamp) AS date,
-      uniq(index1) AS unique_users
+      count(DISTINCT index1) AS unique_users
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${periodDays}' DAY
       AND blob1 != ''
@@ -125,7 +126,7 @@ adminAnalyticsRoutes.get('/events', async (c) => {
     SELECT
       blob1 AS event_name,
       count() AS count,
-      uniq(index1) AS unique_users,
+      count(DISTINCT index1) AS unique_users,
       avg(double1) AS avg_response_ms
     FROM ${dataset}
     WHERE timestamp >= NOW() - ${intervalExpr}
@@ -150,7 +151,7 @@ adminAnalyticsRoutes.get('/funnel', async (c) => {
   const sql = `
     SELECT
       blob1 AS event_name,
-      uniq(index1) AS unique_users
+      count(DISTINCT index1) AS unique_users
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${periodDays}' DAY
       AND blob1 IN ('signup', 'login', 'project_created', 'workspace_created', 'task_submitted')
@@ -180,7 +181,7 @@ adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
     SELECT
       blob1 AS event_name,
       count() AS count,
-      uniq(index1) AS unique_users
+      count(DISTINCT index1) AS unique_users
     FROM ${dataset}
     WHERE timestamp >= NOW() - ${intervalExpr}
       AND blob1 IN (${eventList})
@@ -225,7 +226,7 @@ adminAnalyticsRoutes.get('/geo', async (c) => {
     SELECT
       blob10 AS country,
       count() AS event_count,
-      uniq(index1) AS unique_users
+      count(DISTINCT index1) AS unique_users
     FROM ${dataset}
     WHERE timestamp >= NOW() - ${intervalExpr}
       AND blob10 != ''
@@ -257,13 +258,13 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
   // Then compute retention on the API layer for flexibility.
   //
   // NOTE: Analytics Engine SQL does not support toStartOfWeek — use
-  // toStartOfInterval(timestamp, INTERVAL 7 DAY) which buckets into
+  // toStartOfInterval(timestamp, INTERVAL '7' DAY) which buckets into
   // epoch-aligned 7-day intervals.
 
   const cohortSql = `
     SELECT
       index1 AS user_id,
-      min(toStartOfInterval(timestamp, INTERVAL 7 DAY)) AS cohort_week
+      min(toStartOfInterval(timestamp, INTERVAL '7' DAY)) AS cohort_week
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${weeks * 7}' DAY
       AND index1 != 'anonymous'
@@ -275,7 +276,7 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
   const activitySql = `
     SELECT
       index1 AS user_id,
-      toStartOfInterval(timestamp, INTERVAL 7 DAY) AS active_week
+      toStartOfInterval(timestamp, INTERVAL '7' DAY) AS active_week
     FROM ${dataset}
     WHERE timestamp >= NOW() - INTERVAL '${weeks * 7}' DAY
       AND index1 != 'anonymous'
