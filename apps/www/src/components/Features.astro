@@ -2,78 +2,33 @@
 const features = [
   {
     icon: 'agents',
-    title: 'Multi-Agent Orchestration',
-    description: 'Assign tasks to Claude Code, OpenAI Codex, Gemini CLI, or Mistral Vibe — running in parallel across isolated workspaces. Warm node pooling means sequential tasks start in seconds. Bring your own API keys, stored encrypted.',
-  },
-  {
-    icon: 'eye',
-    title: 'Structured Visibility',
-    description: 'Watch agents work in real time through the Agent Client Protocol. Tool calls, file diffs, permission requests, thinking blocks, and task progress — structured and readable, not raw terminal output.',
+    title: 'Multi-Agent Support',
+    description: 'Claude Code, Codex, Gemini CLI, or Mistral Vibe — pick the right agent for the job. Bring your own API keys.',
   },
   {
     icon: 'shield',
     title: 'Bring Your Own Cloud',
-    description: 'Your code runs on your VMs, in your cloud account. Cloud credentials are encrypted per-user with AES-256 — never stored in plaintext anywhere. You control costs, regions, and data residency. Revoke access anytime by rotating your API key.',
-  },
-  {
-    icon: 'project',
-    title: 'Project-Centric Workflows',
-    description: 'Organize tasks, milestones, and workspaces by project. Persistent chat sessions, activity feeds, and cross-agent monitoring — all tied to your GitHub repos.',
+    description: 'Your code runs on your VMs. Credentials encrypted per-user. You control costs, regions, and data residency.',
   },
   {
     icon: 'container',
-    title: 'Real Dev Environments, Not Sandboxes',
-    description: 'Agents work inside your repo\'s devcontainer — the same environment your team uses. Same toolchains, same test runners, same everything. Not a 5-minute throwaway sandbox. A real workspace a human can take over.',
+    title: 'Real Dev Environments',
+    description: 'Agents work inside your repo\'s devcontainer — same toolchains and test runners your team uses.',
   },
   {
-    icon: 'code',
-    title: 'Open Source & Self-Hostable',
-    description: 'MIT licensed. Self-host the control plane on Cloudflare\'s free tier. No vendor lock-in to any cloud provider or AI model.',
+    icon: 'eye',
+    title: 'Structured Visibility',
+    description: 'Watch agents in real time — tool calls, file diffs, permission requests. Not raw terminal output.',
   },
   {
     icon: 'chat',
     title: 'Chat-Driven Tasks',
-    description: 'Describe what you need in natural language. SAM provisions infrastructure and runs the agent for you — no manual workspace setup required.',
+    description: 'Describe what you need. SAM provisions a VM, builds the devcontainer, and runs the agent.',
   },
   {
-    icon: 'bell',
-    title: 'Real-Time Notifications',
-    description: 'Get alerted when agents need input, complete tasks, or hit blockers. Grouped by project with smart batching and deduplication.',
-  },
-  {
-    icon: 'mic',
-    title: 'Voice Input & TTS',
-    description: 'Speak your tasks instead of typing. Listen to agent responses with text-to-speech playback.',
-  },
-  {
-    icon: 'fork',
-    title: 'Conversation Forking',
-    description: 'Branch off any completed session with AI-generated context summaries to continue where you left off.',
-  },
-  {
-    icon: 'globe',
-    title: 'Port Exposure',
-    description: 'Dev servers running in workspaces are automatically detected and accessible via unique subdomains — no port forwarding needed.',
-  },
-  {
-    icon: 'command',
-    title: 'Global Command Palette',
-    description: 'Jump to any project, workspace, or action instantly with Cmd+K. Fast keyboard-driven navigation across the entire platform.',
-  },
-  {
-    icon: 'zap',
-    title: 'Warm Node Pooling',
-    description: 'Recently used VMs stay warm for 30 minutes so your next task starts in seconds, not minutes. Three-layer defense against orphans.',
-  },
-  {
-    icon: 'sparkle',
-    title: 'AI Task Titles',
-    description: 'Task titles are generated automatically from your message using on-device AI. No manual naming needed.',
-  },
-  {
-    icon: 'pause',
-    title: 'Session Suspend & Resume',
-    description: 'Pause agent sessions and pick them up later without losing context or progress.',
+    icon: 'code',
+    title: 'Open Source & Self-Hostable',
+    description: 'MIT licensed. Self-host on Cloudflare\'s free tier. No vendor lock-in.',
   },
 ];
 
@@ -84,64 +39,24 @@ const iconPaths: Record<string, string[]> = {
     'M22 21v-2a4 4 0 0 0-3-3.87',
     'M16 3.13a4 4 0 0 1 0 7.75',
   ],
-  eye: [
-    'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z',
-    'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
-  ],
   shield: [
     'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
-  ],
-  project: [
-    'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z',
   ],
   container: [
     'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z',
     'M3.27 6.96L12 12.01l8.73-5.05',
     'M12 22.08V12',
   ],
-  code: [
-    'M16 18l6-6-6-6',
-    'M8 6l-6 6 6 6',
+  eye: [
+    'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z',
+    'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   ],
   chat: [
     'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   ],
-  bell: [
-    'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9',
-    'M13.73 21a2 2 0 0 1-3.46 0',
-  ],
-  mic: [
-    'M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z',
-    'M19 10v2a7 7 0 0 1-14 0v-2',
-    'M12 19v4',
-    'M8 23h8',
-  ],
-  fork: [
-    'M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
-    'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
-    'M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
-    'M6 9v12',
-    'M18 9v6',
-    'M6 9a9 9 0 0 0 9 9',
-  ],
-  globe: [
-    'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z',
-    'M2 12h20',
-    'M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z',
-  ],
-  command: [
-    'M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z',
-  ],
-  zap: [
-    'M13 2L3 14h9l-1 10 10-12h-9l1-10z',
-  ],
-  sparkle: [
-    'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
-  ],
-  pause: [
-    'M10 9v6',
-    'M14 9v6',
-    'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z',
+  code: [
+    'M16 18l6-6-6-6',
+    'M8 6l-6 6 6 6',
   ],
 };
 ---
@@ -152,7 +67,7 @@ const iconPaths: Record<string, string[]> = {
       <span class="section-label">Features</span>
       <h2 class="section-title">Agent orchestration<br />on infrastructure you own</h2>
       <p class="section-subtitle">
-        Purpose-built for running autonomous coding agents on your own cloud. Multi-agent, multi-workspace, fully observable.
+        Everything you need to run coding agents on your own cloud.
       </p>
     </div>
 
