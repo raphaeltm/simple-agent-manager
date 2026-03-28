@@ -9,8 +9,9 @@ import {
 import { scaleLinear } from 'd3-scale';
 import type { AnalyticsGeoResponse } from '../../lib/api';
 
-// TopoJSON world atlas — lightweight 110m resolution
-const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+// TopoJSON world atlas — configurable for CSP/air-gapped environments
+const DEFAULT_GEO_TOPOJSON_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+const GEO_URL = import.meta.env.VITE_GEO_TOPOJSON_URL ?? DEFAULT_GEO_TOPOJSON_URL;
 
 /**
  * ISO 3166-1 alpha-2 to alpha-3 mapping for countries commonly seen in analytics.

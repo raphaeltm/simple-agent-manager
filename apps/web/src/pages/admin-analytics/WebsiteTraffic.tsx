@@ -12,6 +12,8 @@ import {
 } from 'recharts';
 import type { AnalyticsWebsiteTrafficResponse } from '../../lib/api';
 
+const TOP_PAGES_DISPLAY_LIMIT = 10;
+
 interface Props {
   data: AnalyticsWebsiteTrafficResponse | null;
 }
@@ -123,7 +125,7 @@ export const WebsiteTraffic: FC<Props> = ({ data }) => {
                   </thead>
                   <tbody>
                     {host.sections.flatMap((s) =>
-                      s.topPages.slice(0, 10).map((p) => (
+                      s.topPages.slice(0, TOP_PAGES_DISPLAY_LIMIT).map((p) => (
                         <tr key={`${s.name}-${p.page}`} className="border-b border-border-muted">
                           <td className="py-1.5 pr-3 truncate max-w-[250px]" title={p.page}>
                             <span
