@@ -360,6 +360,32 @@ async function assertNoOverflow(page: Page) {
   expect(overflow.bodyOverflow, `Body scrollWidth (${overflow.bodyWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
 }
 
+/**
+ * Expand the session header and click a panel button (Files or Git).
+ * Uses expect assertions instead of isVisible guards to ensure elements are found.
+ */
+async function openPanel(page: Page, buttonName: 'Files' | 'Git') {
+  const chevron = page.locator('[aria-label="Show session details"]');
+  await expect(chevron).toBeVisible({ timeout: 3000 });
+  await chevron.click();
+  await page.waitForTimeout(200);
+
+  const btn = page.getByRole('button', { name: buttonName, exact: false }).first();
+  await expect(btn).toBeVisible({ timeout: 3000 });
+  await btn.click();
+  await page.waitForTimeout(800);
+}
+
+/**
+ * Expand the session header (without clicking a panel button).
+ */
+async function expandSessionHeader(page: Page) {
+  const chevron = page.locator('[aria-label="Show session details"]');
+  await expect(chevron).toBeVisible({ timeout: 3000 });
+  await chevron.click();
+  await page.waitForTimeout(300);
+}
+
 async function takeScreenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
   await page.screenshot({
@@ -378,12 +404,7 @@ test.describe('ChatFileViewer — Session Header — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    // Expand session header to show details
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-    }
-    await page.waitForTimeout(300);
+    await expandSessionHeader(page);
 
     await takeScreenshot(page, 'session-header-files-git-buttons-mobile');
     await assertNoOverflow(page);
@@ -394,11 +415,12 @@ test.describe('ChatFileViewer — Session Header — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
+    // When no workspace, chevron may still be available — try to expand
     const chevron = page.locator('[aria-label="Show session details"]');
     if (await chevron.isVisible()) {
       await chevron.click();
+      await page.waitForTimeout(300);
     }
-    await page.waitForTimeout(300);
 
     await takeScreenshot(page, 'session-header-no-workspace-mobile');
     await assertNoOverflow(page);
@@ -459,18 +481,7 @@ test.describe('ChatFileViewer — File Browser — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    // Open session details and click Files
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-      await page.waitForTimeout(200);
-    }
-
-    const filesBtn = page.getByRole('button', { name: 'Files', exact: false }).first();
-    if (await filesBtn.isVisible()) {
-      await filesBtn.click();
-      await page.waitForTimeout(800);
-    }
+    await openPanel(page, 'Files');
 
     await takeScreenshot(page, 'file-browser-entries-mobile');
     await assertNoOverflow(page);
@@ -481,17 +492,7 @@ test.describe('ChatFileViewer — File Browser — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-      await page.waitForTimeout(200);
-    }
-
-    const filesBtn = page.getByRole('button', { name: 'Files', exact: false }).first();
-    if (await filesBtn.isVisible()) {
-      await filesBtn.click();
-      await page.waitForTimeout(800);
-    }
+    await openPanel(page, 'Files');
 
     await takeScreenshot(page, 'file-browser-empty-mobile');
     await assertNoOverflow(page);
@@ -502,17 +503,7 @@ test.describe('ChatFileViewer — File Browser — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-      await page.waitForTimeout(200);
-    }
-
-    const filesBtn = page.getByRole('button', { name: 'Files', exact: false }).first();
-    if (await filesBtn.isVisible()) {
-      await filesBtn.click();
-      await page.waitForTimeout(800);
-    }
+    await openPanel(page, 'Files');
 
     await takeScreenshot(page, 'file-browser-error-mobile');
     await assertNoOverflow(page);
@@ -529,17 +520,7 @@ test.describe('ChatFileViewer — Git Status — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-      await page.waitForTimeout(200);
-    }
-
-    const gitBtn = page.getByRole('button', { name: 'Git', exact: false }).first();
-    if (await gitBtn.isVisible()) {
-      await gitBtn.click();
-      await page.waitForTimeout(800);
-    }
+    await openPanel(page, 'Git');
 
     await takeScreenshot(page, 'git-status-changes-mobile');
     await assertNoOverflow(page);
@@ -550,17 +531,7 @@ test.describe('ChatFileViewer — Git Status — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-      await page.waitForTimeout(200);
-    }
-
-    const gitBtn = page.getByRole('button', { name: 'Git', exact: false }).first();
-    if (await gitBtn.isVisible()) {
-      await gitBtn.click();
-      await page.waitForTimeout(800);
-    }
+    await openPanel(page, 'Git');
 
     await takeScreenshot(page, 'git-status-no-changes-mobile');
     await assertNoOverflow(page);
@@ -577,25 +548,13 @@ test.describe('ChatFileViewer — Diff View — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    // Open git status then click diff on a file
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-      await page.waitForTimeout(200);
-    }
-
-    const gitBtn = page.getByRole('button', { name: 'Git', exact: false }).first();
-    if (await gitBtn.isVisible()) {
-      await gitBtn.click();
-      await page.waitForTimeout(800);
-    }
+    await openPanel(page, 'Git');
 
     // Click diff button on first staged file
     const diffBtn = page.getByRole('button', { name: 'Diff' }).first();
-    if (await diffBtn.isVisible()) {
-      await diffBtn.click();
-      await page.waitForTimeout(800);
-    }
+    await expect(diffBtn).toBeVisible({ timeout: 3000 });
+    await diffBtn.click();
+    await page.waitForTimeout(800);
 
     await takeScreenshot(page, 'diff-view-changes-mobile');
     await assertNoOverflow(page);
@@ -614,11 +573,7 @@ test.describe('ChatFileViewer — Desktop', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-    }
-    await page.waitForTimeout(300);
+    await expandSessionHeader(page);
 
     await takeScreenshot(page, 'session-header-files-git-buttons-desktop');
     await assertNoOverflow(page);
@@ -629,17 +584,7 @@ test.describe('ChatFileViewer — Desktop', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-      await page.waitForTimeout(200);
-    }
-
-    const filesBtn = page.getByRole('button', { name: 'Files', exact: false }).first();
-    if (await filesBtn.isVisible()) {
-      await filesBtn.click();
-      await page.waitForTimeout(800);
-    }
+    await openPanel(page, 'Files');
 
     await takeScreenshot(page, 'file-browser-slide-over-desktop');
     await assertNoOverflow(page);
@@ -650,15 +595,7 @@ test.describe('ChatFileViewer — Desktop', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
-      await page.waitForTimeout(200);
-    }
-
-    const gitBtn = page.getByRole('button', { name: 'Git', exact: false }).first();
-    if (await gitBtn.isVisible()) {
-      await gitBtn.click();
+    await openPanel(page, 'Git');
       await page.waitForTimeout(800);
     }
 
