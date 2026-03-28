@@ -103,6 +103,7 @@ Use semantic z-index classes instead of numeric values:
 
 ```tsx
 <div className="z-sticky">          {/* Sticky headers */}
+<div className="z-player">          {/* Audio player bar */}
 <div className="z-dropdown">         {/* Dropdowns */}
 <div className="z-drawer-backdrop">  {/* Drawer backdrop */}
 <div className="z-dialog">           {/* Dialogs/modals */}

@@ -67,10 +67,9 @@ export function GlobalAudioPlayer() {
     <div
       role="region"
       aria-label="Audio player"
-      className="flex-shrink-0"
+      className="flex-shrink-0 z-player"
       style={{
         height: playerHeight,
-        zIndex: 'var(--sam-z-player, 15)',
         animation: 'sam-player-slide-in 200ms ease-out',
         ['--sam-player-height' as string]: playerHeight,
         backgroundColor: 'var(--sam-color-bg-surface)',

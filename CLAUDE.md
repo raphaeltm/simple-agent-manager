@@ -15,6 +15,9 @@ packages/
 ├── providers/    # Cloud provider abstraction (Hetzner, Scaleway)
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
+├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)
+├── ui/           # Design system tokens and shared UI components
+├── workspace-mcp/ # Workspace MCP server
 └── vm-agent/     # Go VM agent (PTY, WebSocket, ACP)
 tasks/            # Task tracking (backlog -> active -> archive)
 specs/            # Feature specifications
@@ -214,6 +217,7 @@ Domains chain together: competitive research feeds marketing and business strate
 - Cloudflare D1 (credentials table with AES-GCM encrypted tokens) (028-provider-infrastructure)
 
 ## Recent Changes
+- global-persistent-audio-player: Global persistent TTS audio player — `GlobalAudioProvider` wraps the app above the router (`App.tsx`); `GlobalAudioPlayer` bar renders in `AppShell` (mobile: below main via flexbox, desktop: spanning full width via CSS Grid row 2); audio survives page navigation; three callers migrated from per-component `useAudioPlayback` to `useGlobalAudio` (`ProjectMessageView`, `TruncatedSummary`, `TaskDetail`); `MessageActions` and `MessageBubble` in `acp-client` accept new `onPlayAudio` callback prop to delegate to external player; new `--sam-z-player: 15` token added to design system; slide-in animation with `prefers-reduced-motion` support
 - analytics-engine-phase4-forwarding: Analytics Engine Phase 4 — external event forwarding; daily cron job (`0 3 * * *`) queries Analytics Engine for key conversion events (signup, login, project_created, workspace_created, task_submitted) and batch-forwards them to Segment (Track API with Basic auth) and/or GA4 (Measurement Protocol); cursor-based deduplication via KV; new service `analytics-forward.ts` with `runAnalyticsForward()` orchestrator; admin dashboard `ForwardingStatus` card showing enabled state, last-forwarded timestamp, and destination configuration; `GET /api/admin/analytics/forward-status` endpoint; configurable via ANALYTICS_FORWARD_ENABLED (default: false), ANALYTICS_FORWARD_EVENTS, ANALYTICS_FORWARD_LOOKBACK_HOURS (default: 25), SEGMENT_WRITE_KEY, SEGMENT_API_URL, SEGMENT_MAX_BATCH_SIZE (default: 100), GA4_MEASUREMENT_ID, GA4_API_SECRET, GA4_API_URL, GA4_MAX_BATCH_SIZE (default: 25)
 - analytics-engine-phase3-dashboards: Analytics Engine Phase 3 — dashboard visualizations for feature adoption (horizontal bars + sparklines for feature-event trends), geographic distribution (country-level user breakdown from CF headers), and weekly retention cohorts (heat-map cohort table with server-computed retention matrix); three new API endpoints (`/api/admin/analytics/feature-adoption`, `/geo`, `/retention`) using Cloudflare Analytics Engine SQL API; `AdminAnalytics.tsx` refactored from monolithic file to `admin-analytics/` directory with individual chart components; configurable via ANALYTICS_GEO_LIMIT (default: 50), ANALYTICS_RETENTION_WEEKS (default: 12)
 - chat-idea-association: Many-to-many chat session ↔ idea (task) linking — `chat_session_ideas` junction table in ProjectData DO SQLite (migration 012); 4 MCP tools (`link_idea`, `unlink_idea`, `list_linked_ideas`, `find_related_ideas`) for agents to manage associations mid-conversation; REST endpoints `GET/POST /sessions/:id/ideas`, `DELETE /sessions/:id/ideas/:taskId`, `GET /tasks/:id/sessions` for UI; batch D1 enrichment with `inArray()`; shared `SessionIdeaLink` type; configurable via MCP_IDEA_CONTEXT_MAX_LENGTH (default: 500)
