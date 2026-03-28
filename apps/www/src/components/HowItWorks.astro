@@ -3,26 +3,22 @@ const steps = [
   {
     number: '01',
     title: 'Connect Your Cloud',
-    description: 'Add your Hetzner or Scaleway API token in Settings. Your credentials are encrypted per-user with AES-256 — SAM never stores provider keys as platform secrets.',
-    detail: 'Bring Your Own Cloud means you control costs, regions, and data residency.',
+    description: 'Add your Hetzner or Scaleway API token. Credentials encrypted per-user.',
   },
   {
     number: '02',
     title: 'Create a Project',
-    description: 'Link a GitHub repo (public or private via GitHub App). SAM organizes tasks, chat sessions, and workspaces per project — everything in one place.',
-    detail: 'Projects are the primary organizational unit. All agent work is scoped to a project.',
+    description: 'Link a GitHub repo. SAM organizes tasks and workspaces per project.',
   },
   {
     number: '03',
     title: 'Describe Your Task',
-    description: 'Type what you need in the project chat. SAM automatically provisions a VM, builds your repo\'s devcontainer, and assigns an agent to work on it.',
-    detail: 'Your agent gets the same environment your developers use — not a stripped-down sandbox.',
+    description: 'Type what you need. SAM provisions a VM, builds your devcontainer, and runs the agent.',
   },
   {
     number: '04',
     title: 'Watch It Build',
-    description: 'Stream agent output in real time. Get notified when the agent needs input or finishes. Check in from your phone, tablet, or any browser.',
-    detail: 'Sessions persist across reconnects. Multiple workspaces can share a single node to cut costs.',
+    description: 'Stream agent output in real time. Get notified when the agent needs input or finishes.',
   },
 ];
 ---
@@ -47,7 +43,6 @@ const steps = [
           <div class="step-content">
             <h3 class="step-title">{step.title}</h3>
             <p class="step-desc">{step.description}</p>
-            <p class="step-detail">{step.detail}</p>
           </div>
         </div>
       ))}
@@ -131,10 +126,4 @@ const steps = [
     margin-bottom: 8px;
   }
 
-  .step-detail {
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
-    color: var(--color-fg-dim);
-    line-height: 1.5;
-  }
 </style>
