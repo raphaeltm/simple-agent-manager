@@ -45,9 +45,12 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
 
   return (
     <div className="my-2 border border-gray-200 rounded-lg overflow-hidden">
-      {/* Header */}
-      <button
+      {/* Header — uses div with role="button" to allow nested interactive elements */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => hasContent && setExpanded(!expanded)}
+        onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && hasContent) { e.preventDefault(); setExpanded(!expanded); } }}
         aria-expanded={hasContent ? expanded : undefined}
         className={`w-full flex items-center gap-2 px-3 py-2 bg-gray-50 text-left ${hasContent ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'}`}
       >
@@ -93,7 +96,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         )}
-      </button>
+      </div>
 
       {/* Content */}
       {expanded && hasContent && (

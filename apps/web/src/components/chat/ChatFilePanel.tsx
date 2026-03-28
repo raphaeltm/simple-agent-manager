@@ -1,4 +1,4 @@
-import { type FC, useCallback, useEffect, useState } from 'react';
+import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { X, ChevronRight, Folder, FileText, RefreshCw, ArrowLeft } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { DiffRenderer } from '../shared-file-viewer';
@@ -106,6 +106,12 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
 
   // Markdown rendering mode
   const [mdMode, setMdMode] = useState<'rendered' | 'source'>('rendered');
+
+  // Focus management — move focus into panel on mount
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, []);
 
   // Escape key closes panel
   useEffect(() => {
@@ -234,7 +240,10 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           inset-0
           md:inset-y-0 md:left-auto md:right-0 md:w-[min(560px,50vw)]
           md:border-l md:border-border-default"
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
+        aria-modal="true"
         aria-label="File viewer"
       >
         {/* Header */}
@@ -244,7 +253,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               type="button"
               onClick={goBack}
               aria-label="Back"
-              className="p-1 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+              className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
             >
               <ArrowLeft size={16} />
             </button>
@@ -262,6 +271,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
             <div className="flex gap-1 shrink-0">
               <button
                 type="button"
+                aria-pressed={mode === 'browse'}
                 onClick={() => { setMode('browse'); loadListing(currentPath); }}
                 className={`text-xs px-2 py-1 rounded border-none cursor-pointer ${mode === 'browse' ? 'bg-accent-primary text-fg-on-accent' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
               >
@@ -269,6 +279,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               </button>
               <button
                 type="button"
+                aria-pressed={mode === 'git-status'}
                 onClick={() => { setMode('git-status'); loadGitStatus(); }}
                 className={`text-xs px-2 py-1 rounded border-none cursor-pointer ${mode === 'git-status' ? 'bg-accent-primary text-fg-on-accent' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
               >
@@ -303,7 +314,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               onClick={() => loadListing(currentPath)}
               disabled={browseLoading}
               aria-label="Refresh"
-              className="p-1 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+              className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
               style={{ opacity: browseLoading ? 0.5 : 1 }}
             >
               <RefreshCw size={14} className={browseLoading ? 'animate-spin' : ''} />
@@ -314,7 +325,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close file panel"
-            className="p-1 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+            className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
           >
             <X size={16} />
           </button>
@@ -364,7 +375,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                       key={entry.name}
                       type="button"
                       onClick={() => handleEntryClick(entry)}
-                      className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[40px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-raised"
+                      className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[40px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
                     >
                       {entry.type === 'dir' ? (
                         <Folder size={14} className="shrink-0" style={{ color: 'var(--sam-color-accent-primary)' }} />
@@ -504,7 +515,7 @@ function GitStatusList({
               key={`untracked-${file.path}`}
               type="button"
               onClick={() => onViewFile(file.path)}
-              className="w-full flex items-center gap-2 px-4 py-1.5 text-left bg-transparent border-none cursor-pointer hover:bg-surface-raised"
+              className="w-full flex items-center gap-2 px-4 py-1.5 text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
             >
               <span className="text-xs font-mono text-fg-muted">?</span>
               <span className="text-xs font-mono text-fg-primary truncate">{file.path}</span>
@@ -533,7 +544,7 @@ function GitFileRow({
   const statusLabel = file.status.charAt(0).toUpperCase();
 
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 hover:bg-surface-raised group">
+    <div className="flex items-center gap-2 px-4 py-2.5 hover:bg-surface-hover group min-h-[44px]">
       <span
         className="text-xs font-mono font-semibold w-4 text-center shrink-0"
         style={{ color: statusColor }}
@@ -551,7 +562,7 @@ function GitFileRow({
       <button
         type="button"
         onClick={onViewDiff}
-        className="text-[10px] font-semibold px-1.5 py-0.5 rounded border border-border-default bg-transparent cursor-pointer text-fg-muted hover:text-fg-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+        className="text-[10px] font-semibold px-2 py-1 rounded border border-border-default bg-transparent cursor-pointer text-fg-muted hover:text-fg-primary md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0"
       >
         Diff
       </button>

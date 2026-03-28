@@ -159,7 +159,7 @@ describe('ToolCallCard', () => {
 
       const { container } = render(<ToolCallCard toolCall={toolCall} />);
 
-      const header = container.querySelector('button');
+      const header = container.querySelector('[role="button"]');
       expect(header).not.toBeNull();
 
       // The inner flex container should have min-w-0 to allow truncation
@@ -174,7 +174,7 @@ describe('ToolCallCard', () => {
       });
 
       const { container } = render(<ToolCallCard toolCall={toolCall} />);
-      const header = container.querySelector('button');
+      const header = container.querySelector('[role="button"]');
 
       // Status icon wrapper should have shrink-0
       const statusWrapper = header!.querySelector('.shrink-0');
