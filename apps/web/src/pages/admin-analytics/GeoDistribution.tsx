@@ -72,8 +72,8 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* World map */}
-      <div className="w-full rounded-lg border border-border-default overflow-hidden" style={{ height: 300 }}>
+      {/* World map — decorative, data is in the table below */}
+      <div className="w-full rounded-lg border border-border-default overflow-hidden" style={{ height: 300 }} role="img" aria-label={`World map showing user distribution across ${data.geo.length} countries`}>
         <ComposableMap
           projection="geoMercator"
           projectionConfig={{ scale: 120, center: [0, 30] }}
@@ -108,6 +108,18 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
             </Geographies>
           </ZoomableGroup>
         </ComposableMap>
+      </div>
+
+      {/* Color legend */}
+      <div className="flex items-center gap-2 text-xs text-fg-muted">
+        <span>0 users</span>
+        <div
+          className="h-3 flex-1 max-w-[200px] rounded-sm"
+          style={{
+            background: 'linear-gradient(to right, var(--sam-color-bg-surface, #13201d), var(--sam-color-accent-primary, #16a34a))',
+          }}
+        />
+        <span>{maxUsers.toLocaleString()} users</span>
       </div>
 
       {/* Country table */}

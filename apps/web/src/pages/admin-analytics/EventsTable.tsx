@@ -13,7 +13,7 @@ interface EventRow {
 
 function SortIcon({ active, direction }: { active: boolean; direction: SortDir }) {
   return (
-    <span className={`inline-block ml-1 ${active ? 'text-fg-primary' : 'text-fg-muted opacity-40'}`}>
+    <span className={`inline-block ml-1 ${active ? 'text-fg-primary' : 'text-fg-muted opacity-40'}`} aria-hidden="true">
       {active && direction === 'asc' ? '\u25B2' : '\u25BC'}
     </span>
   );
@@ -66,8 +66,16 @@ export const EventsTable: FC<{ data: EventRow[] }> = ({ data }) => {
               <th
                 key={col.key}
                 scope="col"
+                tabIndex={0}
+                role="columnheader"
                 className={`py-2 pr-4 font-medium cursor-pointer select-none hover:text-fg-primary transition-colors ${col.align === 'right' ? 'text-right' : ''}`}
                 onClick={() => handleSort(col.key)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleSort(col.key);
+                  }
+                }}
                 aria-sort={sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
                 {col.label}

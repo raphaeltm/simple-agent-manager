@@ -44,18 +44,18 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
     });
   }
 
-  // Funnel: top conversion
+  // Funnel: top conversion (only show when there's meaningful data)
   if (funnel?.funnel?.length && funnel.funnel.length >= 2) {
     const first = funnel.funnel[0]!;
     const last = funnel.funnel[funnel.funnel.length - 1]!;
-    const rate = first.unique_users > 0
-      ? Math.round((last.unique_users / first.unique_users) * 100)
-      : 0;
-    cards.push({
-      label: 'Funnel Conversion',
-      value: `${rate}%`,
-      sub: `${first.unique_users.toLocaleString()} \u2192 ${last.unique_users.toLocaleString()}`,
-    });
+    if (first.unique_users > 0) {
+      const rate = Math.round((last.unique_users / first.unique_users) * 100);
+      cards.push({
+        label: 'Funnel Conversion',
+        value: `${rate}%`,
+        sub: `${first.unique_users.toLocaleString()} \u2192 ${last.unique_users.toLocaleString()}`,
+      });
+    }
   }
 
   // Total events

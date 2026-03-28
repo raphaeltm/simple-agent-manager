@@ -1,4 +1,4 @@
-import { type FC } from 'react';
+import { type FC, useId } from 'react';
 import { Body } from '@simple-agent-manager/ui';
 import {
   AreaChart,
@@ -31,6 +31,9 @@ function DauTooltip({ active, payload, label }: { active?: boolean; payload?: Ar
 }
 
 export const DauChart: FC<{ data: Array<{ date: string; unique_users: number }> }> = ({ data }) => {
+  const gradientId = useId();
+  const safeGradientId = `dauGradient-${gradientId.replace(/:/g, '')}`;
+
   if (!data.length) {
     return <Body className="text-fg-muted">No DAU data available yet. Data will appear after users sign in.</Body>;
   }
@@ -40,7 +43,7 @@ export const DauChart: FC<{ data: Array<{ date: string; unique_users: number }> 
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
           <defs>
-            <linearGradient id="dauGradient" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id={safeGradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="var(--sam-color-accent-primary, #16a34a)" stopOpacity={0.3} />
               <stop offset="95%" stopColor="var(--sam-color-accent-primary, #16a34a)" stopOpacity={0} />
             </linearGradient>
@@ -67,7 +70,7 @@ export const DauChart: FC<{ data: Array<{ date: string; unique_users: number }> 
             dataKey="unique_users"
             stroke="var(--sam-color-accent-primary, #16a34a)"
             strokeWidth={2}
-            fill="url(#dauGradient)"
+            fill={`url(#${safeGradientId})`}
             dot={false}
             activeDot={{ r: 4, stroke: 'var(--sam-color-accent-primary, #16a34a)', strokeWidth: 2, fill: 'var(--sam-color-bg-surface, #13201d)' }}
           />

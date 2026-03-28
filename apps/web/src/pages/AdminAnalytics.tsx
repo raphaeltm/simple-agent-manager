@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, Spinner, Button, Body } from '@simple-agent-manager/ui';
 import { useAdminAnalytics } from '../hooks/useAdminAnalytics';
 import {
@@ -43,8 +43,29 @@ export function AdminAnalytics() {
     refresh,
   } = useAdminAnalytics();
 
-  const [lastRefreshed] = useState<Date | null>(() => (loading ? null : new Date()));
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(() => (loading ? null : new Date()));
   const [showForwarding, setShowForwarding] = useState(false);
+  const prevLoadingRef = useRef(loading);
+
+  // Update lastRefreshed when loading transitions from true→false (data arrived)
+  useEffect(() => {
+    if (prevLoadingRef.current && !loading) {
+      setLastRefreshed(new Date());
+    }
+    if (!prevLoadingRef.current && !loading && !isRefreshing) {
+      // Also update after a manual refresh completes
+    }
+    prevLoadingRef.current = loading;
+  }, [loading, isRefreshing]);
+
+  // Update lastRefreshed when a refresh cycle completes
+  const prevRefreshingRef = useRef(isRefreshing);
+  useEffect(() => {
+    if (prevRefreshingRef.current && !isRefreshing) {
+      setLastRefreshed(new Date());
+    }
+    prevRefreshingRef.current = isRefreshing;
+  }, [isRefreshing]);
 
   if (error && !dau && !events && !funnel) {
     return (
@@ -172,8 +193,8 @@ export function AdminAnalytics() {
           onClick={() => setShowForwarding((v) => !v)}
           aria-expanded={showForwarding}
         >
-          <h3 className="text-base font-semibold text-fg-primary">Event Forwarding</h3>
-          <span className="text-fg-muted text-sm">{showForwarding ? '\u25B2' : '\u25BC'}</span>
+          <span className="text-base font-semibold text-fg-primary">Event Forwarding</span>
+          <span className="text-fg-muted text-sm" aria-hidden="true">{showForwarding ? '\u25B2' : '\u25BC'}</span>
         </button>
         {showForwarding && (
           <div className="px-4 pb-4">
