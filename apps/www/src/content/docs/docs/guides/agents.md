@@ -133,6 +133,7 @@ Running agents have access to project-aware MCP tools:
 |------|-------------|
 | `dispatch_task` | Spawn a follow-up idea for execution |
 | `create_idea` | Create a new idea |
+| `update_idea` | Update an idea's title, content, priority, or status |
 | `list_ideas` | View project ideas |
 | `get_idea` | Read idea details |
 | `search_ideas` | Search ideas by keyword |

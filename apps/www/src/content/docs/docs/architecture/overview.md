@@ -141,7 +141,7 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 |---------|---------|---------|
 | **KV** | `KV` | Auth sessions, bootstrap tokens, boot logs, MCP tokens |
 | **R2** | `R2` | VM Agent binaries, TTS audio cache, Pulumi state |
-| **Workers AI** | `AI` | Task title generation, transcription, TTS, context summarization |
+| **Workers AI** | `AI` | Idea title generation, transcription, TTS, context summarization |
 
 ## Durable Objects Deep Dive
 
@@ -253,6 +253,6 @@ CI runs lint, typecheck, tests, and build on every push. The deploy workflow onl
 | User-provided cloud tokens (BYOC) | Users own their infrastructure and costs |
 | Callback-driven provisioning | VMs POST `/ready` when bootstrapped — no polling |
 | Dynamic DNS per workspace | Instant subdomain resolution; cleaned up on stop |
-| Alarm-driven task orchestration | Idempotent steps with exponential backoff; no long-running processes |
+| Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes |
 | No credentials in cloud-init | Bootstrap tokens for secure credential injection |
 | Multi-provider abstraction | Unified VM size/lifecycle API across Hetzner and Scaleway |

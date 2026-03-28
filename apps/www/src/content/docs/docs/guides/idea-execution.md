@@ -94,6 +94,7 @@ An agent running inside a workspace has access to MCP tools that provide project
 |------|---------|
 | `dispatch_task` | Spawn a new idea for execution |
 | `create_idea` | Create a new idea |
+| `update_idea` | Update an idea's title, content, priority, or status |
 | `list_ideas` | View existing ideas |
 | `get_idea` | Read idea details |
 | `search_ideas` | Search ideas by keyword |
