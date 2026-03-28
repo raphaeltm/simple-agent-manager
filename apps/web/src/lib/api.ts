@@ -1813,3 +1813,52 @@ export interface AnalyticsForwardStatusResponse {
 export async function fetchAnalyticsForwardStatus(): Promise<AnalyticsForwardStatusResponse> {
   return request<AnalyticsForwardStatusResponse>('/api/admin/analytics/forward-status');
 }
+
+// ---------- Session File Proxy (proxied through CF Worker to VM agent) ----------
+
+/** Fetch directory listing via session proxy. */
+export async function getSessionFileList(
+  projectId: string,
+  sessionId: string,
+  path = '.'
+): Promise<FileListData> {
+  const params = new URLSearchParams({ path });
+  return request<FileListData>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/files/list?${params.toString()}`
+  );
+}
+
+/** Fetch file content via session proxy. */
+export async function getSessionFileContent(
+  projectId: string,
+  sessionId: string,
+  filePath: string
+): Promise<GitFileData> {
+  const params = new URLSearchParams({ path: filePath });
+  return request<GitFileData>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/files/view?${params.toString()}`
+  );
+}
+
+/** Fetch git status via session proxy. */
+export async function getSessionGitStatus(
+  projectId: string,
+  sessionId: string
+): Promise<GitStatusData> {
+  return request<GitStatusData>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/git/status`
+  );
+}
+
+/** Fetch git diff for a file via session proxy. */
+export async function getSessionGitDiff(
+  projectId: string,
+  sessionId: string,
+  filePath: string,
+  staged = false
+): Promise<GitDiffData> {
+  const params = new URLSearchParams({ path: filePath, staged: String(staged) });
+  return request<GitDiffData>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/git/diff?${params.toString()}`
+  );
+}

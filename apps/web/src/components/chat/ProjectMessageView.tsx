@@ -12,9 +12,10 @@ import {
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent, getErrorMeta } from '@simple-agent-manager/acp-client';
 import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
-import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2, Globe, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2, Globe, ExternalLink, FolderOpen, GitCompare } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
+import { ChatFilePanel } from './ChatFilePanel';
 import { mergeMessages } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
 import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession, saveCachedCommands } from '../../lib/api';
@@ -112,7 +113,7 @@ function getTtsUrl(): string {
 }
 
 /** Renders a single ACP ConversationItem using the shared acp-client components. */
-function AcpConversationItemView({ item }: { item: ConversationItem }) {
+function AcpConversationItemView({ item, onFileClick }: { item: ConversationItem; onFileClick?: (path: string, line?: number | null) => void }) {
   const globalAudio = useGlobalAudio();
 
   const handlePlayAudio = item.kind === 'agent_message'
@@ -139,7 +140,7 @@ function AcpConversationItemView({ item }: { item: ConversationItem }) {
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':
-      return <AcpToolCallCard toolCall={item} />;
+      return <AcpToolCallCard toolCall={item} onFileClick={onFileClick} />;
     case 'plan':
       return <PlanView plan={item} />;
     case 'system_message':
@@ -396,6 +397,25 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   // Idle timer state (TDF-8)
   const [idleCountdownMs, setIdleCountdownMs] = useState<number | null>(null);
+
+  // File panel state — slide-over for viewing files/diffs inline
+  const [filePanel, setFilePanel] = useState<{
+    mode: 'browse' | 'view' | 'diff' | 'git-status';
+    path?: string;
+    line?: number | null;
+  } | null>(null);
+
+  const handleFileClick = useCallback((path: string, line?: number | null) => {
+    setFilePanel({ mode: 'view', path, line });
+  }, []);
+
+  const handleOpenFileBrowser = useCallback(() => {
+    setFilePanel({ mode: 'browse', path: '.' });
+  }, []);
+
+  const handleOpenGitChanges = useCallback(() => {
+    setFilePanel({ mode: 'git-status' });
+  }, []);
 
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
@@ -917,6 +937,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           node={node}
           detectedPorts={detectedPorts}
           onSessionMutated={onSessionMutated}
+          onOpenFiles={handleOpenFileBrowser}
+          onOpenGit={handleOpenGitChanges}
         />
       )}
 
@@ -982,7 +1004,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               overscan={200}
               itemContent={(_index, item) => (
                 <div className="px-4 pb-3">
-                  <AcpConversationItemView item={item} />
+                  <AcpConversationItemView item={item} onFileClick={session?.workspaceId && sessionState === 'active' ? handleFileClick : undefined} />
                 </div>
               )}
               components={{
@@ -1068,6 +1090,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           </span>
         </div>
       )}
+
+      {/* File viewer slide-over panel */}
+      {filePanel && session && (
+        <ChatFilePanel
+          projectId={projectId}
+          sessionId={sessionId}
+          initialMode={filePanel.mode}
+          initialPath={filePanel.path}
+          onClose={() => setFilePanel(null)}
+        />
+      )}
     </div>
   );
 };
@@ -1101,6 +1134,8 @@ function SessionHeader({
   node,
   detectedPorts,
   onSessionMutated,
+  onOpenFiles,
+  onOpenGit,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -1112,6 +1147,8 @@ function SessionHeader({
   node: NodeResponse | null;
   detectedPorts: DetectedPort[];
   onSessionMutated?: () => void;
+  onOpenFiles?: () => void;
+  onOpenGit?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -1279,14 +1316,28 @@ function SessionHeader({
 
             <div className="ml-auto flex items-center gap-2">
               {session.workspaceId && sessionState === 'active' && (
-                <a
-                  href={`/workspaces/${session.workspaceId}`}
-                  className="no-underline"
-                >
-                  <Button variant="ghost" size="sm">
-                    Open Workspace
-                  </Button>
-                </a>
+                <>
+                  {onOpenFiles && (
+                    <Button variant="ghost" size="sm" onClick={onOpenFiles}>
+                      <FolderOpen size={14} className="mr-1" />
+                      Files
+                    </Button>
+                  )}
+                  {onOpenGit && (
+                    <Button variant="ghost" size="sm" onClick={onOpenGit}>
+                      <GitCompare size={14} className="mr-1" />
+                      Git
+                    </Button>
+                  )}
+                  <a
+                    href={`/workspaces/${session.workspaceId}`}
+                    className="no-underline"
+                  >
+                    <Button variant="ghost" size="sm">
+                      Open Workspace
+                    </Button>
+                  </a>
+                </>
               )}
 
               {canMarkComplete && (

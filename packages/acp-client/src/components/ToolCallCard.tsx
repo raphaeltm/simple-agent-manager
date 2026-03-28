@@ -5,6 +5,8 @@ import { TerminalBlock } from './TerminalBlock';
 
 interface ToolCallCardProps {
   toolCall: ToolCallItem;
+  /** Called when a file location is clicked. Receives the file path and optional line number. */
+  onFileClick?: (path: string, line?: number | null) => void;
 }
 
 /** Status icon for tool call state */
@@ -37,15 +39,18 @@ function StatusIcon({ status }: { status: ToolCallItem['status'] }) {
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * don't affect this component's props.
  */
-export const ToolCallCard = React.memo(function ToolCallCard({ toolCall }: ToolCallCardProps) {
+export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileClick }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const hasContent = toolCall.content.some(hasRenderableContent);
 
   return (
     <div className="my-2 border border-gray-200 rounded-lg overflow-hidden">
-      {/* Header */}
-      <button
+      {/* Header — uses div with role="button" to allow nested interactive elements */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => hasContent && setExpanded(!expanded)}
+        onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && hasContent) { e.preventDefault(); setExpanded(!expanded); } }}
         aria-expanded={hasContent ? expanded : undefined}
         className={`w-full flex items-center gap-2 px-3 py-2 bg-gray-50 text-left ${hasContent ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'}`}
       >
@@ -58,12 +63,27 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall }: ToolC
             </span>
           )}
           {toolCall.locations.length > 0 && (
-            <span
-              className="text-xs text-gray-500 font-mono truncate min-w-0"
-              title={`${toolCall.locations[0]?.path}${toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}`}
-            >
-              {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
-            </span>
+            onFileClick ? (
+              <button
+                type="button"
+                className="text-xs text-blue-600 hover:text-blue-800 font-mono truncate min-w-0 bg-transparent border-none cursor-pointer p-0 text-left underline decoration-dotted"
+                title={`${toolCall.locations[0]?.path}${toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const loc = toolCall.locations[0];
+                  if (loc) onFileClick(loc.path, loc.line);
+                }}
+              >
+                {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
+              </button>
+            ) : (
+              <span
+                className="text-xs text-gray-500 font-mono truncate min-w-0"
+                title={`${toolCall.locations[0]?.path}${toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}`}
+              >
+                {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
+              </span>
+            )
           )}
         </div>
         {hasContent && (
@@ -76,7 +96,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall }: ToolC
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         )}
-      </button>
+      </div>
 
       {/* Content */}
       {expanded && hasContent && (
