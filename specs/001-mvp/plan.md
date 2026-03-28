@@ -31,7 +31,7 @@ A serverless platform for on-demand AI coding workspaces. Users can spin up clou
 
 | Principle | Status | Notes |
 |-----------|--------|-------|
-| I. Open Source Sustainability | ✅ Pass | All core features OSS (MIT) |
+| I. Open Source Sustainability | ✅ Pass | All core features OSS (AGPL-3.0) |
 | II. Infrastructure Stability | ✅ Pass | 90% coverage for critical paths, TDD required |
 | III. Documentation Excellence | ✅ Pass | API docs, user guides, ADRs planned |
 | IV. Approachable Code & UX | ✅ Pass | Simple control plane, clear error messages |

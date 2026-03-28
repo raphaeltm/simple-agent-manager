@@ -8,7 +8,7 @@ info:
   contact:
     name: API Support
   license:
-    name: MIT
+    name: AGPL-3.0-or-later
 
 servers:
   - url: https://api.workspaces.example.com

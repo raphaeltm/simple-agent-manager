@@ -32,7 +32,7 @@ The current marketing site at `apps/www/` positions SAM primarily as a cheaper G
   3. Bring Your Own Cloud (encrypted credentials, data sovereignty)
   4. Project-Centric Workflows (coming — sessions, tasks, activity)
   5. Multi-Workspace Nodes (cost efficiency through consolidation)
-  6. Open Source & Self-Hostable (MIT, Cloudflare free tier)
+  6. Open Source & Self-Hostable (AGPL-3.0, Cloudflare free tier)
 
 ### New "Vision" Section (new component `Vision.astro`)
 - [ ] Create a prominent section between HowItWorks and Comparison

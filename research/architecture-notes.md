@@ -398,7 +398,7 @@ A complete autonomous coding agent (formerly OpenDevin) - could replace Claude C
 - Full web UI at localhost:3000
 - Docker sandbox for security
 - Can write code, run commands, browse web
-- MIT licensed
+- AGPL-3.0 licensed
 - 38K+ GitHub stars
 
 **Installation:**
