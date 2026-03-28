@@ -7,8 +7,19 @@ import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
+import { normalizeProjectFilePath } from './_helpers';
 
 const fileProxyRoutes = new Hono<{ Bindings: Env }>();
+
+/** Response headers safe to forward from VM agent to the client. */
+const FORWARDED_RESPONSE_HEADERS = [
+  'Content-Type',
+  'Content-Length',
+  'Content-Disposition',
+  'Cache-Control',
+  'ETag',
+  'Last-Modified',
+];
 
 /**
  * Resolve workspace from a chat session and build the VM agent URL + token.
@@ -48,6 +59,11 @@ async function resolveSessionWorkspace(
     throw errors.notFound('No workspace found for this session');
   }
 
+  // Defensive assertion: workspace must belong to the expected project
+  if (workspace.projectId !== projectId) {
+    throw errors.forbidden('Workspace does not belong to this project');
+  }
+
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
     throw errors.badRequest(
       `Workspace is not accessible (status: ${workspace.status})`
@@ -62,6 +78,7 @@ async function resolveSessionWorkspace(
 
 /**
  * Proxy a request to the VM agent, forwarding query params and returning the response.
+ * Token is passed via query param (VM agent's requireWorkspaceRequestAuth expects this).
  */
 async function proxyToVmAgent(
   workspaceUrl: string,
@@ -76,13 +93,52 @@ async function proxyToVmAgent(
   const res = await fetch(url);
   if (!res.ok) {
     const text = await res.text();
-    throw errors.badRequest(`VM agent error: ${text}`);
+    // Log full error server-side for debugging; return sanitized message to client
+    console.error(
+      JSON.stringify({
+        event: 'file_proxy.vm_agent_error',
+        workspaceId,
+        vmPath,
+        status: res.status,
+        body: text,
+      })
+    );
+    // Map VM agent status codes to appropriate client responses
+    const clientStatus =
+      res.status === 404 ? 404 : res.status >= 500 ? 502 : 400;
+    throw errors.badRequest(
+      clientStatus === 404
+        ? 'File or resource not found'
+        : clientStatus === 502
+          ? 'Workspace agent unavailable'
+          : 'VM agent request failed'
+    );
+  }
+
+  // Forward safe response headers from VM agent
+  const headers = new Headers();
+  for (const name of FORWARDED_RESPONSE_HEADERS) {
+    const value = res.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  // Ensure Content-Type always has a default
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
   }
 
   return new Response(res.body, {
     status: res.status,
-    headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' },
+    headers,
   });
+}
+
+/**
+ * Sanitize and validate the path query parameter for file operations.
+ * Uses normalizeProjectFilePath for defence-in-depth against path traversal.
+ */
+function requireSafePath(rawPath: string | undefined): string {
+  if (!rawPath) throw errors.badRequest('path query parameter is required');
+  return normalizeProjectFilePath(rawPath);
 }
 
 /** GET /:id/sessions/:sessionId/files/list — Proxy directory listing */
@@ -99,13 +155,13 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/list', async (c) => {
   );
 
   const params = new URLSearchParams();
-  const path = c.req.query('path');
-  if (path) params.set('path', path);
+  const rawPath = c.req.query('path');
+  if (rawPath) params.set('path', normalizeProjectFilePath(rawPath));
 
   return proxyToVmAgent(workspaceUrl, workspaceId, token, 'files/list', params);
 });
 
-/** GET /:id/sessions/:sessionId/files/view — Proxy file content */
+/** GET /:id/sessions/:sessionId/files/view — Proxy file content (via git/file on VM agent) */
 fileProxyRoutes.get('/:id/sessions/:sessionId/files/view', async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
@@ -119,8 +175,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/view', async (c) => {
   );
 
   const params = new URLSearchParams();
-  const path = c.req.query('path');
-  if (!path) throw errors.badRequest('path query parameter is required');
+  const path = requireSafePath(c.req.query('path'));
   params.set('path', path);
 
   return proxyToVmAgent(workspaceUrl, workspaceId, token, 'git/file', params);
@@ -156,8 +211,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   );
 
   const params = new URLSearchParams();
-  const path = c.req.query('path');
-  if (!path) throw errors.badRequest('path query parameter is required');
+  const path = requireSafePath(c.req.query('path'));
   params.set('path', path);
   const staged = c.req.query('staged');
   if (staged) params.set('staged', staged);
