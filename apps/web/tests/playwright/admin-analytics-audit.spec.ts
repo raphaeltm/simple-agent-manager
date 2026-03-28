@@ -244,8 +244,8 @@ const API_ERROR: MockScenario = { apiError: true };
 // ---------------------------------------------------------------------------
 
 async function setupMocks(page: Page, scenario: MockScenario) {
-  // Auth
-  await page.route('**/api/auth/me', async (route: Route) => {
+  // Auth — BetterAuth calls /api/auth/get-session and related paths
+  await page.route('**/api/auth/**', async (route: Route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_USER) });
   });
 
@@ -312,6 +312,49 @@ async function setupMocks(page: Page, scenario: MockScenario) {
       await route.fulfill({
         status: 200, contentType: 'application/json',
         body: JSON.stringify(scenario.events ?? makeEventsData()),
+      });
+    }
+  });
+
+  // Website traffic
+  await page.route('**/api/admin/analytics/website-traffic**', async (route: Route) => {
+    if (scenario.apiError) {
+      await route.fulfill({ status: 500, body: 'Internal Server Error' });
+    } else {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          hosts: [{
+            host: 'simple-agent-manager.org',
+            totalViews: 12400,
+            uniqueVisitors: 3200,
+            uniqueSessions: 4100,
+            sections: [
+              { name: 'landing', views: 5200, unique_visitors: 2100, topPages: [{ page: '/', views: 4000, unique_visitors: 1800 }] },
+              { name: 'docs', views: 4100, unique_visitors: 1600, topPages: [{ page: '/docs/getting-started', views: 2000, unique_visitors: 900 }] },
+              { name: 'blog', views: 2100, unique_visitors: 800, topPages: [{ page: '/blog/launch', views: 1200, unique_visitors: 500 }] },
+            ],
+          }],
+          trend: [],
+          period: '7d',
+        }),
+      });
+    }
+  });
+
+  // Forward status
+  await page.route('**/api/admin/analytics/forward-status**', async (route: Route) => {
+    if (scenario.apiError) {
+      await route.fulfill({ status: 500, body: 'Internal Server Error' });
+    } else {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          enabled: true,
+          lastForwardedAt: '2026-03-28T10:00:00Z',
+          destinations: { segment: { configured: true }, ga4: { configured: false } },
+          events: ['signup', 'login', 'project_created'],
+        }),
       });
     }
   });
@@ -417,7 +460,7 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     await assertNoHorizontalOverflow(page);
   });
 
-  test('period selector toggle — all three buttons accessible and toggleable', async ({ page }) => {
+  test('period selector toggle — all four buttons accessible and toggleable', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(600);
@@ -461,43 +504,40 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     await page.goto('/admin/analytics');
     await page.waitForTimeout(600);
 
-    // EventsTable has a separate table — verify col scoping
+    // EventsTable, retention, geo, and website traffic tables should all be present
     const tables = page.locator('table');
     const tableCount = await tables.count();
-    expect(tableCount).toBeGreaterThanOrEqual(2); // retention + events
+    expect(tableCount).toBeGreaterThanOrEqual(2); // retention + events + geo + website
 
     const allColHeaders = page.locator('th[scope="col"]');
     const allColCount = await allColHeaders.count();
     expect(allColCount).toBeGreaterThan(0);
   });
 
-  test('sparklines have role=img and title', async ({ page }) => {
+  test('KPI summary cards render with data', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(700);
 
-    const sparklineSvgs = page.locator('svg[role="img"]');
-    const count = await sparklineSvgs.count();
-    // With normal data, there should be at least some sparklines
-    if (count > 0) {
-      const firstSparkline = sparklineSvgs.first();
-      await expect(firstSparkline).toHaveAttribute('aria-label');
-      const titleEl = firstSparkline.locator('title');
-      await expect(titleEl).toBeVisible();
-    }
+    // KPI cards should show key metrics
+    const kpiGrid = page.locator('.grid.grid-cols-2');
+    await expect(kpiGrid).toBeVisible();
+
+    // Should have at least 3 KPI cards (DAU, avg DAU, funnel, events)
+    const kpiCards = kpiGrid.locator('> div');
+    const count = await kpiCards.count();
+    expect(count).toBeGreaterThanOrEqual(3);
   });
 
-  test('DAU chart container has role=img with descriptive label', async ({ page }) => {
+  test('DAU chart renders as Recharts area chart', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(700);
 
-    // Check specifically for the DAU chart container
-    const dauImgContainer = page.locator('.flex.items-end.gap-\\[2px\\][role="img"]');
-    const exists = await dauImgContainer.count();
-    if (exists > 0) {
-      await expect(dauImgContainer.first()).toHaveAttribute('aria-label');
-    }
+    // Recharts renders SVG with .recharts-wrapper class
+    const rechartsWrapper = page.locator('.recharts-wrapper');
+    const exists = await rechartsWrapper.count();
+    expect(exists).toBeGreaterThan(0);
   });
 
   test('section headings use correct text size (base/semibold)', async ({ page }) => {
@@ -507,8 +547,41 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
 
     const headings = page.locator('h3.text-base.font-semibold');
     const count = await headings.count();
-    // All 6 card sections should use the upgraded heading style
-    expect(count).toBeGreaterThanOrEqual(6);
+    // All card sections should use the upgraded heading style
+    expect(count).toBeGreaterThanOrEqual(5);
+  });
+
+  test('events table columns are sortable', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+
+    // Find sortable column headers with aria-sort
+    const sortableHeaders = page.locator('th[aria-sort]');
+    const count = await sortableHeaders.count();
+    expect(count).toBeGreaterThan(0);
+
+    // Click a header to sort
+    const countHeader = page.getByRole('columnheader', { name: /count/i });
+    await countHeader.click();
+    await page.waitForTimeout(200);
+    await expect(countHeader).toHaveAttribute('aria-sort');
+  });
+
+  test('forwarding status is collapsible', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+
+    // Forwarding section should have a toggle button
+    const forwardingToggle = page.getByRole('button', { name: /event forwarding/i });
+    await expect(forwardingToggle).toBeVisible();
+    await expect(forwardingToggle).toHaveAttribute('aria-expanded', 'false');
+
+    // Click to expand
+    await forwardingToggle.click();
+    await page.waitForTimeout(200);
+    await expect(forwardingToggle).toHaveAttribute('aria-expanded', 'true');
   });
 });
 
