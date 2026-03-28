@@ -149,7 +149,6 @@ describe('TruncatedSummary', () => {
     });
 
     it('shows speaker button in modal when taskId is provided', async () => {
-      const user = userEvent.setup();
       mockResizeObserver();
       const { container } = render(<TruncatedSummary summary="Summary with audio" taskId="task-123" />);
 
