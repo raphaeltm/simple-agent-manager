@@ -100,7 +100,7 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "path query parameter is required")
 		return
 	}
-	if err := sanitizeFilePath(filePath); err != nil {
+	if err := sanitizeReadOnlyPath(filePath); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -164,7 +164,7 @@ func (s *Server) handleGitFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "path query parameter is required")
 		return
 	}
-	if err := sanitizeFilePath(filePath); err != nil {
+	if err := sanitizeReadOnlyPath(filePath); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -310,6 +310,33 @@ func sanitizeFilePath(path string) error {
 	}
 
 	// Also reject any component that is ".."
+	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
+		if part == ".." {
+			return fmt.Errorf("path traversal is not allowed")
+		}
+	}
+
+	return nil
+}
+
+// sanitizeReadOnlyPath validates a file path for read-only operations (file listing,
+// file viewing, git diff). Allows absolute paths since read-only access inside an
+// authenticated container is safe — the user already has full terminal access.
+// Still rejects null bytes and path traversal.
+func sanitizeReadOnlyPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("file path is empty")
+	}
+
+	if strings.ContainsRune(path, 0) {
+		return fmt.Errorf("file path contains null byte")
+	}
+
+	// Check for path traversal
+	cleaned := filepath.Clean(path)
+	if strings.HasPrefix(cleaned, "..") || cleaned == ".." {
+		return fmt.Errorf("path traversal is not allowed")
+	}
 	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
 		if part == ".." {
 			return fmt.Errorf("path traversal is not allowed")

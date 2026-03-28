@@ -50,7 +50,7 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		dirPath = "."
 	}
 	if dirPath != "." {
-		if err := sanitizeFilePath(dirPath); err != nil {
+		if err := sanitizeReadOnlyPath(dirPath); err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":"invalid path: %s"}`, err.Error()), http.StatusBadRequest)
 			return
 		}

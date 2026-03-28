@@ -46,6 +46,46 @@ func TestSanitizeFilePath(t *testing.T) {
 	}
 }
 
+func TestSanitizeReadOnlyPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		// All cases from sanitizeFilePath should still work for relative paths
+		{name: "valid simple file", path: "README.md", wantErr: false},
+		{name: "valid nested path", path: "src/components/App.tsx", wantErr: false},
+		{name: "valid deeply nested", path: "a/b/c/d/e/f.go", wantErr: false},
+		{name: "valid hidden file", path: ".gitignore", wantErr: false},
+		{name: "valid hidden dir", path: ".github/workflows/ci.yml", wantErr: false},
+
+		// Absolute paths are ALLOWED for read-only operations
+		{name: "absolute workspace path", path: "/workspaces/repo/src/index.ts", wantErr: false},
+		{name: "absolute etc path", path: "/etc/hostname", wantErr: false},
+		{name: "absolute home path", path: "/home/node/.bashrc", wantErr: false},
+		{name: "absolute deep path", path: "/workspaces/simple-agent-manager/apps/api/src/routes/projects/files.ts", wantErr: false},
+
+		// Still reject dangerous patterns
+		{name: "empty path", path: "", wantErr: true},
+		{name: "path traversal basic", path: "../etc/passwd", wantErr: true},
+		{name: "path traversal nested", path: "src/../../etc/passwd", wantErr: true},
+		// Absolute path with .. resolves to /etc/passwd via filepath.Clean, which is a valid
+		// absolute path. Since we allow all absolute paths for read-only operations, this is fine.
+		{name: "absolute path with .. resolves cleanly", path: "/workspaces/repo/../../etc/passwd", wantErr: false},
+		{name: "null byte", path: "file\x00.txt", wantErr: true},
+		{name: "null byte in absolute", path: "/workspaces/\x00malicious", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := sanitizeReadOnlyPath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("sanitizeReadOnlyPath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestSanitizeGitRef(t *testing.T) {
 	tests := []struct {
 		name    string

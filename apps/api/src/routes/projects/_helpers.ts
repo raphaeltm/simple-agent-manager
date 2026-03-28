@@ -120,6 +120,47 @@ export function normalizeProjectFilePath(path: string): string {
   return segments.join('/');
 }
 
+/**
+ * Relaxed path validation for read-only file proxy routes.
+ * Keeps traversal prevention (no `..`, no empty segments, no invalid characters)
+ * but removes the ALLOWED_ABSOLUTE_PREFIXES restriction since read-only file browsing
+ * through an authenticated session proxy is safe for any container path.
+ *
+ * The file proxy is already protected by:
+ * 1. Project ownership verification (user must own the project)
+ * 2. Workspace linkage validation (workspace must belong to the session)
+ * 3. Terminal token authentication at VM agent layer
+ * 4. Container isolation (VM agent runs commands inside the devcontainer)
+ */
+export function normalizeFileProxyPath(path: string): string {
+  const normalized = path.trim().replace(/\\/g, '/');
+  if (!normalized) {
+    throw errors.badRequest('path is required');
+  }
+  if (!PROJECT_FILE_PATH_PATTERN.test(normalized)) {
+    throw errors.badRequest('path contains invalid characters');
+  }
+
+  const segments = normalized.split('/');
+  // For absolute paths, the first segment will be empty (from leading /). Skip it.
+  const checkSegments = normalized.startsWith('/') ? segments.slice(1) : segments;
+  // Allow bare "." as a root-directory alias
+  if (checkSegments.length === 1 && checkSegments[0] === '.') {
+    return '.';
+  }
+  for (let i = 0; i < checkSegments.length; i++) {
+    const seg = checkSegments[i];
+    if (seg === '' || seg === '.' || seg === '..') {
+      throw errors.badRequest('path must not contain empty, dot, or dot-dot segments');
+    }
+  }
+
+  // No absolute path prefix restriction — read-only proxy is safe for any path.
+  // No ~ expansion needed — the VM agent handles paths relative to container workdir.
+
+  return segments.join('/');
+}
+
 export async function buildProjectRuntimeConfigResponse(
   db: ReturnType<typeof drizzle<typeof schema>>,
   project: schema.Project
