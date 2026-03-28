@@ -5,6 +5,8 @@ import { TerminalBlock } from './TerminalBlock';
 
 interface ToolCallCardProps {
   toolCall: ToolCallItem;
+  /** Called when a file location is clicked. Receives the file path and optional line number. */
+  onFileClick?: (path: string, line?: number | null) => void;
 }
 
 /** Status icon for tool call state */
@@ -37,7 +39,7 @@ function StatusIcon({ status }: { status: ToolCallItem['status'] }) {
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * don't affect this component's props.
  */
-export const ToolCallCard = React.memo(function ToolCallCard({ toolCall }: ToolCallCardProps) {
+export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileClick }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const hasContent = toolCall.content.some(hasRenderableContent);
 
@@ -58,12 +60,27 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall }: ToolC
             </span>
           )}
           {toolCall.locations.length > 0 && (
-            <span
-              className="text-xs text-gray-500 font-mono truncate min-w-0"
-              title={`${toolCall.locations[0]?.path}${toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}`}
-            >
-              {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
-            </span>
+            onFileClick ? (
+              <button
+                type="button"
+                className="text-xs text-blue-600 hover:text-blue-800 font-mono truncate min-w-0 bg-transparent border-none cursor-pointer p-0 text-left underline decoration-dotted"
+                title={`${toolCall.locations[0]?.path}${toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const loc = toolCall.locations[0];
+                  if (loc) onFileClick(loc.path, loc.line);
+                }}
+              >
+                {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
+              </button>
+            ) : (
+              <span
+                className="text-xs text-gray-500 font-mono truncate min-w-0"
+                title={`${toolCall.locations[0]?.path}${toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}`}
+              >
+                {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
+              </span>
+            )
           )}
         </div>
         {hasContent && (
