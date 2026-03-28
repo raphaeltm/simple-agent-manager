@@ -129,7 +129,9 @@
   from { transform: translateY(100%); }
   to { transform: translateY(0); }
 }
-@keyframes sam-player-slide-out {
-  from { transform: translateY(0); }
-  to { transform: translateY(100%); }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sam-player-slide-in {
+    from { transform: translateY(0); }
+    to   { transform: translateY(0); }
+  }
 }

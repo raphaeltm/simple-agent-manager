@@ -109,7 +109,7 @@ export function GlobalAudioPlayer() {
           style={{ color: 'var(--sam-color-fg-muted)' }}
           aria-label={`Skip back ${SKIP_SECONDS} seconds`}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <polygon points="11 19 2 12 11 5 11 19" />
             <polygon points="22 19 13 12 22 5 22 19" />
           </svg>
@@ -128,16 +128,16 @@ export function GlobalAudioPlayer() {
           aria-label={isLoading ? 'Cancel audio generation' : isPlaying ? 'Pause' : 'Play'}
         >
           {isLoading ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="animate-spin motion-reduce:animate-none">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="animate-spin motion-reduce:animate-none">
               <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
             </svg>
           ) : isPlaying ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
               <rect x="6" y="4" width="4" height="16" rx="1" />
               <rect x="14" y="4" width="4" height="16" rx="1" />
             </svg>
           ) : (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
           )}
@@ -152,7 +152,7 @@ export function GlobalAudioPlayer() {
           style={{ color: 'var(--sam-color-fg-muted)' }}
           aria-label={`Skip forward ${SKIP_SECONDS} seconds`}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <polygon points="13 19 22 12 13 5 13 19" />
             <polygon points="2 19 11 12 2 5 2 19" />
           </svg>
@@ -171,7 +171,7 @@ export function GlobalAudioPlayer() {
               step={0.1}
               value={audio.currentTime}
               onChange={handleSeek}
-              className="flex-1 h-1 accent-[var(--sam-color-accent-primary,#16a34a)] cursor-pointer min-w-0"
+              className="flex-1 h-2 accent-[var(--sam-color-accent-primary,#16a34a)] cursor-pointer min-w-0"
               aria-label="Seek position"
               aria-valuemin={0}
               aria-valuemax={audio.duration}
@@ -219,7 +219,7 @@ export function GlobalAudioPlayer() {
           <button
             type="button"
             onClick={() => setExpanded(prev => !prev)}
-            className={`min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
+            className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
             style={{ color: 'var(--sam-color-fg-muted)' }}
             aria-label={expanded ? 'Collapse player' : 'Expand player'}
             aria-expanded={expanded}
