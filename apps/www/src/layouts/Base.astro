@@ -10,6 +10,22 @@ const {
   title = 'SAM — Run Coding Agents in Parallel on Your Infrastructure',
   description = 'Simple Agent Manager (SAM) is an open-source platform for running coding agents on your own cloud. Run as many instances of Claude Code, Codex, or Gemini CLI as you need across cloud VMs.',
 } = Astro.props;
+
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site).href;
+const ogImageUrl = new URL('/images/og-default.png', Astro.site).href;
+
+const organizationSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'Simple Agent Manager',
+  alternateName: 'SAM',
+  url: Astro.site?.href,
+  logo: new URL('/images/logo.png', Astro.site).href,
+  description: 'Open-source platform for running AI coding agents on your own cloud infrastructure.',
+  sameAs: [
+    'https://github.com/raphaeltm/simple-agent-manager',
+  ],
+};
 ---
 
 <!doctype html>
@@ -20,17 +36,24 @@ const {
     <meta name="description" content={description} />
     <meta name="theme-color" content="#0b1110" />
 
+    <!-- Canonical URL -->
+    <link rel="canonical" href={canonicalUrl} />
+
     <!-- Open Graph -->
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://www.simple-agent-manager.org/images/og-default.png" />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content="https://www.simple-agent-manager.org/images/og-default.png" />
+    <meta name="twitter:image" content={ogImageUrl} />
+
+    <!-- Structured Data -->
+    <script type="application/ld+json" set:html={JSON.stringify(organizationSchema)} />
 
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>{title}</title>
@@ -40,6 +63,9 @@ const {
 
     <!-- Analytics -->
     <script src="/scripts/tracker.js" data-api={`https://api.${import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org'}/api/t`} defer></script>
+
+    <!-- Page-specific head content -->
+    <slot name="head" />
   </head>
   <body>
     <slot />

@@ -28,9 +28,66 @@ const formattedDate = date.toLocaleDateString('en-US', {
   month: 'long',
   day: 'numeric',
 });
+
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site).href;
+const ogImageUrl = new URL('/images/og-default.png', Astro.site).href;
+const isoDate = date.toISOString().split('T')[0];
+
+const blogPostingSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'BlogPosting',
+  headline: title,
+  description,
+  datePublished: isoDate,
+  author: {
+    '@type': 'Person',
+    name: author,
+  },
+  publisher: {
+    '@type': 'Organization',
+    name: 'Simple Agent Manager',
+    logo: {
+      '@type': 'ImageObject',
+      url: new URL('/images/logo.png', Astro.site).href,
+    },
+  },
+  url: canonicalUrl,
+  image: ogImageUrl,
+  keywords: tags.join(', '),
+};
+
+const breadcrumbSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    {
+      '@type': 'ListItem',
+      position: 1,
+      name: 'Blog',
+      item: new URL('/blog/', Astro.site).href,
+    },
+    {
+      '@type': 'ListItem',
+      position: 2,
+      name: title,
+      item: canonicalUrl,
+    },
+  ],
+};
 ---
 
 <Base title={`${title} | SAM Blog`} description={description}>
+  <Fragment slot="head">
+    <!-- Article OG meta -->
+    <meta property="og:type" content="article" />
+    <meta property="article:published_time" content={isoDate} />
+    <meta property="article:author" content={author} />
+    {tags.map((tag) => <meta property="article:tag" content={tag} />)}
+
+    <!-- Blog post structured data -->
+    <script type="application/ld+json" set:html={JSON.stringify(blogPostingSchema)} />
+    <script type="application/ld+json" set:html={JSON.stringify(breadcrumbSchema)} />
+  </Fragment>
   <Header />
   <main class="blog-post">
     <div class="container">
