@@ -1,24 +1,24 @@
 ---
-title: Task Execution
-description: How to submit tasks, understand the task lifecycle, and use agent-to-agent dispatch in SAM.
+title: Idea Execution
+description: How ideas go from description to pull request — execution lifecycle, agent dispatch, and warm node pooling.
 ---
 
-Tasks are the primary way to use SAM for autonomous AI coding work. You describe what you want done, and SAM handles provisioning, agent execution, and cleanup.
+Ideas are the primary way to use SAM for autonomous AI coding work. You describe what you want done in the chat, and SAM handles provisioning, agent execution, and cleanup.
 
-## Submitting a Task
+## Executing an Idea
 
-You can submit tasks through the **project chat interface**. Type your task description in the chat input and submit. SAM will:
+You execute ideas through the **project chat interface**. Type your description in the chat input and submit. SAM will:
 
 1. **Generate a title** — AI-powered title generation using Workers AI (short messages are used as-is)
 2. **Create a branch** — descriptive branch name with `sam/` prefix
 3. **Select a node** — reuses a warm node if available, otherwise provisions a new one
 4. **Create a workspace** — clones your repo and sets up the environment
-5. **Start the agent** — runs your configured agent (Claude Code, Codex, Gemini, or Mistral Vibe) with your task description
+5. **Start the agent** — runs your configured agent (Claude Code, Codex, Gemini, or Mistral Vibe) with your description
 6. **Stream output** — watch the agent work in real-time through the chat interface
 
-### Task Options
+### Execution Options
 
-When submitting a task, you can optionally specify:
+When executing an idea, you can optionally specify:
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -28,17 +28,21 @@ When submitting a task, you can optionally specify:
 | **Workspace Profile** | `full` or `lightweight` | `full` |
 | **Node** | Reuse a specific existing node | Auto-select |
 
-## Task Lifecycle
+## Idea Lifecycle
 
-Tasks progress through these statuses:
+Ideas progress through these stages as seen in the UI:
 
-```
-draft → ready → queued → delegated → in_progress → completed/failed/cancelled
-```
+| Stage | What's happening |
+|-------|-----------------|
+| **Exploring** | You're brainstorming — the idea is a draft |
+| **Ready** | The idea is defined and ready to execute |
+| **Executing** | An agent is actively working on it |
+| **Done** | The agent finished and created a PR |
+| **Parked** | The idea was cancelled or execution failed |
 
 ### Execution Steps
 
-While a task is running, the task runner tracks detailed progress:
+While an idea is executing, SAM tracks detailed progress:
 
 | Step | Description |
 |------|-------------|
@@ -50,19 +54,19 @@ While a task is running, the task runner tracks detailed progress:
 | `agent_session` | Starting the AI agent session |
 | `running` | Agent is actively working |
 
-### What Happens When a Task Completes
+### What Happens When Execution Completes
 
 When an agent finishes its work:
 
 1. The agent commits and pushes changes to the branch
 2. A pull request is created automatically
-3. A `task_complete` notification is sent
+3. A notification is sent
 4. The workspace is stopped
 5. If the node was auto-provisioned and has no other active workspaces, it enters the **warm pool** for potential reuse
 
-## AI Task Title Generation
+## AI Title Generation
 
-SAM automatically generates concise titles for tasks using Workers AI. The generation works as follows:
+SAM automatically generates concise titles for ideas using Workers AI:
 
 - Messages **at or below 100 characters** are used as the title directly (no AI needed)
 - Longer messages are summarized by a Workers AI model (default: `@cf/google/gemma-3-12b-it`)
@@ -80,7 +84,7 @@ Configure via environment variables:
 
 ## Agent-to-Agent Dispatch
 
-Running agents can spawn follow-up tasks within the same project using the `dispatch_task` MCP tool. This enables multi-step workflows where one agent delegates subtasks to others.
+Running agents can spawn follow-up work within the same project using MCP tools. This enables multi-step workflows where one agent delegates sub-work to others.
 
 ### How It Works
 
@@ -88,12 +92,14 @@ An agent running inside a workspace has access to MCP tools that provide project
 
 | Tool | Purpose |
 |------|---------|
-| `dispatch_task` | Spawn a new task in the same project |
-| `list_tasks` | View existing tasks |
-| `get_task_details` | Read task details |
-| `search_tasks` | Search tasks by keyword |
+| `dispatch_task` | Spawn a new idea for execution |
+| `create_idea` | Create a new idea |
+| `update_idea` | Update an idea's title, content, priority, or status |
+| `list_ideas` | View existing ideas |
+| `get_idea` | Read idea details |
+| `search_ideas` | Search ideas by keyword |
 | `update_task_status` | Report progress |
-| `complete_task` | Mark the current task as done |
+| `complete_task` | Mark the current work as done |
 | `request_human_input` | Ask the user for a decision |
 
 ### Dispatch Limits
@@ -103,13 +109,13 @@ To prevent runaway recursion, dispatch has configurable limits:
 | Limit | Default | Env Variable |
 |-------|---------|-------------|
 | Max recursion depth | 3 | `MCP_DISPATCH_MAX_DEPTH` |
-| Max tasks per parent | 5 | `MCP_DISPATCH_MAX_PER_TASK` |
+| Max dispatched per parent | 5 | `MCP_DISPATCH_MAX_PER_TASK` |
 | Max active dispatched per project | 10 | `MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT` |
 
 ### Example Flow
 
 ```
-User submits: "Refactor the auth module and add tests"
+You submit: "Refactor the auth module and add tests"
   │
   ├── Agent 1 starts working on refactoring
   │     ├── dispatch_task("Write unit tests for new auth service")
@@ -122,14 +128,14 @@ User submits: "Refactor the auth module and add tests"
 
 ## Warm Node Pooling
 
-After a task completes, the auto-provisioned node enters a **warm** state instead of being destroyed immediately. This dramatically reduces startup time for follow-up tasks.
+After an idea finishes executing, the auto-provisioned node enters a **warm** state instead of being destroyed immediately. This dramatically reduces startup time for follow-up work.
 
 ### How It Works
 
-1. Task completes → workspace is stopped
+1. Execution completes → workspace is stopped
 2. If the node has no other active workspaces, it enters the warm pool
 3. The `NodeLifecycle` Durable Object schedules a cleanup alarm
-4. If a new task arrives before the timeout, the warm node is reused (seconds vs. minutes)
+4. If new work arrives before the timeout, the warm node is reused (seconds vs. minutes)
 5. After the timeout expires, the node is destroyed
 
 ### Configuration

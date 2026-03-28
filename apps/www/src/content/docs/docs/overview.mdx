@@ -19,7 +19,7 @@ AI coding agents need real development environments — not sandboxes. SAM gives
     The API runs on Cloudflare Workers — zero infrastructure to manage. D1 for storage, KV for sessions, R2 for binaries, Durable Objects for real-time chat.
   </Card>
   <Card title="Ephemeral by Design" icon="refresh">
-    Workspaces spin up in minutes and tear down when you're done. Warm node pooling reuses idle VMs for fast follow-up tasks.
+    Workspaces spin up in minutes and tear down when you're done. Warm node pooling reuses idle VMs for fast follow-up work.
   </Card>
   <Card title="Self-Hostable" icon="setting">
     Fork the repo, configure a GitHub Environment, push to main. Automated deployment via Pulumi + GitHub Actions.
@@ -33,20 +33,22 @@ AI coding agents need real development environments — not sandboxes. SAM gives
 3. **Configure agent credentials** — add API keys for your preferred AI coding agents
 4. **Install the GitHub App** on your repositories
 5. **Create a project** — link a GitHub repo to start working
-6. **Submit a task** — describe what you want done; SAM provisions a VM, creates a workspace, and runs the agent autonomously
-7. **Chat with agents** — watch real-time streaming output, fork conversations, use voice input
+6. **Describe your idea** — tell SAM what you want done; it provisions a VM, creates a workspace, and runs the agent autonomously
+7. **Chat with agents** — watch real-time streaming output, browse files, fork conversations, use voice input
 8. **Review the PR** — the agent commits, pushes, and opens a pull request when done
 
 ## Key Features
 
 - **Multi-provider support** — Hetzner Cloud and Scaleway with unified VM size abstraction
 - **Four AI agents** — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe
-- **Task execution** — autonomous agent coding with warm node pooling for fast reuse
+- **Idea execution** — describe what you want, SAM handles the rest with warm node pooling for fast reuse
 - **Chat-first UX** — project pages are chat interfaces with real-time streaming
+- **File browsing in chat** — browse, view, and diff workspace files without leaving the conversation
+- **File upload & download** — attach files to conversations and download from workspaces
 - **Conversation forking** — branch from any point to explore alternatives
-- **Voice input & TTS** — speak your prompts, listen to responses
+- **Voice input & TTS** — speak your prompts, listen to responses with a persistent audio player
 - **Command palette** — quick navigation via Cmd+K / Ctrl+K
-- **In-app notifications** — task progress, agent requests, PR creation alerts
+- **In-app notifications** — progress updates, agent requests, PR creation alerts
 - **Port exposure** — auto-detected dev server ports accessible via unique URLs
 - **Lightweight workspaces** — fast startup by skipping devcontainer build
 

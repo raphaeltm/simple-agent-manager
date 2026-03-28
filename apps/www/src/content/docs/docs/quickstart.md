@@ -13,9 +13,9 @@ If SAM is already deployed (e.g., at `app.example.com`):
 
 Open the web UI and click **Sign in with GitHub**. Authorize the GitHub App when prompted.
 
-### 2. Add Your Hetzner Token
+### 2. Add Your Cloud Provider Token
 
-Go to **Settings** and add your [Hetzner API token](https://console.hetzner.cloud/). This token stays encrypted in the database — it's never stored as an environment variable.
+Go to **Settings** and add your [Hetzner API token](https://console.hetzner.cloud/) or [Scaleway API key](https://console.scaleway.com/iam/api-keys). This token stays encrypted in the database — it's never stored as an environment variable.
 
 ### 3. Install the GitHub App
 

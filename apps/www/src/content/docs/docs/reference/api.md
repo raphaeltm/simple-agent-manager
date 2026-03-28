@@ -122,7 +122,7 @@ Create a new project linked to a GitHub repository.
 Get project details.
 
 ### `POST /api/projects/:id/tasks`
-Submit a task for autonomous execution.
+Submit an idea for autonomous execution.
 
 **Body:**
 ```json
@@ -130,6 +130,31 @@ Submit a task for autonomous execution.
   "message": "Fix the login button on the settings page"
 }
 ```
+
+## File Proxy (Project Chat)
+
+These endpoints proxy file operations to the workspace's VM agent, accessed through a project chat session.
+
+### `GET /api/projects/:id/sessions/:sessionId/files/list`
+List files in a workspace directory.
+
+### `GET /api/projects/:id/sessions/:sessionId/files/view`
+View the contents of a file in the workspace.
+
+### `POST /api/projects/:id/sessions/:sessionId/files/upload`
+Upload files to the workspace container (multipart form data).
+
+### `GET /api/projects/:id/sessions/:sessionId/files/download`
+Download a file from the workspace container.
+
+### `GET /api/projects/:id/sessions/:sessionId/files/raw`
+Stream a binary file (images, etc.) with MIME detection and ETag support.
+
+### `GET /api/projects/:id/sessions/:sessionId/git/status`
+Get git status of the workspace repository.
+
+### `GET /api/projects/:id/sessions/:sessionId/git/diff`
+Get git diff output for the workspace repository.
 
 ## Terminal
 

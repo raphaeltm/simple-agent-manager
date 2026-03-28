@@ -56,7 +56,7 @@ GitHub secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`) because GitHub reserves 
 |----------|---------|-------------|
 | `REQUIRE_APPROVAL` | _(unset)_ | Require admin approval for new users. First user becomes superadmin. |
 
-## AI Task Title Generation
+## AI Idea Title Generation
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -73,17 +73,17 @@ GitHub secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`) because GitHub reserves 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NODE_WARM_TIMEOUT_MS` | `1800000` (30 min) | Time a node stays warm after task completion |
+| `NODE_WARM_TIMEOUT_MS` | `1800000` (30 min) | Time a node stays warm after idea execution completes |
 | `MAX_AUTO_NODE_LIFETIME_MS` | `14400000` (4 hr) | Absolute max lifetime for auto-provisioned nodes |
 | `NODE_WARM_GRACE_PERIOD_MS` | `2100000` (35 min) | Cron sweep grace period (must be > warm timeout) |
 | `NODE_LIFECYCLE_ALARM_RETRY_MS` | `60000` (1 min) | Retry delay for DO alarm failures |
-| `DEFAULT_TASK_AGENT_TYPE` | `claude-code` | Default agent for autonomous task execution |
+| `DEFAULT_TASK_AGENT_TYPE` | `claude-code` | Default agent for autonomous idea execution |
 
 ## Notification System
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NOTIFICATION_PROGRESS_BATCH_WINDOW_MS` | `300000` (5 min) | Min interval between progress notifications per task |
+| `NOTIFICATION_PROGRESS_BATCH_WINDOW_MS` | `300000` (5 min) | Min interval between progress notifications per idea |
 | `NOTIFICATION_DEDUP_WINDOW_MS` | `60000` (60s) | Dedup window for task_complete notifications |
 | `NOTIFICATION_AUTO_DELETE_AGE_MS` | `7776000000` (90 days) | Auto-delete old notifications |
 | `MAX_NOTIFICATIONS_PER_USER` | `500` | Max stored notifications per user |
@@ -115,7 +115,7 @@ GitHub secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`) because GitHub reserves 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MCP_TOKEN_TTL_SECONDS` | `14400` (4 hours) | Token lifetime for agent MCP access (must be >= task max execution time) |
+| `MCP_TOKEN_TTL_SECONDS` | `14400` (4 hours) | Token lifetime for agent MCP access (must be >= max execution time) |
 | `MCP_RATE_LIMIT` | `120` | Max MCP requests per window |
 | `MCP_RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window |
 | `MCP_DISPATCH_MAX_DEPTH` | `3` | Max recursion depth for dispatch_task |
@@ -147,7 +147,7 @@ GitHub secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`) because GitHub reserves 
 | `CONTEXT_SUMMARY_MAX_MESSAGES` | `50` | Max messages to include in summary |
 | `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5` | Skip AI for conversations this short |
 
-## Task Execution Timeouts
+## Idea Execution Timeouts
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -174,8 +174,8 @@ GitHub secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`) because GitHub reserves 
 | `MAX_NODES_PER_USER` | `10` | Max nodes per user |
 | `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10` | Max concurrent agent sessions |
 | `MAX_PROJECTS_PER_USER` | `100` | Max projects per user |
-| `MAX_TASKS_PER_PROJECT` | `500` | Max tasks per project |
-| `MAX_TASK_MESSAGE_LENGTH` | `16000` | Max task description length |
+| `MAX_TASKS_PER_PROJECT` | `500` | Max ideas per project |
+| `MAX_TASK_MESSAGE_LENGTH` | `16000` | Max idea description length |
 
 ## Durable Object Limits
 
@@ -235,3 +235,65 @@ Applied via cloud-init on each node:
 | `MaxRetentionSec` | `7day` | Max log retention period |
 | `Storage` | `persistent` | Persist logs across reboots |
 | `Compress` | `yes` | Compress stored entries |
+
+## File Upload & Download
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FILE_UPLOAD_MAX_BYTES` | `10485760` (10 MB) | Max size per uploaded file |
+| `FILE_UPLOAD_BATCH_MAX_BYTES` | `52428800` (50 MB) | Max total size per upload batch |
+| `FILE_UPLOAD_TIMEOUT` | `30s` | Upload timeout (VM agent) |
+| `FILE_UPLOAD_TIMEOUT_MS` | `60000` (60s) | Upload proxy timeout (Worker) |
+| `FILE_DOWNLOAD_TIMEOUT_MS` | `30000` (30s) | Download proxy timeout |
+| `FILE_DOWNLOAD_MAX_BYTES` | `52428800` (50 MB) | Max download file size |
+
+## File Browsing & Raw Proxy
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FILE_PROXY_TIMEOUT_MS` | `15000` | File proxy request timeout |
+| `FILE_PROXY_MAX_RESPONSE_BYTES` | `2097152` (2 MB) | Max file proxy response size |
+| `FILE_RAW_MAX_SIZE` | `26214400` (25 MB) | Max raw binary file size (VM agent) |
+| `FILE_RAW_TIMEOUT` | `30s` | Raw file streaming timeout (VM agent) |
+| `FILE_RAW_PROXY_MAX_BYTES` | `26214400` (25 MB) | Max raw file proxy size (Worker) |
+
+## MCP Idea Tools
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_IDEA_CONTEXT_MAX_LENGTH` | `500` | Max characters of idea context shown to agents |
+| `MCP_IDEA_LIST_LIMIT` | `20` | Default page size for `list_ideas` |
+| `MCP_IDEA_LIST_MAX` | `100` | Max page size for `list_ideas` |
+| `MCP_IDEA_SEARCH_MAX` | `20` | Max results from `search_ideas` |
+| `MCP_MESSAGE_SEARCH_MAX` | `20` | Max results from `search_messages` |
+| `MCP_MESSAGE_LIST_LIMIT` | `50` | Default page size for `get_session_messages` |
+| `MCP_MESSAGE_LIST_MAX` | `200` | Max messages per `get_session_messages` request |
+
+## Web UI (Build-Time)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES` | `10485760` (10 MB) | Images below this size render inline automatically |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES` | `26214400` (25 MB) | Images below this size show click-to-load; above shows download link |
+
+## Admin Analytics
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANALYTICS_GEO_LIMIT` | `50` | Max countries in geographic distribution view |
+| `ANALYTICS_RETENTION_WEEKS` | `12` | Number of weeks for retention cohort analysis |
+
+## Analytics Forwarding
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANALYTICS_FORWARD_ENABLED` | `false` | Enable external analytics event forwarding |
+| `ANALYTICS_FORWARD_EVENTS` | _(all)_ | Comma-separated list of events to forward |
+| `ANALYTICS_FORWARD_LOOKBACK_HOURS` | `25` | Hours to look back for events |
+| `SEGMENT_WRITE_KEY` | _(unset)_ | Segment Write Key for event forwarding |
+| `SEGMENT_API_URL` | `https://api.segment.io/v1/batch` | Segment API endpoint |
+| `SEGMENT_MAX_BATCH_SIZE` | `100` | Max events per Segment batch request |
+| `GA4_MEASUREMENT_ID` | _(unset)_ | Google Analytics 4 Measurement ID |
+| `GA4_API_SECRET` | _(unset)_ | Google Analytics 4 API secret |
+| `GA4_API_URL` | `https://www.google-analytics.com/mp/collect` | GA4 Measurement Protocol endpoint |
+| `GA4_MAX_BATCH_SIZE` | `25` | Max events per GA4 batch request |
