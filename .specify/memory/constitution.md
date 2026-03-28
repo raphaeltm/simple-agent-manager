@@ -26,7 +26,7 @@ Follow-up TODOs: None
 ### I. Open Source Sustainability
 
 The project is open source first. All core functionality MUST be available under an OSI-approved license
-(MIT or Apache 2.0). Monetization pathways (hosted services, enterprise features, support contracts) are
+(AGPL-3.0). Monetization pathways (hosted services, enterprise features, support contracts) are
 encouraged but MUST NOT compromise the open source core.
 
 **Rules:**
