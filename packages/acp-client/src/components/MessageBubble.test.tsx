@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MessageBubble } from './MessageBubble';
 
 // Verify React.memo is applied (component has $$typeof for memo)
@@ -245,6 +245,56 @@ describe('MessageBubble', () => {
     it('does not show action buttons when timestamp is 0 (epoch)', () => {
       render(<MessageBubble text="Hello" role="agent" timestamp={0} />);
       expect(screen.queryByLabelText('Message info')).toBeNull();
+    });
+
+    it('passes onPlayAudio to MessageActions for agent messages', () => {
+      const onPlayAudio = vi.fn();
+      render(
+        <MessageBubble
+          text="Agent response"
+          role="agent"
+          timestamp={1710288000000}
+          onPlayAudio={onPlayAudio}
+        />
+      );
+
+      // Speaker button should be present — click it
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      // Callback must have been called, not browser TTS
+      expect(onPlayAudio).toHaveBeenCalledOnce();
+    });
+
+    it('does NOT pass onPlayAudio to MessageActions for user messages', () => {
+      const onPlayAudio = vi.fn();
+      render(
+        <MessageBubble
+          text="User message"
+          role="user"
+          timestamp={1710288000000}
+          onPlayAudio={onPlayAudio}
+        />
+      );
+
+      // User bubbles never have TTS — speaker button must not appear
+      expect(screen.queryByLabelText('Read aloud')).toBeNull();
+    });
+
+    it('does not render inline AudioPlayer for agent messages when onPlayAudio is provided', () => {
+      const onPlayAudio = vi.fn();
+      render(
+        <MessageBubble
+          text="Agent response"
+          role="agent"
+          timestamp={1710288000000}
+          onPlayAudio={onPlayAudio}
+        />
+      );
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      // Inline player must NOT appear — global player handles UI
+      expect(screen.queryByRole('region', { name: 'Audio player' })).toBeNull();
     });
   });
 

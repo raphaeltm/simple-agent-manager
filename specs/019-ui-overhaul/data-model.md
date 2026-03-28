@@ -74,6 +74,7 @@ Semantic tint tokens for tinted backgrounds (replace hardcoded `rgba()` values):
 ```css
 :root {
   --sam-z-sticky: 10;
+  --sam-z-player: 15;
   --sam-z-dropdown: 20;
   --sam-z-drawer-backdrop: 40;
   --sam-z-drawer: 41;

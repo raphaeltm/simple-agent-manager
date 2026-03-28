@@ -82,6 +82,7 @@
   --radius-lg: var(--sam-radius-lg);
 
   /* ── Z-Index Scale ── */
+  --z-index-player: var(--sam-z-player);
   --z-index-sticky: var(--sam-z-sticky);
   --z-index-dropdown: var(--sam-z-dropdown);
   --z-index-drawer-backdrop: var(--sam-z-drawer-backdrop);
@@ -121,4 +122,16 @@
 @keyframes sam-session-drawer-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+/* GlobalAudioPlayer — slide-up from bottom on appear, slide-down on dismiss */
+@keyframes sam-player-slide-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sam-player-slide-in {
+    from { transform: translateY(0); }
+    to   { transform: translateY(0); }
+  }
 }

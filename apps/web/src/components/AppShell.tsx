@@ -10,6 +10,7 @@ import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
 import { signOut } from '../lib/auth';
 import { NotificationCenter } from './NotificationCenter';
+import { GlobalAudioPlayer } from './GlobalAudioPlayer';
 
 interface AppShellContextValue {
   setProjectName: (name: string | undefined) => void;
@@ -138,6 +139,8 @@ export function AppShell({ children }: AppShellProps) {
           {children ?? <Outlet />}
         </main>
 
+        <GlobalAudioPlayer />
+
         {drawerOpen && user && (
           <MobileNavDrawer
             onClose={() => setDrawerOpen(false)}
@@ -161,8 +164,8 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <AppShellContext.Provider value={shellContext}>
-    <div className="grid bg-canvas h-screen" style={{ gridTemplateColumns: '220px 1fr' }}>
-      <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 h-screen overflow-y-auto">
+    <div className="grid bg-canvas h-screen" style={{ gridTemplateColumns: '220px 1fr', gridTemplateRows: '1fr auto' }}>
+      <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 overflow-y-auto" style={{ gridRow: '1' }}>
         <div className="p-4 border-b border-border-default flex items-center justify-between">
           <img src="/favicon.png" alt="SAM" className="h-6 w-6" />
           <NotificationCenter />
@@ -201,9 +204,13 @@ export function AppShell({ children }: AppShellProps) {
         )}
       </aside>
 
-      <main className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0" style={{ gridRow: '1' }}>
         {children ?? <Outlet />}
       </main>
+
+      <div style={{ gridColumn: '1 / -1', gridRow: '2' }}>
+        <GlobalAudioPlayer />
+      </div>
 
       {commandPalette.isOpen && (
         <GlobalCommandPalette onClose={commandPalette.close} />

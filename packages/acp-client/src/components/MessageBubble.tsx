@@ -15,6 +15,8 @@ interface MessageBubbleProps {
   ttsApiUrl?: string;
   /** Unique storage ID for caching TTS audio (e.g., message ID). */
   ttsStorageId?: string;
+  /** Optional callback to delegate audio playback to a global player. */
+  onPlayAudio?: () => void;
 }
 
 // Stable remark plugins array — avoids creating a new array reference on every render
@@ -142,7 +144,7 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * (e.g., scroll position, input value) don't affect this component's props.
  */
-export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, timestamp, ttsApiUrl, ttsStorageId }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio }: MessageBubbleProps) {
   const isUser = role === 'user';
   const components = isUser ? USER_MARKDOWN_COMPONENTS : AGENT_MARKDOWN_COMPONENTS;
   const showActions = !streaming && timestamp != null && timestamp > 0;
@@ -175,6 +177,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
             ttsStorageId={isUser ? undefined : ttsStorageId}
             hideTts={isUser}
             variant={isUser ? 'on-dark' : 'default'}
+            onPlayAudio={isUser ? undefined : onPlayAudio}
           />
         )}
       </div>

@@ -102,6 +102,7 @@
 
   /* Z-Index Scale */
   --sam-z-sticky: 10;
+  --sam-z-player: 15;
   --sam-z-dropdown: 20;
   --sam-z-drawer-backdrop: 40;
   --sam-z-drawer: 41;

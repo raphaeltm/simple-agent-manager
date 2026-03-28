@@ -882,6 +882,79 @@ describe('MessageActions', () => {
     });
   });
 
+  describe('onPlayAudio prop — global player delegation', () => {
+    it('calls onPlayAudio when speaker button is clicked', () => {
+      const onPlayAudio = vi.fn();
+      render(<MessageActions {...defaultProps} onPlayAudio={onPlayAudio} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      expect(onPlayAudio).toHaveBeenCalledOnce();
+    });
+
+    it('does not call local audio.toggle when onPlayAudio is provided', () => {
+      // If the local hook's toggle were called, browser speechSynthesis.speak would be invoked.
+      const onPlayAudio = vi.fn();
+      render(<MessageActions {...defaultProps} onPlayAudio={onPlayAudio} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      // Browser TTS must NOT have been invoked — delegation went to onPlayAudio
+      expect(mockSpeak).not.toHaveBeenCalled();
+    });
+
+    it('speaker button aria-label is always "Read aloud" when delegating', () => {
+      // When using global player the label must not reflect local audio state
+      const onPlayAudio = vi.fn();
+      render(<MessageActions {...defaultProps} onPlayAudio={onPlayAudio} />);
+
+      const btn = screen.getByLabelText('Read aloud');
+      expect(btn).toBeTruthy();
+    });
+
+    it('does not render inline AudioPlayer when onPlayAudio is provided', () => {
+      const onPlayAudio = vi.fn();
+      render(<MessageActions {...defaultProps} onPlayAudio={onPlayAudio} />);
+
+      // Inline AudioPlayer must not appear even after clicking
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      expect(screen.queryByRole('region', { name: 'Audio player' })).toBeNull();
+    });
+
+    it('speaker button is still shown when hideTts is false and onPlayAudio is provided', () => {
+      const onPlayAudio = vi.fn();
+      render(<MessageActions {...defaultProps} onPlayAudio={onPlayAudio} hideTts={false} />);
+
+      expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+    });
+
+    it('speaker button is hidden when hideTts is true even if onPlayAudio is provided', () => {
+      const onPlayAudio = vi.fn();
+      render(<MessageActions {...defaultProps} onPlayAudio={onPlayAudio} hideTts />);
+
+      expect(screen.queryByLabelText('Read aloud')).toBeNull();
+    });
+
+    it('screen-reader aria-live span is not rendered when delegating', () => {
+      const onPlayAudio = vi.fn();
+      const { container } = render(<MessageActions {...defaultProps} onPlayAudio={onPlayAudio} />);
+
+      // The sr-only aria-live span that announces local state is suppressed
+      const srSpans = container.querySelectorAll('.sr-only[aria-live]');
+      expect(srSpans.length).toBe(0);
+    });
+
+    it('onPlayAudio is invoked once when speaker button is clicked', () => {
+      const onPlayAudio = vi.fn();
+      render(<MessageActions {...defaultProps} onPlayAudio={onPlayAudio} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      expect(onPlayAudio).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('audio player controls', () => {
     it('has speed selector with correct options', async () => {
       // Use browser TTS to get player to show

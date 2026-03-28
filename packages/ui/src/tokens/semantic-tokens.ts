@@ -70,6 +70,7 @@ export const typographyScale: Record<string, TypographyTier> = {
 
 export const zIndexScale = {
   sticky: 10,
+  player: 15,
   dropdown: 20,
   drawerBackdrop: 40,
   drawer: 41,
