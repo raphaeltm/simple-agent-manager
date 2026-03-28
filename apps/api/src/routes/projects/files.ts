@@ -322,6 +322,14 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
     headers.set('Content-Type', 'application/octet-stream');
   }
 
+  // Enforce security headers independently at the proxy layer,
+  // regardless of what the VM agent sends.
+  headers.set('X-Content-Type-Options', 'nosniff');
+  const ct = headers.get('Content-Type') ?? '';
+  if (ct.startsWith('image/svg')) {
+    headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+  }
+
   return new Response(res.body, {
     status: res.status,
     headers,

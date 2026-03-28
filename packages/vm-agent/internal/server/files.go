@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -236,24 +237,45 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.FileRawTimeout)
 	defer cancel()
 
-	// First stat the file to get size, mtime, and verify it exists.
-	// Output format: size_bytes\tmtime_epoch
-	statCmd := fmt.Sprintf(`stat -c '%%s\t%%Y' %q 2>/dev/null`, filePath)
-	statOut, _, statErr := s.execInContainer(ctx, containerID, user, workDir, "sh", "-c", statCmd)
+	// Stat the file to get type, size, and mtime. Uses direct args (no shell)
+	// to avoid injection. Format: file_type\tsize_bytes\tmtime_epoch
+	statOut, statStderr, statErr := s.execInContainer(ctx, containerID, user, workDir,
+		"stat", "-c", "%F\t%s\t%Y", filePath)
 	if statErr != nil {
+		slog.Warn("stat failed for raw file",
+			"path", filePath, "workspace", workspaceID,
+			"stderr", statStderr, "error", statErr)
 		writeError(w, http.StatusNotFound, "file not found")
 		return
 	}
 
 	statOut = strings.TrimSpace(statOut)
-	statParts := strings.SplitN(statOut, "\t", 2)
-	if len(statParts) < 2 {
+	statParts := strings.SplitN(statOut, "\t", 3)
+	if len(statParts) < 3 {
 		writeError(w, http.StatusInternalServerError, "failed to stat file")
 		return
 	}
 
-	fileSize, _ := strconv.ParseInt(statParts[0], 10, 64)
-	fileMtime, _ := strconv.ParseInt(statParts[1], 10, 64)
+	// Reject non-regular files (directories, symlinks, FIFOs, etc.)
+	fileType := statParts[0]
+	if fileType != "regular file" && fileType != "regular empty file" {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("not a regular file (type: %s)", fileType))
+		return
+	}
+
+	fileSize, err := strconv.ParseInt(statParts[1], 10, 64)
+	if err != nil {
+		slog.Error("failed to parse file size", "raw", statParts[1], "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to parse file metadata")
+		return
+	}
+	fileMtime, err := strconv.ParseInt(statParts[2], 10, 64)
+	if err != nil {
+		slog.Error("failed to parse file mtime", "raw", statParts[2], "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to parse file metadata")
+		return
+	}
 
 	// Enforce max file size
 	if fileSize > int64(s.config.FileRawMaxSize) {
@@ -278,9 +300,10 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 		contentType = "application/octet-stream"
 	}
 
-	// Set response headers before streaming
+	// Set response headers before streaming.
+	// Intentionally omit Content-Length: the stat and cat are not atomic,
+	// so the file could change between them. Chunked transfer encoding is safer.
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("ETag", etag)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -292,6 +315,7 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 
 	// Stream the file content directly from docker exec to the response writer.
 	// This avoids buffering the entire file in memory.
+	// Uses direct args (no shell) — cat receives filePath as a single argument.
 	dockerArgs := []string{"exec", "-i"}
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
@@ -299,10 +323,12 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 	if workDir != "" {
 		dockerArgs = append(dockerArgs, "-w", workDir)
 	}
-	dockerArgs = append(dockerArgs, containerID, "cat", filePath)
+	dockerArgs = append(dockerArgs, containerID, "cat", "--", filePath)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	cmd.Stdout = w
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Run(); err != nil {
 		// If we already started writing, we can't send an error response.
@@ -311,6 +337,7 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 			"path", filePath,
 			"workspace", workspaceID,
 			"error", err,
+			"stderr", strings.TrimSpace(stderrBuf.String()),
 		)
 	}
 }
