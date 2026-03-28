@@ -7,7 +7,7 @@ import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
-import { normalizeProjectFilePath } from './_helpers';
+import { normalizeFileProxyPath } from './_helpers';
 
 const fileProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -156,12 +156,12 @@ async function proxyToVmAgent(
 }
 
 /**
- * Sanitize and validate the path query parameter for file operations.
- * Uses normalizeProjectFilePath for defence-in-depth against path traversal.
+ * Sanitize and validate the path query parameter for read-only file proxy operations.
+ * Uses normalizeFileProxyPath which allows any absolute path but blocks traversal.
  */
 function requireSafePath(rawPath: string | undefined): string {
   if (!rawPath) throw errors.badRequest('path query parameter is required');
-  return normalizeProjectFilePath(rawPath);
+  return normalizeFileProxyPath(rawPath);
 }
 
 /** GET /:id/sessions/:sessionId/files/list — Proxy directory listing */
@@ -179,7 +179,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/list', async (c) => {
 
   const params = new URLSearchParams();
   const rawPath = c.req.query('path');
-  if (rawPath) params.set('path', normalizeProjectFilePath(rawPath));
+  if (rawPath) params.set('path', normalizeFileProxyPath(rawPath));
 
   return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'files/list', params);
 });
