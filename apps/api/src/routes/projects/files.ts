@@ -15,6 +15,8 @@ const fileProxyRoutes = new Hono<{ Bindings: Env }>();
 const DEFAULT_FILE_PROXY_TIMEOUT_MS = 15_000;
 /** Default max response size from VM agent (configurable via FILE_PROXY_MAX_RESPONSE_BYTES). */
 const DEFAULT_FILE_PROXY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2 MB
+/** Default max response size for raw binary file proxy (configurable via FILE_RAW_PROXY_MAX_BYTES). */
+const DEFAULT_FILE_RAW_PROXY_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
 /** Response headers safe to forward from VM agent to the client. */
 const FORWARDED_RESPONSE_HEADERS = [
@@ -24,6 +26,12 @@ const FORWARDED_RESPONSE_HEADERS = [
   'Cache-Control',
   'ETag',
   'Last-Modified',
+];
+
+/** Additional headers forwarded for raw binary file responses (security headers set by VM agent). */
+const RAW_FILE_EXTRA_HEADERS = [
+  'Content-Security-Policy',
+  'X-Content-Type-Options',
 ];
 
 /**
@@ -232,6 +240,92 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   if (staged) params.set('staged', staged);
 
   return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'git/diff', params);
+});
+
+/** GET /:id/sessions/:sessionId/files/raw — Proxy raw binary file content */
+fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+
+  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+    c.env,
+    projectId,
+    sessionId,
+    userId
+  );
+
+  const params = new URLSearchParams();
+  const path = requireSafePath(c.req.query('path'));
+  params.set('path', path);
+
+  const timeoutMs = parseInt(c.env.FILE_PROXY_TIMEOUT_MS ?? String(DEFAULT_FILE_PROXY_TIMEOUT_MS));
+  const maxBytes = parseInt(
+    c.env.FILE_RAW_PROXY_MAX_BYTES ?? String(DEFAULT_FILE_RAW_PROXY_MAX_BYTES)
+  );
+
+  params.set('token', token);
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/raw?${params.toString()}`;
+
+  // Forward If-None-Match for ETag/304 support
+  const fetchHeaders: Record<string, string> = {};
+  const ifNoneMatch = c.req.header('If-None-Match');
+  if (ifNoneMatch) fetchHeaders['If-None-Match'] = ifNoneMatch;
+
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: fetchHeaders,
+  });
+
+  if (!res.ok && res.status !== 304) {
+    const text = await res.text();
+    console.error(
+      JSON.stringify({
+        event: 'file_proxy.vm_agent_error',
+        workspaceId,
+        vmPath: 'files/raw',
+        status: res.status,
+        body: text,
+      })
+    );
+    const clientStatus =
+      res.status === 404 ? 404 : res.status === 413 ? 413 : res.status >= 500 ? 502 : 400;
+    throw errors.badRequest(
+      clientStatus === 404
+        ? 'File or resource not found'
+        : clientStatus === 413
+          ? 'File too large for preview'
+          : clientStatus === 502
+            ? 'Workspace agent unavailable'
+            : 'VM agent request failed'
+    );
+  }
+
+  // For 304, just forward the status
+  if (res.status === 304) {
+    return new Response(null, { status: 304 });
+  }
+
+  // Guard against oversized responses
+  const contentLength = parseInt(res.headers.get('Content-Length') ?? '0');
+  if (contentLength > maxBytes) {
+    throw errors.badRequest(`File too large for preview (${contentLength} bytes)`);
+  }
+
+  // Forward safe response headers + security headers from VM agent
+  const headers = new Headers();
+  for (const name of [...FORWARDED_RESPONSE_HEADERS, ...RAW_FILE_EXTRA_HEADERS]) {
+    const value = res.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/octet-stream');
+  }
+
+  return new Response(res.body, {
+    status: res.status,
+    headers,
+  });
 });
 
 export { fileProxyRoutes };
