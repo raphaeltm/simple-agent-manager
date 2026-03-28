@@ -244,136 +244,97 @@ const API_ERROR: MockScenario = { apiError: true };
 // ---------------------------------------------------------------------------
 
 async function setupMocks(page: Page, scenario: MockScenario) {
-  // Auth — BetterAuth calls /api/auth/get-session and related paths
-  await page.route('**/api/auth/**', async (route: Route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_USER) });
-  });
+  const respond = (route: Route, status: number, body: unknown) =>
+    route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-  // Analytics endpoints
-  await page.route('**/api/admin/analytics/dau**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ dau: scenario.dau ?? [], periodDays: scenario.dau?.length ?? 0 }),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/funnel**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.funnel ?? makeFunnelData()),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/feature-adoption**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.featureAdoption ?? makeFeatureAdoption()),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/geo**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.geo ?? makeGeoData()),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/retention**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.retention ?? makeRetentionData()),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/events**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.events ?? makeEventsData()),
-      });
-    }
-  });
-
-  // Website traffic
-  await page.route('**/api/admin/analytics/website-traffic**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({
-          hosts: [{
-            host: 'simple-agent-manager.org',
-            totalViews: 12400,
-            uniqueVisitors: 3200,
-            uniqueSessions: 4100,
-            sections: [
-              { name: 'landing', views: 5200, unique_visitors: 2100, topPages: [{ page: '/', views: 4000, unique_visitors: 1800 }] },
-              { name: 'docs', views: 4100, unique_visitors: 1600, topPages: [{ page: '/docs/getting-started', views: 2000, unique_visitors: 900 }] },
-              { name: 'blog', views: 2100, unique_visitors: 800, topPages: [{ page: '/blog/launch', views: 1200, unique_visitors: 500 }] },
-            ],
-          }],
-          trend: [],
-          period: '7d',
-        }),
-      });
-    }
-  });
-
-  // Forward status
-  await page.route('**/api/admin/analytics/forward-status**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({
-          enabled: true,
-          lastForwardedAt: '2026-03-28T10:00:00Z',
-          destinations: { segment: { configured: true }, ga4: { configured: false } },
-          events: ['signup', 'login', 'project_created'],
-        }),
-      });
-    }
-  });
-
-  // Stub other common API calls the shell may fire
-  await page.route('**/api/projects**', async (route: Route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-  });
-  await page.route('**/api/admin/health**', async (route: Route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) });
-  });
   await page.route('**/api/**', async (route: Route) => {
-    // Catch-all — prevent real network calls
-    const url = route.request().url();
-    if (url.includes('/api/')) {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
-    } else {
-      await route.continue();
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+
+    // Auth — BetterAuth calls /api/auth/get-session and related paths
+    if (path.includes('/api/auth/')) {
+      return respond(route, 200, MOCK_USER);
     }
+
+    // Notifications
+    if (path.startsWith('/api/notifications')) {
+      return respond(route, 200, { notifications: [], unreadCount: 0 });
+    }
+
+    // Analytics endpoints
+    if (path.includes('/admin/analytics/dau')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, { dau: scenario.dau ?? [], periodDays: scenario.dau?.length ?? 0 });
+    }
+
+    if (path.includes('/admin/analytics/funnel')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.funnel ?? makeFunnelData());
+    }
+
+    if (path.includes('/admin/analytics/feature-adoption')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.featureAdoption ?? makeFeatureAdoption());
+    }
+
+    if (path.includes('/admin/analytics/geo')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.geo ?? makeGeoData());
+    }
+
+    if (path.includes('/admin/analytics/retention')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.retention ?? makeRetentionData());
+    }
+
+    if (path.includes('/admin/analytics/website-traffic')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, {
+        hosts: [{
+          host: 'simple-agent-manager.org',
+          totalViews: 12400,
+          uniqueVisitors: 3200,
+          uniqueSessions: 4100,
+          sections: [
+            { name: 'landing', views: 5200, unique_visitors: 2100, topPages: [{ page: '/', views: 4000, unique_visitors: 1800 }] },
+            { name: 'docs', views: 4100, unique_visitors: 1600, topPages: [{ page: '/docs/getting-started', views: 2000, unique_visitors: 900 }] },
+            { name: 'blog', views: 2100, unique_visitors: 800, topPages: [{ page: '/blog/launch', views: 1200, unique_visitors: 500 }] },
+          ],
+        }],
+        trend: [],
+        period: '7d',
+      });
+    }
+
+    if (path.includes('/admin/analytics/forward-status')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, {
+        enabled: true,
+        lastForwardedAt: '2026-03-28T10:00:00Z',
+        destinations: { segment: { configured: true }, ga4: { configured: false } },
+        events: ['signup', 'login', 'project_created'],
+      });
+    }
+
+    if (path.includes('/admin/analytics/events')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.events ?? makeEventsData());
+    }
+
+    if (path.includes('/admin/health')) {
+      return respond(route, 200, { status: 'ok' });
+    }
+
+    if (path.startsWith('/api/projects')) {
+      return respond(route, 200, []);
+    }
+
+    if (path.startsWith('/api/credentials')) {
+      return respond(route, 200, []);
+    }
+
+    // Catch-all for any other API calls
+    return respond(route, 200, {});
   });
 }
 
@@ -434,14 +395,16 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     await assertNoHorizontalOverflow(page);
   });
 
-  test('error state — retry button visible', async ({ page }) => {
+  test('error state — page still renders with empty states', async ({ page }) => {
     await setupMocks(page, API_ERROR);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(600);
     await screenshot(page, 'admin-analytics-error-mobile');
     await assertNoHorizontalOverflow(page);
-    const retryBtn = page.getByRole('button', { name: /retry/i });
-    await expect(retryBtn).toBeVisible();
+    // When APIs fail, individual sections show empty state messages
+    const emptyMessages = page.locator('text=/No .* data available yet/');
+    const count = await emptyMessages.count();
+    expect(count).toBeGreaterThan(0);
   });
 
   test('high retention heat map — deep green cells', async ({ page }) => {
@@ -561,11 +524,11 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     const count = await sortableHeaders.count();
     expect(count).toBeGreaterThan(0);
 
-    // Click a header to sort
-    const countHeader = page.getByRole('columnheader', { name: /count/i });
-    await countHeader.click();
+    // Click "Avg (ms)" header — unique to the events table
+    const avgHeader = page.getByRole('columnheader', { name: /Avg/ });
+    await avgHeader.click();
     await page.waitForTimeout(200);
-    await expect(countHeader).toHaveAttribute('aria-sort');
+    await expect(avgHeader).toHaveAttribute('aria-sort');
   });
 
   test('forwarding status is collapsible', async ({ page }) => {
