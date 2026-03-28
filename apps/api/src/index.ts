@@ -368,6 +368,9 @@ export interface Env {
   ANALYTICS_SQL_FETCH_TIMEOUT_MS?: string;        // Timeout for Analytics Engine SQL API fetch (default: 30000)
   SEGMENT_FETCH_TIMEOUT_MS?: string;              // Timeout for Segment API fetch (default: 30000)
   GA4_FETCH_TIMEOUT_MS?: string;                  // Timeout for GA4 API fetch (default: 30000)
+  // File proxy configuration (chat file browser)
+  FILE_PROXY_TIMEOUT_MS?: string;                  // Timeout for VM agent file proxy requests (default: 15000)
+  FILE_PROXY_MAX_RESPONSE_BYTES?: string;          // Max response body size from VM agent file proxy (default: 2097152 = 2MB)
 }
 
 const app = new Hono<{ Bindings: Env }>();

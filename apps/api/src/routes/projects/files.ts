@@ -11,6 +11,11 @@ import { normalizeProjectFilePath } from './_helpers';
 
 const fileProxyRoutes = new Hono<{ Bindings: Env }>();
 
+/** Default timeout for VM agent proxy requests (configurable via FILE_PROXY_TIMEOUT_MS). */
+const DEFAULT_FILE_PROXY_TIMEOUT_MS = 15_000;
+/** Default max response size from VM agent (configurable via FILE_PROXY_MAX_RESPONSE_BYTES). */
+const DEFAULT_FILE_PROXY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2 MB
+
 /** Response headers safe to forward from VM agent to the client. */
 const FORWARDED_RESPONSE_HEADERS = [
   'Content-Type',
@@ -81,16 +86,20 @@ async function resolveSessionWorkspace(
  * Token is passed via query param (VM agent's requireWorkspaceRequestAuth expects this).
  */
 async function proxyToVmAgent(
+  env: Env,
   workspaceUrl: string,
   workspaceId: string,
   token: string,
   vmPath: string,
   queryParams: URLSearchParams
 ): Promise<Response> {
+  const timeoutMs = parseInt(env.FILE_PROXY_TIMEOUT_MS ?? String(DEFAULT_FILE_PROXY_TIMEOUT_MS));
+  const maxBytes = parseInt(env.FILE_PROXY_MAX_RESPONSE_BYTES ?? String(DEFAULT_FILE_PROXY_MAX_RESPONSE_BYTES));
+
   queryParams.set('token', token);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/${vmPath}?${queryParams.toString()}`;
 
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) {
     const text = await res.text();
     // Log full error server-side for debugging; return sanitized message to client
@@ -113,6 +122,12 @@ async function proxyToVmAgent(
           ? 'Workspace agent unavailable'
           : 'VM agent request failed'
     );
+  }
+
+  // Guard against oversized responses
+  const contentLength = parseInt(res.headers.get('Content-Length') ?? '0');
+  if (contentLength > maxBytes) {
+    throw errors.badRequest(`Response too large (${contentLength} bytes)`);
   }
 
   // Forward safe response headers from VM agent
@@ -158,7 +173,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/list', async (c) => {
   const rawPath = c.req.query('path');
   if (rawPath) params.set('path', normalizeProjectFilePath(rawPath));
 
-  return proxyToVmAgent(workspaceUrl, workspaceId, token, 'files/list', params);
+  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'files/list', params);
 });
 
 /** GET /:id/sessions/:sessionId/files/view — Proxy file content (via git/file on VM agent) */
@@ -178,7 +193,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/view', async (c) => {
   const path = requireSafePath(c.req.query('path'));
   params.set('path', path);
 
-  return proxyToVmAgent(workspaceUrl, workspaceId, token, 'git/file', params);
+  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'git/file', params);
 });
 
 /** GET /:id/sessions/:sessionId/git/status — Proxy git status */
@@ -194,7 +209,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/status', async (c) => {
     userId
   );
 
-  return proxyToVmAgent(workspaceUrl, workspaceId, token, 'git/status', new URLSearchParams());
+  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'git/status', new URLSearchParams());
 });
 
 /** GET /:id/sessions/:sessionId/git/diff — Proxy git diff for a file */
@@ -216,7 +231,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   const staged = c.req.query('staged');
   if (staged) params.set('staged', staged);
 
-  return proxyToVmAgent(workspaceUrl, workspaceId, token, 'git/diff', params);
+  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'git/diff', params);
 });
 
 export { fileProxyRoutes };
