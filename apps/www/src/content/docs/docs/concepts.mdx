@@ -1,6 +1,6 @@
 ---
 title: Core Concepts
-description: Key concepts in SAM — workspaces, nodes, providers, projects, tasks, and agent sessions.
+description: Key concepts in SAM — workspaces, nodes, providers, projects, ideas, and agent sessions.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -16,7 +16,7 @@ Each workspace has:
 - Automatic port detection and exposure for dev servers
 - Its own lifecycle: `pending` → `creating` → `running` → `stopping` → `stopped`
 
-Workspaces are **ephemeral** — they're meant to be created for a task and deleted when done.
+Workspaces are **ephemeral** — they're meant to be created for a coding session and deleted when done.
 
 ### Workspace Profiles
 
@@ -27,7 +27,7 @@ SAM supports two workspace profiles:
 | **Full** (default) | 2-3 minutes | Standard devcontainer build from your project's `.devcontainer` config |
 | **Lightweight** | 30-120 seconds faster | Skips devcontainer build, uses a minimal base image |
 
-Lightweight workspaces are ideal for quick conversations or tasks that don't need custom build steps. You can select the profile when submitting a task or creating a workspace.
+Lightweight workspaces are ideal for quick conversations that don't need custom build steps. You can select the profile when starting an idea or creating a workspace.
 
 ### Port Exposure
 
@@ -54,7 +54,7 @@ Nodes have their own lifecycle:
 
 ### Warm Node Pooling
 
-After a task completes, the node doesn't shut down immediately. Instead, it enters a **warm** state for 30 minutes (configurable via `NODE_WARM_TIMEOUT_MS`). If a new task arrives during this window, SAM reuses the warm node instead of provisioning a new one — reducing startup time from minutes to seconds.
+After an idea finishes executing, the node doesn't shut down immediately. Instead, it enters a **warm** state for 30 minutes (configurable via `NODE_WARM_TIMEOUT_MS`). If a new idea is executed during this window, SAM reuses the warm node instead of provisioning a new one — reducing startup time from minutes to seconds.
 
 SAM uses a three-layer defense against orphaned warm nodes:
 
@@ -63,7 +63,7 @@ SAM uses a three-layer defense against orphaned warm nodes:
 3. **Max lifetime** — absolute limit of 4 hours (configurable via `MAX_AUTO_NODE_LIFETIME_MS`) for auto-provisioned nodes
 
 <Aside type="tip">
-Warm node pooling only applies to nodes that were auto-provisioned by the task runner. Manually created nodes are not affected.
+Warm node pooling only applies to nodes that were auto-provisioned for idea execution. Manually created nodes are not affected.
 </Aside>
 
 ## Providers
@@ -94,51 +94,60 @@ A **provider** is a cloud infrastructure abstraction. SAM currently supports two
 
 SAM follows a **Bring Your Own Cloud (BYOC)** model: you provide your own cloud provider API tokens through the Settings UI. The platform never stores cloud credentials as environment variables — all VM costs are billed directly to your account.
 
-You can set a **default provider** per project. When submitting tasks, the provider is selected in this order:
-1. Explicit override on the task submission
+You can set a **default provider** per project. When executing an idea, the provider is selected in this order:
+1. Explicit override on submission
 2. Project default provider
 3. First available credential
 
 ## Projects
 
-A **project** links a GitHub repository to its workspaces, chat sessions, tasks, and activity. Projects are the primary organizational unit in SAM.
+A **project** links a GitHub repository to its workspaces, chat sessions, ideas, and activity. Projects are the primary organizational unit in SAM.
 
 Each project has:
-- A **ProjectData Durable Object** with embedded SQLite for chat sessions, messages, activity events, and ACP sessions
+- A **chat-first interface** — the project page is a conversation view
+- An **Ideas board** — for tracking and organizing work
 - A **default VM size** and **default provider** for new workspaces
-- A **default agent type** for task execution
+- A **default agent type** for idea execution
 - **Runtime configuration** — environment variables and files injected into workspaces
 
 <Aside type="note">
 Every ACP (agent) session must belong to a project. Workspaces without a project can only use PTY terminal sessions, not agent chat.
 </Aside>
 
-## Tasks
+## Ideas
 
-A **task** is a unit of work assigned to an AI agent. Tasks are the primary way to use SAM for autonomous coding work.
+An **idea** is how you describe work you want an AI agent to do. Ideas are the primary way to interact with SAM — you write what you want, and SAM handles provisioning, execution, and cleanup.
 
-When you submit a task:
-1. SAM generates an AI-powered title from your message (via Workers AI)
+Ideas progress through these stages:
+
+| Stage | Description |
+|-------|-------------|
+| **Exploring** | You're brainstorming — the idea is a draft |
+| **Ready** | The idea is defined and ready to execute |
+| **Executing** | An agent is actively working on it |
+| **Done** | The agent finished and created a PR |
+| **Parked** | The idea was cancelled or the execution failed |
+
+### How Execution Works
+
+When you execute an idea from the chat interface:
+1. SAM generates a concise title from your message (via Workers AI)
 2. A descriptive branch name is created (`sam/...`)
-3. The task runner selects or provisions a node (reusing warm nodes when available)
+3. The runner selects or provisions a node (reusing warm nodes when available)
 4. A workspace is created with your repository cloned
-5. The selected agent runs autonomously with your task description
+5. The selected agent runs autonomously with your description
 6. When done, the agent commits, pushes, and creates a PR
 7. The workspace enters a warm pool for potential reuse
 
-### Task Lifecycle
+### Linking Ideas to Conversations
 
-Tasks progress through these statuses:
-
-```
-draft → ready → queued → delegated → in_progress → completed/failed/cancelled
-```
+Ideas can be linked to chat sessions, creating a many-to-many association. This lets you track which conversations led to which ideas, and pull in idea context during a chat. Agents can manage these links using MCP tools (`link_idea`, `unlink_idea`, `find_related_ideas`).
 
 ### Agent-to-Agent Dispatch
 
-Running agents can spawn follow-up tasks within the same project using the `dispatch_task` MCP tool. This enables multi-step workflows where one agent delegates subtasks to others.
+Running agents can spawn follow-up ideas within the same project using MCP tools. This enables multi-step workflows where one agent delegates sub-work to others.
 
-See the [Task Execution guide](/docs/guides/task-execution/) for full details.
+See the [Idea Execution guide](/docs/guides/idea-execution/) for full details.
 
 ## Agent Sessions
 
@@ -159,6 +168,8 @@ Sessions support:
 - Persistence across page refreshes (tabs restored from VM Agent SQLite)
 - **Conversation forking** — branch off from any point to explore alternatives
 - **Voice input** and **text-to-speech playback**
+- **File browsing** — browse, view, and diff files directly in the chat panel
+- **File upload/download** — attach files to conversations and download from workspaces
 
 See the [AI Agents guide](/docs/guides/agents/) and [Chat Features guide](/docs/guides/chat-features/) for full details.
 
@@ -168,9 +179,9 @@ SAM includes an in-app notification system with real-time delivery via WebSocket
 
 | Type | Urgency | Trigger |
 |------|---------|---------|
-| `task_complete` | Medium | Task finishes successfully |
+| `task_complete` | Medium | An idea finishes executing successfully |
 | `needs_input` | High | Agent is blocked and needs your decision |
-| `error` | High | Task fails |
+| `error` | High | Execution fails |
 | `progress` | Low | Agent reports incremental progress |
 | `session_ended` | Medium | Agent conversation turn completes |
 | `pr_created` | Medium | Agent creates a pull request |

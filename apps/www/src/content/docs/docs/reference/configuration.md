@@ -56,7 +56,7 @@ GitHub secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`) because GitHub reserves 
 |----------|---------|-------------|
 | `REQUIRE_APPROVAL` | _(unset)_ | Require admin approval for new users. First user becomes superadmin. |
 
-## AI Task Title Generation
+## AI Idea Title Generation
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -147,7 +147,7 @@ GitHub secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`) because GitHub reserves 
 | `CONTEXT_SUMMARY_MAX_MESSAGES` | `50` | Max messages to include in summary |
 | `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5` | Skip AI for conversations this short |
 
-## Task Execution Timeouts
+## Idea Execution Timeouts
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -235,3 +235,44 @@ Applied via cloud-init on each node:
 | `MaxRetentionSec` | `7day` | Max log retention period |
 | `Storage` | `persistent` | Persist logs across reboots |
 | `Compress` | `yes` | Compress stored entries |
+
+## File Upload & Download
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FILE_UPLOAD_MAX_BYTES` | `10485760` (10 MB) | Max size per uploaded file |
+| `FILE_UPLOAD_BATCH_MAX_BYTES` | `52428800` (50 MB) | Max total size per upload batch |
+| `FILE_UPLOAD_TIMEOUT` | `30s` | Upload timeout (VM agent) |
+| `FILE_UPLOAD_TIMEOUT_MS` | `30000` | Upload proxy timeout (Worker) |
+| `FILE_DOWNLOAD_TIMEOUT_MS` | `15000` | Download proxy timeout |
+| `FILE_DOWNLOAD_MAX_BYTES` | `10485760` (10 MB) | Max download file size |
+
+## File Browsing & Raw Proxy
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FILE_PROXY_TIMEOUT_MS` | `15000` | File proxy request timeout |
+| `FILE_PROXY_MAX_RESPONSE_BYTES` | `2097152` (2 MB) | Max file proxy response size |
+| `FILE_RAW_MAX_SIZE` | `26214400` (25 MB) | Max raw binary file size (VM agent) |
+| `FILE_RAW_TIMEOUT` | `30s` | Raw file streaming timeout (VM agent) |
+| `FILE_RAW_PROXY_MAX_BYTES` | `26214400` (25 MB) | Max raw file proxy size (Worker) |
+
+## Idea Linking (MCP)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_IDEA_CONTEXT_MAX_LENGTH` | `500` | Max characters of idea context shown to agents |
+| `MCP_MESSAGE_SEARCH_MAX` | `20` | Max results from message search |
+| `MCP_MESSAGE_LIST_LIMIT` | `50` | Default message list page size |
+| `MCP_MESSAGE_LIST_MAX` | `200` | Max messages per list request |
+
+## Analytics Forwarding
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANALYTICS_FORWARD_ENABLED` | `false` | Enable external analytics event forwarding |
+| `ANALYTICS_FORWARD_EVENTS` | _(all)_ | Comma-separated list of events to forward |
+| `ANALYTICS_FORWARD_LOOKBACK_HOURS` | `25` | Hours to look back for events |
+| `SEGMENT_WRITE_KEY` | _(unset)_ | Segment Write Key for event forwarding |
+| `GA4_MEASUREMENT_ID` | _(unset)_ | Google Analytics 4 Measurement ID |
+| `GA4_API_SECRET` | _(unset)_ | Google Analytics 4 API secret |

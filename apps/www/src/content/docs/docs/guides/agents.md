@@ -56,7 +56,7 @@ You can configure credentials for multiple agents simultaneously and switch betw
 
 ## Project Default Agent
 
-Each project can set a **default agent type** that's used when submitting tasks. If no default is set, you'll need to specify the agent when creating a task.
+Each project can set a **default agent type** that's used when executing ideas. If no default is set, you'll need to specify the agent when starting execution.
 
 To set the default:
 1. Open the project settings
@@ -64,7 +64,7 @@ To set the default:
 3. Save changes
 
 The agent selection follows this precedence:
-1. Explicit override on the task submission
+1. Explicit override on execution
 2. Project default agent
 3. Platform default (`claude-code`)
 
@@ -83,7 +83,7 @@ When running an agent, you can choose between two workspace profiles:
 - Skips the devcontainer build entirely
 - Uses a minimal base image with core tools pre-installed
 - Startup time: 30-120 seconds faster than full profile
-- Best for quick conversations or tasks that don't need custom environments
+- Best for quick conversations that don't need custom environments
 
 ## Agent Session Features
 
@@ -98,13 +98,13 @@ You can fork a conversation from any message to explore an alternative approach:
 1. Hover over a message in the chat
 2. Click the **Fork** button
 3. SAM generates an AI context summary of the conversation up to that point
-4. A new task is created with the context, and a new agent session starts
+4. A new session starts with the context and awareness of the previous conversation
 
 Fork depth is limited to 10 levels (configurable via `ACP_SESSION_MAX_FORK_DEPTH`).
 
 ### Voice Input
 
-Speak your task description or follow-up messages using the microphone button. SAM transcribes audio using Whisper (via Workers AI) and submits the text.
+Speak your message or follow-up prompts using the microphone button. SAM transcribes audio using Whisper (via Workers AI) and submits the text.
 
 ### Text-to-Speech Playback
 
@@ -131,13 +131,18 @@ Running agents have access to project-aware MCP tools:
 
 | Tool | Description |
 |------|-------------|
-| `dispatch_task` | Spawn a follow-up task |
-| `list_tasks` | View project tasks |
-| `get_task_details` | Read task details |
-| `search_tasks` | Search by keyword |
+| `dispatch_task` | Spawn a follow-up idea for execution |
+| `create_idea` | Create a new idea |
+| `list_ideas` | View project ideas |
+| `get_idea` | Read idea details |
+| `search_ideas` | Search ideas by keyword |
+| `link_idea` | Link an idea to a chat session |
+| `unlink_idea` | Remove an idea-session link |
+| `find_related_ideas` | Find ideas related to a session |
+| `list_linked_ideas` | List ideas linked to a session |
 | `list_sessions` | View chat sessions |
 | `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages) |
-| `search_messages` | Search messages by keyword — uses FTS5 full-text search (matches messages containing all search words) for completed sessions; falls back to keyword matching for active sessions |
+| `search_messages` | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
 | `update_task_status` | Report progress |
-| `complete_task` | Mark task as done |
+| `complete_task` | Mark current work as done |
 | `request_human_input` | Ask for user decision (blocks until answered) |

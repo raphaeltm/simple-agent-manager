@@ -80,10 +80,10 @@ Cloudflare Workers can't fetch IP addresses directly (Error 1003). Non-proxied D
 The API Worker (`apps/api/`) is a Hono application handling:
 
 - **Authentication** — GitHub OAuth via BetterAuth
-- **Resource management** — CRUD for nodes, workspaces, projects, tasks
-- **Reverse proxy** — workspace subdomain and port traffic to VMs
-- **Durable Objects** — per-project data, node lifecycle, task orchestration, notifications
-- **Workers AI** — task title generation, voice transcription, text-to-speech, context summarization
+- **Resource management** — CRUD for nodes, workspaces, projects, ideas
+- **Reverse proxy** — workspace subdomain, port traffic, and file proxy to VMs
+- **Durable Objects** — per-project data, node lifecycle, idea orchestration, notifications
+- **Workers AI** — idea title generation, voice transcription, text-to-speech, context summarization
 - **MCP server** — project-aware tools for running agents
 - **Cron triggers** — provisioning timeout checks, warm node cleanup, orphan detection
 
@@ -94,10 +94,10 @@ The API Worker (`apps/api/`) is a Hono application handling:
 | `/api/auth/*` | GitHub OAuth sign-in/out, sessions |
 | `/api/nodes/*` | Node CRUD, lifecycle, health callbacks |
 | `/api/workspaces/*` | Workspace CRUD, lifecycle, boot logs, agent sessions |
-| `/api/projects/*` | Project CRUD, runtime config, tasks, chat sessions |
+| `/api/projects/*` | Project CRUD, runtime config, ideas, chat sessions, file proxy |
 | `/api/credentials/*` | Cloud provider + agent API key management |
 | `/api/notifications/*` | Notification list, read/dismiss, preferences, WebSocket |
-| `/api/tasks/*` | Task submission, lifecycle, status updates |
+| `/api/tasks/*` | Idea submission, lifecycle, status updates |
 | `/api/github/*` | GitHub App installations, repos |
 | `/api/terminal/token` | Workspace JWT for WebSocket auth |
 | `/api/agent/*` | VM Agent binary download |
@@ -114,10 +114,10 @@ SAM uses a hybrid storage model: **D1** for cross-project queries and **Durable 
 
 | Binding | Purpose |
 |---------|---------|
-| `DATABASE` | Users, projects, nodes, workspaces, tasks, credentials |
+| `DATABASE` | Users, projects, nodes, workspaces, ideas, credentials |
 | `OBSERVABILITY_DATABASE` | Error storage for admin dashboard |
 
-D1 stores platform-level data that needs to be queried across projects (e.g., "show all my tasks" on the dashboard).
+D1 stores platform-level data that needs to be queried across projects (e.g., "show all my ideas" on the dashboard).
 
 ### Durable Objects (Per-Project Data)
 
@@ -125,7 +125,7 @@ D1 stores platform-level data that needs to be queried across projects (e.g., "s
 |---------|-------|---------|---------|
 | `PROJECT_DATA` | Per project | SQLite | Chat sessions, messages, activity events, ACP sessions |
 | `NODE_LIFECYCLE` | Per node | KV | Warm pool state machine (active → warm → destroying) |
-| `TASK_RUNNER` | Per task | KV | Multi-step task orchestration via alarm callbacks |
+| `TASK_RUNNER` | Per idea | KV | Multi-step idea execution orchestration via alarm callbacks |
 | `ADMIN_LOGS` | Singleton | KV | Real-time log broadcast to admin WebSocket clients |
 | `NOTIFICATION` | Per user | KV | Notification delivery and state management |
 
@@ -155,7 +155,8 @@ Each project gets one `ProjectData` Durable Object instance, accessed via `env.P
 - `chat_messages_grouped` — materialized grouped messages, populated when a session stops by concatenating consecutive same-role tokens. Source for FTS5 full-text search.
 - `chat_messages_grouped_fts` — FTS5 virtual table indexed on grouped message content for full-text search with stemming and phrase matching.
 - `activity_events` — audit trail (workspace created, session stopped, etc.)
-- `task_status_events` — task lifecycle transitions with actor tracking
+- `chat_session_ideas` — many-to-many links between sessions and ideas
+- `task_status_events` — idea lifecycle transitions with actor tracking
 - `acp_sessions` — ACP session state machine with fork lineage
 - `acp_session_events` — ACP session state transition history
 
@@ -177,7 +178,7 @@ Each node gets one `NodeLifecycle` Durable Object, accessed via `env.NODE_LIFECY
 
 ### TaskRunner DO
 
-Each task gets one `TaskRunner` Durable Object, accessed via `env.TASK_RUNNER.idFromName(taskId)`.
+Each idea execution gets one `TaskRunner` Durable Object, accessed via `env.TASK_RUNNER.idFromName(taskId)`.
 
 **Orchestration steps** (each idempotent, alarm-driven):
 ```

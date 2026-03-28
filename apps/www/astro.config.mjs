@@ -40,7 +40,7 @@ export default defineConfig({
           label: 'Guides',
           items: [
             { slug: 'docs/guides/agents' },
-            { slug: 'docs/guides/task-execution' },
+            { slug: 'docs/guides/idea-execution' },
             { slug: 'docs/guides/chat-features' },
             { slug: 'docs/guides/notifications' },
             { slug: 'docs/guides/creating-workspaces' },

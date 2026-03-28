@@ -80,21 +80,21 @@ Click **Delete** to permanently remove a workspace. This cleans up:
 - DNS records
 - The VM (if no other workspaces are using it)
 
-## Task-Based Workspaces
+## Workspaces from Ideas
 
-You can also create workspaces implicitly through **tasks**:
+Workspaces are also created automatically when you execute an idea:
 
 1. Go to a project's chat view
-2. Submit a task description
-3. SAM automatically provisions a workspace, runs Claude Code with your task, and creates a PR
+2. Describe what you want done
+3. SAM automatically provisions a workspace, runs your configured agent, and creates a PR
 
-After the task completes, the node enters a **warm pool** for 30 minutes, enabling fast reuse for subsequent tasks.
+After execution completes, the node enters a **warm pool** for 30 minutes, enabling fast reuse for follow-up work.
 
 ## VM Sizes
 
 | Size | Specs | Best For | Hourly Cost |
 |------|-------|----------|-------------|
-| **Small** | 2 vCPU, 4GB RAM | Simple tasks, code review | ~$0.007 |
+| **Small** | 2 vCPU, 4GB RAM | Simple changes, code review | ~$0.007 |
 | **Medium** | 4 vCPU, 8GB RAM | Most development work | ~$0.012 |
 | **Large** | 8 vCPU, 16GB RAM | Large builds, heavy compilation | ~$0.030 |
 
