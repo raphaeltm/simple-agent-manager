@@ -57,6 +57,10 @@ export function normalizeProjectFilePath(path: string): string {
   const checkSegments = normalized.startsWith('/') ? segments.slice(1) : segments;
   // Allow ~ as the first segment for home directory expansion
   const startIdx = checkSegments[0] === '~' ? 1 : 0;
+  // Allow bare "." as a root-directory alias, but reject it as a mid-path segment
+  if (checkSegments.length === 1 && checkSegments[0] === '.') {
+    return '.';
+  }
   for (let i = startIdx; i < checkSegments.length; i++) {
     const seg = checkSegments[i];
     if (seg === '' || seg === '.' || seg === '..') {
