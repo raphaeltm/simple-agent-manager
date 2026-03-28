@@ -1,19 +1,21 @@
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  X, ChevronRight, Folder, FileText, RefreshCw, ArrowLeft,
+  X, ChevronRight, Folder, FileText, Image, RefreshCw, ArrowLeft,
 } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
-import { DiffRenderer } from '../shared-file-viewer';
+import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
 import { SyntaxHighlightedCode, RenderedMarkdown } from '../MarkdownRenderer';
 import {
   getSessionFileList,
   getSessionFileContent,
+  getSessionFileRawUrl,
   getSessionGitStatus,
   getSessionGitDiff,
   type FileEntry,
   type GitStatusData,
   type GitFileStatus,
 } from '../../lib/api';
+import { isImageFile } from '../../lib/file-utils';
 
 export type FilePanelMode = 'browse' | 'view' | 'diff' | 'git-status';
 
@@ -184,7 +186,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   // Initial load based on mode
   useEffect(() => {
     if (mode === 'browse') loadListing(currentPath);
-    else if (mode === 'view' && filePath) loadFile(filePath);
+    else if (mode === 'view' && filePath && !isImageFile(filePath)) loadFile(filePath);
     else if (mode === 'git-status') loadGitStatus();
     else if (mode === 'diff' && filePath) loadDiff(filePath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,7 +201,10 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   const openFile = (path: string) => {
     setFilePath(path);
     setMode('view');
-    loadFile(path);
+    // Image files are rendered via <img src> — skip text content fetch
+    if (!isImageFile(path)) {
+      loadFile(path);
+    }
   };
 
   const openDiff = (path: string, staged = false) => {
@@ -291,7 +296,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           )}
 
           {/* Markdown rendered/source toggle */}
-          {mode === 'view' && isMd && (
+          {mode === 'view' && isMd && !isImageFile(filePath) && (
             <div className="flex rounded-md overflow-hidden border border-border-default shrink-0">
               <button
                 type="button"
@@ -381,6 +386,8 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                     >
                       {entry.type === 'dir' ? (
                         <Folder size={14} className="shrink-0" style={{ color: 'var(--sam-color-accent-primary)' }} />
+                      ) : isImageFile(entry.name) ? (
+                        <Image size={14} className="shrink-0" style={{ color: 'var(--sam-color-info, #3b82f6)' }} />
                       ) : (
                         <FileText size={14} className="shrink-0 text-fg-muted" />
                       )}
@@ -400,7 +407,13 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           )}
 
           {/* View mode */}
-          {mode === 'view' && (
+          {mode === 'view' && isImageFile(filePath) && (
+            <ImageViewer
+              src={getSessionFileRawUrl(projectId, sessionId, filePath)}
+              fileName={fileName}
+            />
+          )}
+          {mode === 'view' && !isImageFile(filePath) && (
             <>
               {fileLoading && (
                 <div className="flex justify-center p-8"><Spinner size="md" /></div>

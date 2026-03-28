@@ -1840,6 +1840,35 @@ export async function getSessionFileContent(
   );
 }
 
+/**
+ * Build a URL to fetch raw binary file content via session proxy.
+ * Used as <img src> for image rendering — browser handles the fetch directly.
+ */
+export function getSessionFileRawUrl(
+  projectId: string,
+  sessionId: string,
+  filePath: string
+): string {
+  const params = new URLSearchParams({ path: filePath });
+  return `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/files/raw?${params.toString()}`;
+}
+
+/**
+ * Build a URL to fetch raw binary file content directly from workspace VM agent.
+ * Used as <img src> for image rendering in workspace views.
+ */
+export function getFileRawUrl(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string,
+  filePath: string,
+  worktree?: string
+): string {
+  const params = new URLSearchParams({ token, path: filePath });
+  if (worktree) params.set('worktree', worktree);
+  return `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/raw?${params.toString()}`;
+}
+
 /** Fetch git status via session proxy. */
 export async function getSessionGitStatus(
   projectId: string,

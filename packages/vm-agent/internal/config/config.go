@@ -154,6 +154,8 @@ type Config struct {
 	FileListMaxEntries int           // Max entries returned per directory listing (default: 1000)
 	FileFindTimeout    time.Duration // Timeout for recursive file find (default: 15s)
 	FileFindMaxEntries int           // Max entries returned by file find (default: 5000)
+	FileRawMaxSize     int           // Max file size in bytes for /files/raw binary endpoint (default: 25MB, env: FILE_RAW_MAX_SIZE)
+	FileRawTimeout     time.Duration // Timeout for raw file reads (default: 30s, env: FILE_RAW_TIMEOUT)
 
 	// Callback retry settings - configurable per constitution principle XI
 	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 10s)
@@ -325,6 +327,8 @@ func Load() (*Config, error) {
 		FileListMaxEntries: getEnvInt("FILE_LIST_MAX_ENTRIES", 1000),
 		FileFindTimeout:    getEnvDuration("FILE_FIND_TIMEOUT", 15*time.Second),
 		FileFindMaxEntries: getEnvInt("FILE_FIND_MAX_ENTRIES", 5000),
+		FileRawMaxSize:     getEnvInt("FILE_RAW_MAX_SIZE", 25*1024*1024), // 25 MB
+		FileRawTimeout:     getEnvDuration("FILE_RAW_TIMEOUT", 30*time.Second),
 
 		// Callback retry settings - configurable per constitution principle XI
 		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", 10*time.Second),

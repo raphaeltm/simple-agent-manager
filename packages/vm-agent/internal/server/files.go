@@ -1,11 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -193,6 +197,149 @@ func parseFileFindOutput(output string) []string {
 		files = append(files, line)
 	}
 	return files
+}
+
+// handleFileRaw serves raw binary file content with proper Content-Type.
+// GET /workspaces/{workspaceId}/files/raw?path=...
+// Streams the file directly from the container via docker exec cat.
+func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		return
+	}
+
+	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+		return
+	}
+
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		writeError(w, http.StatusBadRequest, "path query parameter is required")
+		return
+	}
+	if err := sanitizeFilePath(filePath); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	workDir, err = s.resolveWorktreeWorkDir(r, workspaceID, containerID, user, workDir)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.FileRawTimeout)
+	defer cancel()
+
+	// Stat the file to get type, size, and mtime. Uses direct args (no shell)
+	// to avoid injection. Format: file_type\tsize_bytes\tmtime_epoch
+	statOut, statStderr, statErr := s.execInContainer(ctx, containerID, user, workDir,
+		"stat", "-c", "%F\t%s\t%Y", filePath)
+	if statErr != nil {
+		slog.Warn("stat failed for raw file",
+			"path", filePath, "workspace", workspaceID,
+			"stderr", statStderr, "error", statErr)
+		writeError(w, http.StatusNotFound, "file not found")
+		return
+	}
+
+	statOut = strings.TrimSpace(statOut)
+	statParts := strings.SplitN(statOut, "\t", 3)
+	if len(statParts) < 3 {
+		writeError(w, http.StatusInternalServerError, "failed to stat file")
+		return
+	}
+
+	// Reject non-regular files (directories, symlinks, FIFOs, etc.)
+	fileType := statParts[0]
+	if fileType != "regular file" && fileType != "regular empty file" {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("not a regular file (type: %s)", fileType))
+		return
+	}
+
+	fileSize, err := strconv.ParseInt(statParts[1], 10, 64)
+	if err != nil {
+		slog.Error("failed to parse file size", "raw", statParts[1], "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to parse file metadata")
+		return
+	}
+	fileMtime, err := strconv.ParseInt(statParts[2], 10, 64)
+	if err != nil {
+		slog.Error("failed to parse file mtime", "raw", statParts[2], "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to parse file metadata")
+		return
+	}
+
+	// Enforce max file size
+	if fileSize > int64(s.config.FileRawMaxSize) {
+		writeError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("file exceeds maximum size of %d bytes", s.config.FileRawMaxSize))
+		return
+	}
+
+	// Build ETag from mtime and size
+	etag := fmt.Sprintf(`"%x-%x"`, fileMtime, fileSize)
+
+	// Check If-None-Match for 304 support
+	if match := r.Header.Get("If-None-Match"); match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	// Detect MIME type from file extension
+	ext := filepath.Ext(filePath)
+	contentType := mime.TypeByExtension(ext)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	// Set response headers before streaming.
+	// Intentionally omit Content-Length: the stat and cat are not atomic,
+	// so the file could change between them. Chunked transfer encoding is safer.
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", etag)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// For SVG files, add restrictive CSP to prevent script execution
+	if strings.HasPrefix(contentType, "image/svg") {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	}
+
+	// Stream the file content directly from docker exec to the response writer.
+	// This avoids buffering the entire file in memory.
+	// Uses direct args (no shell) — cat receives filePath as a single argument.
+	dockerArgs := []string{"exec", "-i"}
+	if user != "" {
+		dockerArgs = append(dockerArgs, "-u", user)
+	}
+	if workDir != "" {
+		dockerArgs = append(dockerArgs, "-w", workDir)
+	}
+	dockerArgs = append(dockerArgs, containerID, "cat", "--", filePath)
+
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	cmd.Stdout = w
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Run(); err != nil {
+		// If we already started writing, we can't send an error response.
+		// Log and return — the client will see a truncated response.
+		slog.Error("Error streaming raw file",
+			"path", filePath,
+			"workspace", workspaceID,
+			"error", err,
+			"stderr", strings.TrimSpace(stderrBuf.String()),
+		)
+	}
 }
 
 // parseFileListOutput parses the output of find -printf '%y\t%s\t%T@\t%f\n'

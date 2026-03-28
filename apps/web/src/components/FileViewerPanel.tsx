@@ -7,8 +7,10 @@ import {
 } from 'react';
 import { X } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
-import { getGitFile } from '../lib/api';
+import { getGitFile, getFileRawUrl } from '../lib/api';
+import { isImageFile } from '../lib/file-utils';
 import { SyntaxHighlightedCode, RenderedMarkdown } from './MarkdownRenderer';
+import { ImageViewer } from './shared-file-viewer';
 
 interface FileViewerPanelProps {
   workspaceUrl: string;
@@ -110,7 +112,14 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
   const [content, setContent] = useState<string | null>(null);
   const [markdownMode, setMarkdownMode] = useState<MarkdownViewMode>(() => readMarkdownViewMode());
 
+  const imageFile = isImageFile(filePath);
+
   const fetchFile = useCallback(async () => {
+    // Image files are rendered via <img src> — no text content fetch needed
+    if (imageFile) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -128,7 +137,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [workspaceUrl, workspaceId, token, filePath, worktree]);
+  }, [workspaceUrl, workspaceId, token, filePath, worktree, imageFile]);
 
   useEffect(() => {
     fetchFile();
@@ -247,37 +256,46 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
       </header>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto">
-        {loading && (
-          <div className="flex justify-center p-8">
-            <Spinner size="md" />
-          </div>
-        )}
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {imageFile ? (
+          <ImageViewer
+            src={getFileRawUrl(workspaceUrl, workspaceId, token, filePath, worktree ?? undefined)}
+            fileName={fileName}
+          />
+        ) : (
+          <div className="flex-1 overflow-auto">
+            {loading && (
+              <div className="flex justify-center p-8">
+                <Spinner size="md" />
+              </div>
+            )}
 
-        {error && (
-          <div
-            className="m-4 p-3 bg-danger-tint rounded-lg text-tn-red"
-            style={{ fontSize: 'var(--sam-type-caption-size)' }}
-          >
-            {error}
-          </div>
-        )}
+            {error && (
+              <div
+                className="m-4 p-3 bg-danger-tint rounded-lg text-tn-red"
+                style={{ fontSize: 'var(--sam-type-caption-size)' }}
+              >
+                {error}
+              </div>
+            )}
 
-        {!loading && !error && binary && (
-          <div
-            className="flex justify-center p-12 text-fg-muted"
-            style={{ fontSize: 'var(--sam-type-secondary-size)' }}
-          >
-            Binary file — cannot display
-          </div>
-        )}
+            {!loading && !error && binary && (
+              <div
+                className="flex justify-center p-12 text-fg-muted"
+                style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+              >
+                Binary file — cannot display
+              </div>
+            )}
 
-        {!loading && !error && content !== null && !binary && (
-          markdownFile && markdownMode === 'rendered' ? (
-            <RenderedMarkdown content={content} />
-          ) : (
-            <SyntaxHighlightedCode content={content} language={language} />
-          )
+            {!loading && !error && content !== null && !binary && (
+              markdownFile && markdownMode === 'rendered' ? (
+                <RenderedMarkdown content={content} />
+              ) : (
+                <SyntaxHighlightedCode content={content} language={language} />
+              )
+            )}
+          </div>
         )}
       </div>
     </div>
