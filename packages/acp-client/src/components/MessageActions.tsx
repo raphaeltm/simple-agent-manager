@@ -20,6 +20,12 @@ export interface MessageActionsProps {
   hideTts?: boolean;
   /** Color variant. 'default' for light backgrounds, 'on-dark' for dark (e.g., blue) backgrounds. */
   variant?: 'default' | 'on-dark';
+  /**
+   * Optional callback to delegate audio playback to an external player (e.g., global audio context).
+   * When provided, the speaker button calls this instead of managing its own audio.
+   * The inline AudioPlayer is not rendered — the external player handles UI.
+   */
+  onPlayAudio?: () => void;
 }
 
 /** Strips markdown syntax for a cleaner word/char count and TTS reading. */
@@ -65,6 +71,7 @@ export const MessageActions = React.memo(function MessageActions({
   ttsStorageId,
   hideTts,
   variant = 'default',
+  onPlayAudio,
 }: MessageActionsProps) {
   const [showMeta, setShowMeta] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -72,7 +79,10 @@ export const MessageActions = React.memo(function MessageActions({
   const metaRef = useRef<HTMLDivElement>(null);
   const popoverId = React.useId();
 
+  // When onPlayAudio is provided, we delegate audio to the global player.
+  // The local hook is still called (hooks must be unconditional) but won't be used for playback.
   const audio = useAudioPlayback({ text, ttsApiUrl, ttsStorageId });
+  const useGlobalPlayer = !!onPlayAudio;
 
   const plain = stripMarkdownForCount(text);
   const words = plain ? plain.split(/\s+/).filter(Boolean).length : 0;
@@ -82,8 +92,9 @@ export const MessageActions = React.memo(function MessageActions({
   const colorMuted = isOnDark ? 'rgba(255,255,255,0.7)' : 'var(--sam-color-fg-muted)';
   const colorActive = isOnDark ? '#ffffff' : 'var(--sam-color-accent-primary)';
 
-  const showPlayer = !hideTts && (audio.state !== 'idle' || !!audio.lastError);
-  const showSpeaker = !hideTts && (audio.hasServerTTS || (typeof window !== 'undefined' && !!window.speechSynthesis));
+  // When delegating to global player, don't show the inline player
+  const showPlayer = !useGlobalPlayer && !hideTts && (audio.state !== 'idle' || !!audio.lastError);
+  const showSpeaker = !hideTts && (useGlobalPlayer || audio.hasServerTTS || (typeof window !== 'undefined' && !!window.speechSynthesis));
 
   // Close metadata popover on outside click or Escape key
   useEffect(() => {
@@ -162,36 +173,40 @@ export const MessageActions = React.memo(function MessageActions({
           </svg>
         </button>
 
-        {/* TTS state announcements for screen readers */}
-        <span className="sr-only" aria-live="polite" aria-atomic="true">
-          {audio.state === 'loading' ? 'Generating audio' : audio.state === 'playing' ? 'Now playing' : ''}
-        </span>
+        {/* TTS state announcements for screen readers (only when using local player) */}
+        {!useGlobalPlayer && (
+          <span className="sr-only" aria-live="polite" aria-atomic="true">
+            {audio.state === 'loading' ? 'Generating audio' : audio.state === 'playing' ? 'Now playing' : ''}
+          </span>
+        )}
 
         {/* Speaker button */}
         {showSpeaker && (
           <button
             type="button"
-            onClick={audio.toggle}
+            onClick={useGlobalPlayer ? onPlayAudio : audio.toggle}
             className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
             style={{
-              color: audio.state !== 'idle' ? colorActive : colorMuted,
-              backgroundColor: audio.state === 'playing' ? 'var(--sam-color-bg-inset)' : undefined,
-              opacity: audio.state === 'loading' ? 0.7 : 1,
+              color: !useGlobalPlayer && audio.state !== 'idle' ? colorActive : colorMuted,
+              backgroundColor: !useGlobalPlayer && audio.state === 'playing' ? 'var(--sam-color-bg-inset)' : undefined,
+              opacity: !useGlobalPlayer && audio.state === 'loading' ? 0.7 : 1,
             }}
             aria-label={
+              useGlobalPlayer ? 'Read aloud' :
               audio.state === 'loading' ? 'Cancel audio generation' :
               audio.state === 'playing' ? 'Pause' :
               audio.state === 'paused' ? 'Resume' :
               'Read aloud'
             }
             title={
+              useGlobalPlayer ? 'Read aloud' :
               audio.state === 'loading' ? 'Cancel audio generation' :
               audio.state === 'playing' ? 'Pause' :
               audio.state === 'paused' ? 'Resume' :
               'Read aloud'
             }
           >
-            {audio.state === 'loading' ? (
+            {!useGlobalPlayer && audio.state === 'loading' ? (
               <svg
                 width="14"
                 height="14"
@@ -204,7 +219,7 @@ export const MessageActions = React.memo(function MessageActions({
               >
                 <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
               </svg>
-            ) : audio.state === 'playing' ? (
+            ) : !useGlobalPlayer && audio.state === 'playing' ? (
               <svg
                 width="14"
                 height="14"
@@ -216,7 +231,7 @@ export const MessageActions = React.memo(function MessageActions({
                 <rect x="6" y="4" width="4" height="16" rx="1" />
                 <rect x="14" y="4" width="4" height="16" rx="1" />
               </svg>
-            ) : audio.state === 'paused' ? (
+            ) : !useGlobalPlayer && audio.state === 'paused' ? (
               <svg
                 width="14"
                 height="14"

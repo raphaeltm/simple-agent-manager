@@ -14,6 +14,7 @@ import { mapToolCallContent, getErrorMeta } from '@simple-agent-manager/acp-clie
 import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
 import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2, Globe, ExternalLink } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
+import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { mergeMessages } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
 import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession, saveCachedCommands } from '../../lib/api';
@@ -112,11 +113,29 @@ function getTtsUrl(): string {
 
 /** Renders a single ACP ConversationItem using the shared acp-client components. */
 function AcpConversationItemView({ item }: { item: ConversationItem }) {
+  const globalAudio = useGlobalAudio();
+
+  const handlePlayAudio = item.kind === 'agent_message'
+    ? () => {
+        const ttsApiUrl = getTtsUrl();
+        const ttsStorageId = item.id;
+        if (ttsApiUrl && ttsStorageId) {
+          globalAudio.startPlayback({
+            text: item.text,
+            ttsApiUrl,
+            ttsStorageId,
+            label: 'Chat message',
+            sourceText: item.text.slice(0, 200),
+          });
+        }
+      }
+    : undefined;
+
   switch (item.kind) {
     case 'user_message':
       return <AcpMessageBubble text={item.text} role="user" />;
     case 'agent_message':
-      return <AcpMessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} ttsApiUrl={getTtsUrl()} ttsStorageId={item.id} />;
+      return <AcpMessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} ttsApiUrl={getTtsUrl()} ttsStorageId={item.id} onPlayAudio={handlePlayAudio} />;
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':

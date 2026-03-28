@@ -8,7 +8,7 @@ import type {
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
-import { useAudioPlayback, AudioPlayer } from '@simple-agent-manager/acp-client';
+import { useGlobalAudio } from '../contexts/GlobalAudioContext';
 import {
   addTaskDependency,
   deleteProjectTask,
@@ -56,14 +56,19 @@ function getTtsUrl(): string {
 
 /** Output section with audio playback support for task summaries. */
 function TaskOutputSection({ task }: { task: TaskDetailResponse }) {
-  const audio = useAudioPlayback({
-    text: task.outputSummary ?? '',
-    ttsApiUrl: task.outputSummary ? getTtsUrl() : undefined,
-    ttsStorageId: task.outputSummary ? `task-${task.id}` : undefined,
-  });
+  const globalAudio = useGlobalAudio();
+  const showSpeaker = !!task.outputSummary;
 
-  const showPlayer = audio.state !== 'idle';
-  const showSpeaker = task.outputSummary && (audio.hasServerTTS || (typeof window !== 'undefined' && !!window.speechSynthesis));
+  const handlePlayAudio = useCallback(() => {
+    if (!task.outputSummary) return;
+    globalAudio.startPlayback({
+      text: task.outputSummary,
+      ttsApiUrl: getTtsUrl(),
+      ttsStorageId: `task-${task.id}`,
+      label: 'Task Output',
+      sourceText: task.outputSummary.slice(0, 200),
+    });
+  }, [globalAudio, task.outputSummary, task.id]);
 
   if (!task.outputSummary && !task.outputBranch && !task.outputPrUrl) return null;
 
@@ -73,71 +78,23 @@ function TaskOutputSection({ task }: { task: TaskDetailResponse }) {
         <h2 className="sam-type-card-title m-0 text-fg-primary">
           Output
         </h2>
-        {/* TTS state announcements for screen readers */}
-        <span className="sr-only" aria-live="polite" aria-atomic="true">
-          {audio.state === 'loading' ? 'Generating audio' : audio.state === 'playing' ? 'Now playing' : ''}
-        </span>
         {showSpeaker && (
           <button
             type="button"
-            onClick={audio.toggle}
+            onClick={handlePlayAudio}
             className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors hover:bg-[var(--sam-color-bg-inset)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-accent-primary,#16a34a)]"
-            style={{
-              color: audio.state !== 'idle' ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
-              backgroundColor: audio.state === 'playing' ? 'var(--sam-color-bg-inset)' : undefined,
-              opacity: audio.state === 'loading' ? 0.7 : 1,
-            }}
-            aria-label={
-              audio.state === 'loading' ? 'Cancel audio generation' :
-              audio.state === 'playing' ? 'Pause' :
-              audio.state === 'paused' ? 'Resume' :
-              'Read summary aloud'
-            }
-            title={
-              audio.state === 'loading' ? 'Cancel audio generation' :
-              audio.state === 'playing' ? 'Pause' :
-              audio.state === 'paused' ? 'Resume' :
-              'Read summary aloud'
-            }
+            style={{ color: 'var(--sam-color-fg-muted)' }}
+            aria-label="Read summary aloud"
+            title="Read summary aloud"
           >
-            {audio.state === 'loading' ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="animate-spin motion-reduce:animate-none">
-                <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
-              </svg>
-            ) : audio.state === 'playing' ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
-                <rect x="6" y="4" width="4" height="16" rx="1" />
-                <rect x="14" y="4" width="4" height="16" rx="1" />
-              </svg>
-            ) : audio.state === 'paused' ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-              </svg>
-            )}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+            </svg>
           </button>
         )}
       </div>
-
-      {showPlayer && (
-        <AudioPlayer
-          state={audio.state}
-          currentTime={audio.currentTime}
-          duration={audio.duration}
-          playbackRate={audio.playbackRate}
-          onToggle={audio.toggle}
-          onStop={audio.stop}
-          onSeek={audio.seekTo}
-          onSkipForward={audio.skipForward}
-          onSkipBackward={audio.skipBackward}
-          onPlaybackRateChange={audio.setPlaybackRate}
-        />
-      )}
 
       {task.outputSummary && (
         <p className="sam-type-secondary m-0 text-fg-muted whitespace-pre-wrap">

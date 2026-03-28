@@ -36,6 +36,7 @@ import { AdminLogs } from './pages/AdminLogs';
 import { AdminStream } from './pages/AdminStream';
 import { AdminAnalytics } from './pages/AdminAnalytics';
 import { PageViewTracker } from './components/PageViewTracker';
+import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 
 function ProtectedLayout() {
   return (
@@ -52,6 +53,7 @@ export default function App() {
     <ErrorBoundary>
     <AuthProvider>
     <ToastProvider>
+      <GlobalAudioProvider>
       <BrowserRouter>
         <PageViewTracker />
         <Routes>
@@ -116,6 +118,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </GlobalAudioProvider>
     </ToastProvider>
     </AuthProvider>
     </ErrorBoundary>
