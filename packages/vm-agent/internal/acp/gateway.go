@@ -668,7 +668,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	case "google-gemini":
 		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", true, "", ""}
 	case "mistral-vibe":
-		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.4.2 --python 3.12 --quiet`, false, "", ""}
+		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`, false, "", ""}
 	default:
 		return agentCommandInfo{agentType, nil, "API_KEY", "", false, "", ""}
 	}
