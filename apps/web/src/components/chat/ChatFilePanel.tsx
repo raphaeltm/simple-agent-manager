@@ -1,5 +1,7 @@
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
-import { X, ChevronRight, Folder, FileText, RefreshCw, ArrowLeft } from 'lucide-react';
+import {
+  X, ChevronRight, Folder, FileText, RefreshCw, ArrowLeft,
+} from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { DiffRenderer } from '../shared-file-viewer';
 import { SyntaxHighlightedCode, RenderedMarkdown } from '../MarkdownRenderer';
