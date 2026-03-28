@@ -43,6 +43,36 @@ export const BLOCKED_HOME_PATHS = [
   '~/.ssh/environment',
 ];
 
+/**
+ * Permissive path normalization for read-only file proxy routes (chat file viewer).
+ * Prevents path traversal (..) but allows any absolute path — users have full access
+ * to their dev containers and should be able to view any file.
+ */
+export function normalizeFileProxyPath(path: string): string {
+  const normalized = path.trim().replace(/\\/g, '/');
+  if (!normalized) {
+    throw errors.badRequest('path is required');
+  }
+  if (!PROJECT_FILE_PATH_PATTERN.test(normalized)) {
+    throw errors.badRequest('path contains invalid characters');
+  }
+
+  const segments = normalized.split('/');
+  const checkSegments = normalized.startsWith('/') ? segments.slice(1) : segments;
+  const startIdx = checkSegments[0] === '~' ? 1 : 0;
+  if (checkSegments.length === 1 && checkSegments[0] === '.') {
+    return '.';
+  }
+  for (let i = startIdx; i < checkSegments.length; i++) {
+    const seg = checkSegments[i];
+    if (seg === '' || seg === '.' || seg === '..') {
+      throw errors.badRequest('path must not contain empty, dot, or dot-dot segments');
+    }
+  }
+
+  return segments.join('/');
+}
+
 export function normalizeProjectFilePath(path: string): string {
   const normalized = path.trim().replace(/\\/g, '/');
   if (!normalized) {
