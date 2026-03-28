@@ -36,6 +36,7 @@ export interface UseAdminAnalyticsReturn {
 }
 
 const DEFAULT_REFRESH_INTERVAL = 60_000; // 60 seconds
+const DEFAULT_ANALYTICS_PERIOD = '7d';
 
 export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL): UseAdminAnalyticsReturn {
   const [dau, setDau] = useState<AnalyticsDauResponse | null>(null);
@@ -49,7 +50,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [eventPeriod, setEventPeriod] = useState('7d');
+  const [eventPeriod, setEventPeriod] = useState(DEFAULT_ANALYTICS_PERIOD);
 
   const mountedRef = useRef(true);
   const hasLoadedRef = useRef(false);

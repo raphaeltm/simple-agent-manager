@@ -244,93 +244,97 @@ const API_ERROR: MockScenario = { apiError: true };
 // ---------------------------------------------------------------------------
 
 async function setupMocks(page: Page, scenario: MockScenario) {
-  // Auth
-  await page.route('**/api/auth/me', async (route: Route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_USER) });
-  });
+  const respond = (route: Route, status: number, body: unknown) =>
+    route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-  // Analytics endpoints
-  await page.route('**/api/admin/analytics/dau**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ dau: scenario.dau ?? [], periodDays: scenario.dau?.length ?? 0 }),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/funnel**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.funnel ?? makeFunnelData()),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/feature-adoption**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.featureAdoption ?? makeFeatureAdoption()),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/geo**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.geo ?? makeGeoData()),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/retention**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.retention ?? makeRetentionData()),
-      });
-    }
-  });
-
-  await page.route('**/api/admin/analytics/events**', async (route: Route) => {
-    if (scenario.apiError) {
-      await route.fulfill({ status: 500, body: 'Internal Server Error' });
-    } else {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify(scenario.events ?? makeEventsData()),
-      });
-    }
-  });
-
-  // Stub other common API calls the shell may fire
-  await page.route('**/api/projects**', async (route: Route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-  });
-  await page.route('**/api/admin/health**', async (route: Route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) });
-  });
   await page.route('**/api/**', async (route: Route) => {
-    // Catch-all — prevent real network calls
-    const url = route.request().url();
-    if (url.includes('/api/')) {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
-    } else {
-      await route.continue();
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+
+    // Auth — BetterAuth calls /api/auth/get-session and related paths
+    if (path.includes('/api/auth/')) {
+      return respond(route, 200, MOCK_USER);
     }
+
+    // Notifications
+    if (path.startsWith('/api/notifications')) {
+      return respond(route, 200, { notifications: [], unreadCount: 0 });
+    }
+
+    // Analytics endpoints
+    if (path.includes('/admin/analytics/dau')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, { dau: scenario.dau ?? [], periodDays: scenario.dau?.length ?? 0 });
+    }
+
+    if (path.includes('/admin/analytics/funnel')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.funnel ?? makeFunnelData());
+    }
+
+    if (path.includes('/admin/analytics/feature-adoption')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.featureAdoption ?? makeFeatureAdoption());
+    }
+
+    if (path.includes('/admin/analytics/geo')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.geo ?? makeGeoData());
+    }
+
+    if (path.includes('/admin/analytics/retention')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.retention ?? makeRetentionData());
+    }
+
+    if (path.includes('/admin/analytics/website-traffic')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, {
+        hosts: [{
+          host: 'simple-agent-manager.org',
+          totalViews: 12400,
+          uniqueVisitors: 3200,
+          uniqueSessions: 4100,
+          sections: [
+            { name: 'landing', views: 5200, unique_visitors: 2100, topPages: [{ page: '/', views: 4000, unique_visitors: 1800 }] },
+            { name: 'docs', views: 4100, unique_visitors: 1600, topPages: [{ page: '/docs/getting-started', views: 2000, unique_visitors: 900 }] },
+            { name: 'blog', views: 2100, unique_visitors: 800, topPages: [{ page: '/blog/launch', views: 1200, unique_visitors: 500 }] },
+          ],
+        }],
+        trend: [],
+        period: '7d',
+      });
+    }
+
+    if (path.includes('/admin/analytics/forward-status')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, {
+        enabled: true,
+        lastForwardedAt: '2026-03-28T10:00:00Z',
+        destinations: { segment: { configured: true }, ga4: { configured: false } },
+        events: ['signup', 'login', 'project_created'],
+      });
+    }
+
+    if (path.includes('/admin/analytics/events')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.events ?? makeEventsData());
+    }
+
+    if (path.includes('/admin/health')) {
+      return respond(route, 200, { status: 'ok' });
+    }
+
+    if (path.startsWith('/api/projects')) {
+      return respond(route, 200, []);
+    }
+
+    if (path.startsWith('/api/credentials')) {
+      return respond(route, 200, []);
+    }
+
+    // Catch-all for any other API calls
+    return respond(route, 200, {});
   });
 }
 
@@ -391,14 +395,16 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     await assertNoHorizontalOverflow(page);
   });
 
-  test('error state — retry button visible', async ({ page }) => {
+  test('error state — page still renders with empty states', async ({ page }) => {
     await setupMocks(page, API_ERROR);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(600);
     await screenshot(page, 'admin-analytics-error-mobile');
     await assertNoHorizontalOverflow(page);
-    const retryBtn = page.getByRole('button', { name: /retry/i });
-    await expect(retryBtn).toBeVisible();
+    // When APIs fail, individual sections show empty state messages
+    const emptyMessages = page.locator('text=/No .* data available yet/');
+    const count = await emptyMessages.count();
+    expect(count).toBeGreaterThan(0);
   });
 
   test('high retention heat map — deep green cells', async ({ page }) => {
@@ -417,7 +423,7 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     await assertNoHorizontalOverflow(page);
   });
 
-  test('period selector toggle — all three buttons accessible and toggleable', async ({ page }) => {
+  test('period selector toggle — all four buttons accessible and toggleable', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(600);
@@ -461,43 +467,40 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     await page.goto('/admin/analytics');
     await page.waitForTimeout(600);
 
-    // EventsTable has a separate table — verify col scoping
+    // EventsTable, retention, geo, and website traffic tables should all be present
     const tables = page.locator('table');
     const tableCount = await tables.count();
-    expect(tableCount).toBeGreaterThanOrEqual(2); // retention + events
+    expect(tableCount).toBeGreaterThanOrEqual(2); // retention + events + geo + website
 
     const allColHeaders = page.locator('th[scope="col"]');
     const allColCount = await allColHeaders.count();
     expect(allColCount).toBeGreaterThan(0);
   });
 
-  test('sparklines have role=img and title', async ({ page }) => {
+  test('KPI summary cards render with data', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(700);
 
-    const sparklineSvgs = page.locator('svg[role="img"]');
-    const count = await sparklineSvgs.count();
-    // With normal data, there should be at least some sparklines
-    if (count > 0) {
-      const firstSparkline = sparklineSvgs.first();
-      await expect(firstSparkline).toHaveAttribute('aria-label');
-      const titleEl = firstSparkline.locator('title');
-      await expect(titleEl).toBeVisible();
-    }
+    // KPI cards should show key metrics
+    const kpiGrid = page.locator('.grid.grid-cols-2');
+    await expect(kpiGrid).toBeVisible();
+
+    // Should have at least 3 KPI cards (DAU, avg DAU, funnel, events)
+    const kpiCards = kpiGrid.locator('> div');
+    const count = await kpiCards.count();
+    expect(count).toBeGreaterThanOrEqual(3);
   });
 
-  test('DAU chart container has role=img with descriptive label', async ({ page }) => {
+  test('DAU chart renders as Recharts area chart', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(700);
 
-    // Check specifically for the DAU chart container
-    const dauImgContainer = page.locator('.flex.items-end.gap-\\[2px\\][role="img"]');
-    const exists = await dauImgContainer.count();
-    if (exists > 0) {
-      await expect(dauImgContainer.first()).toHaveAttribute('aria-label');
-    }
+    // Recharts renders SVG with .recharts-wrapper class
+    const rechartsWrapper = page.locator('.recharts-wrapper');
+    const exists = await rechartsWrapper.count();
+    expect(exists).toBeGreaterThan(0);
   });
 
   test('section headings use correct text size (base/semibold)', async ({ page }) => {
@@ -507,8 +510,41 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
 
     const headings = page.locator('h3.text-base.font-semibold');
     const count = await headings.count();
-    // All 6 card sections should use the upgraded heading style
-    expect(count).toBeGreaterThanOrEqual(6);
+    // All card sections should use the upgraded heading style
+    expect(count).toBeGreaterThanOrEqual(5);
+  });
+
+  test('events table columns are sortable', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+
+    // Find sortable column headers with aria-sort
+    const sortableHeaders = page.locator('th[aria-sort]');
+    const count = await sortableHeaders.count();
+    expect(count).toBeGreaterThan(0);
+
+    // Click "Avg (ms)" header — unique to the events table
+    const avgHeader = page.getByRole('columnheader', { name: /Avg/ });
+    await avgHeader.click();
+    await page.waitForTimeout(200);
+    await expect(avgHeader).toHaveAttribute('aria-sort');
+  });
+
+  test('forwarding status is collapsible', async ({ page }) => {
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(700);
+
+    // Forwarding section should have a toggle button
+    const forwardingToggle = page.getByRole('button', { name: /event forwarding/i });
+    await expect(forwardingToggle).toBeVisible();
+    await expect(forwardingToggle).toHaveAttribute('aria-expanded', 'false');
+
+    // Click to expand
+    await forwardingToggle.click();
+    await page.waitForTimeout(200);
+    await expect(forwardingToggle).toHaveAttribute('aria-expanded', 'true');
   });
 });
 

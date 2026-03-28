@@ -1,5 +1,15 @@
 import { type FC } from 'react';
 import { Body } from '@simple-agent-manager/ui';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  Cell,
+} from 'recharts';
 import type { AnalyticsFeatureAdoptionResponse } from '../../lib/api';
 
 const EVENT_LABELS: Record<string, string> = {
@@ -18,8 +28,38 @@ const EVENT_LABELS: Record<string, string> = {
   settings_changed: 'Change Settings',
 };
 
+/** Categorical colors for bars. */
+const BAR_COLORS = [
+  'var(--sam-color-accent-primary, #16a34a)',
+  'var(--sam-color-success, #22c55e)',
+  '#60a5fa',
+  '#a78bfa',
+  'var(--sam-color-warning, #f59e0b)',
+  '#f97316',
+  '#ec4899',
+  '#14b8a6',
+  '#8b5cf6',
+  '#06b6d4',
+  '#84cc16',
+  '#f43f5e',
+  '#6366f1',
+];
+
 interface Props {
   data: AnalyticsFeatureAdoptionResponse | null;
+}
+
+/** Custom tooltip for feature adoption chart. */
+function AdoptionTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: { label: string; count: number; unique_users: number } }> }) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0]!.payload;
+  return (
+    <div className="rounded-md border border-border-default bg-surface-primary px-3 py-2 shadow-lg text-sm">
+      <div className="text-fg-primary font-medium">{d.label}</div>
+      <div className="text-fg-secondary tabular-nums">{d.count.toLocaleString()} events</div>
+      <div className="text-fg-muted tabular-nums text-xs">{d.unique_users.toLocaleString()} unique users</div>
+    </div>
+  );
 }
 
 export const FeatureAdoptionChart: FC<Props> = ({ data }) => {
@@ -27,89 +67,42 @@ export const FeatureAdoptionChart: FC<Props> = ({ data }) => {
     return <Body className="text-fg-muted">No feature adoption data available yet.</Body>;
   }
 
-  const maxCount = Math.max(...data.totals.map((t) => t.count), 1);
+  const chartData = data.totals.map((item) => ({
+    label: EVENT_LABELS[item.event_name] ?? item.event_name,
+    event_name: item.event_name,
+    count: item.count,
+    unique_users: item.unique_users,
+  }));
 
-  // Build sparkline data: group trend by event_name
-  const trendByEvent = new Map<string, Array<{ date: string; count: number }>>();
-  for (const row of data.trend ?? []) {
-    if (!trendByEvent.has(row.event_name)) {
-      trendByEvent.set(row.event_name, []);
-    }
-    trendByEvent.get(row.event_name)!.push({ date: row.date, count: row.count });
-  }
+  const chartHeight = Math.max(200, chartData.length * 36);
 
   return (
-    <div className="flex flex-col gap-2">
-      {data.totals.map((item) => {
-        const widthPercent = Math.max((item.count / maxCount) * 100, 3);
-        const label = EVENT_LABELS[item.event_name] ?? item.event_name;
-        const sparkData = trendByEvent.get(item.event_name) ?? [];
-
-        return (
-          <div key={item.event_name} className="flex items-center gap-3">
-            <div className="w-36 text-sm text-fg-secondary truncate" title={item.event_name}>
-              {label}
-            </div>
-            <div className="flex-1 flex items-center gap-2">
-              {/* Bar track — count is shown outside the bar to avoid overflow on small values */}
-              <div
-                className="flex-1 h-7 bg-surface-secondary rounded-sm overflow-hidden"
-                role="img"
-                aria-label={`${label}: ${item.count.toLocaleString()} total events`}
-              >
-                <div
-                  className="h-full bg-accent-emphasis rounded-sm transition-all"
-                  style={{ width: `${widthPercent}%` }}
-                  aria-hidden="true"
-                />
-              </div>
-              <div className="w-12 text-xs text-fg-secondary tabular-nums text-right flex-shrink-0">
-                {item.count.toLocaleString()}
-              </div>
-              {sparkData.length > 1 && <Sparkline data={sparkData} label={label} />}
-            </div>
-            <div className="w-16 text-xs text-fg-muted text-right tabular-nums">
-              {item.unique_users.toLocaleString()} users
-            </div>
-          </div>
-        );
-      })}
+    <div className="w-full" style={{ height: chartHeight }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 4, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--sam-color-border-default, #29423b)" strokeOpacity={0.3} horizontal={false} />
+          <XAxis
+            type="number"
+            tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted, #9fb7ae)' }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            dataKey="label"
+            type="category"
+            width={120}
+            tick={{ fontSize: 12, fill: 'var(--sam-color-fg-secondary, #c5d6cf)' }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <Tooltip content={<AdoptionTooltip />} cursor={{ fill: 'var(--sam-color-bg-surface-hover, #1a2e29)', opacity: 0.5 }} />
+          <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={28}>
+            {chartData.map((_, i) => (
+              <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
-  );
-};
-
-const Sparkline: FC<{ data: Array<{ date: string; count: number }>; label: string }> = ({ data, label }) => {
-  const max = Math.max(...data.map((d) => d.count), 1);
-  const width = 60;
-  const height = 20;
-  const points = data.map((d, i) => {
-    const x = (i / (data.length - 1)) * width;
-    const y = height - (d.count / max) * height;
-    return `${x},${y}`;
-  }).join(' ');
-
-  // Build a human-readable trend summary for screen readers
-  const first = data[0]?.count ?? 0;
-  const last = data[data.length - 1]?.count ?? 0;
-  const trend = last > first ? 'trending up' : last < first ? 'trending down' : 'flat';
-
-  return (
-    <svg
-      width={width}
-      height={height}
-      className="flex-shrink-0"
-      role="img"
-      aria-label={`${label} trend over time: ${trend}`}
-    >
-      <title>{`${label} trend: ${trend} (from ${first} to ${last})`}</title>
-      <polyline
-        points={points}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        className="text-accent-emphasis"
-        aria-hidden="true"
-      />
-    </svg>
   );
 };
