@@ -12,13 +12,13 @@ import {
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent, getErrorMeta } from '@simple-agent-manager/acp-client';
 import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
-import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2, Globe, ExternalLink, FolderOpen, GitCompare } from 'lucide-react';
+import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2, Globe, ExternalLink, FolderOpen, GitCompare, Paperclip } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { ChatFilePanel } from './ChatFilePanel';
 import { mergeMessages } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
-import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession, saveCachedCommands } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession, saveCachedCommands, uploadSessionFiles } from '../../lib/api';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import type { WorkspaceResponse, NodeResponse, VMSize, DetectedPort } from '@simple-agent-manager/shared';
@@ -374,6 +374,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // Follow-up input state
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   // Auto-resume state: tracks when we're resuming a suspended/idle session
   const [isResuming, setIsResuming] = useState(false);
@@ -833,6 +834,30 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     }
   };
 
+  // Upload files to workspace via session proxy
+  const handleUploadFiles = useCallback(async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+    setUploading(true);
+    try {
+      const result = await uploadSessionFiles(projectId, sessionId, fileArray);
+      const names = result.files.map((f) => f.name).join(', ');
+      // Add an optimistic user message showing what was uploaded
+      setMessages((prev) => [...prev, {
+        id: `optimistic-upload-${crypto.randomUUID()}`,
+        sessionId,
+        role: 'user' as const,
+        content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
+        toolMetadata: null,
+        createdAt: Date.now(),
+      }]);
+    } catch (err) {
+      console.error('File upload failed:', err);
+    } finally {
+      setUploading(false);
+    }
+  }, [projectId, sessionId]);
+
   const loadMore = async () => {
     if (!hasMore || loadingMore) return;
     const firstMessage = messages[0];
@@ -1068,7 +1093,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           value={followUp}
           onChange={setFollowUp}
           onSend={handleSendFollowUp}
+          onUploadFiles={(files) => handleUploadFiles(files)}
           sending={sendingFollowUp}
+          uploading={uploading}
           placeholder="Send a message..."
           transcribeApiUrl={transcribeApiUrl}
         />
@@ -1078,7 +1105,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           value={followUp}
           onChange={setFollowUp}
           onSend={handleSendFollowUp}
+          onUploadFiles={(files) => handleUploadFiles(files)}
           sending={sendingFollowUp}
+          uploading={uploading}
           placeholder="Send a message to resume the agent..."
           transcribeApiUrl={transcribeApiUrl}
         />
@@ -1616,18 +1645,23 @@ function FollowUpInput({
   value,
   onChange,
   onSend,
+  onUploadFiles,
   sending,
+  uploading,
   placeholder,
   transcribeApiUrl,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
+  onUploadFiles?: (files: FileList) => void;
   sending: boolean;
+  uploading?: boolean;
   placeholder: string;
   transcribeApiUrl: string;
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleTranscription = useCallback(
     (text: string) => {
@@ -1641,6 +1675,32 @@ function FollowUpInput({
   return (
     <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
       <div className="flex gap-2 items-end">
+        {onUploadFiles && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  onUploadFiles(e.target.files);
+                  e.target.value = ''; // reset so same file can be re-uploaded
+                }
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              aria-label="Attach files"
+              className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+              style={{ opacity: uploading ? 0.5 : 1 }}
+            >
+              <Paperclip size={18} className={uploading ? 'animate-pulse' : ''} />
+            </button>
+          </>
+        )}
         <textarea
           ref={inputRef}
           value={value}

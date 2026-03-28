@@ -468,7 +468,7 @@ func ensureVolumeWritable(ctx context.Context, volumeName string) error {
 		"--rm",
 		"-v", volumeName+":/workspaces",
 		"alpine:latest",
-		"sh", "-c", "chmod -R a+rwX /workspaces",
+		"sh", "-c", "mkdir -p /workspaces/.private && chmod -R a+rwX /workspaces",
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

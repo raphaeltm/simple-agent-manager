@@ -17,6 +17,14 @@ const DEFAULT_FILE_PROXY_TIMEOUT_MS = 15_000;
 const DEFAULT_FILE_PROXY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2 MB
 /** Default max response size for raw binary file proxy (configurable via FILE_RAW_PROXY_MAX_BYTES). */
 const DEFAULT_FILE_RAW_PROXY_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+/** Default max batch upload size (configurable via FILE_UPLOAD_BATCH_MAX_BYTES). */
+const DEFAULT_FILE_UPLOAD_BATCH_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+/** Default timeout for upload proxy requests (configurable via FILE_UPLOAD_TIMEOUT_MS). */
+const DEFAULT_FILE_UPLOAD_TIMEOUT_MS = 60_000;
+/** Default timeout for download proxy requests (configurable via FILE_DOWNLOAD_TIMEOUT_MS). */
+const DEFAULT_FILE_DOWNLOAD_TIMEOUT_MS = 30_000;
+/** Default max file download size (configurable via FILE_DOWNLOAD_MAX_BYTES). */
+const DEFAULT_FILE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
 
 /** Response headers safe to forward from VM agent to the client. */
 const FORWARDED_RESPONSE_HEADERS = [
@@ -153,6 +161,28 @@ async function proxyToVmAgent(
     status: res.status,
     headers,
   });
+}
+
+/**
+ * Create a size-limited ReadableStream that aborts when the byte count exceeds maxBytes.
+ */
+function createSizeLimitedStream(
+  source: ReadableStream<Uint8Array>,
+  maxBytes: number
+): ReadableStream<Uint8Array> {
+  let seen = 0;
+  return source.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        seen += chunk.byteLength;
+        if (seen > maxBytes) {
+          controller.error(new Error(`Stream exceeded size limit of ${maxBytes} bytes`));
+        } else {
+          controller.enqueue(chunk);
+        }
+      },
+    })
+  );
 }
 
 /**
@@ -334,6 +364,133 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
     status: res.status,
     headers,
   });
+});
+
+/** POST /:id/sessions/:sessionId/files/upload — Proxy file upload to workspace */
+fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+
+  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+    c.env,
+    projectId,
+    sessionId,
+    userId
+  );
+
+  const timeoutMs = parseInt(c.env.FILE_UPLOAD_TIMEOUT_MS ?? String(DEFAULT_FILE_UPLOAD_TIMEOUT_MS));
+  const maxBatchBytes = parseInt(
+    c.env.FILE_UPLOAD_BATCH_MAX_BYTES ?? String(DEFAULT_FILE_UPLOAD_BATCH_MAX_BYTES)
+  );
+
+  // Pre-check Content-Length if present
+  const contentLength = parseInt(c.req.header('Content-Length') ?? '0');
+  if (contentLength > maxBatchBytes + 1024 * 1024) {
+    throw errors.badRequest(`Upload too large (${contentLength} bytes)`);
+  }
+
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload?token=${encodeURIComponent(token)}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': c.req.header('Content-Type') ?? 'multipart/form-data',
+    },
+    body: c.req.raw.body
+      ? createSizeLimitedStream(c.req.raw.body, maxBatchBytes + 1024 * 1024)
+      : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
+    // @ts-expect-error duplex is required for streaming request bodies in fetch
+    duplex: 'half',
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(
+      JSON.stringify({
+        event: 'file_proxy.upload_error',
+        workspaceId,
+        status: res.status,
+        body: text,
+      })
+    );
+    const clientStatus =
+      res.status === 413 ? 413 : res.status >= 500 ? 502 : 400;
+    if (clientStatus === 502) throw errors.internal('Workspace agent unavailable');
+    throw errors.badRequest(
+      clientStatus === 413 ? 'File too large' : 'Upload failed'
+    );
+  }
+
+  const headers = new Headers();
+  headers.set('Content-Type', 'application/json');
+  return new Response(res.body, { status: res.status, headers });
+});
+
+/** GET /:id/sessions/:sessionId/files/download — Proxy file download from workspace */
+fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+
+  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+    c.env,
+    projectId,
+    sessionId,
+    userId
+  );
+
+  const filePath = c.req.query('path');
+  if (!filePath) throw errors.badRequest('path query parameter is required');
+  const safePath = normalizeFileProxyPath(filePath);
+
+  const timeoutMs = parseInt(c.env.FILE_DOWNLOAD_TIMEOUT_MS ?? String(DEFAULT_FILE_DOWNLOAD_TIMEOUT_MS));
+  const maxBytes = parseInt(
+    c.env.FILE_DOWNLOAD_MAX_BYTES ?? String(DEFAULT_FILE_DOWNLOAD_MAX_BYTES)
+  );
+
+  const params = new URLSearchParams({ path: safePath, token });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`;
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(
+      JSON.stringify({
+        event: 'file_proxy.download_error',
+        workspaceId,
+        path: safePath,
+        status: res.status,
+        body: text,
+      })
+    );
+    if (res.status === 404) throw errors.notFound('File not found');
+    if (res.status === 413) throw errors.badRequest('File too large for download');
+    if (res.status >= 500) throw errors.internal('Workspace agent unavailable');
+    throw errors.badRequest('Download failed');
+  }
+
+  // Guard against oversized responses
+  const cl = parseInt(res.headers.get('Content-Length') ?? '0');
+  if (cl > maxBytes) {
+    throw errors.badRequest(`File too large for download (${cl} bytes)`);
+  }
+
+  const headers = new Headers();
+  for (const name of [...FORWARDED_RESPONSE_HEADERS]) {
+    const value = res.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/octet-stream');
+  }
+
+  return new Response(
+    res.body ? createSizeLimitedStream(res.body, maxBytes) : null,
+    { status: res.status, headers }
+  );
 });
 
 export { fileProxyRoutes };

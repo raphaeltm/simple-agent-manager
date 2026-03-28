@@ -1,6 +1,6 @@
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  X, ChevronRight, Folder, FileText, Image, RefreshCw, ArrowLeft,
+  X, ChevronRight, Folder, FileText, Image, RefreshCw, ArrowLeft, Download,
 } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
@@ -11,6 +11,7 @@ import {
   getSessionFileRawUrl,
   getSessionGitStatus,
   getSessionGitDiff,
+  downloadSessionFile,
   type FileEntry,
   type GitStatusData,
   type GitFileStatus,
@@ -325,6 +326,31 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               style={{ opacity: browseLoading ? 0.5 : 1 }}
             >
               <RefreshCw size={14} className={browseLoading ? 'animate-spin' : ''} />
+            </button>
+          )}
+
+          {mode === 'view' && filePath && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const { blob, fileName: dlName } = await downloadSessionFile(projectId, sessionId, filePath);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = dlName;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  URL.revokeObjectURL(url);
+                } catch (err) {
+                  console.error('Download failed:', err);
+                }
+              }}
+              aria-label="Download file"
+              className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+            >
+              <Download size={14} />
             </button>
           )}
 

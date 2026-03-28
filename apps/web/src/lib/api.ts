@@ -1891,3 +1891,60 @@ export async function getSessionGitDiff(
     `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/git/diff?${params.toString()}`
   );
 }
+
+// ---------- File Upload/Download (proxied through CF Worker to VM agent) ----------
+
+export interface FileUploadResponse {
+  files: Array<{ name: string; path: string; size: number }>;
+}
+
+/** Upload files to a workspace via session proxy. */
+export async function uploadSessionFiles(
+  projectId: string,
+  sessionId: string,
+  files: File[],
+  destination?: string
+): Promise<FileUploadResponse> {
+  const formData = new FormData();
+  if (destination) formData.append('destination', destination);
+  for (const file of files) {
+    formData.append('files', file);
+  }
+  const response = await fetch(
+    `${API_URL}/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/files/upload`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+      // Do NOT set Content-Type — browser sets it with boundary automatically
+    }
+  );
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({ error: 'UNKNOWN_ERROR', message: 'Upload failed' }));
+    throw new ApiClientError((data as ApiError).error, (data as ApiError).message, response.status);
+  }
+  return response.json() as Promise<FileUploadResponse>;
+}
+
+/** Download a file from a workspace via session proxy. Returns a blob URL. */
+export async function downloadSessionFile(
+  projectId: string,
+  sessionId: string,
+  filePath: string
+): Promise<{ blob: Blob; fileName: string }> {
+  const params = new URLSearchParams({ path: filePath });
+  const response = await fetch(
+    `${API_URL}/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/files/download?${params.toString()}`,
+    { credentials: 'include' }
+  );
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({ error: 'UNKNOWN_ERROR', message: 'Download failed' }));
+    throw new ApiClientError((data as ApiError).error, (data as ApiError).message, response.status);
+  }
+  const blob = await response.blob();
+  // Extract filename from Content-Disposition or fall back to path basename
+  const cd = response.headers.get('Content-Disposition') ?? '';
+  const match = cd.match(/filename="?([^";\n]+)"?/);
+  const fileName = match?.[1] ?? filePath.split('/').pop() ?? 'download';
+  return { blob, fileName };
+}
