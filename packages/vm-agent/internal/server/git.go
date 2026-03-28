@@ -291,8 +291,9 @@ func parseRemoteBranches(output string) []GitBranchInfo {
 
 // ---------- Helpers ----------
 
-// sanitizeFilePath validates that a file path is safe for use in git commands.
-// Rejects path traversal, absolute paths, and null bytes.
+// sanitizeFilePath validates that a file path is safe for use in git/file commands.
+// Rejects path traversal and null bytes. Absolute paths are allowed because
+// the user owns the container and should be able to view any file in it.
 func sanitizeFilePath(path string) error {
 	if path == "" {
 		return fmt.Errorf("file path is empty")
@@ -300,10 +301,6 @@ func sanitizeFilePath(path string) error {
 
 	if strings.ContainsRune(path, 0) {
 		return fmt.Errorf("file path contains null byte")
-	}
-
-	if filepath.IsAbs(path) {
-		return fmt.Errorf("absolute file paths are not allowed")
 	}
 
 	// Check for path traversal

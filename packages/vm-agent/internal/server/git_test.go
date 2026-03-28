@@ -24,12 +24,14 @@ func TestSanitizeFilePath(t *testing.T) {
 		{name: "valid hidden file", path: ".gitignore", wantErr: false},
 		{name: "valid hidden dir", path: ".github/workflows/ci.yml", wantErr: false},
 
+		{name: "valid absolute path", path: "/workspaces/my-project/src/index.ts", wantErr: false},
+		{name: "valid absolute /etc path", path: "/etc/hosts", wantErr: false},
+		{name: "valid absolute /home path", path: "/home/user/file.txt", wantErr: false},
+
 		{name: "empty path", path: "", wantErr: true},
 		{name: "path traversal basic", path: "../etc/passwd", wantErr: true},
 		{name: "path traversal nested", path: "src/../../etc/passwd", wantErr: true},
 		{name: "path traversal middle", path: "a/b/../../../etc/passwd", wantErr: true},
-		{name: "absolute path", path: "/etc/passwd", wantErr: true},
-		{name: "absolute path windows-style", path: "/home/user/secret", wantErr: true},
 		{name: "null byte", path: "file\x00.txt", wantErr: true},
 		{name: "null byte in middle", path: "src/\x00malicious", wantErr: true},
 	}

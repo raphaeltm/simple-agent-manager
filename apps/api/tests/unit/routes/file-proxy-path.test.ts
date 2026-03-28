@@ -75,4 +75,30 @@ describe('normalizeFileProxyPath', () => {
       'path must not contain empty, dot, or dot-dot segments'
     );
   });
+
+  it('rejects tilde traversal (~/..)', () => {
+    expect(() => normalizeFileProxyPath('~/..')).toThrow(
+      'path must not contain empty, dot, or dot-dot segments'
+    );
+  });
+
+  it('rejects trailing slash (empty final segment)', () => {
+    expect(() => normalizeFileProxyPath('/workspaces/foo/')).toThrow(
+      'path must not contain empty, dot, or dot-dot segments'
+    );
+  });
+
+  it('allows bare tilde', () => {
+    expect(normalizeFileProxyPath('~')).toBe('~');
+  });
+
+  it('rejects backslash-encoded traversal', () => {
+    expect(() => normalizeFileProxyPath('..\\..\\etc\\passwd')).toThrow(
+      'path must not contain empty, dot, or dot-dot segments'
+    );
+  });
+
+  it('allows ~/.ssh/authorized_keys (read-only proxy has no blocked paths)', () => {
+    expect(normalizeFileProxyPath('~/.ssh/authorized_keys')).toBe('~/.ssh/authorized_keys');
+  });
 });
