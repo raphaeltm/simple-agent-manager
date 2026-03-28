@@ -8,6 +8,9 @@ import {
   type ReactNode,
 } from 'react';
 
+/** Playback position polling interval — 4 Hz is smooth enough for the seek bar with low CPU cost. */
+const TIME_UPDATE_INTERVAL_MS = 250;
+
 export type GlobalAudioState = 'idle' | 'loading' | 'playing' | 'paused';
 
 export interface StartPlaybackParams {
@@ -113,7 +116,7 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
       if (audioRef.current) {
         setCurrentTime(audioRef.current.currentTime);
       }
-    }, 250);
+    }, TIME_UPDATE_INTERVAL_MS);
   }, [clearTimeInterval]);
 
   const abortFetches = useCallback(() => {

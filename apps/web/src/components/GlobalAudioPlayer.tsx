@@ -300,7 +300,7 @@ export function GlobalAudioPlayer() {
       {audio.error && (
         <div
           className="text-[11px] px-3 py-0.5"
-          style={{ color: '#dc2626' }}
+          style={{ color: 'var(--sam-color-danger-fg)' }}
           role="alert"
         >
           {audio.error}
