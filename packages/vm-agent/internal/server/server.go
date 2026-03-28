@@ -760,6 +760,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// File browser (browser-authenticated via workspace session/token)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/files/list", s.handleFileList)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/files/find", s.handleFileFind)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/files/raw", s.handleFileRaw)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/worktrees", s.handleListWorktrees)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/worktrees", s.handleCreateWorktree)
 	mux.HandleFunc("DELETE /workspaces/{workspaceId}/worktrees", s.handleRemoveWorktree)

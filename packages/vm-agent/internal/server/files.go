@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -193,6 +196,123 @@ func parseFileFindOutput(output string) []string {
 		files = append(files, line)
 	}
 	return files
+}
+
+// handleFileRaw serves raw binary file content with proper Content-Type.
+// GET /workspaces/{workspaceId}/files/raw?path=...
+// Streams the file directly from the container via docker exec cat.
+func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		return
+	}
+
+	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+		return
+	}
+
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		writeError(w, http.StatusBadRequest, "path query parameter is required")
+		return
+	}
+	if err := sanitizeFilePath(filePath); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	workDir, err = s.resolveWorktreeWorkDir(r, workspaceID, containerID, user, workDir)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.FileRawTimeout)
+	defer cancel()
+
+	// First stat the file to get size, mtime, and verify it exists.
+	// Output format: size_bytes\tmtime_epoch
+	statCmd := fmt.Sprintf(`stat -c '%%s\t%%Y' %q 2>/dev/null`, filePath)
+	statOut, _, statErr := s.execInContainer(ctx, containerID, user, workDir, "sh", "-c", statCmd)
+	if statErr != nil {
+		writeError(w, http.StatusNotFound, "file not found")
+		return
+	}
+
+	statOut = strings.TrimSpace(statOut)
+	statParts := strings.SplitN(statOut, "\t", 2)
+	if len(statParts) < 2 {
+		writeError(w, http.StatusInternalServerError, "failed to stat file")
+		return
+	}
+
+	fileSize, _ := strconv.ParseInt(statParts[0], 10, 64)
+	fileMtime, _ := strconv.ParseInt(statParts[1], 10, 64)
+
+	// Enforce max file size
+	if fileSize > int64(s.config.FileRawMaxSize) {
+		writeError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("file exceeds maximum size of %d bytes", s.config.FileRawMaxSize))
+		return
+	}
+
+	// Build ETag from mtime and size
+	etag := fmt.Sprintf(`"%x-%x"`, fileMtime, fileSize)
+
+	// Check If-None-Match for 304 support
+	if match := r.Header.Get("If-None-Match"); match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	// Detect MIME type from file extension
+	ext := filepath.Ext(filePath)
+	contentType := mime.TypeByExtension(ext)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	// Set response headers before streaming
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", etag)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// For SVG files, add restrictive CSP to prevent script execution
+	if strings.HasPrefix(contentType, "image/svg") {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	}
+
+	// Stream the file content directly from docker exec to the response writer.
+	// This avoids buffering the entire file in memory.
+	dockerArgs := []string{"exec", "-i"}
+	if user != "" {
+		dockerArgs = append(dockerArgs, "-u", user)
+	}
+	if workDir != "" {
+		dockerArgs = append(dockerArgs, "-w", workDir)
+	}
+	dockerArgs = append(dockerArgs, containerID, "cat", filePath)
+
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	cmd.Stdout = w
+
+	if err := cmd.Run(); err != nil {
+		// If we already started writing, we can't send an error response.
+		// Log and return — the client will see a truncated response.
+		slog.Error("Error streaming raw file",
+			"path", filePath,
+			"workspace", workspaceID,
+			"error", err,
+		)
+	}
 }
 
 // parseFileListOutput parses the output of find -printf '%y\t%s\t%T@\t%f\n'
