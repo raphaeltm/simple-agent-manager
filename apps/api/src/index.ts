@@ -389,6 +389,8 @@ export interface Env {
   ATTACHMENT_UPLOAD_BATCH_MAX_BYTES?: string;
   ATTACHMENT_MAX_FILES?: string;
   ATTACHMENT_PRESIGN_EXPIRY_SECONDS?: string;
+  // Timeout for transferring attachments from R2 to workspace VM (default: 60000ms)
+  ATTACHMENT_TRANSFER_TIMEOUT_MS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

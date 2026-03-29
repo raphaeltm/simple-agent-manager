@@ -86,6 +86,7 @@ type TaskRunnerEnv = {
   VM_AGENT_PROTOCOL?: string;
   VM_AGENT_PORT?: string;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
+  ATTACHMENT_TRANSFER_TIMEOUT_MS?: string;
   R2: R2Bucket;
 };
 
@@ -846,6 +847,13 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       attachmentCount: attachments.length,
     });
 
+    // Configurable timeout for each attachment transfer
+    const DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS = 60_000;
+    const transferTimeoutMs = parseInt(
+      this.env.ATTACHMENT_TRANSFER_TIMEOUT_MS || String(DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS),
+      10,
+    ) || DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS;
+
     // Transfer each attachment: R2 GET → FormData → VM agent POST
     for (const attachment of attachments) {
       const r2Object = await getAttachmentFromR2(this.env.R2, state.userId, attachment);
@@ -857,13 +865,21 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       formData.append('files', new Blob([bodyBytes], { type: r2Object.contentType }), attachment.filename);
       formData.append('destination', '../.private');
 
-      const resp = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), transferTimeoutMs);
+      let resp: Response;
+      try {
+        resp = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
 
       if (!resp.ok) {
         const errorText = await resp.text().catch(() => 'unknown');
