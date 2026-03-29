@@ -65,6 +65,7 @@ async function resolveSessionWorkspace(
       id: schema.workspaces.id,
       status: schema.workspaces.status,
       projectId: schema.workspaces.projectId,
+      nodeId: schema.workspaces.nodeId,
     })
     .from(schema.workspaces)
     .where(
@@ -91,6 +92,7 @@ async function resolveSessionWorkspace(
           id: schema.workspaces.id,
           status: schema.workspaces.status,
           projectId: schema.workspaces.projectId,
+          nodeId: schema.workspaces.nodeId,
         })
         .from(schema.workspaces)
         .where(
@@ -116,6 +118,7 @@ async function resolveSessionWorkspace(
       sessionId,
       workspaceId: workspace.id,
       workspaceStatus: workspace.status,
+      nodeId: workspace.nodeId,
       lookupStrategy,
     })
   );
@@ -131,7 +134,16 @@ async function resolveSessionWorkspace(
     );
   }
 
-  const workspaceUrl = `https://ws-${workspace.id}.${env.BASE_DOMAIN}`;
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace has no assigned node');
+  }
+
+  // Use the two-level subdomain ({nodeId}.vm.{domain}) to bypass Cloudflare
+  // same-zone routing restrictions. Single-level ws-{id}.{domain} subdomains
+  // are intercepted by the Worker route, causing error 1014 on server-side fetch.
+  const protocol = env.VM_AGENT_PROTOCOL || 'https';
+  const port = env.VM_AGENT_PORT || '8443';
+  const workspaceUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
   const { token } = await signTerminalToken(userId, workspace.id, env);
 
   return { workspaceUrl, workspaceId: workspace.id, token };
