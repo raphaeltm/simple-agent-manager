@@ -240,17 +240,17 @@ func TestEnvFileOperations(t *testing.T) {
 			t.Fatalf("writeSecretEnvFile() error = %v", err)
 		}
 
-		// File should exist
+		// File should exist after creation (it persists until process exits)
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("env file should exist after creation: %v", err)
 		}
 
-		// Remove it (simulating what StartProcess does after cmd.Start())
+		// Simulate cleanup that happens in AgentProcess.Wait() after process exits
 		if err := os.Remove(path); err != nil {
 			t.Fatalf("os.Remove() error = %v", err)
 		}
 
-		// File should be gone
+		// File should be gone after cleanup
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Error("env file should not exist after removal")
 		}

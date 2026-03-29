@@ -174,6 +174,12 @@ type AgentProcess struct {
 	mu               sync.Mutex
 	stopped          bool
 
+	// envFilePath is the tmpfs-backed file containing secret env vars.
+	// Cleaned up after the process exits (in Wait) rather than immediately
+	// after cmd.Start(), because the docker CLI reads the file asynchronously
+	// after the process is forked.
+	envFilePath string
+
 	// waitOnce ensures cmd.Wait() is called exactly once; both Stop() and
 	// monitorProcessExit call Wait(), and Go's exec.Cmd panics or returns
 	// ECHILD on the second call.
@@ -296,14 +302,6 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		return nil, fmt.Errorf("failed to start agent process: %w", err)
 	}
 
-	// Clean up the env file now that docker has read it. The process already
-	// has the env vars in its environment; the file is no longer needed.
-	if envFilePath != "" {
-		if removeErr := os.Remove(envFilePath); removeErr != nil {
-			slog.Warn("Failed to remove secret env file", "path", envFilePath, "error", removeErr)
-		}
-	}
-
 	slog.Info("ACP agent process started", "command", cfg.AcpCommand, "container", cfg.ContainerID, "pid", cmd.Process.Pid)
 
 	gracePeriod := cfg.StopGracePeriod
@@ -322,6 +320,7 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stdout:          stdout,
 		stderr:          stderr,
 		containerID:     cfg.ContainerID,
+		envFilePath:     envFilePath,
 		startTime:       time.Now(),
 		stopGracePeriod: gracePeriod,
 		stopTimeout:     stopTimeout,
@@ -472,9 +471,18 @@ func (p *AgentProcess) killContainerProcesses(sig syscall.Signal) {
 
 // Wait waits for the agent process to exit and returns the error (if any).
 // Safe to call from multiple goroutines — cmd.Wait() is invoked exactly once.
+// Also cleans up the tmpfs-backed secret env file if one was created.
 func (p *AgentProcess) Wait() error {
 	p.waitOnce.Do(func() {
 		p.waitErr = p.cmd.Wait()
+		// Clean up the secret env file now that the process has exited.
+		// We defer this to Wait() rather than doing it right after cmd.Start()
+		// because the docker CLI reads --env-file asynchronously after fork.
+		if p.envFilePath != "" {
+			if removeErr := os.Remove(p.envFilePath); removeErr != nil && !os.IsNotExist(removeErr) {
+				slog.Warn("Failed to remove secret env file", "path", p.envFilePath, "error", removeErr)
+			}
+		}
 		close(p.waitDone)
 	})
 	<-p.waitDone
