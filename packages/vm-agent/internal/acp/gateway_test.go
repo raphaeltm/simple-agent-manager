@@ -74,7 +74,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "vibe-acp",
 			wantEnvVar:     "MISTRAL_API_KEY",
-			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe --python 3.12 --quiet`,
+			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`,
 		},
 	}
 
@@ -268,7 +268,7 @@ func TestGetAgentCommandInfoMistralVibe(t *testing.T) {
 	if info.envVarName != "MISTRAL_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "MISTRAL_API_KEY")
 	}
-	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe --python 3.12 --quiet`
+	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`
 	if info.installCmd != wantInstall {
 		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
 	}
@@ -313,16 +313,20 @@ func TestGetAgentExtraEnvVars_MistralVibe(t *testing.T) {
 	t.Parallel()
 
 	envVars := getAgentExtraEnvVars("mistral-vibe")
-	if len(envVars) != 2 {
-		t.Fatalf("expected 2 extra env vars for mistral-vibe, got %d", len(envVars))
+	if len(envVars) != 3 {
+		t.Fatalf("expected 3 extra env vars for mistral-vibe, got %d", len(envVars))
 	}
 	wantName := "VIBE_CLIENT_NAME=sam"
 	wantVersion := "VIBE_CLIENT_VERSION=1.0.1"
+	wantUnbuffered := "PYTHONUNBUFFERED=1"
 	if envVars[0] != wantName {
 		t.Errorf("envVars[0]=%q, want %q", envVars[0], wantName)
 	}
 	if envVars[1] != wantVersion {
 		t.Errorf("envVars[1]=%q, want %q", envVars[1], wantVersion)
+	}
+	if envVars[2] != wantUnbuffered {
+		t.Errorf("envVars[2]=%q, want %q", envVars[2], wantUnbuffered)
 	}
 }
 
