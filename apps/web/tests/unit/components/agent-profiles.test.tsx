@@ -189,12 +189,28 @@ describe('ProfileList', () => {
     expect(screen.getByText('Edit Profile')).toBeInTheDocument();
   });
 
+  it('opens edit dialog for built-in profile', async () => {
+    const user = userEvent.setup();
+    render(<ProfileList {...defaultProps} />);
+    await user.click(screen.getByLabelText('Edit default'));
+    expect(screen.getByText('Edit Profile')).toBeInTheDocument();
+  });
+
   it('shows delete confirmation when delete button is clicked', async () => {
     const user = userEvent.setup();
     render(<ProfileList {...defaultProps} />);
     await user.click(screen.getByLabelText('Delete Fast Implementer'));
     expect(screen.getByText('Confirm')).toBeInTheDocument();
     expect(screen.getByText('Cancel')).toBeInTheDocument();
+  });
+
+  it('calls onDeleteProfile for built-in profile when confirmed', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />);
+    await user.click(screen.getByLabelText('Delete default'));
+    await user.click(screen.getByLabelText('Confirm delete default'));
+    expect(onDelete).toHaveBeenCalledWith('prof-builtin');
   });
 
   it('calls onDeleteProfile when delete is confirmed', async () => {

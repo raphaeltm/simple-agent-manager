@@ -116,44 +116,44 @@ export const ProfileList: FC<ProfileListProps> = ({
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleEdit(profile)}
-                    aria-label={`Edit ${profile.name}`}
-                    className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-fg-muted hover:text-fg-primary hover:bg-surface cursor-pointer"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  {deleteConfirmId === profile.id ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => void handleDelete(profile.id)}
-                        aria-label={`Confirm delete ${profile.name}`}
-                        className="px-3 py-2 min-h-[44px] rounded text-xs text-danger bg-danger-tint hover:bg-danger hover:text-white cursor-pointer"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setDeleteConfirmId(null); setDeleteError(null); }}
-                        aria-label="Cancel delete"
-                        className="px-3 py-2 min-h-[44px] rounded text-xs text-fg-muted hover:text-fg-primary cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
+                <button
+                  type="button"
+                  onClick={() => handleEdit(profile)}
+                  aria-label={`Edit ${profile.name}`}
+                  className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-fg-muted hover:text-fg-primary hover:bg-surface cursor-pointer"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+                {deleteConfirmId === profile.id ? (
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => { setDeleteConfirmId(profile.id); setDeleteError(null); }}
-                      aria-label={`Delete ${profile.name}`}
-                      className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-fg-muted hover:text-danger hover:bg-danger-tint cursor-pointer"
+                      onClick={() => void handleDelete(profile.id)}
+                      aria-label={`Confirm delete ${profile.name}`}
+                      className="px-3 py-2 min-h-[44px] rounded text-xs text-danger bg-danger-tint hover:bg-danger hover:text-white cursor-pointer"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      Confirm
                     </button>
-                  )}
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => { setDeleteConfirmId(null); setDeleteError(null); }}
+                      aria-label="Cancel delete"
+                      className="px-3 py-2 min-h-[44px] rounded text-xs text-fg-muted hover:text-fg-primary cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { setDeleteConfirmId(profile.id); setDeleteError(null); }}
+                    aria-label={`Delete ${profile.name}`}
+                    className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-fg-muted hover:text-danger hover:bg-danger-tint cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
