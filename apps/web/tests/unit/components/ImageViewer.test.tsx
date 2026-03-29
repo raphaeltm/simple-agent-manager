@@ -138,11 +138,11 @@ describe('ImageViewer', () => {
     expect(img!.getAttribute('src')).toBe(defaultProps.src);
   });
 
-  it('shows "Download" for files over 25 MB', () => {
+  it('shows "Download" for files over 50 MB', () => {
     render(
       <ImageViewer
         {...defaultProps}
-        fileSize={30 * 1024 * 1024} // 30 MB
+        fileSize={60 * 1024 * 1024} // 60 MB
       />
     );
 
