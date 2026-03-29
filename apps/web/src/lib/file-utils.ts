@@ -21,8 +21,8 @@ export const FILE_PREVIEW_INLINE_MAX_BYTES =
     ? parseInt(import.meta.env.VITE_FILE_PREVIEW_INLINE_MAX_BYTES)
     : DEFAULT_FILE_PREVIEW_INLINE_MAX_BYTES;
 
-/** Threshold above which only download is offered (> 25 MB). Override via VITE_FILE_PREVIEW_LOAD_MAX_BYTES. */
-const DEFAULT_FILE_PREVIEW_LOAD_MAX_BYTES = 25 * 1024 * 1024;
+/** Threshold above which only download is offered (> 50 MB). Override via VITE_FILE_PREVIEW_LOAD_MAX_BYTES. */
+const DEFAULT_FILE_PREVIEW_LOAD_MAX_BYTES = 50 * 1024 * 1024;
 export const FILE_PREVIEW_LOAD_MAX_BYTES =
   import.meta.env.VITE_FILE_PREVIEW_LOAD_MAX_BYTES
     ? parseInt(import.meta.env.VITE_FILE_PREVIEW_LOAD_MAX_BYTES)

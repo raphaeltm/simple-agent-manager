@@ -37,8 +37,8 @@ You can attach files to your chat messages and download files from workspace con
 Click the **paperclip** button in the chat input to attach files. Files are uploaded to the workspace container's `.private` directory.
 
 **Limits:**
-- Maximum per-file size: 10 MB (configurable via `FILE_UPLOAD_MAX_BYTES`)
-- Maximum batch size: 50 MB (configurable via `FILE_UPLOAD_BATCH_MAX_BYTES`)
+- Maximum per-file size: 50 MB (configurable via `FILE_UPLOAD_MAX_BYTES`)
+- Maximum batch size: 250 MB (configurable via `FILE_UPLOAD_BATCH_MAX_BYTES`)
 - Filenames must not contain shell metacharacters
 
 ### Downloading Files

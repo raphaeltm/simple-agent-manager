@@ -70,7 +70,7 @@ describe('formatFileSize', () => {
 describe('threshold constants', () => {
   it('has correct default values', () => {
     expect(FILE_PREVIEW_INLINE_MAX_BYTES).toBe(10 * 1024 * 1024); // 10 MB
-    expect(FILE_PREVIEW_LOAD_MAX_BYTES).toBe(25 * 1024 * 1024); // 25 MB
+    expect(FILE_PREVIEW_LOAD_MAX_BYTES).toBe(50 * 1024 * 1024); // 50 MB
   });
 
   it('inline threshold is less than load threshold', () => {
