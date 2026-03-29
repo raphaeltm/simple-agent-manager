@@ -2,7 +2,7 @@
 
 **Created**: 2026-02-20
 **Status**: Active
-**Branch**: `fix/acp-websocket-reliability`
+**Branch**: `sam/fix-acp-websocket-connection-01kmx8`
 **Priority**: High — all three parallel development sessions died from this bug
 
 ## Problem
