@@ -114,7 +114,7 @@ export function AppShell({ children }: AppShellProps) {
       <div className="flex flex-col bg-canvas h-screen">
         <header className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-surface">
           {/* Title on the left */}
-          <img src="/sam-head.png" alt="SAM" className="h-7 w-7" />
+          <img src="/sam-head.png" alt="SAM" className="h-7 w-7 object-contain" />
           {/* Search + Notifications + Hamburger on the right */}
           <div className="flex items-center gap-1">
             <button
@@ -167,7 +167,7 @@ export function AppShell({ children }: AppShellProps) {
     <div className="grid bg-canvas h-screen" style={{ gridTemplateColumns: '220px 1fr', gridTemplateRows: '1fr auto' }}>
       <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 overflow-y-auto" style={{ gridRow: '1' }}>
         <div className="p-4 border-b border-border-default flex items-center justify-between">
-          <img src="/sam-head.png" alt="SAM" className="h-6 w-6" />
+          <img src="/sam-head.png" alt="SAM" className="h-6 w-6 object-contain" />
           <NotificationCenter />
         </div>
         {/* Command palette trigger */}
