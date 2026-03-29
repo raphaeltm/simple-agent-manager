@@ -240,11 +240,11 @@ Applied via cloud-init on each node:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FILE_UPLOAD_MAX_BYTES` | `10485760` (10 MB) | Max size per uploaded file |
-| `FILE_UPLOAD_BATCH_MAX_BYTES` | `52428800` (50 MB) | Max total size per upload batch |
-| `FILE_UPLOAD_TIMEOUT` | `30s` | Upload timeout (VM agent) |
-| `FILE_UPLOAD_TIMEOUT_MS` | `60000` (60s) | Upload proxy timeout (Worker) |
-| `FILE_DOWNLOAD_TIMEOUT_MS` | `30000` (30s) | Download proxy timeout |
+| `FILE_UPLOAD_MAX_BYTES` | `52428800` (50 MB) | Max size per uploaded file |
+| `FILE_UPLOAD_BATCH_MAX_BYTES` | `262144000` (250 MB) | Max total size per upload batch |
+| `FILE_UPLOAD_TIMEOUT` | `120s` | Upload timeout (VM agent) |
+| `FILE_UPLOAD_TIMEOUT_MS` | `120000` (120s) | Upload proxy timeout (Worker) |
+| `FILE_DOWNLOAD_TIMEOUT_MS` | `60000` (60s) | Download proxy timeout |
 | `FILE_DOWNLOAD_MAX_BYTES` | `52428800` (50 MB) | Max download file size |
 
 ## File Browsing & Raw Proxy
@@ -253,9 +253,9 @@ Applied via cloud-init on each node:
 |----------|---------|-------------|
 | `FILE_PROXY_TIMEOUT_MS` | `15000` | File proxy request timeout |
 | `FILE_PROXY_MAX_RESPONSE_BYTES` | `2097152` (2 MB) | Max file proxy response size |
-| `FILE_RAW_MAX_SIZE` | `26214400` (25 MB) | Max raw binary file size (VM agent) |
-| `FILE_RAW_TIMEOUT` | `30s` | Raw file streaming timeout (VM agent) |
-| `FILE_RAW_PROXY_MAX_BYTES` | `26214400` (25 MB) | Max raw file proxy size (Worker) |
+| `FILE_RAW_MAX_SIZE` | `52428800` (50 MB) | Max raw binary file size (VM agent) |
+| `FILE_RAW_TIMEOUT` | `60s` | Raw file streaming timeout (VM agent) |
+| `FILE_RAW_PROXY_MAX_BYTES` | `52428800` (50 MB) | Max raw file proxy size (Worker) |
 
 ## MCP Idea Tools
 
@@ -274,7 +274,7 @@ Applied via cloud-init on each node:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VITE_FILE_PREVIEW_INLINE_MAX_BYTES` | `10485760` (10 MB) | Images below this size render inline automatically |
-| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES` | `26214400` (25 MB) | Images below this size show click-to-load; above shows download link |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES` | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link |
 
 ## Admin Analytics
 

@@ -371,14 +371,14 @@ export interface Env {
   // File proxy configuration (chat file browser)
   FILE_PROXY_TIMEOUT_MS?: string;                  // Timeout for VM agent file proxy requests (default: 15000)
   FILE_PROXY_MAX_RESPONSE_BYTES?: string;          // Max response body size from VM agent file proxy (default: 2097152 = 2MB)
-  FILE_RAW_PROXY_MAX_BYTES?: string;              // Max response size for raw binary file proxy (default: 26214400 = 25MB)
+  FILE_RAW_PROXY_MAX_BYTES?: string;              // Max response size for raw binary file proxy (default: 52428800 = 50MB)
   // File upload/download configuration
   // Note: Per-file size enforcement (FILE_UPLOAD_MAX_BYTES) is delegated to the VM agent.
   // The API layer only enforces batch size via Content-Length pre-check.
-  FILE_UPLOAD_BATCH_MAX_BYTES?: string;
-  FILE_UPLOAD_TIMEOUT_MS?: string;
-  FILE_DOWNLOAD_TIMEOUT_MS?: string;
-  FILE_DOWNLOAD_MAX_BYTES?: string;
+  FILE_UPLOAD_BATCH_MAX_BYTES?: string;            // Max total batch upload size forwarded to VM agent (default: 262144000 = 250MB)
+  FILE_UPLOAD_TIMEOUT_MS?: string;                 // Timeout for upload proxy requests in ms (default: 120000)
+  FILE_DOWNLOAD_TIMEOUT_MS?: string;               // Timeout for download proxy requests in ms (default: 60000)
+  FILE_DOWNLOAD_MAX_BYTES?: string;                // Max file download size forwarded from VM agent (default: 52428800 = 50MB)
 }
 
 const app = new Hono<{ Bindings: Env }>();

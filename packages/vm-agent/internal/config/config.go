@@ -155,14 +155,14 @@ type Config struct {
 	FileListMaxEntries int           // Max entries returned per directory listing (default: 1000)
 	FileFindTimeout    time.Duration // Timeout for recursive file find (default: 15s)
 	FileFindMaxEntries int           // Max entries returned by file find (default: 5000)
-	FileRawMaxSize     int           // Max file size in bytes for /files/raw binary endpoint (default: 25MB, env: FILE_RAW_MAX_SIZE)
-	FileRawTimeout     time.Duration // Timeout for raw file reads (default: 30s, env: FILE_RAW_TIMEOUT)
+	FileRawMaxSize     int           // Max file size in bytes for /files/raw binary endpoint (default: 50MB, env: FILE_RAW_MAX_SIZE)
+	FileRawTimeout     time.Duration // Timeout for raw file reads (default: 60s, env: FILE_RAW_TIMEOUT)
 
 	// File transfer settings - configurable per constitution principle XI
-	FileUploadMaxBytes      int64         // Max single file size in bytes (default: 10MB)
-	FileUploadBatchMaxBytes int64         // Max total batch upload size in bytes (default: 50MB)
-	FileUploadTimeout       time.Duration // Timeout for file upload operations (default: 60s)
-	FileDownloadTimeout     time.Duration // Timeout for file download operations (default: 30s)
+	FileUploadMaxBytes      int64         // Max single file size in bytes (default: 50MB)
+	FileUploadBatchMaxBytes int64         // Max total batch upload size in bytes (default: 250MB)
+	FileUploadTimeout       time.Duration // Timeout for file upload operations (default: 120s)
+	FileDownloadTimeout     time.Duration // Timeout for file download operations (default: 60s)
 	FileDownloadMaxBytes    int64         // Max file download size in bytes (default: 50MB)
 
 	// Callback retry settings - configurable per constitution principle XI
@@ -335,15 +335,15 @@ func Load() (*Config, error) {
 		FileListMaxEntries: getEnvInt("FILE_LIST_MAX_ENTRIES", 1000),
 		FileFindTimeout:    getEnvDuration("FILE_FIND_TIMEOUT", 15*time.Second),
 		FileFindMaxEntries: getEnvInt("FILE_FIND_MAX_ENTRIES", 5000),
-		FileRawMaxSize:     getEnvInt("FILE_RAW_MAX_SIZE", 25*1024*1024), // 25 MB
-		FileRawTimeout:     getEnvDuration("FILE_RAW_TIMEOUT", 30*time.Second),
+		FileRawMaxSize:     getEnvInt("FILE_RAW_MAX_SIZE", 50*1024*1024), // 50 MB
+		FileRawTimeout:     getEnvDuration("FILE_RAW_TIMEOUT", 60*time.Second),
 
 		// File transfer settings
-		FileUploadMaxBytes:      getEnvInt64("FILE_UPLOAD_MAX_BYTES", 10*1024*1024),       // 10 MB
-		FileUploadBatchMaxBytes: getEnvInt64("FILE_UPLOAD_BATCH_MAX_BYTES", 50*1024*1024),  // 50 MB
-		FileUploadTimeout:       getEnvDuration("FILE_UPLOAD_TIMEOUT", 60*time.Second),
-		FileDownloadTimeout:     getEnvDuration("FILE_DOWNLOAD_TIMEOUT", 30*time.Second),
-		FileDownloadMaxBytes:    getEnvInt64("FILE_DOWNLOAD_MAX_BYTES", 50*1024*1024),      // 50 MB
+		FileUploadMaxBytes:      getEnvInt64("FILE_UPLOAD_MAX_BYTES", 50*1024*1024),        // 50 MB
+		FileUploadBatchMaxBytes: getEnvInt64("FILE_UPLOAD_BATCH_MAX_BYTES", 250*1024*1024),  // 250 MB
+		FileUploadTimeout:       getEnvDuration("FILE_UPLOAD_TIMEOUT", 120*time.Second),
+		FileDownloadTimeout:     getEnvDuration("FILE_DOWNLOAD_TIMEOUT", 60*time.Second),
+		FileDownloadMaxBytes:    getEnvInt64("FILE_DOWNLOAD_MAX_BYTES", 50*1024*1024),       // 50 MB
 
 		// Callback retry settings - configurable per constitution principle XI
 		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", 10*time.Second),

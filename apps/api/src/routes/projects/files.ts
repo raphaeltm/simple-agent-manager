@@ -17,13 +17,13 @@ const DEFAULT_FILE_PROXY_TIMEOUT_MS = 15_000;
 /** Default max response size from VM agent (configurable via FILE_PROXY_MAX_RESPONSE_BYTES). */
 const DEFAULT_FILE_PROXY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2 MB
 /** Default max response size for raw binary file proxy (configurable via FILE_RAW_PROXY_MAX_BYTES). */
-const DEFAULT_FILE_RAW_PROXY_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+const DEFAULT_FILE_RAW_PROXY_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
 /** Default max batch upload size (configurable via FILE_UPLOAD_BATCH_MAX_BYTES). */
-const DEFAULT_FILE_UPLOAD_BATCH_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+const DEFAULT_FILE_UPLOAD_BATCH_MAX_BYTES = 250 * 1024 * 1024; // 250 MB
 /** Default timeout for upload proxy requests (configurable via FILE_UPLOAD_TIMEOUT_MS). */
-const DEFAULT_FILE_UPLOAD_TIMEOUT_MS = 60_000;
+const DEFAULT_FILE_UPLOAD_TIMEOUT_MS = 120_000;
 /** Default timeout for download proxy requests (configurable via FILE_DOWNLOAD_TIMEOUT_MS). */
-const DEFAULT_FILE_DOWNLOAD_TIMEOUT_MS = 30_000;
+const DEFAULT_FILE_DOWNLOAD_TIMEOUT_MS = 60_000;
 /** Default max file download size (configurable via FILE_DOWNLOAD_MAX_BYTES). */
 const DEFAULT_FILE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
 
