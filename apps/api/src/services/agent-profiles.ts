@@ -325,7 +325,7 @@ export async function deleteProfile(
   userId: string
 ): Promise<void> {
   // Verify it exists and user has access
-  const profile = await getProfile(db, projectId, profileId, userId);
+  await getProfile(db, projectId, profileId, userId);
 
   await db
     .delete(schema.agentProfiles)
