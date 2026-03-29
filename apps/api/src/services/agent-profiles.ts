@@ -262,10 +262,6 @@ export async function updateProfile(
   // Verify profile exists and user has access
   const profile = await getProfile(db, projectId, profileId, userId);
 
-  if (profile.isBuiltin) {
-    throw errors.badRequest('Built-in profiles cannot be modified');
-  }
-
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
@@ -330,10 +326,6 @@ export async function deleteProfile(
 ): Promise<void> {
   // Verify it exists and user has access
   const profile = await getProfile(db, projectId, profileId, userId);
-
-  if (profile.isBuiltin) {
-    throw errors.badRequest('Built-in profiles cannot be deleted');
-  }
 
   await db
     .delete(schema.agentProfiles)

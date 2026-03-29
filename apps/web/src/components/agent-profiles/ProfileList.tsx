@@ -115,8 +115,7 @@ export const ProfileList: FC<ProfileListProps> = ({
                 </div>
               </div>
 
-              {!profile.isBuiltin && (
-                <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
                     onClick={() => handleEdit(profile)}
@@ -155,7 +154,6 @@ export const ProfileList: FC<ProfileListProps> = ({
                     </button>
                   )}
                 </div>
-              )}
             </div>
           ))}
         </div>

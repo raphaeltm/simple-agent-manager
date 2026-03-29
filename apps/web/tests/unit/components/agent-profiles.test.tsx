@@ -167,14 +167,12 @@ describe('ProfileList', () => {
     expect(screen.getByText(/no profiles yet/i)).toBeInTheDocument();
   });
 
-  it('shows edit/delete buttons only for non-builtin profiles', () => {
+  it('shows edit/delete buttons for all profiles including built-in', () => {
     render(<ProfileList {...defaultProps} />);
-    // Non-builtin profiles should have edit buttons
     const editButtons = screen.getAllByLabelText(/^Edit /);
-    expect(editButtons).toHaveLength(2); // Fast Implementer and Deep Planner
-    // Builtin "default" should not have edit buttons
+    expect(editButtons).toHaveLength(3); // All profiles including built-in
     const deleteButtons = screen.getAllByLabelText(/^Delete /);
-    expect(deleteButtons).toHaveLength(2);
+    expect(deleteButtons).toHaveLength(3);
   });
 
   it('opens create dialog when New Profile is clicked', async () => {

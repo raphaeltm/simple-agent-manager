@@ -463,17 +463,22 @@ describe('Agent Profile Service', () => {
       expect(db.update).toHaveBeenCalledTimes(1);
     });
 
-    it('rejects updates to built-in profiles', async () => {
+    it('allows updates to built-in profiles', async () => {
       const db = createMockDB();
       const builtinRow = makeProfileRow({ id: 'profile-1', isBuiltin: 1 });
+      // getProfile (verify exists)
       db._pushResult([builtinRow]);
+      // update().set().where()
+      db._pushResult([]);
+      // getProfile (return updated)
+      db._pushResult([makeProfileRow({ id: 'profile-1', isBuiltin: 1, model: 'claude-opus-4-6' })]);
 
-      await expect(
-        agentProfileService.updateProfile(
-          db, 'project-1', 'profile-1', 'user-1',
-          { model: 'claude-opus-4-6' }
-        )
-      ).rejects.toThrow('Built-in profiles cannot be modified');
+      const result = await agentProfileService.updateProfile(
+        db, 'project-1', 'profile-1', 'user-1',
+        { model: 'claude-opus-4-6' }
+      );
+      expect(result.model).toBe('claude-opus-4-6');
+      expect(result.isBuiltin).toBe(true);
     });
 
     it('rejects invalid agent type on update', async () => {
@@ -540,14 +545,17 @@ describe('Agent Profile Service', () => {
       ).rejects.toThrow();
     });
 
-    it('rejects deletion of built-in profiles', async () => {
+    it('allows deletion of built-in profiles', async () => {
       const db = createMockDB();
       const builtinRow = makeProfileRow({ id: 'profile-1', isBuiltin: 1 });
+      // getProfile (verify exists)
       db._pushResult([builtinRow]);
+      // delete().where()
+      db._pushResult([]);
 
       await expect(
         agentProfileService.deleteProfile(db, 'project-1', 'profile-1', 'user-1')
-      ).rejects.toThrow('Built-in profiles cannot be deleted');
+      ).resolves.toBeUndefined();
     });
   });
 
