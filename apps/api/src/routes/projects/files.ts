@@ -8,6 +8,7 @@ import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
 import { normalizeFileProxyPath } from './_helpers';
+import * as projectDataService from '../../services/project-data';
 
 const fileProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -58,7 +59,7 @@ async function resolveSessionWorkspace(
   // Verify project ownership
   await requireOwnedProject(db, projectId, userId);
 
-  // Find workspace linked to this chat session
+  // Strategy 1: Find workspace by chatSessionId in D1 (canonical path)
   const workspaces = await db
     .select({
       id: schema.workspaces.id,
@@ -75,9 +76,36 @@ async function resolveSessionWorkspace(
     )
     .limit(1);
 
-  const workspace = workspaces[0];
+  let workspace = workspaces[0];
+
+  // Strategy 2: Fall back to the session's workspaceId from the ProjectData DO.
+  // This handles the case where chatSessionId was not written to D1 (e.g., DO
+  // crash during workspace creation left the link incomplete).
   if (!workspace) {
-    throw errors.notFound('No workspace found for this session');
+    const session = await projectDataService.getSession(env, projectId, sessionId);
+    const sessionWorkspaceId = session?.workspaceId as string | undefined;
+    if (sessionWorkspaceId) {
+      const fallbackWorkspaces = await db
+        .select({
+          id: schema.workspaces.id,
+          status: schema.workspaces.status,
+          projectId: schema.workspaces.projectId,
+        })
+        .from(schema.workspaces)
+        .where(
+          and(
+            eq(schema.workspaces.id, sessionWorkspaceId),
+            eq(schema.workspaces.projectId, projectId),
+            eq(schema.workspaces.userId, userId)
+          )
+        )
+        .limit(1);
+      workspace = fallbackWorkspaces[0];
+    }
+  }
+
+  if (!workspace) {
+    throw errors.notFound('Workspace');
   }
 
   // Defensive assertion: workspace must belong to the expected project
@@ -264,8 +292,8 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   );
 
   const params = new URLSearchParams();
-  const path = requireSafePath(c.req.query('path'));
-  params.set('path', path);
+  const rawPath = c.req.query('path');
+  if (rawPath) params.set('path', normalizeFileProxyPath(rawPath));
   const staged = c.req.query('staged');
   if (staged) params.set('staged', staged);
 
