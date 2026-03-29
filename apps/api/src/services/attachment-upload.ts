@@ -2,7 +2,7 @@
  * Attachment Upload Service — R2 presigned URL generation and validation.
  *
  * Generates S3-compatible presigned PUT URLs for direct browser → R2 uploads,
- * and validates attachment existence/integrity on task submission via HEAD checks.
+ * Validates attachment existence/integrity on task submission via HEAD checks.
  */
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
