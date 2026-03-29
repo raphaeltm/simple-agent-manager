@@ -220,7 +220,10 @@ export function ProjectChat() {
     if (!files || files.length === 0) return;
     const maxFiles = ATTACHMENT_DEFAULTS.MAX_FILES;
     const maxBytes = ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES;
+    const batchMax = ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES;
     const newFiles: AttachmentUploadState[] = [];
+    const currentTotal = chatAttachments.reduce((sum, a) => sum + a.file.size, 0);
+    let runningTotal = currentTotal;
     for (const file of Array.from(files)) {
       if (chatAttachments.length + newFiles.length >= maxFiles) {
         setSubmitError(`Maximum ${maxFiles} files allowed`);
@@ -234,6 +237,11 @@ export function ProjectChat() {
         setSubmitError(`${file.name} has invalid characters`);
         continue;
       }
+      if (runningTotal + file.size > batchMax) {
+        setSubmitError(`Total size would exceed ${formatFileSize(batchMax)} limit`);
+        break;
+      }
+      runningTotal += file.size;
       newFiles.push({ file, uploadId: null, progress: 0, status: 'pending' });
     }
     if (newFiles.length === 0) return;
