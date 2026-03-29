@@ -1,10 +1,18 @@
-import { type FC, useState, useEffect, useCallback } from 'react';
+import { type FC, useState, useEffect, useCallback, useRef } from 'react';
 import type { AgentProfile, VMSize, WorkspaceProfile, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
-import { Settings } from 'lucide-react';
+import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import { Settings, Paperclip, X } from 'lucide-react';
 import { SplitButton } from '../ui/SplitButton';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
-import { listAgentProfiles, updateAgentProfile } from '../../lib/api';
+import {
+  listAgentProfiles,
+  updateAgentProfile,
+  requestAttachmentUpload,
+  uploadAttachmentToR2,
+} from '../../lib/api';
+import type { TaskAttachmentRef } from '../../lib/api';
+import { formatFileSize } from '../../lib/file-utils';
 
 export interface TaskSubmitFormProps {
   projectId: string;
@@ -19,6 +27,16 @@ export interface TaskSubmitOptions {
   agentProfileId?: string;
   vmSize?: VMSize;
   workspaceProfile?: WorkspaceProfile;
+  attachments?: TaskAttachmentRef[];
+}
+
+interface AttachmentState {
+  file: File;
+  uploadId: string | null;
+  progress: number; // 0-100
+  status: 'pending' | 'uploading' | 'complete' | 'error';
+  error?: string;
+  ref?: TaskAttachmentRef;
 }
 
 export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
@@ -38,11 +56,16 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [attachments, setAttachments] = useState<AttachmentState[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const hasProfile = !!agentProfileId;
   const selectedProfile = hasProfile
     ? profiles.find((p) => p.id === agentProfileId) ?? null
     : null;
+
+  const uploading = attachments.some((a) => a.status === 'uploading' || a.status === 'pending');
+  const allUploadsComplete = attachments.length === 0 || attachments.every((a) => a.status === 'complete');
 
   // Load profiles
   const loadProfiles = useCallback(() => {
@@ -60,18 +83,128 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
     loadProfiles();
   }, [projectId, loadProfiles]);
 
-  const options: TaskSubmitOptions = hasProfile
-    ? {
-        description: description.trim() || undefined,
-        priority: priority || undefined,
-        agentProfileId: agentProfileId ?? undefined,
-      }
-    : {
-        description: description.trim() || undefined,
-        priority: priority || undefined,
-        vmSize: vmSize || undefined,
-        workspaceProfile: workspaceProfile || undefined,
+  // Upload a single file: request presigned URL, then PUT to R2
+  const uploadFile = useCallback(async (file: File, index: number) => {
+    try {
+      // Request presigned URL
+      const presigned = await requestAttachmentUpload(
+        projectId,
+        file.name,
+        file.size,
+        file.type || 'application/octet-stream',
+      );
+
+      setAttachments((prev) =>
+        prev.map((a, i) =>
+          i === index ? { ...a, uploadId: presigned.uploadId, status: 'uploading' as const } : a,
+        ),
+      );
+
+      // Upload directly to R2
+      await uploadAttachmentToR2(presigned.uploadUrl, file, (loaded, total) => {
+        const progress = Math.round((loaded / total) * 100);
+        setAttachments((prev) =>
+          prev.map((a, i) => (i === index ? { ...a, progress } : a)),
+        );
+      });
+
+      const ref: TaskAttachmentRef = {
+        uploadId: presigned.uploadId,
+        filename: file.name,
+        size: file.size,
+        contentType: file.type || 'application/octet-stream',
       };
+
+      setAttachments((prev) =>
+        prev.map((a, i) =>
+          i === index ? { ...a, status: 'complete' as const, progress: 100, ref } : a,
+        ),
+      );
+    } catch (err) {
+      setAttachments((prev) =>
+        prev.map((a, i) =>
+          i === index
+            ? { ...a, status: 'error' as const, error: err instanceof Error ? err.message : 'Upload failed' }
+            : a,
+        ),
+      );
+    }
+  }, [projectId]);
+
+  const handleFilesSelected = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const maxFiles = ATTACHMENT_DEFAULTS.MAX_FILES;
+    const maxBytes = ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES;
+    const batchMax = ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES;
+
+    const newFiles: AttachmentState[] = [];
+    const currentTotal = attachments.reduce((sum, a) => sum + a.file.size, 0);
+    let runningTotal = currentTotal;
+
+    for (const file of Array.from(files)) {
+      if (attachments.length + newFiles.length >= maxFiles) {
+        setError(`Maximum ${maxFiles} files allowed`);
+        break;
+      }
+      if (file.size > maxBytes) {
+        setError(`${file.name} exceeds ${formatFileSize(maxBytes)} limit`);
+        continue;
+      }
+      if (!SAFE_FILENAME_REGEX.test(file.name)) {
+        setError(`${file.name} has invalid characters. Only letters, numbers, dots, dashes, underscores, and spaces allowed.`);
+        continue;
+      }
+      if (runningTotal + file.size > batchMax) {
+        setError(`Total size would exceed ${formatFileSize(batchMax)} limit`);
+        break;
+      }
+      runningTotal += file.size;
+      newFiles.push({
+        file,
+        uploadId: null,
+        progress: 0,
+        status: 'pending',
+      });
+    }
+
+    if (newFiles.length === 0) return;
+
+    const startIndex = attachments.length;
+    setAttachments((prev) => [...prev, ...newFiles]);
+
+    // Start uploads
+    for (let i = 0; i < newFiles.length; i++) {
+      void uploadFile(newFiles[i]!.file, startIndex + i);
+    }
+  }, [attachments, uploadFile]);
+
+  const handleRemoveAttachment = useCallback((index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const buildOptions = (): TaskSubmitOptions => {
+    const completedAttachments = attachments
+      .filter((a) => a.status === 'complete' && a.ref)
+      .map((a) => a.ref!);
+
+    const base = hasProfile
+      ? {
+          description: description.trim() || undefined,
+          priority: priority || undefined,
+          agentProfileId: agentProfileId ?? undefined,
+        }
+      : {
+          description: description.trim() || undefined,
+          priority: priority || undefined,
+          vmSize: vmSize || undefined,
+          workspaceProfile: workspaceProfile || undefined,
+        };
+
+    return completedAttachments.length > 0
+      ? { ...base, attachments: completedAttachments }
+      : base;
+  };
 
   const resetForm = () => {
     setTitle('');
@@ -80,6 +213,10 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
     setAgentProfileId(null);
     setVmSize('');
     setWorkspaceProfile('');
+    setAttachments([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const handleRunNow = async () => {
@@ -92,10 +229,14 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       setError('Cloud credentials required. Go to Settings to connect your Hetzner account.');
       return;
     }
+    if (uploading) {
+      setError('Please wait for file uploads to complete');
+      return;
+    }
     try {
       setError(null);
       setSubmitting(true);
-      await onRunNow(trimmed, options);
+      await onRunNow(trimmed, buildOptions());
       resetForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run task');
@@ -113,7 +254,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
     try {
       setError(null);
       setSubmitting(true);
-      await onSaveToBacklog(trimmed, options);
+      await onSaveToBacklog(trimmed, buildOptions());
       resetForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save task');
@@ -130,14 +271,66 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
         </div>
       )}
 
+      {/* Attachment list */}
+      {attachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {attachments.map((att, index) => (
+            <div
+              key={`${att.file.name}-${index}`}
+              className="flex items-center gap-1.5 py-1 px-2 rounded-sm bg-page border border-border-default text-xs max-w-[220px]"
+            >
+              <span className="truncate text-fg-primary" title={att.file.name}>
+                {att.file.name}
+              </span>
+              <span className="text-fg-muted shrink-0">
+                {att.status === 'uploading' ? `${att.progress}%` : formatFileSize(att.file.size)}
+              </span>
+              {att.status === 'error' && (
+                <span className="text-danger shrink-0" title={att.error}>!</span>
+              )}
+              <button
+                type="button"
+                onClick={() => handleRemoveAttachment(index)}
+                className="shrink-0 p-0.5 bg-transparent border-none text-fg-muted hover:text-fg-primary cursor-pointer"
+                aria-label={`Remove ${att.file.name}`}
+              >
+                <X size={12} />
+              </button>
+              {att.status === 'uploading' && (
+                <div className="absolute bottom-0 left-0 h-0.5 bg-accent-emphasis rounded-full transition-all" style={{ width: `${att.progress}%` }} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex gap-2 items-start">
+        {/* Attachment button */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFilesSelected(e.target.files)}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={submitting || uploading}
+          className="shrink-0 p-2 bg-transparent border border-border-default rounded-md text-fg-muted hover:text-fg-primary hover:border-fg-muted cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-label="Attach files"
+          title="Attach files to this task"
+        >
+          <Paperclip size={18} />
+        </button>
+
         <div className="flex-1">
           <input
             type="text"
             value={title}
             onChange={(e) => { setTitle(e.target.value); setError(null); }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !submitting) {
+              if (e.key === 'Enter' && !e.shiftKey && !submitting && allUploadsComplete) {
                 void handleRunNow();
               }
             }}
@@ -153,7 +346,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           options={[
             { label: 'Save to Backlog', onClick: () => void handleSaveToBacklog() },
           ]}
-          disabled={submitting}
+          disabled={submitting || !allUploadsComplete}
           loading={submitting}
         />
       </div>

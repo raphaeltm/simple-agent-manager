@@ -19,8 +19,10 @@ import type {
   VMLocation,
   WorkspaceProfile,
   CredentialProvider,
+  TaskAttachment,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, MAX_CONTEXT_SUMMARY_BYTES, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, MAX_CONTEXT_SUMMARY_BYTES, CREDENTIAL_PROVIDERS, ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import { validateAttachments } from '../../services/attachment-upload';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -90,6 +92,35 @@ submitRoutes.post('/submit', async (c) => {
     if (summaryBytes > MAX_CONTEXT_SUMMARY_BYTES) {
       throw errors.badRequest(`contextSummary exceeds maximum size of ${MAX_CONTEXT_SUMMARY_BYTES} bytes`);
     }
+  }
+
+  // Validate attachments if provided
+  let validatedAttachments: TaskAttachment[] = [];
+  if (body.attachments && body.attachments.length > 0) {
+    // Validate attachment structure
+    const maxFiles = c.env.ATTACHMENT_MAX_FILES
+      ? parseInt(c.env.ATTACHMENT_MAX_FILES, 10)
+      : ATTACHMENT_DEFAULTS.MAX_FILES;
+    if (body.attachments.length > maxFiles) {
+      throw errors.badRequest(`Too many attachments: ${body.attachments.length} exceeds maximum ${maxFiles}`);
+    }
+
+    for (const att of body.attachments) {
+      if (!att.uploadId || !att.filename || typeof att.size !== 'number' || !att.contentType) {
+        throw errors.badRequest('Each attachment must have uploadId, filename, size, and contentType');
+      }
+      if (!SAFE_FILENAME_REGEX.test(att.filename)) {
+        throw errors.badRequest(`Unsafe filename in attachment: ${att.filename}`);
+      }
+    }
+
+    // Validate attachments exist in R2 and match declared sizes
+    const validation = await validateAttachments(c.env, userId, body.attachments);
+    if (!validation.valid) {
+      throw errors.badRequest(`Attachment validation failed: ${validation.errors.join('; ')}`);
+    }
+
+    validatedAttachments = body.attachments;
   }
 
   // Validate parentTaskId if provided — must belong to the same project
@@ -319,6 +350,7 @@ submitRoutes.post('/submit', async (c) => {
     parentTaskId: body.parentTaskId ?? null,
     hasContextSummary: !!body.contextSummary,
     checkoutBranch: branch,
+    attachmentCount: validatedAttachments.length,
   });
 
   // Look up user's githubId for noreply email fallback
@@ -357,6 +389,7 @@ submitRoutes.post('/submit', async (c) => {
       taskMode,
       model: resolvedProfile?.model ?? null,
       permissionMode: resolvedProfile?.permissionMode ?? null,
+      attachments: validatedAttachments.length > 0 ? validatedAttachments : null,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed.

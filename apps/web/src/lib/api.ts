@@ -355,6 +355,13 @@ export interface ListProjectTasksParams {
 // =============================================================================
 // Task Submit (single-action chat flow)
 // =============================================================================
+export interface TaskAttachmentRef {
+  uploadId: string;
+  filename: string;
+  size: number;
+  contentType: string;
+}
+
 export interface SubmitTaskRequest {
   message: string;
   vmSize?: string;
@@ -366,6 +373,7 @@ export interface SubmitTaskRequest {
   contextSummary?: string;
   taskMode?: 'task' | 'conversation';
   agentProfileId?: string;
+  attachments?: TaskAttachmentRef[];
 }
 
 export interface SubmitTaskResponse {
@@ -382,6 +390,73 @@ export async function submitTask(
   return request<SubmitTaskResponse>(`/api/projects/${projectId}/tasks/submit`, {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+// =============================================================================
+// Task Attachment Uploads (presigned R2)
+// =============================================================================
+
+export interface RequestAttachmentUploadResponse {
+  uploadId: string;
+  uploadUrl: string;
+  r2Key: string;
+  expiresIn: number;
+}
+
+/**
+ * Request a presigned R2 upload URL for a task attachment.
+ */
+export async function requestAttachmentUpload(
+  projectId: string,
+  filename: string,
+  size: number,
+  contentType: string,
+): Promise<RequestAttachmentUploadResponse> {
+  return request<RequestAttachmentUploadResponse>(
+    `/api/projects/${projectId}/tasks/request-upload`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ filename, size, contentType }),
+    },
+  );
+}
+
+/**
+ * Upload a file directly to R2 via presigned URL.
+ * Returns a promise that resolves when the upload completes.
+ * Uses XMLHttpRequest for progress tracking.
+ */
+export function uploadAttachmentToR2(
+  uploadUrl: string,
+  file: File,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+
+    if (onProgress) {
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          onProgress(e.loaded, e.total);
+        }
+      });
+    }
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`Upload failed with status ${xhr.status}`));
+      }
+    });
+
+    xhr.addEventListener('error', () => reject(new Error('Upload network error')));
+    xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+
+    xhr.send(file);
   });
 }
 

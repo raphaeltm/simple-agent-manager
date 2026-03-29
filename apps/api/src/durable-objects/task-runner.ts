@@ -24,7 +24,7 @@
  * See: specs/tdf-2-orchestration-engine/ for full design.
  */
 import { DurableObject } from 'cloudflare:workers';
-import type { TaskExecutionStep, VMSize, VMLocation, WorkspaceProfile, CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
+import type { TaskExecutionStep, VMSize, VMLocation, WorkspaceProfile, CredentialProvider, TaskMode, TaskAttachment } from '@simple-agent-manager/shared';
 import type { NodeLifecycle } from './node-lifecycle';
 import {
   DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES,
@@ -86,6 +86,7 @@ type TaskRunnerEnv = {
   VM_AGENT_PROTOCOL?: string;
   VM_AGENT_PORT?: string;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
+  R2: R2Bucket;
 };
 
 interface StepResults {
@@ -127,6 +128,8 @@ interface TaskRunConfig {
   model: string | null;
   /** Permission mode override from agent profile (forwarded to VM agent). Null = use agent default. */
   permissionMode: string | null;
+  /** File attachments uploaded to R2 before task submission. Null = no attachments. */
+  attachments: TaskAttachment[] | null;
 }
 
 export interface TaskRunnerState {
@@ -296,6 +299,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
           break;
         case 'workspace_ready':
           await this.handleWorkspaceReady(state);
+          break;
+        case 'attachment_transfer':
+          await this.handleAttachmentTransfer(state);
           break;
         case 'agent_session':
           await this.handleAgentSession(state);
@@ -738,7 +744,8 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
           workspaceId: state.stepResults.workspaceId,
           status: state.workspaceReadyStatus,
         });
-        await this.advanceToStep(state, 'agent_session');
+        const nextStep = state.config.attachments?.length ? 'attachment_transfer' : 'agent_session';
+        await this.advanceToStep(state, nextStep);
         return;
       }
       if (state.workspaceReadyStatus === 'error') {
@@ -765,7 +772,8 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         workspaceId: state.stepResults.workspaceId,
         status: wsRow.status,
       });
-      await this.advanceToStep(state, 'agent_session');
+      const nextStepFromPoll = state.config.attachments?.length ? 'attachment_transfer' : 'agent_session';
+      await this.advanceToStep(state, nextStepFromPoll);
       return;
     }
     if (wsRow?.status === 'error') {
@@ -793,6 +801,94 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     const pollIntervalMs = this.getWorkspaceReadyPollIntervalMs();
     const nextPollMs = Math.min(pollIntervalMs, Math.max(timeoutMs - elapsed, 0));
     await this.ctx.storage.setAlarm(Date.now() + nextPollMs);
+  }
+
+  /**
+   * Transfer file attachments from R2 to the workspace's .private/ directory.
+   * Downloads each attachment from R2 and uploads it to the VM agent.
+   * On success, eagerly deletes R2 keys and advances to agent_session.
+   */
+  private async handleAttachmentTransfer(state: TaskRunnerState): Promise<void> {
+    await this.updateD1ExecutionStep(state.taskId, 'attachment_transfer');
+
+    const attachments = state.config.attachments;
+    if (!attachments || attachments.length === 0) {
+      // No attachments — skip directly to agent session
+      await this.advanceToStep(state, 'agent_session');
+      return;
+    }
+
+    if (!state.stepResults.nodeId || !state.stepResults.workspaceId) {
+      throw new Error('Missing nodeId or workspaceId for attachment transfer');
+    }
+
+    const { getAttachmentFromR2, cleanupAttachments } = await import('../services/attachment-upload');
+    const { signTerminalToken } = await import('../services/jwt');
+
+    // Build VM agent URL for file upload
+    const protocol = this.env.VM_AGENT_PROTOCOL || 'https';
+    const port = this.env.VM_AGENT_PORT || '8443';
+    const workspaceId = state.stepResults.workspaceId;
+    const baseDomain = (this.env as any).BASE_DOMAIN || '';
+    const vmUrl = `${protocol}://ws-${workspaceId}.${baseDomain}:${port}`;
+    const uploadUrl = `${vmUrl}/workspaces/${workspaceId}/files/upload`;
+
+    // Generate a terminal token for authenticating with the VM agent
+    const { token } = await signTerminalToken(
+      state.userId,
+      workspaceId,
+      this.env as any,
+    );
+
+    log.info('task_runner_do.step.attachment_transfer_start', {
+      taskId: state.taskId,
+      workspaceId,
+      attachmentCount: attachments.length,
+    });
+
+    // Transfer each attachment: R2 GET → FormData → VM agent POST
+    for (const attachment of attachments) {
+      const r2Object = await getAttachmentFromR2(this.env.R2, state.userId, attachment);
+
+      // Read the R2 body into a Uint8Array for FormData
+      const bodyBytes = new Uint8Array(await new Response(r2Object.body).arrayBuffer());
+
+      const formData = new FormData();
+      formData.append('files', new Blob([bodyBytes], { type: r2Object.contentType }), attachment.filename);
+      formData.append('destination', '../.private');
+
+      const resp = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => 'unknown');
+        throw Object.assign(
+          new Error(`Attachment transfer failed for ${attachment.filename}: ${resp.status} ${errorText}`),
+          { permanent: resp.status >= 400 && resp.status < 500 },
+        );
+      }
+
+      log.info('task_runner_do.step.attachment_transferred', {
+        taskId: state.taskId,
+        filename: attachment.filename,
+        size: attachment.size,
+      });
+    }
+
+    // Eager R2 cleanup (best-effort)
+    await cleanupAttachments(this.env.R2, state.userId, attachments);
+
+    log.info('task_runner_do.step.attachment_transfer_complete', {
+      taskId: state.taskId,
+      attachmentCount: attachments.length,
+    });
+
+    await this.advanceToStep(state, 'agent_session');
   }
 
   private async handleAgentSession(state: TaskRunnerState): Promise<void> {
@@ -897,8 +993,20 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       const { startAgentSessionOnNode } = await import('../services/node-agent');
       const agentType = state.config.agentType || this.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
       const taskContent = state.config.taskDescription || state.config.taskTitle;
+
+      // Build attachment context if files were transferred
+      let attachmentContext = '';
+      if (state.config.attachments?.length) {
+        const fileList = state.config.attachments
+          .map((a) => `- \`/workspaces/.private/${a.filename}\` (${a.size} bytes, ${a.contentType})`)
+          .join('\n');
+        attachmentContext =
+          `\n\n## Attached Files\n\nThe following files have been uploaded to the workspace:\n${fileList}\n` +
+          `\nThese files are available at the paths listed above. Read them to understand the task context.\n`;
+      }
+
       const initialPrompt =
-        `${taskContent}\n\n---\n\n` +
+        `${taskContent}${attachmentContext}\n\n---\n\n` +
         `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
         `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
         `Do not proceed until you have called this tool and read its response.`;

@@ -379,6 +379,16 @@ export interface Env {
   FILE_UPLOAD_TIMEOUT_MS?: string;                 // Timeout for upload proxy requests in ms (default: 120000)
   FILE_DOWNLOAD_TIMEOUT_MS?: string;               // Timeout for download proxy requests in ms (default: 60000)
   FILE_DOWNLOAD_MAX_BYTES?: string;                // Max file download size forwarded from VM agent (default: 52428800 = 50MB)
+  // R2 S3-compatible credentials (for presigned URL generation — task file attachments)
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
+  // R2 bucket name (runtime — set by wrangler sync script; used for presigned URL generation)
+  R2_BUCKET_NAME?: string;
+  // Task attachment upload limits (all configurable per constitution Principle XI)
+  ATTACHMENT_UPLOAD_MAX_BYTES?: string;
+  ATTACHMENT_UPLOAD_BATCH_MAX_BYTES?: string;
+  ATTACHMENT_MAX_FILES?: string;
+  ATTACHMENT_PRESIGN_EXPIRY_SECONDS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
