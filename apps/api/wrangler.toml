@@ -26,6 +26,7 @@ ACTIVITY_RETENTION_DAYS = "90"
 SESSION_IDLE_TIMEOUT_MINUTES = "60"
 DO_SUMMARY_SYNC_DEBOUNCE_MS = "5000"
 DEFAULT_TASK_AGENT_TYPE = "claude-code"
+R2_BUCKET_NAME = "workspaces-dev-assets"
 VM_AGENT_PROTOCOL = "https"
 VM_AGENT_PORT = "8443"
 TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS = "30000"
@@ -143,3 +144,5 @@ crons = ["*/5 * * * *", "0 3 * * *"]
 # - GOOGLE_CLIENT_SECRET (optional — Google Cloud Console OAuth client secret)
 # - SEGMENT_WRITE_KEY (optional — Segment.io write key, enables Segment event forwarding)
 # - GA4_API_SECRET (optional — Google Analytics 4 API secret, enables GA4 forwarding; NOTE: GA4 Measurement Protocol requires api_secret as a query parameter — ensure outbound request URLs are not logged)
+# - R2_ACCESS_KEY_ID (optional — R2 S3-compatible API token key ID, enables task attachment presigned uploads)
+# - R2_SECRET_ACCESS_KEY (optional — R2 S3-compatible API token secret, enables task attachment presigned uploads)
