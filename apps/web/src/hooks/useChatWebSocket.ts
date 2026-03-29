@@ -7,8 +7,8 @@ export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 
 const BASE_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const MAX_RETRIES = 10;
-const PING_INTERVAL_MS = 30000;
-const PONG_TIMEOUT_MS = 10000;
+const PING_INTERVAL_MS = parseInt(import.meta.env.VITE_WS_PING_INTERVAL_MS || '30000');
+const PONG_TIMEOUT_MS = parseInt(import.meta.env.VITE_WS_PONG_TIMEOUT_MS || '10000');
 
 interface UseChatWebSocketOptions {
   projectId: string;

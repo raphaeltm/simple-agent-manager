@@ -34,8 +34,12 @@ class MockWebSocket {
   }
 
   close(code?: number) {
+    if (this.readyState === MockWebSocket.CLOSED) return;
     this.closeCode = code;
     this.readyState = MockWebSocket.CLOSED;
+    // Real browsers fire onclose after close() — needed for pong timeout
+    // detection which calls close(4000) and expects onclose to trigger reconnect.
+    this.onclose?.({ code: code ?? 1000 });
   }
 
   // Test helpers
@@ -422,6 +426,108 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(ws.sentMessages).toHaveLength(0);
+  });
+
+  // ===========================================================================
+  // Pong timeout detection — force-closes stale connections that stop
+  // responding to pings. Without this, Cloudflare/proxy-dropped connections
+  // appear open but silently drop all messages.
+  // ===========================================================================
+
+  it('force-closes the WebSocket if no pong arrives within 10s of a ping', () => {
+    const { result } = renderHook(() => useChatWebSocket({ ...defaultProps }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    const ws = MockWebSocket.instances[0]!;
+
+    // Trigger first ping
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    expect(ws.sentMessages).toHaveLength(1);
+    expect(ws.readyState).toBe(MockWebSocket.OPEN);
+
+    // Advance 10s without pong — timeout should fire and close
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED);
+    // Must trigger reconnect, not just disconnect
+    expect(result.current.connectionState).toBe('reconnecting');
+  });
+
+  it('clears the pong timeout when a pong message is received', () => {
+    renderHook(() => useChatWebSocket({ ...defaultProps }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    const ws = MockWebSocket.instances[0]!;
+
+    // Trigger first ping
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    expect(ws.sentMessages).toHaveLength(1);
+
+    // Receive pong before timeout
+    act(() => {
+      ws.simulateMessage({ type: 'pong' });
+    });
+
+    // Advance well past the timeout window — socket should still be open
+    act(() => {
+      vi.advanceTimersByTime(15000);
+    });
+    expect(ws.readyState).toBe(MockWebSocket.OPEN);
+  });
+
+  it('pong messages do not trigger onMessage or other callbacks', () => {
+    const onMessage = vi.fn();
+    const onSessionStopped = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessage, onSessionStopped }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({ type: 'pong' });
+    });
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onSessionStopped).not.toHaveBeenCalled();
+  });
+
+  it('resets the pong timeout on each new ping cycle', () => {
+    renderHook(() => useChatWebSocket({ ...defaultProps }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    const ws = MockWebSocket.instances[0]!;
+
+    // First ping at 30s, respond with pong
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    act(() => {
+      ws.simulateMessage({ type: 'pong' });
+    });
+
+    // Second ping at 60s — no pong this time
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    expect(ws.sentMessages).toHaveLength(2);
+
+    // 10s after second ping without pong — should close
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED);
   });
 
   it('disconnects when enabled changes to false', () => {
