@@ -153,7 +153,7 @@ describe('Agent Profile Service', () => {
 
       // seedBuiltinProfiles: existing built-in profiles (all 4 present)
       db._pushResult([
-        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
       ]);
       // byId query
       db._pushResult([profile]);
@@ -173,7 +173,7 @@ describe('Agent Profile Service', () => {
 
       // seedBuiltinProfiles
       db._pushResult([
-        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
       ]);
       // byId — not found
       db._pushResult([]);
@@ -200,7 +200,7 @@ describe('Agent Profile Service', () => {
 
       // seedBuiltinProfiles
       db._pushResult([
-        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
       ]);
       // byId — not found
       db._pushResult([]);
@@ -222,7 +222,7 @@ describe('Agent Profile Service', () => {
 
       // seedBuiltinProfiles
       db._pushResult([
-        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
       ]);
       // byId — not found
       db._pushResult([]);
@@ -254,7 +254,7 @@ describe('Agent Profile Service', () => {
 
       // seedBuiltinProfiles
       db._pushResult([
-        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
       ]);
       // byId — found
       db._pushResult([profile]);
@@ -294,7 +294,7 @@ describe('Agent Profile Service', () => {
 
       // seedBuiltinProfiles
       db._pushResult([
-        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
       ]);
       // byId — found
       db._pushResult([profile]);
@@ -361,7 +361,7 @@ describe('Agent Profile Service', () => {
       const db = createMockDB();
       // seedBuiltinProfiles: all 4 already exist
       db._pushResult([
-        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
       ]);
       // listProfiles query (select + from + where + orderBy)
       db._pushResult([
@@ -381,7 +381,7 @@ describe('Agent Profile Service', () => {
     it('converts isBuiltin from integer 0 to boolean false', async () => {
       const db = createMockDB();
       db._pushResult([
-        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
       ]);
       db._pushResult([
         makeProfileRow({ id: 'p1', isBuiltin: 0 }),
@@ -598,21 +598,21 @@ describe('Agent Profile Service', () => {
       expect(db.insert).toHaveBeenCalledTimes(4);
     });
 
-    it('skips already existing built-in profiles', async () => {
+    it('skips all seeding when any built-in profile exists', async () => {
       const db = createMockDB();
-      // Two built-in profiles already exist
-      db._pushResult([{ name: 'default' }, { name: 'planner' }]);
+      // One built-in profile already exists — seeding is a one-time event
+      db._pushResult([{ id: 'existing-1' }]);
 
       await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1', env);
 
-      // Should only insert 2 (implementer, reviewer)
-      expect(db.insert).toHaveBeenCalledTimes(2);
+      // Should not insert anything — seeding already happened for this project
+      expect(db.insert).not.toHaveBeenCalled();
     });
 
     it('does nothing when all built-in profiles exist', async () => {
       const db = createMockDB();
       db._pushResult([
-        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+        { id: 'p1' }, { id: 'p2' }, { id: 'p3' }, { id: 'p4' },
       ]);
 
       await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1', env);
