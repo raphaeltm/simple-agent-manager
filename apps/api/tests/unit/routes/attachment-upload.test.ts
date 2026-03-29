@@ -90,7 +90,7 @@ describe('POST /projects/:projectId/tasks/request-upload', () => {
     const json = await res.json() as any;
     expect(json.uploadId).toBe('TEST-UPLOAD-ID');
     expect(json.uploadUrl).toBe('https://r2.example.com/presigned');
-    expect(json.r2Key).toBe('temp-uploads/test-user-id/TEST-UPLOAD-ID/report.pdf');
+    expect(json.r2Key).toBeUndefined(); // r2Key should NOT be exposed to client
     expect(json.expiresIn).toBe(900);
   });
 

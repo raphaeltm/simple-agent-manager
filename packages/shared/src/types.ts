@@ -644,7 +644,6 @@ export interface RequestAttachmentUploadRequest {
 export interface RequestAttachmentUploadResponse {
   uploadId: string;
   uploadUrl: string;
-  r2Key: string;
   expiresIn: number;
 }
 

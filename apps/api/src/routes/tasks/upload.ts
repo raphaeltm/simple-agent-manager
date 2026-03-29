@@ -93,7 +93,6 @@ uploadRoutes.post('/:projectId/tasks/request-upload', async (c) => {
   const response: RequestAttachmentUploadResponse = {
     uploadId,
     uploadUrl: result.uploadUrl,
-    r2Key: result.r2Key,
     expiresIn: result.expiresIn,
   };
 

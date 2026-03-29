@@ -400,7 +400,6 @@ export async function submitTask(
 export interface RequestAttachmentUploadResponse {
   uploadId: string;
   uploadUrl: string;
-  r2Key: string;
   expiresIn: number;
 }
 

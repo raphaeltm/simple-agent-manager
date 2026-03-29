@@ -863,7 +863,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
 
       const formData = new FormData();
       formData.append('files', new Blob([bodyBytes], { type: r2Object.contentType }), attachment.filename);
-      formData.append('destination', '../.private');
+      // Omit 'destination' field — VM agent defaults to ../.private (sanitizeFilePath rejects explicit ../ paths)
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), transferTimeoutMs);

@@ -96,7 +96,7 @@ export async function generatePresignedUploadUrl(
 
   // Validate filename safety
   if (!SAFE_FILENAME_REGEX.test(filename)) {
-    throw new Error(`Unsafe filename: ${filename}`);
+    throw new Error('Unsafe filename: contains disallowed characters');
   }
 
   // Validate file size
