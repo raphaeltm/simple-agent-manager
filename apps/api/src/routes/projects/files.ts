@@ -201,14 +201,14 @@ async function proxyToVmAgent(
       })
     );
     // Map VM agent status codes to appropriate client responses
-    const clientStatus =
-      res.status === 404 ? 404 : res.status >= 500 ? 502 : 400;
+    if (res.status === 404) {
+      throw errors.notFound('File or resource not found');
+    }
+    if (res.status >= 500) {
+      throw errors.internal(`Workspace agent unavailable (${res.status})`);
+    }
     throw errors.badRequest(
-      clientStatus === 404
-        ? 'File or resource not found'
-        : clientStatus === 502
-          ? `Workspace agent unavailable (${res.status})`
-          : `VM agent error (${res.status}): ${text.substring(0, 200)}`
+      `VM agent error (${res.status}): ${text.substring(0, 200)}`
     );
   }
 
