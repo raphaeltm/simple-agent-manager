@@ -1,6 +1,6 @@
 # VM Agent Crash: Nil Pointer in BootLogBroadcaster + ACP Install Failure
 
-**Status:** backlog
+**Status:** archived (fixed in PR #293, commit b43b8b02)
 **Priority:** high
 **Created:** 2026-02-24
 
