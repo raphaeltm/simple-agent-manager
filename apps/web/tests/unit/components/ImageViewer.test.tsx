@@ -106,7 +106,7 @@ describe('ImageViewer', () => {
     expect(screen.getByText('Failed to load image')).toBeInTheDocument();
   });
 
-  it('shows "Click to load" for files between 10-25 MB', () => {
+  it('shows "Click to load" for files between 10-50 MB', () => {
     render(
       <ImageViewer
         {...defaultProps}

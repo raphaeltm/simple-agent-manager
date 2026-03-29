@@ -50,8 +50,8 @@ Click the **download** button on files shown in the file browser panel to downlo
 When browsing files, images are rendered inline with a dedicated viewer:
 
 - **Small images** (under 10 MB) load inline automatically
-- **Medium images** (10–25 MB) show a click-to-load preview
-- **Large images** (over 25 MB) offer a download link only
+- **Medium images** (10–50 MB) show a click-to-load preview
+- **Large images** (over 50 MB) offer a download link only
 - Toggle between **fit-to-panel** and **1:1** zoom modes
 
 Supported formats include PNG, JPG, GIF, SVG, WebP, and other common image types.
