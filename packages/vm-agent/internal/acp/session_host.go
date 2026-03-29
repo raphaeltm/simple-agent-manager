@@ -856,7 +856,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 			slog.Info("Injected GH_TOKEN via runtime fetch", "workspaceId", h.config.WorkspaceID)
 		} else if err != nil {
 			slog.Warn("Failed to fetch GH_TOKEN for ACP session — agent will run without GitHub access",
-				"workspaceId", h.config.WorkspaceID, "error", err)
+				"workspaceId", h.config.WorkspaceID, "sessionId", h.config.SessionID, "error", err)
 		}
 	}
 
