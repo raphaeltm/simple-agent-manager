@@ -373,10 +373,13 @@ func New(cfg *config.Config) (*Server, error) {
 		done:                make(chan struct{}),
 	}
 
-	// Wire a default git token fetcher using the node-level workspace ID.
-	// This is overridden per-session in getOrCreateSessionHost() with a
-	// closure that uses the correct per-workspace ID and callback token.
-	s.acpConfig.GitTokenFetcher = s.fetchGitToken
+	// GitTokenFetcher is intentionally left nil at the server level.
+	// Each SessionHost receives a per-session closure in getOrCreateSessionHost()
+	// that captures the correct workspace ID. A nil fetcher is safe: session_host.go
+	// guards with `if h.config.GitTokenFetcher != nil`. Setting s.fetchGitToken
+	// here would silently use the node-level workspace ID if the per-session
+	// override were ever missed — nil fails visibly instead.
+	// s.acpConfig.GitTokenFetcher = nil  (already the zero value)
 
 	// Wire task completion callback now that server and workspace runtime exist.
 	if deferredTaskCallback {

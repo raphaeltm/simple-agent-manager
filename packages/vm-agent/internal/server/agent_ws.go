@@ -226,10 +226,12 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.WorkspaceID = workspaceID
 	cfg.SessionID = sessionID
 
-	// Override GitTokenFetcher per-session so it uses the correct workspace ID
-	// and callback token. The server-level fetchGitToken uses s.config.WorkspaceID
-	// (the node-level ID), which is wrong for multi-workspace nodes where each
-	// session targets a different workspace.
+	// Override GitTokenFetcher per-session so it targets the correct workspace's
+	// git-token endpoint. The callback token is resolved at call time via
+	// callbackTokenForWorkspace(), so token rotations are automatically picked up.
+	// Without this override, the server-level default (nil) would leave GH_TOKEN
+	// unset; the previous bug had a server-level s.fetchGitToken that silently
+	// used s.config.WorkspaceID (the node-level ID) instead.
 	cfg.GitTokenFetcher = func(ctx context.Context) (string, error) {
 		return s.fetchGitTokenForWorkspace(ctx, workspaceID, "")
 	}
