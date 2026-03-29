@@ -52,11 +52,6 @@ describe('agent profiles integration wiring', () => {
     expect(schemaFile).toContain("text('task_mode')");
   });
 
-  it('service guards built-in profiles against modification and deletion', () => {
-    expect(serviceFile).toContain('Built-in profiles cannot be modified');
-    expect(serviceFile).toContain('Built-in profiles cannot be deleted');
-  });
-
   it('Env interface includes configurable built-in profile model env vars', () => {
     expect(indexFile).toContain('BUILTIN_PROFILE_SONNET_MODEL');
     expect(indexFile).toContain('BUILTIN_PROFILE_OPUS_MODEL');

@@ -99,9 +99,13 @@ export async function seedBuiltinProfiles(
   userId: string,
   env: ProfileEnv
 ): Promise<void> {
-  // Check if any built-in profiles already exist for this project
+  // Check if any built-in profiles already exist for this project.
+  // If ANY exist, skip all seeding — built-ins are a one-time seed per project.
+  // This allows users to rename or delete individual built-ins without
+  // triggering re-creation. If all built-ins are deleted, they will be
+  // re-seeded on next access.
   const existing = await db
-    .select({ name: schema.agentProfiles.name })
+    .select({ id: schema.agentProfiles.id })
     .from(schema.agentProfiles)
     .where(
       and(
@@ -110,13 +114,13 @@ export async function seedBuiltinProfiles(
       )
     );
 
-  const existingNames = new Set(existing.map((r) => r.name));
+  if (existing.length > 0) {
+    return;
+  }
+
   const builtinProfiles = getBuiltinProfiles(env);
 
   for (const profile of builtinProfiles) {
-    if (existingNames.has(profile.name)) {
-      continue;
-    }
     await db.insert(schema.agentProfiles).values({
       id: ulid(),
       projectId,
@@ -262,10 +266,6 @@ export async function updateProfile(
   // Verify profile exists and user has access
   const profile = await getProfile(db, projectId, profileId, userId);
 
-  if (profile.isBuiltin) {
-    throw errors.badRequest('Built-in profiles cannot be modified');
-  }
-
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
@@ -316,7 +316,12 @@ export async function updateProfile(
   await db
     .update(schema.agentProfiles)
     .set(updates)
-    .where(eq(schema.agentProfiles.id, profileId));
+    .where(
+      and(
+        eq(schema.agentProfiles.id, profileId),
+        eq(schema.agentProfiles.projectId, projectId)
+      )
+    );
 
   return getProfile(db, projectId, profileId, userId);
 }
@@ -329,15 +334,16 @@ export async function deleteProfile(
   userId: string
 ): Promise<void> {
   // Verify it exists and user has access
-  const profile = await getProfile(db, projectId, profileId, userId);
-
-  if (profile.isBuiltin) {
-    throw errors.badRequest('Built-in profiles cannot be deleted');
-  }
+  await getProfile(db, projectId, profileId, userId);
 
   await db
     .delete(schema.agentProfiles)
-    .where(eq(schema.agentProfiles.id, profileId));
+    .where(
+      and(
+        eq(schema.agentProfiles.id, profileId),
+        eq(schema.agentProfiles.projectId, projectId)
+      )
+    );
 }
 
 /**
