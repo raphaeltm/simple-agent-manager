@@ -8,6 +8,7 @@ import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
 import { normalizeFileProxyPath } from './_helpers';
+import * as projectDataService from '../../services/project-data';
 
 const fileProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -58,12 +59,13 @@ async function resolveSessionWorkspace(
   // Verify project ownership
   await requireOwnedProject(db, projectId, userId);
 
-  // Find workspace linked to this chat session
+  // Strategy 1: Find workspace by chatSessionId in D1 (canonical path)
   const workspaces = await db
     .select({
       id: schema.workspaces.id,
       status: schema.workspaces.status,
       projectId: schema.workspaces.projectId,
+      nodeId: schema.workspaces.nodeId,
     })
     .from(schema.workspaces)
     .where(
@@ -75,9 +77,40 @@ async function resolveSessionWorkspace(
     )
     .limit(1);
 
-  const workspace = workspaces[0];
+  let workspace = workspaces[0];
+  let lookupStrategy = workspace ? 'chatSessionId' : 'none';
+
+  // Strategy 2: Fall back to the session's workspaceId from the ProjectData DO.
+  // This handles the case where chatSessionId was not written to D1 (e.g., DO
+  // crash during workspace creation left the link incomplete).
   if (!workspace) {
-    throw errors.notFound('No workspace found for this session');
+    const session = await projectDataService.getSession(env, projectId, sessionId);
+    const raw = session?.workspaceId;
+    const sessionWorkspaceId = typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+    if (sessionWorkspaceId) {
+      const fallbackWorkspaces = await db
+        .select({
+          id: schema.workspaces.id,
+          status: schema.workspaces.status,
+          projectId: schema.workspaces.projectId,
+          nodeId: schema.workspaces.nodeId,
+        })
+        .from(schema.workspaces)
+        .where(
+          and(
+            eq(schema.workspaces.id, sessionWorkspaceId),
+            eq(schema.workspaces.projectId, projectId),
+            eq(schema.workspaces.userId, userId)
+          )
+        )
+        .limit(1);
+      workspace = fallbackWorkspaces[0];
+      if (workspace) lookupStrategy = 'sessionWorkspaceId-fallback';
+    }
+  }
+
+  if (!workspace) {
+    throw errors.notFound('Workspace');
   }
 
   // Defensive assertion: workspace must belong to the expected project
@@ -85,13 +118,33 @@ async function resolveSessionWorkspace(
     throw errors.forbidden('Workspace does not belong to this project');
   }
 
+  console.log(
+    JSON.stringify({
+      event: 'file_proxy.workspace_resolved',
+      sessionId,
+      workspaceId: workspace.id,
+      workspaceStatus: workspace.status,
+      nodeId: workspace.nodeId,
+      lookupStrategy,
+    })
+  );
+
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
     throw errors.badRequest(
       `Workspace is not accessible (status: ${workspace.status})`
     );
   }
 
-  const workspaceUrl = `https://ws-${workspace.id}.${env.BASE_DOMAIN}`;
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace has no assigned node');
+  }
+
+  // Use the two-level subdomain ({nodeId}.vm.{domain}) to bypass Cloudflare
+  // same-zone routing restrictions. Single-level ws-{id}.{domain} subdomains
+  // are intercepted by the Worker route, causing error 1014 on server-side fetch.
+  const protocol = env.VM_AGENT_PROTOCOL || 'https';
+  const port = env.VM_AGENT_PORT || '8443';
+  const workspaceUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
   const { token } = await signTerminalToken(userId, workspace.id, env);
 
   return { workspaceUrl, workspaceId: workspace.id, token };
@@ -115,7 +168,26 @@ async function proxyToVmAgent(
   queryParams.set('token', token);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/${vmPath}?${queryParams.toString()}`;
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch (fetchErr) {
+    // Network error, DNS failure, or timeout — VM agent is completely unreachable
+    const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+    console.error(
+      JSON.stringify({
+        event: 'file_proxy.fetch_error',
+        workspaceId,
+        vmPath,
+        url: url.replace(/token=[^&]+/, 'token=REDACTED'),
+        error: errMsg,
+      })
+    );
+    throw errors.badRequest(
+      `Workspace agent unreachable: ${errMsg.includes('timeout') || errMsg.includes('abort') ? 'request timed out' : 'connection failed'}`
+    );
+  }
+
   if (!res.ok) {
     const text = await res.text();
     // Log full error server-side for debugging; return sanitized message to client
@@ -124,20 +196,19 @@ async function proxyToVmAgent(
         event: 'file_proxy.vm_agent_error',
         workspaceId,
         vmPath,
+        url: url.replace(/token=[^&]+/, 'token=REDACTED'),
         status: res.status,
         body: text,
       })
     );
     // Map VM agent status codes to appropriate client responses
-    const clientStatus =
-      res.status === 404 ? 404 : res.status >= 500 ? 502 : 400;
-    throw errors.badRequest(
-      clientStatus === 404
-        ? 'File or resource not found'
-        : clientStatus === 502
-          ? 'Workspace agent unavailable'
-          : 'VM agent request failed'
-    );
+    if (res.status === 404) {
+      throw errors.notFound('File or resource not found');
+    }
+    if (res.status >= 500) {
+      throw errors.internal(`Workspace agent unavailable (${res.status})`);
+    }
+    throw errors.badRequest('VM agent returned an error');
   }
 
   // Guard against oversized responses
@@ -264,10 +335,10 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   );
 
   const params = new URLSearchParams();
-  const path = requireSafePath(c.req.query('path'));
-  params.set('path', path);
+  const rawPath = c.req.query('path');
+  if (rawPath) params.set('path', normalizeFileProxyPath(rawPath));
   const staged = c.req.query('staged');
-  if (staged) params.set('staged', staged);
+  if (staged === 'true' || staged === '1') params.set('staged', staged);
 
   return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'git/diff', params);
 });
