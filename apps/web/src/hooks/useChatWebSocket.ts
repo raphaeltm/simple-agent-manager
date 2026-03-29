@@ -8,6 +8,7 @@ const BASE_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const MAX_RETRIES = 10;
 const PING_INTERVAL_MS = 30000;
+const PONG_TIMEOUT_MS = 10000;
 
 interface UseChatWebSocketOptions {
   projectId: string;
@@ -50,6 +51,7 @@ export function useChatWebSocket({
   const wsRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const pongTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const mountedRef = useRef(true);
   const connectRef = useRef<() => void>(() => {});
   const hadConnectionRef = useRef(false);
@@ -128,6 +130,14 @@ export function useChatWebSocket({
         try {
           const data = JSON.parse(event.data);
           const payload = data.payload ?? data;
+
+          // Handle pong response — clear the pong timeout to indicate the
+          // connection is alive. Without this, the timeout would fire and
+          // force-close the socket even though the server is responsive.
+          if (data.type === 'pong') {
+            clearTimeout(pongTimeoutRef.current);
+            return;
+          }
 
           if (data.type === 'message.new') {
             const p = payload;
@@ -209,16 +219,34 @@ export function useChatWebSocket({
     }
   }, [projectId, sessionId]);
 
-  // Ping keep-alive
+  // Ping keep-alive with pong timeout detection.
+  // Sends a JSON ping every PING_INTERVAL_MS. After each ping, starts a
+  // PONG_TIMEOUT_MS timer — if no pong arrives before it fires, the connection
+  // is considered dead and force-closed to trigger the reconnect path.
   useEffect(() => {
     if (!enabled) return;
     const interval = setInterval(() => {
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'ping' }));
+
+        // Start pong deadline — if the server doesn't respond within
+        // PONG_TIMEOUT_MS, the connection is silently dead (e.g. Cloudflare
+        // proxy dropped it). Force-close with a non-1000 code to trigger
+        // the reconnect path in onclose.
+        clearTimeout(pongTimeoutRef.current);
+        pongTimeoutRef.current = setTimeout(() => {
+          const current = wsRef.current;
+          if (current && current.readyState === WebSocket.OPEN) {
+            current.close(4000, 'pong timeout');
+          }
+        }, PONG_TIMEOUT_MS);
       }
     }, PING_INTERVAL_MS);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(pongTimeoutRef.current);
+    };
   }, [enabled]);
 
   // Connection lifecycle
@@ -230,6 +258,7 @@ export function useChatWebSocket({
         wsRef.current = null;
       }
       clearTimeout(reconnectTimerRef.current);
+      clearTimeout(pongTimeoutRef.current);
       setConnectionState('disconnected');
       hadConnectionRef.current = false;
       retriesRef.current = 0;
@@ -242,6 +271,7 @@ export function useChatWebSocket({
     return () => {
       mountedRef.current = false;
       clearTimeout(reconnectTimerRef.current);
+      clearTimeout(pongTimeoutRef.current);
       if (wsRef.current) {
         wsRef.current.close(1000);
         wsRef.current = null;
