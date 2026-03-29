@@ -77,6 +77,7 @@ async function resolveSessionWorkspace(
     .limit(1);
 
   let workspace = workspaces[0];
+  let lookupStrategy = workspace ? 'chatSessionId' : 'none';
 
   // Strategy 2: Fall back to the session's workspaceId from the ProjectData DO.
   // This handles the case where chatSessionId was not written to D1 (e.g., DO
@@ -101,12 +102,23 @@ async function resolveSessionWorkspace(
         )
         .limit(1);
       workspace = fallbackWorkspaces[0];
+      if (workspace) lookupStrategy = 'sessionWorkspaceId-fallback';
     }
   }
 
   if (!workspace) {
     throw errors.notFound('Workspace');
   }
+
+  console.log(
+    JSON.stringify({
+      event: 'file_proxy.workspace_resolved',
+      sessionId,
+      workspaceId: workspace.id,
+      workspaceStatus: workspace.status,
+      lookupStrategy,
+    })
+  );
 
   // Defensive assertion: workspace must belong to the expected project
   if (workspace.projectId !== projectId) {
@@ -143,7 +155,26 @@ async function proxyToVmAgent(
   queryParams.set('token', token);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/${vmPath}?${queryParams.toString()}`;
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch (fetchErr) {
+    // Network error, DNS failure, or timeout — VM agent is completely unreachable
+    const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+    console.error(
+      JSON.stringify({
+        event: 'file_proxy.fetch_error',
+        workspaceId,
+        vmPath,
+        url: url.replace(/token=[^&]+/, 'token=REDACTED'),
+        error: errMsg,
+      })
+    );
+    throw errors.badRequest(
+      `Workspace agent unreachable: ${errMsg.includes('timeout') || errMsg.includes('abort') ? 'request timed out' : 'connection failed'}`
+    );
+  }
+
   if (!res.ok) {
     const text = await res.text();
     // Log full error server-side for debugging; return sanitized message to client
@@ -152,6 +183,7 @@ async function proxyToVmAgent(
         event: 'file_proxy.vm_agent_error',
         workspaceId,
         vmPath,
+        url: url.replace(/token=[^&]+/, 'token=REDACTED'),
         status: res.status,
         body: text,
       })
@@ -163,8 +195,8 @@ async function proxyToVmAgent(
       clientStatus === 404
         ? 'File or resource not found'
         : clientStatus === 502
-          ? 'Workspace agent unavailable'
-          : 'VM agent request failed'
+          ? `Workspace agent unavailable (${res.status})`
+          : `VM agent error (${res.status}): ${text.substring(0, 200)}`
     );
   }
 
