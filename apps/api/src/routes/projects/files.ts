@@ -85,7 +85,8 @@ async function resolveSessionWorkspace(
   // crash during workspace creation left the link incomplete).
   if (!workspace) {
     const session = await projectDataService.getSession(env, projectId, sessionId);
-    const sessionWorkspaceId = session?.workspaceId as string | undefined;
+    const raw = session?.workspaceId;
+    const sessionWorkspaceId = typeof raw === 'string' && raw.length > 0 ? raw : undefined;
     if (sessionWorkspaceId) {
       const fallbackWorkspaces = await db
         .select({
@@ -112,6 +113,11 @@ async function resolveSessionWorkspace(
     throw errors.notFound('Workspace');
   }
 
+  // Defensive assertion: workspace must belong to the expected project
+  if (workspace.projectId !== projectId) {
+    throw errors.forbidden('Workspace does not belong to this project');
+  }
+
   console.log(
     JSON.stringify({
       event: 'file_proxy.workspace_resolved',
@@ -122,11 +128,6 @@ async function resolveSessionWorkspace(
       lookupStrategy,
     })
   );
-
-  // Defensive assertion: workspace must belong to the expected project
-  if (workspace.projectId !== projectId) {
-    throw errors.forbidden('Workspace does not belong to this project');
-  }
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
     throw errors.badRequest(
@@ -207,9 +208,7 @@ async function proxyToVmAgent(
     if (res.status >= 500) {
       throw errors.internal(`Workspace agent unavailable (${res.status})`);
     }
-    throw errors.badRequest(
-      `VM agent error (${res.status}): ${text.substring(0, 200)}`
-    );
+    throw errors.badRequest('VM agent returned an error');
   }
 
   // Guard against oversized responses
@@ -339,7 +338,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   const rawPath = c.req.query('path');
   if (rawPath) params.set('path', normalizeFileProxyPath(rawPath));
   const staged = c.req.query('staged');
-  if (staged) params.set('staged', staged);
+  if (staged === 'true' || staged === '1') params.set('staged', staged);
 
   return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'git/diff', params);
 });
