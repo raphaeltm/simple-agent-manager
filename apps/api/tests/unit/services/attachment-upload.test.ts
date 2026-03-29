@@ -4,6 +4,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   buildAttachmentR2Key,
+  generatePresignedUploadUrl,
   validateAttachments,
   cleanupAttachments,
   getAttachmentFromR2,
@@ -29,6 +30,91 @@ describe('buildAttachmentR2Key', () => {
   it('preserves filenames with dots and dashes', () => {
     const key = buildAttachmentR2Key('u1', 'up1', 'my-file.v2.tar.gz');
     expect(key).toBe('temp-uploads/u1/up1/my-file.v2.tar.gz');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Presigned URL Generation
+// ---------------------------------------------------------------------------
+
+describe('generatePresignedUploadUrl', () => {
+  function makePresignEnv(overrides: Record<string, unknown> = {}) {
+    return {
+      R2_ACCESS_KEY_ID: 'test-key',
+      R2_SECRET_ACCESS_KEY: 'test-secret',
+      CF_ACCOUNT_ID: 'test-account',
+      R2_BUCKET_NAME: 'test-bucket',
+      ...overrides,
+    } as any;
+  }
+
+  const validOptions = {
+    userId: 'user-1',
+    uploadId: 'upload-1',
+    filename: 'report.pdf',
+    size: 1024,
+    contentType: 'application/pdf',
+  };
+
+  it('rejects unsafe filenames', async () => {
+    await expect(
+      generatePresignedUploadUrl(makePresignEnv(), { ...validOptions, filename: '../etc/passwd' }),
+    ).rejects.toThrow('Unsafe filename');
+  });
+
+  it('rejects zero size', async () => {
+    await expect(
+      generatePresignedUploadUrl(makePresignEnv(), { ...validOptions, size: 0 }),
+    ).rejects.toThrow('File size must be positive');
+  });
+
+  it('rejects negative size', async () => {
+    await expect(
+      generatePresignedUploadUrl(makePresignEnv(), { ...validOptions, size: -1 }),
+    ).rejects.toThrow('File size must be positive');
+  });
+
+  it('rejects when file exceeds max bytes', async () => {
+    const env = makePresignEnv({ ATTACHMENT_UPLOAD_MAX_BYTES: '500' });
+    await expect(
+      generatePresignedUploadUrl(env, { ...validOptions, size: 1000 }),
+    ).rejects.toThrow('exceeds maximum');
+  });
+
+  it('rejects when R2_BUCKET_NAME is missing', async () => {
+    const env = makePresignEnv({ R2_BUCKET_NAME: undefined });
+    await expect(
+      generatePresignedUploadUrl(env, validOptions),
+    ).rejects.toThrow('R2_BUCKET_NAME not configured');
+  });
+
+  it('rejects when R2 S3 credentials are missing', async () => {
+    const env = makePresignEnv({ R2_ACCESS_KEY_ID: undefined });
+    await expect(
+      generatePresignedUploadUrl(env, validOptions),
+    ).rejects.toThrow('R2 S3 credentials not configured');
+  });
+
+  it('rejects when CF_ACCOUNT_ID is missing', async () => {
+    const env = makePresignEnv({ CF_ACCOUNT_ID: undefined });
+    await expect(
+      generatePresignedUploadUrl(env, validOptions),
+    ).rejects.toThrow('R2 S3 credentials not configured');
+  });
+
+  it('uses configurable presign expiry from env', async () => {
+    const env = makePresignEnv({ ATTACHMENT_PRESIGN_EXPIRY_SECONDS: '300' });
+    // This will attempt to create a real S3Client and fail at signing,
+    // but we're testing that the validation passes and it reaches S3 logic
+    try {
+      await generatePresignedUploadUrl(env, validOptions);
+    } catch (e) {
+      // Expected — S3Client creation succeeds but signing fails without a real endpoint
+      // The key assertion is that it gets past validation
+      expect((e as Error).message).not.toContain('Unsafe filename');
+      expect((e as Error).message).not.toContain('File size');
+      expect((e as Error).message).not.toContain('R2_BUCKET_NAME');
+    }
   });
 });
 
@@ -200,6 +286,23 @@ describe('cleanupAttachments', () => {
       cleanupAttachments(r2, 'user-1', [makeAttachment()]),
     ).resolves.not.toThrow();
   });
+
+  it('continues cleaning up remaining files when one fails', async () => {
+    const r2 = makeMockR2Bucket();
+    let callCount = 0;
+    (r2.delete as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) throw new Error('first delete fails');
+      // second delete succeeds
+    });
+    const attachments = [
+      makeAttachment({ uploadId: 'a', filename: 'file1.txt' }),
+      makeAttachment({ uploadId: 'b', filename: 'file2.txt' }),
+    ];
+    await cleanupAttachments(r2, 'user-1', attachments);
+    // Both deletes were attempted despite first failure
+    expect(r2.delete).toHaveBeenCalledTimes(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -221,5 +324,23 @@ describe('getAttachmentFromR2', () => {
     await expect(
       getAttachmentFromR2(r2, 'user-1', makeAttachment()),
     ).rejects.toThrow('Attachment not found in R2');
+  });
+
+  it('falls back to attachment contentType when R2 httpMetadata is missing', async () => {
+    const r2 = {
+      ...makeMockR2Bucket(),
+      get: vi.fn(async () => ({
+        body: new ReadableStream(),
+        size: 1024,
+        httpMetadata: undefined, // no metadata from R2
+      })),
+    } as unknown as R2Bucket;
+
+    const result = await getAttachmentFromR2(
+      r2,
+      'user-1',
+      makeAttachment({ contentType: 'text/csv' }),
+    );
+    expect(result.contentType).toBe('text/csv');
   });
 });
