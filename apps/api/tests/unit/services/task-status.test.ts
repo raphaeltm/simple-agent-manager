@@ -495,8 +495,8 @@ describe('edge cases', () => {
     expect(TASK_STATUSES).toHaveLength(8);
   });
 
-  it('TASK_EXECUTION_STEPS has exactly 8 steps', () => {
-    expect(TASK_EXECUTION_STEPS).toHaveLength(8);
+  it('TASK_EXECUTION_STEPS has exactly 9 steps', () => {
+    expect(TASK_EXECUTION_STEPS).toHaveLength(9);
   });
 
   it('execution steps include awaiting_followup', () => {

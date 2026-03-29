@@ -5,7 +5,7 @@
  * This is the bridge between HTTP routes and the DO. Routes should call
  * these functions instead of accessing the DO binding directly.
  */
-import type { VMSize, VMLocation, WorkspaceProfile, CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
+import type { VMSize, VMLocation, WorkspaceProfile, CredentialProvider, TaskMode, TaskAttachment } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import type { StartTaskInput, TaskRunner } from '../durable-objects/task-runner';
 import { log } from '../lib/logger';
@@ -56,6 +56,8 @@ export async function startTaskRunnerDO(
     model?: string | null;
     /** Permission mode override from agent profile. Null = use agent default. */
     permissionMode?: string | null;
+    /** File attachments uploaded to R2 before task submission. */
+    attachments?: TaskAttachment[] | null;
   },
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
@@ -85,6 +87,7 @@ export async function startTaskRunnerDO(
       taskMode: input.taskMode ?? 'task',
       model: input.model ?? null,
       permissionMode: input.permissionMode ?? null,
+      attachments: input.attachments ?? null,
     },
   };
 

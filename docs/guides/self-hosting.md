@@ -323,9 +323,34 @@ npx wrangler d1 create workspaces
 npx wrangler kv:namespace create sessions
 # Note the namespace id from the output!
 
-# Create R2 Bucket for VM Agent binaries
+# Create R2 Bucket for VM Agent binaries and task attachments
 npx wrangler r2 bucket create workspaces-assets
 ```
+
+#### R2 CORS Configuration (Required for Task Attachments)
+
+If you want to enable file attachments on task submissions, configure CORS on the R2 bucket to allow direct browser uploads via presigned PUT URLs:
+
+```bash
+# Create a cors-rules.json file:
+cat > cors-rules.json << 'CORS'
+[
+  {
+    "AllowedOrigins": ["https://app.YOUR_DOMAIN"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["Content-Type", "Content-Length"],
+    "MaxAgeSeconds": 3600
+  }
+]
+CORS
+
+# Apply CORS rules to the bucket (via S3-compatible API or Cloudflare Dashboard)
+# Dashboard: R2 → workspaces-assets → Settings → CORS Policy
+```
+
+Replace `YOUR_DOMAIN` with your `BASE_DOMAIN` value (e.g., `https://app.simple-agent-manager.org`).
+
+You also need R2 S3-compatible API credentials for presigned URL generation. Create these in the Cloudflare Dashboard under R2 → Manage R2 API Tokens, with **Object Read & Write** permissions scoped to the `workspaces-assets` bucket. Set `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` as Worker secrets.
 
 **Save these IDs** from the command outputs:
 - D1 Database ID (e.g., `abc123...`)

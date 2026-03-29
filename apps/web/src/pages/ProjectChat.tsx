@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight, X, Lightbulb } from 'lucide-react';
+import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight, X, Lightbulb, Paperclip } from 'lucide-react';
+import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import { formatFileSize } from '../lib/file-utils';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton, SlashCommandPalette } from '@simple-agent-manager/acp-client';
 import type { SlashCommandPaletteHandle, SlashCommand } from '@simple-agent-manager/acp-client';
@@ -26,8 +28,10 @@ import {
   getProjectTask,
   getTranscribeApiUrl,
   closeConversationTask,
+  requestAttachmentUpload,
+  uploadAttachmentToR2,
 } from '../lib/api';
-import type { ChatSessionResponse } from '../lib/api';
+import type { ChatSessionResponse, TaskAttachmentRef } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 import { stripMarkdown } from '../lib/text-utils';
 import { ForkDialog } from '../components/project/ForkDialog';
@@ -172,6 +176,83 @@ export function ProjectChat() {
 
   // Slash command cache for pre-session autocomplete
   const { commands: slashCommands } = useAvailableCommands(projectId);
+
+  // File attachment state for task submission
+  interface AttachmentUploadState {
+    file: File;
+    uploadId: string | null;
+    progress: number;
+    status: 'pending' | 'uploading' | 'complete' | 'error';
+    error?: string;
+    ref?: TaskAttachmentRef;
+  }
+  const [chatAttachments, setChatAttachments] = useState<AttachmentUploadState[]>([]);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
+  const chatUploading = chatAttachments.some((a) => a.status === 'uploading' || a.status === 'pending');
+
+  const handleChatFileUpload = useCallback(async (file: File, index: number) => {
+    try {
+      const presigned = await requestAttachmentUpload(
+        projectId, file.name, file.size, file.type || 'application/octet-stream',
+      );
+      setChatAttachments((prev) =>
+        prev.map((a, i) => i === index ? { ...a, uploadId: presigned.uploadId, status: 'uploading' as const } : a),
+      );
+      await uploadAttachmentToR2(presigned.uploadUrl, file, (loaded, total) => {
+        const progress = Math.round((loaded / total) * 100);
+        setChatAttachments((prev) => prev.map((a, i) => i === index ? { ...a, progress } : a));
+      });
+      const ref: TaskAttachmentRef = {
+        uploadId: presigned.uploadId, filename: file.name,
+        size: file.size, contentType: file.type || 'application/octet-stream',
+      };
+      setChatAttachments((prev) =>
+        prev.map((a, i) => i === index ? { ...a, status: 'complete' as const, progress: 100, ref } : a),
+      );
+    } catch (err) {
+      setChatAttachments((prev) =>
+        prev.map((a, i) => i === index ? { ...a, status: 'error' as const, error: err instanceof Error ? err.message : 'Upload failed' } : a),
+      );
+    }
+  }, [projectId]);
+
+  const handleChatFilesSelected = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const maxFiles = ATTACHMENT_DEFAULTS.MAX_FILES;
+    const maxBytes = ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES;
+    const batchMax = ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES;
+    const newFiles: AttachmentUploadState[] = [];
+    const currentTotal = chatAttachments.reduce((sum, a) => sum + a.file.size, 0);
+    let runningTotal = currentTotal;
+    for (const file of Array.from(files)) {
+      if (chatAttachments.length + newFiles.length >= maxFiles) {
+        setSubmitError(`Maximum ${maxFiles} files allowed`);
+        break;
+      }
+      if (file.size > maxBytes) {
+        setSubmitError(`${file.name} exceeds ${formatFileSize(maxBytes)} limit`);
+        continue;
+      }
+      if (!SAFE_FILENAME_REGEX.test(file.name)) {
+        setSubmitError(`${file.name} has invalid characters`);
+        continue;
+      }
+      if (runningTotal + file.size > batchMax) {
+        setSubmitError(`Total size would exceed ${formatFileSize(batchMax)} limit`);
+        break;
+      }
+      runningTotal += file.size;
+      newFiles.push({ file, uploadId: null, progress: 0, status: 'pending' });
+    }
+    if (newFiles.length === 0) return;
+    const startIndex = chatAttachments.length;
+    setChatAttachments((prev) => [...prev, ...newFiles]);
+    for (let i = 0; i < newFiles.length; i++) { void handleChatFileUpload(newFiles[i]!.file, startIndex + i); }
+  }, [chatAttachments, handleChatFileUpload]);
+
+  const handleRemoveChatAttachment = useCallback((index: number) => {
+    setChatAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   // Workspace profile selection — defaults to project setting or platform default
   const [selectedWorkspaceProfile, setSelectedWorkspaceProfile] = useState<WorkspaceProfile>(
@@ -420,19 +501,35 @@ export function ProjectChat() {
       return;
     }
 
+    if (chatUploading) {
+      setSubmitError('Please wait for file uploads to complete');
+      return;
+    }
+
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const result = await submitTask(projectId, selectedProfileId
+      // Collect completed attachment refs
+      const attachmentRefs = chatAttachments
+        .filter((a) => a.status === 'complete' && a.ref)
+        .map((a) => a.ref!);
+
+      const baseRequest = selectedProfileId
         ? { message: trimmed, agentProfileId: selectedProfileId }
         : {
             message: trimmed,
             ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
             workspaceProfile: selectedWorkspaceProfile,
             taskMode: selectedTaskMode,
-          },
+          };
+
+      const result = await submitTask(projectId, attachmentRefs.length > 0
+        ? { ...baseRequest, attachments: attachmentRefs }
+        : baseRequest,
       );
       setMessage('');
+      setChatAttachments([]);
+      if (chatFileInputRef.current) chatFileInputRef.current.value = '';
       setProvisioning({
         taskId: result.taskId,
         sessionId: result.sessionId,
@@ -762,6 +859,11 @@ export function ProjectChat() {
               selectedTaskMode={selectedTaskMode}
               onTaskModeChange={(mode: TaskMode) => { userSetTaskModeRef.current = true; setSelectedTaskMode(mode); }}
               slashCommands={slashCommands}
+              attachments={chatAttachments}
+              onFilesSelected={handleChatFilesSelected}
+              onRemoveAttachment={handleRemoveChatAttachment}
+              fileInputRef={chatFileInputRef}
+              uploading={chatUploading}
             />
           </div>
         ) : (
@@ -1182,6 +1284,14 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
 // Chat input (preserved)
 // ---------------------------------------------------------------------------
 
+interface ChatAttachmentDisplay {
+  file: File;
+  uploadId: string | null;
+  progress: number;
+  status: 'pending' | 'uploading' | 'complete' | 'error';
+  error?: string;
+}
+
 function ChatInput({
   value,
   onChange,
@@ -1202,6 +1312,11 @@ function ChatInput({
   selectedTaskMode,
   onTaskModeChange,
   slashCommands,
+  attachments,
+  onFilesSelected,
+  onRemoveAttachment,
+  fileInputRef,
+  uploading,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -1222,6 +1337,11 @@ function ChatInput({
   selectedTaskMode: TaskMode;
   onTaskModeChange: (mode: TaskMode) => void;
   slashCommands?: SlashCommand[];
+  attachments?: ChatAttachmentDisplay[];
+  onFilesSelected?: (files: FileList | null) => void;
+  onRemoveAttachment?: (index: number) => void;
+  fileInputRef?: React.RefObject<HTMLInputElement | null>;
+  uploading?: boolean;
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
@@ -1457,7 +1577,59 @@ function ChatInput({
           )}
         </div>
       )}
+      {/* Attachment chips */}
+      {attachments && attachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {attachments.map((att, index) => (
+            <div
+              key={`${att.file.name}-${index}`}
+              className="relative flex items-center gap-1.5 py-1 px-2 rounded-sm bg-page border border-border-default text-xs max-w-[220px] overflow-hidden"
+            >
+              <span className="truncate text-fg-primary" title={att.file.name}>{att.file.name}</span>
+              <span className="text-fg-muted shrink-0">
+                {att.status === 'uploading' ? `${att.progress}%` : formatFileSize(att.file.size)}
+              </span>
+              {att.status === 'error' && <span className="text-danger shrink-0" title={att.error}>!</span>}
+              {onRemoveAttachment && (
+                <button
+                  type="button"
+                  onClick={() => onRemoveAttachment(index)}
+                  className="shrink-0 p-0.5 bg-transparent border-none text-fg-muted hover:text-fg-primary cursor-pointer"
+                  aria-label={`Remove ${att.file.name}`}
+                >
+                  <X size={12} />
+                </button>
+              )}
+              {att.status === 'uploading' && (
+                <div className="absolute bottom-0 left-0 h-0.5 bg-accent-emphasis rounded-full transition-all" style={{ width: `${att.progress}%` }} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2 items-end">
+        {/* Attachment button */}
+        {onFilesSelected && (
+          <>
+            <input
+              ref={fileInputRef as React.RefObject<HTMLInputElement>}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => onFilesSelected(e.target.files)}
+            />
+            <button
+              type="button"
+              onClick={() => (fileInputRef as React.RefObject<HTMLInputElement>)?.current?.click()}
+              disabled={submitting || uploading}
+              className="shrink-0 p-2 bg-transparent border border-border-default rounded-md text-fg-muted hover:text-fg-primary hover:border-fg-muted cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Attach files"
+              title="Attach files to this task"
+            >
+              <Paperclip size={18} />
+            </button>
+          </>
+        )}
         <textarea
           ref={inputRef}
           value={value}
@@ -1488,12 +1660,12 @@ function ChatInput({
         <button
           type="button"
           onClick={onSubmit}
-          disabled={submitting || !value.trim()}
+          disabled={submitting || !value.trim() || uploading}
           className="px-3 py-2 border-none rounded-md text-base font-medium whitespace-nowrap"
           style={{
-            backgroundColor: submitting || !value.trim() ? 'var(--sam-color-bg-inset)' : 'var(--sam-color-accent-primary)',
-            color: submitting || !value.trim() ? 'var(--sam-color-fg-muted)' : 'white',
-            cursor: submitting || !value.trim() ? 'default' : 'pointer',
+            backgroundColor: submitting || !value.trim() || uploading ? 'var(--sam-color-bg-inset)' : 'var(--sam-color-accent-primary)',
+            color: submitting || !value.trim() || uploading ? 'var(--sam-color-fg-muted)' : 'white',
+            cursor: submitting || !value.trim() || uploading ? 'default' : 'pointer',
           }}
         >
           {submitting ? 'Sending...' : 'Send'}

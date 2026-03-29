@@ -31,7 +31,7 @@ describe('Execution step labels (shared types)', () => {
 
   it('order indices are sequential starting from 0', () => {
     const values = TASK_EXECUTION_STEPS.map((s) => EXECUTION_STEP_ORDER[s]);
-    expect(values).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(values).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
   it('isTaskExecutionStep validates known steps', () => {
