@@ -1,6 +1,7 @@
 # GH_TOKEN Empty in SAM Workspaces
 
 **Created**: 2026-02-23
+**Updated**: 2026-03-29
 **Priority**: High
 **Classification**: `cross-component-change`, `business-logic-change`
 
@@ -8,39 +9,24 @@
 
 The `GH_TOKEN` environment variable is empty in SAM workspaces despite the GitHub token being available — the git credential helper at `/usr/local/bin/git-credential-sam` successfully fetches it on-demand from the VM agent's `/git-credential` endpoint, proving the token exists on the host side.
 
-Recent PR #158 (commit `87a94ad`) attempted to fix this by:
-1. Renaming `GITHUB_TOKEN` to `GH_TOKEN` (gh CLI preference)
-2. Adding `-l` flag to bash for login shell (sources `/etc/profile.d/`)
-3. Adding `ReadContainerEnvFiles()` to inject env vars into ACP sessions
+PR #179 added dynamic fallback infrastructure (shell-level credential helper for PTY sessions, `GitTokenFetcher` for ACP sessions), but a remaining bug caused the `GitTokenFetcher` to use the **node-level** workspace ID instead of the **per-session** workspace ID.
 
 ## Root Cause Analysis
 
-The suspected issue is that `ensureSAMEnvironment` in `bootstrap.go` is called with an empty `githubToken` argument because the token isn't yet available at bootstrap time.
+### Original issue (PR #179 — resolved)
+Token unavailable at bootstrap time → empty GH_TOKEN in env files. Fixed by adding dynamic fallback in `/etc/profile.d/sam-env.sh` and `GitTokenFetcher` in `session_host.go`.
 
-### Call chain:
+### Remaining issue (this PR)
+`GitTokenFetcher` is wired at the **server level** (`server.go:377`) as `s.fetchGitToken`, which always uses `s.config.WorkspaceID` (the node-level workspace ID). On multi-workspace nodes, this is wrong — each ACP session targets a different workspace but the fetcher always requests the token for the initial/node-level workspace.
 
-**Node-mode workspace provisioning** (primary path for multi-workspace nodes):
-1. `workspace_provisioning.go:84` — `gitToken, err := s.fetchGitTokenForWorkspace(provisionCtx, runtime.ID, callbackToken)`
-2. `git_credential.go:48-68` — `fetchGitTokenForWorkspace()` makes HTTP POST to `/api/workspaces/{workspaceId}/git-token`
-3. `workspaces.ts:1799-1823` — API endpoint fetches GitHub installation token
-4. `workspace_provisioning.go:103` — Token passed to `PrepareWorkspace()` as `bootstrap.ProvisionState{GitHubToken: gitToken}`
-5. `bootstrap.go:169` — `ensureSAMEnvironment(ctx, cfg, state.GitHubToken)` writes env files
+**Root cause chain:**
+1. `server.go:377`: `s.acpConfig.GitTokenFetcher = s.fetchGitToken` — binds server-level config
+2. `git_credential.go:44-46`: `fetchGitToken()` calls `fetchGitTokenForWorkspace(ctx, s.config.WorkspaceID, s.config.CallbackToken)` — hardcoded to node config
+3. `agent_ws.go:225`: `cfg := s.acpConfig` — copies the wrong fetcher to each session
+4. `session_host.go:853-854`: Session calls `GitTokenFetcher` which hits the wrong workspace's `/git-token` endpoint → 404 or wrong token
 
-**Where it can fail:**
-- `git_credential.go:84-90`: If `/git-token` endpoint fails, code logs warning and **continues with empty token** — does not fail provisioning
-- `workspaces.ts:1806-1809`: If workspace has no `installationId`, returns 404
-- The token fetch happens during provisioning, which may race with other setup
-
-### Environment file generation:
-- `bootstrap.go:1610-1620`: `buildSAMEnvScript()` — if `githubToken` is empty, the `GH_TOKEN` entry is **skipped entirely** (empty values are omitted)
-- Files written: `/etc/profile.d/sam-env.sh` and `/etc/sam/env`
-
-## Plan
-
-1. Trace why the token fetch fails during provisioning — add better error logging
-2. Consider making the git token fetch retry with backoff
-3. If token unavailable at bootstrap, implement a mechanism to update env files when token becomes available
-4. Alternatively, have the env script source the token dynamically via the credential helper
+### Fix
+Override `GitTokenFetcher` per-session in `getOrCreateSessionHost()` with a closure that captures the correct workspace ID. The closure calls `fetchGitTokenForWorkspace(ctx, workspaceID, "")` which falls back to the per-workspace callback token via `callbackTokenForWorkspace()`.
 
 ## Detailed Tasklist
 
@@ -53,15 +39,26 @@ The suspected issue is that `ensureSAMEnvironment` in `bootstrap.go` is called w
 - [x] For ACP sessions: add `GitTokenFetcher` to GatewayConfig, inject fresh GH_TOKEN in session_host.go
 - [x] Separate shell script (with dynamic commands) from static env file (/etc/sam/env)
 - [x] Update tests for new behavior (dynamic fallback block always present)
+- [x] Fix: Override GitTokenFetcher per-session with correct workspace ID closure
+- [x] Fix: Upgrade GH_TOKEN fetch failure logging from DEBUG to WARN
+- [x] Add regression test: TestPerSessionGitTokenFetcherUsesCorrectWorkspaceID
+- [x] Run Go tests: `cd packages/vm-agent && go test ./...`
 - [ ] Test that GH_TOKEN is available in PTY sessions after fix (requires deployed workspace)
 - [ ] Test that GH_TOKEN is available in ACP agent sessions after fix (requires deployed workspace)
-- [x] Run Go tests: `cd packages/vm-agent && go test ./...`
 
-## Files to Modify
+## Files Modified
 
 | File | Change |
 |------|--------|
-| `packages/vm-agent/internal/server/workspace_provisioning.go` | Improve token fetch error handling/retry |
-| `packages/vm-agent/internal/server/git_credential.go` | Add retry logic to token fetch |
-| `packages/vm-agent/internal/bootstrap/bootstrap.go` | Possibly make env script dynamically source token |
-| `apps/api/src/routes/workspaces.ts` | Verify /git-token endpoint correctness |
+| `packages/vm-agent/internal/server/agent_ws.go` | Override GitTokenFetcher per-session with correct workspace ID |
+| `packages/vm-agent/internal/server/server.go` | Clarify server-level fetcher is a default, overridden per-session |
+| `packages/vm-agent/internal/acp/session_host.go` | Upgrade error logging from DEBUG to WARN, add success info log |
+| `packages/vm-agent/internal/server/git_credential_test.go` | Add regression test for per-session workspace ID |
+
+## Acceptance Criteria
+
+- [ ] Per-session GitTokenFetcher uses the session's workspace ID, not the node-level ID
+- [ ] GH_TOKEN fetch failures are logged at WARN level (visible in production)
+- [ ] Successful GH_TOKEN injection is logged at INFO level
+- [ ] Regression test verifies correct workspace ID is used
+- [ ] Go tests pass

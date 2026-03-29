@@ -373,7 +373,9 @@ func New(cfg *config.Config) (*Server, error) {
 		done:                make(chan struct{}),
 	}
 
-	// Wire the git token fetcher now that the server exists.
+	// Wire a default git token fetcher using the node-level workspace ID.
+	// This is overridden per-session in getOrCreateSessionHost() with a
+	// closure that uses the correct per-workspace ID and callback token.
 	s.acpConfig.GitTokenFetcher = s.fetchGitToken
 
 	// Wire task completion callback now that server and workspace runtime exist.

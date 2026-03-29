@@ -107,6 +107,63 @@ func TestHandleGitCredentialControlPlaneFailure(t *testing.T) {
 	}
 }
 
+// TestPerSessionGitTokenFetcherUsesCorrectWorkspaceID verifies that a
+// per-session closure built from fetchGitTokenForWorkspace hits the correct
+// workspace's git-token endpoint rather than the node-level s.config.WorkspaceID.
+// This is the regression test for the GH_TOKEN-empty-in-workspaces bug where
+// multi-workspace nodes used the wrong workspace ID.
+func TestPerSessionGitTokenFetcherUsesCorrectWorkspaceID(t *testing.T) {
+	t.Parallel()
+
+	var requestedPath string
+	var requestedAuth string
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		requestedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"ghs_session_token","expiresAt":"2026-01-01T00:00:00Z"}`))
+	}))
+	defer controlPlane.Close()
+
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: controlPlane.URL,
+			// Node-level workspace ID — should NOT be used by per-session fetcher.
+			WorkspaceID:   "ws-node-level",
+			CallbackToken: "node-callback-token",
+		},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-session-123": {
+				ID:            "ws-session-123",
+				CallbackToken: "session-callback-token",
+			},
+		},
+	}
+
+	// Build the same per-session closure that getOrCreateSessionHost creates.
+	sessionWorkspaceID := "ws-session-123"
+	fetcher := func() (string, error) {
+		return s.fetchGitTokenForWorkspace(t.Context(), sessionWorkspaceID, "")
+	}
+
+	token, err := fetcher()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if token != "ghs_session_token" {
+		t.Fatalf("expected ghs_session_token, got %q", token)
+	}
+	// The request must target the SESSION workspace, not the node-level one.
+	wantPath := "/api/workspaces/ws-session-123/git-token"
+	if requestedPath != wantPath {
+		t.Fatalf("fetcher hit wrong workspace path:\n  got:  %s\n  want: %s", requestedPath, wantPath)
+	}
+	// It should use the workspace-scoped callback token, not the node-level one.
+	if requestedAuth != "Bearer session-callback-token" {
+		t.Fatalf("fetcher used wrong callback token:\n  got:  %s\n  want: Bearer session-callback-token", requestedAuth)
+	}
+}
+
 func TestHandleGitCredentialUsesWorkspaceScopedTokenAndWorkspaceID(t *testing.T) {
 	t.Parallel()
 

@@ -853,8 +853,10 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	if h.config.GitTokenFetcher != nil && !hasEnvVar(envVars, "GH_TOKEN") {
 		if token, err := h.config.GitTokenFetcher(ctx); err == nil && token != "" {
 			envVars = append(envVars, "GH_TOKEN="+token)
+			slog.Info("Injected GH_TOKEN via runtime fetch", "workspaceId", h.config.WorkspaceID)
 		} else if err != nil {
-			slog.Debug("Failed to fetch GH_TOKEN for ACP session", "error", err)
+			slog.Warn("Failed to fetch GH_TOKEN for ACP session — agent will run without GitHub access",
+				"workspaceId", h.config.WorkspaceID, "error", err)
 		}
 	}
 

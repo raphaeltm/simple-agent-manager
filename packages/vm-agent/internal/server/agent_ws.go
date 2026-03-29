@@ -226,6 +226,14 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.WorkspaceID = workspaceID
 	cfg.SessionID = sessionID
 
+	// Override GitTokenFetcher per-session so it uses the correct workspace ID
+	// and callback token. The server-level fetchGitToken uses s.config.WorkspaceID
+	// (the node-level ID), which is wrong for multi-workspace nodes where each
+	// session targets a different workspace.
+	cfg.GitTokenFetcher = func(ctx context.Context) (string, error) {
+		return s.fetchGitTokenForWorkspace(ctx, workspaceID, "")
+	}
+
 	// Use per-workspace message reporter to prevent cross-workspace contamination.
 	// Lock ordering: sessionHostMu → messageReportersMu → Reporter.mu
 	// and: callbackTokenMu → messageReportersMu → Reporter.mu
