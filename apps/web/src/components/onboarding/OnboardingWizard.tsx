@@ -87,8 +87,9 @@ export function OnboardingWizard() {
 
   const advanceStep = (from: WizardStep) => {
     const idx = STEPS.findIndex((s) => s.id === from);
-    if (idx < STEPS.length - 1) {
-      setCurrentStep(STEPS[idx + 1].id);
+    const next = STEPS[idx + 1];
+    if (next) {
+      setCurrentStep(next.id);
     }
     // Refresh status after credential steps
     if (from !== 'how-it-works') {
