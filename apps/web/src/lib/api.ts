@@ -2022,3 +2022,50 @@ export async function downloadSessionFile(
   const fileName = match?.[1] ?? filePath.split('/').pop() ?? 'download';
   return { blob, fileName };
 }
+
+// ---------------------------------------------------------------------------
+// Smoke Test Auth Tokens
+// ---------------------------------------------------------------------------
+
+export interface SmokeTestStatusResponse {
+  enabled: boolean;
+}
+
+export interface SmokeTestTokenResponse {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface CreateSmokeTestTokenResponse {
+  id: string;
+  token: string;
+  name: string;
+}
+
+/** Check if smoke test token auth is enabled in this environment */
+export async function getSmokeTestStatus(): Promise<SmokeTestStatusResponse> {
+  return request<SmokeTestStatusResponse>('/api/auth/smoke-test-status');
+}
+
+/** List all smoke test tokens for the current user */
+export async function listSmokeTestTokens(): Promise<SmokeTestTokenResponse[]> {
+  return request<SmokeTestTokenResponse[]>('/api/auth/smoke-test-tokens');
+}
+
+/** Create a new smoke test token */
+export async function createSmokeTestToken(name: string): Promise<CreateSmokeTestTokenResponse> {
+  return request<CreateSmokeTestTokenResponse>('/api/auth/smoke-test-tokens', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** Revoke a smoke test token */
+export async function revokeSmokeTestToken(id: string): Promise<void> {
+  await request<{ success: boolean }>(`/api/auth/smoke-test-tokens/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
