@@ -3,9 +3,9 @@ import { type BrowserContext, type Page, expect } from '@playwright/test';
 /**
  * Authenticate a Playwright browser context using a smoke test token.
  *
- * POSTs to /api/auth/token-login with the provided token,
- * extracts the session cookie from the Set-Cookie header,
- * and injects it into the browser context for the app domain.
+ * Uses a page-level fetch to call the token-login endpoint, which lets the
+ * browser handle Set-Cookie headers natively (including domain scoping).
+ * Then navigates to the app URL.
  *
  * Returns the authenticated page ready for use.
  */
@@ -28,66 +28,44 @@ export async function loginWithToken(
     );
   }
 
-  // Call the token-login endpoint
-  const response = await context.request.post(`${apiUrl}/api/auth/token-login`, {
-    data: { token },
-    headers: { 'Content-Type': 'application/json' },
-  });
+  // Open a page on the API domain first — this ensures the browser
+  // processes Set-Cookie headers for the correct domain.
+  const page = await context.newPage();
 
-  expect(response.ok(), `Token login failed: ${response.status()} ${await response.text()}`).toBe(
-    true
+  // Navigate to the API domain (health endpoint is lightweight)
+  await page.goto(`${apiUrl}/health`, { waitUntil: 'domcontentloaded' });
+
+  // Use the browser's fetch to call token-login. This ensures:
+  // 1. The browser sees the Set-Cookie header directly
+  // 2. Cookie domain scoping works correctly
+  // 3. No manual cookie extraction/injection needed
+  const loginResult = await page.evaluate(
+    async ({ apiUrl, token }) => {
+      const res = await fetch(`${apiUrl}/api/auth/token-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+        credentials: 'include',
+      });
+
+      const body = await res.json();
+      return {
+        ok: res.ok,
+        status: res.status,
+        body,
+      };
+    },
+    { apiUrl, token }
   );
 
-  const body = await response.json();
-  expect(body.success).toBe(true);
+  expect(
+    loginResult.ok,
+    `Token login failed: ${loginResult.status} ${JSON.stringify(loginResult.body)}`
+  ).toBe(true);
+  expect(loginResult.body.success).toBe(true);
 
-  // Get the session token. Try multiple sources for robustness:
-  // 1. Response body (most reliable — our endpoint includes it)
-  // 2. Set-Cookie header
-  // 3. Playwright cookie jar
-  let sessionTokenValue: string | undefined = body.sessionToken;
-
-  if (!sessionTokenValue) {
-    const setCookieHeader = response.headers()['set-cookie'] || '';
-    const sessionTokenMatch = setCookieHeader.match(/better-auth\.session_token=([^;]+)/);
-    sessionTokenValue = sessionTokenMatch?.[1];
-  }
-
-  if (!sessionTokenValue) {
-    const cookies = await context.cookies(apiUrl);
-    const sessionCookie = cookies.find((c) => c.name === 'better-auth.session_token');
-    sessionTokenValue = sessionCookie?.value;
-  }
-
-  if (!sessionTokenValue) {
-    throw new Error(
-      'Token login succeeded but no session cookie was returned. ' +
-        `Set-Cookie header: ${setCookieHeader ? setCookieHeader.substring(0, 100) : '(empty)'}`
-    );
-  }
-
-  // Extract the base domain for cookie sharing
-  // e.g., from "api.sammy.party" we need ".sammy.party"
-  const apiHostname = new URL(apiUrl).hostname;
-  const parts = apiHostname.split('.');
-  const baseDomain = parts.length >= 2 ? `.${parts.slice(-2).join('.')}` : apiHostname;
-
-  // Set the session cookie for the base domain so both app and API subdomains can use it
-  await context.addCookies([
-    {
-      name: 'better-auth.session_token',
-      value: sessionTokenValue,
-      domain: baseDomain,
-      path: '/',
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-    },
-  ]);
-
-  // Create a page and navigate to the app
-  const page = await context.newPage();
-  await page.goto(appUrl);
+  // Now navigate to the app — the browser already has the session cookie
+  await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
 
   return page;
 }
