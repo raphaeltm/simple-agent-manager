@@ -16,56 +16,49 @@ test.describe('Auth Debug', () => {
 
     console.log(`[DEBUG] token-login status: ${response.status()}`);
     const body = await response.json();
-    console.log(`[DEBUG] token-login body keys: ${Object.keys(body)}`);
+    console.log(`[DEBUG] success: ${body.success}, has sessionToken: ${!!body.sessionToken}`);
 
     const setCookieHeader = response.headers()['set-cookie'] || '';
-    console.log(`[DEBUG] Set-Cookie: ${setCookieHeader.substring(0, 200)}`);
+    console.log(`[DEBUG] Set-Cookie: ${setCookieHeader.substring(0, 300)}`);
 
     expect(response.ok()).toBe(true);
 
     // Step 2: Extract signed cookie value
     const cookieMatch = setCookieHeader.match(/better-auth\.session_token=([^;]+)/);
-    expect(cookieMatch, 'No session cookie in Set-Cookie header').toBeTruthy();
+    expect(cookieMatch, 'No session cookie in Set-Cookie').toBeTruthy();
     const signedValue = decodeURIComponent(cookieMatch![1]);
-    console.log(`[DEBUG] Signed cookie value (first 50): ${signedValue.substring(0, 50)}...`);
+    console.log(`[DEBUG] Signed cookie (decoded, first 80): ${signedValue.substring(0, 80)}`);
+    console.log(`[DEBUG] Signed cookie contains dot: ${signedValue.includes('.')}`);
+    console.log(`[DEBUG] Parts: ${signedValue.split('.').length}`);
 
-    // Step 3: Inject signed cookie into browser context
-    await context.addCookies([
-      {
-        name: 'better-auth.session_token',
-        value: signedValue,
-        domain: '.sammy.party',
-        path: '/',
-        httpOnly: true,
-        secure: true,
-        sameSite: 'None',
+    // Step 3: Check get-session with the context.request cookie jar
+    // (context.request DOES capture Set-Cookie cookies)
+    const sessionRes = await context.request.get(`${API_URL}/api/auth/get-session`);
+    console.log(`[DEBUG] get-session (via context.request) status: ${sessionRes.status()}`);
+    const sessionText = await sessionRes.text();
+    console.log(`[DEBUG] get-session body: ${sessionText.substring(0, 500)}`);
+
+    // Step 4: Try calling get-session with explicit cookie header
+    const sessionRes2 = await context.request.get(`${API_URL}/api/auth/get-session`, {
+      headers: {
+        Cookie: `better-auth.session_token=${encodeURIComponent(signedValue)}`,
       },
-    ]);
-
-    // Step 4: Verify cookie is set
-    const cookies = await context.cookies(APP_URL);
-    console.log(`[DEBUG] Cookies for app: ${JSON.stringify(cookies.map((c) => ({ name: c.name, value: c.value.substring(0, 30) + '...' })))}`);
-
-    // Step 5: Open page and capture ALL network requests
-    const page = await context.newPage();
-    const allRequests: string[] = [];
-    page.on('request', (req) => {
-      allRequests.push(`${req.method()} ${req.url()}`);
     });
-    page.on('response', (res) => {
-      allRequests.push(`  → ${res.status()} ${res.url()}`);
+    console.log(`[DEBUG] get-session (explicit cookie) status: ${sessionRes2.status()}`);
+    const sessionText2 = await sessionRes2.text();
+    console.log(`[DEBUG] get-session (explicit cookie) body: ${sessionText2.substring(0, 500)}`);
+
+    // Step 5: Try with raw unsigned token
+    const sessionRes3 = await context.request.get(`${API_URL}/api/auth/get-session`, {
+      headers: {
+        Cookie: `better-auth.session_token=${body.sessionToken}`,
+      },
     });
+    console.log(`[DEBUG] get-session (raw unsigned) status: ${sessionRes3.status()}`);
+    const sessionText3 = await sessionRes3.text();
+    console.log(`[DEBUG] get-session (raw unsigned) body: ${sessionText3.substring(0, 500)}`);
 
-    console.log(`[DEBUG] Navigating to ${APP_URL}...`);
-    await page.goto(APP_URL, { waitUntil: 'networkidle', timeout: 15_000 });
-
-    console.log(`[DEBUG] Final URL: ${page.url()}`);
-    console.log(`[DEBUG] All network requests (${allRequests.length}):\n${allRequests.join('\n')}`);
-
-    const pageText = await page.textContent('body');
-    console.log(`[DEBUG] Page text (first 300): ${pageText?.substring(0, 300)}`);
-
-    // The test passes regardless — we just want the debug output
-    expect(true).toBe(true);
+    // Step 6: Check if there is a user-status issue
+    console.log(`[DEBUG] User from token-login: ${JSON.stringify(body.user)}`);
   });
 });
