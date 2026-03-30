@@ -35,18 +35,18 @@ Add a deployment step that configures R2 bucket CORS using the S3-compatible `Pu
 ## Implementation Checklist
 
 ### Phase A: CORS Configuration Script
-- [ ] A1. Create `scripts/deploy/configure-r2-cors.sh` that uses `aws s3api put-bucket-cors` (or curl to S3 API) to set CORS rules on the R2 bucket
-- [ ] A2. CORS rules: allow PUT from `https://app.${BASE_DOMAIN}`, allow Content-Type + Content-Length headers
-- [ ] A3. Add the script to `deploy-reusable.yml` after Pulumi and before Worker deployment
+- [x] A1. Create `scripts/deploy/configure-r2-cors.ts` using AWS SDK PutBucketCors + shell wrapper
+- [x] A2. CORS rules: allow PUT from `https://app.${BASE_DOMAIN}`, allow Content-Type + Content-Length headers
+- [x] A3. Add the script to `deploy-reusable.yml` after sync-wrangler-config step
 
 ### Phase B: Deployment Workflow Integration
-- [ ] B1. Add R2 CORS configuration step to `.github/workflows/deploy-reusable.yml`
-- [ ] B2. Pass required env vars: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CF_ACCOUNT_ID, R2_BUCKET_NAME, BASE_DOMAIN
-- [ ] B3. Make step idempotent (safe to run on every deploy)
+- [x] B1. Add R2 CORS configuration step to `.github/workflows/deploy-reusable.yml`
+- [x] B2. Pass required env vars: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CF_ACCOUNT_ID, R2_BUCKET_NAME, BASE_DOMAIN
+- [x] B3. Step is idempotent (PutBucketCors replaces existing rules on every deploy)
 
 ### Phase C: Postmortem
-- [ ] C1. Write postmortem at `docs/notes/2026-03-30-r2-cors-upload-failure-postmortem.md`
-- [ ] C2. Add process rule to prevent this class of failure
+- [x] C1. Write postmortem at `docs/notes/2026-03-30-r2-cors-upload-failure-postmortem.md`
+- [x] C2. Add process rule `.claude/rules/20-cross-origin-cors.md`
 
 ### Phase D: Verification
 - [ ] D1. Deploy to staging with CORS fix
