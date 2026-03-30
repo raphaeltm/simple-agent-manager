@@ -413,6 +413,7 @@ export function ProjectSettings() {
           </p>
         </div>
         <div>
+          <label htmlFor="workspace-idle-timeout" className="sr-only">Workspace idle timeout</label>
           <div className="flex items-center gap-3">
             <input
               id="workspace-idle-timeout"
@@ -463,191 +464,191 @@ export function ProjectSettings() {
         <ScalingSettings projectId={projectId} project={project} reload={reload} />
       )}
 
-    {/* Runtime Config */}
-    <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
-      <h2 className="sam-type-section-heading m-0 text-fg-primary">
-        Runtime Config
-      </h2>
+      {/* Runtime Config */}
+      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
+        <h2 className="sam-type-section-heading m-0 text-fg-primary">
+          Runtime Config
+        </h2>
 
-      {runtimeConfigLoading ? (
-        <div className="flex items-center gap-2">
-          <Spinner size="sm" />
-          <span>Loading runtime config...</span>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {/* Environment Variables */}
-          <div className="grid gap-2">
-            <h3 className="sam-type-card-title m-0 text-fg-primary">Environment Variables</h3>
-
-            {/* Add form — key and value on same row */}
-            <div className="flex gap-2 items-end flex-wrap">
-              <div className="flex-[1_1_140px] min-w-0">
-                <label className="block text-xs text-fg-muted mb-0.5">Key</label>
-                <input
-                  type="text"
-                  aria-label="Runtime env key"
-                  placeholder="API_TOKEN"
-                  value={envKeyInput}
-                  onChange={(event) => setEnvKeyInput(event.currentTarget.value)}
-                  className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
-                />
-              </div>
-              <div className="flex-[2_1_200px] min-w-0">
-                <label className="block text-xs text-fg-muted mb-0.5">Value</label>
-                <input
-                  type="text"
-                  aria-label="Runtime env value"
-                  placeholder="Value"
-                  value={envValueInput}
-                  onChange={(event) => setEnvValueInput(event.currentTarget.value)}
-                  className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
-                />
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer whitespace-nowrap">
-                  <input
-                    type="checkbox"
-                    checked={envSecretInput}
-                    onChange={(event) => setEnvSecretInput(event.currentTarget.checked)}
-                  />
-                  Secret
-                </label>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleUpsertEnvVar}
-                  loading={savingRuntimeConfig}
-                  disabled={savingRuntimeConfig}
-                  style={{ minHeight: '36px' }}
-                >
-                  Add
-                </Button>
-              </div>
-            </div>
-
-            {/* Env var list */}
-            {runtimeConfig.envVars.length === 0 ? (
-              <div className="text-fg-muted text-xs py-1">
-                No environment variables configured.
-              </div>
-            ) : (
-              <div className="border border-border-default rounded-sm overflow-hidden">
-                {runtimeConfig.envVars.map((item, idx) => (
-                  <div
-                    key={item.key}
-                    className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.envVars.length - 1 ? 'border-b border-border-default' : ''}`}
-                  >
-                    <code className="font-semibold text-fg-primary text-[0.8125rem]">{item.key}</code>
-                    <span className="text-fg-muted flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                      = {item.isSecret ? '\u2022\u2022\u2022\u2022\u2022\u2022' : item.value}
-                    </span>
-                    {item.isSecret && (
-                      <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
-                    )}
-                    <button
-                      onClick={() => void handleDeleteEnvVar(item.key)}
-                      disabled={savingRuntimeConfig}
-                      className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"
-                      aria-label={`Remove ${item.key}`}
-                      title={`Remove ${item.key}`}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+        {runtimeConfigLoading ? (
+          <div className="flex items-center gap-2">
+            <Spinner size="sm" />
+            <span>Loading runtime config...</span>
           </div>
-
-          {/* Runtime Files */}
-          <div className="grid gap-2">
-            <h3 className="sam-type-card-title m-0 text-fg-primary">Runtime Files</h3>
-
-            {/* Add form */}
+        ) : (
+          <div className="grid gap-4">
+            {/* Environment Variables */}
             <div className="grid gap-2">
-              <div>
-                <label className="block text-xs text-fg-muted mb-0.5">File path</label>
-                <input
-                  type="text"
-                  aria-label="Runtime file path"
-                  placeholder=".env.local"
-                  value={filePathInput}
-                  onChange={(event) => setFilePathInput(event.currentTarget.value)}
-                  className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-fg-muted mb-0.5">Content</label>
-                <textarea
-                  aria-label="Runtime file content"
-                  placeholder="FOO=bar"
-                  rows={3}
-                  value={fileContentInput}
-                  onChange={(event) => setFileContentInput(event.currentTarget.value)}
-                  className="block w-full py-1.5 px-2.5 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono resize-y box-border"
-                />
-              </div>
-              <div className="flex justify-between items-center gap-2 flex-wrap">
-                <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer">
+              <h3 className="sam-type-card-title m-0 text-fg-primary">Environment Variables</h3>
+
+              {/* Add form — key and value on same row */}
+              <div className="flex gap-2 items-end flex-wrap">
+                <div className="flex-[1_1_140px] min-w-0">
+                  <label className="block text-xs text-fg-muted mb-0.5">Key</label>
                   <input
-                    type="checkbox"
-                    checked={fileSecretInput}
-                    onChange={(event) => setFileSecretInput(event.currentTarget.checked)}
+                    type="text"
+                    aria-label="Runtime env key"
+                    placeholder="API_TOKEN"
+                    value={envKeyInput}
+                    onChange={(event) => setEnvKeyInput(event.currentTarget.value)}
+                    className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
                   />
-                  Secret file content
-                </label>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleUpsertFile}
-                  loading={savingRuntimeConfig}
-                  disabled={savingRuntimeConfig}
-                  style={{ minHeight: '36px' }}
-                >
-                  Add file
-                </Button>
+                </div>
+                <div className="flex-[2_1_200px] min-w-0">
+                  <label className="block text-xs text-fg-muted mb-0.5">Value</label>
+                  <input
+                    type="text"
+                    aria-label="Runtime env value"
+                    placeholder="Value"
+                    value={envValueInput}
+                    onChange={(event) => setEnvValueInput(event.currentTarget.value)}
+                    className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
+                  />
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={envSecretInput}
+                      onChange={(event) => setEnvSecretInput(event.currentTarget.checked)}
+                    />
+                    Secret
+                  </label>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleUpsertEnvVar}
+                    loading={savingRuntimeConfig}
+                    disabled={savingRuntimeConfig}
+                    style={{ minHeight: '36px' }}
+                  >
+                    Add
+                  </Button>
+                </div>
               </div>
+
+              {/* Env var list */}
+              {runtimeConfig.envVars.length === 0 ? (
+                <div className="text-fg-muted text-xs py-1">
+                  No environment variables configured.
+                </div>
+              ) : (
+                <div className="border border-border-default rounded-sm overflow-hidden">
+                  {runtimeConfig.envVars.map((item, idx) => (
+                    <div
+                      key={item.key}
+                      className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.envVars.length - 1 ? 'border-b border-border-default' : ''}`}
+                    >
+                      <code className="font-semibold text-fg-primary text-[0.8125rem]">{item.key}</code>
+                      <span className="text-fg-muted flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                        = {item.isSecret ? '\u2022\u2022\u2022\u2022\u2022\u2022' : item.value}
+                      </span>
+                      {item.isSecret && (
+                        <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
+                      )}
+                      <button
+                        onClick={() => void handleDeleteEnvVar(item.key)}
+                        disabled={savingRuntimeConfig}
+                        className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"
+                        aria-label={`Remove ${item.key}`}
+                        title={`Remove ${item.key}`}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* File list */}
-            {runtimeConfig.files.length === 0 ? (
-              <div className="text-fg-muted text-xs py-1">
-                No runtime files configured.
-              </div>
-            ) : (
-              <div className="border border-border-default rounded-sm overflow-hidden">
-                {runtimeConfig.files.map((item, idx) => (
-                  <div
-                    key={item.path}
-                    className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.files.length - 1 ? 'border-b border-border-default' : ''}`}
+            {/* Runtime Files */}
+            <div className="grid gap-2">
+              <h3 className="sam-type-card-title m-0 text-fg-primary">Runtime Files</h3>
+
+              {/* Add form */}
+              <div className="grid gap-2">
+                <div>
+                  <label className="block text-xs text-fg-muted mb-0.5">File path</label>
+                  <input
+                    type="text"
+                    aria-label="Runtime file path"
+                    placeholder=".env.local"
+                    value={filePathInput}
+                    onChange={(event) => setFilePathInput(event.currentTarget.value)}
+                    className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-fg-muted mb-0.5">Content</label>
+                  <textarea
+                    aria-label="Runtime file content"
+                    placeholder="FOO=bar"
+                    rows={3}
+                    value={fileContentInput}
+                    onChange={(event) => setFileContentInput(event.currentTarget.value)}
+                    className="block w-full py-1.5 px-2.5 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono resize-y box-border"
+                  />
+                </div>
+                <div className="flex justify-between items-center gap-2 flex-wrap">
+                  <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={fileSecretInput}
+                      onChange={(event) => setFileSecretInput(event.currentTarget.checked)}
+                    />
+                    Secret file content
+                  </label>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleUpsertFile}
+                    loading={savingRuntimeConfig}
+                    disabled={savingRuntimeConfig}
+                    style={{ minHeight: '36px' }}
                   >
-                    <code className="font-semibold text-fg-primary text-[0.8125rem] overflow-hidden text-ellipsis whitespace-nowrap min-w-0">{item.path}</code>
-                    <span className="flex-1" />
-                    {item.isSecret && (
-                      <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
-                    )}
-                    <button
-                      onClick={() => void handleDeleteFile(item.path)}
-                      disabled={savingRuntimeConfig}
-                      className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"
-                      aria-label={`Remove ${item.path}`}
-                      title={`Remove ${item.path}`}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
+                    Add file
+                  </Button>
+                </div>
               </div>
-            )}
+
+              {/* File list */}
+              {runtimeConfig.files.length === 0 ? (
+                <div className="text-fg-muted text-xs py-1">
+                  No runtime files configured.
+                </div>
+              ) : (
+                <div className="border border-border-default rounded-sm overflow-hidden">
+                  {runtimeConfig.files.map((item, idx) => (
+                    <div
+                      key={item.path}
+                      className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.files.length - 1 ? 'border-b border-border-default' : ''}`}
+                    >
+                      <code className="font-semibold text-fg-primary text-[0.8125rem] overflow-hidden text-ellipsis whitespace-nowrap min-w-0">{item.path}</code>
+                      <span className="flex-1" />
+                      {item.isSecret && (
+                        <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
+                      )}
+                      <button
+                        onClick={() => void handleDeleteFile(item.path)}
+                        disabled={savingRuntimeConfig}
+                        className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"
+                        aria-label={`Remove ${item.path}`}
+                        title={`Remove ${item.path}`}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-    </section>
+        )}
+      </section>
 
       {/* Deploy to Cloud */}
       <DeploymentSettings projectId={projectId} />
