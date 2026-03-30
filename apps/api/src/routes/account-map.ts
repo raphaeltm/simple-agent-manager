@@ -56,10 +56,14 @@ accountMapRoutes.use('/*', requireAuth(), requireApproved());
 accountMapRoutes.get('/', async (c) => {
   const userId = getUserId(c);
 
-  const activeOnlyDefault = (c.env.ACCOUNT_MAP_ACTIVE_ONLY_DEFAULT ?? 'true') === 'true';
+  const rawActiveOnlyDefault = c.env.ACCOUNT_MAP_ACTIVE_ONLY_DEFAULT;
+  if (rawActiveOnlyDefault !== undefined && rawActiveOnlyDefault !== 'true' && rawActiveOnlyDefault !== 'false') {
+    console.warn(`AccountMap: unrecognised ACCOUNT_MAP_ACTIVE_ONLY_DEFAULT value "${rawActiveOnlyDefault}", defaulting to "true"`);
+  }
+  const activeOnlyDefault = (rawActiveOnlyDefault ?? 'true') === 'true';
   const activeOnlyParam = c.req.query('activeOnly');
   const activeOnly = activeOnlyParam !== undefined
-    ? activeOnlyParam !== 'false'
+    ? activeOnlyParam === 'true'
     : activeOnlyDefault;
 
   const parsedMax = parseInt(c.env.ACCOUNT_MAP_MAX_ENTITIES ?? '', 10);

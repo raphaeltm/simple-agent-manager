@@ -155,6 +155,13 @@ describe('GET /account-map', () => {
     // Only active sessions returned
     expect(body.sessions).toHaveLength(1);
     expect(body.sessions[0].status).toBe('active');
+
+    // Relationships should only reference the active session, not the stopped one
+    const sessionRelTargets = body.relationships
+      .filter((r: any) => r.type === 'has_session')
+      .map((r: any) => r.target);
+    expect(sessionRelTargets).toContain('sess-2');
+    expect(sessionRelTargets).not.toContain('sess-1');
   });
 
   it('returns all resources when activeOnly=false', async () => {
