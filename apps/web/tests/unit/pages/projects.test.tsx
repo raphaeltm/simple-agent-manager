@@ -2,13 +2,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { ToastProvider } from '../../../src/hooks/useToast';
+import type { ProjectSummary } from '@simple-agent-manager/shared';
 
 const mocks = vi.hoisted(() => ({
-  listProjects: vi.fn(),
+  useProjectList: vi.fn(),
+  deleteProject: vi.fn(),
+}));
+
+vi.mock('../../../src/hooks/useProjectData', () => ({
+  useProjectList: mocks.useProjectList,
 }));
 
 vi.mock('../../../src/lib/api', () => ({
-  listProjects: mocks.listProjects,
+  deleteProject: mocks.deleteProject,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -16,6 +22,24 @@ vi.mock('../../../src/components/UserMenu', () => ({
 }));
 
 import { Projects } from '../../../src/pages/Projects';
+
+const PROJECT_SUMMARY: ProjectSummary = {
+  id: 'proj-1',
+  userId: 'user-1',
+  name: 'Project One',
+  description: 'First project',
+  installationId: 'inst-1',
+  repository: 'acme/repo-one',
+  defaultBranch: 'main',
+  status: 'active',
+  activeWorkspaceCount: 2,
+  activeSessionCount: 1,
+  lastActivityAt: '2026-02-18T12:00:00.000Z',
+  taskCountsByStatus: {},
+  linkedWorkspaces: [],
+  createdAt: '2026-02-18T00:00:00.000Z',
+  updatedAt: '2026-02-18T00:00:00.000Z',
+};
 
 function renderPage() {
   return render(
@@ -34,47 +58,36 @@ describe('Projects page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mocks.listProjects.mockResolvedValue({
-      projects: [
-        {
-          id: 'proj-1',
-          userId: 'user-1',
-          name: 'Project One',
-          description: 'First project',
-          installationId: 'inst-1',
-          repository: 'acme/repo-one',
-          defaultBranch: 'main',
-          createdAt: '2026-02-18T00:00:00.000Z',
-          updatedAt: '2026-02-18T00:00:00.000Z',
-        },
-      ],
-      nextCursor: null,
+    mocks.useProjectList.mockReturnValue({
+      projects: [PROJECT_SUMMARY],
+      loading: false,
+      isRefreshing: false,
+      error: null,
+      refresh: vi.fn(),
     });
   });
 
-  it('loads and renders projects', async () => {
+  it('loads and renders projects using ProjectSummaryCard', async () => {
     renderPage();
-
-    await waitFor(() => {
-      expect(mocks.listProjects).toHaveBeenCalled();
-    });
 
     expect(await screen.findByText('Project One')).toBeInTheDocument();
-    expect(screen.getByText('acme/repo-one@main')).toBeInTheDocument();
+    expect(screen.getByText(/acme\/repo-one/)).toBeInTheDocument();
   });
 
-  it('renders New Project button that links to /projects/new', async () => {
+  it('renders New Project button', async () => {
     renderPage();
-
-    await waitFor(() => {
-      expect(mocks.listProjects).toHaveBeenCalled();
-    });
 
     expect(screen.getByRole('button', { name: 'New Project' })).toBeInTheDocument();
   });
 
   it('shows empty state when no projects', async () => {
-    mocks.listProjects.mockResolvedValue({ projects: [], nextCursor: null });
+    mocks.useProjectList.mockReturnValue({
+      projects: [],
+      loading: false,
+      isRefreshing: false,
+      error: null,
+      refresh: vi.fn(),
+    });
     renderPage();
 
     await waitFor(() => {
@@ -83,11 +96,39 @@ describe('Projects page', () => {
   });
 
   it('shows error when loading fails', async () => {
-    mocks.listProjects.mockRejectedValue(new Error('Network error'));
+    mocks.useProjectList.mockReturnValue({
+      projects: [],
+      loading: false,
+      isRefreshing: false,
+      error: 'Network error',
+      refresh: vi.fn(),
+    });
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Network error')).toBeInTheDocument();
     });
+  });
+
+  it('shows skeleton cards during loading', () => {
+    mocks.useProjectList.mockReturnValue({
+      projects: [],
+      loading: true,
+      isRefreshing: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    renderPage();
+
+    // SkeletonCard renders skeleton elements
+    expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('Project One')).not.toBeInTheDocument();
+  });
+
+  it('shows workspace and session counts', async () => {
+    renderPage();
+
+    expect(await screen.findByText(/2 ws/)).toBeInTheDocument();
+    expect(screen.getByText(/1 sessions/)).toBeInTheDocument();
   });
 });
