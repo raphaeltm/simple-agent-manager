@@ -273,6 +273,30 @@ test.describe('ScalingSettings — Mobile (375x667)', () => {
     await assertNoOverflow(page);
   });
 
+  test('removed duplicate sections are absent, renamed section present', async ({ page }) => {
+    await setupMocks(page, { credentials: CREDS_TWO });
+    await goToSettings(page);
+
+    // "Default Cloud Provider" toggle section was removed from ProjectSettings
+    // (canonical control lives in ScalingSettings as a dropdown)
+    const duplicateProviderSection = page.locator(
+      'text=Default Cloud Provider'
+    );
+    // ScalingSettings has "Default Provider" (not "Default Cloud Provider")
+    // so "Default Cloud Provider" should not appear anywhere on the page
+    await expect(duplicateProviderSection).not.toBeVisible();
+
+    // "Compute Lifecycle" was renamed to "Workspace Idle Timeout" after
+    // nodeIdleTimeoutMs was removed (it now only has workspaceIdleTimeoutMs)
+    await expect(page.locator('text=Compute Lifecycle')).not.toBeVisible();
+    await expect(
+      page.locator('text=Workspace Idle Timeout')
+    ).toBeVisible();
+
+    await screenshot(page, 'scaling-no-duplicates-mobile');
+    await assertNoOverflow(page);
+  });
+
   test('reset button appears when value is set', async ({ page }) => {
     await setupMocks(page, {
       projectOverrides: { maxConcurrentTasks: 5, taskExecutionTimeoutMs: 7200000 },
