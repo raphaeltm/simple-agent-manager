@@ -102,24 +102,8 @@ export async function handleDispatchTask(
     );
   }
 
-  // ── Enforce dispatch depth limit (project override > platform env > default) ──
+  // ── Compute new depth (enforcement deferred until project overrides are resolved) ──
   const newDepth = currentTask.dispatchDepth + 1;
-  // Project overrides are checked after the project is fetched (below for per-task and active limits).
-  // Depth limit uses platform default here since the project isn't fetched yet.
-  if (newDepth > limits.dispatchMaxDepth) {
-    log.warn('mcp.dispatch_task.depth_exceeded', {
-      taskId: tokenData.taskId,
-      projectId: tokenData.projectId,
-      currentDepth: currentTask.dispatchDepth,
-      maxDepth: limits.dispatchMaxDepth,
-    });
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Dispatch depth limit exceeded. Current depth: ${currentTask.dispatchDepth}, max allowed: ${limits.dispatchMaxDepth}. ` +
-      'Agent-dispatched tasks have a depth limit to prevent runaway recursive spawning.',
-    );
-  }
 
   // ── Parallel: pre-flight checks, credential check, project fetch, and AI title ─
   // These queries are independent of each other (only depend on currentTask for depth,
