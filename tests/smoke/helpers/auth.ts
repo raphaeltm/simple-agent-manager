@@ -3,9 +3,9 @@ import { type BrowserContext, type Page, expect } from '@playwright/test';
 /**
  * Authenticate a Playwright browser context using a smoke test token.
  *
- * Uses a page-level fetch to call the token-login endpoint, which lets the
- * browser handle Set-Cookie headers natively (including domain scoping).
- * Then navigates to the app URL.
+ * Calls the token-login endpoint via context.request (to get the signed
+ * cookie value), then injects the signed cookie into the browser context
+ * so page navigations can use it.
  *
  * Returns the authenticated page ready for use.
  */
@@ -28,44 +28,58 @@ export async function loginWithToken(
     );
   }
 
-  // Open a page on the API domain first — this ensures the browser
-  // processes Set-Cookie headers for the correct domain.
-  const page = await context.newPage();
+  // Call the token-login endpoint via context.request
+  const response = await context.request.post(`${apiUrl}/api/auth/token-login`, {
+    data: { token },
+    headers: { 'Content-Type': 'application/json' },
+  });
 
-  // Navigate to the API domain (health endpoint is lightweight)
-  await page.goto(`${apiUrl}/health`, { waitUntil: 'domcontentloaded' });
-
-  // Use the browser's fetch to call token-login. This ensures:
-  // 1. The browser sees the Set-Cookie header directly
-  // 2. Cookie domain scoping works correctly
-  // 3. No manual cookie extraction/injection needed
-  const loginResult = await page.evaluate(
-    async ({ apiUrl, token }) => {
-      const res = await fetch(`${apiUrl}/api/auth/token-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-        credentials: 'include',
-      });
-
-      const body = await res.json();
-      return {
-        ok: res.ok,
-        status: res.status,
-        body,
-      };
-    },
-    { apiUrl, token }
+  expect(response.ok(), `Token login failed: ${response.status()} ${await response.text()}`).toBe(
+    true
   );
 
-  expect(
-    loginResult.ok,
-    `Token login failed: ${loginResult.status} ${JSON.stringify(loginResult.body)}`
-  ).toBe(true);
-  expect(loginResult.body.success).toBe(true);
+  const body = await response.json();
+  expect(body.success).toBe(true);
 
-  // Now navigate to the app — the browser already has the session cookie
-  await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
+  // Extract the SIGNED cookie value from the Set-Cookie header.
+  // BetterAuth uses HMAC-SHA256 signed cookies: `token.signature`
+  // The server already signs the cookie, so we need to extract and re-inject it.
+  const setCookieHeader = response.headers()['set-cookie'] || '';
+  const cookieMatch = setCookieHeader.match(/better-auth\.session_token=([^;]+)/);
+
+  if (!cookieMatch) {
+    throw new Error(
+      `Token login succeeded but no session cookie in Set-Cookie header. ` +
+        `Header: ${setCookieHeader.substring(0, 200)}`
+    );
+  }
+
+  // The cookie value is URL-encoded (e.g., token.signature%3D), decode it for addCookies
+  const signedValue = decodeURIComponent(cookieMatch[1]);
+
+  // Extract the base domain for cookie sharing
+  const apiHostname = new URL(apiUrl).hostname;
+  const parts = apiHostname.split('.');
+  const baseDomain = parts.length >= 2 ? `.${parts.slice(-2).join('.')}` : apiHostname;
+
+  // Inject the signed cookie into the browser context.
+  // context.request and page share cookie storage in Playwright, but
+  // we set it explicitly to ensure domain scoping is correct.
+  await context.addCookies([
+    {
+      name: 'better-auth.session_token',
+      value: signedValue,
+      domain: baseDomain,
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+    },
+  ]);
+
+  // Create a page and navigate to the app
+  const page = await context.newPage();
+  await page.goto(appUrl, { waitUntil: 'networkidle', timeout: 15_000 });
 
   return page;
 }

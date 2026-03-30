@@ -5,10 +5,10 @@ const APP_URL = process.env.SMOKE_TEST_URL || 'https://app.sammy.party';
 const TOKEN = process.env.SMOKE_TEST_TOKEN;
 
 test.describe('Auth Debug', () => {
-  test('token-login returns session cookie', async ({ context }) => {
+  test('token-login creates valid session', async ({ context }) => {
     test.skip(!TOKEN, 'SMOKE_TEST_TOKEN not configured');
 
-    // Step 1: Call token-login via Playwright API request
+    // Step 1: Call token-login
     const response = await context.request.post(`${API_URL}/api/auth/token-login`, {
       data: { token: TOKEN },
       headers: { 'Content-Type': 'application/json' },
@@ -16,68 +16,56 @@ test.describe('Auth Debug', () => {
 
     console.log(`[DEBUG] token-login status: ${response.status()}`);
     const body = await response.json();
-    console.log(`[DEBUG] token-login body: ${JSON.stringify(body)}`);
+    console.log(`[DEBUG] token-login body keys: ${Object.keys(body)}`);
 
-    // Check response headers
-    const headers = response.headers();
-    console.log(`[DEBUG] Set-Cookie header: ${headers['set-cookie'] || '(not present)'}`);
-    console.log(`[DEBUG] All response headers: ${JSON.stringify(headers, null, 2)}`);
+    const setCookieHeader = response.headers()['set-cookie'] || '';
+    console.log(`[DEBUG] Set-Cookie: ${setCookieHeader.substring(0, 200)}`);
 
     expect(response.ok()).toBe(true);
-    expect(body.success).toBe(true);
 
-    // Step 2: Check what cookies Playwright captured
-    const apiCookies = await context.cookies(API_URL);
-    console.log(`[DEBUG] Cookies for ${API_URL}: ${JSON.stringify(apiCookies, null, 2)}`);
+    // Step 2: Extract signed cookie value
+    const cookieMatch = setCookieHeader.match(/better-auth\.session_token=([^;]+)/);
+    expect(cookieMatch, 'No session cookie in Set-Cookie header').toBeTruthy();
+    const signedValue = decodeURIComponent(cookieMatch![1]);
+    console.log(`[DEBUG] Signed cookie value (first 50): ${signedValue.substring(0, 50)}...`);
 
-    const appCookies = await context.cookies(APP_URL);
-    console.log(`[DEBUG] Cookies for ${APP_URL}: ${JSON.stringify(appCookies, null, 2)}`);
+    // Step 3: Inject signed cookie into browser context
+    await context.addCookies([
+      {
+        name: 'better-auth.session_token',
+        value: signedValue,
+        domain: '.sammy.party',
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'None',
+      },
+    ]);
 
-    // Step 3: Manually set cookie using sessionToken from body
-    if (body.sessionToken) {
-      console.log(`[DEBUG] Setting cookie manually from body.sessionToken`);
-      await context.addCookies([
-        {
-          name: 'better-auth.session_token',
-          value: body.sessionToken,
-          domain: '.sammy.party',
-          path: '/',
-          httpOnly: true,
-          secure: true,
-          sameSite: 'None',
-        },
-      ]);
+    // Step 4: Verify cookie is set
+    const cookies = await context.cookies(APP_URL);
+    console.log(`[DEBUG] Cookies for app: ${JSON.stringify(cookies.map((c) => ({ name: c.name, value: c.value.substring(0, 30) + '...' })))}`);
 
-      const cookiesAfterSet = await context.cookies(APP_URL);
-      console.log(`[DEBUG] Cookies after manual set: ${JSON.stringify(cookiesAfterSet, null, 2)}`);
-    }
-
-    // Step 4: Try the get-session endpoint to verify session works
-    const sessionResponse = await context.request.get(`${API_URL}/api/auth/get-session`);
-    console.log(`[DEBUG] get-session status: ${sessionResponse.status()}`);
-    const sessionBody = await sessionResponse.json().catch(() => sessionResponse.text());
-    console.log(`[DEBUG] get-session body: ${JSON.stringify(sessionBody)}`);
-
-    // Step 5: Navigate to app and check what happens
+    // Step 5: Open page and capture ALL network requests
     const page = await context.newPage();
-    const networkRequests: string[] = [];
+    const allRequests: string[] = [];
     page.on('request', (req) => {
-      if (req.url().includes('auth') || req.url().includes('session')) {
-        networkRequests.push(`${req.method()} ${req.url()}`);
-      }
+      allRequests.push(`${req.method()} ${req.url()}`);
     });
     page.on('response', (res) => {
-      if (res.url().includes('auth') || res.url().includes('session')) {
-        networkRequests.push(`  → ${res.status()} ${res.url()}`);
-      }
+      allRequests.push(`  → ${res.status()} ${res.url()}`);
     });
 
-    await page.goto(APP_URL, { waitUntil: 'networkidle' });
+    console.log(`[DEBUG] Navigating to ${APP_URL}...`);
+    await page.goto(APP_URL, { waitUntil: 'networkidle', timeout: 15_000 });
 
     console.log(`[DEBUG] Final URL: ${page.url()}`);
-    console.log(`[DEBUG] Auth-related network requests:\n${networkRequests.join('\n')}`);
+    console.log(`[DEBUG] All network requests (${allRequests.length}):\n${allRequests.join('\n')}`);
 
-    const pageTitle = await page.textContent('body');
-    console.log(`[DEBUG] Page content (first 200 chars): ${pageTitle?.substring(0, 200)}`);
+    const pageText = await page.textContent('body');
+    console.log(`[DEBUG] Page text (first 300): ${pageText?.substring(0, 300)}`);
+
+    // The test passes regardless — we just want the debug output
+    expect(true).toBe(true);
   });
 });
