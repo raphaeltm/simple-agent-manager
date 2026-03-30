@@ -132,6 +132,14 @@ else
   echo -e "${YELLOW}ℹ  Skipping R2 S3 credentials (R2_ACCESS_KEY_ID/SECRET not set — task attachment uploads disabled)${NC}"
 fi
 
+# Configure smoke test auth (optional — only needed for staging/test environments)
+SMOKE_TEST_AUTH_ENABLED="${SMOKE_TEST_AUTH_ENABLED:-}"
+if [ -n "$SMOKE_TEST_AUTH_ENABLED" ]; then
+  set_worker_secret "SMOKE_TEST_AUTH_ENABLED" "$SMOKE_TEST_AUTH_ENABLED" "$ENVIRONMENT" "false"
+else
+  echo -e "${YELLOW}ℹ  Skipping SMOKE_TEST_AUTH_ENABLED (not set — smoke test token auth disabled)${NC}"
+fi
+
 # NOTE: Hetzner tokens are NOT platform secrets.
 # Users provide their own tokens through the Settings UI, stored encrypted per-user in the database.
 

@@ -12,6 +12,7 @@ import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsAgentKeys } from './pages/SettingsAgentKeys';
 import { SettingsAgentConfig } from './pages/SettingsAgentConfig';
 import { SettingsNotifications } from './pages/SettingsNotifications';
+import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Workspace } from './pages/Workspace';
 import { Workspaces } from './pages/Workspaces';
@@ -91,6 +92,7 @@ export default function App() {
               <Route path="agent-keys" element={<SettingsAgentKeys />} />
               <Route path="agent-config" element={<SettingsAgentConfig />} />
               <Route path="notifications" element={<SettingsNotifications />} />
+              <Route path="smoke-test-tokens" element={<SettingsSmokeTestTokens />} />
             </Route>
             <Route path="/ui-standards" element={<UiStandards />} />
             <Route path="/admin" element={<Admin />}>

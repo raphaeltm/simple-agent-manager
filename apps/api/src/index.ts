@@ -42,6 +42,7 @@ import { mcpRoutes } from './routes/mcp';
 import { notificationRoutes } from './routes/notifications';
 import { gcpRoutes } from './routes/gcp';
 import { googleAuthRoutes } from './routes/google-auth';
+import { smokeTestTokenRoutes } from './routes/smoke-test-tokens';
 import { projectDeploymentRoutes, gcpDeployCallbackRoute, deploymentIdentityTokenRoute } from './routes/project-deployment';
 import { analyticsMiddleware } from './middleware/analytics';
 import { checkProvisioningTimeouts } from './services/timeout';
@@ -100,6 +101,13 @@ export interface Env {
   WWW_PAGES_PROJECT_NAME?: string;
   // User approval / invite-only mode
   REQUIRE_APPROVAL?: string;
+  // Smoke test auth tokens (CI authentication — only set in staging/test environments)
+  SMOKE_TEST_AUTH_ENABLED?: string;
+  // Smoke test token configuration (all optional with defaults)
+  SMOKE_TOKEN_BYTES?: string;              // Random bytes for token generation (default: 32)
+  MAX_SMOKE_TOKENS_PER_USER?: string;      // Max active tokens per user (default: 10)
+  MAX_SMOKE_TOKEN_NAME_LENGTH?: string;    // Max token name length (default: 100)
+  SMOKE_TEST_SESSION_DURATION_SECONDS?: string; // Session lifetime for token login (default: 604800 = 7 days)
   // Optional configurable values (per constitution principle XI)
   TERMINAL_TOKEN_EXPIRY_MS?: string;
   CALLBACK_TOKEN_EXPIRY_MS?: string;
@@ -687,7 +695,8 @@ app.get('/.well-known/openid-configuration', async (c) => {
   return c.json(discovery);
 });
 
-// API routes
+// API routes — smoke test token routes registered before BetterAuth catch-all
+app.route('/api/auth', smokeTestTokenRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/providers', providersRoutes);

@@ -873,3 +873,30 @@ export type MigrationWorkItem = typeof migrationWorkItems.$inferSelect;
 export type NewMigrationWorkItem = typeof migrationWorkItems.$inferInsert;
 export type AgentSettingsRow = typeof agentSettings.$inferSelect;
 export type NewAgentSettingsRow = typeof agentSettings.$inferInsert;
+
+// =============================================================================
+// Smoke Test Auth Tokens (CI authentication, gated by SMOKE_TEST_AUTH_ENABLED)
+// =============================================================================
+export const smokeTestTokens = sqliteTable(
+  'smoke_test_tokens',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    name: text('name').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(cast(unixepoch() * 1000 as integer))`),
+    lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
+    revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => ({
+    tokenHashIdx: uniqueIndex('idx_smoke_test_tokens_hash').on(table.tokenHash),
+    userIdIdx: index('idx_smoke_test_tokens_user').on(table.userId),
+  })
+);
+
+export type SmokeTestToken = typeof smokeTestTokens.$inferSelect;
+export type NewSmokeTestToken = typeof smokeTestTokens.$inferInsert;
