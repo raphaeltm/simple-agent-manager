@@ -2,8 +2,12 @@
  * Account Map API route.
  *
  * Returns aggregated entity data (projects, nodes, workspaces, sessions,
- * tasks, ideas) and their relationships for the authenticated user.
+ * tasks) and their relationships for the authenticated user.
  * Used by the Account Map visualization page.
+ *
+ * Performance note: this endpoint fans out to one ProjectData DO per project
+ * to fetch sessions. For accounts with many projects, this can be slow on
+ * cold DOs (~5-20ms each). KV caching (30s TTL) absorbs repeated reads.
  */
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
@@ -13,10 +17,31 @@ import * as schema from '../db/schema';
 import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import * as projectDataService from '../services/project-data';
 
-/**
- * Default max entities per type. Configurable via ACCOUNT_MAP_MAX_ENTITIES env var.
- */
+/** Default max entities per type from D1. Configurable via ACCOUNT_MAP_MAX_ENTITIES. */
 const DEFAULT_MAX_ENTITIES = 200;
+
+/** Max sessions fetched per project from DO. Configurable via ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT. */
+const DEFAULT_MAX_SESSIONS_PER_PROJECT = 20;
+
+/** KV cache TTL in seconds. Configurable via ACCOUNT_MAP_CACHE_TTL_SECONDS. */
+const DEFAULT_CACHE_TTL_SECONDS = 30;
+
+interface SessionSummary {
+  id: string;
+  projectId: string;
+  topic: string | null;
+  status: string;
+  messageCount: number;
+  workspaceId: string | null;
+  taskId: string | null;
+}
+
+interface Relationship {
+  source: string;
+  target: string;
+  type: string;
+  active: boolean;
+}
 
 const accountMapRoutes = new Hono<{ Bindings: Env }>();
 
@@ -24,11 +49,29 @@ accountMapRoutes.use('/*', requireAuth(), requireApproved());
 
 accountMapRoutes.get('/', async (c) => {
   const userId = getUserId(c);
-  const db = drizzle(c.env.DATABASE, { schema });
-  const maxEntities =
-    parseInt(c.env.ACCOUNT_MAP_MAX_ENTITIES ?? '', 10) || DEFAULT_MAX_ENTITIES;
 
-  // --- D1 queries: projects, nodes, workspaces ---
+  const parsedMax = parseInt(c.env.ACCOUNT_MAP_MAX_ENTITIES ?? '', 10);
+  const maxEntities = Number.isFinite(parsedMax) && parsedMax > 0
+    ? parsedMax
+    : DEFAULT_MAX_ENTITIES;
+
+  const parsedSessionCap = parseInt(c.env.ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT ?? '', 10);
+  const maxSessionsPerProject = Number.isFinite(parsedSessionCap) && parsedSessionCap > 0
+    ? parsedSessionCap
+    : DEFAULT_MAX_SESSIONS_PER_PROJECT;
+
+  const cacheTtl = parseInt(c.env.ACCOUNT_MAP_CACHE_TTL_SECONDS ?? '', 10) || DEFAULT_CACHE_TTL_SECONDS;
+
+  // --- KV cache check ---
+  const cacheKey = `account-map:${userId}`;
+  const cached = await c.env.KV.get(cacheKey, 'json');
+  if (cached) {
+    return c.json(cached);
+  }
+
+  // --- D1 queries: projects, nodes, workspaces, tasks ---
+  const db = drizzle(c.env.DATABASE, { schema });
+
   const [projectRows, nodeRows, workspaceRows, taskRows] = await Promise.all([
     db
       .select({
@@ -90,66 +133,40 @@ accountMapRoutes.get('/', async (c) => {
       .limit(maxEntities),
   ]);
 
-  // --- Fan out to ProjectData DOs for sessions and ideas ---
-  interface SessionSummary {
-    id: string;
-    projectId: string;
-    topic: string | null;
-    status: string;
-    messageCount: number;
-    workspaceId: string | null;
-    taskId: string | null;
-  }
-
-  interface IdeaSummary {
-    id: string;
-    projectId: string;
-    title: string;
-    status: string;
-    linkedSessionCount: number;
-  }
-
-  const allSessions: SessionSummary[] = [];
-  const allIdeas: IdeaSummary[] = [];
-
+  // --- Fan out to ProjectData DOs for sessions ---
+  // Each callback returns its sessions; collected after settlement to avoid shared-array mutation.
   const doResults = await Promise.allSettled(
     projectRows.map(async (project) => {
       const sessionsResult = await projectDataService.listSessions(
         c.env,
         project.id,
         null,
-        maxEntities,
+        maxSessionsPerProject,
         0
       );
 
-      for (const s of sessionsResult.sessions) {
-        allSessions.push({
-          id: s.id as string,
-          projectId: project.id,
-          topic: (s.topic as string) ?? null,
-          status: (s.status as string) ?? 'unknown',
-          messageCount: (s.messageCount as number) ?? 0,
-          workspaceId: (s.workspaceId as string) ?? null,
-          taskId: (s.taskId as string) ?? null,
-        });
-      }
+      return sessionsResult.sessions.map((s): SessionSummary => ({
+        id: s.id as string,
+        projectId: project.id,
+        topic: (s.topic as string) ?? null,
+        status: (s.status as string) ?? 'unknown',
+        messageCount: (s.messageCount as number) ?? 0,
+        workspaceId: (s.workspaceId as string) ?? null,
+        taskId: (s.taskId as string) ?? null,
+      }));
     })
   );
 
+  const allSessions: SessionSummary[] = [];
   for (const result of doResults) {
-    if (result.status === 'rejected') {
+    if (result.status === 'fulfilled') {
+      allSessions.push(...result.value);
+    } else {
       console.warn('AccountMap: failed to fetch DO data:', result.reason);
     }
   }
 
   // --- Build relationships ---
-  interface Relationship {
-    source: string;
-    target: string;
-    type: string;
-    active: boolean;
-  }
-
   const relationships: Relationship[] = [];
 
   // Project → Workspace
@@ -222,7 +239,7 @@ accountMapRoutes.get('/', async (c) => {
     }
   }
 
-  return c.json({
+  const payload = {
     projects: projectRows,
     nodes: nodeRows,
     workspaces: workspaceRows,
@@ -236,9 +253,14 @@ accountMapRoutes.get('/', async (c) => {
       executionStep: t.executionStep,
       priority: t.priority,
     })),
-    ideas: allIdeas,
     relationships,
-  });
+  };
+
+  // --- Cache in KV (fire-and-forget) ---
+  void c.env.KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: cacheTtl })
+    .catch((err: unknown) => console.warn('AccountMap: KV cache write failed:', err));
+
+  return c.json(payload);
 });
 
 export { accountMapRoutes };

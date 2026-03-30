@@ -30,7 +30,7 @@ interface UseMapFiltersResult {
   totalCount: number;
 }
 
-const ALL_TYPES: EntityType[] = ['project', 'node', 'workspace', 'session', 'task', 'idea'];
+const ALL_TYPES: EntityType[] = ['project', 'node', 'workspace', 'session', 'task'];
 
 export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFiltersResult {
   const [searchQuery, setSearchQuery] = useState('');

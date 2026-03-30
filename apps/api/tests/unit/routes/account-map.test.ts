@@ -84,6 +84,10 @@ const mockEnv = {
     idFromName: vi.fn().mockReturnValue({ toString: () => 'do-id' }),
     get: vi.fn(),
   },
+  KV: {
+    get: vi.fn().mockResolvedValue(null),
+    put: vi.fn().mockResolvedValue(undefined),
+  },
 } as unknown as Env;
 
 // ---------------------------------------------------------------------------
@@ -108,7 +112,7 @@ describe('GET /account-map', () => {
     expect(body.workspaces).toEqual([]);
     expect(body.sessions).toEqual([]);
     expect(body.tasks).toEqual([]);
-    expect(body.ideas).toEqual([]);
+
     expect(body.relationships).toEqual([]);
   });
 

@@ -171,6 +171,8 @@ export interface Env {
   ACP_MAX_RESTART_ATTEMPTS?: string;
   // Account Map configuration
   ACCOUNT_MAP_MAX_ENTITIES?: string;
+  ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT?: string;
+  ACCOUNT_MAP_CACHE_TTL_SECONDS?: string;
   // Dashboard configuration
   DASHBOARD_INACTIVE_THRESHOLD_MS?: string;
   // Boot log configuration

@@ -294,13 +294,6 @@ export interface AccountMapResponse {
     executionStep: string | null;
     priority: number | null;
   }>;
-  ideas: Array<{
-    id: string;
-    projectId: string;
-    title: string;
-    status: string;
-    linkedSessionCount: number;
-  }>;
   relationships: Array<{
     source: string;
     target: string;

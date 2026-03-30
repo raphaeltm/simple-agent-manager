@@ -25,7 +25,7 @@ interface UseAccountMapDataResult {
   loading: boolean;
   error: string | null;
   isEmpty: boolean;
-  stats: { projects: number; nodes: number; workspaces: number; sessions: number; tasks: number; ideas: number };
+  stats: { projects: number; nodes: number; workspaces: number; sessions: number; tasks: number };
   refresh: () => void;
   reorganize: () => void;
 }
@@ -58,7 +58,7 @@ export function useAccountMapData({ isMobile }: UseAccountMapDataOptions): UseAc
       return {
         nodes: [] as Node[],
         edges: [] as Edge[],
-        stats: { projects: 0, nodes: 0, workspaces: 0, sessions: 0, tasks: 0, ideas: 0 },
+        stats: { projects: 0, nodes: 0, workspaces: 0, sessions: 0, tasks: 0 },
         isEmpty: true,
       };
     }
@@ -170,21 +170,6 @@ export function useAccountMapData({ isMobile }: UseAccountMapDataOptions): UseAc
       });
     }
 
-    // Ideas
-    for (const idea of rawData.ideas) {
-      flowNodes.push({
-        id: idea.id,
-        type: 'ideaNode',
-        position: { x: 0, y: 0 },
-        data: {
-          label: idea.title,
-          status: idea.status,
-          linkedSessionCount: idea.linkedSessionCount,
-          isMobile,
-        },
-      });
-    }
-
     // Edges
     const flowEdges: Edge[] = rawData.relationships.map((rel, i) => ({
       id: `e-${rel.source}-${rel.target}-${i}`,
@@ -209,8 +194,7 @@ export function useAccountMapData({ isMobile }: UseAccountMapDataOptions): UseAc
       rawData.nodes.length +
       rawData.workspaces.length +
       rawData.sessions.length +
-      rawData.tasks.length +
-      rawData.ideas.length;
+      rawData.tasks.length;
 
     return {
       nodes: layoutedNodes,
@@ -221,7 +205,6 @@ export function useAccountMapData({ isMobile }: UseAccountMapDataOptions): UseAc
         workspaces: rawData.workspaces.length,
         sessions: rawData.sessions.length,
         tasks: rawData.tasks.length,
-        ideas: rawData.ideas.length,
       },
       isEmpty: totalEntities === 0,
     };
