@@ -3,6 +3,7 @@ import { useAuth } from '../components/AuthProvider';
 import { UserMenu } from '../components/UserMenu';
 import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
 import { ActiveTaskCard } from '../components/ActiveTaskCard';
+import { OnboardingWizard } from '../components/onboarding';
 import { useProjectList } from '../hooks/useProjectData';
 import { useActiveTasks } from '../hooks/useActiveTasks';
 import { PageLayout, Button, Alert, EmptyState, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
@@ -26,6 +27,9 @@ export function Dashboard() {
           Welcome, {user?.name || user?.email}!
         </h2>
       </div>
+
+      {/* Onboarding wizard for new users */}
+      <OnboardingWizard />
 
       {/* Error messages */}
       {tasksError && (
