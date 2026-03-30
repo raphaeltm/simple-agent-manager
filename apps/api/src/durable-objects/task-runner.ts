@@ -1380,7 +1380,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       if (state.stepResults.workspaceId) {
         try {
           const { cleanupTaskRun } = await import('../services/task-runner');
-          await cleanupTaskRun(state.taskId, this.env as any);
+          await cleanupTaskRun(state.taskId, this.env as any, state.config.projectScaling?.warmNodeTimeoutMs);
         } catch (err) {
           log.error('task_runner_do.cleanup.node_cleanup_failed', {
             taskId: state.taskId,
