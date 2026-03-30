@@ -148,6 +148,7 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 - **Subagents** live in `.claude/agents/`; Codex skills in `.agents/skills/`
 - **Playwright screenshots** go in `.codex/tmp/playwright-screenshots/` (gitignored)
 - **Playwright visual audit required for UI changes** — any PR touching `apps/web/`, `packages/ui/`, or `packages/terminal/` must run Playwright visual tests with diverse mock data on mobile (375px) and desktop (1280px) viewports. See `.claude/rules/17-ui-visual-testing.md`.
+- **No duplicate UI controls** — before adding any new settings control or form field, search for existing controls managing the same API field. Consolidate into one canonical location. See `.claude/rules/24-no-duplicate-ui-controls.md`.
 
 ## Agent Authentication
 
