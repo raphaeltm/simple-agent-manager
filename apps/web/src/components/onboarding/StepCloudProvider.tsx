@@ -44,7 +44,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
         <p className="sam-type-body text-fg-primary font-medium m-0 mb-1">Cloud provider connected</p>
         <p className="sam-type-caption text-fg-muted m-0">You can manage your credentials in Settings.</p>
         <div className="mt-4">
-          <Button variant="primary" size="sm" onClick={onComplete}>Continue</Button>
+          <Button variant="primary" size="md" onClick={onComplete}>Continue</Button>
         </div>
       </div>
     );
@@ -94,7 +94,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
       )}
 
       {/* Provider selection */}
-      <div className="grid grid-cols-2 gap-2 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
         {PROVIDERS.map((provider) => (
           <button
             key={provider.id}
@@ -120,6 +120,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
           </label>
           <Input
             type="password"
+            autoComplete="off"
             value={token}
             onChange={(e) => setToken(e.target.value)}
             placeholder={`Paste your ${selectedDef.name} API token`}
@@ -155,13 +156,13 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
         <button
           type="button"
           onClick={onSkip}
-          className="text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0"
+          className="text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          I&apos;ll do this later
+          Skip this step
         </button>
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           onClick={handleSave}
           disabled={!isValid || saving}
         >

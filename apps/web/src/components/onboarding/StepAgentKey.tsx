@@ -25,7 +25,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
         <p className="sam-type-body text-fg-primary font-medium m-0 mb-1">AI agent connected</p>
         <p className="sam-type-caption text-fg-muted m-0">You can manage your agent keys in Settings.</p>
         <div className="mt-4">
-          <Button variant="primary" size="sm" onClick={onComplete}>Continue</Button>
+          <Button variant="primary" size="md" onClick={onComplete}>Continue</Button>
         </div>
       </div>
     );
@@ -66,7 +66,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
       )}
 
       {/* Agent selection grid */}
-      <div className="grid grid-cols-2 gap-2 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
         {AGENT_CATALOG.map((agent) => (
           <button
             key={agent.id}
@@ -92,6 +92,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
           </label>
           <Input
             type="password"
+            autoComplete="off"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder={`Paste your ${selectedDef.provider} API key`}
@@ -112,13 +113,13 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
         <button
           type="button"
           onClick={onSkip}
-          className="text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0"
+          className="text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          I&apos;ll do this later
+          Skip this step
         </button>
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           onClick={handleSave}
           disabled={!selectedAgent || !apiKey.trim() || saving}
         >

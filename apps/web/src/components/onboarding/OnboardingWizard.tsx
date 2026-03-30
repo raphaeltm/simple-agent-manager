@@ -29,7 +29,7 @@ interface SetupStatus {
 export function OnboardingWizard() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [dismissed, setDismissed] = useState(true);
+  const [dismissed, setDismissed] = useState<boolean | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>('agent');
   const [status, setStatus] = useState<SetupStatus>({ hasAgent: false, hasCloud: false, hasGitHub: false });
 
@@ -108,39 +108,40 @@ export function OnboardingWizard() {
     advanceStep(step);
   };
 
-  if (loading || dismissed) return null;
+  if (loading || dismissed === null || dismissed) return null;
 
   const currentIdx = STEPS.findIndex((s) => s.id === currentStep);
 
   return (
-    <div data-testid="onboarding-wizard">
+    <div data-testid="onboarding-wizard" aria-label="Account setup">
     <Card className="p-0 mb-6 overflow-hidden">
       {/* Step indicator */}
-      <div className="flex border-b border-border-default">
+      <div role="tablist" aria-label="Setup steps" className="flex border-b border-border-default">
         {STEPS.map((step, idx) => {
           const isActive = step.id === currentStep;
           const isPast = idx < currentIdx;
           const isStepComplete =
             (step.id === 'agent' && status.hasAgent) ||
             (step.id === 'cloud' && status.hasCloud) ||
-            (step.id === 'github' && status.hasGitHub) ||
-            (step.id === 'how-it-works' && false);
+            (step.id === 'github' && status.hasGitHub);
 
           return (
             <button
               key={step.id}
               type="button"
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`onboarding-step-${step.id}`}
               onClick={() => setCurrentStep(step.id)}
-              className={`flex-1 py-2.5 px-2 text-xs font-medium text-center border-none cursor-pointer transition-colors ${
+              className={`flex-1 py-3 px-2 text-xs font-medium text-center border-none cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                 isActive
                   ? 'bg-surface text-accent border-b-2 border-b-accent'
                   : isPast || isStepComplete
                     ? 'bg-inset text-fg-muted'
                     : 'bg-inset text-fg-muted/50'
               }`}
-              style={isActive ? { borderBottom: '2px solid var(--sam-color-accent)' } : undefined}
             >
-              {isStepComplete && <span className="mr-1 text-success">{'\u2713'}</span>}
+              {isStepComplete && <span className="mr-1 text-success" aria-hidden="true">{'\u2713'}</span>}
               {step.label}
             </button>
           );
@@ -152,14 +153,14 @@ export function OnboardingWizard() {
         <button
           type="button"
           onClick={handleDismiss}
-          className="text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0"
+          className="text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          Dismiss setup
+          Don&apos;t show again
         </button>
       </div>
 
       {/* Step content */}
-      <div className="p-4 pt-2">
+      <div className="p-4 pt-2" id={`onboarding-step-${currentStep}`} role="tabpanel">
         {currentStep === 'agent' && (
           <StepAgentKey
             isComplete={status.hasAgent}

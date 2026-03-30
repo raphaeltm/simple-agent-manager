@@ -20,7 +20,7 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
           description="Describe what you want — a feature, bug fix, question, or brainstorm."
         />
         <div className="flex justify-center">
-          <span className="text-fg-muted text-lg">{'\u2193'}</span>
+          <span className="text-fg-muted text-lg" aria-hidden="true">{'\u2193'}</span>
         </div>
         <FlowStep
           number="2"
@@ -28,7 +28,7 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
           description="A cloud VM with your repo cloned, dependencies installed, and your AI agent ready."
         />
         <div className="flex justify-center">
-          <span className="text-fg-muted text-lg">{'\u2193'}</span>
+          <span className="text-fg-muted text-lg" aria-hidden="true">{'\u2193'}</span>
         </div>
         <FlowStep
           number="3"
@@ -36,7 +36,7 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
           description="It works in a real environment — running tests, installing packages, using git."
         />
         <div className="flex justify-center">
-          <span className="text-fg-muted text-lg">{'\u2193'}</span>
+          <span className="text-fg-muted text-lg" aria-hidden="true">{'\u2193'}</span>
         </div>
         <FlowStep
           number="4"
@@ -81,7 +81,7 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
       </div>
 
       <div className="flex justify-end">
-        <Button variant="primary" size="sm" onClick={onComplete}>
+        <Button variant="primary" size="md" onClick={onComplete}>
           Got it, let&apos;s go!
         </Button>
       </div>
@@ -92,7 +92,7 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
 function FlowStep({ number, title, description }: { number: string; title: string; description: string }) {
   return (
     <div className="flex items-start gap-3 p-3 border border-border-default rounded-md bg-surface">
-      <div className="shrink-0 w-6 h-6 rounded-full bg-accent text-white text-xs font-bold flex items-center justify-center">
+      <div className="shrink-0 w-6 h-6 rounded-full bg-accent text-fg-on-accent text-xs font-bold flex items-center justify-center">
         {number}
       </div>
       <div>

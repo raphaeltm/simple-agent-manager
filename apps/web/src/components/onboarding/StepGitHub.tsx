@@ -21,7 +21,7 @@ export function StepGitHub({ onComplete, onSkip, isComplete }: StepGitHubProps) 
         <p className="sam-type-body text-fg-primary font-medium m-0 mb-1">GitHub App installed</p>
         <p className="sam-type-caption text-fg-muted m-0">SAM can access your repositories.</p>
         <div className="mt-4">
-          <Button variant="primary" size="sm" onClick={onComplete}>Continue</Button>
+          <Button variant="primary" size="md" onClick={onComplete}>Continue</Button>
         </div>
       </div>
     );
@@ -66,13 +66,13 @@ export function StepGitHub({ onComplete, onSkip, isComplete }: StepGitHubProps) 
         <button
           type="button"
           onClick={onSkip}
-          className="text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0"
+          className="text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          I&apos;ll do this later
+          Skip this step
         </button>
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           onClick={handleInstall}
           disabled={loading}
         >

@@ -90,10 +90,10 @@ describe('OnboardingWizard', () => {
     renderWizard();
 
     await waitFor(() => {
-      expect(screen.getByText('Dismiss setup')).toBeInTheDocument();
+      expect(screen.getByText('Don\'t show again')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('Dismiss setup'));
+    fireEvent.click(screen.getByText('Don\'t show again'));
 
     await waitFor(() => {
       expect(screen.queryByTestId('onboarding-wizard')).not.toBeInTheDocument();
@@ -234,7 +234,7 @@ describe('StepAgentKey', () => {
       expect(screen.getByText('Connect your AI agent')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("I'll do this later"));
+    fireEvent.click(screen.getByText("Skip this step"));
 
     await waitFor(() => {
       expect(screen.getByText('Connect your cloud')).toBeInTheDocument();
