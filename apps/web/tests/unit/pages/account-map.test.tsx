@@ -227,7 +227,7 @@ describe('AccountMap page', () => {
         ],
       })
     );
-    const { container } = renderAccountMap();
+    renderAccountMap();
 
     await waitFor(() => {
       expect(screen.getByTestId('react-flow')).toBeInTheDocument();
