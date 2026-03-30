@@ -1,21 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { ProjectRuntimeConfigResponse, ProviderCatalog, VMSize, CredentialProvider } from '@simple-agent-manager/shared';
+import type { ProjectRuntimeConfigResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
-  CREDENTIAL_PROVIDERS,
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
-  DEFAULT_NODE_WARM_TIMEOUT_MS,
-  MIN_NODE_IDLE_TIMEOUT_MS,
-  MAX_NODE_IDLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 import { Button, Spinner, Skeleton } from '@simple-agent-manager/ui';
 import {
   getProjectRuntimeConfig,
   getProviderCatalog,
-  listCredentials,
   updateProject,
   deleteProject,
   upsertProjectRuntimeEnvVar,
@@ -64,18 +59,12 @@ export function ProjectSettings() {
   const [savingVmSize, setSavingVmSize] = useState(false);
   const [defaultAgentType, setDefaultAgentType] = useState<string | null>(project?.defaultAgentType ?? null);
   const [savingAgentType, setSavingAgentType] = useState(false);
-  const [defaultProvider, setDefaultProvider] = useState<CredentialProvider | null>(project?.defaultProvider ?? null);
-  const [savingProvider, setSavingProvider] = useState(false);
-  const [configuredProviders, setConfiguredProviders] = useState<CredentialProvider[]>([]);
 
-  // Idle timeout settings
+  // Workspace idle timeout (node idle timeout is managed in ScalingSettings)
   const [workspaceIdleTimeoutMs, setWorkspaceIdleTimeoutMs] = useState<number>(
     project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
   );
-  const [nodeIdleTimeoutMs, setNodeIdleTimeoutMs] = useState<number>(
-    project?.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS
-  );
-  const [savingTimeouts, setSavingTimeouts] = useState(false);
+  const [savingWorkspaceTimeout, setSavingWorkspaceTimeout] = useState(false);
 
   // Provider catalog for accurate VM size descriptions
   const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
@@ -109,26 +98,13 @@ export function ProjectSettings() {
       })
     : FALLBACK_VM_SIZES;
 
-  // Load user's configured cloud providers
-  useEffect(() => {
-    listCredentials()
-      .then((creds) => {
-        const providers = creds
-          .map((c) => c.provider);
-        setConfiguredProviders(providers);
-      })
-      .catch(() => { /* credentials unavailable */ });
-  }, []);
-
   // Sync from project when it reloads
   useEffect(() => {
     if (project) {
       setProjectName(project.name);
       setDefaultVmSize(project.defaultVmSize ?? null);
       setDefaultAgentType(project.defaultAgentType ?? null);
-      setDefaultProvider(project.defaultProvider ?? null);
       setWorkspaceIdleTimeoutMs(project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS);
-      setNodeIdleTimeoutMs(project.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS);
     }
   }, [project]);
 
@@ -195,37 +171,17 @@ export function ProjectSettings() {
     }
   };
 
-  const handleSaveProvider = async (provider: CredentialProvider) => {
-    const newProvider = provider === defaultProvider ? null : provider;
-    setSavingProvider(true);
-    setDefaultProvider(newProvider);
+  const handleSaveWorkspaceTimeout = async () => {
+    setSavingWorkspaceTimeout(true);
     try {
-      await updateProject(projectId, { defaultProvider: newProvider });
+      await updateProject(projectId, { workspaceIdleTimeoutMs });
       await reload();
-      toast.success(newProvider ? `Default provider set to ${newProvider}` : 'Default provider cleared (will use any available)');
-    } catch (err) {
-      setDefaultProvider(project?.defaultProvider ?? null);
-      toast.error(err instanceof Error ? err.message : 'Failed to update provider');
-    } finally {
-      setSavingProvider(false);
-    }
-  };
-
-  const handleSaveTimeouts = async () => {
-    setSavingTimeouts(true);
-    try {
-      await updateProject(projectId, {
-        workspaceIdleTimeoutMs: workspaceIdleTimeoutMs,
-        nodeIdleTimeoutMs: nodeIdleTimeoutMs,
-      });
-      await reload();
-      toast.success('Idle timeout settings saved');
+      toast.success('Workspace idle timeout saved');
     } catch (err) {
       setWorkspaceIdleTimeoutMs(project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS);
-      setNodeIdleTimeoutMs(project?.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS);
-      toast.error(err instanceof Error ? err.message : 'Failed to update timeout settings');
+      toast.error(err instanceof Error ? err.message : 'Failed to update timeout');
     } finally {
-      setSavingTimeouts(false);
+      setSavingWorkspaceTimeout(false);
     }
   };
 
@@ -446,138 +402,59 @@ export function ProjectSettings() {
         )}
       </section>
 
-      {/* Default Cloud Provider */}
-      {configuredProviders.length > 1 && (
-        <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
-          <div>
-            <h2 className="sam-type-section-heading m-0 text-fg-primary">
-              Default Cloud Provider
-            </h2>
-            <p className="m-0 mt-1 text-xs text-fg-muted">
-              Which cloud provider to use for auto-provisioned nodes. Click again to clear.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {CREDENTIAL_PROVIDERS.filter((p) => configuredProviders.includes(p)).map((provider) => {
-              const isSelected = defaultProvider === provider;
-              return (
-                <button
-                  key={provider}
-                  type="button"
-                  aria-pressed={isSelected}
-                  disabled={savingProvider}
-                  onClick={() => void handleSaveProvider(provider)}
-                  className={`p-3 rounded-md text-left text-fg-primary transition-all ${
-                    isSelected
-                      ? 'border-2 border-accent bg-accent-tint'
-                      : 'border border-border-default bg-inset'
-                  } ${savingProvider ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
-                >
-                  <div className="font-medium capitalize">{provider}</div>
-                </button>
-              );
-            })}
-          </div>
-          {!defaultProvider && (
-            <div className="text-xs text-fg-muted">
-              No default set — system will use any available provider credential.
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Idle Timeout Settings */}
-      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-4">
+      {/* Workspace Idle Timeout */}
+      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
         <div>
           <h2 className="sam-type-section-heading m-0 text-fg-primary">
-            Compute Lifecycle
+            Workspace Idle Timeout
           </h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
-            Configure how long workspaces and nodes stay active when idle. Workspaces with no messages or terminal activity beyond the timeout are automatically cleaned up.
+            How long workspaces stay active when idle. Workspaces with no messages or terminal activity beyond the timeout are automatically cleaned up.
           </p>
         </div>
-        <div className="grid gap-4">
-          <div>
-            <label htmlFor="workspace-idle-timeout" className="block text-xs font-medium text-fg-muted mb-1">
-              Workspace Idle Timeout
-            </label>
-            <div className="flex items-center gap-3">
-              <input
-                id="workspace-idle-timeout"
-                type="range"
-                min={MIN_WORKSPACE_IDLE_TIMEOUT_MS}
-                max={MAX_WORKSPACE_IDLE_TIMEOUT_MS}
-                step={MIN_WORKSPACE_IDLE_TIMEOUT_MS}
-                value={workspaceIdleTimeoutMs}
-                onChange={(e) => setWorkspaceIdleTimeoutMs(Number(e.target.value))}
-                aria-valuetext={
-                  workspaceIdleTimeoutMs >= 60 * 60 * 1000
-                    ? `${(workspaceIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)} hours`
-                    : `${(workspaceIdleTimeoutMs / (60 * 1000)).toFixed(0)} minutes`
-                }
-                className="flex-1 accent-[var(--sam-color-accent-primary)] h-2 cursor-pointer"
-              />
-              <span
-                aria-live="polite"
-                aria-atomic="true"
-                className="text-sm text-fg-primary font-medium min-w-[4rem] text-right tabular-nums"
-              >
-                {workspaceIdleTimeoutMs >= 60 * 60 * 1000
-                  ? `${(workspaceIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)}h`
-                  : `${(workspaceIdleTimeoutMs / (60 * 1000)).toFixed(0)}m`}
-              </span>
-            </div>
-            <p className="m-0 mt-1 text-xs text-fg-muted">
+        <div>
+          <label htmlFor="workspace-idle-timeout" className="sr-only">Workspace idle timeout</label>
+          <div className="flex items-center gap-3">
+            <input
+              id="workspace-idle-timeout"
+              type="range"
+              min={MIN_WORKSPACE_IDLE_TIMEOUT_MS}
+              max={MAX_WORKSPACE_IDLE_TIMEOUT_MS}
+              step={MIN_WORKSPACE_IDLE_TIMEOUT_MS}
+              value={workspaceIdleTimeoutMs}
+              onChange={(e) => setWorkspaceIdleTimeoutMs(Number(e.target.value))}
+              aria-valuetext={
+                workspaceIdleTimeoutMs >= 60 * 60 * 1000
+                  ? `${(workspaceIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)} hours`
+                  : `${(workspaceIdleTimeoutMs / (60 * 1000)).toFixed(0)} minutes`
+              }
+              className="flex-1 accent-[var(--sam-color-accent-primary)] h-2 cursor-pointer"
+            />
+            <span
+              aria-live="polite"
+              aria-atomic="true"
+              className="text-sm text-fg-primary font-medium min-w-[4rem] text-right tabular-nums"
+            >
+              {workspaceIdleTimeoutMs >= 60 * 60 * 1000
+                ? `${(workspaceIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)}h`
+                : `${(workspaceIdleTimeoutMs / (60 * 1000)).toFixed(0)}m`}
+            </span>
+          </div>
+          <p className="m-0 mt-1 text-xs text-fg-muted">
               Default: {DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS / (60 * 60 * 1000)}h. Range: 30m \u2013 24h.
             </p>
-          </div>
-          <div>
-            <label htmlFor="node-idle-timeout" className="block text-xs font-medium text-fg-muted mb-1">
-              Node Idle Timeout
-            </label>
-            <div className="flex items-center gap-3">
-              <input
-                id="node-idle-timeout"
-                type="range"
-                min={MIN_NODE_IDLE_TIMEOUT_MS}
-                max={MAX_NODE_IDLE_TIMEOUT_MS}
-                step={MIN_NODE_IDLE_TIMEOUT_MS}
-                value={nodeIdleTimeoutMs}
-                onChange={(e) => setNodeIdleTimeoutMs(Number(e.target.value))}
-                aria-valuetext={
-                  nodeIdleTimeoutMs >= 60 * 60 * 1000
-                    ? `${(nodeIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)} hours`
-                    : `${(nodeIdleTimeoutMs / (60 * 1000)).toFixed(0)} minutes`
-                }
-                className="flex-1 accent-[var(--sam-color-accent-primary)] h-2 cursor-pointer"
-              />
-              <span
-                aria-live="polite"
-                aria-atomic="true"
-                className="text-sm text-fg-primary font-medium min-w-[4rem] text-right tabular-nums"
-              >
-                {nodeIdleTimeoutMs >= 60 * 60 * 1000
-                  ? `${(nodeIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)}h`
-                  : `${(nodeIdleTimeoutMs / (60 * 1000)).toFixed(0)}m`}
-              </span>
-            </div>
-            <p className="m-0 mt-1 text-xs text-fg-muted">
-              Default: {DEFAULT_NODE_WARM_TIMEOUT_MS / (60 * 1000)}m. How long an empty node stays warm before being destroyed. Range: 5m \u2013 4h.
-            </p>
-          </div>
         </div>
         <div className="flex justify-end">
           <Button
             size="sm"
-            loading={savingTimeouts}
+            loading={savingWorkspaceTimeout}
             disabled={
-              savingTimeouts ||
-              (workspaceIdleTimeoutMs === (project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS) &&
-               nodeIdleTimeoutMs === (project?.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS))
+              savingWorkspaceTimeout ||
+              workspaceIdleTimeoutMs === (project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS)
             }
-            onClick={() => void handleSaveTimeouts()}
+            onClick={() => void handleSaveWorkspaceTimeout()}
           >
-            Save Timeouts
+            Save
           </Button>
         </div>
       </section>
@@ -587,191 +464,191 @@ export function ProjectSettings() {
         <ScalingSettings projectId={projectId} project={project} reload={reload} />
       )}
 
-    {/* Runtime Config */}
-    <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
-      <h2 className="sam-type-section-heading m-0 text-fg-primary">
-        Runtime Config
-      </h2>
+      {/* Runtime Config */}
+      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
+        <h2 className="sam-type-section-heading m-0 text-fg-primary">
+          Runtime Config
+        </h2>
 
-      {runtimeConfigLoading ? (
-        <div className="flex items-center gap-2">
-          <Spinner size="sm" />
-          <span>Loading runtime config...</span>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {/* Environment Variables */}
-          <div className="grid gap-2">
-            <h3 className="sam-type-card-title m-0 text-fg-primary">Environment Variables</h3>
-
-            {/* Add form — key and value on same row */}
-            <div className="flex gap-2 items-end flex-wrap">
-              <div className="flex-[1_1_140px] min-w-0">
-                <label className="block text-xs text-fg-muted mb-0.5">Key</label>
-                <input
-                  type="text"
-                  aria-label="Runtime env key"
-                  placeholder="API_TOKEN"
-                  value={envKeyInput}
-                  onChange={(event) => setEnvKeyInput(event.currentTarget.value)}
-                  className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
-                />
-              </div>
-              <div className="flex-[2_1_200px] min-w-0">
-                <label className="block text-xs text-fg-muted mb-0.5">Value</label>
-                <input
-                  type="text"
-                  aria-label="Runtime env value"
-                  placeholder="Value"
-                  value={envValueInput}
-                  onChange={(event) => setEnvValueInput(event.currentTarget.value)}
-                  className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
-                />
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer whitespace-nowrap">
-                  <input
-                    type="checkbox"
-                    checked={envSecretInput}
-                    onChange={(event) => setEnvSecretInput(event.currentTarget.checked)}
-                  />
-                  Secret
-                </label>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleUpsertEnvVar}
-                  loading={savingRuntimeConfig}
-                  disabled={savingRuntimeConfig}
-                  style={{ minHeight: '36px' }}
-                >
-                  Add
-                </Button>
-              </div>
-            </div>
-
-            {/* Env var list */}
-            {runtimeConfig.envVars.length === 0 ? (
-              <div className="text-fg-muted text-xs py-1">
-                No environment variables configured.
-              </div>
-            ) : (
-              <div className="border border-border-default rounded-sm overflow-hidden">
-                {runtimeConfig.envVars.map((item, idx) => (
-                  <div
-                    key={item.key}
-                    className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.envVars.length - 1 ? 'border-b border-border-default' : ''}`}
-                  >
-                    <code className="font-semibold text-fg-primary text-[0.8125rem]">{item.key}</code>
-                    <span className="text-fg-muted flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                      = {item.isSecret ? '\u2022\u2022\u2022\u2022\u2022\u2022' : item.value}
-                    </span>
-                    {item.isSecret && (
-                      <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
-                    )}
-                    <button
-                      onClick={() => void handleDeleteEnvVar(item.key)}
-                      disabled={savingRuntimeConfig}
-                      className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"
-                      aria-label={`Remove ${item.key}`}
-                      title={`Remove ${item.key}`}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+        {runtimeConfigLoading ? (
+          <div className="flex items-center gap-2">
+            <Spinner size="sm" />
+            <span>Loading runtime config...</span>
           </div>
-
-          {/* Runtime Files */}
-          <div className="grid gap-2">
-            <h3 className="sam-type-card-title m-0 text-fg-primary">Runtime Files</h3>
-
-            {/* Add form */}
+        ) : (
+          <div className="grid gap-4">
+            {/* Environment Variables */}
             <div className="grid gap-2">
-              <div>
-                <label className="block text-xs text-fg-muted mb-0.5">File path</label>
-                <input
-                  type="text"
-                  aria-label="Runtime file path"
-                  placeholder=".env.local"
-                  value={filePathInput}
-                  onChange={(event) => setFilePathInput(event.currentTarget.value)}
-                  className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-fg-muted mb-0.5">Content</label>
-                <textarea
-                  aria-label="Runtime file content"
-                  placeholder="FOO=bar"
-                  rows={3}
-                  value={fileContentInput}
-                  onChange={(event) => setFileContentInput(event.currentTarget.value)}
-                  className="block w-full py-1.5 px-2.5 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono resize-y box-border"
-                />
-              </div>
-              <div className="flex justify-between items-center gap-2 flex-wrap">
-                <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer">
+              <h3 className="sam-type-card-title m-0 text-fg-primary">Environment Variables</h3>
+
+              {/* Add form — key and value on same row */}
+              <div className="flex gap-2 items-end flex-wrap">
+                <div className="flex-[1_1_140px] min-w-0">
+                  <label className="block text-xs text-fg-muted mb-0.5">Key</label>
                   <input
-                    type="checkbox"
-                    checked={fileSecretInput}
-                    onChange={(event) => setFileSecretInput(event.currentTarget.checked)}
+                    type="text"
+                    aria-label="Runtime env key"
+                    placeholder="API_TOKEN"
+                    value={envKeyInput}
+                    onChange={(event) => setEnvKeyInput(event.currentTarget.value)}
+                    className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
                   />
-                  Secret file content
-                </label>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleUpsertFile}
-                  loading={savingRuntimeConfig}
-                  disabled={savingRuntimeConfig}
-                  style={{ minHeight: '36px' }}
-                >
-                  Add file
-                </Button>
+                </div>
+                <div className="flex-[2_1_200px] min-w-0">
+                  <label className="block text-xs text-fg-muted mb-0.5">Value</label>
+                  <input
+                    type="text"
+                    aria-label="Runtime env value"
+                    placeholder="Value"
+                    value={envValueInput}
+                    onChange={(event) => setEnvValueInput(event.currentTarget.value)}
+                    className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
+                  />
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={envSecretInput}
+                      onChange={(event) => setEnvSecretInput(event.currentTarget.checked)}
+                    />
+                    Secret
+                  </label>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleUpsertEnvVar}
+                    loading={savingRuntimeConfig}
+                    disabled={savingRuntimeConfig}
+                    style={{ minHeight: '36px' }}
+                  >
+                    Add
+                  </Button>
+                </div>
               </div>
+
+              {/* Env var list */}
+              {runtimeConfig.envVars.length === 0 ? (
+                <div className="text-fg-muted text-xs py-1">
+                  No environment variables configured.
+                </div>
+              ) : (
+                <div className="border border-border-default rounded-sm overflow-hidden">
+                  {runtimeConfig.envVars.map((item, idx) => (
+                    <div
+                      key={item.key}
+                      className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.envVars.length - 1 ? 'border-b border-border-default' : ''}`}
+                    >
+                      <code className="font-semibold text-fg-primary text-[0.8125rem]">{item.key}</code>
+                      <span className="text-fg-muted flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                        = {item.isSecret ? '\u2022\u2022\u2022\u2022\u2022\u2022' : item.value}
+                      </span>
+                      {item.isSecret && (
+                        <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
+                      )}
+                      <button
+                        onClick={() => void handleDeleteEnvVar(item.key)}
+                        disabled={savingRuntimeConfig}
+                        className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"
+                        aria-label={`Remove ${item.key}`}
+                        title={`Remove ${item.key}`}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* File list */}
-            {runtimeConfig.files.length === 0 ? (
-              <div className="text-fg-muted text-xs py-1">
-                No runtime files configured.
-              </div>
-            ) : (
-              <div className="border border-border-default rounded-sm overflow-hidden">
-                {runtimeConfig.files.map((item, idx) => (
-                  <div
-                    key={item.path}
-                    className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.files.length - 1 ? 'border-b border-border-default' : ''}`}
+            {/* Runtime Files */}
+            <div className="grid gap-2">
+              <h3 className="sam-type-card-title m-0 text-fg-primary">Runtime Files</h3>
+
+              {/* Add form */}
+              <div className="grid gap-2">
+                <div>
+                  <label className="block text-xs text-fg-muted mb-0.5">File path</label>
+                  <input
+                    type="text"
+                    aria-label="Runtime file path"
+                    placeholder=".env.local"
+                    value={filePathInput}
+                    onChange={(event) => setFilePathInput(event.currentTarget.value)}
+                    className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-fg-muted mb-0.5">Content</label>
+                  <textarea
+                    aria-label="Runtime file content"
+                    placeholder="FOO=bar"
+                    rows={3}
+                    value={fileContentInput}
+                    onChange={(event) => setFileContentInput(event.currentTarget.value)}
+                    className="block w-full py-1.5 px-2.5 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono resize-y box-border"
+                  />
+                </div>
+                <div className="flex justify-between items-center gap-2 flex-wrap">
+                  <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={fileSecretInput}
+                      onChange={(event) => setFileSecretInput(event.currentTarget.checked)}
+                    />
+                    Secret file content
+                  </label>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleUpsertFile}
+                    loading={savingRuntimeConfig}
+                    disabled={savingRuntimeConfig}
+                    style={{ minHeight: '36px' }}
                   >
-                    <code className="font-semibold text-fg-primary text-[0.8125rem] overflow-hidden text-ellipsis whitespace-nowrap min-w-0">{item.path}</code>
-                    <span className="flex-1" />
-                    {item.isSecret && (
-                      <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
-                    )}
-                    <button
-                      onClick={() => void handleDeleteFile(item.path)}
-                      disabled={savingRuntimeConfig}
-                      className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"
-                      aria-label={`Remove ${item.path}`}
-                      title={`Remove ${item.path}`}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
+                    Add file
+                  </Button>
+                </div>
               </div>
-            )}
+
+              {/* File list */}
+              {runtimeConfig.files.length === 0 ? (
+                <div className="text-fg-muted text-xs py-1">
+                  No runtime files configured.
+                </div>
+              ) : (
+                <div className="border border-border-default rounded-sm overflow-hidden">
+                  {runtimeConfig.files.map((item, idx) => (
+                    <div
+                      key={item.path}
+                      className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.files.length - 1 ? 'border-b border-border-default' : ''}`}
+                    >
+                      <code className="font-semibold text-fg-primary text-[0.8125rem] overflow-hidden text-ellipsis whitespace-nowrap min-w-0">{item.path}</code>
+                      <span className="flex-1" />
+                      {item.isSecret && (
+                        <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
+                      )}
+                      <button
+                        onClick={() => void handleDeleteFile(item.path)}
+                        disabled={savingRuntimeConfig}
+                        className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"
+                        aria-label={`Remove ${item.path}`}
+                        title={`Remove ${item.path}`}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-    </section>
+        )}
+      </section>
 
       {/* Deploy to Cloud */}
       <DeploymentSettings projectId={projectId} />

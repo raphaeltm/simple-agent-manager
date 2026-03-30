@@ -135,40 +135,20 @@ describe('Project default provider — TaskRunner DO', () => {
 });
 
 describe('Project default provider — settings UI', () => {
-  const settings = webSrc('pages/ProjectSettings.tsx');
-  const drawer = webSrc('components/project/SettingsDrawer.tsx');
+  const scaling = webSrc('components/ScalingSettings.tsx');
 
-  it('ProjectSettings renders provider selector', () => {
-    expect(settings).toContain('Default Cloud Provider');
-    expect(settings).toContain('handleSaveProvider');
-    expect(settings).toContain('defaultProvider');
+  it('ScalingSettings renders provider selector', () => {
+    expect(scaling).toContain('Default Provider');
+    expect(scaling).toContain('selectedProvider');
+    expect(scaling).toContain('defaultProvider');
   });
 
-  it('ProjectSettings calls updateProject with defaultProvider', () => {
-    expect(settings).toContain("updateProject(projectId, { defaultProvider:");
+  it('ScalingSettings calls updateProject with defaultProvider', () => {
+    expect(scaling).toContain('defaultProvider: selectedProvider');
   });
 
-  it('ProjectSettings only shows provider section when multiple providers configured', () => {
-    expect(settings).toContain('configuredProviders.length > 1');
-  });
-
-  it('ProjectSettings loads user credentials to determine configured providers', () => {
-    expect(settings).toContain('listCredentials');
-    expect(settings).toContain('setConfiguredProviders');
-  });
-
-  it('SettingsDrawer renders provider selector', () => {
-    expect(drawer).toContain('Default Cloud Provider');
-    expect(drawer).toContain('handleSaveProvider');
-    expect(drawer).toContain('defaultProvider');
-  });
-
-  it('SettingsDrawer only shows when multiple providers configured', () => {
-    expect(drawer).toContain('configuredProviders.length > 1');
-  });
-
-  it('SettingsDrawer syncs defaultProvider from project context', () => {
-    expect(drawer).toContain('project.defaultProvider');
-    expect(drawer).toContain('setDefaultProvider');
+  it('ScalingSettings loads user credentials to determine configured providers', () => {
+    expect(scaling).toContain('listCredentials');
+    expect(scaling).toContain('setConfiguredProviders');
   });
 });

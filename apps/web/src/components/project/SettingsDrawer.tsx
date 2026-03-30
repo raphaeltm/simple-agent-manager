@@ -9,12 +9,10 @@
  */
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { ProjectRuntimeConfigResponse, VMSize, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
+import type { ProjectRuntimeConfigResponse, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import {
   getProjectRuntimeConfig,
-  listCredentials,
   updateProject,
   upsertProjectRuntimeEnvVar,
   deleteProjectRuntimeEnvVar,
@@ -60,11 +58,6 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   );
   const [savingWorkspaceProfile, setSavingWorkspaceProfile] = useState(false);
 
-  // Cloud provider
-  const [defaultProvider, setDefaultProvider] = useState<CredentialProvider | null>(project?.defaultProvider ?? null);
-  const [savingProvider, setSavingProvider] = useState(false);
-  const [configuredProviders, setConfiguredProviders] = useState<CredentialProvider[]>([]);
-
   // Runtime config
   const [runtimeConfig, setRuntimeConfig] = useState<ProjectRuntimeConfigResponse>({ envVars: [], files: [] });
   const [runtimeConfigLoading, setRuntimeConfigLoading] = useState(true);
@@ -80,23 +73,11 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   const [fileContentInput, setFileContentInput] = useState('');
   const [fileSecretInput, setFileSecretInput] = useState(false);
 
-  // Load user's configured cloud providers
-  useEffect(() => {
-    listCredentials()
-      .then((creds) => {
-        const providers = creds
-          .map((c) => c.provider);
-        setConfiguredProviders(providers);
-      })
-      .catch(() => { /* credentials unavailable */ });
-  }, []);
-
-  // Sync VM size, workspace profile, and provider from project
+  // Sync VM size and workspace profile from project
   useEffect(() => {
     if (project) {
       setDefaultVmSize(project.defaultVmSize ?? null);
       setDefaultWorkspaceProfile((project.defaultWorkspaceProfile as WorkspaceProfile | null) ?? null);
-      setDefaultProvider(project.defaultProvider ?? null);
     }
   }, [project]);
 
@@ -207,23 +188,6 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
       toast.error(err instanceof Error ? err.message : 'Failed to update workspace profile');
     } finally {
       setSavingWorkspaceProfile(false);
-    }
-  };
-
-  // Cloud provider handler
-  const handleSaveProvider = async (provider: CredentialProvider) => {
-    const newProvider = provider === defaultProvider ? null : provider;
-    setSavingProvider(true);
-    setDefaultProvider(newProvider);
-    try {
-      await updateProject(projectId, { defaultProvider: newProvider });
-      await reload();
-      toast.success(newProvider ? `Default provider set to ${newProvider}` : 'Default provider cleared');
-    } catch (err) {
-      setDefaultProvider(project?.defaultProvider ?? null);
-      toast.error(err instanceof Error ? err.message : 'Failed to update provider');
-    } finally {
-      setSavingProvider(false);
     }
   };
 
@@ -426,46 +390,6 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                 </div>
               )}
             </section>
-
-            {/* Default Cloud Provider — only show when user has multiple providers */}
-            {configuredProviders.length > 1 && (
-              <section className="grid gap-3">
-                <div>
-                  <h3 className="sam-type-card-title m-0 text-fg-primary">
-                    Default Cloud Provider
-                  </h3>
-                  <p className="m-0 mt-1 text-xs text-fg-muted">
-                    Which cloud provider to use for auto-provisioned nodes. Click again to clear.
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {CREDENTIAL_PROVIDERS.filter((p) => configuredProviders.includes(p)).map((provider) => {
-                    const isSelected = defaultProvider === provider;
-                    return (
-                      <button
-                        key={provider}
-                        type="button"
-                        aria-pressed={isSelected}
-                        disabled={savingProvider}
-                        onClick={() => void handleSaveProvider(provider)}
-                        className={`p-2 rounded-md text-left text-fg-primary ${
-                          isSelected
-                            ? 'border-2 border-accent bg-accent-tint'
-                            : 'border border-border-default bg-inset'
-                        } ${savingProvider ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
-                      >
-                        <div className="font-medium text-[0.8125rem] capitalize">{provider}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-                {!defaultProvider && (
-                  <div className="text-xs text-fg-muted">
-                    No default set — uses any available provider.
-                  </div>
-                )}
-              </section>
-            )}
 
             {/* Runtime Config */}
             <section className="grid gap-3">
