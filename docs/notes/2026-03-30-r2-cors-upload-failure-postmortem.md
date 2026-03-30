@@ -11,13 +11,23 @@ File attachments on task submissions fail silently with a red error indicator. U
 
 The user experience: click paperclip → select file → file chip appears → turns red with exclamation mark. The presigned URL is generated successfully, but the browser's same-origin policy blocks the XHR PUT to `{accountId}.r2.cloudflarestorage.com`.
 
-## Root Cause
+## Root Causes (Three Bugs)
+
+### Bug 1: Missing R2 CORS Configuration (Browser Upload Blocked)
 
 The R2 bucket has no CORS configuration. Cloudflare R2 requires explicit CORS rules to allow cross-origin requests from the browser. Without CORS rules, the browser sends a preflight OPTIONS request, R2 responds without `Access-Control-Allow-Origin`, and the browser blocks the subsequent PUT.
 
 The upload flow crosses an origin boundary:
 1. Browser at `https://app.sammy.party` requests presigned URL from `https://api.sammy.party` → succeeds (same-origin via subdomain, handled by Worker CORS middleware)
 2. Browser PUTs file to `https://{accountId}.r2.cloudflarestorage.com/{bucket}/...` → **blocked by CORS** (different origin, no CORS rules on R2)
+
+### Bug 2: Upload Route Double-Mounted (404 on Presigned URL Request)
+
+Even after CORS was fixed, the presigned URL endpoint returned 404. The `uploadRoutes` defined its path as `/:projectId/tasks/request-upload` but was already mounted under `/api/projects/:projectId/tasks`, resulting in the full server path being `/api/projects/:projectId/tasks/:projectId/tasks/request-upload`. The client correctly called `/api/projects/:id/tasks/request-upload`, which matched no route. Fixed by changing the route path to `/request-upload`.
+
+### Bug 3: Attachment Transfer Auth Mismatch (401 "missing token")
+
+Even after CORS and routing were fixed, the attachment transfer step (TaskRunner downloading from R2 and uploading to workspace) failed with 401 `{"error":"missing token"}`. The TaskRunner sent the terminal token as an `Authorization: Bearer` header, but the VM agent's `requireWorkspaceRequestAuth()` only checks `r.URL.Query().Get("token")` — it ignores the Authorization header. Fixed by passing the token as a query parameter.
 
 ## Timeline
 
