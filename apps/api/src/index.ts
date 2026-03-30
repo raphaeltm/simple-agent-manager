@@ -107,6 +107,7 @@ export interface Env {
   SMOKE_TOKEN_BYTES?: string;              // Random bytes for token generation (default: 32)
   MAX_SMOKE_TOKENS_PER_USER?: string;      // Max active tokens per user (default: 10)
   MAX_SMOKE_TOKEN_NAME_LENGTH?: string;    // Max token name length (default: 100)
+  SMOKE_TEST_SESSION_DURATION_SECONDS?: string; // Session lifetime for token login (default: 604800 = 7 days)
   // Optional configurable values (per constitution principle XI)
   TERMINAL_TOKEN_EXPIRY_MS?: string;
   CALLBACK_TOKEN_EXPIRY_MS?: string;

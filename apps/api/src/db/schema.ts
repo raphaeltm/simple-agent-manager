@@ -893,7 +893,7 @@ export const smokeTestTokens = sqliteTable(
     revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
-    tokenHashIdx: index('idx_smoke_test_tokens_hash').on(table.tokenHash),
+    tokenHashIdx: uniqueIndex('idx_smoke_test_tokens_hash').on(table.tokenHash),
     userIdIdx: index('idx_smoke_test_tokens_user').on(table.userId),
   })
 );

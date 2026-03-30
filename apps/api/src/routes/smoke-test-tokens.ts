@@ -6,6 +6,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { createAuth } from '../auth';
 import { errors } from '../middleware/error';
+import { rateLimit } from '../middleware/rate-limit';
 
 /** Token prefix — identifiable if leaked, greppable in logs */
 const TOKEN_PREFIX = 'sam_test_';
@@ -18,6 +19,9 @@ const DEFAULT_MAX_TOKENS_PER_USER = 10;
 
 /** Maximum length for token name (default: 100) */
 const DEFAULT_MAX_TOKEN_NAME_LENGTH = 100;
+
+/** Default session duration for token-based login (7 days in seconds) */
+const DEFAULT_SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60; // 604800
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,8 +38,10 @@ function isFeatureEnabled(env: Env): boolean {
 function generateToken(tokenBytes: number): string {
   const bytes = new Uint8Array(tokenBytes);
   crypto.getRandomValues(bytes);
-  // base64url encoding (no padding)
-  const base64url = btoa(String.fromCharCode(...bytes))
+  // base64url encoding (no padding) — loop avoids stack overflow from spread on large arrays
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  const base64url = btoa(binary)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
@@ -164,6 +170,7 @@ smokeTestTokenRoutes.post('/smoke-test-tokens', async (c) => {
 /**
  * DELETE /api/auth/smoke-test-tokens/:id
  * Revoke a token. Sets revoked_at timestamp. Must belong to the authenticated user.
+ * Returns 404 for both missing tokens and tokens belonging to other users (prevents enumeration).
  */
 smokeTestTokenRoutes.delete('/smoke-test-tokens/:id', async (c) => {
   if (!isFeatureEnabled(c.env)) {
@@ -179,35 +186,47 @@ smokeTestTokenRoutes.delete('/smoke-test-tokens/:id', async (c) => {
   const tokenId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const token = await db
-    .select({ id: schema.smokeTestTokens.id, userId: schema.smokeTestTokens.userId })
-    .from(schema.smokeTestTokens)
-    .where(eq(schema.smokeTestTokens.id, tokenId))
-    .get();
-
-  if (!token) {
-    throw errors.notFound('Token');
-  }
-
-  if (token.userId !== session.user.id) {
-    throw errors.forbidden('Cannot revoke another user\'s token');
-  }
-
-  await db
+  // Single UPDATE with ownership check — avoids info disclosure and extra round-trip
+  const result = await db
     .update(schema.smokeTestTokens)
     .set({ revokedAt: new Date() })
-    .where(eq(schema.smokeTestTokens.id, tokenId));
+    .where(
+      and(
+        eq(schema.smokeTestTokens.id, tokenId),
+        eq(schema.smokeTestTokens.userId, session.user.id)
+      )
+    );
+
+  // D1 returns changes count; if 0, token not found or not owned by user
+  if ((result as { meta?: { changes?: number } }).meta?.changes === 0) {
+    throw errors.notFound('Token not found');
+  }
 
   return c.json({ success: true });
 });
+
+/** Default rate limit for token-login: 20 attempts per hour per IP */
+const DEFAULT_RATE_LIMIT_TOKEN_LOGIN = 20;
 
 /**
  * POST /api/auth/token-login
  * Login via smoke test token. No session auth required — the token IS the credential.
  * Creates a BetterAuth session and returns the session cookie.
+ * Rate-limited by IP to prevent brute-force attempts.
  * Body: { token: string }
+ *
+ * NOTE: Session creation bypasses BetterAuth's session lifecycle (direct DB insert).
+ * BetterAuth does not expose a programmatic session creation API suitable for token-based login.
+ * If the sessions table schema changes (new required columns), this path must be updated.
+ * The unit tests verify that sessions created here are compatible with the current schema.
  */
-smokeTestTokenRoutes.post('/token-login', async (c) => {
+const tokenLoginRateLimit = rateLimit({
+  limit: DEFAULT_RATE_LIMIT_TOKEN_LOGIN,
+  keyPrefix: 'rl:token-login',
+  useIp: true,
+});
+
+smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   if (!isFeatureEnabled(c.env)) {
     throw errors.notFound('Not found');
   }
@@ -239,18 +258,18 @@ smokeTestTokenRoutes.post('/token-login', async (c) => {
     throw errors.unauthorized('Token has been revoked');
   }
 
-  // Update last_used_at
-  await db
-    .update(schema.smokeTestTokens)
-    .set({ lastUsedAt: new Date() })
-    .where(eq(schema.smokeTestTokens.id, tokenRecord.id));
-
-  // Look up the user
-  const user = await db
-    .select()
-    .from(schema.users)
-    .where(eq(schema.users.id, tokenRecord.userId))
-    .get();
+  // Parallelize last_used_at update and user lookup — independent D1 queries
+  const [, user] = await Promise.all([
+    db
+      .update(schema.smokeTestTokens)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(schema.smokeTestTokens.id, tokenRecord.id)),
+    db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, tokenRecord.userId))
+      .get(),
+  ]);
 
   if (!user) {
     throw errors.unauthorized('Token owner not found');
@@ -258,9 +277,11 @@ smokeTestTokenRoutes.post('/token-login', async (c) => {
 
   // Create a session directly in the BetterAuth sessions table.
   // This produces the same cookie as the OAuth callback would.
+  const sessionDurationSeconds =
+    parseInt(c.env.SMOKE_TEST_SESSION_DURATION_SECONDS || '', 10) || DEFAULT_SESSION_DURATION_SECONDS;
   const sessionToken = crypto.randomUUID();
   const sessionId = ulid();
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  const expiresAt = new Date(Date.now() + sessionDurationSeconds * 1000);
 
   await db.insert(schema.sessions).values({
     id: sessionId,
@@ -282,8 +303,8 @@ smokeTestTokenRoutes.post('/token-login', async (c) => {
     `${cookieName}=${cookieValue}`,
     `Path=/`,
     `HttpOnly`,
-    `SameSite=Lax`,
-    `Max-Age=${7 * 24 * 60 * 60}`,
+    `SameSite=Strict`,
+    `Max-Age=${sessionDurationSeconds}`,
     ...(isSecure ? [`Secure`, `Domain=.${baseDomain}`] : []),
   ].join('; ');
 

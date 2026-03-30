@@ -31,6 +31,11 @@ vi.mock('../../../src/lib/ulid', () => ({
   ulid: vi.fn(() => 'test-ulid-123'),
 }));
 
+// Mock rate-limit middleware to be a passthrough in tests
+vi.mock('../../../src/middleware/rate-limit', () => ({
+  rateLimit: vi.fn(() => async (_c: any, next: any) => next()),
+}));
+
 // Import route after mocks
 import { smokeTestTokenRoutes } from '../../../src/routes/smoke-test-tokens';
 
@@ -39,9 +44,11 @@ let currentMockDB: any;
 function createMockDB(options: {
   selectGetResults?: any[];
   selectAllResults?: any[][];
+  updateChanges?: number;
 }) {
   const getQueue = [...(options.selectGetResults || [])];
   const allQueue = [...(options.selectAllResults || [])];
+  const changes = options.updateChanges ?? 1;
 
   return {
     select: vi.fn(() => {
@@ -60,7 +67,7 @@ function createMockDB(options: {
     update: vi.fn(() => {
       const chain: any = {};
       chain.set = vi.fn(() => chain);
-      chain.where = vi.fn(() => Promise.resolve());
+      chain.where = vi.fn(() => Promise.resolve({ meta: { changes } }));
       return chain;
     }),
   };
@@ -199,10 +206,40 @@ describe('Smoke Test Token Routes', () => {
       expect(res.status).toBe(400);
     });
 
-    it('DELETE /smoke-test-tokens/:id revokes token', async () => {
-      currentMockDB = createMockDB({
-        selectGetResults: [{ id: 'token-1', userId: 'user-1' }],
+    it('POST /smoke-test-tokens rejects name exceeding max length', async () => {
+      currentMockDB = createMockDB({});
+      mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
+      const app = buildApp();
+      const longName = 'a'.repeat(101);
+      const res = await app.request('/api/auth/smoke-test-tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: longName }),
       });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('100 characters');
+    });
+
+    it('POST /smoke-test-tokens rejects when at token limit', async () => {
+      const tenTokens = Array.from({ length: 10 }, (_, i) => ({ id: `token-${i}` }));
+      currentMockDB = createMockDB({
+        selectAllResults: [tenTokens],
+      });
+      mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
+      const app = buildApp();
+      const res = await app.request('/api/auth/smoke-test-tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'one more' }),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('Maximum of 10');
+    });
+
+    it('DELETE /smoke-test-tokens/:id revokes token (updateChanges=1)', async () => {
+      currentMockDB = createMockDB({ updateChanges: 1 });
       mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
       const app = buildApp();
       const res = await app.request('/api/auth/smoke-test-tokens/token-1', {
@@ -211,28 +248,25 @@ describe('Smoke Test Token Routes', () => {
       expect(res.status).toBe(200);
     });
 
-    it('DELETE /smoke-test-tokens/:id returns 403 for other user token', async () => {
-      currentMockDB = createMockDB({
-        selectGetResults: [{ id: 'token-1', userId: 'user-2' }],
-      });
-      mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
-      const app = buildApp();
-      const res = await app.request('/api/auth/smoke-test-tokens/token-1', {
-        method: 'DELETE',
-      });
-      expect(res.status).toBe(403);
-    });
-
-    it('DELETE /smoke-test-tokens/:id returns 404 for unknown token', async () => {
-      currentMockDB = createMockDB({
-        selectGetResults: [null],
-      });
+    it('DELETE /smoke-test-tokens/:id returns 404 for unknown or other-user token', async () => {
+      // Single UPDATE with ownership check returns 0 changes for both cases
+      currentMockDB = createMockDB({ updateChanges: 0 });
       mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
       const app = buildApp();
       const res = await app.request('/api/auth/smoke-test-tokens/nonexistent', {
         method: 'DELETE',
       });
       expect(res.status).toBe(404);
+    });
+
+    it('DELETE /smoke-test-tokens/:id returns 401 when not authenticated', async () => {
+      currentMockDB = createMockDB({});
+      mockGetSession.mockResolvedValue(null);
+      const app = buildApp();
+      const res = await app.request('/api/auth/smoke-test-tokens/token-1', {
+        method: 'DELETE',
+      });
+      expect(res.status).toBe(401);
     });
   });
 
@@ -306,9 +340,12 @@ describe('Smoke Test Token Routes', () => {
       expect(body.user.id).toBe('user-1');
       expect(body.user.email).toBe('test@example.com');
 
-      // Should set session cookie
-      const setCookie = res.headers.get('Set-Cookie');
-      expect(setCookie).toContain('better-auth.session_token');
+      // Verify session cookie format — SameSite=Strict, HttpOnly, Path=/
+      const setCookie = res.headers.get('Set-Cookie') || '';
+      expect(setCookie).toContain('better-auth.session_token=');
+      expect(setCookie).toContain('HttpOnly');
+      expect(setCookie).toContain('SameSite=Strict');
+      expect(setCookie).toContain('Path=/');
     });
 
     it('POST /token-login returns 401 when user not found', async () => {
