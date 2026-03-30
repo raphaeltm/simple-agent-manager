@@ -832,7 +832,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     const workspaceId = state.stepResults.workspaceId;
     const baseDomain = (this.env as any).BASE_DOMAIN || '';
     const vmUrl = `${protocol}://ws-${workspaceId}.${baseDomain}:${port}`;
-    const uploadUrl = `${vmUrl}/workspaces/${workspaceId}/files/upload`;
+    // Token passed as query param — VM agent's requireWorkspaceRequestAuth() checks
+    // r.URL.Query().Get("token"), not Authorization header.
+    const uploadBaseUrl = `${vmUrl}/workspaces/${workspaceId}/files/upload`;
 
     // Generate a terminal token for authenticating with the VM agent
     const { token } = await signTerminalToken(
@@ -869,11 +871,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       const timer = setTimeout(() => controller.abort(), transferTimeoutMs);
       let resp: Response;
       try {
+        const uploadUrl = `${uploadBaseUrl}?token=${encodeURIComponent(token)}`;
         resp = await fetch(uploadUrl, {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
           body: formData,
           signal: controller.signal,
         });
