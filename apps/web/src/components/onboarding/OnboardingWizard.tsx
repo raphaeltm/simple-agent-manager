@@ -113,7 +113,8 @@ export function OnboardingWizard() {
   const currentIdx = STEPS.findIndex((s) => s.id === currentStep);
 
   return (
-    <Card className="p-0 mb-6 overflow-hidden" data-testid="onboarding-wizard">
+    <div data-testid="onboarding-wizard">
+    <Card className="p-0 mb-6 overflow-hidden">
       {/* Step indicator */}
       <div className="flex border-b border-border-default">
         {STEPS.map((step, idx) => {
@@ -185,5 +186,6 @@ export function OnboardingWizard() {
         )}
       </div>
     </Card>
+    </div>
   );
 }
