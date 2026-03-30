@@ -43,7 +43,9 @@ jobs:
           node-version: '22'
 
       - name: Install Playwright
-        run: npx playwright install chromium
+        run: |
+          npm install @playwright/test
+          npx playwright install chromium
 
       - name: Run smoke tests
         if: ${{ env.SMOKE_TEST_TOKEN != '' }}
