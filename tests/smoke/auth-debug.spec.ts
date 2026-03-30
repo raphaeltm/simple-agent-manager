@@ -58,7 +58,18 @@ test.describe('Auth Debug', () => {
     const sessionText3 = await sessionRes3.text();
     console.log(`[DEBUG] get-session (raw unsigned) body: ${sessionText3.substring(0, 500)}`);
 
-    // Step 6: Check if there is a user-status issue
+    // Step 6: Server-side session debug
+    const debugRes = await context.request.post(`${API_URL}/api/auth/token-session-debug`, {
+      data: { sessionToken: body.sessionToken },
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `better-auth.session_token=${encodeURIComponent(signedValue)}`,
+      },
+    });
+    console.log(`[DEBUG] token-session-debug status: ${debugRes.status()}`);
+    const debugBody = await debugRes.text();
+    console.log(`[DEBUG] token-session-debug body: ${debugBody}`);
+
     console.log(`[DEBUG] User from token-login: ${JSON.stringify(body.user)}`);
   });
 });

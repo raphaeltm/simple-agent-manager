@@ -349,4 +349,46 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   );
 });
 
+/**
+ * POST /api/auth/token-session-debug
+ * Temporary debug endpoint — verifies session lookup and cookie parsing.
+ * Will be removed once smoke test auth is working.
+ */
+smokeTestTokenRoutes.post('/token-session-debug', async (c) => {
+  if (!isFeatureEnabled(c.env)) {
+    throw errors.notFound('Not found');
+  }
+
+  const body = await c.req.json<{ sessionToken?: string }>();
+  const auth = createAuth(c.env);
+  const ctx = await auth.$context;
+
+  // Test 1: Can we find the session via internalAdapter?
+  let findResult = null;
+  if (body.sessionToken) {
+    try {
+      findResult = await ctx.internalAdapter.findSession(body.sessionToken);
+    } catch (err) {
+      findResult = { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  // Test 2: Can BetterAuth read cookies from this request?
+  let sessionFromHeaders = null;
+  try {
+    sessionFromHeaders = await auth.api.getSession({ headers: c.req.raw.headers });
+  } catch (err) {
+    sessionFromHeaders = { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  // Test 3: What cookies does BetterAuth see?
+  const cookieHeader = c.req.header('cookie') || '(none)';
+
+  return c.json({
+    findSession: findResult ? { found: true, userId: findResult.user?.id } : { found: false },
+    sessionFromHeaders: sessionFromHeaders ? { found: true, userId: sessionFromHeaders.user?.id } : { found: false },
+    cookieHeaderReceived: cookieHeader.substring(0, 300),
+  });
+});
+
 export { smokeTestTokenRoutes };
