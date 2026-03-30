@@ -26,3 +26,35 @@ jobs:
       skip_agent: false # Required: staging VMs need the agent binary in R2
       dry_run: ${{ inputs.dry_run || false }}
     secrets: inherit
+
+  # Smoke tests run after successful staging deployment.
+  # Requires SMOKE_TEST_TOKEN secret in the staging environment.
+  # Skipped if the token is not configured (new deployments before token setup).
+  smoke-tests:
+    needs: deploy
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Playwright
+        run: npx playwright install chromium
+
+      - name: Run smoke tests
+        if: ${{ env.SMOKE_TEST_TOKEN != '' }}
+        env:
+          SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
+          SMOKE_TEST_URL: https://app.sammy.party
+          SMOKE_TEST_API_URL: https://api.sammy.party
+        run: npx playwright test --config=tests/smoke/playwright.config.ts
+
+      - name: Skip notice (no token configured)
+        if: ${{ env.SMOKE_TEST_TOKEN == '' }}
+        env:
+          SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
+        run: echo "⚠ Smoke tests skipped — SMOKE_TEST_TOKEN not configured in staging environment secrets"
