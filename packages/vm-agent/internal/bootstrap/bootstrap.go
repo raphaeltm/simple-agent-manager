@@ -1403,7 +1403,8 @@ func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName string) (stri
   "image": %q,
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   }%s%s
 }
 `, image, remoteUserLine, mountLines)

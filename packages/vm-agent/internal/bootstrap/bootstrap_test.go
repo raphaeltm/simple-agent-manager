@@ -770,21 +770,36 @@ func TestWriteDefaultDevcontainerConfig(t *testing.T) {
 		t.Fatalf("failed to read written config: %v", err)
 	}
 
-	content := string(data)
-	required := []string{
-		`"mcr.microsoft.com/devcontainers/base:ubuntu"`,
-		`"ghcr.io/devcontainers/features/git:1"`,
-		`"ghcr.io/devcontainers/features/github-cli:1"`,
+	// Verify the output is valid JSON and all features are present structurally
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("generated config is not valid JSON: %v\nContent:\n%s", err, string(data))
 	}
-	for _, fragment := range required {
-		if !strings.Contains(content, fragment) {
-			t.Fatalf("expected config to contain %q, got:\n%s", fragment, content)
+
+	features, ok := parsed["features"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected 'features' to be an object, got: %v", parsed["features"])
+	}
+
+	requiredFeatures := []string{
+		"ghcr.io/devcontainers/features/git:1",
+		"ghcr.io/devcontainers/features/github-cli:1",
+		"ghcr.io/devcontainers/features/docker-in-docker:2",
+	}
+	for _, key := range requiredFeatures {
+		if _, ok := features[key]; !ok {
+			t.Errorf("missing feature %q in parsed config; present keys: %v", key, features)
 		}
 	}
 
+	// Verify image is correct
+	if img, _ := parsed["image"].(string); img != "mcr.microsoft.com/devcontainers/base:ubuntu" {
+		t.Errorf("expected image %q, got %q", "mcr.microsoft.com/devcontainers/base:ubuntu", img)
+	}
+
 	// By default, remoteUser should NOT be present (empty DefaultDevcontainerRemoteUser)
-	if strings.Contains(content, "remoteUser") {
-		t.Fatalf("expected no remoteUser when DefaultDevcontainerRemoteUser is empty, got:\n%s", content)
+	if _, hasRemoteUser := parsed["remoteUser"]; hasRemoteUser {
+		t.Fatalf("expected no remoteUser when DefaultDevcontainerRemoteUser is empty, got:\n%s", string(data))
 	}
 }
 
