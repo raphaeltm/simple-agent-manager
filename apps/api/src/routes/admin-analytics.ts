@@ -20,8 +20,16 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/** Convert a period string (24h, 7d, 30d, 90d) to an Analytics Engine SQL interval expression. */
-function periodToInterval(period: string): string {
+const VALID_PERIODS = ['24h', '7d', '30d', '90d'] as const;
+type Period = (typeof VALID_PERIODS)[number];
+
+/** Validate and normalize a period query param. Returns a safe Period value. */
+function parsePeriod(raw: string | undefined): Period {
+  return (VALID_PERIODS as readonly string[]).includes(raw ?? '') ? (raw as Period) : '7d';
+}
+
+/** Convert a validated period to an Analytics Engine SQL interval expression. */
+function periodToInterval(period: Period): string {
   switch (period) {
     case '24h':
       return "INTERVAL '1' DAY";
@@ -122,7 +130,7 @@ adminAnalyticsRoutes.get('/dau', async (c) => {
  * Query param: ?period=24h|7d|30d (default 7d)
  */
 adminAnalyticsRoutes.get('/events', async (c) => {
-  const period = c.req.query('period') || '7d';
+  const period = parsePeriod(c.req.query('period'));
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
   const intervalExpr = periodToInterval(period);
   const topEventsLimit = parsePositiveInt(c.env.ANALYTICS_TOP_EVENTS_LIMIT, DEFAULT_TOP_EVENTS_LIMIT);
@@ -187,7 +195,7 @@ adminAnalyticsRoutes.get('/funnel', async (c) => {
  * Returns per-feature-event counts + unique users + daily breakdown for sparklines.
  */
 adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
-  const period = c.req.query('period') || '30d';
+  const period = parsePeriod(c.req.query('period') || '30d');
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
   const intervalExpr = periodToInterval(period);
 
@@ -249,7 +257,7 @@ adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
  * Query param: ?period=24h|7d|30d|90d (default 30d)
  */
 adminAnalyticsRoutes.get('/geo', async (c) => {
-  const period = c.req.query('period') || '30d';
+  const period = parsePeriod(c.req.query('period') || '30d');
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
   const intervalExpr = periodToInterval(period);
   const geoLimit = parsePositiveInt(c.env.ANALYTICS_GEO_LIMIT, DEFAULT_GEO_LIMIT);
@@ -394,7 +402,7 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
  * filter on blob1='page_view' which only comes from client-side events.
  */
 adminAnalyticsRoutes.get('/website-traffic', async (c) => {
-  const period = c.req.query('period') || '7d';
+  const period = parsePeriod(c.req.query('period'));
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
   const intervalExpr = periodToInterval(period);
   const topPagesLimit = parsePositiveInt(
