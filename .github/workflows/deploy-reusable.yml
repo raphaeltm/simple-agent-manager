@@ -216,6 +216,22 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
 
+      - name: Configure R2 CORS
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          R2_BUCKET_NAME=$(cd infra && pulumi stack output r2Name)
+          export R2_BUCKET_NAME
+          bash scripts/deploy/configure-r2-cors.sh
+        env:
+          # AWS_* for Pulumi R2 backend (pulumi stack output)
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          # CF_API_TOKEN for Cloudflare REST API (R2 bucket CORS)
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+
       - name: Check First Deploy Status
         id: first_deploy
         if: ${{ inputs.dry_run != true }}

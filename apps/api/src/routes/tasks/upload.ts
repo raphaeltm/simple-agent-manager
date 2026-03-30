@@ -1,7 +1,7 @@
 /**
  * Task Attachment Upload Route — Presigned URL generation for R2 direct uploads.
  *
- * POST /api/projects/:projectId/tasks/request-upload
+ * POST /api/projects/:projectId/tasks/request-upload  (full mounted path)
  *
  * Generates a presigned PUT URL that the browser uses to upload a file directly
  * to R2. The Worker is not in the upload path — only in the URL generation path.
@@ -27,15 +27,21 @@ const uploadRoutes = new Hono<{ Bindings: Env }>();
 uploadRoutes.use('/*', requireAuth(), requireApproved());
 
 /**
- * POST /projects/:projectId/tasks/request-upload
+ * POST /request-upload
  *
  * Generate a presigned R2 URL for direct browser upload of a task attachment.
+ * Mounted under /api/projects/:projectId/tasks, so full path is:
+ *   POST /api/projects/:projectId/tasks/request-upload
  * Returns 200 with { uploadId, uploadUrl, r2Key, expiresIn }.
  */
-uploadRoutes.post('/:projectId/tasks/request-upload', async (c) => {
+uploadRoutes.post('/request-upload', async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
+  // projectId comes from the parent route mount: /api/projects/:projectId/tasks
   const projectId = c.req.param('projectId');
+  if (!projectId) {
+    throw errors.badRequest('projectId is required');
+  }
   const db = drizzle(c.env.DATABASE, { schema });
 
   // Validate project ownership

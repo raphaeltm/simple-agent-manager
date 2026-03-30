@@ -58,7 +58,8 @@ function makeApp(env: Env) {
     }
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
-  app.route('/projects', uploadRoutes);
+  // Mount like production: /projects/:projectId/tasks + route defines /request-upload
+  app.route('/projects/:projectId/tasks', uploadRoutes);
   return { app, env };
 }
 
