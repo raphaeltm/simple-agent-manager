@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { Search, RotateCcw, X } from 'lucide-react';
+import { Search, RotateCcw, X, Eye, EyeOff } from 'lucide-react';
 import type { EntityType } from './hooks/useMapFilters';
 
 interface FilterChip {
@@ -29,6 +29,8 @@ interface AccountMapToolbarProps {
   totalCount: number;
   stats: Record<string, number>;
   isMobile: boolean;
+  showAll: boolean;
+  onToggleShowAll: () => void;
 }
 
 export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
@@ -43,6 +45,8 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
   totalCount,
   stats,
   isMobile,
+  showAll,
+  onToggleShowAll,
 }) => {
   return (
     <div className="flex flex-col gap-2 p-3 bg-surface border-b border-border-default">
@@ -76,6 +80,21 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
             {matchCount}/{totalCount}
           </span>
         )}
+
+        <button
+          onClick={onToggleShowAll}
+          className={`flex items-center gap-1 px-2 py-1.5 text-xs border rounded-md cursor-pointer transition-colors ${
+            showAll
+              ? 'bg-accent/10 border-accent text-accent hover:bg-accent/20'
+              : 'bg-transparent border-border-default text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
+          }`}
+          aria-label={showAll ? 'Show active only' : 'Show all resources'}
+          aria-pressed={showAll}
+          title={showAll ? 'Showing all resources — click to show active only' : 'Showing active only — click to show all'}
+        >
+          {showAll ? <Eye size={14} /> : <EyeOff size={14} />}
+          {!isMobile && <span>{showAll ? 'All' : 'Active'}</span>}
+        </button>
 
         <button
           onClick={onReorganize}

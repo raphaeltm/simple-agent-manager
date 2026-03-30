@@ -191,4 +191,87 @@ describe('AccountMap page', () => {
     expect(screen.getByPlaceholderText('Search entities...')).toBeInTheDocument();
     expect(screen.getByText('Reorganize')).toBeInTheDocument();
   });
+
+  it('renders Show All toggle button showing "Active" by default', async () => {
+    mocks.getAccountMap.mockResolvedValue(
+      makeAccountMapResponse({
+        projects: [
+          { id: 'proj-1', name: 'My Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
+        ],
+      })
+    );
+    renderAccountMap();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
+    });
+
+    // Default state shows "Active" label
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    const toggle = screen.getByLabelText('Show all resources');
+    expect(toggle).toBeInTheDocument();
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('toggles to show all resources when Show All is clicked', async () => {
+    mocks.getAccountMap.mockResolvedValue(
+      makeAccountMapResponse({
+        projects: [
+          { id: 'proj-1', name: 'My Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
+        ],
+      })
+    );
+    renderAccountMap();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
+    });
+
+    const toggle = screen.getByLabelText('Show all resources');
+    toggle.click();
+
+    await waitFor(() => {
+      expect(screen.getByText('All')).toBeInTheDocument();
+    });
+
+    // API should be called again with activeOnly=false
+    expect(mocks.getAccountMap).toHaveBeenCalledWith({ activeOnly: false });
+  });
+
+  it('removes nodes from canvas when type filter is toggled off', async () => {
+    mocks.getAccountMap.mockResolvedValue(
+      makeAccountMapResponse({
+        projects: [
+          { id: 'proj-1', name: 'My Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
+        ],
+        nodes: [
+          { id: 'node-1', name: 'node-1', status: 'running', vmSize: 'cax11', vmLocation: 'nbg1', cloudProvider: 'hetzner', ipAddress: '1.2.3.4', healthStatus: 'healthy', lastHeartbeatAt: null, lastMetrics: null },
+        ],
+        workspaces: [
+          { id: 'ws-1', nodeId: 'node-1', projectId: 'proj-1', displayName: 'dev-ws', branch: 'main', status: 'running', vmSize: 'cax11', chatSessionId: null },
+        ],
+        relationships: [
+          { source: 'proj-1', target: 'ws-1', type: 'has_workspace', active: true },
+          { source: 'ws-1', target: 'node-1', type: 'runs_on', active: true },
+        ],
+      })
+    );
+    renderAccountMap();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
+    });
+
+    // Initially 3 nodes: project + node + workspace
+    expect(screen.getByTestId('node-count')).toHaveTextContent('3');
+
+    // Toggle off Workspaces
+    const wsChip = screen.getByText('Workspaces');
+    wsChip.click();
+
+    // Now should show 2 nodes (workspace removed, not dimmed)
+    await waitFor(() => {
+      expect(screen.getByTestId('node-count')).toHaveTextContent('2');
+    });
+  });
 });

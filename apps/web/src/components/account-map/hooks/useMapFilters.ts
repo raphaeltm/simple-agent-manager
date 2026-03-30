@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { Node, Edge } from '@xyflow/react';
 
 export type EntityType = 'project' | 'node' | 'workspace' | 'session' | 'task' | 'idea';
@@ -28,6 +28,10 @@ interface UseMapFiltersResult {
   hasActiveFilters: boolean;
   matchCount: number;
   totalCount: number;
+  /** True when type filters changed and nodes were added/removed (signals auto-reorganize). */
+  filterNodesChanged: boolean;
+  /** Call after handling a filter-triggered reorganize to reset the signal. */
+  clearFilterNodesChanged: () => void;
 }
 
 const ALL_TYPES: EntityType[] = ['project', 'node', 'workspace', 'session', 'task'];
@@ -35,6 +39,7 @@ const ALL_TYPES: EntityType[] = ['project', 'node', 'workspace', 'session', 'tas
 export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFiltersResult {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState<Set<EntityType>>(() => new Set(ALL_TYPES));
+  const [filterNodesChanged, setFilterNodesChanged] = useState(false);
 
   const toggleFilter = useCallback((type: EntityType) => {
     setActiveFilters((prev) => {
@@ -53,10 +58,17 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
     setSearchQuery('');
   }, []);
 
+  const clearFilterNodesChanged = useCallback(() => {
+    setFilterNodesChanged(false);
+  }, []);
+
+  // Track previous filtered count to detect add/remove from type toggles
+  const prevFilteredCountRef = useRef<number | null>(null);
+
   const { filteredNodes, filteredEdges, matchCount, totalCount } = useMemo(() => {
     const lowerQuery = searchQuery.toLowerCase().trim();
 
-    // Filter by entity type
+    // Type filter: fully REMOVE nodes whose type is toggled off
     const typeFiltered = nodes.filter((node) => {
       const entityType = NODE_TYPE_TO_ENTITY[node.type ?? ''];
       return entityType ? activeFilters.has(entityType) : true;
@@ -90,7 +102,7 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
       matchingIds = new Set(typeFiltered.map((n) => n.id));
     }
 
-    // Apply opacity styling
+    // Apply opacity styling (only for search dimming; type-filtered nodes are removed entirely)
     const styledNodes = typeFiltered.map((node) => ({
       ...node,
       style: {
@@ -100,13 +112,13 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
       },
     }));
 
-    // Filter edges to only include those between visible nodes
+    // Filter edges to only include those between visible (type-included) nodes
     const visibleIds = new Set(typeFiltered.map((n) => n.id));
     const edgesFiltered = edges.filter(
       (e) => visibleIds.has(e.source) && visibleIds.has(e.target)
     );
 
-    // Dim edges where either end is dimmed
+    // Dim edges where either end is search-dimmed
     const styledEdges = edgesFiltered.map((edge) => ({
       ...edge,
       style: {
@@ -125,6 +137,14 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
     };
   }, [nodes, edges, searchQuery, activeFilters]);
 
+  // Detect when type filtering changes the visible node count (triggers auto-reorganize)
+  useEffect(() => {
+    if (prevFilteredCountRef.current !== null && prevFilteredCountRef.current !== filteredNodes.length) {
+      setFilterNodesChanged(true);
+    }
+    prevFilteredCountRef.current = filteredNodes.length;
+  }, [filteredNodes.length]);
+
   const hasActiveFilters = activeFilters.size < ALL_TYPES.length || searchQuery.length > 0;
 
   return {
@@ -138,5 +158,7 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
     hasActiveFilters,
     matchCount,
     totalCount,
+    filterNodesChanged,
+    clearFilterNodesChanged,
   };
 }
