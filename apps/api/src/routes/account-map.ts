@@ -17,7 +17,13 @@ import * as schema from '../db/schema';
 import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import * as projectDataService from '../services/project-data';
 
-/** Statuses considered "active" for each entity type when activeOnly=true. */
+/**
+ * Statuses considered "active" for each entity type when activeOnly=true.
+ * These are intentionally broader than operational gating statuses (e.g.,
+ * workspaces/_helpers.ts uses only 'running'|'recovery' for connection gating).
+ * The map visualization includes transitional states so users can see resources
+ * that are starting up or shutting down.
+ */
 const ACTIVE_NODE_STATUSES = ['pending', 'creating', 'running', 'stopping'];
 const ACTIVE_WORKSPACE_STATUSES = ['pending', 'creating', 'running', 'recovery', 'stopping'];
 const ACTIVE_TASK_STATUSES = ['queued', 'delegated', 'in_progress'];
@@ -56,7 +62,7 @@ accountMapRoutes.use('/*', requireAuth(), requireApproved());
 accountMapRoutes.get('/', async (c) => {
   const userId = getUserId(c);
 
-  // activeOnly defaults to true — only show active/running resources
+  // activeOnly defaults to true — only ?activeOnly=false disables filtering
   const activeOnlyParam = c.req.query('activeOnly');
   const activeOnly = activeOnlyParam !== 'false';
 
