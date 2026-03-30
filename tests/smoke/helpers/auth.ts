@@ -44,8 +44,12 @@ export async function loginWithToken(
   // Extract the SIGNED cookie value from the Set-Cookie header.
   // BetterAuth uses HMAC-SHA256 signed cookies: `token.signature`
   // The server already signs the cookie, so we need to extract and re-inject it.
+  // BetterAuth uses __Secure- prefix when baseURL starts with https://.
+  // Match either prefixed or unprefixed cookie name.
   const setCookieHeader = response.headers()['set-cookie'] || '';
-  const cookieMatch = setCookieHeader.match(/better-auth\.session_token=([^;]+)/);
+  const cookieMatch = setCookieHeader.match(
+    /(__Secure-)?better-auth\.session_token=([^;]+)/
+  );
 
   if (!cookieMatch) {
     throw new Error(
@@ -54,8 +58,11 @@ export async function loginWithToken(
     );
   }
 
+  const cookiePrefix = cookieMatch[1] || '';
+  const cookieName = `${cookiePrefix}better-auth.session_token`;
+
   // The cookie value is URL-encoded (e.g., token.signature%3D), decode it for addCookies
-  const signedValue = decodeURIComponent(cookieMatch[1]);
+  const signedValue = decodeURIComponent(cookieMatch[2]);
 
   // Extract the base domain for cookie sharing
   const apiHostname = new URL(apiUrl).hostname;
@@ -67,7 +74,7 @@ export async function loginWithToken(
   // we set it explicitly to ensure domain scoping is correct.
   await context.addCookies([
     {
-      name: 'better-auth.session_token',
+      name: cookieName,
       value: signedValue,
       domain: baseDomain,
       path: '/',

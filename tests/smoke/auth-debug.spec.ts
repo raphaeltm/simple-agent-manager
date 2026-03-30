@@ -24,9 +24,12 @@ test.describe('Auth Debug', () => {
     expect(response.ok()).toBe(true);
 
     // Step 2: Extract signed cookie value
-    const cookieMatch = setCookieHeader.match(/better-auth\.session_token=([^;]+)/);
+    const cookieMatch = setCookieHeader.match(/(__Secure-)?better-auth\.session_token=([^;]+)/);
     expect(cookieMatch, 'No session cookie in Set-Cookie').toBeTruthy();
-    const signedValue = decodeURIComponent(cookieMatch![1]);
+    const cookiePrefix = cookieMatch![1] || '';
+    const fullCookieName = `${cookiePrefix}better-auth.session_token`;
+    const signedValue = decodeURIComponent(cookieMatch![2]);
+    console.log(`[DEBUG] Cookie name: ${fullCookieName}`);
     console.log(`[DEBUG] Signed cookie (decoded, first 80): ${signedValue.substring(0, 80)}`);
     console.log(`[DEBUG] Signed cookie contains dot: ${signedValue.includes('.')}`);
     console.log(`[DEBUG] Parts: ${signedValue.split('.').length}`);
@@ -41,7 +44,7 @@ test.describe('Auth Debug', () => {
     // Step 4: Try calling get-session with explicit cookie header
     const sessionRes2 = await context.request.get(`${API_URL}/api/auth/get-session`, {
       headers: {
-        Cookie: `better-auth.session_token=${encodeURIComponent(signedValue)}`,
+        Cookie: `${fullCookieName}=${encodeURIComponent(signedValue)}`,
       },
     });
     console.log(`[DEBUG] get-session (explicit cookie) status: ${sessionRes2.status()}`);
@@ -51,7 +54,7 @@ test.describe('Auth Debug', () => {
     // Step 5: Try with raw unsigned token
     const sessionRes3 = await context.request.get(`${API_URL}/api/auth/get-session`, {
       headers: {
-        Cookie: `better-auth.session_token=${body.sessionToken}`,
+        Cookie: `${fullCookieName}=${body.sessionToken}`,
       },
     });
     console.log(`[DEBUG] get-session (raw unsigned) status: ${sessionRes3.status()}`);
@@ -63,7 +66,7 @@ test.describe('Auth Debug', () => {
       data: { sessionToken: body.sessionToken },
       headers: {
         'Content-Type': 'application/json',
-        Cookie: `better-auth.session_token=${encodeURIComponent(signedValue)}`,
+        Cookie: `${fullCookieName}=${encodeURIComponent(signedValue)}`,
       },
     });
     console.log(`[DEBUG] token-session-debug status: ${debugRes.status()}`);

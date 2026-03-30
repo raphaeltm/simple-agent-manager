@@ -317,7 +317,12 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   const isSecure = c.req.url.startsWith('https');
   const baseDomain = c.env.BASE_DOMAIN;
 
-  const cookieName = 'better-auth.session_token';
+  // BetterAuth adds a __Secure- prefix to cookie names when baseURL starts
+  // with https:// (see cookies/index.ts createCookieGetter). Our cookie name
+  // must match what getSession() expects.
+  const cookieName = isSecure
+    ? '__Secure-better-auth.session_token'
+    : 'better-auth.session_token';
   const sessionDurationSeconds =
     parseInt(c.env.SMOKE_TEST_SESSION_DURATION_SECONDS || '', 10) || DEFAULT_SESSION_DURATION_SECONDS;
   const cookieOptions = [
