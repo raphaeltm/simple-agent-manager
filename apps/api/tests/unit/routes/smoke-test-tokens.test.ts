@@ -5,8 +5,14 @@ import { AppError } from '../../../src/middleware/error';
 
 // Set up mocks before importing the route module
 const mockGetSession = vi.fn();
+const mockCreateSession = vi.fn();
 const mockAuth = {
   api: { getSession: mockGetSession },
+  $context: Promise.resolve({
+    internalAdapter: {
+      createSession: mockCreateSession,
+    },
+  }),
 };
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -77,6 +83,7 @@ function buildApp(envOverrides: Partial<Env> = {}) {
   const env: Record<string, any> = {
     BASE_DOMAIN: 'test.example.com',
     SMOKE_TEST_AUTH_ENABLED: 'true',
+    ENCRYPTION_KEY: 'test-secret-key-for-hmac-signing',
     DATABASE: {} as any,
     ...envOverrides,
   };
@@ -320,12 +327,18 @@ describe('Smoke Test Token Routes', () => {
     });
 
     it('POST /token-login creates session for valid token', async () => {
+      mockCreateSession.mockResolvedValue({
+        token: 'ba-session-token-abc',
+        id: 'session-id-1',
+        userId: 'user-1',
+        expiresAt: new Date(Date.now() + 86400_000),
+      });
       currentMockDB = createMockDB({
         selectGetResults: [
           // token lookup
           { id: 'token-1', userId: 'user-1', revokedAt: null },
-          // user lookup
-          { id: 'user-1', email: 'test@example.com', name: 'Test User' },
+          // user lookup (now before session creation for status check)
+          { id: 'user-1', email: 'test@example.com', name: 'Test User', status: 'active', role: 'user' },
         ],
       });
       const app = buildApp();
@@ -337,15 +350,79 @@ describe('Smoke Test Token Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.success).toBe(true);
+      expect(body.sessionToken).toBeUndefined();
       expect(body.user.id).toBe('user-1');
       expect(body.user.email).toBe('test@example.com');
 
-      // Verify session cookie format — SameSite=Strict, HttpOnly, Path=/
+      // Verify session cookie format — SameSite=Lax, HttpOnly, Path=/
       const setCookie = res.headers.get('Set-Cookie') || '';
       expect(setCookie).toContain('better-auth.session_token=');
       expect(setCookie).toContain('HttpOnly');
-      expect(setCookie).toContain('SameSite=Strict');
+      expect(setCookie).toContain('SameSite=Lax');
       expect(setCookie).toContain('Path=/');
+
+      // Verify internalAdapter.createSession was called with correct args
+      expect(mockCreateSession).toHaveBeenCalledWith('user-1', false);
+    });
+
+    it('POST /token-login returns 403 for suspended user', async () => {
+      currentMockDB = createMockDB({
+        selectGetResults: [
+          // token lookup
+          { id: 'token-1', userId: 'user-1', revokedAt: null },
+          // user lookup — suspended
+          { id: 'user-1', email: 'test@example.com', name: 'Test User', status: 'suspended', role: 'user' },
+        ],
+      });
+      const app = buildApp({ REQUIRE_APPROVAL: 'true' });
+      const res = await app.request('/api/auth/token-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: 'sam_test_validtoken123' }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it('POST /token-login returns 403 for pending user when approval required', async () => {
+      currentMockDB = createMockDB({
+        selectGetResults: [
+          // token lookup
+          { id: 'token-1', userId: 'user-1', revokedAt: null },
+          // user lookup — pending
+          { id: 'user-1', email: 'test@example.com', name: 'Test User', status: 'pending', role: 'user' },
+        ],
+      });
+      const app = buildApp({ REQUIRE_APPROVAL: 'true' });
+      const res = await app.request('/api/auth/token-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: 'sam_test_validtoken123' }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it('POST /token-login allows admin even when pending approval', async () => {
+      mockCreateSession.mockResolvedValue({
+        token: 'ba-session-token-admin',
+        id: 'session-id-admin',
+        userId: 'admin-1',
+        expiresAt: new Date(Date.now() + 86400_000),
+      });
+      currentMockDB = createMockDB({
+        selectGetResults: [
+          // token lookup
+          { id: 'token-1', userId: 'admin-1', revokedAt: null },
+          // user lookup — admin with pending status
+          { id: 'admin-1', email: 'admin@example.com', name: 'Admin', status: 'pending', role: 'admin' },
+        ],
+      });
+      const app = buildApp({ REQUIRE_APPROVAL: 'true' });
+      const res = await app.request('/api/auth/token-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: 'sam_test_admintoken' }),
+      });
+      expect(res.status).toBe(200);
     });
 
     it('POST /token-login returns 401 when user not found', async () => {

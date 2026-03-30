@@ -216,10 +216,9 @@ const DEFAULT_RATE_LIMIT_TOKEN_LOGIN = 20;
  * Rate-limited by IP to prevent brute-force attempts.
  * Body: { token: string }
  *
- * NOTE: Session creation bypasses BetterAuth's session lifecycle (direct DB insert).
- * BetterAuth does not expose a programmatic session creation API suitable for token-based login.
- * If the sessions table schema changes (new required columns), this path must be updated.
- * The unit tests verify that sessions created here are compatible with the current schema.
+ * NOTE: Session creation uses BetterAuth's internal adapter (`ctx.internalAdapter.createSession()`)
+ * to ensure schema mapping (usePlural, field transforms) is handled correctly.
+ * Cookie signing replicates BetterAuth's HMAC-SHA256 format with the `__Secure-` prefix for HTTPS.
  */
 const tokenLoginRateLimit = rateLimit({
   limit: DEFAULT_RATE_LIMIT_TOKEN_LOGIN,
@@ -259,39 +258,52 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
     throw errors.unauthorized('Token has been revoked');
   }
 
-  // Parallelize last_used_at update and user lookup — independent D1 queries
-  const [, user] = await Promise.all([
-    db
-      .update(schema.smokeTestTokens)
-      .set({ lastUsedAt: new Date() })
-      .where(eq(schema.smokeTestTokens.id, tokenRecord.id)),
-    db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.id, tokenRecord.userId))
-      .get(),
-  ]);
+  // Update last_used_at
+  await db
+    .update(schema.smokeTestTokens)
+    .set({ lastUsedAt: new Date() })
+    .where(eq(schema.smokeTestTokens.id, tokenRecord.id));
+
+  // Look up user before creating session — needed for status check and response
+  const user = await db
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.id, tokenRecord.userId))
+    .get();
 
   if (!user) {
     throw errors.unauthorized('Token owner not found');
   }
 
-  // Create a session directly in the BetterAuth sessions table.
-  // This produces the same cookie as the OAuth callback would.
-  const sessionDurationSeconds =
-    parseInt(c.env.SMOKE_TEST_SESSION_DURATION_SECONDS || '', 10) || DEFAULT_SESSION_DURATION_SECONDS;
-  const sessionToken = crypto.randomUUID();
-  const sessionId = ulid();
-  const expiresAt = new Date(Date.now() + sessionDurationSeconds * 1000);
+  // Block suspended/pending users — mirrors requireApproved() middleware logic.
+  // Without this check, a previously issued token could bypass the approval gate.
+  if (c.env.REQUIRE_APPROVAL === 'true') {
+    const isAdmin = user.role === 'superadmin' || user.role === 'admin';
+    if (user.status === 'suspended') {
+      throw errors.forbidden('Your account has been suspended');
+    }
+    if (user.status !== 'active' && !isAdmin) {
+      throw errors.forbidden('Your account is pending admin approval');
+    }
+  }
 
-  await db.insert(schema.sessions).values({
-    id: sessionId,
-    token: sessionToken,
-    userId: user.id,
-    expiresAt,
-    ipAddress: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || null,
-    userAgent: c.req.header('user-agent') || null,
-  });
+  // Create a session using BetterAuth's internal adapter (verified against v1.4.17).
+  // Raw DB inserts bypass BetterAuth's schema mapping (usePlural, field transforms)
+  // and produce sessions that getSession() cannot find. The internal adapter
+  // handles all of this correctly.
+  // NOTE: ipAddress/userAgent overrides are silently ignored because createSession
+  // reads these from AsyncLocalStorage (populated only inside a BetterAuth request
+  // handler). They are omitted here intentionally.
+  const auth = createAuth(c.env);
+  const ctx = await auth.$context;
+  const session = await ctx.internalAdapter.createSession(
+    tokenRecord.userId,
+    false, // dontRememberMe
+  );
+
+  if (!session) {
+    throw errors.badRequest('Failed to create session');
+  }
 
   // Set the session cookie matching BetterAuth's signed cookie format.
   // BetterAuth uses HMAC-SHA256 to sign cookie values: `value.base64(hmac(value, secret))`
@@ -307,20 +319,32 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   const signature = await crypto.subtle.sign(
     'HMAC',
     key,
-    new TextEncoder().encode(sessionToken),
+    new TextEncoder().encode(session.token),
   );
   const base64Sig = btoa(String.fromCharCode(...new Uint8Array(signature)));
-  const signedValue = encodeURIComponent(`${sessionToken}.${base64Sig}`);
+  const signedValue = encodeURIComponent(`${session.token}.${base64Sig}`);
 
-  const isSecure = c.req.url.startsWith('https');
   const baseDomain = c.env.BASE_DOMAIN;
+  // Match BetterAuth's prefix logic: based on the configured baseURL (always HTTPS
+  // in deployment), not the incoming request URL which may differ behind proxies.
+  const isSecure = `https://api.${baseDomain}`.startsWith('https://');
 
-  const cookieName = 'better-auth.session_token';
+  // BetterAuth adds a __Secure- prefix to cookie names when baseURL starts
+  // with https:// (see cookies/index.ts createCookieGetter). Our cookie name
+  // must match what getSession() expects.
+  const cookieName = isSecure
+    ? '__Secure-better-auth.session_token'
+    : 'better-auth.session_token';
+  // NOTE: SMOKE_TEST_SESSION_DURATION_SECONDS controls only the cookie Max-Age.
+  // The server-side session expiry is determined by BetterAuth's session.expiresIn
+  // config (default: 7 days), which matches DEFAULT_SESSION_DURATION_SECONDS.
+  const sessionDurationSeconds =
+    parseInt(c.env.SMOKE_TEST_SESSION_DURATION_SECONDS || '', 10) || DEFAULT_SESSION_DURATION_SECONDS;
   const cookieOptions = [
     `${cookieName}=${signedValue}`,
     `Path=/`,
     `HttpOnly`,
-    `SameSite=None`,
+    `SameSite=Lax`,
     `Max-Age=${sessionDurationSeconds}`,
     ...(isSecure ? [`Secure`, `Domain=.${baseDomain}`] : []),
   ].join('; ');
@@ -328,7 +352,6 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   return new Response(
     JSON.stringify({
       success: true,
-      sessionToken,
       user: {
         id: user.id,
         email: user.email,
