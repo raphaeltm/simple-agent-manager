@@ -33,6 +33,26 @@ export const PROVIDER_LABELS: Record<string, string> = {
   gcp: 'Google Cloud',
 };
 
+/** Provider console URLs and help text for onboarding / credential setup. */
+export interface ProviderHelpMeta {
+  description: string;
+  helpUrl: string;
+  helpText: string;
+}
+
+export const PROVIDER_HELP: Record<string, ProviderHelpMeta> = {
+  hetzner: {
+    description: 'European cloud, great value',
+    helpUrl: 'https://console.hetzner.cloud/projects',
+    helpText: 'Go to your project \u2192 Security \u2192 API Tokens \u2192 Generate API Token (Read & Write)',
+  },
+  scaleway: {
+    description: 'European cloud, GPU options',
+    helpUrl: 'https://console.scaleway.com/iam/api-keys',
+    helpText: 'Go to IAM \u2192 API Keys \u2192 Generate an API Key',
+  },
+};
+
 // =============================================================================
 // VM Location Display Names (all providers)
 // =============================================================================

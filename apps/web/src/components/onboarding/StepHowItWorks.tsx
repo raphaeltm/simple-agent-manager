@@ -53,7 +53,7 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
         <div className="grid grid-cols-1 sm:grid-cols-2">
           <div className="p-3 border-b sm:border-b-0 sm:border-r border-border-default">
             <p className="text-sm font-medium text-fg-primary m-0 mb-1">Task mode</p>
-            <p className="text-xs text-fg-muted m-0 mb-2">Full devcontainer, 1-3 min startup</p>
+            <p className="text-xs text-fg-muted m-0 mb-2">Full devcontainer build</p>
             <ul className="m-0 pl-4 text-xs text-fg-muted list-disc grid gap-0.5">
               <li>Builds your devcontainer config</li>
               <li>Full development environment</li>
@@ -62,7 +62,7 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
           </div>
           <div className="p-3">
             <p className="text-sm font-medium text-fg-primary m-0 mb-1">Conversation mode</p>
-            <p className="text-xs text-fg-muted m-0 mb-2">Lightweight, ~20s startup</p>
+            <p className="text-xs text-fg-muted m-0 mb-2">Lightweight, faster startup</p>
             <ul className="m-0 pl-4 text-xs text-fg-muted list-disc grid gap-0.5">
               <li>Skips devcontainer build</li>
               <li>Quick brainstorming &amp; questions</li>

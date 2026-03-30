@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { CreateCredentialRequest } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS, PROVIDER_HELP } from '@simple-agent-manager/shared';
 import { Button, Input, Alert } from '@simple-agent-manager/ui';
 import { createCredential } from '../../lib/api';
 
@@ -13,22 +14,13 @@ interface ProviderOption {
   helpText: string;
 }
 
-const PROVIDERS: ProviderOption[] = [
-  {
-    id: 'hetzner',
-    name: 'Hetzner',
-    description: 'European cloud, great value',
-    helpUrl: 'https://console.hetzner.cloud/projects',
-    helpText: 'Go to your project \u2192 Security \u2192 API Tokens \u2192 Generate API Token (Read & Write)',
-  },
-  {
-    id: 'scaleway',
-    name: 'Scaleway',
-    description: 'European cloud, GPU options',
-    helpUrl: 'https://console.scaleway.com/iam/api-keys',
-    helpText: 'Go to IAM \u2192 API Keys \u2192 Generate an API Key',
-  },
-];
+const PROVIDERS: ProviderOption[] = (['hetzner', 'scaleway'] as const).map((id) => ({
+  id,
+  name: PROVIDER_LABELS[id] ?? id,
+  description: PROVIDER_HELP[id]?.description ?? '',
+  helpUrl: PROVIDER_HELP[id]?.helpUrl ?? '',
+  helpText: PROVIDER_HELP[id]?.helpText ?? '',
+}));
 
 interface StepCloudProviderProps {
   onComplete: () => void;
