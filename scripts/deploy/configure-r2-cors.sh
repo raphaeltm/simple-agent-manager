@@ -29,8 +29,7 @@ for VAR in R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY CF_ACCOUNT_ID R2_BUCKET_NAME BA
 done
 
 if [ -n "$MISSING" ]; then
-  echo -e "${YELLOW}Skipping R2 CORS configuration — missing:${MISSING}${NC}"
-  echo "File attachments via presigned URLs will not work without CORS."
+  echo "::warning::R2 CORS configuration skipped — missing:${MISSING}. File attachments via presigned URLs will not work."
   exit 0
 fi
 

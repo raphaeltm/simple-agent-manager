@@ -33,6 +33,9 @@ const client = new S3Client({
   },
 });
 
+// Only PUT is allowed — all R2 reads flow through the authenticated Worker proxy
+// (GET /api/projects/:id/sessions/:sessionId/files/raw). Omitting GET from CORS
+// prevents leaked presigned GET URLs from being usable cross-origin.
 const command = new PutBucketCorsCommand({
   Bucket: R2_BUCKET_NAME,
   CORSConfiguration: {
@@ -40,7 +43,10 @@ const command = new PutBucketCorsCommand({
       {
         AllowedOrigins: [appOrigin],
         AllowedMethods: ['PUT'],
-        AllowedHeaders: ['Content-Type', 'Content-Length'],
+        // Wildcard is safe: presigned URL signature enforces what the caller can do,
+        // CORS AllowedHeaders is just a browser-level gate.
+        AllowedHeaders: ['*'],
+        ExposeHeaders: ['ETag'],
         MaxAgeSeconds: 3600,
       },
     ],

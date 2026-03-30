@@ -224,9 +224,11 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           R2_BUCKET_NAME="$R2_BUCKET" bash scripts/deploy/configure-r2-cors.sh
         env:
+          # AWS_* for Pulumi R2 backend (pulumi stack output)
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          # R2_* for the CORS configuration script
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
