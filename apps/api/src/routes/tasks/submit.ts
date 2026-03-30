@@ -21,7 +21,7 @@ import type {
   CredentialProvider,
   TaskAttachment,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, MAX_CONTEXT_SUMMARY_BYTES, CREDENTIAL_PROVIDERS, ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, MAX_CONTEXT_SUMMARY_BYTES, CREDENTIAL_PROVIDERS, ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX, isValidLocationForProvider, getLocationsForProvider, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
 import { validateAttachments } from '../../services/attachment-upload';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
@@ -205,21 +205,32 @@ submitRoutes.post('/submit', async (c) => {
     ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
-    ?? (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? DEFAULT_VM_LOCATION;
-  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
-    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
   // Determine cloud provider: explicit override > profile > project default > null (system picks)
   const provider: CredentialProvider | null = body.provider
     ?? (resolvedProfile?.provider as CredentialProvider | null)
     ?? (project.defaultProvider as CredentialProvider | null)
     ?? null;
+  // Location resolution: explicit > profile > project default > provider default > platform default
+  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
+    ?? (resolvedProfile?.vmLocation as VMLocation | null)
+    ?? (project.defaultLocation as VMLocation | null)
+    ?? (provider ? getDefaultLocationForProvider(provider) as VMLocation | null : null)
+    ?? DEFAULT_VM_LOCATION;
+  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
+    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
+    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
+    ?? DEFAULT_WORKSPACE_PROFILE;
 
   if (provider !== null && !CREDENTIAL_PROVIDERS.includes(provider)) {
     throw errors.badRequest(`provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
+  }
+
+  // Validate location against provider
+  if (provider !== null && !isValidLocationForProvider(provider, vmLocation)) {
+    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
+    throw errors.badRequest(
+      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
+    );
   }
 
   // Determine task mode: explicit override > profile > inferred from workspace profile > default 'task'
@@ -390,6 +401,13 @@ submitRoutes.post('/submit', async (c) => {
       model: resolvedProfile?.model ?? null,
       permissionMode: resolvedProfile?.permissionMode ?? null,
       attachments: validatedAttachments.length > 0 ? validatedAttachments : null,
+      projectScaling: {
+        taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
+        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
+        nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
+        nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+        warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
+      },
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed.

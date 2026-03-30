@@ -244,8 +244,18 @@ export interface Project {
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   defaultProvider?: CredentialProvider | null;
+  defaultLocation?: string | null;
   workspaceIdleTimeoutMs?: number | null;
   nodeIdleTimeoutMs?: number | null;
+  // Per-project scaling parameters (null = use platform default)
+  taskExecutionTimeoutMs?: number | null;
+  maxConcurrentTasks?: number | null;
+  maxDispatchDepth?: number | null;
+  maxSubTasksPerTask?: number | null;
+  warmNodeTimeoutMs?: number | null;
+  maxWorkspacesPerNode?: number | null;
+  nodeCpuThresholdPercent?: number | null;
+  nodeMemoryThresholdPercent?: number | null;
   status?: ProjectStatus;
   createdAt: string;
   updatedAt: string;
@@ -438,8 +448,18 @@ export interface UpdateProjectRequest {
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   defaultProvider?: CredentialProvider | null;
+  defaultLocation?: string | null;
   workspaceIdleTimeoutMs?: number | null;
   nodeIdleTimeoutMs?: number | null;
+  // Per-project scaling parameters (null = reset to platform default)
+  taskExecutionTimeoutMs?: number | null;
+  maxConcurrentTasks?: number | null;
+  maxDispatchDepth?: number | null;
+  maxSubTasksPerTask?: number | null;
+  warmNodeTimeoutMs?: number | null;
+  maxWorkspacesPerNode?: number | null;
+  nodeCpuThresholdPercent?: number | null;
+  nodeMemoryThresholdPercent?: number | null;
 }
 
 export interface ProjectRuntimeEnvVarResponse {

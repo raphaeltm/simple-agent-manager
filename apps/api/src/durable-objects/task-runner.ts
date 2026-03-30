@@ -131,6 +131,14 @@ interface TaskRunConfig {
   permissionMode: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
+  /** Per-project scaling overrides. Null values mean "use platform default". */
+  projectScaling?: {
+    taskExecutionTimeoutMs?: number | null;
+    maxWorkspacesPerNode?: number | null;
+    nodeCpuThresholdPercent?: number | null;
+    nodeMemoryThresholdPercent?: number | null;
+    warmNodeTimeoutMs?: number | null;
+  } | null;
 }
 
 export interface TaskRunnerState {
@@ -1372,7 +1380,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       if (state.stepResults.workspaceId) {
         try {
           const { cleanupTaskRun } = await import('../services/task-runner');
-          await cleanupTaskRun(state.taskId, this.env as any);
+          await cleanupTaskRun(state.taskId, this.env as any, state.config.projectScaling?.warmNodeTimeoutMs);
         } catch (err) {
           log.error('task_runner_do.cleanup.node_cleanup_failed', {
             taskId: state.taskId,
@@ -1387,7 +1395,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         try {
           const doId = this.env.NODE_LIFECYCLE.idFromName(state.stepResults.nodeId);
           const stub = this.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<NodeLifecycle>;
-          await stub.markIdle(state.stepResults.nodeId, state.userId);
+          await stub.markIdle(state.stepResults.nodeId, state.userId, state.config.projectScaling?.warmNodeTimeoutMs);
 
           log.info('task_runner_do.cleanup.node_marked_warm_direct', {
             taskId: state.taskId,
@@ -1475,10 +1483,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
           const wsCount = await this.env.DATABASE.prepare(
             `SELECT COUNT(*) as c FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
           ).bind(warmNode.id).first<{ c: number }>();
-          const maxWorkspaces = parseEnvInt(
-            this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE,
-          );
-          if ((wsCount?.c ?? 0) >= maxWorkspaces) {
+          const warmMaxWs = state.config.projectScaling?.maxWorkspacesPerNode
+            ?? parseEnvInt(this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
+          if ((wsCount?.c ?? 0) >= warmMaxWs) {
             continue; // At capacity despite being warm — skip
           }
           log.info('task_runner_do.warm_node_claimed', {
@@ -1496,15 +1503,13 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
   }
 
   private async findNodeWithCapacity(state: TaskRunnerState): Promise<string | null> {
-    const cpuThreshold = parseEnvInt(
-      this.env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT, DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
-    );
-    const memThreshold = parseEnvInt(
-      this.env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT, DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-    );
-    const maxWorkspaces = parseEnvInt(
-      this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE,
-    );
+    const scaling = state.config.projectScaling;
+    const cpuThreshold = scaling?.nodeCpuThresholdPercent
+      ?? parseEnvInt(this.env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT, DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT);
+    const memThreshold = scaling?.nodeMemoryThresholdPercent
+      ?? parseEnvInt(this.env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT, DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT);
+    const maxWorkspaces = scaling?.maxWorkspacesPerNode
+      ?? parseEnvInt(this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
 
     const nodes = await this.env.DATABASE.prepare(
       `SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes

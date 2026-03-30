@@ -36,32 +36,74 @@ export const PROVIDER_LABELS: Record<string, string> = {
 // =============================================================================
 // VM Location Display Names (all providers)
 // =============================================================================
-export const VM_LOCATIONS: Record<string, { name: string; country: string }> = {
-  // Hetzner
-  nbg1: { name: 'Nuremberg', country: 'DE' },
-  fsn1: { name: 'Falkenstein', country: 'DE' },
-  hel1: { name: 'Helsinki', country: 'FI' },
-  ash: { name: 'Ashburn', country: 'US' },
-  hil: { name: 'Hillsboro', country: 'US' },
-  // Scaleway
-  'fr-par-1': { name: 'Paris 1', country: 'FR' },
-  'fr-par-2': { name: 'Paris 2', country: 'FR' },
-  'fr-par-3': { name: 'Paris 3', country: 'FR' },
-  'nl-ams-1': { name: 'Amsterdam 1', country: 'NL' },
-  'nl-ams-2': { name: 'Amsterdam 2', country: 'NL' },
-  'nl-ams-3': { name: 'Amsterdam 3', country: 'NL' },
-  'pl-waw-1': { name: 'Warsaw 1', country: 'PL' },
-  'pl-waw-2': { name: 'Warsaw 2', country: 'PL' },
-  // GCP
-  'us-central1-a': { name: 'Iowa', country: 'US' },
-  'us-east1-b': { name: 'South Carolina', country: 'US' },
-  'us-west1-a': { name: 'Oregon', country: 'US' },
-  'europe-west1-b': { name: 'Belgium', country: 'BE' },
-  'europe-west3-a': { name: 'Frankfurt', country: 'DE' },
-  'europe-west2-a': { name: 'London', country: 'GB' },
-  'asia-southeast1-a': { name: 'Singapore', country: 'SG' },
-  'asia-northeast1-a': { name: 'Tokyo', country: 'JP' },
+
+/** Metadata for a VM location. */
+export interface LocationMeta {
+  id: string;
+  name: string;
+  country: string;
+}
+
+/** Provider-keyed location registry. Source of truth for valid provider–location pairs. */
+export const PROVIDER_LOCATIONS: Record<string, LocationMeta[]> = {
+  hetzner: [
+    { id: 'nbg1', name: 'Nuremberg', country: 'DE' },
+    { id: 'fsn1', name: 'Falkenstein', country: 'DE' },
+    { id: 'hel1', name: 'Helsinki', country: 'FI' },
+    { id: 'ash', name: 'Ashburn', country: 'US' },
+    { id: 'hil', name: 'Hillsboro', country: 'US' },
+  ],
+  scaleway: [
+    { id: 'fr-par-1', name: 'Paris 1', country: 'FR' },
+    { id: 'fr-par-2', name: 'Paris 2', country: 'FR' },
+    { id: 'fr-par-3', name: 'Paris 3', country: 'FR' },
+    { id: 'nl-ams-1', name: 'Amsterdam 1', country: 'NL' },
+    { id: 'nl-ams-2', name: 'Amsterdam 2', country: 'NL' },
+    { id: 'nl-ams-3', name: 'Amsterdam 3', country: 'NL' },
+    { id: 'pl-waw-1', name: 'Warsaw 1', country: 'PL' },
+    { id: 'pl-waw-2', name: 'Warsaw 2', country: 'PL' },
+  ],
+  gcp: [
+    { id: 'us-central1-a', name: 'Iowa', country: 'US' },
+    { id: 'us-east1-b', name: 'South Carolina', country: 'US' },
+    { id: 'us-west1-a', name: 'Oregon', country: 'US' },
+    { id: 'europe-west1-b', name: 'Belgium', country: 'BE' },
+    { id: 'europe-west3-a', name: 'Frankfurt', country: 'DE' },
+    { id: 'europe-west2-a', name: 'London', country: 'GB' },
+    { id: 'asia-southeast1-a', name: 'Singapore', country: 'SG' },
+    { id: 'asia-northeast1-a', name: 'Tokyo', country: 'JP' },
+  ],
 };
+
+/** Default location per provider. */
+export const PROVIDER_DEFAULT_LOCATIONS: Record<string, string> = {
+  hetzner: 'fsn1',
+  scaleway: 'fr-par-1',
+  gcp: 'us-central1-a',
+};
+
+/** Flat lookup of all locations (derived from PROVIDER_LOCATIONS). */
+export const VM_LOCATIONS: Record<string, { name: string; country: string }> = Object.fromEntries(
+  Object.values(PROVIDER_LOCATIONS)
+    .flat()
+    .map((loc) => [loc.id, { name: loc.name, country: loc.country }])
+);
+
+/** Get valid locations for a provider. Returns empty array for unknown providers. */
+export function getLocationsForProvider(provider: string): LocationMeta[] {
+  return PROVIDER_LOCATIONS[provider] ?? [];
+}
+
+/** Get the default location for a provider. Returns undefined for unknown providers. */
+export function getDefaultLocationForProvider(provider: string): string | undefined {
+  return PROVIDER_DEFAULT_LOCATIONS[provider];
+}
+
+/** Check if a location is valid for the given provider. */
+export function isValidLocationForProvider(provider: string, location: string): boolean {
+  const locations = PROVIDER_LOCATIONS[provider];
+  return locations != null && locations.some((loc) => loc.id === location);
+}
 
 // =============================================================================
 // Status Configuration
@@ -204,6 +246,91 @@ export const MIN_NODE_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Maximum node idle timeout (ms). */
 export const MAX_NODE_IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+// =============================================================================
+// Per-Project Scaling Parameters (Defaults, Mins, Maxes)
+// =============================================================================
+
+/** Default task execution timeout (ms). Override per-project or via TASK_RUN_MAX_EXECUTION_MS env var. */
+export const DEFAULT_TASK_EXECUTION_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
+export const MIN_TASK_EXECUTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+export const MAX_TASK_EXECUTION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Default max concurrent tasks per project. Override per-project or via MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT env var. */
+export const DEFAULT_MAX_CONCURRENT_TASKS = 10;
+export const MIN_MAX_CONCURRENT_TASKS = 1;
+export const MAX_MAX_CONCURRENT_TASKS = 50;
+
+/** Default max dispatch depth. Override per-project or via MCP_DISPATCH_MAX_DEPTH env var. */
+export const DEFAULT_MAX_DISPATCH_DEPTH = 3;
+export const MIN_MAX_DISPATCH_DEPTH = 1;
+export const MAX_MAX_DISPATCH_DEPTH = 10;
+
+/** Default max sub-tasks per task. Override per-project or via MCP_DISPATCH_MAX_PER_TASK env var. */
+export const DEFAULT_MAX_SUB_TASKS_PER_TASK = 5;
+export const MIN_MAX_SUB_TASKS_PER_TASK = 1;
+export const MAX_MAX_SUB_TASKS_PER_TASK = 20;
+
+/** Min/max for warm node timeout. Default uses existing DEFAULT_NODE_WARM_TIMEOUT_MS. */
+export const MIN_WARM_NODE_TIMEOUT_MS = 30 * 1000; // 30 seconds — prevents instant-destroy race
+export const MAX_WARM_NODE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+/** Min/max for max workspaces per node. Default uses existing DEFAULT_MAX_WORKSPACES_PER_NODE. */
+export const MIN_MAX_WORKSPACES_PER_NODE = 1;
+export const MAX_MAX_WORKSPACES_PER_NODE = 10;
+
+/** Default CPU threshold (%). Override per-project or via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
+export const DEFAULT_NODE_CPU_THRESHOLD_PERCENT = 50;
+export const MIN_NODE_CPU_THRESHOLD_PERCENT = 10;
+export const MAX_NODE_CPU_THRESHOLD_PERCENT = 95;
+
+/** Default memory threshold (%). Override per-project or via TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT env var. */
+export const DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT = 50;
+export const MIN_NODE_MEMORY_THRESHOLD_PERCENT = 10;
+export const MAX_NODE_MEMORY_THRESHOLD_PERCENT = 95;
+
+/** Scaling parameter metadata for validation and UI display. */
+export interface ScalingParamMeta {
+  key: string;
+  label: string;
+  envVar: string;
+  defaultValue: number;
+  min: number;
+  max: number;
+  unit: 'ms' | 'count' | 'percent';
+}
+
+/** Registry of all per-project scaling parameters. */
+export const SCALING_PARAMS: ScalingParamMeta[] = [
+  { key: 'taskExecutionTimeoutMs', label: 'Task Execution Timeout', envVar: 'TASK_RUN_MAX_EXECUTION_MS', defaultValue: DEFAULT_TASK_EXECUTION_TIMEOUT_MS, min: MIN_TASK_EXECUTION_TIMEOUT_MS, max: MAX_TASK_EXECUTION_TIMEOUT_MS, unit: 'ms' },
+  { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', envVar: 'MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT', defaultValue: DEFAULT_MAX_CONCURRENT_TASKS, min: MIN_MAX_CONCURRENT_TASKS, max: MAX_MAX_CONCURRENT_TASKS, unit: 'count' },
+  { key: 'maxDispatchDepth', label: 'Max Dispatch Depth', envVar: 'MCP_DISPATCH_MAX_DEPTH', defaultValue: DEFAULT_MAX_DISPATCH_DEPTH, min: MIN_MAX_DISPATCH_DEPTH, max: MAX_MAX_DISPATCH_DEPTH, unit: 'count' },
+  { key: 'maxSubTasksPerTask', label: 'Max Sub-Tasks Per Task', envVar: 'MCP_DISPATCH_MAX_PER_TASK', defaultValue: DEFAULT_MAX_SUB_TASKS_PER_TASK, min: MIN_MAX_SUB_TASKS_PER_TASK, max: MAX_MAX_SUB_TASKS_PER_TASK, unit: 'count' },
+  { key: 'warmNodeTimeoutMs', label: 'Warm Node Timeout', envVar: 'NODE_WARM_TIMEOUT_MS', defaultValue: DEFAULT_NODE_WARM_TIMEOUT_MS, min: MIN_WARM_NODE_TIMEOUT_MS, max: MAX_WARM_NODE_TIMEOUT_MS, unit: 'ms' },
+  { key: 'maxWorkspacesPerNode', label: 'Max Workspaces Per Node', envVar: 'MAX_WORKSPACES_PER_NODE', defaultValue: DEFAULT_MAX_WORKSPACES_PER_NODE, min: MIN_MAX_WORKSPACES_PER_NODE, max: MAX_MAX_WORKSPACES_PER_NODE, unit: 'count' },
+  { key: 'nodeCpuThresholdPercent', label: 'Node CPU Threshold', envVar: 'TASK_RUN_NODE_CPU_THRESHOLD_PERCENT', defaultValue: DEFAULT_NODE_CPU_THRESHOLD_PERCENT, min: MIN_NODE_CPU_THRESHOLD_PERCENT, max: MAX_NODE_CPU_THRESHOLD_PERCENT, unit: 'percent' },
+  { key: 'nodeMemoryThresholdPercent', label: 'Node Memory Threshold', envVar: 'TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT', defaultValue: DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT, min: MIN_NODE_MEMORY_THRESHOLD_PERCENT, max: MAX_NODE_MEMORY_THRESHOLD_PERCENT, unit: 'percent' },
+];
+
+/** Scaling parameter keys as a type. */
+export type ScalingParamKey = typeof SCALING_PARAMS[number]['key'];
+
+/**
+ * Resolve a project scaling config value with fallback chain:
+ * project setting → env var → hardcoded default.
+ */
+export function resolveProjectScalingConfig(
+  projectValue: number | null | undefined,
+  envValue: string | undefined,
+  defaultValue: number,
+): number {
+  if (projectValue != null && Number.isFinite(projectValue)) return projectValue;
+  if (envValue != null) {
+    const parsed = parseInt(envValue, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return defaultValue;
+}
 
 /** Interval (ms) at which the ProjectData DO checks workspace idle state. */
 export const WORKSPACE_IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes

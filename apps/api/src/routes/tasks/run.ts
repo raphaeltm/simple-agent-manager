@@ -14,7 +14,7 @@ import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { RunTaskRequest, RunTaskResponse, TaskStatus, VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, isValidLocationForProvider, getLocationsForProvider, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -157,11 +157,23 @@ runRoutes.post('/:taskId/run', async (c) => {
   const vmSize: VMSize = body.vmSize
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? DEFAULT_VM_LOCATION;
+  const provider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
+  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
+    ?? (project.defaultLocation as VMLocation | null)
+    ?? (provider ? getDefaultLocationForProvider(provider) as VMLocation | null : null)
+    ?? DEFAULT_VM_LOCATION;
   const workspaceProfile: WorkspaceProfile = body.workspaceProfile
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
   const branch = body.branch ?? project.defaultBranch;
+
+  // Validate location against provider
+  if (provider !== null && !isValidLocationForProvider(provider, vmLocation)) {
+    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
+    throw errors.badRequest(
+      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
+    );
+  }
 
   // Look up user's githubId for noreply email fallback
   const [userRow] = await db
@@ -250,11 +262,18 @@ runRoutes.post('/:taskId/run', async (c) => {
       chatSessionId: sessionId,
       agentType: project.defaultAgentType ?? null,
       workspaceProfile,
-      cloudProvider: (project.defaultProvider as CredentialProvider | null) ?? null,
+      cloudProvider: provider,
       // Agent profile resolution is not supported on the kanban Run path — tasks
       // re-run with project defaults. Profile support deferred to a future PR.
       model: null,
       permissionMode: null,
+      projectScaling: {
+        taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
+        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
+        nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
+        nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+        warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
+      },
     });
   } catch (err) {
     const failedAt = new Date().toISOString();

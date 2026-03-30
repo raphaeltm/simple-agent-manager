@@ -1,0 +1,10 @@
+-- Per-project scaling parameters and provider-aware location
+ALTER TABLE projects ADD COLUMN default_location TEXT;
+ALTER TABLE projects ADD COLUMN task_execution_timeout_ms INTEGER;
+ALTER TABLE projects ADD COLUMN max_concurrent_tasks INTEGER;
+ALTER TABLE projects ADD COLUMN max_dispatch_depth INTEGER;
+ALTER TABLE projects ADD COLUMN max_sub_tasks_per_task INTEGER;
+ALTER TABLE projects ADD COLUMN warm_node_timeout_ms INTEGER;
+ALTER TABLE projects ADD COLUMN max_workspaces_per_node INTEGER;
+ALTER TABLE projects ADD COLUMN node_cpu_threshold_percent INTEGER;
+ALTER TABLE projects ADD COLUMN node_memory_threshold_percent INTEGER;

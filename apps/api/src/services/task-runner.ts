@@ -45,7 +45,8 @@ function getCleanupDelayMs(env: Env): number {
  */
 export async function cleanupTaskRun(
   taskId: string,
-  env: Env
+  env: Env,
+  warmTimeoutOverrideMs?: number | null
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const cleanupDelay = getCleanupDelayMs(env);
@@ -109,7 +110,8 @@ export async function cleanupTaskRun(
       task.autoProvisionedNodeId,
       task.userId,
       workspace.id,
-      env
+      env,
+      warmTimeoutOverrideMs
     );
   }
 }
@@ -128,7 +130,8 @@ async function cleanupAutoProvisionedNode(
   nodeId: string,
   userId: string,
   excludeWorkspaceId: string | null,
-  env: Env
+  env: Env,
+  warmTimeoutOverrideMs?: number | null
 ): Promise<void> {
   // Check current node state first (TDF-7: idempotency guard)
   const [node] = await db
@@ -179,8 +182,8 @@ async function cleanupAutoProvisionedNode(
   // No active workspaces — mark node as warm for reuse.
   // The NodeLifecycle DO will schedule an alarm for eventual teardown.
   try {
-    await nodeLifecycleService.markIdle(env, nodeId, userId);
-    log.info('task_run.cleanup.node_marked_warm', { nodeId, userId });
+    await nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs);
+    log.info('task_run.cleanup.node_marked_warm', { nodeId, userId, warmTimeoutOverrideMs });
   } catch (err) {
     log.error('task_run.cleanup.mark_idle_failed', {
       nodeId,

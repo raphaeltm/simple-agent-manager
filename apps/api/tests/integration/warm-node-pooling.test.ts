@@ -33,7 +33,7 @@ describe('warm node pooling lifecycle integration', () => {
     });
 
     it('service.markIdle calls DO.markIdle via stub', () => {
-      expect(serviceFile).toContain('stub.markIdle(nodeId, userId)');
+      expect(serviceFile).toContain('stub.markIdle(nodeId, userId, warmTimeoutOverrideMs)');
     });
 
     it('DO.markIdle sets warm status and schedules alarm', () => {

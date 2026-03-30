@@ -26,10 +26,11 @@ function getStub(env: Env, nodeId: string): DurableObjectStub<NodeLifecycle> {
 export async function markIdle(
   env: Env,
   nodeId: string,
-  userId: string
+  userId: string,
+  warmTimeoutOverrideMs?: number | null,
 ): Promise<NodeLifecycleState> {
   const stub = getStub(env, nodeId);
-  return stub.markIdle(nodeId, userId);
+  return stub.markIdle(nodeId, userId, warmTimeoutOverrideMs);
 }
 
 /**

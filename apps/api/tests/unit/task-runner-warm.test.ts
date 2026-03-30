@@ -21,7 +21,7 @@ describe('task runner warm node marking source contract', () => {
       const cleanupSection = taskRunnerFile.slice(
         taskRunnerFile.indexOf('cleanupAutoProvisionedNode')
       );
-      expect(cleanupSection).toContain('nodeLifecycleService.markIdle(env, nodeId, userId)');
+      expect(cleanupSection).toContain('nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs)');
     });
 
     it('still checks for active workspaces before marking idle', () => {

@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { CreateNodeRequest, NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, isValidLocationForProvider, getLocationsForProvider } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -172,12 +172,23 @@ nodesRoutes.post('/', async (c) => {
     throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
   }
 
+  const provider = body.provider;
+  const vmLocation = body.vmLocation ?? DEFAULT_VM_LOCATION;
+
+  // Validate location against provider if provider is specified
+  if (provider && !isValidLocationForProvider(provider, vmLocation)) {
+    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
+    throw errors.badRequest(
+      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
+    );
+  }
+
   const created = await createNodeRecord(c.env, {
     userId,
     name: body.name.trim(),
     vmSize: body.vmSize ?? DEFAULT_VM_SIZE,
-    vmLocation: body.vmLocation ?? DEFAULT_VM_LOCATION,
-    cloudProvider: body.provider,
+    vmLocation,
+    cloudProvider: provider,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
   });
 
