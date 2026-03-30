@@ -58,6 +58,14 @@ export async function startTaskRunnerDO(
     permissionMode?: string | null;
     /** File attachments uploaded to R2 before task submission. */
     attachments?: TaskAttachment[] | null;
+    /** Per-project scaling overrides. */
+    projectScaling?: {
+      taskExecutionTimeoutMs?: number | null;
+      maxWorkspacesPerNode?: number | null;
+      nodeCpuThresholdPercent?: number | null;
+      nodeMemoryThresholdPercent?: number | null;
+      warmNodeTimeoutMs?: number | null;
+    } | null;
   },
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
@@ -88,6 +96,7 @@ export async function startTaskRunnerDO(
       model: input.model ?? null,
       permissionMode: input.permissionMode ?? null,
       attachments: input.attachments ?? null,
+      projectScaling: input.projectScaling ?? null,
     },
   };
 

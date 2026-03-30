@@ -40,6 +40,8 @@ interface StoredState {
   status: NodeLifecycleStatus;
   warmSince: number | null;
   claimedByTask: string | null;
+  /** Per-project warm timeout override (ms). Null = use platform default. */
+  warmTimeoutOverrideMs?: number | null;
 }
 
 export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
@@ -50,7 +52,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * If already warm, resets the alarm to a new timeout.
    * Throws if the node is currently being destroyed.
    */
-  async markIdle(nodeId: string, userId: string): Promise<NodeLifecycleState> {
+  async markIdle(nodeId: string, userId: string, warmTimeoutOverrideMs?: number | null): Promise<NodeLifecycleState> {
     const state = await this.getStoredState();
     const now = Date.now();
 
@@ -58,7 +60,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       throw new Error('node_lifecycle_conflict: node is being destroyed');
     }
 
-    const warmTimeout = this.getWarmTimeoutMs();
+    const warmTimeout = warmTimeoutOverrideMs ?? this.getWarmTimeoutMs();
 
     const newState: StoredState = {
       nodeId,
@@ -66,6 +68,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       status: 'warm',
       warmSince: now,
       claimedByTask: null,
+      warmTimeoutOverrideMs: warmTimeoutOverrideMs ?? null,
     };
     await this.ctx.storage.put('state', newState);
 

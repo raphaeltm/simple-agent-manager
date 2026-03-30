@@ -4,7 +4,7 @@
 import { and, eq, sql, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
@@ -102,8 +102,10 @@ export async function handleDispatchTask(
     );
   }
 
-  // ── Enforce dispatch depth limit ────────────────────────────────────────
+  // ── Enforce dispatch depth limit (project override > platform env > default) ──
   const newDepth = currentTask.dispatchDepth + 1;
+  // Project overrides are checked after the project is fetched (below for per-task and active limits).
+  // Depth limit uses platform default here since the project isn't fetched yet.
   if (newDepth > limits.dispatchMaxDepth) {
     log.warn('mcp.dispatch_task.depth_exceeded', {
       taskId: tokenData.taskId,
@@ -161,34 +163,55 @@ export async function handleDispatchTask(
     generateTaskTitle(env.AI, description, titleConfig),
   ]);
 
-  // ── Advisory pre-checks (fast-fail before expensive operations) ─────────
-  const childCount = childCountResult?.count ?? 0;
-  if (childCount >= limits.dispatchMaxPerTask) {
-    log.warn('mcp.dispatch_task.per_task_limit', {
+  // ── Apply per-project overrides to dispatch limits ──────────────────────
+  const effectiveMaxDepth = project?.maxDispatchDepth ?? limits.dispatchMaxDepth;
+  const effectiveMaxPerTask = project?.maxSubTasksPerTask ?? limits.dispatchMaxPerTask;
+  const effectiveMaxActive = project?.maxConcurrentTasks ?? limits.dispatchMaxActivePerProject;
+
+  // Re-check depth with project override (initial check above used platform default)
+  if (newDepth > effectiveMaxDepth) {
+    log.warn('mcp.dispatch_task.depth_exceeded', {
       taskId: tokenData.taskId,
       projectId: tokenData.projectId,
-      childCount,
-      maxPerTask: limits.dispatchMaxPerTask,
+      currentDepth: currentTask.dispatchDepth,
+      maxDepth: effectiveMaxDepth,
     });
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Per-task dispatch limit reached (${childCount}/${limits.dispatchMaxPerTask}). ` +
+      `Dispatch depth limit exceeded. Current depth: ${currentTask.dispatchDepth}, max allowed: ${effectiveMaxDepth}. ` +
+      'Agent-dispatched tasks have a depth limit to prevent runaway recursive spawning.',
+    );
+  }
+
+  // ── Advisory pre-checks (fast-fail before expensive operations) ─────────
+  const childCount = childCountResult?.count ?? 0;
+  if (childCount >= effectiveMaxPerTask) {
+    log.warn('mcp.dispatch_task.per_task_limit', {
+      taskId: tokenData.taskId,
+      projectId: tokenData.projectId,
+      childCount,
+      maxPerTask: effectiveMaxPerTask,
+    });
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Per-task dispatch limit reached (${childCount}/${effectiveMaxPerTask}). ` +
       'A single agent can only dispatch a limited number of tasks to prevent resource exhaustion.',
     );
   }
 
   const activeDispatched = activeDispatchedResult?.count ?? 0;
-  if (activeDispatched >= limits.dispatchMaxActivePerProject) {
+  if (activeDispatched >= effectiveMaxActive) {
     log.warn('mcp.dispatch_task.project_active_limit', {
       projectId: tokenData.projectId,
       activeDispatched,
-      maxActive: limits.dispatchMaxActivePerProject,
+      maxActive: effectiveMaxActive,
     });
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Project has ${activeDispatched} active agent-dispatched tasks (limit: ${limits.dispatchMaxActivePerProject}). ` +
+      `Project has ${activeDispatched} active agent-dispatched tasks (limit: ${effectiveMaxActive}). ` +
       'Wait for existing tasks to complete before dispatching more.',
     );
   }
@@ -233,10 +256,12 @@ export async function handleDispatchTask(
   const resolvedVmSize: VMSize = vmSize
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
-  const resolvedVmLocation: VMLocation = DEFAULT_VM_LOCATION;
+  const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
+  const resolvedVmLocation: VMLocation = (project.defaultLocation as VMLocation | null)
+    ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
+    ?? DEFAULT_VM_LOCATION;
   const resolvedWorkspaceProfile: WorkspaceProfile = (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
-  const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
 
   // Explicit branch > project default branch.
   // We intentionally do NOT fall back to the parent task's outputBranch because
@@ -276,11 +301,11 @@ export async function handleDispatchTask(
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,
     ...ACTIVE_STATUSES,
-    limits.dispatchMaxPerTask,
+    effectiveMaxPerTask,
     // Per-project active count subquery
     tokenData.projectId,
     ...ACTIVE_STATUSES,
-    limits.dispatchMaxActivePerProject,
+    effectiveMaxActive,
   ).run();
 
   if (!conditionalInsertResult.meta.changes || conditionalInsertResult.meta.changes === 0) {
@@ -289,8 +314,8 @@ export async function handleDispatchTask(
     log.warn('mcp.dispatch_task.atomic_limit_breach', {
       taskId,
       projectId: tokenData.projectId,
-      maxPerTask: limits.dispatchMaxPerTask,
-      maxActive: limits.dispatchMaxActivePerProject,
+      maxPerTask: effectiveMaxPerTask,
+      maxActive: effectiveMaxActive,
     });
     return jsonRpcError(
       requestId,
@@ -385,6 +410,13 @@ export async function handleDispatchTask(
       // use project defaults. Profile support deferred to a future PR.
       model: null,
       permissionMode: null,
+      projectScaling: {
+        taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
+        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
+        nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
+        nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+        warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
+      },
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed

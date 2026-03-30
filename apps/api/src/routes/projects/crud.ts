@@ -19,6 +19,8 @@ import {
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
   MIN_NODE_IDLE_TIMEOUT_MS,
   MAX_NODE_IDLE_TIMEOUT_MS,
+  isValidLocationForProvider,
+  SCALING_PARAMS,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
@@ -542,17 +544,14 @@ crudRoutes.patch('/:id', async (c) => {
 
   const existing = await requireOwnedProject(db, projectId, userId);
 
-  if (
-    body.name === undefined &&
-    body.description === undefined &&
-    body.defaultBranch === undefined &&
-    body.defaultVmSize === undefined &&
-    body.defaultAgentType === undefined &&
-    body.defaultWorkspaceProfile === undefined &&
-    body.defaultProvider === undefined &&
-    body.workspaceIdleTimeoutMs === undefined &&
-    body.nodeIdleTimeoutMs === undefined
-  ) {
+  const allFieldKeys: (keyof UpdateProjectRequest)[] = [
+    'name', 'description', 'defaultBranch', 'defaultVmSize', 'defaultAgentType',
+    'defaultWorkspaceProfile', 'defaultProvider', 'defaultLocation',
+    'workspaceIdleTimeoutMs', 'nodeIdleTimeoutMs',
+    'taskExecutionTimeoutMs', 'maxConcurrentTasks', 'maxDispatchDepth', 'maxSubTasksPerTask',
+    'warmNodeTimeoutMs', 'maxWorkspacesPerNode', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent',
+  ];
+  if (allFieldKeys.every((k) => body[k] === undefined)) {
     throw errors.badRequest('At least one field is required');
   }
 
@@ -582,6 +581,36 @@ crudRoutes.patch('/:id', async (c) => {
 
   if (body.defaultProvider !== undefined && body.defaultProvider !== null && !CREDENTIAL_PROVIDERS.includes(body.defaultProvider)) {
     throw errors.badRequest(`defaultProvider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
+  }
+
+  // Determine the effective provider for location validation
+  const effectiveProvider = body.defaultProvider === undefined
+    ? existing.defaultProvider
+    : (body.defaultProvider ?? null);
+
+  // If defaultProvider changed, clear defaultLocation unless explicitly set in this request
+  if (body.defaultProvider !== undefined && body.defaultProvider !== existing.defaultProvider && body.defaultLocation === undefined) {
+    body.defaultLocation = null;
+  }
+
+  // Validate defaultLocation against the effective provider
+  if (body.defaultLocation !== undefined && body.defaultLocation !== null) {
+    if (!effectiveProvider) {
+      throw errors.badRequest('Cannot set defaultLocation without a defaultProvider');
+    }
+    if (!isValidLocationForProvider(effectiveProvider, body.defaultLocation)) {
+      throw errors.badRequest(`defaultLocation '${body.defaultLocation}' is not valid for provider '${effectiveProvider}'`);
+    }
+  }
+
+  // Validate per-project scaling parameters
+  for (const param of SCALING_PARAMS) {
+    const value = body[param.key as keyof UpdateProjectRequest] as number | null | undefined;
+    if (value !== undefined && value !== null) {
+      if (!Number.isFinite(value) || value < param.min || value > param.max) {
+        throw errors.badRequest(`${param.key} must be between ${param.min} and ${param.max}`);
+      }
+    }
   }
 
   if (body.workspaceIdleTimeoutMs !== undefined && body.workspaceIdleTimeoutMs !== null) {
@@ -631,8 +660,17 @@ crudRoutes.patch('/:id', async (c) => {
       defaultAgentType: body.defaultAgentType === undefined ? existing.defaultAgentType : (body.defaultAgentType ?? null),
       defaultWorkspaceProfile: body.defaultWorkspaceProfile === undefined ? existing.defaultWorkspaceProfile : (body.defaultWorkspaceProfile ?? null),
       defaultProvider: body.defaultProvider === undefined ? existing.defaultProvider : (body.defaultProvider ?? null),
+      defaultLocation: body.defaultLocation === undefined ? existing.defaultLocation : (body.defaultLocation ?? null),
       workspaceIdleTimeoutMs: body.workspaceIdleTimeoutMs === undefined ? existing.workspaceIdleTimeoutMs : (body.workspaceIdleTimeoutMs ?? null),
       nodeIdleTimeoutMs: body.nodeIdleTimeoutMs === undefined ? existing.nodeIdleTimeoutMs : (body.nodeIdleTimeoutMs ?? null),
+      taskExecutionTimeoutMs: body.taskExecutionTimeoutMs === undefined ? existing.taskExecutionTimeoutMs : (body.taskExecutionTimeoutMs ?? null),
+      maxConcurrentTasks: body.maxConcurrentTasks === undefined ? existing.maxConcurrentTasks : (body.maxConcurrentTasks ?? null),
+      maxDispatchDepth: body.maxDispatchDepth === undefined ? existing.maxDispatchDepth : (body.maxDispatchDepth ?? null),
+      maxSubTasksPerTask: body.maxSubTasksPerTask === undefined ? existing.maxSubTasksPerTask : (body.maxSubTasksPerTask ?? null),
+      warmNodeTimeoutMs: body.warmNodeTimeoutMs === undefined ? existing.warmNodeTimeoutMs : (body.warmNodeTimeoutMs ?? null),
+      maxWorkspacesPerNode: body.maxWorkspacesPerNode === undefined ? existing.maxWorkspacesPerNode : (body.maxWorkspacesPerNode ?? null),
+      nodeCpuThresholdPercent: body.nodeCpuThresholdPercent === undefined ? existing.nodeCpuThresholdPercent : (body.nodeCpuThresholdPercent ?? null),
+      nodeMemoryThresholdPercent: body.nodeMemoryThresholdPercent === undefined ? existing.nodeMemoryThresholdPercent : (body.nodeMemoryThresholdPercent ?? null),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));

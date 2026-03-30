@@ -28,6 +28,7 @@ import { useAgentProfiles } from '../hooks/useAgentProfiles';
 import { useProjectContext } from './ProjectContext';
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProfileList } from '../components/agent-profiles/ProfileList';
+import { ScalingSettings } from '../components/ScalingSettings';
 
 const FALLBACK_VM_SIZES: { value: VMSize; label: string; description: string }[] = [
   { value: 'small', label: 'Small', description: '2-3 vCPUs, 4 GB RAM' },
@@ -580,6 +581,11 @@ export function ProjectSettings() {
           </Button>
         </div>
       </section>
+
+      {/* Scaling & Scheduling */}
+      {project && (
+        <ScalingSettings projectId={projectId} project={project} reload={reload} />
+      )}
 
     {/* Runtime Config */}
     <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
