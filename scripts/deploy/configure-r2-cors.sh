@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
 # Configure R2 bucket CORS rules for direct browser uploads.
-# Uses the AWS CLI (pre-installed on GitHub Actions runners) with S3-compatible API.
+# Uses the Cloudflare REST API (not S3-compatible API) because the R2 S3 token
+# typically has Object Read & Write permissions only, not Admin permissions
+# needed for PutBucketCors.
 #
 # Required environment variables:
-#   R2_ACCESS_KEY_ID      — R2 S3-compatible API key ID
-#   R2_SECRET_ACCESS_KEY  — R2 S3-compatible API secret
-#   CF_ACCOUNT_ID         — Cloudflare account ID (for R2 endpoint)
-#   R2_BUCKET_NAME        — R2 bucket name (e.g., sam-staging-assets)
-#   BASE_DOMAIN           — App domain (e.g., sammy.party or simple-agent-manager.org)
+#   CF_API_TOKEN    — Cloudflare API token (same one used for wrangler)
+#   CF_ACCOUNT_ID   — Cloudflare account ID
+#   R2_BUCKET_NAME  — R2 bucket name (e.g., sam-staging-assets)
+#   BASE_DOMAIN     — App domain (e.g., sammy.party or simple-agent-manager.org)
 #
 # Usage: bash scripts/deploy/configure-r2-cors.sh
 #
@@ -21,7 +22,7 @@ NC='\033[0m'
 # Validate required env vars
 # ---------------------------------------------------------------------------
 MISSING=""
-for VAR in R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY CF_ACCOUNT_ID R2_BUCKET_NAME BASE_DOMAIN; do
+for VAR in CF_API_TOKEN CF_ACCOUNT_ID R2_BUCKET_NAME BASE_DOMAIN; do
   if [ -z "${!VAR:-}" ]; then
     MISSING="$MISSING $VAR"
   fi
@@ -33,42 +34,51 @@ if [ -n "$MISSING" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Configure CORS using AWS CLI (S3-compatible API)
+# Configure CORS using Cloudflare REST API
 # ---------------------------------------------------------------------------
 APP_ORIGIN="https://app.${BASE_DOMAIN}"
-R2_ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 echo "Configuring R2 CORS for bucket '${R2_BUCKET_NAME}' (origin: ${APP_ORIGIN})..."
 
 # Only PUT is allowed — all R2 reads flow through the authenticated Worker proxy.
 # Omitting GET prevents leaked presigned GET URLs from being usable cross-origin.
 # AllowedHeaders wildcard is safe: presigned URL signature enforces authorization.
-CORS_CONFIG=$(cat <<CORSEOF
+CORS_PAYLOAD=$(cat <<CORSEOF
 {
-  "CORSRules": [
+  "rules": [
     {
-      "AllowedOrigins": ["${APP_ORIGIN}"],
-      "AllowedMethods": ["PUT"],
-      "AllowedHeaders": ["*"],
-      "ExposeHeaders": ["ETag"],
-      "MaxAgeSeconds": 3600
+      "allowed": {
+        "origins": ["${APP_ORIGIN}"],
+        "methods": ["PUT"],
+        "headers": ["*"]
+      },
+      "exposed_headers": ["ETag"],
+      "max_age_seconds": 3600
     }
   ]
 }
 CORSEOF
 )
 
-AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" \
-AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
-aws s3api put-bucket-cors \
-  --bucket "${R2_BUCKET_NAME}" \
-  --cors-configuration "${CORS_CONFIG}" \
-  --endpoint-url "${R2_ENDPOINT}" \
-  --region auto
+RESPONSE=$(curl -s -o /tmp/r2-cors-response.txt -w "%{http_code}" \
+  -X PUT \
+  "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${R2_BUCKET_NAME}/cors" \
+  -H "Authorization: Bearer ${CF_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "${CORS_PAYLOAD}")
 
-echo -e "${GREEN}R2 CORS configured successfully${NC}"
-echo "  Bucket: ${R2_BUCKET_NAME}"
-echo "  Allowed Origin: ${APP_ORIGIN}"
-echo "  Allowed Methods: PUT"
-echo "  Allowed Headers: * (wildcard — presigned URL signature enforces auth)"
-echo "  Expose Headers: ETag"
+BODY=$(cat /tmp/r2-cors-response.txt 2>/dev/null || echo "(empty)")
+rm -f /tmp/r2-cors-response.txt
+
+if [ "$RESPONSE" -ge 200 ] && [ "$RESPONSE" -lt 300 ]; then
+  echo -e "${GREEN}R2 CORS configured successfully (HTTP ${RESPONSE})${NC}"
+  echo "  Bucket: ${R2_BUCKET_NAME}"
+  echo "  Allowed Origin: ${APP_ORIGIN}"
+  echo "  Allowed Methods: PUT"
+  echo "  Allowed Headers: * (wildcard — presigned URL signature enforces auth)"
+  echo "  Expose Headers: ETag"
+else
+  echo "::error::Failed to configure R2 CORS (HTTP ${RESPONSE})"
+  echo "Response: ${BODY}"
+  exit 1
+fi
