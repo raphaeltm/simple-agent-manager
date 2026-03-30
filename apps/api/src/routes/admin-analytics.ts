@@ -454,13 +454,13 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
 
   const [hostTotals, topPagesData, trendData] = await Promise.all([
     queryAnalyticsEngine(c.env, sectionsSql) as Promise<
-      Array<{ host: string; total_views: number; unique_visitors: number; unique_sessions: number }>
+      Array<{ host: string; total_views: string; unique_visitors: string; unique_sessions: string }>
     >,
     queryAnalyticsEngine(c.env, topPagesSql) as Promise<
-      Array<{ host: string; page: string; views: number; unique_visitors: number }>
+      Array<{ host: string; page: string; views: string; unique_visitors: string }>
     >,
     queryAnalyticsEngine(c.env, trendSql) as Promise<
-      Array<{ host: string; date: string; views: number }>
+      Array<{ host: string; date: string; views: string }>
     >,
   ]);
 
