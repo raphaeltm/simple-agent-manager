@@ -303,7 +303,7 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
     `${cookieName}=${cookieValue}`,
     `Path=/`,
     `HttpOnly`,
-    `SameSite=Strict`,
+    `SameSite=None`,
     `Max-Age=${sessionDurationSeconds}`,
     ...(isSecure ? [`Secure`, `Domain=.${baseDomain}`] : []),
   ].join('; ');
@@ -311,6 +311,7 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   return new Response(
     JSON.stringify({
       success: true,
+      sessionToken,
       user: {
         id: user.id,
         email: user.email,
