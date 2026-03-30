@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, Button, EmptyState, PageLayout, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
@@ -8,10 +9,16 @@ import { deleteProject } from '../lib/api';
 export function Projects() {
   const navigate = useNavigate();
   const { projects, loading, isRefreshing, error, refresh } = useProjectList({ sort: 'last_activity', limit: 50 });
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDelete = async (id: string) => {
-    await deleteProject(id);
-    refresh();
+    try {
+      setDeleteError(null);
+      await deleteProject(id);
+      refresh();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete project');
+    }
   };
 
   return (
@@ -34,8 +41,16 @@ export function Projects() {
         </div>
       )}
 
+      {deleteError && (
+        <div className="mb-3">
+          <Alert variant="error" onDismiss={() => setDeleteError(null)}>
+            {deleteError}
+          </Alert>
+        </div>
+      )}
+
       {loading && projects.length === 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div role="status" aria-label="Loading projects" aria-busy="true" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={2} />
           ))}
