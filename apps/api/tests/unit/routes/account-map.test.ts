@@ -159,6 +159,77 @@ describe('GET /account-map', () => {
     expect(relTypes).toContain('task_workspace');
   });
 
+  it('defaults to activeOnly=true and uses scoped cache key', async () => {
+    buildMockDB([], [], [], []);
+
+    const app = buildApp();
+    const res = await app.request('/account-map', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+
+    // Cache key should include :active suffix
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:user-123:active', 'json');
+  });
+
+  it('uses :all cache key when activeOnly=false', async () => {
+    buildMockDB([], [], [], []);
+
+    const app = buildApp();
+    const res = await app.request('/account-map?activeOnly=false', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+
+    // Cache key should include :all suffix
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:user-123:all', 'json');
+  });
+
+  it('filters sessions to active-only by default', async () => {
+    const projects = [
+      { id: 'proj-1', name: 'Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 1 },
+    ];
+
+    buildMockDB(projects, [], [], []);
+    (projectDataService.listSessions as any).mockResolvedValue({
+      sessions: [
+        { id: 'sess-active', topic: 'Active chat', status: 'active', messageCount: 5, workspaceId: null, taskId: null },
+        { id: 'sess-stopped', topic: 'Old chat', status: 'stopped', messageCount: 20, workspaceId: null, taskId: null },
+        { id: 'sess-error', topic: 'Error chat', status: 'error', messageCount: 0, workspaceId: null, taskId: null },
+      ],
+      total: 3,
+    });
+
+    const app = buildApp();
+    const res = await app.request('/account-map', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    // Only the active session should be returned
+    expect(body.sessions).toHaveLength(1);
+    expect(body.sessions[0].id).toBe('sess-active');
+  });
+
+  it('returns all sessions when activeOnly=false', async () => {
+    const projects = [
+      { id: 'proj-1', name: 'Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 1 },
+    ];
+
+    buildMockDB(projects, [], [], []);
+    (projectDataService.listSessions as any).mockResolvedValue({
+      sessions: [
+        { id: 'sess-active', topic: 'Active chat', status: 'active', messageCount: 5, workspaceId: null, taskId: null },
+        { id: 'sess-stopped', topic: 'Old chat', status: 'stopped', messageCount: 20, workspaceId: null, taskId: null },
+      ],
+      total: 2,
+    });
+
+    const app = buildApp();
+    const res = await app.request('/account-map?activeOnly=false', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.sessions).toHaveLength(2);
+  });
+
   it('tolerates DO failures without failing the request', async () => {
     const projects = [
       { id: 'proj-1', name: 'Failing Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },

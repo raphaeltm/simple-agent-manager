@@ -10,12 +10,24 @@
  * cold DOs (~5-20ms each). KV caching (30s TTL) absorbs repeated reads.
  */
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import * as projectDataService from '../services/project-data';
+
+/**
+ * Statuses considered "active" for each entity type when activeOnly=true.
+ * These are intentionally broader than operational gating statuses (e.g.,
+ * workspaces/_helpers.ts uses only 'running'|'recovery' for connection gating).
+ * The map visualization includes transitional states so users can see resources
+ * that are starting up or shutting down.
+ */
+const ACTIVE_NODE_STATUSES = ['pending', 'creating', 'running', 'stopping'];
+const ACTIVE_WORKSPACE_STATUSES = ['pending', 'creating', 'running', 'recovery', 'stopping'];
+const ACTIVE_TASK_STATUSES = ['queued', 'delegated', 'in_progress'];
+const ACTIVE_SESSION_STATUSES = ['active', 'running'];
 
 /** Default max entities per type from D1. Configurable via ACCOUNT_MAP_MAX_ENTITIES. */
 const DEFAULT_MAX_ENTITIES = 200;
@@ -50,6 +62,10 @@ accountMapRoutes.use('/*', requireAuth(), requireApproved());
 accountMapRoutes.get('/', async (c) => {
   const userId = getUserId(c);
 
+  // activeOnly defaults to true — only ?activeOnly=false disables filtering
+  const activeOnlyParam = c.req.query('activeOnly');
+  const activeOnly = activeOnlyParam !== 'false';
+
   const parsedMax = parseInt(c.env.ACCOUNT_MAP_MAX_ENTITIES ?? '', 10);
   const maxEntities = Number.isFinite(parsedMax) && parsedMax > 0
     ? parsedMax
@@ -62,8 +78,8 @@ accountMapRoutes.get('/', async (c) => {
 
   const cacheTtl = parseInt(c.env.ACCOUNT_MAP_CACHE_TTL_SECONDS ?? '', 10) || DEFAULT_CACHE_TTL_SECONDS;
 
-  // --- KV cache check ---
-  const cacheKey = `account-map:${userId}`;
+  // --- KV cache check (separate keys for active vs all) ---
+  const cacheKey = `account-map:${userId}:${activeOnly ? 'active' : 'all'}`;
   const cached = await c.env.KV.get(cacheKey, 'json');
   if (cached) {
     return c.json(cached);
@@ -73,6 +89,7 @@ accountMapRoutes.get('/', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   const [projectRows, nodeRows, workspaceRows, taskRows] = await Promise.all([
+    // Projects: always return all (they're parent containers)
     db
       .select({
         id: schema.projects.id,
@@ -86,6 +103,7 @@ accountMapRoutes.get('/', async (c) => {
       .where(eq(schema.projects.userId, userId))
       .limit(maxEntities),
 
+    // Nodes: filter to active statuses when activeOnly
     db
       .select({
         id: schema.nodes.id,
@@ -100,9 +118,14 @@ accountMapRoutes.get('/', async (c) => {
         lastMetrics: schema.nodes.lastMetrics,
       })
       .from(schema.nodes)
-      .where(eq(schema.nodes.userId, userId))
+      .where(
+        activeOnly
+          ? and(eq(schema.nodes.userId, userId), inArray(schema.nodes.status, ACTIVE_NODE_STATUSES))
+          : eq(schema.nodes.userId, userId)
+      )
       .limit(maxEntities),
 
+    // Workspaces: filter to active statuses when activeOnly
     db
       .select({
         id: schema.workspaces.id,
@@ -115,9 +138,14 @@ accountMapRoutes.get('/', async (c) => {
         chatSessionId: schema.workspaces.chatSessionId,
       })
       .from(schema.workspaces)
-      .where(eq(schema.workspaces.userId, userId))
+      .where(
+        activeOnly
+          ? and(eq(schema.workspaces.userId, userId), inArray(schema.workspaces.status, ACTIVE_WORKSPACE_STATUSES))
+          : eq(schema.workspaces.userId, userId)
+      )
       .limit(maxEntities),
 
+    // Tasks: filter to active statuses when activeOnly
     db
       .select({
         id: schema.tasks.id,
@@ -129,7 +157,11 @@ accountMapRoutes.get('/', async (c) => {
         priority: schema.tasks.priority,
       })
       .from(schema.tasks)
-      .where(eq(schema.tasks.userId, userId))
+      .where(
+        activeOnly
+          ? and(eq(schema.tasks.userId, userId), inArray(schema.tasks.status, ACTIVE_TASK_STATUSES))
+          : eq(schema.tasks.userId, userId)
+      )
       .limit(maxEntities),
   ]);
 
@@ -166,6 +198,11 @@ accountMapRoutes.get('/', async (c) => {
     }
   }
 
+  // Filter sessions to active-only when requested
+  const filteredSessions = activeOnly
+    ? allSessions.filter((s) => ACTIVE_SESSION_STATUSES.includes(s.status))
+    : allSessions;
+
   // --- Build relationships ---
   const relationships: Relationship[] = [];
 
@@ -194,7 +231,7 @@ accountMapRoutes.get('/', async (c) => {
   }
 
   // Project → Session
-  for (const session of allSessions) {
+  for (const session of filteredSessions) {
     relationships.push({
       source: session.projectId,
       target: session.id,
@@ -204,7 +241,7 @@ accountMapRoutes.get('/', async (c) => {
   }
 
   // Session → Workspace
-  for (const session of allSessions) {
+  for (const session of filteredSessions) {
     if (session.workspaceId) {
       relationships.push({
         source: session.id,
@@ -243,7 +280,7 @@ accountMapRoutes.get('/', async (c) => {
     projects: projectRows,
     nodes: nodeRows,
     workspaces: workspaceRows,
-    sessions: allSessions,
+    sessions: filteredSessions,
     tasks: taskRows.map((t) => ({
       id: t.id,
       projectId: t.projectId,

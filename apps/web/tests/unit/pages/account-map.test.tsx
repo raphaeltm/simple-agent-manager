@@ -2,7 +2,7 @@
  * Unit tests for the AccountMap page component.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 // ---------------------------------------------------------------------------
@@ -190,5 +190,58 @@ describe('AccountMap page', () => {
 
     expect(screen.getByPlaceholderText('Search entities...')).toBeInTheDocument();
     expect(screen.getByText('Reorganize')).toBeInTheDocument();
+  });
+
+  it('renders Active/All toggle button', async () => {
+    mocks.getAccountMap.mockResolvedValue(
+      makeAccountMapResponse({
+        projects: [
+          { id: 'proj-1', name: 'My Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
+        ],
+      })
+    );
+    renderAccountMap();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
+    });
+
+    // Should show "Active" text on the toggle button (desktop mode, activeOnly=true by default)
+    expect(screen.getByText('Active')).toBeInTheDocument();
+  });
+
+  it('calls getAccountMap with activeOnly by default', async () => {
+    mocks.getAccountMap.mockResolvedValue(makeAccountMapResponse());
+    renderAccountMap();
+
+    await waitFor(() => {
+      expect(mocks.getAccountMap).toHaveBeenCalledWith({ activeOnly: true });
+    });
+  });
+
+  it('toggles to show all when Active button is clicked', async () => {
+    mocks.getAccountMap.mockResolvedValue(
+      makeAccountMapResponse({
+        projects: [
+          { id: 'proj-1', name: 'My Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
+        ],
+      })
+    );
+    renderAccountMap();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
+    });
+
+    // Click the Active/All toggle
+    const toggleBtn = screen.getByText('Active').closest('button')!;
+    await act(async () => {
+      toggleBtn.click();
+    });
+
+    // Should re-fetch with activeOnly=false
+    await waitFor(() => {
+      expect(mocks.getAccountMap).toHaveBeenCalledWith({ activeOnly: false });
+    });
   });
 });

@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { Search, RotateCcw, X } from 'lucide-react';
+import { Search, RotateCcw, X, Eye, EyeOff } from 'lucide-react';
 import type { EntityType } from './hooks/useMapFilters';
 
 interface FilterChip {
@@ -29,6 +29,8 @@ interface AccountMapToolbarProps {
   totalCount: number;
   stats: Record<string, number>;
   isMobile: boolean;
+  activeOnly: boolean;
+  onToggleActiveOnly: () => void;
 }
 
 export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
@@ -43,6 +45,8 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
   totalCount,
   stats,
   isMobile,
+  activeOnly,
+  onToggleActiveOnly,
 }) => {
   return (
     <div className="flex flex-col gap-2 p-3 bg-surface border-b border-border-default">
@@ -78,8 +82,23 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
         )}
 
         <button
+          onClick={onToggleActiveOnly}
+          aria-pressed={!activeOnly}
+          aria-label={activeOnly ? 'Showing active only — click to show all' : 'Showing all — click to show active only'}
+          className={`flex items-center gap-1 px-2 py-1.5 text-xs rounded-md border cursor-pointer transition-colors whitespace-nowrap min-h-[44px] ${
+            activeOnly
+              ? 'bg-transparent border-border-default text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
+              : 'bg-surface-hover border-border-default text-fg-primary'
+          }`}
+          title={activeOnly ? 'Showing active only — click to show all' : 'Showing all — click to show active only'}
+        >
+          {activeOnly ? <Eye size={14} /> : <EyeOff size={14} />}
+          {!isMobile && <span aria-hidden="true">{activeOnly ? 'Active' : 'All'}</span>}
+        </button>
+
+        <button
           onClick={onReorganize}
-          className="flex items-center gap-1 px-2 py-1.5 text-xs bg-transparent border border-border-default rounded-md text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer transition-colors"
+          className="flex items-center gap-1 px-2 py-1.5 text-xs min-h-[44px] bg-transparent border border-border-default rounded-md text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer transition-colors"
           aria-label="Reorganize layout"
           title="Reorganize layout"
         >
@@ -90,7 +109,7 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
         {hasActiveFilters && (
           <button
             onClick={onResetFilters}
-            className="px-2 py-1.5 text-xs bg-transparent border border-border-default rounded-md text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer transition-colors"
+            className="px-2 py-1.5 text-xs min-h-[44px] bg-transparent border border-border-default rounded-md text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer transition-colors"
             aria-label="Reset filters"
           >
             Reset

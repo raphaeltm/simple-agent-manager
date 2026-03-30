@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAccountMapData } from '../components/account-map/hooks/useAccountMapData';
@@ -8,8 +9,10 @@ import { AccountMapEmptyState } from '../components/account-map/AccountMapEmptyS
 
 export function AccountMap() {
   const isMobile = useIsMobile();
+  const [activeOnly, setActiveOnly] = useState(true);
+
   const { nodes, edges, loading, error, isEmpty, stats, refresh, reorganize } =
-    useAccountMapData({ isMobile });
+    useAccountMapData({ isMobile, activeOnly });
 
   const {
     filteredNodes,
@@ -22,7 +25,15 @@ export function AccountMap() {
     hasActiveFilters,
     matchCount,
     totalCount,
+    filterNodeCountChanged,
   } = useMapFilters({ nodes, edges });
+
+  // Auto-reorganize when type filters add/remove nodes from the graph
+  useEffect(() => {
+    if (filterNodeCountChanged) {
+      reorganize();
+    }
+  }, [filterNodeCountChanged, reorganize]);
 
   if (loading) {
     return (
@@ -64,6 +75,8 @@ export function AccountMap() {
         totalCount={totalCount}
         stats={stats}
         isMobile={isMobile}
+        activeOnly={activeOnly}
+        onToggleActiveOnly={() => setActiveOnly((v) => !v)}
       />
       <div className="flex-1 min-h-0">
         <AccountMapCanvas

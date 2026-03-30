@@ -302,8 +302,13 @@ export interface AccountMapResponse {
   }>;
 }
 
-export async function getAccountMap(): Promise<AccountMapResponse> {
-  return request<AccountMapResponse>('/api/account-map');
+export async function getAccountMap(options?: { activeOnly?: boolean }): Promise<AccountMapResponse> {
+  const params = new URLSearchParams();
+  if (options?.activeOnly === false) {
+    params.set('activeOnly', 'false');
+  }
+  const qs = params.toString();
+  return request<AccountMapResponse>(`/api/account-map${qs ? `?${qs}` : ''}`);
 }
 
 // =============================================================================
