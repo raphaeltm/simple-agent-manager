@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAccountMapData } from '../components/account-map/hooks/useAccountMapData';
@@ -29,12 +29,17 @@ export function AccountMap() {
     clearFilterNodesChanged,
   } = useMapFilters({ nodes, edges });
 
-  // Auto-reorganize when type filters add/remove nodes
+  // Auto-reorganize when type filters add/remove nodes (debounced to batch rapid toggles)
+  const reorganizeTimerRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     if (filterNodesChanged) {
-      reorganize();
-      clearFilterNodesChanged();
+      clearTimeout(reorganizeTimerRef.current);
+      reorganizeTimerRef.current = setTimeout(() => {
+        reorganize();
+        clearFilterNodesChanged();
+      }, 150);
     }
+    return () => clearTimeout(reorganizeTimerRef.current);
   }, [filterNodesChanged, reorganize, clearFilterNodesChanged]);
 
   if (loading) {

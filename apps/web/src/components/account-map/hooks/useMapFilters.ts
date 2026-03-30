@@ -62,8 +62,9 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
     setFilterNodesChanged(false);
   }, []);
 
-  // Track previous filtered count to detect add/remove from type toggles
+  // Track previous state to detect add/remove from type toggles (not data refreshes)
   const prevFilteredCountRef = useRef<number | null>(null);
+  const prevActiveFiltersRef = useRef(activeFilters);
 
   const { filteredNodes, filteredEdges, matchCount, totalCount } = useMemo(() => {
     const lowerQuery = searchQuery.toLowerCase().trim();
@@ -137,13 +138,16 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
     };
   }, [nodes, edges, searchQuery, activeFilters]);
 
-  // Detect when type filtering changes the visible node count (triggers auto-reorganize)
+  // Detect when type filtering changes the visible node count (triggers auto-reorganize).
+  // Only fires when activeFilters changed — not when raw data refreshes from showAll toggle.
   useEffect(() => {
-    if (prevFilteredCountRef.current !== null && prevFilteredCountRef.current !== filteredNodes.length) {
+    const filtersChanged = prevActiveFiltersRef.current !== activeFilters;
+    if (filtersChanged && prevFilteredCountRef.current !== null && prevFilteredCountRef.current !== filteredNodes.length) {
       setFilterNodesChanged(true);
     }
+    prevActiveFiltersRef.current = activeFilters;
     prevFilteredCountRef.current = filteredNodes.length;
-  }, [filteredNodes.length]);
+  }, [filteredNodes.length, activeFilters]);
 
   const hasActiveFilters = activeFilters.size < ALL_TYPES.length || searchQuery.length > 0;
 

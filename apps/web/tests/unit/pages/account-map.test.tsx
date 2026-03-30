@@ -208,9 +208,8 @@ describe('AccountMap page', () => {
 
     // Default state shows "Active" label
     expect(screen.getByText('Active')).toBeInTheDocument();
-    const toggle = screen.getByLabelText('Show all resources');
+    const toggle = screen.getByLabelText('Showing active resources only');
     expect(toggle).toBeInTheDocument();
-    expect(toggle.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('toggles to show all resources when Show All is clicked', async () => {
@@ -227,11 +226,11 @@ describe('AccountMap page', () => {
       expect(screen.getByTestId('react-flow')).toBeInTheDocument();
     });
 
-    const toggle = screen.getByLabelText('Show all resources');
+    const toggle = screen.getByLabelText('Showing active resources only');
     toggle.click();
 
     await waitFor(() => {
-      expect(screen.getByText('All')).toBeInTheDocument();
+      expect(screen.getByLabelText('Showing all resources')).toBeInTheDocument();
     });
 
     // API should be called again with activeOnly=false
