@@ -264,26 +264,7 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
     .set({ lastUsedAt: new Date() })
     .where(eq(schema.smokeTestTokens.id, tokenRecord.id));
 
-  // Create a session using BetterAuth's internal adapter.
-  // Raw DB inserts bypass BetterAuth's schema mapping (usePlural, field transforms)
-  // and produce sessions that getSession() cannot find. The internal adapter
-  // handles all of this correctly.
-  const auth = createAuth(c.env);
-  const ctx = await auth.$context;
-  const session = await ctx.internalAdapter.createSession(
-    tokenRecord.userId,
-    false, // dontRememberMe
-    {
-      ipAddress: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || null,
-      userAgent: c.req.header('user-agent') || null,
-    },
-  );
-
-  if (!session) {
-    throw errors.badRequest('Failed to create session');
-  }
-
-  // Look up user for the response
+  // Look up user before creating session — needed for status check and response
   const user = await db
     .select()
     .from(schema.users)
@@ -292,6 +273,36 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
 
   if (!user) {
     throw errors.unauthorized('Token owner not found');
+  }
+
+  // Block suspended/pending users — mirrors requireApproved() middleware logic.
+  // Without this check, a previously issued token could bypass the approval gate.
+  if (c.env.REQUIRE_APPROVAL === 'true') {
+    const isAdmin = user.role === 'superadmin' || user.role === 'admin';
+    if (user.status === 'suspended') {
+      throw errors.forbidden('Your account has been suspended');
+    }
+    if (user.status !== 'active' && !isAdmin) {
+      throw errors.forbidden('Your account is pending admin approval');
+    }
+  }
+
+  // Create a session using BetterAuth's internal adapter (verified against v1.4.17).
+  // Raw DB inserts bypass BetterAuth's schema mapping (usePlural, field transforms)
+  // and produce sessions that getSession() cannot find. The internal adapter
+  // handles all of this correctly.
+  // NOTE: ipAddress/userAgent overrides are silently ignored because createSession
+  // reads these from AsyncLocalStorage (populated only inside a BetterAuth request
+  // handler). They are omitted here intentionally.
+  const auth = createAuth(c.env);
+  const ctx = await auth.$context;
+  const session = await ctx.internalAdapter.createSession(
+    tokenRecord.userId,
+    false, // dontRememberMe
+  );
+
+  if (!session) {
+    throw errors.badRequest('Failed to create session');
   }
 
   // Set the session cookie matching BetterAuth's signed cookie format.
@@ -313,8 +324,10 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   const base64Sig = btoa(String.fromCharCode(...new Uint8Array(signature)));
   const signedValue = encodeURIComponent(`${session.token}.${base64Sig}`);
 
-  const isSecure = c.req.url.startsWith('https');
   const baseDomain = c.env.BASE_DOMAIN;
+  // Match BetterAuth's prefix logic: based on the configured baseURL (always HTTPS
+  // in deployment), not the incoming request URL which may differ behind proxies.
+  const isSecure = `https://api.${baseDomain}`.startsWith('https://');
 
   // BetterAuth adds a __Secure- prefix to cookie names when baseURL starts
   // with https:// (see cookies/index.ts createCookieGetter). Our cookie name
@@ -322,13 +335,16 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   const cookieName = isSecure
     ? '__Secure-better-auth.session_token'
     : 'better-auth.session_token';
+  // NOTE: SMOKE_TEST_SESSION_DURATION_SECONDS controls only the cookie Max-Age.
+  // The server-side session expiry is determined by BetterAuth's session.expiresIn
+  // config (default: 7 days), which matches DEFAULT_SESSION_DURATION_SECONDS.
   const sessionDurationSeconds =
     parseInt(c.env.SMOKE_TEST_SESSION_DURATION_SECONDS || '', 10) || DEFAULT_SESSION_DURATION_SECONDS;
   const cookieOptions = [
     `${cookieName}=${signedValue}`,
     `Path=/`,
     `HttpOnly`,
-    `SameSite=None`,
+    `SameSite=Lax`,
     `Max-Age=${sessionDurationSeconds}`,
     ...(isSecure ? [`Secure`, `Domain=.${baseDomain}`] : []),
   ].join('; ');
@@ -336,7 +352,6 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   return new Response(
     JSON.stringify({
       success: true,
-      sessionToken: session.token,
       user: {
         id: user.id,
         email: user.email,
