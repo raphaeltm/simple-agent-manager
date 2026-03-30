@@ -17,6 +17,7 @@ const EDGE_COLORS: Record<string, string> = {
 
 interface UseAccountMapDataOptions {
   isMobile: boolean;
+  activeOnly: boolean;
 }
 
 interface UseAccountMapDataResult {
@@ -30,7 +31,7 @@ interface UseAccountMapDataResult {
   reorganize: () => void;
 }
 
-export function useAccountMapData({ isMobile }: UseAccountMapDataOptions): UseAccountMapDataResult {
+export function useAccountMapData({ isMobile, activeOnly }: UseAccountMapDataOptions): UseAccountMapDataResult {
   const [rawData, setRawData] = useState<AccountMapResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,14 +41,14 @@ export function useAccountMapData({ isMobile }: UseAccountMapDataOptions): UseAc
     try {
       setLoading(true);
       setError(null);
-      const data = await getAccountMap();
+      const data = await getAccountMap({ activeOnly });
       setRawData(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load account map');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeOnly]);
 
   useEffect(() => {
     void fetchData();
