@@ -122,19 +122,9 @@ export function SmokeTestTokens() {
     );
   }
 
-  // Don't render if feature is disabled
+  // Feature disabled — tab is hidden, but handle direct URL navigation
   if (!enabled) {
-    return (
-      <div className="p-6">
-        <div className="text-fg-secondary text-sm">
-          Smoke test token authentication is not enabled in this environment.
-        </div>
-        <p className="text-fg-tertiary text-xs mt-2">
-          Set <code className="px-1 py-0.5 bg-bg-secondary rounded text-xs">SMOKE_TEST_AUTH_ENABLED=true</code> as
-          a Worker secret to enable this feature.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   if (error) {

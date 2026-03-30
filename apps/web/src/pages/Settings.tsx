@@ -1,19 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
-import { listCredentials } from '../lib/api';
+import { listCredentials, getSmokeTestStatus } from '../lib/api';
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, PageLayout, Tabs } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { SettingsContext } from './SettingsContext';
 
-const SETTINGS_TABS = [
+const BASE_TABS = [
   { id: 'cloud-provider', label: 'Cloud Provider', path: 'cloud-provider' },
   { id: 'github', label: 'GitHub', path: 'github' },
   { id: 'agent-keys', label: 'Agent Keys', path: 'agent-keys' },
   { id: 'agent-config', label: 'Agent Config', path: 'agent-config' },
   { id: 'notifications', label: 'Notifications', path: 'notifications' },
-  { id: 'smoke-test-tokens', label: 'Test Tokens', path: 'smoke-test-tokens' },
 ];
+
+const SMOKE_TEST_TAB = { id: 'smoke-test-tokens', label: 'Test Tokens', path: 'smoke-test-tokens' };
 
 /**
  * Settings shell — Tabs + Outlet for sub-route pages.
@@ -22,6 +23,7 @@ export function Settings() {
   const [credentials, setCredentials] = useState<CredentialResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [smokeTestEnabled, setSmokeTestEnabled] = useState(false);
 
   const loadCredentials = useCallback(async () => {
     try {
@@ -37,7 +39,12 @@ export function Settings() {
 
   useEffect(() => {
     loadCredentials();
+    getSmokeTestStatus()
+      .then((status) => setSmokeTestEnabled(status.enabled))
+      .catch(() => setSmokeTestEnabled(false));
   }, [loadCredentials]);
+
+  const tabs = smokeTestEnabled ? [...BASE_TABS, SMOKE_TEST_TAB] : BASE_TABS;
 
   return (
     <PageLayout title="Settings" maxWidth="xl" headerRight={<UserMenu />}>
@@ -55,7 +62,7 @@ export function Settings() {
       )}
 
       <div className="grid gap-4 mt-4">
-        <Tabs tabs={SETTINGS_TABS} basePath="/settings" />
+        <Tabs tabs={tabs} basePath="/settings" />
 
         <SettingsContext.Provider value={{ credentials, loading, reload: loadCredentials }}>
           <Outlet />
