@@ -192,6 +192,110 @@ describe('admin-analytics routes', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Numeric conversion: Analytics Engine returns strings, API must convert
+  // -------------------------------------------------------------------------
+
+  describe('numeric conversion from Analytics Engine string values', () => {
+    it('GET /dau converts unique_users from string to number', async () => {
+      mockFetch.mockResolvedValue(new Response(JSON.stringify({
+        data: [
+          { date: '2026-03-27', unique_users: '5' },
+          { date: '2026-03-28', unique_users: '12' },
+        ],
+      }), { status: 200 }));
+
+      const app = createApp();
+      const res = await app.request('/api/admin/analytics/dau');
+      const json = await res.json() as { dau: Array<{ unique_users: number }> };
+
+      expect(typeof json.dau[0].unique_users).toBe('number');
+      expect(json.dau[0].unique_users).toBe(5);
+      expect(json.dau[1].unique_users).toBe(12);
+    });
+
+    it('GET /events converts count, unique_users, avg_response_ms from string to number', async () => {
+      mockFetch.mockResolvedValue(new Response(JSON.stringify({
+        data: [
+          { event_name: 'signup', count: '100', unique_users: '42', avg_response_ms: '123.456' },
+          { event_name: 'login', count: '200', unique_users: '38', avg_response_ms: '89.1' },
+        ],
+      }), { status: 200 }));
+
+      const app = createApp();
+      const res = await app.request('/api/admin/analytics/events');
+      const json = await res.json() as { events: Array<{ count: number; unique_users: number; avg_response_ms: number }> };
+
+      expect(typeof json.events[0].count).toBe('number');
+      expect(json.events[0].count).toBe(100);
+      expect(json.events[0].unique_users).toBe(42);
+      expect(json.events[0].avg_response_ms).toBeCloseTo(123.456);
+
+      // Verify summing works (this was the original bug — string concatenation)
+      const total = json.events.reduce((s, e) => s + e.count, 0);
+      expect(total).toBe(300); // not "100200"
+    });
+
+    it('GET /funnel converts unique_users from string to number', async () => {
+      mockFetch.mockResolvedValue(new Response(JSON.stringify({
+        data: [
+          { event_name: 'signup', unique_users: '50' },
+          { event_name: 'task_submitted', unique_users: '10' },
+        ],
+      }), { status: 200 }));
+
+      const app = createApp();
+      const res = await app.request('/api/admin/analytics/funnel');
+      const json = await res.json() as { funnel: Array<{ unique_users: number }> };
+
+      expect(typeof json.funnel[0].unique_users).toBe('number');
+      expect(json.funnel[0].unique_users).toBe(50);
+      // Verify division works (would be NaN or wrong with strings)
+      const rate = Math.round((json.funnel[1].unique_users / json.funnel[0].unique_users) * 100);
+      expect(rate).toBe(20);
+    });
+
+    it('GET /feature-adoption converts count and unique_users from string to number', async () => {
+      mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+        const sql = (init as { body?: string }).body ?? '';
+        const data = sql.includes('toDate(timestamp)')
+          ? [{ event_name: 'task_submitted', date: '2026-03-25', count: '15' }]
+          : [{ event_name: 'task_submitted', count: '42', unique_users: '10' }];
+        return new Response(JSON.stringify({ data }), { status: 200 });
+      });
+
+      const app = createApp();
+      const res = await app.request('/api/admin/analytics/feature-adoption');
+      const json = await res.json() as {
+        totals: Array<{ count: number; unique_users: number }>;
+        trend: Array<{ count: number }>;
+      };
+
+      expect(typeof json.totals[0].count).toBe('number');
+      expect(json.totals[0].count).toBe(42);
+      expect(json.totals[0].unique_users).toBe(10);
+      expect(typeof json.trend[0].count).toBe('number');
+      expect(json.trend[0].count).toBe(15);
+    });
+
+    it('GET /geo converts event_count and unique_users from string to number', async () => {
+      mockFetch.mockResolvedValue(new Response(JSON.stringify({
+        data: [
+          { country: 'US', event_count: '100', unique_users: '20' },
+          { country: 'DE', event_count: '50', unique_users: '10' },
+        ],
+      }), { status: 200 }));
+
+      const app = createApp();
+      const res = await app.request('/api/admin/analytics/geo');
+      const json = await res.json() as { geo: Array<{ event_count: number; unique_users: number }> };
+
+      expect(typeof json.geo[0].event_count).toBe('number');
+      expect(json.geo[0].event_count).toBe(100);
+      expect(json.geo[0].unique_users).toBe(20);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Phase 3: Feature Adoption
   // -------------------------------------------------------------------------
 

@@ -109,8 +109,12 @@ adminAnalyticsRoutes.get('/dau', async (c) => {
     ORDER BY date ASC
   `;
 
-  const data = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ dau: data, periodDays });
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{ date: string; unique_users: string }>;
+  const dau = data.map((row) => ({
+    date: row.date,
+    unique_users: Number(row.unique_users),
+  }));
+  return c.json({ dau, periodDays });
 });
 
 /**
@@ -137,8 +141,16 @@ adminAnalyticsRoutes.get('/events', async (c) => {
     LIMIT ${topEventsLimit}
   `;
 
-  const data = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ events: data, period });
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{
+    event_name: string; count: string; unique_users: string; avg_response_ms: string;
+  }>;
+  const events = data.map((row) => ({
+    event_name: row.event_name,
+    count: Number(row.count),
+    unique_users: Number(row.unique_users),
+    avg_response_ms: Number(row.avg_response_ms),
+  }));
+  return c.json({ events, period });
 });
 
 /**
@@ -160,8 +172,12 @@ adminAnalyticsRoutes.get('/funnel', async (c) => {
     GROUP BY event_name
   `;
 
-  const data = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ funnel: data, periodDays });
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{ event_name: string; unique_users: string }>;
+  const funnel = data.map((row) => ({
+    event_name: row.event_name,
+    unique_users: Number(row.unique_users),
+  }));
+  return c.json({ funnel, periodDays });
 });
 
 /**
@@ -205,10 +221,25 @@ adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
     ORDER BY event_name, date ASC
   `;
 
-  const [totals, trend] = await Promise.all([
-    queryAnalyticsEngine(c.env, totalsSql),
-    queryAnalyticsEngine(c.env, trendSql),
+  const [totalsRaw, trendRaw] = await Promise.all([
+    queryAnalyticsEngine(c.env, totalsSql) as Promise<
+      Array<{ event_name: string; count: string; unique_users: string }>
+    >,
+    queryAnalyticsEngine(c.env, trendSql) as Promise<
+      Array<{ event_name: string; date: string; count: string }>
+    >,
   ]);
+
+  const totals = totalsRaw.map((row) => ({
+    event_name: row.event_name,
+    count: Number(row.count),
+    unique_users: Number(row.unique_users),
+  }));
+  const trend = trendRaw.map((row) => ({
+    event_name: row.event_name,
+    date: row.date,
+    count: Number(row.count),
+  }));
 
   return c.json({ totals, trend, period });
 });
@@ -237,8 +268,15 @@ adminAnalyticsRoutes.get('/geo', async (c) => {
     LIMIT ${geoLimit}
   `;
 
-  const data = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ geo: data, period });
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{
+    country: string; event_count: string; unique_users: string;
+  }>;
+  const geo = data.map((row) => ({
+    country: row.country,
+    event_count: Number(row.event_count),
+    unique_users: Number(row.unique_users),
+  }));
+  return c.json({ geo, period });
 });
 
 /**
@@ -489,7 +527,13 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
     };
   });
 
-  return c.json({ hosts, trend: trendData, period });
+  const trend = (trendData as Array<{ host: string; date: string; views: string }>).map((row) => ({
+    host: row.host,
+    date: row.date,
+    views: Number(row.views),
+  }));
+
+  return c.json({ hosts, trend, period });
 });
 
 /**
