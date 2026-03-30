@@ -259,39 +259,41 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
     throw errors.unauthorized('Token has been revoked');
   }
 
-  // Parallelize last_used_at update and user lookup — independent D1 queries
-  const [, user] = await Promise.all([
-    db
-      .update(schema.smokeTestTokens)
-      .set({ lastUsedAt: new Date() })
-      .where(eq(schema.smokeTestTokens.id, tokenRecord.id)),
-    db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.id, tokenRecord.userId))
-      .get(),
-  ]);
+  // Update last_used_at
+  await db
+    .update(schema.smokeTestTokens)
+    .set({ lastUsedAt: new Date() })
+    .where(eq(schema.smokeTestTokens.id, tokenRecord.id));
+
+  // Create a session using BetterAuth's internal adapter.
+  // Raw DB inserts bypass BetterAuth's schema mapping (usePlural, field transforms)
+  // and produce sessions that getSession() cannot find. The internal adapter
+  // handles all of this correctly.
+  const auth = createAuth(c.env);
+  const ctx = await auth.$context;
+  const session = await ctx.internalAdapter.createSession(
+    tokenRecord.userId,
+    false, // dontRememberMe
+    {
+      ipAddress: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || null,
+      userAgent: c.req.header('user-agent') || null,
+    },
+  );
+
+  if (!session) {
+    throw errors.badRequest('Failed to create session');
+  }
+
+  // Look up user for the response
+  const user = await db
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.id, tokenRecord.userId))
+    .get();
 
   if (!user) {
     throw errors.unauthorized('Token owner not found');
   }
-
-  // Create a session directly in the BetterAuth sessions table.
-  // This produces the same cookie as the OAuth callback would.
-  const sessionDurationSeconds =
-    parseInt(c.env.SMOKE_TEST_SESSION_DURATION_SECONDS || '', 10) || DEFAULT_SESSION_DURATION_SECONDS;
-  const sessionToken = crypto.randomUUID();
-  const sessionId = ulid();
-  const expiresAt = new Date(Date.now() + sessionDurationSeconds * 1000);
-
-  await db.insert(schema.sessions).values({
-    id: sessionId,
-    token: sessionToken,
-    userId: user.id,
-    expiresAt,
-    ipAddress: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || null,
-    userAgent: c.req.header('user-agent') || null,
-  });
 
   // Set the session cookie matching BetterAuth's signed cookie format.
   // BetterAuth uses HMAC-SHA256 to sign cookie values: `value.base64(hmac(value, secret))`
@@ -307,15 +309,17 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   const signature = await crypto.subtle.sign(
     'HMAC',
     key,
-    new TextEncoder().encode(sessionToken),
+    new TextEncoder().encode(session.token),
   );
   const base64Sig = btoa(String.fromCharCode(...new Uint8Array(signature)));
-  const signedValue = encodeURIComponent(`${sessionToken}.${base64Sig}`);
+  const signedValue = encodeURIComponent(`${session.token}.${base64Sig}`);
 
   const isSecure = c.req.url.startsWith('https');
   const baseDomain = c.env.BASE_DOMAIN;
 
   const cookieName = 'better-auth.session_token';
+  const sessionDurationSeconds =
+    parseInt(c.env.SMOKE_TEST_SESSION_DURATION_SECONDS || '', 10) || DEFAULT_SESSION_DURATION_SECONDS;
   const cookieOptions = [
     `${cookieName}=${signedValue}`,
     `Path=/`,
@@ -328,7 +332,7 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
   return new Response(
     JSON.stringify({
       success: true,
-      sessionToken,
+      sessionToken: session.token,
       user: {
         id: user.id,
         email: user.email,
