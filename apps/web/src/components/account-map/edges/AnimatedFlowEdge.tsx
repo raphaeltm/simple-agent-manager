@@ -1,8 +1,22 @@
-import { type FC, useMemo } from 'react';
+import { type FC, useMemo, useSyncExternalStore } from 'react';
 import { getBezierPath, type EdgeProps } from '@xyflow/react';
 
 const PARTICLE_COUNT = 4;
 const CYCLE_DURATION = 3;
+
+/** Subscribes to prefers-reduced-motion media query. */
+const motionQuery = typeof window !== 'undefined'
+  ? window.matchMedia('(prefers-reduced-motion: reduce)')
+  : null;
+
+function subscribeMotion(cb: () => void) {
+  motionQuery?.addEventListener('change', cb);
+  return () => motionQuery?.removeEventListener('change', cb);
+}
+
+function getMotionSnapshot() {
+  return motionQuery?.matches ?? false;
+}
 
 /**
  * Custom React Flow edge with animated SVG particles flowing along the path.
@@ -20,7 +34,8 @@ export const AnimatedFlowEdge: FC<EdgeProps> = ({
   style,
 }) => {
   const color = (data?.color as string) ?? '#00ff88';
-  const active = (data?.active as boolean) ?? false;
+  const prefersReducedMotion = useSyncExternalStore(subscribeMotion, getMotionSnapshot);
+  const active = ((data?.active as boolean) ?? false) && !prefersReducedMotion;
 
   const [edgePath] = getBezierPath({
     sourceX,

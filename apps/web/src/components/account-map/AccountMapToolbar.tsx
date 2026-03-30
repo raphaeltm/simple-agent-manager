@@ -15,7 +15,6 @@ const FILTER_CHIPS: FilterChip[] = [
   { type: 'workspace', label: 'Workspaces', shortLabel: 'WS', color: 'bg-[#00ccff]' },
   { type: 'session', label: 'Sessions', shortLabel: 'Chat', color: 'bg-[#aa88ff]' },
   { type: 'task', label: 'Tasks', shortLabel: 'Task', color: 'bg-warning' },
-  { type: 'idea', label: 'Ideas', shortLabel: 'Idea', color: 'bg-[#ffdd44]' },
 ];
 
 interface AccountMapToolbarProps {
@@ -64,7 +63,7 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
           {searchQuery && (
             <button
               onClick={() => onSearchChange('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0"
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-1.5 -m-0.5"
               aria-label="Clear search"
             >
               <X size={14} />
@@ -100,7 +99,7 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
       </div>
 
       {/* Filter chips */}
-      <div className="flex gap-1.5 overflow-x-auto pb-0.5 -mb-0.5 scrollbar-none">
+      <div className="flex gap-1.5 overflow-x-auto pb-0.5 -mb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {FILTER_CHIPS.map((chip) => {
           const isActive = activeFilters.has(chip.type);
           const count = stats[chip.type + 's'] ?? stats[chip.type] ?? 0;
@@ -108,7 +107,8 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
             <button
               key={chip.type}
               onClick={() => onToggleFilter(chip.type)}
-              className={`flex items-center gap-1 px-2 py-1 text-xs rounded-full border cursor-pointer transition-all whitespace-nowrap shrink-0 ${
+              aria-pressed={isActive}
+              className={`flex items-center gap-1 px-2.5 py-2 text-xs rounded-full border cursor-pointer transition-all whitespace-nowrap shrink-0 min-h-[44px] ${
                 isActive
                   ? 'border-border-default bg-surface-hover text-fg-primary'
                   : 'border-transparent bg-transparent text-fg-muted opacity-50'

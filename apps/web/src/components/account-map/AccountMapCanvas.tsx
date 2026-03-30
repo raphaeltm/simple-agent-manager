@@ -1,4 +1,4 @@
-import { type FC, useCallback, useMemo, useState, useRef } from 'react';
+import { type FC, useCallback, useEffect, useState, useRef } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -23,6 +23,9 @@ import { SessionNode } from './nodes/SessionNode';
 import { TaskNode } from './nodes/TaskNode';
 import { IdeaNode } from './nodes/IdeaNode';
 import { AnimatedFlowEdge } from './edges/AnimatedFlowEdge';
+
+/** Delay before hiding tooltip after mouse leaves a node (ms). */
+const TOOLTIP_HIDE_DELAY_MS = 100;
 
 interface AccountMapCanvasProps {
   nodes: Node[];
@@ -67,10 +70,12 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   // Sync external changes
-  useMemo(() => {
+  useEffect(() => {
     setNodes(initialNodes);
+  }, [initialNodes, setNodes]);
+  useEffect(() => {
     setEdges(initialEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
+  }, [initialEdges, setEdges]);
 
   const handleNodeMouseEnter = useCallback(
     (_event: React.MouseEvent, node: Node) => {
@@ -82,7 +87,7 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
   );
 
   const handleNodeMouseLeave = useCallback(() => {
-    timeoutRef.current = setTimeout(() => setTooltip(null), 100);
+    timeoutRef.current = setTimeout(() => setTooltip(null), TOOLTIP_HIDE_DELAY_MS);
   }, []);
 
   const handleNodeClick = useCallback(
@@ -101,7 +106,7 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
   }, []);
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative w-full h-full" role="region" aria-label="Account map visualization">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -139,12 +144,12 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
       {/* Tooltip */}
       {tooltip && (
         <div
-          className={`fixed z-[var(--sam-z-dropdown)] bg-surface border border-border-default rounded-lg px-3 py-2 shadow-lg pointer-events-none max-w-[260px] ${
-            isMobile ? 'bottom-4 left-4 right-4' : ''
+          className={`fixed z-dropdown bg-surface border border-border-default rounded-lg px-3 py-2 shadow-lg pointer-events-none max-w-[260px] ${
+            isMobile ? 'left-4 right-4' : ''
           }`}
           style={
             isMobile
-              ? undefined
+              ? { bottom: 'max(1rem, env(safe-area-inset-bottom, 1rem))' }
               : { left: tooltip.x, top: tooltip.y }
           }
         >
@@ -157,7 +162,7 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
 
       {/* Keyboard hint — desktop only */}
       {!isMobile && (
-        <div className="absolute bottom-3 left-3 sam-type-caption text-fg-muted bg-surface/80 px-2 py-1 rounded border border-border-default backdrop-blur-sm">
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 sam-type-caption text-fg-muted bg-surface/80 px-2 py-1 rounded border border-border-default backdrop-blur-sm whitespace-nowrap">
           Drag nodes to rearrange &middot; Scroll to zoom
         </div>
       )}

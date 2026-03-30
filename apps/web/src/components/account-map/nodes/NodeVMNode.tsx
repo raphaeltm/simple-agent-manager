@@ -31,7 +31,7 @@ export const NodeVMNode: FC<NodeProps> = ({ data }) => {
       <div className="flex items-center gap-2 mb-1">
         <Server size={14} className="text-success shrink-0" />
         <span className="sam-type-secondary text-fg-primary truncate font-medium">{d.label}</span>
-        <span className={`ml-auto w-2 h-2 rounded-full shrink-0 ${dotClass}`} />
+        <span className={`ml-auto w-2 h-2 rounded-full shrink-0 ${dotClass}`} title={d.healthStatus ?? 'unknown'} aria-label={`Health: ${d.healthStatus ?? 'unknown'}`} role="img" />
       </div>
 
       {!d.isMobile && (

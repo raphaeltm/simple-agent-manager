@@ -31,6 +31,9 @@ export const WorkspaceNode: FC<NodeProps> = ({ data }) => {
           className={`ml-auto w-2 h-2 rounded-full shrink-0 ${
             isRunning ? 'bg-[#00ccff]' : 'bg-fg-muted'
           }`}
+          title={d.status}
+          aria-label={`Status: ${d.status}`}
+          role="img"
         />
       </div>
 
