@@ -76,7 +76,6 @@ function makeAccountMapResponse(overrides: Partial<{
   workspaces: any[];
   sessions: any[];
   tasks: any[];
-  ideas: any[];
   relationships: any[];
 }> = {}) {
   return {
@@ -85,7 +84,6 @@ function makeAccountMapResponse(overrides: Partial<{
     workspaces: overrides.workspaces ?? [],
     sessions: overrides.sessions ?? [],
     tasks: overrides.tasks ?? [],
-    ideas: overrides.ideas ?? [],
     relationships: overrides.relationships ?? [],
   };
 }
@@ -174,7 +172,6 @@ describe('AccountMap page', () => {
     expect(screen.getByText('Workspaces')).toBeInTheDocument();
     expect(screen.getByText('Sessions')).toBeInTheDocument();
     expect(screen.getByText('Tasks')).toBeInTheDocument();
-    expect(screen.getByText('Ideas')).toBeInTheDocument();
   });
 
   it('renders search input and reorganize button', async () => {
