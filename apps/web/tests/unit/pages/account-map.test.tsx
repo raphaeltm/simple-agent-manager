@@ -102,10 +102,8 @@ describe('AccountMap page', () => {
   it('shows loading spinner initially', () => {
     mocks.getAccountMap.mockReturnValue(new Promise(() => {})); // never resolves
     renderAccountMap();
-    // Spinner should be rendered (from @simple-agent-manager/ui)
-    const spinner = document.querySelector('[class*="animate-spin"], [role="status"]');
-    // At minimum, the component should render without crashing
-    expect(document.body).toBeTruthy();
+    // Component should render without crashing during loading state
+    expect(document.querySelector('[class*="animate-spin"], [role="status"]')).toBeTruthy();
   });
 
   it('shows empty state when user has no entities', async () => {
