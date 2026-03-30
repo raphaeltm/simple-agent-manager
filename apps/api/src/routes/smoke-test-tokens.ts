@@ -216,10 +216,9 @@ const DEFAULT_RATE_LIMIT_TOKEN_LOGIN = 20;
  * Rate-limited by IP to prevent brute-force attempts.
  * Body: { token: string }
  *
- * NOTE: Session creation bypasses BetterAuth's session lifecycle (direct DB insert).
- * BetterAuth does not expose a programmatic session creation API suitable for token-based login.
- * If the sessions table schema changes (new required columns), this path must be updated.
- * The unit tests verify that sessions created here are compatible with the current schema.
+ * NOTE: Session creation uses BetterAuth's internal adapter (`ctx.internalAdapter.createSession()`)
+ * to ensure schema mapping (usePlural, field transforms) is handled correctly.
+ * Cookie signing replicates BetterAuth's HMAC-SHA256 format with the `__Secure-` prefix for HTTPS.
  */
 const tokenLoginRateLimit = rateLimit({
   limit: DEFAULT_RATE_LIMIT_TOKEN_LOGIN,
