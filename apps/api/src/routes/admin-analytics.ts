@@ -20,8 +20,16 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/** Convert a period string (24h, 7d, 30d, 90d) to an Analytics Engine SQL interval expression. */
-function periodToInterval(period: string): string {
+const VALID_PERIODS = ['24h', '7d', '30d', '90d'] as const;
+type Period = (typeof VALID_PERIODS)[number];
+
+/** Validate and normalize a period query param. Returns a safe Period value. */
+function parsePeriod(raw: string | undefined): Period {
+  return (VALID_PERIODS as readonly string[]).includes(raw ?? '') ? (raw as Period) : '7d';
+}
+
+/** Convert a validated period to an Analytics Engine SQL interval expression. */
+function periodToInterval(period: Period): string {
   switch (period) {
     case '24h':
       return "INTERVAL '1' DAY";
@@ -109,8 +117,12 @@ adminAnalyticsRoutes.get('/dau', async (c) => {
     ORDER BY date ASC
   `;
 
-  const data = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ dau: data, periodDays });
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{ date: string; unique_users: string }>;
+  const dau = data.map((row) => ({
+    date: row.date,
+    unique_users: Number(row.unique_users),
+  }));
+  return c.json({ dau, periodDays });
 });
 
 /**
@@ -118,7 +130,7 @@ adminAnalyticsRoutes.get('/dau', async (c) => {
  * Query param: ?period=24h|7d|30d (default 7d)
  */
 adminAnalyticsRoutes.get('/events', async (c) => {
-  const period = c.req.query('period') || '7d';
+  const period = parsePeriod(c.req.query('period'));
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
   const intervalExpr = periodToInterval(period);
   const topEventsLimit = parsePositiveInt(c.env.ANALYTICS_TOP_EVENTS_LIMIT, DEFAULT_TOP_EVENTS_LIMIT);
@@ -137,8 +149,16 @@ adminAnalyticsRoutes.get('/events', async (c) => {
     LIMIT ${topEventsLimit}
   `;
 
-  const data = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ events: data, period });
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{
+    event_name: string; count: string; unique_users: string; avg_response_ms: string;
+  }>;
+  const events = data.map((row) => ({
+    event_name: row.event_name,
+    count: Number(row.count),
+    unique_users: Number(row.unique_users),
+    avg_response_ms: Number(row.avg_response_ms),
+  }));
+  return c.json({ events, period });
 });
 
 /**
@@ -160,8 +180,12 @@ adminAnalyticsRoutes.get('/funnel', async (c) => {
     GROUP BY event_name
   `;
 
-  const data = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ funnel: data, periodDays });
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{ event_name: string; unique_users: string }>;
+  const funnel = data.map((row) => ({
+    event_name: row.event_name,
+    unique_users: Number(row.unique_users),
+  }));
+  return c.json({ funnel, periodDays });
 });
 
 /**
@@ -171,7 +195,7 @@ adminAnalyticsRoutes.get('/funnel', async (c) => {
  * Returns per-feature-event counts + unique users + daily breakdown for sparklines.
  */
 adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
-  const period = c.req.query('period') || '30d';
+  const period = parsePeriod(c.req.query('period') || '30d');
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
   const intervalExpr = periodToInterval(period);
 
@@ -205,10 +229,25 @@ adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
     ORDER BY event_name, date ASC
   `;
 
-  const [totals, trend] = await Promise.all([
-    queryAnalyticsEngine(c.env, totalsSql),
-    queryAnalyticsEngine(c.env, trendSql),
+  const [totalsRaw, trendRaw] = await Promise.all([
+    queryAnalyticsEngine(c.env, totalsSql) as Promise<
+      Array<{ event_name: string; count: string; unique_users: string }>
+    >,
+    queryAnalyticsEngine(c.env, trendSql) as Promise<
+      Array<{ event_name: string; date: string; count: string }>
+    >,
   ]);
+
+  const totals = totalsRaw.map((row) => ({
+    event_name: row.event_name,
+    count: Number(row.count),
+    unique_users: Number(row.unique_users),
+  }));
+  const trend = trendRaw.map((row) => ({
+    event_name: row.event_name,
+    date: row.date,
+    count: Number(row.count),
+  }));
 
   return c.json({ totals, trend, period });
 });
@@ -218,7 +257,7 @@ adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
  * Query param: ?period=24h|7d|30d|90d (default 30d)
  */
 adminAnalyticsRoutes.get('/geo', async (c) => {
-  const period = c.req.query('period') || '30d';
+  const period = parsePeriod(c.req.query('period') || '30d');
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
   const intervalExpr = periodToInterval(period);
   const geoLimit = parsePositiveInt(c.env.ANALYTICS_GEO_LIMIT, DEFAULT_GEO_LIMIT);
@@ -237,8 +276,15 @@ adminAnalyticsRoutes.get('/geo', async (c) => {
     LIMIT ${geoLimit}
   `;
 
-  const data = await queryAnalyticsEngine(c.env, sql);
-  return c.json({ geo: data, period });
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{
+    country: string; event_count: string; unique_users: string;
+  }>;
+  const geo = data.map((row) => ({
+    country: row.country,
+    event_count: Number(row.event_count),
+    unique_users: Number(row.unique_users),
+  }));
+  return c.json({ geo, period });
 });
 
 /**
@@ -356,7 +402,7 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
  * filter on blob1='page_view' which only comes from client-side events.
  */
 adminAnalyticsRoutes.get('/website-traffic', async (c) => {
-  const period = c.req.query('period') || '7d';
+  const period = parsePeriod(c.req.query('period'));
   const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
   const intervalExpr = periodToInterval(period);
   const topPagesLimit = parsePositiveInt(
@@ -416,13 +462,13 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
 
   const [hostTotals, topPagesData, trendData] = await Promise.all([
     queryAnalyticsEngine(c.env, sectionsSql) as Promise<
-      Array<{ host: string; total_views: number; unique_visitors: number; unique_sessions: number }>
+      Array<{ host: string; total_views: string; unique_visitors: string; unique_sessions: string }>
     >,
     queryAnalyticsEngine(c.env, topPagesSql) as Promise<
-      Array<{ host: string; page: string; views: number; unique_visitors: number }>
+      Array<{ host: string; page: string; views: string; unique_visitors: string }>
     >,
     queryAnalyticsEngine(c.env, trendSql) as Promise<
-      Array<{ host: string; date: string; views: number }>
+      Array<{ host: string; date: string; views: string }>
     >,
   ]);
 
@@ -489,7 +535,13 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
     };
   });
 
-  return c.json({ hosts, trend: trendData, period });
+  const trend = (trendData as Array<{ host: string; date: string; views: string }>).map((row) => ({
+    host: row.host,
+    date: row.date,
+    views: Number(row.views),
+  }));
+
+  return c.json({ hosts, trend, period });
 });
 
 /**
