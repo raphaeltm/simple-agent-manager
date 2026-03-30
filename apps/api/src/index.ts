@@ -695,9 +695,9 @@ app.get('/.well-known/openid-configuration', async (c) => {
   return c.json(discovery);
 });
 
-// API routes
-app.route('/api/auth', authRoutes);
+// API routes — smoke test token routes registered before BetterAuth catch-all
 app.route('/api/auth', smokeTestTokenRoutes);
+app.route('/api/auth', authRoutes);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
