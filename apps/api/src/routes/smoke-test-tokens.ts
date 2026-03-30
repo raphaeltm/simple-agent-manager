@@ -5,6 +5,7 @@ import { ulid } from '../lib/ulid';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { createAuth } from '../auth';
+import { getBetterAuthSecret } from '../lib/secrets';
 import { errors } from '../middleware/error';
 import { rateLimit } from '../middleware/rate-limit';
 
@@ -292,15 +293,31 @@ smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
     userAgent: c.req.header('user-agent') || null,
   });
 
-  // Set the session cookie matching BetterAuth's format
+  // Set the session cookie matching BetterAuth's signed cookie format.
+  // BetterAuth uses HMAC-SHA256 to sign cookie values: `value.base64(hmac(value, secret))`
+  // then URL-encodes the result.
+  const authSecret = getBetterAuthSecret(c.env);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(authSecret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(sessionToken),
+  );
+  const base64Sig = btoa(String.fromCharCode(...new Uint8Array(signature)));
+  const signedValue = encodeURIComponent(`${sessionToken}.${base64Sig}`);
+
   const isSecure = c.req.url.startsWith('https');
   const baseDomain = c.env.BASE_DOMAIN;
 
-  // BetterAuth uses "better-auth.session_token" as the cookie name
   const cookieName = 'better-auth.session_token';
-  const cookieValue = sessionToken;
   const cookieOptions = [
-    `${cookieName}=${cookieValue}`,
+    `${cookieName}=${signedValue}`,
     `Path=/`,
     `HttpOnly`,
     `SameSite=None`,
