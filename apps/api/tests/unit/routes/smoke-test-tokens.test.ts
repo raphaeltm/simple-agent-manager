@@ -5,8 +5,14 @@ import { AppError } from '../../../src/middleware/error';
 
 // Set up mocks before importing the route module
 const mockGetSession = vi.fn();
+const mockCreateSession = vi.fn();
 const mockAuth = {
   api: { getSession: mockGetSession },
+  $context: Promise.resolve({
+    internalAdapter: {
+      createSession: mockCreateSession,
+    },
+  }),
 };
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -77,6 +83,7 @@ function buildApp(envOverrides: Partial<Env> = {}) {
   const env: Record<string, any> = {
     BASE_DOMAIN: 'test.example.com',
     SMOKE_TEST_AUTH_ENABLED: 'true',
+    ENCRYPTION_KEY: 'test-secret-key-for-hmac-signing',
     DATABASE: {} as any,
     ...envOverrides,
   };
@@ -320,6 +327,12 @@ describe('Smoke Test Token Routes', () => {
     });
 
     it('POST /token-login creates session for valid token', async () => {
+      mockCreateSession.mockResolvedValue({
+        token: 'ba-session-token-abc',
+        id: 'session-id-1',
+        userId: 'user-1',
+        expiresAt: new Date(Date.now() + 86400_000),
+      });
       currentMockDB = createMockDB({
         selectGetResults: [
           // token lookup
@@ -337,18 +350,30 @@ describe('Smoke Test Token Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.success).toBe(true);
+      expect(body.sessionToken).toBe('ba-session-token-abc');
       expect(body.user.id).toBe('user-1');
       expect(body.user.email).toBe('test@example.com');
 
-      // Verify session cookie format — SameSite=Strict, HttpOnly, Path=/
+      // Verify session cookie format — SameSite=None, HttpOnly, Path=/
       const setCookie = res.headers.get('Set-Cookie') || '';
       expect(setCookie).toContain('better-auth.session_token=');
       expect(setCookie).toContain('HttpOnly');
-      expect(setCookie).toContain('SameSite=Strict');
+      expect(setCookie).toContain('SameSite=None');
       expect(setCookie).toContain('Path=/');
+
+      // Verify internalAdapter.createSession was called with correct args
+      expect(mockCreateSession).toHaveBeenCalledWith('user-1', false, expect.objectContaining({
+        userAgent: null,
+      }));
     });
 
     it('POST /token-login returns 401 when user not found', async () => {
+      mockCreateSession.mockResolvedValue({
+        token: 'ba-session-token-orphan',
+        id: 'session-id-2',
+        userId: 'deleted-user',
+        expiresAt: new Date(Date.now() + 86400_000),
+      });
       currentMockDB = createMockDB({
         selectGetResults: [
           // token lookup succeeds
