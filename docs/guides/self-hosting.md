@@ -329,7 +329,9 @@ npx wrangler r2 bucket create workspaces-assets
 
 #### R2 CORS Configuration (Required for Task Attachments)
 
-If you want to enable file attachments on task submissions, configure CORS on the R2 bucket to allow direct browser uploads via presigned PUT URLs:
+> **Quick Start (Automated Deployment)**: R2 CORS is configured automatically on every deploy by `scripts/deploy/configure-r2-cors.sh`. Skip this section if you are using the automated deployment pipeline.
+
+If you are deploying manually and want to enable file attachments on task submissions, configure CORS on the R2 bucket to allow direct browser uploads via presigned PUT URLs:
 
 ```bash
 # Create a cors-rules.json file:
@@ -338,7 +340,8 @@ cat > cors-rules.json << 'CORS'
   {
     "AllowedOrigins": ["https://app.YOUR_DOMAIN"],
     "AllowedMethods": ["PUT"],
-    "AllowedHeaders": ["Content-Type", "Content-Length"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag"],
     "MaxAgeSeconds": 3600
   }
 ]

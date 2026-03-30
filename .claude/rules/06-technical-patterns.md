@@ -89,6 +89,8 @@ The MCP token revocation bug (see `docs/notes/2026-03-08-mcp-token-revocation-po
 
 When adding or modifying CORS middleware, the origin callback MUST default to **deny** (return `null`) for unrecognized origins. Never use a fallthrough that reflects the requesting origin.
 
+> For browser requests to external origins (R2, S3, third-party APIs), see `.claude/rules/20-cross-origin-cors.md`.
+
 ### Why This Rule Exists
 
 The CORS origin fallthrough bug (see `docs/notes/2026-03-09-cors-origin-fallthrough-postmortem.md`) allowed any website to make credentialed cross-origin requests because the origin callback returned the requesting origin for all cases, including unknown ones.
