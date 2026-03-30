@@ -34,7 +34,7 @@ describe('NodeLifecycle DO source contract', () => {
 
   describe('markIdle method', () => {
     it('accepts nodeId and userId parameters', () => {
-      expect(doFile).toContain('async markIdle(nodeId: string, userId: string)');
+      expect(doFile).toContain('async markIdle(nodeId: string, userId: string, warmTimeoutOverrideMs?: number | null)');
     });
 
     it('sets status to warm', () => {
