@@ -293,6 +293,51 @@ describe('admin-analytics routes', () => {
       expect(json.geo[0].event_count).toBe(100);
       expect(json.geo[0].unique_users).toBe(20);
     });
+
+    it('GET /website-traffic converts host totals and trend views from string to number', async () => {
+      let callCount = 0;
+      mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+        callCount++;
+        const sql = (init as { body?: string }).body ?? '';
+        if (sql.includes('toDate(timestamp)')) {
+          // trend query
+          return new Response(JSON.stringify({
+            data: [{ host: 'example.com', date: '2026-03-28', views: '55' }],
+          }), { status: 200 });
+        } else if (sql.includes('blob3 AS page')) {
+          // top pages query
+          return new Response(JSON.stringify({
+            data: [{ host: 'example.com', page: '/', views: '30', unique_visitors: '10' }],
+          }), { status: 200 });
+        } else {
+          // sections (host totals) query
+          return new Response(JSON.stringify({
+            data: [{ host: 'example.com', total_views: '80', unique_visitors: '25', unique_sessions: '18' }],
+          }), { status: 200 });
+        }
+      });
+
+      const app = createApp();
+      const res = await app.request('/api/admin/analytics/website-traffic');
+      expect(res.status).toBe(200);
+
+      const json = await res.json() as {
+        hosts: Array<{ totalViews: number; uniqueVisitors: number; uniqueSessions: number }>;
+        trend: Array<{ views: number }>;
+      };
+
+      // Host totals converted from strings
+      expect(typeof json.hosts[0].totalViews).toBe('number');
+      expect(json.hosts[0].totalViews).toBe(80);
+      expect(json.hosts[0].uniqueVisitors).toBe(25);
+      expect(json.hosts[0].uniqueSessions).toBe(18);
+
+      // Trend converted from strings
+      expect(typeof json.trend[0].views).toBe('number');
+      expect(json.trend[0].views).toBe(55);
+
+      expect(callCount).toBe(3);
+    });
   });
 
   // -------------------------------------------------------------------------
