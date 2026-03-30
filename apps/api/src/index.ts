@@ -37,6 +37,7 @@ import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
 import { adminAnalyticsRoutes } from './routes/admin-analytics';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
+import { accountMapRoutes } from './routes/account-map';
 import { dashboardRoutes } from './routes/dashboard';
 import { mcpRoutes } from './routes/mcp';
 import { notificationRoutes } from './routes/notifications';
@@ -168,6 +169,10 @@ export interface Env {
   ACP_RECONNECT_DELAY_MS?: string;
   ACP_RECONNECT_TIMEOUT_MS?: string;
   ACP_MAX_RESTART_ATTEMPTS?: string;
+  // Account Map configuration
+  ACCOUNT_MAP_MAX_ENTITIES?: string;
+  ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT?: string;
+  ACCOUNT_MAP_CACHE_TTL_SECONDS?: string;
   // Dashboard configuration
   DASHBOARD_INACTIVE_THRESHOLD_MS?: string;
   // Boot log configuration
@@ -730,6 +735,7 @@ app.route('/api/projects', projectDeploymentRoutes);
 app.route('/api/deployment', gcpDeployCallbackRoute);
 app.route('/api/admin', adminRoutes);
 app.route('/api/admin/analytics', adminAnalyticsRoutes);
+app.route('/api/account-map', accountMapRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/notifications', notificationRoutes);
 app.route('/api/gcp', gcpRoutes);

@@ -36,6 +36,7 @@ import { AdminOverview } from './pages/AdminOverview';
 import { AdminLogs } from './pages/AdminLogs';
 import { AdminStream } from './pages/AdminStream';
 import { AdminAnalytics } from './pages/AdminAnalytics';
+import { AccountMap } from './pages/AccountMap';
 import { PageViewTracker } from './components/PageViewTracker';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 
@@ -94,6 +95,7 @@ export default function App() {
               <Route path="notifications" element={<SettingsNotifications />} />
               <Route path="smoke-test-tokens" element={<SettingsSmokeTestTokens />} />
             </Route>
+            <Route path="/account-map" element={<AccountMap />} />
             <Route path="/ui-standards" element={<UiStandards />} />
             <Route path="/admin" element={<Admin />}>
               <Route index element={<Navigate to="users" replace />} />

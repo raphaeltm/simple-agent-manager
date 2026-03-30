@@ -242,6 +242,71 @@ export async function listBranches(
 // Projects
 // =============================================================================
 // =============================================================================
+// Account Map
+// =============================================================================
+
+export interface AccountMapResponse {
+  projects: Array<{
+    id: string;
+    name: string;
+    repository: string | null;
+    status: string | null;
+    lastActivityAt: string | null;
+    activeSessionCount: number | null;
+  }>;
+  nodes: Array<{
+    id: string;
+    name: string;
+    status: string;
+    vmSize: string | null;
+    vmLocation: string | null;
+    cloudProvider: string | null;
+    ipAddress: string | null;
+    healthStatus: string | null;
+    lastHeartbeatAt: string | null;
+    lastMetrics: string | null;
+  }>;
+  workspaces: Array<{
+    id: string;
+    nodeId: string | null;
+    projectId: string | null;
+    displayName: string | null;
+    branch: string | null;
+    status: string;
+    vmSize: string | null;
+    chatSessionId: string | null;
+  }>;
+  sessions: Array<{
+    id: string;
+    projectId: string;
+    topic: string | null;
+    status: string;
+    messageCount: number;
+    workspaceId: string | null;
+    taskId: string | null;
+  }>;
+  tasks: Array<{
+    id: string;
+    projectId: string | null;
+    workspaceId: string | null;
+    title: string;
+    status: string;
+    executionStep: string | null;
+    priority: number | null;
+  }>;
+  relationships: Array<{
+    source: string;
+    target: string;
+    type: string;
+    active: boolean;
+  }>;
+}
+
+export async function getAccountMap(): Promise<AccountMapResponse> {
+  return request<AccountMapResponse>('/api/account-map');
+}
+
+// =============================================================================
 // Dashboard
 // =============================================================================
 
