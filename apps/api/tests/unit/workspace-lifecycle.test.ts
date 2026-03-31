@@ -318,7 +318,7 @@ describe('workspace lifecycle race condition handling', () => {
   it('DO guarantees single-threaded execution (no concurrent RPC + alarm)', () => {
     // This is a Cloudflare platform guarantee — DOs process one request at a time.
     // We verify the DO extends DurableObject which provides this guarantee.
-    expect(doSource).toContain('extends DurableObject<TaskRunnerEnv>');
+    expect(doSource).toContain('extends DurableObject<Env>');
   });
 
   it('callback stores signal even when DO not at workspace_ready step', () => {

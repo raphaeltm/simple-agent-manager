@@ -255,6 +255,7 @@ export interface Env {
   TASK_RUNNER_AGENT_POLL_INTERVAL_MS?: string;
   TASK_RUNNER_AGENT_READY_TIMEOUT_MS?: string;
   TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS?: string;
+  TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS?: string;
   TASK_RUNNER_PROVISION_POLL_INTERVAL_MS?: string;
   // Callback token refresh threshold (ratio of token lifetime, default 0.5)
   CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO?: string;
