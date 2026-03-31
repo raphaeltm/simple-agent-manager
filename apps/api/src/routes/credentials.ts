@@ -9,9 +9,10 @@ import { encrypt, decrypt } from '../services/encryption';
 import { createProvider } from '@simple-agent-manager/providers';
 import { CredentialValidator } from '../services/validation';
 import * as schema from '../db/schema';
-import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialRequest, CredentialKind, AgentType, CredentialProvider, CreateCredentialRequest } from '@simple-agent-manager/shared';
+import type { CredentialResponse, AgentCredentialInfo, CredentialKind, AgentType, CredentialProvider } from '@simple-agent-manager/shared';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { isValidAgentType, getAgentDefinition, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
+import { jsonValidator, CreateCredentialSchema, SaveAgentCredentialSchema, CredentialKindBodySchema } from '../schemas';
 import { serializeCredentialToken, buildProviderConfig } from '../services/provider-credentials';
 import { log } from '../lib/logger';
 
@@ -54,11 +55,11 @@ credentialsRoutes.get('/', async (c) => {
 /**
  * POST /api/credentials - Create or update a credential
  */
-credentialsRoutes.post('/', async (c) => {
+credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const body = await c.req.json<CreateCredentialRequest>();
+  const body = c.req.valid('json');
   const providerName = body.provider;
 
   // Validate required fields per provider
@@ -274,19 +275,15 @@ credentialsRoutes.get('/agent', async (c) => {
 /**
  * PUT /api/credentials/agent - Save or update an agent API key or OAuth token
  */
-credentialsRoutes.put('/agent', async (c) => {
+credentialsRoutes.put('/agent', jsonValidator(SaveAgentCredentialSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const body = await c.req.json<SaveAgentCredentialRequest>();
+  const body = c.req.valid('json');
 
   const credential = body.credential;
   const credentialKind = body.credentialKind || 'api-key';
   const autoActivate = body.autoActivate !== false; // Default true
-
-  if (!body.agentType || !credential) {
-    throw errors.badRequest('agentType and credential are required');
-  }
 
   if (!isValidAgentType(body.agentType)) {
     throw errors.badRequest('Invalid agent type');
@@ -407,7 +404,7 @@ credentialsRoutes.put('/agent', async (c) => {
  * target, preventing race conditions where concurrent requests could leave
  * multiple credentials active or none active.
  */
-credentialsRoutes.post('/agent/:agentType/toggle', async (c) => {
+credentialsRoutes.post('/agent/:agentType/toggle', jsonValidator(CredentialKindBodySchema), async (c) => {
   const userId = getUserId(c);
   const agentType = c.req.param('agentType');
 
@@ -415,11 +412,7 @@ credentialsRoutes.post('/agent/:agentType/toggle', async (c) => {
     throw errors.badRequest('Invalid agent type');
   }
 
-  const body = await c.req.json<{ credentialKind: CredentialKind }>();
-
-  if (!body.credentialKind || !['api-key', 'oauth-token'].includes(body.credentialKind)) {
-    throw errors.badRequest('Invalid credential kind');
-  }
+  const body = c.req.valid('json');
 
   const now = new Date().toISOString();
 

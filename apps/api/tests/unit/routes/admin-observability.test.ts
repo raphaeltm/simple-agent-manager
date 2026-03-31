@@ -505,7 +505,7 @@ describe('Admin Observability Routes', () => {
 
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.message).toContain('array');
+      expect(body.message).toContain('levels');
     });
 
     it('should return 400 for invalid limit', async () => {

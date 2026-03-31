@@ -8,6 +8,7 @@ import { errors } from '../middleware/error';
 import { queryErrors, getHealthSummary, getErrorTrends, queryCloudflareLogs, getLogQueryRateLimit, CfApiError } from '../services/observability';
 import { rateLimit } from '../middleware/rate-limit';
 import type { UserRole, UserStatus, PlatformErrorSource, PlatformErrorLevel } from '@simple-agent-manager/shared';
+import { jsonValidator, AdminUserActionSchema, AdminUserRoleSchema, AdminLogQuerySchema } from '../schemas';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
 
@@ -52,14 +53,10 @@ adminRoutes.get('/users', async (c) => {
  * PATCH /api/admin/users/:userId - Approve or suspend a user
  * Body: { action: 'approve' | 'suspend' }
  */
-adminRoutes.patch('/users/:userId', async (c) => {
+adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const { userId } = c.req.param();
-  const body = await c.req.json<{ action: string }>();
-
-  if (!body.action || !['approve', 'suspend'].includes(body.action)) {
-    throw errors.badRequest('action must be "approve" or "suspend"');
-  }
+  const body = c.req.valid('json');
 
   const target = await db
     .select({ id: schema.users.id, role: schema.users.role })
@@ -93,15 +90,11 @@ adminRoutes.patch('/users/:userId', async (c) => {
  * PATCH /api/admin/users/:userId/role - Change a user's role
  * Body: { role: 'admin' | 'user' }
  */
-adminRoutes.patch('/users/:userId/role', async (c) => {
+adminRoutes.patch('/users/:userId/role', jsonValidator(AdminUserRoleSchema), async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const { userId } = c.req.param();
   const currentUserId = getUserId(c);
-  const body = await c.req.json<{ role: string }>();
-
-  if (!body.role || !['admin', 'user'].includes(body.role)) {
-    throw errors.badRequest('role must be "admin" or "user"');
-  }
+  const body = c.req.valid('json');
 
   if (userId === currentUserId) {
     throw errors.badRequest('Cannot change your own role');
@@ -313,38 +306,25 @@ adminRoutes.post('/observability/logs/query',
     });
     return limiter(c, next);
   },
+  jsonValidator(AdminLogQuerySchema),
   async (c) => {
   if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID) {
     throw errors.badRequest('Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.');
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await c.req.json();
-  } catch {
-    throw errors.badRequest('Invalid JSON body');
-  }
+  const body = c.req.valid('json');
 
-  // Validate timeRange
-  const timeRange = body.timeRange as { start?: string; end?: string } | undefined;
-  if (!timeRange || !timeRange.start || !timeRange.end) {
-    throw errors.badRequest('timeRange with start and end is required');
-  }
-
-  const startDate = new Date(timeRange.start);
-  const endDate = new Date(timeRange.end);
+  // Validate dates
+  const startDate = new Date(body.timeRange.start);
+  const endDate = new Date(body.timeRange.end);
   if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
     throw errors.badRequest('timeRange start and end must be valid ISO 8601 dates');
   }
 
   // Validate levels
-  const levels = body.levels as string[] | undefined;
-  if (levels !== undefined) {
-    if (!Array.isArray(levels)) {
-      throw errors.badRequest('levels must be an array');
-    }
+  if (body.levels) {
     const validLogLevels = new Set(['error', 'warn', 'info', 'debug', 'log']);
-    for (const level of levels) {
+    for (const level of body.levels) {
       if (!validLogLevels.has(level)) {
         throw errors.badRequest(`Invalid level: ${level}. Must be one of: error, warn, info, debug, log`);
       }
@@ -352,8 +332,7 @@ adminRoutes.post('/observability/logs/query',
   }
 
   // Validate limit
-  const limit = body.limit as number | undefined;
-  if (limit !== undefined && (typeof limit !== 'number' || limit < 1 || limit > 500)) {
+  if (body.limit !== undefined && (body.limit < 1 || body.limit > 500)) {
     throw errors.badRequest('limit must be between 1 and 500');
   }
 
@@ -361,12 +340,12 @@ adminRoutes.post('/observability/logs/query',
     const result = await queryCloudflareLogs({
       cfApiToken: c.env.CF_API_TOKEN,
       cfAccountId: c.env.CF_ACCOUNT_ID,
-      timeRange: { start: timeRange.start, end: timeRange.end },
-      levels: levels ?? undefined,
-      search: (body.search as string) || undefined,
-      limit,
-      cursor: (body.cursor as string) || undefined,
-      queryId: (body.queryId as string) || undefined,
+      timeRange: { start: body.timeRange.start, end: body.timeRange.end },
+      levels: body.levels ?? undefined,
+      search: body.search || undefined,
+      limit: body.limit,
+      cursor: body.cursor || undefined,
+      queryId: body.queryId || undefined,
     });
 
     return c.json(result);

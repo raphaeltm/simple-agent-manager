@@ -177,7 +177,8 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
 
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.message).toContain('Unsupported provider');
+    expect(body.error).toBe('BAD_REQUEST');
+    expect(body.message).toContain('provider');
   });
 
   it('returns 400 when hetzner token field is missing', async () => {
@@ -189,7 +190,8 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
 
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.message).toContain('Token is required');
+    expect(body.error).toBe('BAD_REQUEST');
+    expect(body.message).toContain('token');
   });
 
   it('returns 400 when scaleway secretKey is missing', async () => {

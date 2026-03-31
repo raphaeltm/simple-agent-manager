@@ -101,8 +101,8 @@ describe('cached-commands routes', () => {
         agentType: 'claude-code',
         commands: [
           { name: 'help', description: 'Help' },
-          { name: '', description: 'Empty name' },
           { description: 'No name field' },
+          { name: '', description: 'Empty name' },
         ],
       });
       expect(res.status).toBe(200);

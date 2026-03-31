@@ -194,7 +194,8 @@ describe('Agent Settings Routes', () => {
 
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.message).toContain('Invalid permission mode');
+      expect(body.error).toBe('BAD_REQUEST');
+      expect(body.message).toContain('permissionMode');
     });
 
     it('should reject non-array allowedTools', async () => {
@@ -210,7 +211,8 @@ describe('Agent Settings Routes', () => {
 
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.message).toContain('allowedTools must be an array');
+      expect(body.error).toBe('BAD_REQUEST');
+      expect(body.message).toContain('allowedTools');
     });
 
     it('should reject non-object additionalEnv', async () => {
@@ -226,7 +228,8 @@ describe('Agent Settings Routes', () => {
 
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.message).toContain('additionalEnv must be an object');
+      expect(body.error).toBe('BAD_REQUEST');
+      expect(body.message).toContain('additionalEnv');
     });
 
     it('should accept null values to clear settings', async () => {

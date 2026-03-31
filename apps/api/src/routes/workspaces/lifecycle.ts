@@ -5,6 +5,7 @@ import type { Env } from '../../index';
 import { getUserId, requireAuth, requireApproved } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import * as schema from '../../db/schema';
+import { parseOptionalBody, WorkspaceStatusUpdateSchema, WorkspaceErrorSchema } from '../../schemas';
 import {
   rebuildWorkspaceOnNode,
   restartWorkspaceOnNode,
@@ -203,9 +204,7 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
 lifecycleRoutes.post('/:id/ready', async (c) => {
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<{ status?: string }>().catch(
-    (): { status?: string } => ({})
-  );
+  const body = await parseOptionalBody(c.req.raw, WorkspaceStatusUpdateSchema, {});
   const nextStatus = normalizeWorkspaceReadyStatus(body.status);
 
   await verifyWorkspaceCallbackAuth(c, workspaceId);
@@ -264,8 +263,8 @@ lifecycleRoutes.post('/:id/provisioning-failed', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  const body = await c.req.json<{ errorMessage?: string }>().catch(() => null);
-  const providedMessage = typeof body?.errorMessage === 'string' ? body.errorMessage.trim() : '';
+  const body = await parseOptionalBody(c.req.raw, WorkspaceErrorSchema, {});
+  const providedMessage = typeof body.errorMessage === 'string' ? body.errorMessage.trim() : '';
   const errorMessage = providedMessage || 'Workspace provisioning failed';
 
   const rows = await db

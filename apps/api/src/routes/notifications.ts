@@ -20,9 +20,9 @@ import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import type {
   NotificationType,
-  UpdateNotificationPreferenceRequest,
 } from '@simple-agent-manager/shared';
-import { NOTIFICATION_TYPES, NOTIFICATION_CHANNELS } from '@simple-agent-manager/shared';
+import { NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
+import { jsonValidator, UpdateNotificationPreferenceSchema } from '../schemas';
 import type { NotificationService } from '../durable-objects/notification';
 
 const notificationRoutes = new Hono<{ Bindings: Env }>();
@@ -100,22 +100,9 @@ notificationRoutes.get('/preferences', requireAuth(), requireApproved(), async (
 });
 
 // PUT /api/notifications/preferences
-notificationRoutes.put('/preferences', requireAuth(), requireApproved(), async (c) => {
+notificationRoutes.put('/preferences', requireAuth(), requireApproved(), jsonValidator(UpdateNotificationPreferenceSchema), async (c) => {
   const userId = getUserId(c);
-  const body = await c.req.json<UpdateNotificationPreferenceRequest>();
-
-  if (!body.notificationType) {
-    throw errors.badRequest('notificationType is required');
-  }
-  if (body.notificationType !== '*' && !NOTIFICATION_TYPES.includes(body.notificationType as any)) {
-    throw errors.badRequest(`Invalid notification type: ${body.notificationType}`);
-  }
-  if (!body.channel || !NOTIFICATION_CHANNELS.includes(body.channel as any)) {
-    throw errors.badRequest(`Invalid channel: ${body.channel}`);
-  }
-  if (typeof body.enabled !== 'boolean') {
-    throw errors.badRequest('enabled must be a boolean');
-  }
+  const body = c.req.valid('json');
 
   const stub = getNotificationStub(c.env, userId);
   await stub.updatePreference(

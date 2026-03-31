@@ -5,6 +5,7 @@ import { rateLimit, getRateLimit } from '../middleware/rate-limit';
 import { errors } from '../middleware/error';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import { log } from '../lib/logger';
+import { jsonValidator, ClientErrorBatchSchema } from '../schemas';
 
 /** Default max body size: 64 KB (configurable via MAX_CLIENT_ERROR_BODY_BYTES) */
 const DEFAULT_MAX_BODY_BYTES = 65_536;
@@ -50,7 +51,7 @@ clientErrorsRoutes.use('*', async (c, next) => {
  *
  * Body: { errors: ClientErrorEntry[] }
  */
-clientErrorsRoutes.post('/', async (c) => {
+clientErrorsRoutes.post('/', jsonValidator(ClientErrorBatchSchema), async (c) => {
   const maxBodyBytes = parseInt(
     c.env.MAX_CLIENT_ERROR_BODY_BYTES || String(DEFAULT_MAX_BODY_BYTES),
     10
@@ -66,24 +67,9 @@ clientErrorsRoutes.post('/', async (c) => {
     throw errors.badRequest(`Request body too large (max ${maxBodyBytes} bytes)`);
   }
 
-  // Parse JSON body
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    throw errors.badRequest('Invalid JSON body');
-  }
-
-  // Validate structure
-  if (!body || typeof body !== 'object' || !('errors' in body)) {
-    throw errors.badRequest('Body must contain an "errors" array');
-  }
-
-  const { errors: entries } = body as { errors: unknown };
-
-  if (!Array.isArray(entries)) {
-    throw errors.badRequest('"errors" must be an array');
-  }
+  // Validated by middleware; entries may contain extra fields beyond schema
+  const validatedBody = c.req.valid('json');
+  const entries = validatedBody.errors as unknown as Array<Record<string, unknown>>;
 
   if (entries.length === 0) {
     return c.body(null, 204);

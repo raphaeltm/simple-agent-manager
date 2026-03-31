@@ -152,7 +152,8 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     const res = await postSync({ agentType: 'openai-codex' });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.message).toContain('agentType, credentialKind, and credential are required');
+    expect(body.error).toBe('BAD_REQUEST');
+    expect(body.message).toContain('credential');
   });
 
   it('returns 400 for invalid agentType', async () => {
@@ -166,7 +167,8 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     const res = await postSync({ ...validBody, credentialKind: 'bad-kind' });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.message).toContain('Invalid credentialKind');
+    expect(body.error).toBe('BAD_REQUEST');
+    expect(body.message).toContain('credentialKind');
   });
 
   it('returns 404 when workspace does not exist', async () => {

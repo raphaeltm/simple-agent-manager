@@ -2,15 +2,19 @@ import { Hono } from 'hono';
 import { and, count, desc, eq, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
-  CreateProjectRequest,
   ListProjectsResponse,
   Project,
   ProjectDetailResponse,
   TaskStatus,
-  UpsertProjectRuntimeEnvVarRequest,
-  UpsertProjectRuntimeFileRequest,
   UpdateProjectRequest,
 } from '@simple-agent-manager/shared';
+import {
+  jsonValidator,
+  CreateProjectSchema,
+  UpdateProjectSchema,
+  UpsertProjectRuntimeEnvVarSchema,
+  UpsertProjectRuntimeFileSchema,
+} from '../../schemas';
 import {
   isValidAgentType,
   VALID_WORKSPACE_PROFILES,
@@ -49,11 +53,11 @@ import { log } from '../../lib/logger';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
-crudRoutes.post('/', async (c) => {
+crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
   const limits = getRuntimeLimits(c.env);
-  const body = await c.req.json<CreateProjectRequest>();
+  const body = c.req.valid('json');
 
   const name = body.name?.trim();
   const installationId = body.installationId?.trim();
@@ -311,11 +315,11 @@ crudRoutes.get('/:id/runtime-config', async (c) => {
   return c.json(response);
 });
 
-crudRoutes.post('/:id/runtime/env-vars', async (c) => {
+crudRoutes.post('/:id/runtime/env-vars', jsonValidator(UpsertProjectRuntimeEnvVarSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<UpsertProjectRuntimeEnvVarRequest>();
+  const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
 
   const project = await requireOwnedProject(db, projectId, userId);
@@ -423,11 +427,11 @@ crudRoutes.delete('/:id/runtime/env-vars/:envKey', async (c) => {
   return c.json(response);
 });
 
-crudRoutes.post('/:id/runtime/files', async (c) => {
+crudRoutes.post('/:id/runtime/files', jsonValidator(UpsertProjectRuntimeFileSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<UpsertProjectRuntimeFileRequest>();
+  const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
   const project = await requireOwnedProject(db, projectId, userId);
 
@@ -537,11 +541,11 @@ crudRoutes.delete('/:id/runtime/files', async (c) => {
   return c.json(response);
 });
 
-crudRoutes.patch('/:id', async (c) => {
+crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<UpdateProjectRequest>();
+  const body = c.req.valid('json');
 
   const existing = await requireOwnedProject(db, projectId, userId);
 

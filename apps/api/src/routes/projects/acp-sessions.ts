@@ -3,11 +3,8 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   AcpSessionStatus,
-  AcpSessionForkRequest,
-  AcpSessionAssignRequest,
-  AcpSessionStatusReport,
-  AcpSessionHeartbeatRequest,
 } from '@simple-agent-manager/shared';
+import { jsonValidator, CreateAcpSessionSchema, AcpSessionAssignSchema, AcpSessionStatusReportSchema, AcpSessionHeartbeatSchema, AcpSessionForkSchema } from '../../schemas';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { getUserId } from '../../middleware/auth';
@@ -25,21 +22,14 @@ const DEFAULT_MAX_ACP_CONTEXT_BYTES = 262144;
 const acpSessionRoutes = new Hono<{ Bindings: Env }>();
 
 /** POST /:id/acp-sessions — Create a new ACP session */
-acpSessionRoutes.post('/:id/acp-sessions', async (c) => {
+acpSessionRoutes.post('/:id/acp-sessions', jsonValidator(CreateAcpSessionSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireOwnedProject(db, projectId, userId);
 
-  const body = await c.req.json<{
-    chatSessionId: string;
-    initialPrompt?: string;
-    agentType?: string;
-  }>();
-
-  if (!body.chatSessionId) {
-    throw errors.badRequest('chatSessionId is required');
-  }
+  const body = c.req.valid('json');
+  const chatSessionId = body.chatSessionId ?? '';
 
   // Validate initialPrompt length (256 KB default, configurable via MAX_ACP_PROMPT_BYTES)
   const maxPromptBytes = parsePositiveInt(c.env.MAX_ACP_PROMPT_BYTES as string, DEFAULT_MAX_ACP_PROMPT_BYTES);
@@ -50,7 +40,7 @@ acpSessionRoutes.post('/:id/acp-sessions', async (c) => {
   const session = await projectDataService.createAcpSession(
     c.env,
     projectId,
-    body.chatSessionId,
+    chatSessionId,
     body.initialPrompt ?? null,
     body.agentType ?? null
   );
@@ -97,17 +87,14 @@ acpSessionRoutes.get('/:id/acp-sessions/:sessionId', async (c) => {
 });
 
 /** POST /:id/acp-sessions/:sessionId/assign — Assign workspace + node to session */
-acpSessionRoutes.post('/:id/acp-sessions/:sessionId/assign', async (c) => {
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/assign', jsonValidator(AcpSessionAssignSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireOwnedProject(db, projectId, userId);
 
-  const body = await c.req.json<AcpSessionAssignRequest>();
-  if (!body.workspaceId || !body.nodeId) {
-    throw errors.badRequest('workspaceId and nodeId are required');
-  }
+  const body = c.req.valid('json');
 
   // US3: Validate workspace belongs to this project
   const workspace = await db.query.workspaces.findFirst({
@@ -148,15 +135,12 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/assign', async (c) => {
  * workspace owner, not necessarily the project owner, and the nodeId check
  * provides identity verification at the session level.
  */
-acpSessionRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/status', jsonValidator(AcpSessionStatusReportSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const body = await c.req.json<AcpSessionStatusReport>();
-  if (!body.status || !body.nodeId) {
-    throw errors.badRequest('status and nodeId are required');
-  }
+  const body = c.req.valid('json');
 
   // Runtime allowlist — VM agents can only report these statuses
   const ALLOWED_REPORTED_STATUSES = ['running', 'completed', 'failed'] as const;
@@ -206,15 +190,12 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
  * POST /:id/acp-sessions/:sessionId/heartbeat — VM agent heartbeat.
  * Auth: JWT + nodeId verification in DO (same model as /status above).
  */
-acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', async (c) => {
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', jsonValidator(AcpSessionHeartbeatSchema), async (c) => {
   const userId = getUserId(c); // Ensure authenticated (JWT validated by requireAuth middleware)
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const body = await c.req.json<AcpSessionHeartbeatRequest>();
-  if (!body.nodeId) {
-    throw errors.badRequest('nodeId is required');
-  }
+  const body = c.req.valid('json');
 
   // Validate node matches assigned node — prevents cross-user session manipulation.
   // See AUTH-VULN-05 in Shannon security assessment.
@@ -239,17 +220,14 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', async (c) => {
 });
 
 /** POST /:id/acp-sessions/:sessionId/fork — Fork a completed/interrupted session */
-acpSessionRoutes.post('/:id/acp-sessions/:sessionId/fork', async (c) => {
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/fork', jsonValidator(AcpSessionForkSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireOwnedProject(db, projectId, userId);
 
-  const body = await c.req.json<AcpSessionForkRequest>();
-  if (!body.contextSummary) {
-    throw errors.badRequest('contextSummary is required');
-  }
+  const body = c.req.valid('json');
 
   // Validate contextSummary length (256 KB default, configurable via MAX_ACP_CONTEXT_BYTES)
   const maxContextBytes = parsePositiveInt(c.env.MAX_ACP_CONTEXT_BYTES as string, DEFAULT_MAX_ACP_CONTEXT_BYTES);

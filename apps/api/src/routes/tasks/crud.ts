@@ -11,17 +11,20 @@ import type { SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import {
   isTaskExecutionStep,
-  type CreateTaskDependencyRequest,
-  type CreateTaskRequest,
-  type DelegateTaskRequest,
   type ListTaskEventsResponse,
   type ListTasksResponse,
   type TaskActorType,
   type TaskDetailResponse,
   type TaskStatus,
-  type UpdateTaskRequest,
-  type UpdateTaskStatusRequest,
 } from '@simple-agent-manager/shared';
+import {
+  jsonValidator,
+  CreateTaskSchema,
+  UpdateTaskSchema,
+  UpdateTaskStatusSchema,
+  CreateTaskDependencySchema,
+  DelegateTaskSchema,
+} from '../../schemas';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -67,12 +70,12 @@ crudRoutes.use('/*', async (c, next) => {
   });
 });
 
-crudRoutes.post('/', async (c) => {
+crudRoutes.post('/', jsonValidator(CreateTaskSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   const limits = getRuntimeLimits(c.env);
-  const body = await c.req.json<CreateTaskRequest>();
+  const body = c.req.valid('json');
 
   const project = await requireOwnedProject(db, projectId, userId);
 
@@ -224,12 +227,12 @@ crudRoutes.get('/:taskId', async (c) => {
   return c.json(response);
 });
 
-crudRoutes.patch('/:taskId', async (c) => {
+crudRoutes.patch('/:taskId', jsonValidator(UpdateTaskSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<UpdateTaskRequest>();
+  const body = c.req.valid('json');
 
   await requireOwnedProject(db, projectId, userId);
   const task = await requireOwnedTask(db, projectId, taskId, userId);
@@ -328,12 +331,12 @@ crudRoutes.delete('/:taskId', async (c) => {
   return c.json({ success: true });
 });
 
-crudRoutes.post('/:taskId/status', async (c) => {
+crudRoutes.post('/:taskId/status', jsonValidator(UpdateTaskStatusSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<UpdateTaskStatusRequest>();
+  const body = c.req.valid('json');
 
   await requireOwnedProject(db, projectId, userId);
   const task = await requireOwnedTask(db, projectId, taskId, userId);
@@ -391,11 +394,11 @@ crudRoutes.post('/:taskId/status', async (c) => {
   return c.json(toTaskResponse(updatedTask, nextBlocked));
 });
 
-crudRoutes.post('/:taskId/status/callback', async (c) => {
+crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<UpdateTaskStatusRequest>();
+  const body = c.req.valid('json');
 
   const authHeader = c.req.header('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
@@ -645,13 +648,13 @@ crudRoutes.post('/:taskId/status/callback', async (c) => {
   return c.json(toTaskResponse(updatedTask, blocked));
 });
 
-crudRoutes.post('/:taskId/dependencies', async (c) => {
+crudRoutes.post('/:taskId/dependencies', jsonValidator(CreateTaskDependencySchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
   const limits = getRuntimeLimits(c.env);
-  const body = await c.req.json<CreateTaskDependencyRequest>();
+  const body = c.req.valid('json');
 
   await requireOwnedProject(db, projectId, userId);
   const task = await requireOwnedTask(db, projectId, taskId, userId);
@@ -753,12 +756,12 @@ crudRoutes.delete('/:taskId/dependencies', async (c) => {
   return c.json({ success: true });
 });
 
-crudRoutes.post('/:taskId/delegate', async (c) => {
+crudRoutes.post('/:taskId/delegate', jsonValidator(DelegateTaskSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<DelegateTaskRequest>();
+  const body = c.req.valid('json');
 
   await requireOwnedProject(db, projectId, userId);
   const task = await requireOwnedTask(db, projectId, taskId, userId);

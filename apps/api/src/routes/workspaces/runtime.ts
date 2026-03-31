@@ -6,7 +6,8 @@ import type { Env } from '../../index';
 import { requireAuth, requireApproved } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import * as schema from '../../db/schema';
-import { isValidAgentType, type BootLogEntry, type BootstrapTokenData } from '@simple-agent-manager/shared';
+import { isValidAgentType, type BootstrapTokenData } from '@simple-agent-manager/shared';
+import { jsonValidator, AgentTypeBodySchema, AgentCredentialSyncSchema, BootLogEntrySchema, MessageBatchSchema } from '../../schemas';
 import { getDecryptedAgentKey } from '../credentials';
 import { getInstallationToken } from '../../services/github-app';
 import { appendBootLog } from '../../services/boot-log';
@@ -24,14 +25,10 @@ import { log } from '../../lib/logger';
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
-runtimeRoutes.post('/:id/agent-key', async (c) => {
+runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
-  const body = await c.req.json<{ agentType: string }>();
-
-  if (!body.agentType) {
-    throw errors.badRequest('agentType is required');
-  }
+  const body = c.req.valid('json');
 
   const db = drizzle(c.env.DATABASE, { schema });
 
@@ -70,7 +67,7 @@ runtimeRoutes.post('/:id/agent-key', async (c) => {
  * The VM agent reads the updated auth file from the container and sends it here.
  * Uses workspace callback auth.
  */
-runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
+runtimeRoutes.post('/:id/agent-credential-sync', jsonValidator(AgentCredentialSyncSchema), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
@@ -81,27 +78,17 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
     throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
   }
 
-  const body = await c.req.json<{
-    agentType: string;
-    credentialKind: string;
-    credential: string;
-  }>().catch(() => null);
-
-  if (!body) {
-    throw errors.badRequest('Request body must be valid JSON');
-  }
-
-  if (!body.agentType || !body.credentialKind || !body.credential) {
-    throw errors.badRequest('agentType, credentialKind, and credential are required');
-  }
+  const body = c.req.valid('json');
+  const agentType = body.agentType;
+  const credentialKind = body.credentialKind;
 
   // Validate against known values. Use the shared catalog so new agents
   // are accepted automatically without a manual allowlist update.
   const validCredentialKinds = new Set(['api-key', 'oauth-token']);
-  if (!isValidAgentType(body.agentType)) {
+  if (!agentType || !isValidAgentType(agentType)) {
     throw errors.badRequest('Invalid agentType');
   }
-  if (!validCredentialKinds.has(body.credentialKind)) {
+  if (!credentialKind || !validCredentialKinds.has(credentialKind)) {
     throw errors.badRequest('Invalid credentialKind');
   }
 
@@ -127,8 +114,8 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
       and(
         eq(schema.credentials.userId, workspace.userId),
         eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, body.agentType),
-        eq(schema.credentials.credentialKind, body.credentialKind),
+        eq(schema.credentials.agentType, agentType),
+        eq(schema.credentials.credentialKind, credentialKind),
         eq(schema.credentials.isActive, true)
       )
     )
@@ -165,8 +152,8 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
 
   log.info('agent_credential_sync.credential_updated', {
     workspaceId,
-    agentType: body.agentType,
-    credentialKind: body.credentialKind,
+    agentType,
+    credentialKind,
     credentialId: existing.id,
   });
 
@@ -177,14 +164,10 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
  * POST /:id/agent-settings — VM agent callback to fetch user's agent settings.
  * Uses workspace callback auth (same as agent-key).
  */
-runtimeRoutes.post('/:id/agent-settings', async (c) => {
+runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
-  const body = await c.req.json<{ agentType: string }>();
-
-  if (!body.agentType) {
-    throw errors.badRequest('agentType is required');
-  }
+  const body = c.req.valid('json');
 
   const db = drizzle(c.env.DATABASE, { schema });
 
@@ -299,16 +282,13 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   return c.json({ token: token.token, expiresAt: token.expiresAt });
 });
 
-runtimeRoutes.post('/:id/boot-log', async (c) => {
+runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  const body = await c.req.json<BootLogEntry>();
-  if (!body.step || !body.status || !body.message) {
-    throw errors.badRequest('step, status, and message are required');
-  }
+  const body = c.req.valid('json');
 
-  const entry: BootLogEntry = {
+  const entry = {
     step: body.step,
     status: body.status,
     message: body.message,
@@ -325,7 +305,7 @@ runtimeRoutes.post('/:id/boot-log', async (c) => {
  * Uses workspace callback auth. Accepts 1-100 messages per batch.
  * All messages must target the same sessionId.
  */
-runtimeRoutes.post('/:id/messages', async (c) => {
+runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
@@ -336,21 +316,8 @@ runtimeRoutes.post('/:id/messages', async (c) => {
     throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
   }
 
-  const body = await c.req.json<{
-    messages: Array<{
-      messageId: string;
-      sessionId: string;
-      role: string;
-      content: string;
-      toolMetadata?: string | null;
-      timestamp: string;
-      sequence?: number;
-    }>;
-  }>();
+  const body = c.req.valid('json');
 
-  if (!body.messages || !Array.isArray(body.messages)) {
-    throw errors.badRequest('messages array is required');
-  }
   if (body.messages.length === 0) {
     throw errors.badRequest('messages array must not be empty');
   }

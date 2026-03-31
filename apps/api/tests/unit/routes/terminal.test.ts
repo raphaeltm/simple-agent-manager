@@ -21,7 +21,7 @@ describe('terminal routes source contract', () => {
   });
 
   it('validates workspaceId is required on activity endpoint', () => {
-    expect(file).toContain("throw errors.badRequest('workspaceId is required')");
+    expect(file).toContain('jsonValidator(TerminalRequestSchema)');
   });
 
   it('skips activity tracking when workspace has no projectId', () => {

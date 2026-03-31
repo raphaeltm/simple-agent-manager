@@ -8,8 +8,8 @@ import { errors } from '../../middleware/error';
 import * as schema from '../../db/schema';
 import type {
   AgentSession,
-  CreateAgentSessionRequest,
 } from '@simple-agent-manager/shared';
+import { jsonValidator, CreateAgentSessionSchema, UpdateAgentSessionSchema } from '../../schemas';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   createAgentSessionOnNode,
@@ -52,11 +52,11 @@ agentSessionRoutes.get('/:id/agent-sessions', requireAuth(), requireApproved(), 
   return c.json(sessions.map(toAgentSessionResponse));
 });
 
-agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(), async (c) => {
+agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(), jsonValidator(CreateAgentSessionSchema), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<CreateAgentSessionRequest>();
+  const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
 
   const workspace = await getOwnedWorkspace(db, workspaceId, userId);
@@ -132,7 +132,7 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
   return c.json(toAgentSessionResponse(rows[0]!), 201);
 });
 
-agentSessionRoutes.patch('/:id/agent-sessions/:sessionId', requireAuth(), requireApproved(), async (c) => {
+agentSessionRoutes.patch('/:id/agent-sessions/:sessionId', requireAuth(), requireApproved(), jsonValidator(UpdateAgentSessionSchema), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
@@ -143,7 +143,7 @@ agentSessionRoutes.patch('/:id/agent-sessions/:sessionId', requireAuth(), requir
     throw errors.notFound('Workspace');
   }
 
-  const body = await c.req.json<{ label?: string }>();
+  const body = c.req.valid('json');
   const maxLabelLength = parsePositiveInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH as string, 50);
   const label = body.label?.trim()?.slice(0, maxLabelLength);
   if (!label) {

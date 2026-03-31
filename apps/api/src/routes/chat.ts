@@ -20,6 +20,7 @@ import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
 import { log } from '../lib/logger';
+import { parseOptionalBody, CreateChatSessionSchema, SendChatMessageSchema, LinkTaskToChatSchema } from '../schemas';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
@@ -67,9 +68,7 @@ chatRoutes.post('/', async (c) => {
 
   await requireOwnedProject(db, projectId, userId);
 
-  const body = await c.req.json<{ workspaceId?: string; topic?: string }>().catch(
-    (): { workspaceId?: string; topic?: string } => ({})
-  );
+  const body = await parseOptionalBody(c.req.raw, CreateChatSessionSchema, {});
   const workspaceId = body.workspaceId?.trim() || null;
   const topic = body.topic?.trim() || null;
 
@@ -250,7 +249,7 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
 
   await requireOwnedProject(db, projectId, userId);
 
-  const body = await c.req.json<{ content?: string }>().catch((): { content?: string } => ({}));
+  const body = await parseOptionalBody(c.req.raw, SendChatMessageSchema, {});
   const content = body.content?.trim();
   if (!content) {
     throw errors.badRequest('content is required');
@@ -455,9 +454,7 @@ chatRoutes.post('/:sessionId/ideas', async (c) => {
 
   await requireOwnedProject(db, projectId, userId);
 
-  const body = await c.req.json<{ taskId?: string; context?: string }>().catch(
-    (): { taskId?: string; context?: string } => ({})
-  );
+  const body = await parseOptionalBody(c.req.raw, LinkTaskToChatSchema, {});
   const taskId = body.taskId?.trim();
   if (!taskId) {
     throw errors.badRequest('taskId is required');

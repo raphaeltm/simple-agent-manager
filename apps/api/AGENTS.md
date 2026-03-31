@@ -37,16 +37,18 @@ Throw `AppError` (from `middleware/error.ts`) in route handlers — the global `
 ## Route Handler Pattern
 
 ```typescript
+import * as v from 'valibot';
 import { Hono } from 'hono';
-import { errors } from '../middleware/error';
+import { jsonValidator } from '../schemas';
+
+const MySchema = v.object({
+  name: v.string(),
+});
 
 const routes = new Hono();
 
-routes.post('/endpoint', async (c) => {
-  const body = await c.req.json();
-  if (!body.name) {
-    throw errors.badRequest('Name is required');
-  }
+routes.post('/endpoint', jsonValidator(MySchema), async (c) => {
+  const body = c.req.valid('json'); // typed & validated
   return c.json({ result: 'success' }, 201);
 });
 ```

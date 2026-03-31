@@ -12,7 +12,8 @@ import {
   ATTACHMENT_DEFAULTS,
   SAFE_FILENAME_REGEX,
 } from '@simple-agent-manager/shared';
-import type { RequestAttachmentUploadRequest, RequestAttachmentUploadResponse } from '@simple-agent-manager/shared';
+import type { RequestAttachmentUploadResponse } from '@simple-agent-manager/shared';
+import { jsonValidator, RequestAttachmentUploadSchema } from '../../schemas';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { getAuth, requireAuth, requireApproved } from '../../middleware/auth';
@@ -34,7 +35,7 @@ uploadRoutes.use('/*', requireAuth(), requireApproved());
  *   POST /api/projects/:projectId/tasks/request-upload
  * Returns 200 with { uploadId, uploadUrl, r2Key, expiresIn }.
  */
-uploadRoutes.post('/request-upload', async (c) => {
+uploadRoutes.post('/request-upload', jsonValidator(RequestAttachmentUploadSchema), async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   // projectId comes from the parent route mount: /api/projects/:projectId/tasks
@@ -52,17 +53,11 @@ uploadRoutes.post('/request-upload', async (c) => {
     throw errors.forbidden('File attachments are not configured (R2 S3 credentials missing)');
   }
 
-  const body = await c.req.json<RequestAttachmentUploadRequest>();
+  const body = c.req.valid('json');
 
-  // Validate required fields
-  if (!body.filename || typeof body.filename !== 'string') {
-    throw errors.badRequest('filename is required');
-  }
-  if (!body.size || typeof body.size !== 'number' || body.size <= 0) {
+  // Structure validated by schema; check business rules
+  if (body.size <= 0) {
     throw errors.badRequest('size must be a positive number');
-  }
-  if (!body.contentType || typeof body.contentType !== 'string') {
-    throw errors.badRequest('contentType is required');
   }
 
   // Validate filename safety

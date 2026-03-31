@@ -8,6 +8,7 @@ import { createAuth } from '../auth';
 import { getBetterAuthSecret } from '../lib/secrets';
 import { errors } from '../middleware/error';
 import { rateLimit } from '../middleware/rate-limit';
+import { jsonValidator, SmokeTestCreateSchema, SmokeTestRedeemSchema } from '../schemas';
 
 /** Token prefix — identifiable if leaked, greppable in logs */
 const TOKEN_PREFIX = 'sam_test_';
@@ -113,7 +114,7 @@ smokeTestTokenRoutes.get('/smoke-test-tokens', async (c) => {
  * Generate a new token. Returns the raw token once — it is never stored or returned again.
  * Body: { name: string }
  */
-smokeTestTokenRoutes.post('/smoke-test-tokens', async (c) => {
+smokeTestTokenRoutes.post('/smoke-test-tokens', jsonValidator(SmokeTestCreateSchema), async (c) => {
   if (!isFeatureEnabled(c.env)) {
     throw errors.notFound('Not found');
   }
@@ -124,7 +125,7 @@ smokeTestTokenRoutes.post('/smoke-test-tokens', async (c) => {
     throw errors.unauthorized('Not authenticated');
   }
 
-  const body = await c.req.json<{ name?: string }>();
+  const body = c.req.valid('json');
   const maxNameLength = parseInt(c.env.MAX_SMOKE_TOKEN_NAME_LENGTH || '', 10) || DEFAULT_MAX_TOKEN_NAME_LENGTH;
   const name = (body.name || '').trim();
   if (!name || name.length > maxNameLength) {
@@ -226,12 +227,12 @@ const tokenLoginRateLimit = rateLimit({
   useIp: true,
 });
 
-smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, async (c) => {
+smokeTestTokenRoutes.post('/token-login', tokenLoginRateLimit, jsonValidator(SmokeTestRedeemSchema), async (c) => {
   if (!isFeatureEnabled(c.env)) {
     throw errors.notFound('Not found');
   }
 
-  const body = await c.req.json<{ token?: string }>();
+  const body = c.req.valid('json');
   const rawToken = (body.token || '').trim();
   if (!rawToken) {
     throw errors.badRequest('Token is required');
