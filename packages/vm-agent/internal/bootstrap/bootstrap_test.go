@@ -1094,6 +1094,48 @@ func TestWriteCredentialHelperToHostSkipsNonGitHub(t *testing.T) {
 	}
 }
 
+func TestWriteCredentialHelperToHostMissingCallbackToken(t *testing.T) {
+	t.Parallel()
+
+	// writeCredentialHelperToHost should return an error (not panic or empty path)
+	// when the callback token is missing. Callers treat this as non-fatal.
+	cfg := &config.Config{
+		WorkspaceID: "ws-missing-token",
+		Port:        8080,
+		Repository:  "https://github.com/owner/repo.git",
+		// CallbackToken intentionally empty
+	}
+
+	hostPath, err := writeCredentialHelperToHost(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing callback token")
+	}
+	if hostPath != "" {
+		os.Remove(hostPath)
+		t.Error("expected empty host path on error")
+	}
+}
+
+func TestWriteCredentialHelperToHostInvalidPort(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		WorkspaceID:   "ws-bad-port",
+		CallbackToken: "token",
+		Port:          0,
+		Repository:    "https://github.com/owner/repo.git",
+	}
+
+	hostPath, err := writeCredentialHelperToHost(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid port")
+	}
+	if hostPath != "" {
+		os.Remove(hostPath)
+		t.Error("expected empty host path on error")
+	}
+}
+
 func TestRemoveCredentialHelperFromHost(t *testing.T) {
 	t.Parallel()
 
