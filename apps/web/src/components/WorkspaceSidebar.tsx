@@ -5,6 +5,7 @@ import { GitBranch, ExternalLink, Play, Trash2, Globe } from 'lucide-react';
 import type { AgentSession } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
 import { CollapsibleSection } from './CollapsibleSection';
+import { BrowserSidecar } from './BrowserSidecar';
 import { ResourceBar } from './node/ResourceBar';
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
 import type { WorkspaceResponse, Event, DetectedPort } from '@simple-agent-manager/shared';
@@ -427,6 +428,17 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                   </a>
                 ))}
             </div>
+          </CollapsibleSection>
+        )}
+
+        {/* Remote Browser */}
+        {isRunning && workspace?.id && (
+          <CollapsibleSection
+            title="Remote Browser"
+            defaultCollapsed
+            storageKey="sam-sidebar-browser"
+          >
+            <BrowserSidecar workspaceId={workspace.id} />
           </CollapsibleSection>
         )}
 
