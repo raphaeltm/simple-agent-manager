@@ -33,6 +33,14 @@ import {
   getWorkspace,
 } from '../lib/api';
 import type { ChatSessionResponse, TaskAttachmentRef } from '../lib/api';
+import {
+  getSessionState,
+  isStaleSession,
+  getLastActivity,
+  formatRelativeTime,
+  STATE_COLORS,
+  STATE_LABELS,
+} from '../lib/chat-session-utils';
 import { useProjectContext } from './ProjectContext';
 import { stripMarkdown } from '../lib/text-utils';
 import { ForkDialog } from '../components/project/ForkDialog';
@@ -49,9 +57,6 @@ import { BootLogPanel } from '../components/chat/BootLogPanel';
 
 /** How often to poll task status during provisioning (ms). */
 const TASK_STATUS_POLL_MS = 2000;
-/** Sessions with no activity in this window are considered stale and hidden by default (ms). */
-const STALE_SESSION_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
-
 /** Max sessions to load in the sidebar. Override via VITE_CHAT_SESSION_LIST_LIMIT. */
 const DEFAULT_CHAT_SESSION_LIST_LIMIT = 100;
 const CHAT_SESSION_LIST_LIMIT = parseInt(
@@ -86,52 +91,7 @@ interface ProvisioningState {
   workspaceUrl: string | null;
 }
 
-type SessionState = 'active' | 'idle' | 'terminated';
-
-// ---------------------------------------------------------------------------
-// Session helpers (moved from SessionSidebar.tsx)
-// ---------------------------------------------------------------------------
-
-function getSessionState(session: ChatSessionResponse): SessionState {
-  if (session.status === 'stopped') return 'terminated';
-  if (session.isIdle || session.agentCompletedAt) return 'idle';
-  if (session.status === 'active') return 'active';
-  return 'terminated';
-}
-
-const STATE_COLORS: Record<SessionState, string> = {
-  active: 'var(--sam-color-success)',
-  idle: 'var(--sam-color-warning, #f59e0b)',
-  terminated: 'var(--sam-color-fg-muted)',
-};
-
-const STATE_LABELS: Record<SessionState, string> = {
-  active: 'Active',
-  idle: 'Idle',
-  terminated: 'Stopped',
-};
-
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
-
-/** Returns the most relevant activity timestamp for a session. */
-function getLastActivity(session: ChatSessionResponse): number {
-  return session.lastMessageAt ?? session.startedAt;
-}
-
-/** Whether a session is "stale" — no activity within the threshold window. */
-function isStaleSession(session: ChatSessionResponse): boolean {
-  return Date.now() - getLastActivity(session) > STALE_SESSION_THRESHOLD_MS;
-}
+// Session helpers imported from '../lib/chat-session-utils'
 
 function isTerminal(status: TaskStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled';

@@ -37,6 +37,7 @@ import { AdminLogs } from './pages/AdminLogs';
 import { AdminStream } from './pages/AdminStream';
 import { AdminAnalytics } from './pages/AdminAnalytics';
 import { AccountMap } from './pages/AccountMap';
+import { Chats } from './pages/Chats';
 import { PageViewTracker } from './components/PageViewTracker';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 
@@ -65,6 +66,7 @@ export default function App() {
           {/* Protected routes with AppShell (persistent navigation) */}
           <Route element={<ProtectedLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/chats" element={<Chats />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/new" element={<ProjectCreate />} />
 

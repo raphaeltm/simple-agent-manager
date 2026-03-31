@@ -769,11 +769,11 @@ describe('GlobalCommandPalette', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Chats')).toBeInTheDocument();
+      expect(document.getElementById('gcp-category-Chats')).toBeInTheDocument();
     });
 
-    const chatsHeader = screen.getByText('Chats');
-    expect(chatsHeader.getAttribute('id')).toBe('gcp-category-Chats');
+    const chatsHeader = document.getElementById('gcp-category-Chats')!;
+    expect(chatsHeader.textContent).toBe('Chats');
 
     const group = chatsHeader.closest('[role="group"]');
     expect(group).not.toBeNull();
@@ -795,7 +795,7 @@ describe('GlobalCommandPalette', () => {
       expect(screen.getByText('Home')).toBeInTheDocument();
     });
 
-    // Chats category should not appear
-    expect(screen.queryByText('Chats')).not.toBeInTheDocument();
+    // Chats category header should not appear (nav item "Chats" will still exist)
+    expect(document.getElementById('gcp-category-Chats')).not.toBeInTheDocument();
   });
 });
