@@ -20,7 +20,7 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain("const nodeId = c.req.query('nodeId')");
     expect(file).toContain("crudRoutes.patch('/:id'");
     expect(file).toContain('resolveUniqueWorkspaceDisplayName');
-    expect(file).toContain('UpdateWorkspaceRequest');
+    expect(file).toContain("c.req.valid('json')");
     expect(file).toContain('body.displayName?.trim()');
     expect(file).toContain('normalizedDisplayName');
   });

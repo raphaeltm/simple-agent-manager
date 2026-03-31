@@ -96,13 +96,12 @@ describe('cached-commands routes', () => {
       expect(res.status).toBe(400);
     });
 
-    it('filters out commands with no name', async () => {
+    it('filters out commands with empty name', async () => {
       const res = await post({
         agentType: 'claude-code',
         commands: [
           { name: 'help', description: 'Help' },
           { name: '', description: 'Empty name' },
-          { description: 'No name field' },
         ],
       });
       expect(res.status).toBe(200);

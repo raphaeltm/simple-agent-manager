@@ -27,9 +27,12 @@ function formatIssues(issues: v.BaseIssue<unknown>[]): string {
  * `{ error: "BAD_REQUEST", message: "..." }` format on validation failure.
  *
  * Use for routes where the request body is required and must be valid JSON.
+ *
+ * Also wraps the middleware in a try/catch to handle JSON parse errors from
+ * invalid request bodies (vValidator calls c.req.json() which throws on bad JSON).
  */
 export function jsonValidator<T extends GenericSchema | GenericSchemaAsync>(schema: T) {
-  return vValidator('json', schema, (result, c) => {
+  const validator = vValidator('json', schema, (result, c) => {
     if (!result.success) {
       return c.json(
         {
@@ -40,6 +43,24 @@ export function jsonValidator<T extends GenericSchema | GenericSchemaAsync>(sche
       );
     }
   });
+
+  // Wrap to catch JSON parse errors (SyntaxError from c.req.json())
+  return async (c: Parameters<typeof validator>[0], next: Parameters<typeof validator>[1]) => {
+    try {
+      return await validator(c, next);
+    } catch (err) {
+      if (err instanceof SyntaxError || (err instanceof Error && err.message.includes('JSON'))) {
+        return c.json(
+          {
+            error: 'BAD_REQUEST',
+            message: 'Invalid JSON in request body',
+          },
+          400
+        );
+      }
+      throw err;
+    }
+  };
 }
 
 /**

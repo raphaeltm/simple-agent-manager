@@ -21,7 +21,7 @@ describe('workspace messages batch endpoint source contract', () => {
   });
 
   it('validates messages array is present and non-empty', () => {
-    expect(file).toContain("'messages array is required'");
+    expect(file).toContain('jsonValidator(MessageBatchSchema)');
     expect(file).toContain("'messages array must not be empty'");
   });
 

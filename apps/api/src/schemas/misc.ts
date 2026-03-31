@@ -64,19 +64,11 @@ export const ProjectDeploymentSetupSchema = v.object({
   gcpProjectId: v.string(),
 });
 
-// Client errors
-const ClientErrorEntrySchema = v.object({
-  message: v.string(),
-  stack: v.optional(v.string()),
-  source: v.optional(v.string()),
-  componentStack: v.optional(v.string()),
-  url: v.optional(v.string()),
-  userAgent: v.optional(v.string()),
-  timestamp: v.optional(v.string()),
-});
-
+// Client errors — entries are v.unknown() because the route handler does
+// per-entry validation (skipping malformed entries, processing extra fields
+// like level, context that vary per entry)
 export const ClientErrorBatchSchema = v.object({
-  errors: v.array(ClientErrorEntrySchema),
+  errors: v.array(v.unknown()),
 });
 
 // Node heartbeat
@@ -92,18 +84,9 @@ export const NodeHeartbeatSchema = v.object({
   metrics: v.optional(NodeMetricsSchema),
 });
 
-// Node error report
-const NodeErrorEntrySchema = v.object({
-  message: v.string(),
-  severity: v.optional(v.string()),
-  source: v.optional(v.string()),
-  stack: v.optional(v.string()),
-  timestamp: v.optional(v.string()),
-  workspaceId: v.optional(v.string()),
-});
-
+// Node error report — entries are v.unknown() for the same reason as client errors
 export const NodeErrorBatchSchema = v.object({
-  errors: v.array(NodeErrorEntrySchema),
+  errors: v.array(v.unknown()),
 });
 
 // Admin analytics forward
