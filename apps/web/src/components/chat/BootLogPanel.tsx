@@ -26,8 +26,8 @@ export const BootLogPanel: FC<BootLogPanelProps> = ({ logs, onClose }) => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
   // Auto-scroll to bottom when new logs arrive
@@ -43,7 +43,7 @@ export const BootLogPanel: FC<BootLogPanelProps> = ({ logs, onClose }) => {
       <div
         className="hidden md:block fixed inset-0 bg-black/20 z-40"
         onClick={onClose}
-        aria-hidden
+        aria-hidden="true"
       />
 
       {/* Panel */}
@@ -67,7 +67,7 @@ export const BootLogPanel: FC<BootLogPanelProps> = ({ logs, onClose }) => {
             type="button"
             onClick={onClose}
             aria-label="Close boot logs"
-            className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
           >
             <X size={16} />
           </button>

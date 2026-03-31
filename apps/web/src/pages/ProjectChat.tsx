@@ -1304,7 +1304,7 @@ function ProvisioningIndicator({ state, bootLogCount, onViewLogs }: { state: Pro
           <button
             type="button"
             onClick={onViewLogs}
-            className="sam-type-caption text-accent-primary hover:underline bg-transparent border-none cursor-pointer p-0 shrink-0"
+            className="sam-type-caption text-accent-primary hover:underline bg-transparent border-none cursor-pointer px-2 min-h-[44px] flex items-center shrink-0"
           >
             View Logs
           </button>

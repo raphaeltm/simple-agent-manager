@@ -6,16 +6,16 @@ function statusIcon(status: BootLogEntry['status']) {
   switch (status) {
     case 'completed':
       return (
-        <span className="text-success-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>&#10003;</span>
+        <span className="text-success-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }} aria-label="Step completed" role="img">&#10003;</span>
       );
     case 'failed':
       return (
-        <span className="text-danger-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>&#10007;</span>
+        <span className="text-danger-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }} aria-label="Step failed" role="img">&#10007;</span>
       );
     case 'started':
     default:
       return (
-        <span className="mr-2 inline-flex">
+        <span className="mr-2 inline-flex" aria-label="Step in progress" role="img">
           <Spinner size="sm" />
         </span>
       );
@@ -48,7 +48,7 @@ export const BootLogList: FC<BootLogListProps> = ({ logs, maxWidthClass = 'max-w
 
   return (
     <>
-      <div className={`flex flex-col gap-1.5 ${maxWidthClass} w-full`}>
+      <div className={`flex flex-col gap-1.5 ${maxWidthClass} w-full`} aria-live="polite" aria-atomic="false">
         {steps.map((entry, i) => (
           <div
             key={i}
@@ -59,8 +59,8 @@ export const BootLogList: FC<BootLogListProps> = ({ logs, maxWidthClass = 'max-w
                 entry.status === 'failed'
                   ? 'var(--sam-color-danger-fg)'
                   : entry.status === 'completed'
-                    ? 'var(--sam-color-tn-fg-muted)'
-                    : 'var(--sam-color-tn-fg)',
+                    ? 'var(--sam-color-fg-muted)'
+                    : undefined,
             }}
           >
             {statusIcon(entry.status)}
@@ -70,7 +70,7 @@ export const BootLogList: FC<BootLogListProps> = ({ logs, maxWidthClass = 'max-w
       </div>
       {lastStep?.status === 'failed' && lastStep.detail && (
         <p
-          className={`mt-3 mb-0 ${maxWidthClass} text-center break-words text-tn-fg-muted`}
+          className={`mt-3 mb-0 ${maxWidthClass} text-center break-words text-fg-muted`}
           style={{ fontSize: 'var(--sam-type-caption-size)' }}
         >
           {lastStep.detail}
