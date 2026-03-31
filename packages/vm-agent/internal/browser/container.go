@@ -6,14 +6,15 @@ import (
 )
 
 // buildNekoEnv generates environment variable flags for the Neko container.
-func buildNekoEnv(resolution string, maxFPS int, enableAudio, tcpFallback bool) []string {
+func buildNekoEnv(resolution string, maxFPS, nekoPort int, password, passwordAdmin string, enableAudio, tcpFallback bool) []string {
 	env := []string{
 		fmt.Sprintf("NEKO_SCREEN=%s@%d", resolution, maxFPS),
-		// Disable Neko's built-in authentication — SAM handles auth at the proxy layer.
-		"NEKO_PASSWORD=neko",
-		"NEKO_PASSWORD_ADMIN=admin",
-		// Bind to all interfaces so it's reachable from the Docker network.
-		"NEKO_BIND=:8080",
+		// Neko passwords — configurable via NEKO_PASSWORD / NEKO_PASSWORD_ADMIN env vars.
+		// SAM handles auth at the proxy layer; these are set for Neko's internal requirements.
+		fmt.Sprintf("NEKO_PASSWORD=%s", password),
+		fmt.Sprintf("NEKO_PASSWORD_ADMIN=%s", passwordAdmin),
+		// Bind to all interfaces on the configured port so it's reachable from the Docker network.
+		fmt.Sprintf("NEKO_BIND=:%d", nekoPort),
 	}
 
 	if !enableAudio {
@@ -29,12 +30,12 @@ func buildNekoEnv(resolution string, maxFPS int, enableAudio, tcpFallback bool) 
 }
 
 // buildDockerRunArgs constructs the full `docker run` argument list for the Neko container.
-func buildDockerRunArgs(containerName, image, networkName string, nekoPort int, envVars []string) []string {
+func buildDockerRunArgs(containerName, image, networkName, shmSize string, nekoPort int, envVars []string) []string {
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
 		"--network", networkName,
-		"--shm-size=2g", // Chrome requires shared memory for rendering
+		fmt.Sprintf("--shm-size=%s", shmSize), // Chrome requires shared memory for rendering
 		"--restart", "unless-stopped",
 	}
 

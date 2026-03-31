@@ -52,6 +52,12 @@ export function useBrowserSidecar(
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasStatusRef = useRef(false);
+
+  // Track whether we've ever received a status (avoids stale closure on `status`)
+  useEffect(() => {
+    hasStatusRef.current = status !== null;
+  }, [status]);
 
   // Determine which API flavor to use based on options
   const isWorkspaceMode = 'workspaceId' in options && !!options.workspaceId;
@@ -65,11 +71,11 @@ export function useBrowserSidecar(
       setError(null);
     } catch (err) {
       // Don't clear status on poll errors — keep showing last known state
-      if (!status) {
+      if (!hasStatusRef.current) {
         setError(err instanceof Error ? err.message : 'Failed to get browser status');
       }
     }
-  }, [isWorkspaceMode, options, status]);
+  }, [isWorkspaceMode, options]);
 
   const start = useCallback(
     async (opts?: {

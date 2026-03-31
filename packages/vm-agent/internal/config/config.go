@@ -197,14 +197,19 @@ type Config struct {
 	PortProxyCacheTTL    time.Duration // Bridge IP cache TTL (env: PORT_PROXY_CACHE_TTL, default: 30s)
 
 	// Neko browser sidecar settings - configurable per constitution principle XI
-	NekoImage            string        // Docker image for Neko browser (env: NEKO_IMAGE, default: ghcr.io/m1k1o/neko/google-chrome:latest)
-	NekoScreenResolution string        // Default screen resolution (env: NEKO_SCREEN_RESOLUTION, default: 1920x1080)
-	NekoMaxFPS           int           // Max WebRTC framerate (env: NEKO_MAX_FPS, default: 30)
-	NekoWebRTCPort       int           // HTTP port for Neko web client (env: NEKO_WEBRTC_PORT, default: 8080)
+	NekoImage             string        // Docker image for Neko browser (env: NEKO_IMAGE, default: ghcr.io/m1k1o/neko/google-chrome:latest)
+	NekoScreenResolution  string        // Default screen resolution (env: NEKO_SCREEN_RESOLUTION, default: 1920x1080)
+	NekoMaxFPS            int           // Max WebRTC framerate (env: NEKO_MAX_FPS, default: 30)
+	NekoWebRTCPort        int           // HTTP port for Neko web client (env: NEKO_WEBRTC_PORT, default: 8080)
 	NekoSocatPollInterval time.Duration // Interval for port scan / socat sync (env: NEKO_SOCAT_POLL_INTERVAL, default: 5s)
-	NekoMinRAMMB         int           // Minimum free RAM to start sidecar in MB (env: NEKO_MIN_RAM_MB, default: 2048)
-	NekoEnableAudio      bool          // Enable audio streaming (env: NEKO_ENABLE_AUDIO, default: true)
-	NekoTCPFallback      bool          // Use TCP fallback for WebRTC (env: NEKO_TCP_FALLBACK, default: true)
+	NekoMinRAMMB          int           // Minimum free RAM to start sidecar in MB (env: NEKO_MIN_RAM_MB, default: 2048)
+	NekoEnableAudio       bool          // Enable audio streaming (env: NEKO_ENABLE_AUDIO, default: true)
+	NekoTCPFallback       bool          // Use TCP fallback for WebRTC (env: NEKO_TCP_FALLBACK, default: true)
+	NekoPassword          string        // Neko viewer password (env: NEKO_PASSWORD, default: neko)
+	NekoPasswordAdmin     string        // Neko admin password (env: NEKO_PASSWORD_ADMIN, default: admin)
+	NekoShmSize           string        // Shared memory size for Chrome (env: NEKO_SHM_SIZE, default: 2g)
+	NekoBrowserStartTimeout time.Duration // Timeout for browser sidecar start (env: NEKO_BROWSER_START_TIMEOUT, default: 60s)
+	NekoBrowserStopTimeout  time.Duration // Timeout for browser sidecar stop (env: NEKO_BROWSER_STOP_TIMEOUT, default: 30s)
 }
 
 // Load reads configuration from environment variables.
@@ -386,14 +391,19 @@ func Load() (*Config, error) {
 		PortProxyCacheTTL:    getEnvDuration("PORT_PROXY_CACHE_TTL", 30*time.Second),
 
 		// Neko browser sidecar settings - configurable per constitution principle XI
-		NekoImage:             getEnv("NEKO_IMAGE", "ghcr.io/m1k1o/neko/google-chrome:latest"),
-		NekoScreenResolution:  getEnv("NEKO_SCREEN_RESOLUTION", "1920x1080"),
-		NekoMaxFPS:            getEnvInt("NEKO_MAX_FPS", 30),
-		NekoWebRTCPort:        getEnvInt("NEKO_WEBRTC_PORT", 8080),
-		NekoSocatPollInterval: getEnvDuration("NEKO_SOCAT_POLL_INTERVAL", 5*time.Second),
-		NekoMinRAMMB:          getEnvInt("NEKO_MIN_RAM_MB", 2048),
-		NekoEnableAudio:       getEnvBool("NEKO_ENABLE_AUDIO", true),
-		NekoTCPFallback:       getEnvBool("NEKO_TCP_FALLBACK", true),
+		NekoImage:               getEnv("NEKO_IMAGE", "ghcr.io/m1k1o/neko/google-chrome:latest"),
+		NekoScreenResolution:    getEnv("NEKO_SCREEN_RESOLUTION", "1920x1080"),
+		NekoMaxFPS:              getEnvInt("NEKO_MAX_FPS", 30),
+		NekoWebRTCPort:          getEnvInt("NEKO_WEBRTC_PORT", 8080),
+		NekoSocatPollInterval:   getEnvDuration("NEKO_SOCAT_POLL_INTERVAL", 5*time.Second),
+		NekoMinRAMMB:            getEnvInt("NEKO_MIN_RAM_MB", 2048),
+		NekoEnableAudio:         getEnvBool("NEKO_ENABLE_AUDIO", true),
+		NekoTCPFallback:         getEnvBool("NEKO_TCP_FALLBACK", true),
+		NekoPassword:            getEnv("NEKO_PASSWORD", "neko"),
+		NekoPasswordAdmin:       getEnv("NEKO_PASSWORD_ADMIN", "admin"),
+		NekoShmSize:             getEnv("NEKO_SHM_SIZE", "2g"),
+		NekoBrowserStartTimeout: getEnvDuration("NEKO_BROWSER_START_TIMEOUT", 60*time.Second),
+		NekoBrowserStopTimeout:  getEnvDuration("NEKO_BROWSER_STOP_TIMEOUT", 30*time.Second),
 	}
 
 	// Derive TLS enabled state from cert/key paths

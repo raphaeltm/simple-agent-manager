@@ -41,7 +41,7 @@ func TestBuildNekoEnv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := buildNekoEnv(tt.resolution, tt.maxFPS, tt.audio, tt.tcpFallback)
+			env := buildNekoEnv(tt.resolution, tt.maxFPS, 8080, "neko", "admin", tt.audio, tt.tcpFallback)
 
 			if len(env) != tt.wantLen {
 				t.Errorf("expected %d env vars, got %d: %v", tt.wantLen, len(env), env)
@@ -61,9 +61,12 @@ func TestBuildNekoEnv(t *testing.T) {
 				t.Errorf("NEKO_ICELITE=true present=%v, want=%v", hasICE, tt.wantICE)
 			}
 
-			// Always has password and bind
+			// Always has password, admin password, and bind
 			if !contains(env, "NEKO_PASSWORD=neko") {
 				t.Error("missing NEKO_PASSWORD")
+			}
+			if !contains(env, "NEKO_PASSWORD_ADMIN=admin") {
+				t.Error("missing NEKO_PASSWORD_ADMIN")
 			}
 			if !contains(env, "NEKO_BIND=:8080") {
 				t.Error("missing NEKO_BIND")
@@ -74,7 +77,7 @@ func TestBuildNekoEnv(t *testing.T) {
 
 func TestBuildDockerRunArgs(t *testing.T) {
 	env := []string{"NEKO_SCREEN=1920x1080@30", "NEKO_BIND=:8080"}
-	args := buildDockerRunArgs("neko-ws-123", "ghcr.io/m1k1o/neko/google-chrome:latest", "workspace-net", 8080, env)
+	args := buildDockerRunArgs("neko-ws-123", "ghcr.io/m1k1o/neko/google-chrome:latest", "workspace-net", "2g", 8080, env)
 
 	// Must start with "run -d"
 	if args[0] != "run" || args[1] != "-d" {

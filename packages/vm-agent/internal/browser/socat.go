@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// validHostnameRe matches safe Docker container hostnames (alphanumeric, hyphens, dots, underscores).
+var validHostnameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`)
 
 // socatPollLoop periodically syncs socat forwarders with DevContainer's detected ports.
 func (m *Manager) socatPollLoop(ctx context.Context, workspaceID string) {
@@ -145,6 +149,10 @@ func (m *Manager) SyncForwardersFromPorts(ctx context.Context, workspaceID strin
 
 // addForwarder starts a socat process inside the Neko container to forward a port.
 func (m *Manager) addForwarder(ctx context.Context, containerName string, port int, targetHost string) error {
+	// Validate targetHost to prevent shell injection — only safe container hostnames allowed.
+	if !validHostnameRe.MatchString(targetHost) {
+		return fmt.Errorf("invalid target host: %q", targetHost)
+	}
 	// Run socat in background inside the Neko container.
 	// socat listens on localhost:<port> and forwards to the DevContainer.
 	cmd := fmt.Sprintf("socat TCP-LISTEN:%d,fork,reuseaddr TCP:%s:%d &", port, targetHost, port)
@@ -157,7 +165,8 @@ func (m *Manager) addForwarder(ctx context.Context, containerName string, port i
 // removeForwarder kills the socat process for a specific port inside the Neko container.
 func (m *Manager) removeForwarder(ctx context.Context, containerName string, port int) error {
 	// Find and kill socat processes listening on this port.
-	cmd := fmt.Sprintf("pkill -f 'socat TCP-LISTEN:%d' || true", port)
+	// Anchor with comma after port to prevent matching port-prefix (e.g., port 80 matching 8080).
+	cmd := fmt.Sprintf("pkill -f 'socat TCP-LISTEN:%d,' || true", port)
 	return m.docker.RunSilent(ctx,
 		"exec", containerName,
 		"sh", "-c", cmd,
@@ -171,12 +180,13 @@ func (m *Manager) detectContainerPorts(ctx context.Context, containerName string
 		return nil, fmt.Errorf("failed to read /proc/net/tcp: %w", err)
 	}
 
-	return parseProcNetTCP(string(out)), nil
+	return parseProcNetTCP(string(out), m.cfg.PortScanEphemeralMin), nil
 }
 
 // parseProcNetTCP parses /proc/net/tcp output to extract listening port numbers.
 // Lines with state 0A (LISTEN) have their local address port extracted.
-func parseProcNetTCP(data string) []int {
+// Ports >= ephemeralMin are excluded (ephemeral/dynamic range).
+func parseProcNetTCP(data string, ephemeralMin int) []int {
 	var ports []int
 	seen := make(map[int]bool)
 
@@ -206,7 +216,7 @@ func parseProcNetTCP(data string) []int {
 		port := int(port64)
 
 		// Skip well-known system ports and ephemeral range
-		if port <= 0 || port >= 32768 {
+		if port <= 0 || port >= ephemeralMin {
 			continue
 		}
 

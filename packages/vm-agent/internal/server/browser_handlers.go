@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/workspace/vm-agent/internal/browser"
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // handleStartBrowser starts a Neko browser sidecar for a workspace.
@@ -52,7 +52,7 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.NekoBrowserStartTimeout)
 	defer cancel()
 
 	netInfo, err := browser.DiscoverContainerNetwork(ctx, s.browserManager.DockerExec(), containerID)
@@ -123,7 +123,7 @@ func (s *Server) handleStopBrowser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.NekoBrowserStopTimeout)
 	defer cancel()
 
 	if err := s.browserManager.Stop(ctx, workspaceID); err != nil {
@@ -192,7 +192,9 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 		resp["containerName"] = state.ContainerName
 	}
 	if state.Error != "" {
-		resp["error"] = state.Error
+		// Sanitize — do not leak Docker internals to the client
+		resp["error"] = "browser sidecar failed to start"
+		slog.Debug("Browser sidecar error detail", "workspace", workspaceID, "error", state.Error)
 	}
 	if state.NekoPort > 0 && state.Status == browser.StatusRunning {
 		resp["nekoPort"] = state.NekoPort
@@ -210,40 +212,8 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 }
 
 // deriveBaseDomainFromURL extracts the base domain from a control plane URL.
-func deriveBaseDomainFromURL(url string) string {
-	// Reuse the config package helper via the pattern it uses
-	return configDeriveBaseDomain(url)
-}
-
-// configDeriveBaseDomain is a local wrapper to avoid import cycles.
-// It mirrors config.DeriveBaseDomain.
-func configDeriveBaseDomain(controlPlaneURL string) string {
-	host := controlPlaneURL
-	for _, prefix := range []string{"https://", "http://"} {
-		if len(host) > len(prefix) && host[:len(prefix)] == prefix {
-			host = host[len(prefix):]
-			break
-		}
-	}
-	if idx := indexOf(host, '/'); idx != -1 {
-		host = host[:idx]
-	}
-	if idx := indexOf(host, ':'); idx != -1 {
-		host = host[:idx]
-	}
-	if len(host) > 4 && host[:4] == "api." {
-		return host[4:]
-	}
-	return host
-}
-
-func indexOf(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
+func deriveBaseDomainFromURL(controlPlaneURL string) string {
+	return config.DeriveBaseDomain(controlPlaneURL)
 }
 
 func itoa(n int) string {

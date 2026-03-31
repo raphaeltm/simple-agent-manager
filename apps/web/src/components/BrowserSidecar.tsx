@@ -1,4 +1,4 @@
-import { type FC, useState, useCallback } from 'react';
+import { type FC, useState, useCallback, useEffect } from 'react';
 import { Globe, Loader2, X, Monitor, AlertCircle } from 'lucide-react';
 import { useBrowserSidecar } from '../hooks/useBrowserSidecar';
 
@@ -52,6 +52,13 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
   const sidecarStatus = status?.status ?? 'off';
   const isRunning = sidecarStatus === 'running';
   const isStarting = sidecarStatus === 'starting';
+
+  // Reset viewer when sidecar transitions to off or error
+  useEffect(() => {
+    if (sidecarStatus === 'off' || sidecarStatus === 'error') {
+      setShowViewer(false);
+    }
+  }, [sidecarStatus]);
 
   return (
     <div className="browser-sidecar">
@@ -117,6 +124,7 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
                 color: 'var(--sam-text-danger, #dc2626)',
               }}
               title="Stop remote browser"
+              aria-label="Stop remote browser"
             >
               <X size={14} />
             </button>
@@ -145,7 +153,7 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
       </div>
 
       {error && (
-        <div style={{ color: 'var(--sam-text-danger, #dc2626)', fontSize: '12px', marginBottom: '8px' }}>
+        <div role="alert" style={{ color: 'var(--sam-text-danger, #dc2626)', fontSize: '12px', marginBottom: '8px' }}>
           {error}
         </div>
       )}
@@ -172,7 +180,7 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
               border: 'none',
             }}
             allow="autoplay; clipboard-write; clipboard-read"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            sandbox="allow-scripts allow-forms allow-popups"
           />
         </div>
       )}

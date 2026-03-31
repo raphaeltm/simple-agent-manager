@@ -13,7 +13,7 @@ const testProcNetTCP = `  sl  local_address rem_address   st tx_queue rx_queue t
    4: 00000000:8000 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 28459 1 0000000000000000 100 0 0 10 0`
 
 func TestParseProcNetTCP(t *testing.T) {
-	ports := parseProcNetTCP(testProcNetTCP)
+	ports := parseProcNetTCP(testProcNetTCP, 32768)
 
 	// Should find listening ports: 3000 (0x0BB8), 8080 (0x1F90), 22 (0x0016)
 	// Should exclude: ESTABLISHED connection (state 01), port 32768 (0x8000, >= ephemeral threshold)
@@ -44,14 +44,14 @@ func TestParseProcNetTCP(t *testing.T) {
 }
 
 func TestParseProcNetTCP_Empty(t *testing.T) {
-	ports := parseProcNetTCP("")
+	ports := parseProcNetTCP("", 32768)
 	if len(ports) != 0 {
 		t.Errorf("expected 0 ports for empty input, got %d", len(ports))
 	}
 }
 
 func TestParseProcNetTCP_HeaderOnly(t *testing.T) {
-	ports := parseProcNetTCP("  sl  local_address rem_address   st tx_queue rx_queue\n")
+	ports := parseProcNetTCP("  sl  local_address rem_address   st tx_queue rx_queue\n", 32768)
 	if len(ports) != 0 {
 		t.Errorf("expected 0 ports for header-only input, got %d", len(ports))
 	}
@@ -62,7 +62,7 @@ func TestParseProcNetTCP_NoDuplicates(t *testing.T) {
    0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 27894 1 0000000000000000 100 0 0 10 0
    1: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 27895 1 0000000000000000 100 0 0 10 0`
 
-	ports := parseProcNetTCP(data)
+	ports := parseProcNetTCP(data, 32768)
 	if len(ports) != 1 {
 		t.Errorf("expected 1 unique port, got %d: %v", len(ports), ports)
 	}

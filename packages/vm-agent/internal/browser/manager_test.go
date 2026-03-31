@@ -67,14 +67,20 @@ func (m *mockDocker) getCalls() []string {
 
 func testConfig() *config.Config {
 	return &config.Config{
-		NekoImage:             "ghcr.io/m1k1o/neko/google-chrome:latest",
-		NekoScreenResolution:  "1920x1080",
-		NekoMaxFPS:            30,
-		NekoWebRTCPort:        8080,
-		NekoSocatPollInterval: 5 * time.Second,
-		NekoMinRAMMB:          2048,
-		NekoEnableAudio:       true,
-		NekoTCPFallback:       true,
+		NekoImage:               "ghcr.io/m1k1o/neko/google-chrome:latest",
+		NekoScreenResolution:    "1920x1080",
+		NekoMaxFPS:              30,
+		NekoWebRTCPort:          8080,
+		NekoSocatPollInterval:   5 * time.Second,
+		NekoMinRAMMB:            2048,
+		NekoEnableAudio:         true,
+		NekoTCPFallback:         true,
+		NekoPassword:            "neko",
+		NekoPasswordAdmin:       "admin",
+		NekoShmSize:             "2g",
+		NekoBrowserStartTimeout: 60 * time.Second,
+		NekoBrowserStopTimeout:  30 * time.Second,
+		PortScanEphemeralMin:    32768,
 	}
 }
 

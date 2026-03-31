@@ -108,10 +108,10 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		enableAudio = *opts.EnableAudio
 	}
 
-	env := buildNekoEnv(resolution, m.cfg.NekoMaxFPS, enableAudio, m.cfg.NekoTCPFallback)
+	env := buildNekoEnv(resolution, m.cfg.NekoMaxFPS, m.cfg.NekoWebRTCPort, m.cfg.NekoPassword, m.cfg.NekoPasswordAdmin, enableAudio, m.cfg.NekoTCPFallback)
 
 	// Create and start the container
-	args := buildDockerRunArgs(containerName, m.cfg.NekoImage, networkName, m.cfg.NekoWebRTCPort, env)
+	args := buildDockerRunArgs(containerName, m.cfg.NekoImage, networkName, m.cfg.NekoShmSize, m.cfg.NekoWebRTCPort, env)
 	if err := m.docker.RunSilent(ctx, args...); err != nil {
 		state.Status = StatusError
 		state.Error = fmt.Sprintf("failed to create Neko container: %v", err)
