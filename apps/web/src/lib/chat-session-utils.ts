@@ -25,11 +25,31 @@ export const STATE_COLORS: Record<SessionState, string> = {
   terminated: 'var(--sam-color-fg-muted)',
 };
 
+/**
+ * Badge background colors for each session state.
+ * References correct CSS variable names from packages/ui/src/tokens/theme.css.
+ * Using --sam-color-bg-surface-hover (not --sam-color-surface-hover) for terminated.
+ */
+export const STATE_BADGE_BG: Record<SessionState, string> = {
+  active: 'var(--sam-color-success-tint)',
+  idle: 'var(--sam-color-warning-tint)',
+  terminated: 'var(--sam-color-bg-surface-hover)',
+};
+
 export const STATE_LABELS: Record<SessionState, string> = {
   active: 'Active',
   idle: 'Idle',
   terminated: 'Stopped',
 };
+
+/**
+ * Whether a session should appear on the Chats page.
+ * Excludes stopped/terminated sessions so that the "active chats" framing is accurate.
+ * Callers should also apply isStaleSession() to remove old inactive sessions.
+ */
+export function isActiveSession(session: ChatSessionResponse): boolean {
+  return session.status !== 'stopped';
+}
 
 /** Returns the most relevant activity timestamp for a session. */
 export function getLastActivity(session: ChatSessionResponse): number {

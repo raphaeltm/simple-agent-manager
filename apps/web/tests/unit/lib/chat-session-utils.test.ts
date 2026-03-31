@@ -2,11 +2,13 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   getSessionState,
   isStaleSession,
+  isActiveSession,
   getLastActivity,
   formatRelativeTime,
   STALE_SESSION_THRESHOLD_MS,
   STATE_COLORS,
   STATE_LABELS,
+  STATE_BADGE_BG,
 } from '../../../src/lib/chat-session-utils';
 import type { ChatSessionResponse } from '../../../src/lib/api';
 
@@ -122,7 +124,21 @@ describe('formatRelativeTime', () => {
   });
 });
 
-describe('STATE_COLORS and STATE_LABELS', () => {
+describe('isActiveSession', () => {
+  it('returns true for active sessions', () => {
+    expect(isActiveSession(makeSession({ status: 'active' }))).toBe(true);
+  });
+
+  it('returns false for stopped sessions', () => {
+    expect(isActiveSession(makeSession({ status: 'stopped' }))).toBe(false);
+  });
+
+  it('returns true for non-stopped sessions with unknown status', () => {
+    expect(isActiveSession(makeSession({ status: 'pending' }))).toBe(true);
+  });
+});
+
+describe('STATE_COLORS, STATE_LABELS, and STATE_BADGE_BG', () => {
   it('maps all session states', () => {
     expect(STATE_COLORS).toHaveProperty('active');
     expect(STATE_COLORS).toHaveProperty('idle');
@@ -130,5 +146,8 @@ describe('STATE_COLORS and STATE_LABELS', () => {
     expect(STATE_LABELS.active).toBe('Active');
     expect(STATE_LABELS.idle).toBe('Idle');
     expect(STATE_LABELS.terminated).toBe('Stopped');
+    expect(STATE_BADGE_BG).toHaveProperty('active');
+    expect(STATE_BADGE_BG).toHaveProperty('idle');
+    expect(STATE_BADGE_BG).toHaveProperty('terminated');
   });
 });

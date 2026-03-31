@@ -158,4 +158,20 @@ describe('Chats page', () => {
     expect(screen.getByText('Idle Session')).toBeInTheDocument();
     expect(screen.getByText('Idle')).toBeInTheDocument();
   });
+
+  it('filters out stopped sessions', () => {
+    mocks.useAllChatSessions.mockReturnValue({
+      sessions: [
+        makeSession({ id: 's-active', topic: 'Active Chat', status: 'active' }),
+        makeSession({ id: 's-stopped', topic: 'Stopped Chat', status: 'stopped' }),
+      ],
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    renderChats();
+
+    expect(screen.getByText('Active Chat')).toBeInTheDocument();
+    expect(screen.queryByText('Stopped Chat')).not.toBeInTheDocument();
+  });
 });
