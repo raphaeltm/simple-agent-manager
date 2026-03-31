@@ -1697,6 +1697,7 @@ function ConnectionBanner({ state, onRetry }: { state: ChatConnectionState; onRe
 
   return (
     <div
+      role="alert"
       className="flex items-center gap-2 px-4 py-1 border-b border-border-default text-xs"
       style={{
         backgroundColor: isRecoverable ? 'var(--sam-color-danger-tint)' : 'var(--sam-color-warning-tint, var(--sam-color-info-tint))',
