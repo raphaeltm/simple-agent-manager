@@ -70,13 +70,21 @@ func (s *Server) requireWorkspaceRequestAuth(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Try Authorization: Bearer header first, then fall back to ?token= query param
+	// Try Authorization: Bearer header first, then fall back to ?token= query param.
+	// The query param fallback exists because browser WebSocket upgrade requests cannot
+	// set custom headers. Server-to-server calls (API proxy) MUST use Bearer header.
 	token := ""
 	if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
 		token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 	}
 	if token == "" {
 		token = strings.TrimSpace(r.URL.Query().Get("token"))
+		if token != "" {
+			slog.Debug("Auth token from query parameter (prefer Bearer header for non-WebSocket calls)",
+				"workspace", workspaceID,
+				"path", r.URL.Path,
+			)
+		}
 	}
 	if token == "" {
 		writeError(w, http.StatusUnauthorized, "missing token")

@@ -2146,7 +2146,6 @@ export async function revokeSmokeTestToken(id: string): Promise<void> {
 
 export interface BrowserSidecarStatusResponse {
   status: 'off' | 'starting' | 'running' | 'error';
-  nekoPort?: number;
   url?: string;
   containerName?: string;
   error?: string;

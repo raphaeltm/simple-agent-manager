@@ -218,8 +218,8 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 		slog.Debug("Browser sidecar error detail", "workspace", workspaceID, "error", state.Error)
 	}
 	if state.NekoPort > 0 && state.Status == browser.StatusRunning {
-		resp["nekoPort"] = state.NekoPort
-		// Build the proxy URL using SAM's existing port proxy pattern.
+		// Do NOT expose nekoPort in the response — it leaks internal container topology
+		// and enables direct container bypass. The proxy URL is sufficient for the UI.
 		baseDomain := deriveBaseDomainFromURL(controlPlaneURL)
 		if baseDomain != "" {
 			resp["url"] = "https://ws-" + workspaceID + "--" + itoa(state.NekoPort) + "." + baseDomain
