@@ -65,6 +65,19 @@ describe('useWorkspacePorts', () => {
     expect(result.current.ports).toEqual([]);
   });
 
+  it('returns empty ports when workspaceId is undefined', async () => {
+    const { result } = renderHook(() =>
+      useWorkspacePorts('https://ws.example.com', undefined, 'tok-1', true)
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockListWorkspacePorts).not.toHaveBeenCalled();
+    expect(result.current.ports).toEqual([]);
+  });
+
   it('returns empty ports when not running', async () => {
     const { result } = renderHook(() =>
       useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', false)
@@ -227,5 +240,75 @@ describe('useWorkspacePorts', () => {
       await Promise.resolve();
     });
     expect(mockListWorkspacePorts).toHaveBeenCalledTimes(3);
+  });
+
+  it('sets loading to true during fetch and false after', async () => {
+    let resolvePromise!: (value: typeof PORT_A[]) => void;
+    mockListWorkspacePorts.mockImplementationOnce(
+      () => new Promise((resolve) => { resolvePromise = resolve; })
+    );
+
+    const { result } = renderHook(() =>
+      useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true)
+    );
+
+    // Loading should be true while fetch is in-flight
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.loading).toBe(true);
+
+    // Resolve the fetch
+    await act(async () => {
+      resolvePromise([PORT_A]);
+      await Promise.resolve();
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.ports).toEqual([PORT_A]);
+  });
+
+  it('confirms counter reset to zero by verifying 3 post-reset failures trigger clear', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Initial success
+    mockListWorkspacePorts.mockResolvedValueOnce([PORT_A]);
+
+    const { result } = renderHook(() =>
+      useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true)
+    );
+
+    await act(async () => { await Promise.resolve(); });
+
+    // 2 failures
+    for (let i = 0; i < 2; i++) {
+      mockListWorkspacePorts.mockRejectedValueOnce(new Error('fail'));
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+    expect(result.current.ports).toEqual([PORT_A]); // preserved
+
+    // Success — should reset counter to 0
+    mockListWorkspacePorts.mockResolvedValueOnce([PORT_B]);
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+    expect(result.current.ports).toEqual([PORT_B]);
+
+    // Now 3 consecutive failures from zero should trigger clear
+    for (let i = 0; i < 3; i++) {
+      mockListWorkspacePorts.mockRejectedValueOnce(new Error('fail'));
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+    expect(result.current.ports).toEqual([]); // cleared after 3 from zero
+
+    warnSpy.mockRestore();
   });
 });
