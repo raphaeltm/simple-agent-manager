@@ -11,6 +11,7 @@ import { requireOwnedProject } from '../middleware/project-auth';
 import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
 import * as projectDataService from '../services/project-data';
+import { jsonValidator, SaveCachedCommandsSchema } from '../schemas';
 
 /** Default limits for cached commands. Override via env vars. */
 const DEFAULT_MAX_CACHED_COMMANDS = 200;
@@ -54,7 +55,7 @@ cachedCommandRoutes.get('/', async (c) => {
  * POST /api/projects/:projectId/cached-commands
  * Persist slash commands discovered during an ACP session.
  */
-cachedCommandRoutes.post('/', async (c) => {
+cachedCommandRoutes.post('/', jsonValidator(SaveCachedCommandsSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('projectId is required');
@@ -62,17 +63,7 @@ cachedCommandRoutes.post('/', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   await requireOwnedProject(db, projectId, userId);
 
-  const body = await c.req.json<{
-    agentType: string;
-    commands: Array<{ name: string; description: string }>;
-  }>();
-
-  if (!body.agentType || typeof body.agentType !== 'string') {
-    throw errors.badRequest('agentType is required');
-  }
-  if (!Array.isArray(body.commands)) {
-    throw errors.badRequest('commands must be an array');
-  }
+  const body = c.req.valid('json');
 
   // Configurable limits (Constitution Principle XI)
   const maxAgentTypeLen = parseIntSafe(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH, DEFAULT_MAX_AGENT_TYPE_LENGTH);

@@ -29,6 +29,7 @@ import {
   DEFAULT_GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
+import { jsonValidator, GcpOAuthHandleSchema, ProjectDeploymentSetupSchema } from '../schemas';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -128,16 +129,14 @@ projectDeploymentRoutes.post(
   '/:id/deployment/gcp/projects',
   requireAuth(),
   requireApproved(),
+  jsonValidator(GcpOAuthHandleSchema),
   async (c) => {
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
 
-    const body = await c.req.json<{ oauthHandle: string }>();
-    if (!body.oauthHandle) {
-      throw errors.badRequest('oauthHandle is required');
-    }
+    const body = c.req.valid('json');
 
     const oauthToken = await resolveDeployOAuthToken(body.oauthHandle, c.env.KV);
     const timeoutMs = c.env.GCP_API_TIMEOUT_MS
@@ -161,19 +160,14 @@ projectDeploymentRoutes.post(
   '/:id/deployment/gcp/setup',
   requireAuth(),
   requireApproved(),
+  jsonValidator(ProjectDeploymentSetupSchema),
   async (c) => {
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
 
-    const body = await c.req.json<{
-      oauthHandle: string;
-      gcpProjectId: string;
-    }>();
-
-    if (!body.oauthHandle) throw errors.badRequest('oauthHandle is required');
-    if (!body.gcpProjectId) throw errors.badRequest('gcpProjectId is required');
+    const body = c.req.valid('json');
 
     if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
       throw errors.badRequest('Google OAuth is not configured on this SAM instance');

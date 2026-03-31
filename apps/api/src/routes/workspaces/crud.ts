@@ -6,11 +6,8 @@ import type { Env } from '../../index';
 import { getAuth, getUserId, requireAuth, requireApproved } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import * as schema from '../../db/schema';
-import type {
-  CreateWorkspaceRequest,
-  UpdateWorkspaceRequest,
-} from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION } from '@simple-agent-manager/shared';
+import { jsonValidator, UpdateWorkspaceSchema, CreateWorkspaceSchema } from '../../schemas';
 import { getRuntimeLimits } from '../../services/limits';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
@@ -78,11 +75,11 @@ crudRoutes.get('/:id', requireAuth(), requireApproved(), async (c) => {
   return c.json(response);
 });
 
-crudRoutes.patch('/:id', requireAuth(), requireApproved(), async (c) => {
+crudRoutes.patch('/:id', requireAuth(), requireApproved(), jsonValidator(UpdateWorkspaceSchema), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<UpdateWorkspaceRequest>();
+  const body = c.req.valid('json');
 
   if (!body.displayName?.trim()) {
     throw errors.badRequest('displayName is required');
@@ -111,11 +108,11 @@ crudRoutes.patch('/:id', requireAuth(), requireApproved(), async (c) => {
   return c.json(toWorkspaceResponse(updated, c.env.BASE_DOMAIN));
 });
 
-crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
+crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorkspaceSchema), async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<CreateWorkspaceRequest>();
+  const body = c.req.valid('json');
   const now = new Date().toISOString();
   const limits = getRuntimeLimits(c.env);
   const projectId = body.projectId?.trim();

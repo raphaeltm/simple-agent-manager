@@ -3,8 +3,8 @@ import type { Env } from '../index';
 import { getAuth, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { synthesizeSpeech, getAudioFromR2, getTTSConfig } from '../services/tts';
-import type { TTSMode } from '../services/tts';
 import { log } from '../lib/logger';
+import { parseOptionalBody, TtsRequestSchema } from '../schemas';
 
 const ttsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -32,8 +32,8 @@ ttsRoutes.post('/synthesize', async (c) => {
     throw errors.badRequest('Text-to-speech is disabled');
   }
 
-  const body = await c.req.json<{ text?: string; storageId?: string; mode?: TTSMode }>().catch(() => null);
-  if (!body?.text || !body?.storageId) {
+  const body = await parseOptionalBody(c.req.raw, TtsRequestSchema, {});
+  if (!body.text || !body.storageId) {
     throw errors.badRequest('Missing required fields: text, storageId');
   }
 
@@ -46,11 +46,6 @@ ttsRoutes.post('/synthesize', async (c) => {
 
   if (text.length === 0) {
     throw errors.badRequest('Text cannot be empty');
-  }
-
-  // Validate mode if provided
-  if (mode !== undefined && mode !== 'full' && mode !== 'summary') {
-    throw errors.badRequest('Invalid mode: must be "full" or "summary"');
   }
 
   try {

@@ -2,16 +2,17 @@ import { Hono } from 'hono';
 import type { Env } from '../index';
 import { requireAuth, requireApproved, requireSuperadmin, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import {
-  validateComplianceRunCreate,
-  validateComponentDefinitionCreate,
-  validateComponentDefinitionUpdate,
-  validateExceptionRequestCreate,
-  validateMigrationWorkItemCreate,
-  validateMigrationWorkItemPatch,
-  validateStandardUpsert,
-} from './ui-governance.schemas';
 import { createUiGovernanceService } from '../services/ui-governance';
+import {
+  jsonValidator,
+  UIStandardUpsertSchema,
+  ComponentDefinitionCreateSchema,
+  ComponentDefinitionUpdateSchema,
+  ComplianceRunCreateSchema,
+  ExceptionRequestCreateSchema,
+  MigrationWorkItemCreateSchema,
+  MigrationWorkItemPatchSchema,
+} from '../schemas';
 
 const uiGovernanceRoutes = new Hono<{ Bindings: Env }>();
 
@@ -69,24 +70,24 @@ uiGovernanceRoutes.get('/agent-instructions/active', async (c) => {
 // --- Write endpoints: superadmin only ---
 // See AUTHZ-VULN-07 through AUTHZ-VULN-11 in Shannon security assessment.
 
-uiGovernanceRoutes.put('/standards/:version', requireSuperadmin(), async (c) => {
+uiGovernanceRoutes.put('/standards/:version', requireSuperadmin(), jsonValidator(UIStandardUpsertSchema), async (c) => {
   const version = c.req.param('version');
-  const payload = validateStandardUpsert(await c.req.json());
+  const payload = c.req.valid('json');
   const service = createUiGovernanceService(c.env.DATABASE);
   const standard = await service.upsertStandardVersion(version, payload);
   return c.json(standard);
 });
 
-uiGovernanceRoutes.post('/components', requireSuperadmin(), async (c) => {
-  const payload = validateComponentDefinitionCreate(await c.req.json());
+uiGovernanceRoutes.post('/components', requireSuperadmin(), jsonValidator(ComponentDefinitionCreateSchema), async (c) => {
+  const payload = c.req.valid('json');
   const service = createUiGovernanceService(c.env.DATABASE);
   const component = await service.createComponentDefinition(payload);
   return c.json(component, 201);
 });
 
-uiGovernanceRoutes.put('/components/:componentId', requireSuperadmin(), async (c) => {
+uiGovernanceRoutes.put('/components/:componentId', requireSuperadmin(), jsonValidator(ComponentDefinitionUpdateSchema), async (c) => {
   const componentId = c.req.param('componentId');
-  const payload = validateComponentDefinitionUpdate(await c.req.json());
+  const payload = c.req.valid('json');
   const service = createUiGovernanceService(c.env.DATABASE);
   const updated = await service.updateComponentDefinition(componentId, payload);
   if (!updated) {
@@ -95,37 +96,33 @@ uiGovernanceRoutes.put('/components/:componentId', requireSuperadmin(), async (c
   return c.json(updated);
 });
 
-uiGovernanceRoutes.post('/compliance-runs', requireSuperadmin(), async (c) => {
-  const payload = validateComplianceRunCreate(await c.req.json());
+uiGovernanceRoutes.post('/compliance-runs', requireSuperadmin(), jsonValidator(ComplianceRunCreateSchema), async (c) => {
+  const payload = c.req.valid('json');
   const service = createUiGovernanceService(c.env.DATABASE);
   const run = await service.createComplianceRun(payload);
   return c.json(run, 201);
 });
 
-uiGovernanceRoutes.post('/exceptions', requireSuperadmin(), async (c) => {
+uiGovernanceRoutes.post('/exceptions', requireSuperadmin(), jsonValidator(ExceptionRequestCreateSchema), async (c) => {
   // Bind requestedBy to the authenticated user — never trust client-supplied identity.
   // See AUTHZ-VULN-08 in Shannon security assessment.
   const userId = getUserId(c);
-  const rawPayload = await c.req.json();
-  const payload = validateExceptionRequestCreate({
-    ...rawPayload,
-    requestedBy: userId,
-  });
+  const payload = { ...c.req.valid('json'), requestedBy: userId };
   const service = createUiGovernanceService(c.env.DATABASE);
   const exception = await service.createExceptionRequest(payload);
   return c.json(exception, 201);
 });
 
-uiGovernanceRoutes.post('/migration-items', requireSuperadmin(), async (c) => {
-  const payload = validateMigrationWorkItemCreate(await c.req.json());
+uiGovernanceRoutes.post('/migration-items', requireSuperadmin(), jsonValidator(MigrationWorkItemCreateSchema), async (c) => {
+  const payload = c.req.valid('json');
   const service = createUiGovernanceService(c.env.DATABASE);
   const item = await service.createMigrationWorkItem(payload);
   return c.json(item, 201);
 });
 
-uiGovernanceRoutes.patch('/migration-items/:itemId', requireSuperadmin(), async (c) => {
+uiGovernanceRoutes.patch('/migration-items/:itemId', requireSuperadmin(), jsonValidator(MigrationWorkItemPatchSchema), async (c) => {
   const itemId = c.req.param('itemId');
-  const payload = validateMigrationWorkItemPatch(await c.req.json());
+  const payload = c.req.valid('json');
   const service = createUiGovernanceService(c.env.DATABASE);
   const item = await service.updateMigrationWorkItem(itemId, payload);
   if (!item) {

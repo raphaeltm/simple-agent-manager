@@ -14,6 +14,7 @@ import * as schema from '../db/schema';
 import { DEFAULT_GCP_API_TIMEOUT_MS } from '@simple-agent-manager/shared';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { log } from '../lib/logger';
+import { jsonValidator, GcpOAuthHandleSchema, GcpSetupSchema } from '../schemas';
 
 const gcpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -36,11 +37,8 @@ async function resolveOAuthToken(handle: string, kv: KVNamespace): Promise<strin
  * POST /api/gcp/projects - List user's GCP projects
  * Accepts the OAuth handle in the request body to avoid leaking it in URL query parameters.
  */
-gcpRoutes.post('/projects', async (c) => {
-  const body = await c.req.json<{ oauthHandle: string }>();
-  if (!body.oauthHandle) {
-    throw errors.badRequest('oauthHandle is required');
-  }
+gcpRoutes.post('/projects', jsonValidator(GcpOAuthHandleSchema), async (c) => {
+  const body = c.req.valid('json');
   const oauthToken = await resolveOAuthToken(body.oauthHandle, c.env.KV);
 
   const timeoutMs = c.env.GCP_API_TIMEOUT_MS
@@ -60,17 +58,9 @@ gcpRoutes.post('/projects', async (c) => {
  * Creates WIF pool, OIDC provider, service account, and IAM bindings.
  * Stores the resulting credential metadata (encrypted) for future use.
  */
-gcpRoutes.post('/setup', async (c) => {
+gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
   const userId = getUserId(c);
-  const body = await c.req.json<{
-    oauthHandle: string;
-    gcpProjectId: string;
-    defaultZone: string;
-  }>();
-
-  if (!body.oauthHandle) throw errors.badRequest('oauthHandle is required');
-  if (!body.gcpProjectId) throw errors.badRequest('gcpProjectId is required');
-  if (!body.defaultZone) throw errors.badRequest('defaultZone is required');
+  const body = c.req.valid('json');
 
   // Validate Google OAuth is configured
   if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {

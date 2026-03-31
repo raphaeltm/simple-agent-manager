@@ -52,6 +52,22 @@ export const BootLogEntrySchema = v.object({
 export const AgentCredentialSyncSchema = v.object({
   credential: v.string(),
   credentialKind: v.optional(CredentialKindSchema),
+  agentType: v.optional(v.string()),
+});
+
+// Message batch schema (VM agent persistence)
+const MessageEntrySchema = v.object({
+  messageId: v.string(),
+  sessionId: v.string(),
+  role: v.string(),
+  content: v.string(),
+  toolMetadata: v.optional(v.nullable(v.string())),
+  timestamp: v.string(),
+  sequence: v.optional(v.number()),
+});
+
+export const MessageBatchSchema = v.object({
+  messages: v.array(MessageEntrySchema),
 });
 
 // Workspace lifecycle schemas

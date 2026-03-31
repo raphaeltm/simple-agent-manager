@@ -45,6 +45,7 @@ export {
   CredentialInjectionSchema,
   BootLogEntrySchema,
   AgentCredentialSyncSchema,
+  MessageBatchSchema,
   WorkspaceStatusUpdateSchema,
   WorkspaceErrorSchema,
 } from './workspaces';
@@ -94,7 +95,7 @@ export {
   ClientErrorBatchSchema,
   NodeHeartbeatSchema,
   NodeErrorBatchSchema,
-  AdminAnalyticsQuerySchema,
+  AdminLogQuerySchema,
   UIStandardUpsertSchema,
   ComponentDefinitionCreateSchema,
   ComponentDefinitionUpdateSchema,

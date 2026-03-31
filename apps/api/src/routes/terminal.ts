@@ -8,6 +8,7 @@ import { signTerminalToken } from '../services/jwt';
 import * as schema from '../db/schema';
 import * as projectDataService from '../services/project-data';
 import type { TerminalTokenResponse } from '@simple-agent-manager/shared';
+import { jsonValidator, TerminalRequestSchema } from '../schemas';
 
 const terminalRoutes = new Hono<{ Bindings: Env }>();
 
@@ -18,15 +19,11 @@ terminalRoutes.use('*', requireAuth(), requireApproved());
  * POST /api/terminal/token - Generate a terminal access token for a workspace.
  * The token can be used to authenticate WebSocket connections to the VM agent.
  */
-terminalRoutes.post('/token', async (c) => {
+terminalRoutes.post('/token', jsonValidator(TerminalRequestSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const body = await c.req.json<{ workspaceId: string }>();
-
-  if (!body.workspaceId) {
-    throw errors.badRequest('workspaceId is required');
-  }
+  const body = c.req.valid('json');
 
   // Verify the workspace exists and belongs to the user
   const workspace = await db
@@ -82,14 +79,11 @@ terminalRoutes.post('/token', async (c) => {
  * POST /api/terminal/activity - Report terminal activity for idle detection.
  * Called periodically by the frontend while a terminal session is active.
  */
-terminalRoutes.post('/activity', async (c) => {
+terminalRoutes.post('/activity', jsonValidator(TerminalRequestSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const body = await c.req.json<{ workspaceId: string }>();
-  if (!body.workspaceId) {
-    throw errors.badRequest('workspaceId is required');
-  }
+  const body = c.req.valid('json');
 
   const workspace = await db
     .select({

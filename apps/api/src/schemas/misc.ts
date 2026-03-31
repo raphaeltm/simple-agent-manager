@@ -107,14 +107,16 @@ export const NodeErrorBatchSchema = v.object({
 });
 
 // Admin analytics forward
-export const AdminAnalyticsQuerySchema = v.object({
+export const AdminLogQuerySchema = v.object({
   timeRange: v.object({
     start: v.string(),
     end: v.string(),
   }),
-  dataset: v.optional(v.string()),
-  sql: v.optional(v.string()),
+  levels: v.optional(v.array(v.string())),
+  search: v.optional(v.string()),
   limit: v.optional(v.number()),
+  cursor: v.optional(v.string()),
+  queryId: v.optional(v.string()),
 });
 
 // UI Governance schemas (replacing manual validators)

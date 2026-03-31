@@ -7,6 +7,7 @@ export const CreateAcpSessionSchema = v.object({
   initialPrompt: v.optional(v.string()),
   parentSessionId: v.optional(v.string()),
   contextSummary: v.optional(v.string()),
+  chatSessionId: v.optional(v.string()),
 });
 
 export const AcpSessionAssignSchema = v.object({

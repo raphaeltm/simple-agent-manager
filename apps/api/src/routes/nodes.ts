@@ -2,8 +2,9 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { CreateNodeRequest, NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
+import type { NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, isValidLocationForProvider, getLocationsForProvider } from '@simple-agent-manager/shared';
+import { jsonValidator, CreateNodeSchema, NodeHeartbeatSchema, NodeErrorBatchSchema } from '../schemas';
 import type { Env } from '../index';
 import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -153,10 +154,10 @@ nodesRoutes.get('/', async (c) => {
   return c.json(hydrated.map(toNodeResponse));
 });
 
-nodesRoutes.post('/', async (c) => {
+nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<CreateNodeRequest>();
+  const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
 
   if (!body.name?.trim()) {
@@ -535,7 +536,7 @@ nodesRoutes.post('/:id/ready', async (c) => {
   return c.json({ status: 'running', readyAt: now });
 });
 
-nodesRoutes.post('/:id/heartbeat', async (c) => {
+nodesRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c) => {
   const nodeId = c.req.param('id');
   await verifyNodeCallbackAuth(c, nodeId);
 
@@ -547,15 +548,7 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
-  const body = await c.req.json<{
-    activeWorkspaces?: number;
-    nodeId?: string;
-    metrics?: {
-      cpuLoadAvg1?: number;
-      memoryPercent?: number;
-      diskPercent?: number;
-    };
-  }>();
+  const body = c.req.valid('json');
 
   // Read the node first to check if IP backfill is needed
   const rows = await db
@@ -665,7 +658,7 @@ function truncateString(value: string, maxLength: number): string {
  *
  * Body: { errors: VMAgentErrorEntry[] }
  */
-nodesRoutes.post('/:id/errors', async (c) => {
+nodesRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), async (c) => {
   const nodeId = c.req.param('id');
   await verifyNodeCallbackAuth(c, nodeId);
 
@@ -684,24 +677,8 @@ nodesRoutes.post('/:id/errors', async (c) => {
     throw errors.badRequest(`Request body too large (max ${maxBodyBytes} bytes)`);
   }
 
-  // Parse JSON body
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    throw errors.badRequest('Invalid JSON body');
-  }
-
-  // Validate structure
-  if (!body || typeof body !== 'object' || !('errors' in body)) {
-    throw errors.badRequest('Body must contain an "errors" array');
-  }
-
-  const { errors: entries } = body as { errors: unknown };
-
-  if (!Array.isArray(entries)) {
-    throw errors.badRequest('"errors" must be an array');
-  }
+  const body = c.req.valid('json');
+  const entries = body.errors;
 
   if (entries.length === 0) {
     return c.body(null, 204);

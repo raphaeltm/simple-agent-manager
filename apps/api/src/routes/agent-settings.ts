@@ -12,9 +12,9 @@ import {
 } from '@simple-agent-manager/shared';
 import type {
   AgentSettingsResponse,
-  SaveAgentSettingsRequest,
   AgentPermissionMode,
 } from '@simple-agent-manager/shared';
+import { jsonValidator, SaveAgentSettingsSchema } from '../schemas';
 
 export const agentSettingsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -83,7 +83,7 @@ agentSettingsRoutes.get('/:agentType', async (c) => {
  * PUT /api/agent-settings/:agentType
  * Upsert user's settings for a specific agent type.
  */
-agentSettingsRoutes.put('/:agentType', async (c) => {
+agentSettingsRoutes.put('/:agentType', jsonValidator(SaveAgentSettingsSchema), async (c) => {
   const userId = getUserId(c);
   const agentType = c.req.param('agentType');
 
@@ -91,7 +91,7 @@ agentSettingsRoutes.put('/:agentType', async (c) => {
     throw errors.badRequest(`Invalid agent type: ${agentType}`);
   }
 
-  const body = await c.req.json<SaveAgentSettingsRequest>();
+  const body = c.req.valid('json');
 
   // Validate permissionMode if provided
   if (body.permissionMode !== undefined && body.permissionMode !== null) {
