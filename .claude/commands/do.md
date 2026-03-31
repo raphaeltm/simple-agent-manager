@@ -124,7 +124,9 @@ Before creating the PR, ensure everything is solid:
 
 2. **Verify documentation sync** — grep for references to anything you changed and update stale docs.
 
-3. **Move the task file** from `tasks/active/` to `tasks/archive/` and commit.
+3. **Run the task-completion-validator** (see `.claude/rules/09-task-tracking.md`). This validates that research findings became checklist items, checklist items are in the diff, acceptance criteria have tests, and UI inputs reach the backend. **CRITICAL/HIGH findings block merge — fix them now, do not defer to backlog.** The only exception is explicit human approval.
+
+4. **Move the task file** from `tasks/active/` to `tasks/archive/` and commit.
 
 ---
 

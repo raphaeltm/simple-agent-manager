@@ -39,9 +39,10 @@ Before moving ANY task from `tasks/active/` to `tasks/archive/`, you MUST run th
 
 ### Validation Rules
 
-- **CRITICAL/HIGH findings block archive.** Fix them or create explicit backlog tasks.
-- **A validator FAIL means the task is not complete.** Return to implementation.
+- **CRITICAL/HIGH findings block merge.** Fix them in the branch before merging. Filing a backlog task is NOT an acceptable alternative — the validator exists to catch gaps *before* they ship, not to generate follow-up work. The only exception is explicit human approval to defer a specific finding.
+- **A validator FAIL means the task is not complete.** Return to implementation. Do NOT proceed to PR creation or merge.
 - **Do NOT rationalize gaps.** "It works when I test it manually" is not an answer to "no test covers this acceptance criterion." Either add the test or document the manual verification with evidence.
+- **"Fix or defer" is not a real choice.** If you have time to write a backlog task file, you have time to write the test or fix the gap. The backlog escape hatch has been abused in every case where it was used (PR #568, PR #570) — the follow-up tasks add friction and delay but deliver the same work that should have been done in the original PR.
 
 ### When to Run
 
