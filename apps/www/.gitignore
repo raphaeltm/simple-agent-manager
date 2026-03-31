@@ -1,3 +1,6 @@
 dist/
 node_modules/
 .astro/
+
+# Compiled from src/scripts/tracker.ts by build:tracker script
+public/scripts/tracker.js

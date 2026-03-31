@@ -17,15 +17,19 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export function toPath(urlOrPath) {
+export function toPath(urlOrPath: URL | string): string {
   return urlOrPath instanceof URL ? fileURLToPath(urlOrPath) : urlOrPath;
 }
 
-export function traversePathUp(startPath) {
+interface TraversePathUpIterable {
+  [Symbol.iterator](): Generator<string>;
+}
+
+export function traversePathUp(startPath: URL | string): TraversePathUpIterable {
   return {
     *[Symbol.iterator]() {
       let currentPath = path.resolve(toPath(startPath));
-      let previousPath;
+      let previousPath: string | undefined;
 
       while (previousPath !== currentPath) {
         yield currentPath;
@@ -36,12 +40,17 @@ export function traversePathUp(startPath) {
   };
 }
 
-export function rootDirectory(pathInput) {
+export function rootDirectory(pathInput: URL | string): string {
   return path.parse(toPath(pathInput)).root;
 }
 
-export async function delay({ seconds, milliseconds } = {}) {
-  let duration;
+interface DelayOptions {
+  seconds?: number;
+  milliseconds?: number;
+}
+
+export async function delay({ seconds, milliseconds }: DelayOptions = {}): Promise<void> {
+  let duration: number;
   if (typeof seconds === 'number') {
     duration = seconds * 1000;
   } else if (typeof milliseconds === 'number') {

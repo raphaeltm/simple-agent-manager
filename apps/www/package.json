@@ -5,12 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build:tracker": "node scripts/build-tracker.mjs",
+    "build": "pnpm build:tracker && astro build",
     "preview": "astro preview"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.0",
     "@astrojs/starlight": "^0.37.7",
     "astro": "^5.17.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
   }
 }

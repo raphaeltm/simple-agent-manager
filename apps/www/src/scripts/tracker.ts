@@ -6,20 +6,36 @@
  *
  * Usage: <script src="/scripts/tracker.js" data-api="https://api.example.com/api/t" defer></script>
  */
-(function () {
+
+interface AnalyticsEvent {
+  event: string;
+  page: string;
+  referrer: string;
+  host: string;
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+  sessionId: string;
+  visitorId: string;
+  entityId: string;
+  durationMs: number;
+  timestamp: string;
+}
+
+(function (): void {
   'use strict';
 
-  var script = document.currentScript;
-  var endpoint = script && script.getAttribute('data-api');
+  const script = document.currentScript as HTMLScriptElement | null;
+  const endpoint = script?.getAttribute('data-api');
   if (!endpoint) return;
 
-  var host = location.hostname;
+  const host = location.hostname;
 
-  function uid(store) {
+  function uid(store: Storage): string {
     try {
-      var existing = store.getItem('sam_id');
+      const existing = store.getItem('sam_id');
       if (existing) return existing;
-      var id =
+      const id =
         typeof crypto !== 'undefined' && crypto.randomUUID
           ? crypto.randomUUID()
           : Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -30,43 +46,43 @@
     }
   }
 
-  var sessionId = uid(sessionStorage);
-  var visitorId = uid(localStorage);
+  const sessionId = uid(sessionStorage);
+  const visitorId = uid(localStorage);
 
-  function utmParam(name) {
+  function utmParam(name: string): string {
     try {
-      return new URLSearchParams(location.search).get(name) || '';
+      return new URLSearchParams(location.search).get(name) ?? '';
     } catch (_) {
       return '';
     }
   }
 
-  function send(events) {
-    var body = JSON.stringify({ events: events });
+  function send(events: AnalyticsEvent[]): void {
+    const body = JSON.stringify({ events });
     if (navigator.sendBeacon) {
       navigator.sendBeacon(endpoint, body);
     } else {
       fetch(endpoint, {
         method: 'POST',
-        body: body,
+        body,
         headers: { 'Content-Type': 'application/json' },
         keepalive: true,
-      }).catch(function () {});
+      }).catch(() => {});
     }
   }
 
-  function trackPageView() {
+  function trackPageView(): void {
     send([
       {
         event: 'page_view',
         page: location.pathname,
         referrer: document.referrer || '',
-        host: host,
+        host,
         utmSource: utmParam('utm_source'),
         utmMedium: utmParam('utm_medium'),
         utmCampaign: utmParam('utm_campaign'),
-        sessionId: sessionId,
-        visitorId: visitorId,
+        sessionId,
+        visitorId,
         entityId: '',
         durationMs: 0,
         timestamp: new Date().toISOString(),

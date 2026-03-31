@@ -1,9 +1,14 @@
-/* eslint-disable no-restricted-globals */
+/// <reference lib="webworker" />
+
+// Cast self to ServiceWorkerGlobalScope for proper typing.
+// The default WebWorker lib types self as WorkerGlobalScope which lacks
+// service worker APIs (skipWaiting, clients, install/activate/fetch events).
+const sw = self as unknown as ServiceWorkerGlobalScope;
 
 const SHELL_CACHE = 'sam-shell-v1';
 const RUNTIME_CACHE = 'sam-runtime-v1';
 const OFFLINE_URL = '/offline.html';
-const APP_SHELL = [
+const APP_SHELL: string[] = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
@@ -14,25 +19,29 @@ const APP_SHELL = [
   OFFLINE_URL,
 ];
 
-self.addEventListener('install', (event) => {
+sw.addEventListener('install', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(SHELL_CACHE).then((cache) => cache.addAll(APP_SHELL)),
   );
-  self.skipWaiting();
+  sw.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
+sw.addEventListener('activate', (event: ExtendableEvent) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
-      keys
-        .filter((key) => key !== SHELL_CACHE && key !== RUNTIME_CACHE)
-        .map((key) => caches.delete(key))
-    ))
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key !== SHELL_CACHE && key !== RUNTIME_CACHE)
+            .map((key) => caches.delete(key)),
+        ),
+      ),
   );
-  self.clients.claim();
+  sw.clients.claim();
 });
 
-self.addEventListener('fetch', (event) => {
+sw.addEventListener('fetch', (event: FetchEvent) => {
   const request = event.request;
 
   if (request.method !== 'GET') {
@@ -40,7 +49,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) {
+  if (url.origin !== sw.location.origin) {
     return;
   }
 
@@ -54,7 +63,7 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
-async function networkFirstNavigation(request) {
+async function networkFirstNavigation(request: Request): Promise<Response> {
   try {
     const response = await fetch(request);
     const cache = await caches.open(RUNTIME_CACHE);
@@ -84,7 +93,7 @@ async function networkFirstNavigation(request) {
   }
 }
 
-async function staleWhileRevalidate(request) {
+async function staleWhileRevalidate(request: Request): Promise<Response> {
   const cache = await caches.open(RUNTIME_CACHE);
   const cached = await cache.match(request);
 
@@ -95,7 +104,7 @@ async function staleWhileRevalidate(request) {
       }
       return response;
     })
-    .catch(() => undefined);
+    .catch((): undefined => undefined);
 
   if (cached) {
     return cached;
