@@ -116,9 +116,13 @@ async function proxyBrowserRequest(
   token: string,
   vmPath: string,
   method: string,
-  body?: ReadableStream<Uint8Array> | null
+  body?: ReadableStream<Uint8Array> | null,
+  contentType?: string
 ): Promise<Response> {
-  const timeoutMs = parseInt(env.BROWSER_PROXY_TIMEOUT_MS ?? String(DEFAULT_BROWSER_PROXY_TIMEOUT_MS));
+  const rawTimeout = parseInt(env.BROWSER_PROXY_TIMEOUT_MS ?? '');
+  const timeoutMs = Number.isFinite(rawTimeout) && rawTimeout > 0
+    ? rawTimeout
+    : DEFAULT_BROWSER_PROXY_TIMEOUT_MS;
 
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/${vmPath}?token=${encodeURIComponent(token)}`;
 
@@ -129,7 +133,9 @@ async function proxyBrowserRequest(
 
   if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
     fetchOpts.body = body;
-    fetchOpts.headers = { 'Content-Type': 'application/json' };
+    fetchOpts.headers = { 'Content-Type': contentType || 'application/json' };
+    // @ts-expect-error — duplex required for streaming bodies in Workers/Node 18+
+    fetchOpts.duplex = 'half';
   }
 
   let res: Response;
@@ -168,7 +174,7 @@ async function proxyBrowserRequest(
     if (res.status >= 500) {
       throw errors.internal(`Workspace agent unavailable (${res.status})`);
     }
-    throw errors.badRequest(text || 'VM agent returned an error');
+    throw errors.badRequest('VM agent returned an error');
   }
 
   // Forward safe headers
@@ -204,7 +210,8 @@ browserProxyRoutes.post('/:id/sessions/:sessionId/browser', async (c) => {
     token,
     'browser',
     'POST',
-    c.req.raw.body
+    c.req.raw.body,
+    c.req.header('Content-Type')
   );
 });
 

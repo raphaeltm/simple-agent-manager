@@ -27,9 +27,13 @@ async function proxyBrowserToVmAgent(
   userId: string,
   vmPath: string,
   method: string,
-  body?: ReadableStream<Uint8Array> | null
+  body?: ReadableStream<Uint8Array> | null,
+  contentType?: string
 ): Promise<Response> {
-  const timeoutMs = parseInt(env.BROWSER_PROXY_TIMEOUT_MS ?? String(DEFAULT_BROWSER_PROXY_TIMEOUT_MS));
+  const rawTimeout = parseInt(env.BROWSER_PROXY_TIMEOUT_MS ?? '');
+  const timeoutMs = Number.isFinite(rawTimeout) && rawTimeout > 0
+    ? rawTimeout
+    : DEFAULT_BROWSER_PROXY_TIMEOUT_MS;
   const protocol = env.VM_AGENT_PROTOCOL || 'https';
   const port = env.VM_AGENT_PORT || '8443';
   const workspaceUrl = `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
@@ -44,7 +48,9 @@ async function proxyBrowserToVmAgent(
 
   if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
     fetchOpts.body = body;
-    fetchOpts.headers = { 'Content-Type': 'application/json' };
+    fetchOpts.headers = { 'Content-Type': contentType || 'application/json' };
+    // @ts-expect-error — duplex required for streaming bodies in Workers/Node 18+
+    fetchOpts.duplex = 'half';
   }
 
   let res: Response;
@@ -79,7 +85,7 @@ async function proxyBrowserToVmAgent(
     );
     if (res.status === 404) throw errors.notFound('Browser sidecar not found');
     if (res.status >= 500) throw errors.internal(`Workspace agent unavailable (${res.status})`);
-    throw errors.badRequest(text || 'VM agent returned an error');
+    throw errors.badRequest('VM agent returned an error');
   }
 
   const headers = new Headers();
@@ -110,7 +116,7 @@ browserRoutes.post('/:id/browser', requireAuth(), requireApproved(), async (c) =
 
   return proxyBrowserToVmAgent(
     c.env, workspace.nodeId, workspace.id, userId,
-    'browser', 'POST', c.req.raw.body
+    'browser', 'POST', c.req.raw.body, c.req.header('Content-Type')
   );
 });
 
@@ -141,6 +147,9 @@ browserRoutes.delete('/:id/browser', requireAuth(), requireApproved(), async (c)
   const db = drizzle(c.env.DATABASE, { schema });
 
   const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!isActiveWorkspaceStatus(workspace.status)) {
+    throw errors.badRequest(`Workspace is not accessible (status: ${workspace.status})`);
+  }
   if (!workspace.nodeId) {
     throw errors.badRequest('Workspace has no assigned node');
   }
