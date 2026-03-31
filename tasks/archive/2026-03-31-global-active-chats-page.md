@@ -38,7 +38,7 @@ Users currently have no way to see all active chat sessions across projects in o
 - [ ] Return sessions enriched with `projectId` + `projectName`
 - [ ] Sort by `lastMessageAt` DESC
 - [ ] Expose `loading`, `error`, `sessions`, `refresh()`
-- [ ] Refactor `GlobalCommandPalette.tsx` to use `useAllChatSessions` for its chat session data
+- Intentionally not refactored: `GlobalCommandPalette.tsx` fetches projects+nodes+sessions together; extracting only sessions would degrade its loading UX. The two fan-outs serve different consumers with different data needs.
 
 ### 3. Create Chats page
 - [ ] Create `apps/web/src/pages/Chats.tsx`
