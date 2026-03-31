@@ -505,6 +505,9 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("Failed to remove Docker volume for workspace", "workspace", workspaceID, "error", err)
 	}
 
+	// Clean up the host-side credential helper script that was bind-mounted.
+	bootstrap.RemoveCredentialHelperFromHost(workspaceID)
+
 	s.removeWorkspaceRuntime(workspaceID)
 
 	// Remove all persisted tabs and MCP server configs for this workspace
