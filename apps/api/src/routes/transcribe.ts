@@ -1,7 +1,10 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
+import { createModuleLogger, serializeError } from '../lib/logger';
 import { requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
+
+const log = createModuleLogger('transcribe');
 
 /** Default Whisper model — configurable via WHISPER_MODEL_ID env var (Constitution Principle XI) */
 const DEFAULT_WHISPER_MODEL = '@cf/openai/whisper-large-v3-turbo';
@@ -39,7 +42,7 @@ transcribeRoutes.use('*', requireAuth(), requireApproved());
  */
 transcribeRoutes.post('/', async (c) => {
   const startTime = Date.now();
-  console.log('[transcribe] Request received');
+  log.info('request_received');
 
   const maxAudioSizeBytes = parseInt(
     c.env.MAX_AUDIO_SIZE_BYTES || String(DEFAULT_MAX_AUDIO_SIZE_BYTES),
@@ -50,26 +53,23 @@ transcribeRoutes.post('/', async (c) => {
   let formData: Record<string, string | File>;
   try {
     formData = await c.req.parseBody();
-    console.log(
-      '[transcribe] Form data parsed, fields:',
-      Object.keys(formData).join(', ')
-    );
+    log.info('form_data_parsed', { fields: Object.keys(formData).join(', ') });
   } catch (parseErr) {
-    console.error('[transcribe] Failed to parse form data:', parseErr);
+    log.error('form_data_parse_failed', serializeError(parseErr));
     throw errors.badRequest('Failed to parse multipart form data');
   }
 
   const audioFile = formData['audio'];
 
   if (!audioFile || typeof audioFile === 'string') {
-    console.error('[transcribe] Missing or invalid audio field', {
+    log.error('missing_or_invalid_audio_field', {
       hasAudioKey: 'audio' in formData,
       audioType: typeof audioFile,
     });
     throw errors.badRequest('Missing "audio" field in multipart form data');
   }
 
-  console.log('[transcribe] Audio file received', {
+  log.info('audio_file_received', {
     name: audioFile.name,
     type: audioFile.type,
     size: audioFile.size,
@@ -78,13 +78,13 @@ transcribeRoutes.post('/', async (c) => {
 
   // Validate file size > 0
   if (audioFile.size === 0) {
-    console.error('[transcribe] Audio file is empty (0 bytes)');
+    log.error('audio_file_empty');
     throw errors.badRequest('Audio file is empty');
   }
 
   // Validate file size within limit
   if (audioFile.size > maxAudioSizeBytes) {
-    console.error('[transcribe] Audio file too large', {
+    log.error('audio_file_too_large', {
       size: audioFile.size,
       maxSize: maxAudioSizeBytes,
     });
@@ -97,7 +97,7 @@ transcribeRoutes.post('/', async (c) => {
   // Convert audio to base64 for Workers AI Whisper input
   const audioBuffer = await audioFile.arrayBuffer();
   const audioBase64 = arrayBufferToBase64(audioBuffer);
-  console.log('[transcribe] Audio converted to base64', {
+  log.info('audio_converted_to_base64', {
     bufferBytes: audioBuffer.byteLength,
     base64Length: audioBase64.length,
   });
@@ -105,7 +105,7 @@ transcribeRoutes.post('/', async (c) => {
   // Determine model ID (configurable via env var, per Constitution Principle XI)
   const modelId = (c.env.WHISPER_MODEL_ID || DEFAULT_WHISPER_MODEL) as
     '@cf/openai/whisper-large-v3-turbo';
-  console.log('[transcribe] Calling Workers AI', { model: modelId });
+  log.info('calling_workers_ai', { model: modelId });
 
   // Call Workers AI Whisper model
   let result: { text?: string } | undefined;
@@ -115,7 +115,7 @@ transcribeRoutes.post('/', async (c) => {
       audio: audioBase64,
     });
     const aiDurationMs = Date.now() - aiStartTime;
-    console.log('[transcribe] Workers AI response received', {
+    log.info('workers_ai_response_received', {
       durationMs: aiDurationMs,
       hasResult: !!result,
       hasText: !!result?.text,
@@ -124,9 +124,8 @@ transcribeRoutes.post('/', async (c) => {
     });
   } catch (aiErr) {
     const totalDurationMs = Date.now() - startTime;
-    console.error('[transcribe] Workers AI call failed', {
-      error: aiErr instanceof Error ? aiErr.message : String(aiErr),
-      stack: aiErr instanceof Error ? aiErr.stack : undefined,
+    log.error('workers_ai_call_failed', {
+      ...serializeError(aiErr),
       model: modelId,
       audioSizeBytes: audioFile.size,
       totalDurationMs,
@@ -138,7 +137,7 @@ transcribeRoutes.post('/', async (c) => {
   const text = result?.text ?? '';
   const totalDurationMs = Date.now() - startTime;
 
-  console.log('[transcribe] Request complete', {
+  log.info('request_complete', {
     totalDurationMs,
     inputSizeKB: Math.round(audioFile.size / 1024),
     inputType: audioFile.type,

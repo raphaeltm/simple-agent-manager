@@ -56,6 +56,7 @@ import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 import { signTerminalToken } from './services/jwt';
+import { log, serializeError } from './lib/logger';
 
 // Cloudflare bindings type
 export interface Env {
@@ -416,7 +417,7 @@ const app = new Hono<{ Bindings: Env }>();
 // Must use app.onError() instead of middleware try/catch because Hono's
 // app.route() subrouter errors don't propagate to parent middleware.
 app.onError((err, c) => {
-  console.error('Request error:', err);
+  log.error('request_error', serializeError(err));
 
   if (err instanceof AppError) {
     return c.json(err.toJSON(), err.statusCode as any);
@@ -522,15 +523,14 @@ app.use('*', async (c, next) => {
   // the wildcard Worker route *.{domain}/* (which only matches one level).
   const routedNodeId = (workspace.nodeId || workspaceId).toLowerCase();
   const backendHostname = `${routedNodeId}.vm.${baseDomain}`;
-  console.log(JSON.stringify({
-    event: 'ws_proxy_route',
+  log.info('ws_proxy_route', {
     workspaceId,
     nodeId: workspace.nodeId || workspaceId,
     backendHostname,
     targetPort,
     method: c.req.raw.method,
     path: url.pathname,
-  }));
+  });
   recordNodeRoutingMetric({
     metric: 'ws_proxy_route',
     nodeId: workspace.nodeId || workspaceId,
@@ -557,11 +557,10 @@ app.use('*', async (c, next) => {
       const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
       vmUrl.searchParams.set('token', token);
     } catch (err) {
-      console.error(JSON.stringify({
-        event: 'port_proxy_token_error',
+      log.error('port_proxy_token_error', {
         workspaceId,
-        error: err instanceof Error ? err.message : String(err),
-      }));
+        ...serializeError(err),
+      });
       return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
     }
   }
@@ -599,15 +598,12 @@ app.use('*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
   // Skip noisy health checks from structured logs
   if (path === '/health') return;
-  console.log(JSON.stringify({
-    timestamp: new Date().toISOString(),
-    level: 'info',
-    event: 'http.request',
+  log.info('http.request', {
     method: c.req.method,
     path,
     status: c.res.status,
     durationMs,
-  }));
+  });
 });
 
 // Hono built-in logger (kept for dev convenience, can be removed in production)
@@ -788,23 +784,17 @@ export default {
   ): Promise<void> {
     const isDailyForward = controller.cron === '0 3 * * *';
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: 'info',
-      event: 'cron.started',
+    log.info('cron.started', {
       cron: controller.cron,
       type: isDailyForward ? 'daily-forward' : 'sweep',
-    }));
+    });
 
     // Daily analytics forwarding (Phase 4) — use ctx.waitUntil to keep the
     // isolate alive for the full duration of multi-step external API calls.
     if (isDailyForward) {
       ctx.waitUntil((async () => {
         const forward = await runAnalyticsForwardJob(env);
-        console.log(JSON.stringify({
-          timestamp: new Date().toISOString(),
-          level: 'info',
-          event: 'cron.completed',
+        log.info('cron.completed', {
           cron: controller.cron,
           type: 'daily-forward',
           forwardEnabled: forward.enabled,
@@ -812,7 +802,7 @@ export default {
           forwardSegmentSent: forward.segment.sent,
           forwardGA4Sent: forward.ga4.sent,
           forwardCursorUpdated: forward.cursorUpdated,
-        }));
+        });
       })());
       return;
     }
@@ -834,10 +824,7 @@ export default {
     // Purge expired observability errors (retention + row count limits)
     const observabilityPurge = await runObservabilityPurge(env);
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: 'info',
-      event: 'cron.completed',
+    log.info('cron.completed', {
       cron: controller.cron,
       type: 'sweep',
       provisioningTimedOut: timedOut,
@@ -856,6 +843,6 @@ export default {
       stuckTaskDoHealthChecked: stuckTasks.doHealthChecked,
       observabilityPurgedByAge: observabilityPurge.deletedByAge,
       observabilityPurgedByCount: observabilityPurge.deletedByCount,
-    }));
+    });
   },
 };
