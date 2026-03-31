@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { PlanView } from './PlanView';
-import type { PlanItem } from '../hooks/useAcpMessages';
+import { PlanView } from '../../../src/components/PlanView';
+import type { PlanItem } from '../../../src/hooks/useAcpMessages';
 
 function makePlan(entries?: PlanItem['entries']): PlanItem {
   return {

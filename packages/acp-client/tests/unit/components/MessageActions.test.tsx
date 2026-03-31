@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, within, waitFor } from '@testing-library/react';
-import { MessageActions } from './MessageActions';
+import { MessageActions } from '../../../src/components/MessageActions';
 
 // Mock clipboard API
 const mockWriteText = vi.fn<(text: string) => Promise<void>>();

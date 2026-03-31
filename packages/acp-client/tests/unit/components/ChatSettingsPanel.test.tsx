@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { ChatSettingsPanel } from './ChatSettingsPanel';
-import type { ChatSettingsPanelProps } from './ChatSettingsPanel';
+import { ChatSettingsPanel } from '../../../src/components/ChatSettingsPanel';
+import type { ChatSettingsPanelProps } from '../../../src/components/ChatSettingsPanel';
 
 const defaultModes = [
   { value: 'default', label: 'Default' },

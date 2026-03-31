@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { StickyPlanButton } from './StickyPlanButton';
-import type { PlanItem } from '../hooks/useAcpMessages';
+import { StickyPlanButton } from '../../../src/components/StickyPlanButton';
+import type { PlanItem } from '../../../src/hooks/useAcpMessages';
 
 function makePlan(overrides: Partial<PlanItem> = {}, entries?: PlanItem['entries']): PlanItem {
   return {

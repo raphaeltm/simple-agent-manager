@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { RawFallbackView } from './RawFallbackView';
-import type { RawFallback } from '../hooks/useAcpMessages';
+import { RawFallbackView } from '../../../src/components/RawFallbackView';
+import type { RawFallback } from '../../../src/hooks/useAcpMessages';
 
 function makeRawFallback(data: unknown = { foo: 'bar' }): RawFallback {
   return {

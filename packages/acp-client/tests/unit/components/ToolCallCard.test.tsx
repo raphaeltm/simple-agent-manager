@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { ToolCallCard } from './ToolCallCard';
-import type { ToolCallItem } from '../hooks/useAcpMessages';
+import { ToolCallCard } from '../../../src/components/ToolCallCard';
+import type { ToolCallItem } from '../../../src/hooks/useAcpMessages';
 
 function createToolCall(overrides: Partial<ToolCallItem> = {}): ToolCallItem {
   return {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getStaticCommands, getAllStaticCommands } from './registry';
+import { getStaticCommands, getAllStaticCommands } from '../../../src/commands/registry';
 
 describe('getStaticCommands', () => {
   it('returns Claude Code commands for claude-code agent type', () => {

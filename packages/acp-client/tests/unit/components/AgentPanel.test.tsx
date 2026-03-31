@@ -1,11 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { AgentPanel, CLIENT_COMMANDS } from './AgentPanel';
-import type { AcpSessionHandle } from '../hooks/useAcpSession';
-import type { AcpMessagesHandle } from '../hooks/useAcpMessages';
-import type { ConversationItem } from '../hooks/useAcpMessages';
-import type { SlashCommand } from '../types';
+import { AgentPanel, CLIENT_COMMANDS } from '../../../src/components/AgentPanel';
+import type { AcpSessionHandle } from '../../../src/hooks/useAcpSession';
+import type { AcpMessagesHandle } from '../../../src/hooks/useAcpMessages';
+import type { ConversationItem } from '../../../src/hooks/useAcpMessages';
+import type { SlashCommand } from '../../../src/types';
 
 // Mock react-virtuoso — JSDOM has no layout engine, so Virtuoso can't measure items.
 // This mock renders all items inline so content-based tests work normally.

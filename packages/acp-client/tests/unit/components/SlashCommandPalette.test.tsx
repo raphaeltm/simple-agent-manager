@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { SlashCommandPalette } from './SlashCommandPalette';
-import type { SlashCommandPaletteHandle } from './SlashCommandPalette';
-import type { SlashCommand } from '../types';
+import { SlashCommandPalette } from '../../../src/components/SlashCommandPalette';
+import type { SlashCommandPaletteHandle } from '../../../src/components/SlashCommandPalette';
+import type { SlashCommand } from '../../../src/types';
 
 const MOCK_COMMANDS: SlashCommand[] = [
   { name: 'compact', description: 'Compress conversation context', source: 'agent' },

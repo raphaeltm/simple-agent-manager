@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { useAcpSession, addJitter, classifyCloseCode } from './useAcpSession';
-import type { AcpErrorCode } from '../errors';
+import { useAcpSession, addJitter, classifyCloseCode } from '../../../src/hooks/useAcpSession';
+import type { AcpErrorCode } from '../../../src/errors';
 
 class MockWebSocket {
   static CONNECTING = 0;

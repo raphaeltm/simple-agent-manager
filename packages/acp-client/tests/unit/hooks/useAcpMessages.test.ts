@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { useAcpMessages } from './useAcpMessages';
-import type { AcpMessage } from './useAcpSession';
+import { useAcpMessages } from '../../../src/hooks/useAcpMessages';
+import type { AcpMessage } from '../../../src/hooks/useAcpSession';
 
 function sessionUpdateMessage(update: Record<string, unknown>): AcpMessage {
   return {

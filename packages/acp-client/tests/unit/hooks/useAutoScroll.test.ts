@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useAutoScroll } from './useAutoScroll';
+import { useAutoScroll } from '../../../src/hooks/useAutoScroll';
 
 // =============================================================================
 // Test helpers — jsdom doesn't implement layout/scrolling, so we mock geometry

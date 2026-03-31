@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MultiTerminal } from './MultiTerminal';
+import { MultiTerminal } from '../../src/MultiTerminal';
 
 // Mock xterm.js
 const mockTerminalWrite = vi.fn();
@@ -32,7 +32,7 @@ vi.mock('@xterm/addon-fit', () => ({
   })),
 }));
 
-vi.mock('./components/TabBar', () => ({
+vi.mock('../../src/components/TabBar', () => ({
   TabBar: vi.fn(({ sessions, onNewTab, onTabActivate, onTabClose }: any) => (
     <div data-testid="tab-bar">
       {sessions.map((s: any) => (
