@@ -103,6 +103,36 @@ describe('useWorkspacePorts', () => {
     expect(result.current.ports).toEqual([PORT_A, PORT_B]);
   });
 
+  it('logs a warning on fetch failure for debuggability', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    mockListWorkspacePorts.mockResolvedValueOnce([PORT_A]);
+
+    renderHook(() =>
+      useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true)
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    mockListWorkspacePorts.mockRejectedValueOnce(new Error('401 Unauthorized'));
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith('useWorkspacePorts: fetch failed', {
+      workspaceId: 'ws-1',
+      consecutiveFailures: 1,
+      error: '401 Unauthorized',
+    });
+
+    warnSpy.mockRestore();
+  });
+
   it('clears ports after MAX_CONSECUTIVE_FAILURES (3) failures', async () => {
     // First call succeeds
     mockListWorkspacePorts.mockResolvedValueOnce([PORT_A]);

@@ -46,11 +46,16 @@ export function useWorkspacePorts(
           consecutiveFailuresRef.current = 0;
           setPorts(result);
         }
-      } catch {
+      } catch (err) {
         // Preserve stale ports on transient failures — only clear after
         // MAX_CONSECUTIVE_FAILURES so the UI doesn't flicker on brief hiccups.
         if (!cancelled && mountedRef.current) {
           consecutiveFailuresRef.current += 1;
+          console.warn('useWorkspacePorts: fetch failed', {
+            workspaceId: workspaceId!,
+            consecutiveFailures: consecutiveFailuresRef.current,
+            error: err instanceof Error ? err.message : String(err),
+          });
           if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_FAILURES) {
             setPorts([]);
           }
