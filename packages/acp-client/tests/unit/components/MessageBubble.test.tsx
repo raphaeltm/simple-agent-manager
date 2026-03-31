@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { MessageBubble } from './MessageBubble';
+import { MessageBubble } from '../../../src/components/MessageBubble';
 
 // Verify React.memo is applied (component has $$typeof for memo)
 describe('MessageBubble memoization', () => {

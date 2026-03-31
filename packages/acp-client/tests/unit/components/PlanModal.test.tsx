@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { PlanModal } from './PlanModal';
-import type { PlanItem } from '../hooks/useAcpMessages';
+import { PlanModal } from '../../../src/components/PlanModal';
+import type { PlanItem } from '../../../src/hooks/useAcpMessages';
 
 function makePlan(entries?: PlanItem['entries']): PlanItem {
   return {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { TabBar } from './TabBar';
-import type { TerminalSession } from '../types/multi-terminal';
+import { TabBar } from '../../../src/components/TabBar';
+import type { TerminalSession } from '../../../src/types/multi-terminal';
 
 describe('TabBar', () => {
   const mockSessions: TerminalSession[] = [

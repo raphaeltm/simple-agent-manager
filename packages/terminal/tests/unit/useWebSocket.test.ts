@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { useWebSocket } from './useWebSocket';
+import { useWebSocket } from '../../src/useWebSocket';
 
 class MockWebSocket {
   static CONNECTING = 0;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { AcpLifecycleEvent } from './types';
-import { createAcpWebSocketTransport } from './websocket';
+import type { AcpLifecycleEvent } from '../../../src/transport/types';
+import { createAcpWebSocketTransport } from '../../../src/transport/websocket';
 
 // Minimal WebSocket mock for jsdom
 function createMockWebSocket(): WebSocket & {

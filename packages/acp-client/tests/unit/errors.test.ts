@@ -3,8 +3,8 @@ import {
   getErrorMeta,
   errorCodeFromCloseCode,
   errorCodeFromMessage,
-} from './errors';
-import type { AcpErrorCode } from './errors';
+} from '../../src/errors';
+import type { AcpErrorCode } from '../../src/errors';
 
 describe('getErrorMeta', () => {
   it('returns metadata for every known error code', () => {

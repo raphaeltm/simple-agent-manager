@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useTerminalSessions } from './useTerminalSessions';
+import { useTerminalSessions } from '../../../src/hooks/useTerminalSessions';
 
 describe('useTerminalSessions', () => {
   beforeEach(() => {
