@@ -1,5 +1,6 @@
 import { type FC, useState, useCallback, useEffect } from 'react';
-import { Globe, Loader2, X, Monitor, AlertCircle } from 'lucide-react';
+import { Globe, Loader2, X, Monitor } from 'lucide-react';
+import { Button, Alert } from '@simple-agent-manager/ui';
 import { useBrowserSidecar } from '../hooks/useBrowserSidecar';
 
 interface BrowserSidecarSessionProps {
@@ -33,7 +34,6 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
   const [showViewer, setShowViewer] = useState(false);
 
   const handleStart = useCallback(async () => {
-    // Detect viewport for mobile emulation
     const opts = {
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
@@ -62,123 +62,76 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
 
   return (
     <div className="browser-sidecar">
-      {/* Control button */}
-      <div className="browser-sidecar-controls" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+      {/* Control buttons */}
+      <div className="flex items-center gap-2 mb-2">
         {sidecarStatus === 'off' && (
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={handleStart}
-            disabled={isLoading}
-            className="browser-sidecar-btn"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              border: '1px solid var(--sam-border, #e2e8f0)',
-              background: 'var(--sam-bg-secondary, #f8fafc)',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              fontSize: '13px',
-            }}
+            loading={isLoading}
+            aria-label="Start remote browser"
           >
-            {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
+            <Globe size={14} aria-hidden="true" />
             Remote Browser
-          </button>
+          </Button>
         )}
 
         {(isStarting || isRunning) && (
           <>
-            <button
+            <Button
+              variant={isRunning ? 'primary' : 'secondary'}
+              size="sm"
               onClick={() => setShowViewer(!showViewer)}
-              className="browser-sidecar-btn"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                border: '1px solid var(--sam-border, #e2e8f0)',
-                background: isRunning ? 'var(--sam-bg-accent, #eff6ff)' : 'var(--sam-bg-secondary, #f8fafc)',
-                cursor: 'pointer',
-                fontSize: '13px',
-              }}
+              aria-label={showViewer ? 'Hide remote browser' : 'Show remote browser'}
             >
-              <Monitor size={14} />
+              <Monitor size={14} aria-hidden="true" />
               {showViewer ? 'Hide' : 'Show'} Browser
-              {isStarting && <Loader2 size={12} className="animate-spin" />}
-            </button>
-            <button
+              {isStarting && <Loader2 size={12} className="animate-spin" aria-hidden="true" />}
+              {isStarting && <span className="sr-only">Starting browser...</span>}
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
               onClick={handleStop}
-              disabled={isLoading}
-              className="browser-sidecar-btn"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '6px 8px',
-                borderRadius: '6px',
-                border: '1px solid var(--sam-border-danger, #fecaca)',
-                background: 'var(--sam-bg-danger, #fef2f2)',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                fontSize: '13px',
-                color: 'var(--sam-text-danger, #dc2626)',
-              }}
-              title="Stop remote browser"
+              loading={isLoading}
               aria-label="Stop remote browser"
             >
-              <X size={14} />
-            </button>
+              <X size={14} aria-hidden="true" />
+            </Button>
           </>
         )}
 
         {sidecarStatus === 'error' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--sam-text-danger, #dc2626)', fontSize: '13px' }}>
-            <AlertCircle size={14} />
-            <span>{status?.error ?? 'Browser sidecar error'}</span>
-            <button
+          <div className="flex items-center gap-2">
+            <Alert variant="error">
+              {status?.error ?? 'Browser sidecar error'}
+            </Alert>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={handleStart}
-              style={{
-                padding: '4px 8px',
-                borderRadius: '4px',
-                border: '1px solid var(--sam-border, #e2e8f0)',
-                background: 'var(--sam-bg-secondary, #f8fafc)',
-                cursor: 'pointer',
-                fontSize: '12px',
-              }}
+              aria-label="Retry starting remote browser"
             >
               Retry
-            </button>
+            </Button>
           </div>
         )}
       </div>
 
       {error && (
-        <div role="alert" style={{ color: 'var(--sam-text-danger, #dc2626)', fontSize: '12px', marginBottom: '8px' }}>
+        <Alert variant="error" className="mb-2">
           {error}
-        </div>
+        </Alert>
       )}
 
       {/* Neko viewer iframe */}
       {showViewer && isRunning && status?.url && (
-        <div
-          className="browser-sidecar-viewer"
-          style={{
-            border: '1px solid var(--sam-border, #e2e8f0)',
-            borderRadius: '8px',
-            overflow: 'hidden',
-            position: 'relative',
-            width: '100%',
-            aspectRatio: '16/9',
-          }}
-        >
+        <div className="border border-border-default rounded-lg overflow-hidden relative w-full" style={{ aspectRatio: '16/9' }}>
           <iframe
             src={status.url}
             title="Remote Browser"
-            style={{
-              width: '100%',
-              height: '100%',
-              border: 'none',
-            }}
+            className="w-full h-full border-none"
             allow="autoplay; clipboard-write; clipboard-read"
             sandbox="allow-scripts allow-forms allow-popups"
           />
@@ -187,7 +140,7 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
 
       {/* Port forwarders info */}
       {isRunning && status?.ports && status.ports.length > 0 && (
-        <div style={{ fontSize: '12px', color: 'var(--sam-text-secondary, #64748b)', marginTop: '4px' }}>
+        <div className="text-xs text-fg-secondary mt-1">
           Forwarded ports: {status.ports.map((p) => p.port).join(', ')}
         </div>
       )}
