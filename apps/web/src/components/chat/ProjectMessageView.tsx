@@ -20,6 +20,7 @@ import { mergeMessages } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
 import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession, saveCachedCommands, uploadSessionFiles } from '../../lib/api';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
+import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import type { WorkspaceResponse, NodeResponse, VMSize, DetectedPort } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
@@ -368,8 +369,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [node, setNode] = useState<NodeResponse | null>(null);
 
-  // Terminal token for direct VM agent API calls (port scanning)
-  const [terminalToken, setTerminalToken] = useState<string | null>(null);
+  // Terminal token for direct VM agent API calls (port scanning) — uses
+  // useTokenRefresh for proactive refresh, matching the workspace view pattern.
 
   // Follow-up input state
   const [followUp, setFollowUp] = useState('');
@@ -545,17 +546,20 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }, [loadSession]);
 
   // Fetch workspace and node details for the session header context dropdown.
-  // Fires once when the session's workspaceId first becomes available.
+  // Retries on failure with exponential backoff so transient errors don't
+  // permanently break port polling (which depends on workspace.url).
   useEffect(() => {
     const wsId = session?.workspaceId;
     if (!wsId) return;
-    // Skip if already fetched for this workspace
     if (workspace?.id === wsId) return;
 
     let cancelled = false;
-    (async () => {
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const RETRY_DELAYS_MS = [2_000, 5_000, 10_000]; // 3 retries with backoff
+
+    async function attemptFetch(attempt = 0) {
       try {
-        const ws = await getWorkspace(wsId);
+        const ws = await getWorkspace(wsId!);
         if (cancelled) return;
         setWorkspace(ws);
         if (ws.nodeId) {
@@ -563,31 +567,35 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           if (!cancelled) setNode(nd);
         }
       } catch {
-        // Best-effort — context info is supplementary
+        if (cancelled) return;
+        if (attempt < RETRY_DELAYS_MS.length) {
+          retryTimer = setTimeout(() => attemptFetch(attempt + 1), RETRY_DELAYS_MS[attempt]);
+        }
+        // After exhausting retries, silently give up — workspace context is supplementary
       }
-    })();
-    return () => { cancelled = true; };
+    }
+
+    attemptFetch();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [session?.workspaceId, workspace?.id]);
 
-  // Fetch terminal token for direct VM agent calls (port scanning).
+  // Token refresh for direct VM agent calls (port scanning).
+  // Uses useTokenRefresh for proactive refresh before expiry, matching the
+  // workspace view pattern in Workspace.tsx.
   const isWorkspaceRunning = workspace?.status === 'running';
-  useEffect(() => {
+  const tokenRefreshFetchToken = useCallback(async () => {
     const wsId = session?.workspaceId;
-    if (!wsId || !isWorkspaceRunning) {
-      setTerminalToken(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const { token } = await getTerminalToken(wsId);
-        if (!cancelled) setTerminalToken(token);
-      } catch {
-        // Best-effort — ports are supplementary UX
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [session?.workspaceId, isWorkspaceRunning]);
+    if (!wsId) throw new Error('No workspace ID');
+    return getTerminalToken(wsId);
+  }, [session?.workspaceId]);
+
+  const { token: terminalToken } = useTokenRefresh({
+    fetchToken: tokenRefreshFetchToken,
+    enabled: !!session?.workspaceId && isWorkspaceRunning,
+  });
 
   // Poll detected ports from VM agent
   const { ports: detectedPorts } = useWorkspacePorts(
