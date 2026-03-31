@@ -126,6 +126,5 @@ export function recordNodeRoutingMetric(metric: NodeRoutingMetric, _env: Env): v
   log.info('telemetry', {
     ...metric,
     aggregate,
-    ts: new Date().toISOString(),
   });
 }

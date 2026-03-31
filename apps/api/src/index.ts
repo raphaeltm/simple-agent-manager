@@ -7,7 +7,6 @@ export { NotificationService } from './durable-objects/notification';
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from './db/schema';
@@ -605,9 +604,6 @@ app.use('*', async (c, next) => {
     durationMs,
   });
 });
-
-// Hono built-in logger (kept for dev convenience, can be removed in production)
-app.use('*', logger());
 
 // Analytics Engine — writes one data point per request (non-blocking, fire-and-forget)
 app.use('*', analyticsMiddleware());

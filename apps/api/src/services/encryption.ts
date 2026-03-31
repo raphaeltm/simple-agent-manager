@@ -79,7 +79,6 @@ export async function decrypt(
     // Log decryption failures for security monitoring
     // This could indicate key rotation issues, data corruption, or tampering
     log.error('decryption_failure', {
-      timestamp: new Date().toISOString(),
       error: error instanceof Error ? error.message : 'unknown error',
       // Don't log sensitive data like ciphertext or IV
     });
