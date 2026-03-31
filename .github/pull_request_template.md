@@ -78,6 +78,29 @@ All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, 
 
 <!-- Link to docs/notes/YYYY-MM-DD-*-postmortem.md created in this PR -->
 
+## Specialist Review Evidence (Required for agent-authored PRs)
+
+If review agents were dispatched during Phase 5, list every reviewer below. **Do NOT merge until every row shows PASS or ADDRESSED.** If any reviewer could not complete (timeout, workspace killed, error), you MUST add the `needs-human-review` label and stop — do not self-merge. See `.claude/rules/25-review-merge-gate.md`.
+
+- [ ] **All dispatched reviewers completed and findings addressed before merge**
+- [ ] **If any reviewer did NOT complete: `needs-human-review` label added and merge deferred to human**
+
+| Reviewer | Status | Outcome |
+|----------|--------|---------|
+| <!-- e.g. go-specialist --> | <!-- PASS / ADDRESSED / DISPATCHED / FAILED --> | <!-- summary of findings or "no critical findings" --> |
+
+<!--
+Status values:
+- PASS: Reviewer completed, no critical/high findings
+- ADDRESSED: Reviewer completed, findings fixed in commit <hash>
+- DISPATCHED: Reviewer launched but has NOT returned results — BLOCKS MERGE
+- FAILED: Reviewer errored or timed out — REQUIRES HUMAN REVIEW
+- DEFERRED: Findings deferred to backlog task <link> — requires justification
+
+If this table is empty or missing rows for dispatched reviewers, the PR is NOT ready to merge.
+If this is not an agent-authored PR, write `N/A: human-authored PR`.
+-->
+
 ## Exceptions (If any)
 
 - Scope:

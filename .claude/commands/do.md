@@ -145,15 +145,21 @@ Dispatch review based on what the PR touches:
 
 Address every bug or correctness issue raised. Push fixes and re-run quality checks.
 
-**STOP: Wait for all review agents to complete before proceeding.** If you launched reviewers in background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to PR creation.
+**HARD STOP: Wait for ALL review agents to complete before proceeding.** If you launched reviewers in background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to PR creation. Context compaction WILL make you forget outstanding reviewers — the tracking mechanisms below exist specifically to prevent this.
 
 **Update todo list and `.do-state.md`**: When dispatching reviewers, immediately add each one to the "Phase 5: Review Tracker" section with status `DISPATCHED`. Update each reviewer's status as results arrive. **Phase 5 CANNOT be marked complete until every dispatched reviewer shows `PASS` or `ADDRESSED`.** If any reviewer is still `DISPATCHED`, you are NOT done with Phase 5 — wait for it.
+
+**Reviewer tracking is merge-blocking (see `.claude/rules/25-review-merge-gate.md`):**
+1. When you create the PR in Phase 7, you MUST copy the review tracker into the PR description's "Specialist Review Evidence" section — one row per reviewer with their status and outcome.
+2. If ANY reviewer is still `DISPATCHED` or `FAILED` at PR creation time, you MUST add the `needs-human-review` label and MUST NOT merge. The human will decide when to proceed.
+3. Filing findings as backlog tasks does NOT count as "addressed" for CRITICAL/HIGH severity. Fix them or get human approval to defer.
+4. Re-read `.do-state.md` and the todo list before EVERY phase transition. If you cannot confirm all reviewers completed, STOP.
 
 ---
 
 ## Phase 6: Staging Verification (BLOCKING — DO NOT SKIP)
 
-> **Checkpoint**: Before entering Phase 6, verify the "Phase 5: Review Tracker" in `.do-state.md` has ZERO reviewers with status `DISPATCHED`. Every reviewer must show `PASS` or `ADDRESSED`. If any reviewer is still outstanding, STOP — go back to Phase 5 and wait for it.
+> **Checkpoint**: Before entering Phase 6, re-read `.do-state.md` and verify the "Phase 5: Review Tracker" has ZERO reviewers with status `DISPATCHED`. Every reviewer must show `PASS` or `ADDRESSED`. If any reviewer is still outstanding, STOP — go back to Phase 5 and wait for it. If you have lost track of reviewer status due to context compaction, assume they are NOT complete — re-read `.do-state.md` to recover state. If `.do-state.md` is also incomplete, add `needs-human-review` label and do NOT merge.
 
 If this PR includes **any code changes** (not just docs/tasks), deploy to staging and verify before creating the PR.
 

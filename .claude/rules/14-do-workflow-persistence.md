@@ -101,7 +101,7 @@ Before advancing past Phase 5, you MUST:
 4. Wait for the outstanding reviewer(s) to complete, then update their status
 5. Only after every reviewer shows `PASS` or `ADDRESSED` may you check off Phase 5
 
-**Why this exists:** PR #409's security auditor was dispatched during Phase 5 but completed after the PR was merged. Context compaction caused the agent to forget it was waiting for a reviewer and advance through Phases 6-7. The review tracker makes outstanding reviewers visible across context boundaries.
+**Why this exists:** PR #409's security auditor was dispatched during Phase 5 but completed after the PR was merged. Context compaction caused the agent to forget it was waiting for a reviewer and advance through Phases 6-7. PR #568 repeated this exact failure — the go-specialist and security-auditor completed post-merge, and their CRITICAL findings were filed as backlog tasks instead of being fixed. See `docs/notes/2026-03-31-pr568-premature-merge-postmortem.md`.
 
 ### Updating the Review Tracker
 
@@ -124,6 +124,14 @@ When the reviewer finds issues deferred to backlog:
 ```markdown
 - [x] security-auditor — DEFERRED, 1 MEDIUM → tasks/backlog/2026-03-16-rate-limiting.md
 ```
+
+## PR Description Is the Durable Source of Truth
+
+`.do-state.md` is gitignored and lives in the worktree. It is destroyed when the workspace is killed. The PR description, by contrast, is durable — it lives on GitHub and is visible to humans.
+
+**When you create the PR in Phase 7, you MUST copy the Review Tracker into the PR description's "Specialist Review Evidence" table.** This is the authoritative record. If `.do-state.md` is lost (workspace killed, worktree removed), the PR description is what humans will use to verify whether reviews were actually completed.
+
+If you cannot populate the PR's review table because you've lost track of reviewer state (context compaction, workspace killed), you MUST add the `needs-human-review` label and stop. See `.claude/rules/25-review-merge-gate.md`.
 
 ## This Rule Is Non-Negotiable
 
