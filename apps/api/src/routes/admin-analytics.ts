@@ -3,6 +3,7 @@ import type { Env } from '../index';
 import { requireAuth, requireApproved, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getForwardStatus } from '../services/analytics-forward';
+import { log } from '../lib/logger';
 
 const DEFAULT_ANALYTICS_SQL_API_URL = 'https://api.cloudflare.com/client/v4/accounts';
 const DEFAULT_PERIOD_DAYS = 30;
@@ -85,7 +86,7 @@ async function queryAnalyticsEngine(
 
   if (!response.ok) {
     const body = await response.text();
-    console.error('Analytics Engine SQL API error', {
+    log.error('analytics.sql_api_error', {
       status: response.status,
       body: body.slice(0, 500),
       sql: sql.slice(0, 300),

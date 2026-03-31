@@ -3,6 +3,7 @@
  */
 import type { Env } from './types';
 import { generateId } from './types';
+import { log } from '../../lib/logger';
 
 /**
  * Returns the next monotonic sequence number for a session's messages.
@@ -391,7 +392,7 @@ function searchMessagesFts(
       sessionTaskId: (row.session_task_id as string) ?? null,
     }));
   } catch (e) {
-    console.error('FTS5 search failed, falling back to LIKE', { error: String(e) });
+    log.error('messages.fts5_search_failed', { error: String(e) });
     return [];
   }
 }
@@ -490,7 +491,7 @@ export function persistSystemMessage(
     );
     return { id, now, sequence };
   } catch (e) {
-    console.warn(JSON.stringify({ event: 'project_data.system_message_insert_failed', sessionId, error: String(e) }));
+    log.warn('project_data.system_message_insert_failed', { sessionId, error: String(e) });
     return null;
   }
 }

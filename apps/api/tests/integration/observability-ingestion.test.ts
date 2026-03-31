@@ -66,7 +66,7 @@ describe('observability error ingestion pipeline', () => {
     it('persistError is fail-silent (catches D1 errors)', () => {
       // The try/catch wraps the entire insert
       expect(observabilityService).toContain('} catch (err) {');
-      expect(observabilityService).toContain('[observability] Failed to persist error:');
+      expect(observabilityService).toContain('observability.persist_error_failed');
     });
 
     it('persistErrorBatch respects configurable batch size', () => {
@@ -106,8 +106,8 @@ describe('observability error ingestion pipeline', () => {
       expect(clientErrorsRoute).toContain('c.executionCtx.waitUntil(promise)');
     });
 
-    it('client-errors route still calls console.error for CF Workers Observability', () => {
-      expect(clientErrorsRoute).toContain("console.error('[client-error]'");
+    it('client-errors route still logs via structured logger for CF Workers Observability', () => {
+      expect(clientErrorsRoute).toContain("log.error('client_error'");
     });
 
     it('client-errors route maps timestamp from client ISO string to epoch ms', () => {
@@ -146,8 +146,8 @@ describe('observability error ingestion pipeline', () => {
       expect(nodesRoute).toContain('c.executionCtx.waitUntil(promise)');
     });
 
-    it('nodes route still calls console.error for CF Workers Observability', () => {
-      expect(nodesRoute).toContain("console.error('[vm-agent-error]'");
+    it('nodes route still logs via structured logger for CF Workers Observability', () => {
+      expect(nodesRoute).toContain("log.error('vm_agent_error'");
     });
   });
 

@@ -45,6 +45,7 @@ import {
   requireOwnedInstallation,
   assertRepositoryAccess,
 } from './_helpers';
+import { log } from '../../lib/logger';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
@@ -281,7 +282,7 @@ crudRoutes.get('/:id', async (c) => {
     recentActivity = activityResult.events;
   } catch (err) {
     // DO may not exist yet for projects created before this feature
-    console.error('Failed to fetch DO data for project', project.id, err);
+    log.error('project.do_fetch_failed', { projectId: project.id, error: err instanceof Error ? err.message : String(err) });
   }
 
   const response: ProjectDetailResponse = {

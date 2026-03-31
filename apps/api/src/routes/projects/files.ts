@@ -9,6 +9,7 @@ import { requireOwnedProject } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
 import { normalizeFileProxyPath } from './_helpers';
 import * as projectDataService from '../../services/project-data';
+import { log } from '../../lib/logger';
 
 const fileProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -118,16 +119,13 @@ async function resolveSessionWorkspace(
     throw errors.forbidden('Workspace does not belong to this project');
   }
 
-  console.log(
-    JSON.stringify({
-      event: 'file_proxy.workspace_resolved',
-      sessionId,
-      workspaceId: workspace.id,
-      workspaceStatus: workspace.status,
-      nodeId: workspace.nodeId,
-      lookupStrategy,
-    })
-  );
+  log.info('file_proxy.workspace_resolved', {
+    sessionId,
+    workspaceId: workspace.id,
+    workspaceStatus: workspace.status,
+    nodeId: workspace.nodeId,
+    lookupStrategy,
+  });
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
     throw errors.badRequest(
@@ -174,15 +172,12 @@ async function proxyToVmAgent(
   } catch (fetchErr) {
     // Network error, DNS failure, or timeout — VM agent is completely unreachable
     const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-    console.error(
-      JSON.stringify({
-        event: 'file_proxy.fetch_error',
-        workspaceId,
-        vmPath,
-        url: url.replace(/token=[^&]+/, 'token=REDACTED'),
-        error: errMsg,
-      })
-    );
+    log.error('file_proxy.fetch_error', {
+      workspaceId,
+      vmPath,
+      url: url.replace(/token=[^&]+/, 'token=REDACTED'),
+      error: errMsg,
+    });
     throw errors.badRequest(
       `Workspace agent unreachable: ${errMsg.includes('timeout') || errMsg.includes('abort') ? 'request timed out' : 'connection failed'}`
     );
@@ -191,16 +186,13 @@ async function proxyToVmAgent(
   if (!res.ok) {
     const text = await res.text();
     // Log full error server-side for debugging; return sanitized message to client
-    console.error(
-      JSON.stringify({
-        event: 'file_proxy.vm_agent_error',
-        workspaceId,
-        vmPath,
-        url: url.replace(/token=[^&]+/, 'token=REDACTED'),
-        status: res.status,
-        body: text,
-      })
-    );
+    log.error('file_proxy.vm_agent_error', {
+      workspaceId,
+      vmPath,
+      url: url.replace(/token=[^&]+/, 'token=REDACTED'),
+      status: res.status,
+      body: text,
+    });
     // Map VM agent status codes to appropriate client responses
     if (res.status === 404) {
       throw errors.notFound('File or resource not found');
@@ -380,15 +372,12 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
 
   if (!res.ok && res.status !== 304) {
     const text = await res.text();
-    console.error(
-      JSON.stringify({
-        event: 'file_proxy.vm_agent_error',
-        workspaceId,
-        vmPath: 'files/raw',
-        status: res.status,
-        body: text,
-      })
-    );
+    log.error('file_proxy.vm_agent_error', {
+      workspaceId,
+      vmPath: 'files/raw',
+      status: res.status,
+      body: text,
+    });
     const clientStatus =
       res.status === 404 ? 404 : res.status === 413 ? 413 : res.status >= 500 ? 502 : 400;
     throw errors.badRequest(
@@ -478,14 +467,11 @@ fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
 
   if (!res.ok) {
     const text = await res.text();
-    console.error(
-      JSON.stringify({
-        event: 'file_proxy.upload_error',
-        workspaceId,
-        status: res.status,
-        body: text,
-      })
-    );
+    log.error('file_proxy.upload_error', {
+      workspaceId,
+      status: res.status,
+      body: text,
+    });
     const clientStatus =
       res.status === 413 ? 413 : res.status >= 500 ? 502 : 400;
     if (clientStatus === 502) throw errors.internal('Workspace agent unavailable');
@@ -528,15 +514,12 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {
 
   if (!res.ok) {
     const text = await res.text();
-    console.error(
-      JSON.stringify({
-        event: 'file_proxy.download_error',
-        workspaceId,
-        path: safePath,
-        status: res.status,
-        body: text,
-      })
-    );
+    log.error('file_proxy.download_error', {
+      workspaceId,
+      path: safePath,
+      status: res.status,
+      body: text,
+    });
     if (res.status === 404) throw errors.notFound('File not found');
     if (res.status === 413) throw errors.badRequest('File too large for download');
     if (res.status >= 500) throw errors.internal('Workspace agent unavailable');

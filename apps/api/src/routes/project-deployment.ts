@@ -28,6 +28,7 @@ import {
   DEFAULT_GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS,
   DEFAULT_GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
+import { log } from '../lib/logger';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -545,7 +546,7 @@ gcpDeployCallbackRoute.get(
 
     if (!tokenResponse.ok) {
       const errBody = await tokenResponse.json().catch(() => ({})) as { error?: string };
-      console.error('Google token exchange failed', {
+      log.error('project_deployment.google_token_exchange_failed', {
         status: tokenResponse.status,
         error: errBody.error ?? 'unknown',
       });

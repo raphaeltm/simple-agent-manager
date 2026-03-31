@@ -13,6 +13,7 @@ import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialReques
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { isValidAgentType, getAgentDefinition, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
 import { serializeCredentialToken, buildProviderConfig } from '../services/provider-credentials';
+import { log } from '../lib/logger';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -114,7 +115,7 @@ credentialsRoutes.post('/', async (c) => {
       const provider = createProvider(providerConfig);
       await provider.validateToken();
     } catch (err) {
-      console.error(`${providerName} credential validation failed:`, err instanceof Error ? err.message : err);
+      log.error('credentials.validation_failed', { providerName, error: err instanceof Error ? err.message : String(err) });
       throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
     }
   }

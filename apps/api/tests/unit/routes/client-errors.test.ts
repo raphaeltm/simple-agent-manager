@@ -107,17 +107,17 @@ describe('Client Errors Routes', () => {
 
       expect(spy).toHaveBeenCalledTimes(2);
 
-      // First call
-      expect(spy).toHaveBeenCalledWith('[client-error]', expect.objectContaining({
-        level: 'error',
-        message: 'Error A',
-        source: 'VoiceButton',
-      }));
+      // First call — logger emits a single JSON string
+      const firstEntry = JSON.parse(spy.mock.calls[0][0] as string);
+      expect(firstEntry.event).toBe('client_error');
+      expect(firstEntry.level).toBe('error');
+      expect(firstEntry.message).toBe('Error A');
+      expect(firstEntry.source).toBe('VoiceButton');
 
       // Second call
-      expect(spy).toHaveBeenCalledWith('[client-error]', expect.objectContaining({
-        message: 'Error B',
-      }));
+      const secondEntry = JSON.parse(spy.mock.calls[1][0] as string);
+      expect(secondEntry.event).toBe('client_error');
+      expect(secondEntry.message).toBe('Error B');
 
       spy.mockRestore();
     });
@@ -217,9 +217,9 @@ describe('Client Errors Routes', () => {
 
       // Only the valid entry should be logged
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy).toHaveBeenCalledWith('[client-error]', expect.objectContaining({
-        message: 'Valid one',
-      }));
+      const loggedValid = JSON.parse(spy.mock.calls[0][0] as string);
+      expect(loggedValid.event).toBe('client_error');
+      expect(loggedValid.message).toBe('Valid one');
 
       spy.mockRestore();
     });
@@ -239,9 +239,9 @@ describe('Client Errors Routes', () => {
       }, createEnv());
 
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy).toHaveBeenCalledWith('[client-error]', expect.objectContaining({
-        message: 'Has source',
-      }));
+      const loggedHasSource = JSON.parse(spy.mock.calls[0][0] as string);
+      expect(loggedHasSource.event).toBe('client_error');
+      expect(loggedHasSource.message).toBe('Has source');
 
       spy.mockRestore();
     });
@@ -258,7 +258,7 @@ describe('Client Errors Routes', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const loggedEntry = spy.mock.calls[0][1] as Record<string, unknown>;
+      const loggedEntry = JSON.parse(spy.mock.calls[0][0] as string);
       const loggedMessage = loggedEntry.message as string;
       expect(loggedMessage.length).toBeLessThanOrEqual(2048 + 3); // +3 for '...'
 
@@ -276,7 +276,7 @@ describe('Client Errors Routes', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const loggedEntry = spy.mock.calls[0][1] as Record<string, unknown>;
+      const loggedEntry = JSON.parse(spy.mock.calls[0][0] as string);
       expect(loggedEntry.level).toBe('error');
 
       spy.mockRestore();
@@ -296,8 +296,8 @@ describe('Client Errors Routes', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const warnEntry = spy.mock.calls[0][1] as Record<string, unknown>;
-      const infoEntry = spy.mock.calls[1][1] as Record<string, unknown>;
+      const warnEntry = JSON.parse(spy.mock.calls[0][0] as string);
+      const infoEntry = JSON.parse(spy.mock.calls[1][0] as string);
       expect(warnEntry.level).toBe('warn');
       expect(infoEntry.level).toBe('info');
 
@@ -316,7 +316,7 @@ describe('Client Errors Routes', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const loggedEntry = spy.mock.calls[0][1] as Record<string, unknown>;
+      const loggedEntry = JSON.parse(spy.mock.calls[0][0] as string);
       expect(loggedEntry.context).toEqual(ctx);
 
       spy.mockRestore();

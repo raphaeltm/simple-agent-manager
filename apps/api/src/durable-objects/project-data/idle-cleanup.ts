@@ -6,11 +6,14 @@ import {
   WORKSPACE_IDLE_CHECK_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
 
+import { createModuleLogger, serializeError } from '../../lib/logger';
 import type { Env } from './types';
 import { recordActivityEventInternal } from './activity';
 import { stopSessionInternal } from './sessions';
 import { materializeSession } from './materialization';
 import { persistSystemMessage } from './messages';
+
+const log = createModuleLogger('idle_cleanup');
 
 export function scheduleIdleCleanup(
   sql: SqlStorage,
@@ -107,7 +110,7 @@ export async function processExpiredCleanups(
       try {
         materializeSession(sql, sessionId);
       } catch (e) {
-        console.error('Failed to materialize session on idle cleanup', {
+        log.error('materialize_session_failed', {
           sessionId,
           error: String(e),
         });
@@ -139,7 +142,7 @@ export async function processExpiredCleanups(
       broadcastEvent('session.idle_cleanup', { sessionId, workspaceId, taskId }, sessionId);
       scheduleSummarySync();
     } catch (err) {
-      console.error('Idle cleanup failed for session', sessionId, err);
+      log.error('cleanup_failed', { sessionId, ...serializeError(err) });
 
       if (retryCount >= maxRetries) {
         sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
@@ -211,7 +214,7 @@ export async function checkWorkspaceIdleTimeouts(
         timeoutMs = row.workspace_idle_timeout_ms;
       }
     } catch (err) {
-      console.warn('D1 project timeout query failed, using default', projectId, err);
+      log.warn('d1_project_timeout_query_failed', { projectId, ...serializeError(err) });
     }
   }
 
@@ -235,14 +238,13 @@ export async function checkWorkspaceIdleTimeouts(
     const lastActivity = Math.max(lastTerminal, lastMessage, sessionUpdatedAt);
 
     if (lastActivity > 0 && lastActivity < idleThreshold) {
-      console.log(JSON.stringify({
-        event: 'workspace_idle_timeout',
+      log.info('workspace_idle_timeout', {
         workspaceId,
         sessionId,
         lastActivity,
         timeoutMs,
         idleDurationMs: now - lastActivity,
-      }));
+      });
 
       try {
         if (sessionId) {
@@ -250,7 +252,7 @@ export async function checkWorkspaceIdleTimeouts(
           try {
             materializeSession(sql, sessionId);
           } catch (e) {
-            console.error('Failed to materialize session on workspace idle timeout', {
+            log.error('materialize_session_on_idle_timeout_failed', {
               sessionId,
               error: String(e),
             });
@@ -277,7 +279,7 @@ export async function checkWorkspaceIdleTimeouts(
         broadcastEvent('workspace.idle_timeout', { workspaceId, sessionId });
         scheduleSummarySync();
       } catch (err) {
-        console.error('Workspace idle timeout cleanup failed', workspaceId, err);
+        log.error('workspace_idle_timeout_cleanup_failed', { workspaceId, ...serializeError(err) });
       }
     }
   }
@@ -325,7 +327,7 @@ export async function completeTaskInD1(db: D1Database, taskId: string): Promise<
       .bind(now, now, taskId)
       .run();
   } catch (err) {
-    console.error('D1 task completion failed for', taskId, err);
+    log.error('d1_task_completion_failed', { taskId, ...serializeError(err) });
     throw err;
   }
 }
@@ -339,7 +341,7 @@ export async function stopWorkspaceInD1(db: D1Database, workspaceId: string): Pr
       .bind(now, workspaceId)
       .run();
   } catch (err) {
-    console.error('D1 workspace stop failed for', workspaceId, err);
+    log.error('d1_workspace_stop_failed', { workspaceId, ...serializeError(err) });
     throw err;
   }
 }
@@ -353,7 +355,7 @@ export async function deleteWorkspaceInD1(db: D1Database, workspaceId: string): 
       .bind(now, workspaceId)
       .run();
   } catch (err) {
-    console.error('D1 workspace deletion failed for', workspaceId, err);
+    log.error('d1_workspace_deletion_failed', { workspaceId, ...serializeError(err) });
     throw err;
   }
 }

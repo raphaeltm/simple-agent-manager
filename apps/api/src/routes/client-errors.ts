@@ -46,7 +46,7 @@ clientErrorsRoutes.use('*', async (c, next) => {
  * POST /api/client-errors
  *
  * Accepts a batch of client-side error entries and logs each to
- * Workers observability via console.error(). Returns 204.
+ * Workers observability via structured logger. Returns 204.
  *
  * Body: { errors: ClientErrorEntry[] }
  */
@@ -117,7 +117,7 @@ clientErrorsRoutes.post('/', async (c) => {
       ? e.level
       : 'error';
 
-    console.error('[client-error]', {
+    log.error('client_error', {
       level,
       message: truncate(message, MAX_MESSAGE_LENGTH),
       source: truncate(source, MAX_SOURCE_LENGTH),

@@ -3,7 +3,10 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './db/schema';
 import type { Env } from './index';
+import { createModuleLogger } from './lib/logger';
 import { getBetterAuthSecret } from './lib/secrets';
+
+const log = createModuleLogger('auth');
 
 interface GitHubUserResponse {
   id: number | string;
@@ -103,7 +106,7 @@ export function createAuth(env: Env) {
         getUserInfo: async (token) => {
           const accessToken = token.accessToken;
           if (!accessToken) {
-            console.error('[Auth] Missing GitHub access token in getUserInfo callback');
+            log.error('missing_github_access_token');
             return null;
           }
 
@@ -111,7 +114,7 @@ export function createAuth(env: Env) {
             headers: githubApiHeaders(accessToken),
           });
           if (!userRes.ok) {
-            console.error('[Auth] Failed to fetch /user:', userRes.status);
+            log.error('github_user_fetch_failed', { status: userRes.status });
             return null;
           }
 
@@ -129,22 +132,22 @@ export function createAuth(env: Env) {
               if (Array.isArray(emailsData)) {
                 email = selectPrimaryGitHubEmail(email, emailsData as GitHubEmailResponse[]);
               } else {
-                console.error('[Auth] /user/emails returned non-array:', JSON.stringify(emailsData));
+                log.error('github_emails_non_array', { data: JSON.stringify(emailsData) });
               }
             } else {
               const errorBody = await emailsRes.text();
               if (emailsRes.status === 403 || emailsRes.status === 404) {
-                console.error(
-                  '[Auth] /user/emails unavailable (status %d). Ensure GitHub App user permission "Email addresses" is read-only or OAuth app has user:email scope. Response: %s',
-                  emailsRes.status,
-                  errorBody
-                );
+                log.error('github_emails_unavailable', {
+                  status: emailsRes.status,
+                  hint: 'Ensure GitHub App user permission "Email addresses" is read-only or OAuth app has user:email scope',
+                  responseBody: errorBody,
+                });
               } else {
-                console.error('[Auth] Failed to fetch /user/emails (status %d): %s', emailsRes.status, errorBody);
+                log.error('github_emails_fetch_failed', { status: emailsRes.status, responseBody: errorBody });
               }
             }
           } catch (err) {
-            console.error('[Auth] Failed to fetch /user/emails:', err);
+            log.error('github_emails_fetch_exception', { error: err instanceof Error ? err.message : String(err) });
           }
 
           // Last resort: use GitHub noreply email

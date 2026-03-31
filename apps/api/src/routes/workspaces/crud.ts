@@ -255,7 +255,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
       .where(eq(schema.workspaces.id, workspaceId));
   } catch (err) {
     // Best-effort: session creation failure should not block workspace creation
-    console.error('Failed to create chat session for workspace:', err);
+    log.error('workspace.chat_session_create_failed', { workspaceId, error: err instanceof Error ? err.message : String(err) });
   }
 
   const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);

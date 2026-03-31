@@ -7,6 +7,7 @@
  * Runs daily via cron. Uses a KV cursor to avoid re-sending events.
  */
 import type { Env } from '../index';
+import { log } from '../lib/logger';
 
 // ─── Defaults (configurable via env vars per constitution Principle XI) ───
 
@@ -156,7 +157,7 @@ export async function queryConversionEvents(
 
   if (!response.ok) {
     const body = await response.text();
-    console.error('Analytics forward: SQL API error', {
+    log.error('analytics_forward.sql_api_error', {
       status: response.status,
       body: body.slice(0, 500),
     });
@@ -170,7 +171,7 @@ export async function queryConversionEvents(
   if (rows.length > 0) {
     const first = rows[0] as Record<string, unknown>;
     if (typeof first.timestamp !== 'string' || typeof first.userId !== 'string') {
-      console.error('Analytics forward: unexpected SQL API response shape', {
+      log.error('analytics_forward.unexpected_sql_response_shape', {
         firstRowKeys: Object.keys(first),
       });
       return [];
@@ -249,7 +250,7 @@ export async function forwardToSegment(
 
     if (!response.ok) {
       const body = await response.text();
-      console.error('Analytics forward: Segment API error', {
+      log.error('analytics_forward.segment_api_error', {
         status: response.status,
         body: body.slice(0, 500),
         batchSize: chunk.length,
@@ -350,7 +351,7 @@ export async function forwardToGA4(
       // but we still check for network/server errors
       if (!response.ok) {
         const body = await response.text();
-        console.error('Analytics forward: GA4 API error', {
+        log.error('analytics_forward.ga4_api_error', {
           status: response.status,
           body: body.slice(0, 500),
           batchSize: chunk.length,
@@ -472,7 +473,7 @@ export async function getForwardStatus(env: Env): Promise<{
       assertIsoTimestamp(rawCursor);
       lastForwardedAt = rawCursor;
     } catch {
-      console.warn('Analytics forward: invalid cursor in KV, treating as absent', { rawCursor: rawCursor.slice(0, 100) });
+      log.warn('analytics_forward.invalid_cursor_in_kv', { rawCursor: rawCursor.slice(0, 100) });
     }
   }
   const events = (env.ANALYTICS_FORWARD_EVENTS ?? DEFAULT_FORWARD_EVENTS)

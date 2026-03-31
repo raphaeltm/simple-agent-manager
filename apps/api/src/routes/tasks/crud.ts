@@ -535,7 +535,7 @@ crudRoutes.post('/:taskId/status/callback', async (c) => {
             }
           }
         })().catch((err) => {
-          console.error('Failed to schedule idle cleanup for task', taskId, err);
+          log.error('task.idle_cleanup_schedule_failed', { taskId, error: err instanceof Error ? err.message : String(err) });
         })
       );
     }

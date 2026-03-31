@@ -10,6 +10,7 @@
 import type { CreateNotificationRequest } from '@simple-agent-manager/shared';
 import { NOTIFICATION_TYPE_URGENCY, MAX_NOTIFICATION_BODY_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT, type HumanInputCategory } from '@simple-agent-manager/shared';
 import type { NotificationService } from '../durable-objects/notification';
+import { log } from '../lib/logger';
 
 interface NotificationEnv {
   NOTIFICATION: DurableObjectNamespace;
@@ -31,7 +32,7 @@ export async function getProjectName(env: { DATABASE: D1Database }, projectId: s
       .first<{ name: string }>();
     return row?.name ?? projectId;
   } catch (err) {
-    console.warn('getProjectName: D1 query failed, falling back to projectId', {
+    log.warn('notification.get_project_name_failed', {
       projectId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -297,7 +298,7 @@ export async function getChatSessionId(env: { DATABASE: D1Database }, workspaceI
       .first<{ chat_session_id: string | null }>();
     return row?.chat_session_id ?? null;
   } catch (err) {
-    console.warn('getChatSessionId: D1 query failed', {
+    log.warn('notification.get_chat_session_id_failed', {
       workspaceId,
       error: err instanceof Error ? err.message : String(err),
     });

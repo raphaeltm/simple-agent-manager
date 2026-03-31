@@ -3,6 +3,8 @@
  * Uses Web Crypto API (native to Cloudflare Workers).
  */
 
+import { log } from '../lib/logger';
+
 function bufferToBase64(buffer: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buffer)));
 }
@@ -76,9 +78,7 @@ export async function decrypt(
   } catch (error) {
     // Log decryption failures for security monitoring
     // This could indicate key rotation issues, data corruption, or tampering
-    console.error('Decryption failed:', {
-      event: 'decryption_failure',
-      timestamp: new Date().toISOString(),
+    log.error('decryption_failure', {
       error: error instanceof Error ? error.message : 'unknown error',
       // Don't log sensitive data like ciphertext or IV
     });

@@ -10,7 +10,10 @@
 import { DurableObject } from 'cloudflare:workers';
 import { runMigrations } from '../migrations';
 import type { AcpSessionStatus, AcpSessionEventActorType } from '@simple-agent-manager/shared';
+import { createModuleLogger, serializeError } from '../../lib/logger';
 import type { Env, SummaryData } from './types';
+
+const log = createModuleLogger('project_data');
 import * as sessions from './sessions';
 import * as messages from './messages';
 import * as materialization from './materialization';
@@ -55,7 +58,7 @@ export class ProjectData extends DurableObject<Env> {
   async createSession(workspaceId: string | null, topic: string | null, taskId: string | null = null): Promise<string> {
     const { id, now } = sessions.createSession(this.sql, this.env, workspaceId, topic, taskId);
     if (workspaceId) {
-      this.recalculateAlarm().catch((err) => console.warn('Failed to schedule workspace idle alarm', workspaceId, err));
+      this.recalculateAlarm().catch((err) => log.warn('schedule_workspace_idle_alarm_failed', { workspaceId, ...serializeError(err) }));
     }
     activity.recordActivityEventInternal(this.sql, 'session.started', 'system', null, workspaceId, id, taskId, null);
     this.scheduleSummarySync();
@@ -78,7 +81,7 @@ export class ProjectData extends DurableObject<Env> {
       activity.recordActivityEventInternal(this.sql, 'session.stopped', 'system', null, result.workspaceId, sessionId, null, JSON.stringify({ message_count: result.messageCount }));
     }
     try { materialization.materializeSession(this.sql, sessionId); }
-    catch (e) { console.error('Failed to materialize session on stop', { sessionId, error: String(e) }); }
+    catch (e) { log.error('materialize_session_on_stop_failed', { sessionId, error: String(e) }); }
     this.scheduleSummarySync();
     this.broadcastEvent('session.stopped', { sessionId }, sessionId);
   }
@@ -110,7 +113,7 @@ export class ProjectData extends DurableObject<Env> {
 
   async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
     sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId);
-    this.recalculateAlarm().catch((err) => console.warn('Failed to schedule workspace idle alarm after link', workspaceId, err));
+    this.recalculateAlarm().catch((err) => log.warn('schedule_workspace_idle_alarm_after_link_failed', { workspaceId, ...serializeError(err) }));
     this.broadcastEvent('session.updated', { sessionId, workspaceId }, sessionId);
   }
 
@@ -213,7 +216,7 @@ export class ProjectData extends DurableObject<Env> {
   async createAcpSession(opts: { chatSessionId: string; initialPrompt: string | null; agentType: string | null; parentSessionId?: string | null; forkDepth?: number }) {
     const result = acpSessions.createAcpSession(this.sql, opts);
     const projectId = this.getProjectId();
-    console.log(JSON.stringify({ event: 'acp_session.created', sessionId: result.id, chatSessionId: opts.chatSessionId, projectId, parentSessionId: opts.parentSessionId ?? null, forkDepth: opts.forkDepth ?? 0 }));
+    log.info('acp_session.created', { sessionId: result.id, chatSessionId: opts.chatSessionId, projectId, parentSessionId: opts.parentSessionId ?? null, forkDepth: opts.forkDepth ?? 0 });
     return result;
   }
 
@@ -301,7 +304,7 @@ export class ProjectData extends DurableObject<Env> {
         if (wsSessionTag) {
           const wsSessionId = wsSessionTag.slice('session:'.length);
           if (wsSessionId !== sessionId) {
-            console.error('WebSocket message.send session mismatch', { wsSessionId, messageSessionId: sessionId, action: 'rejected' });
+            log.error('websocket_session_mismatch', { wsSessionId, messageSessionId: sessionId, action: 'rejected' });
             ws.send(JSON.stringify({ type: 'error', message: `Session mismatch: WebSocket connected to session ${wsSessionId}, but message targets ${sessionId}` }));
             return;
           }
@@ -372,17 +375,17 @@ export class ProjectData extends DurableObject<Env> {
     if (this.summarySyncTimer !== null) clearTimeout(this.summarySyncTimer);
     this.summarySyncTimer = setTimeout(async () => {
       this.summarySyncTimer = null;
-      try { await this.syncSummaryToD1(); } catch (err) { console.error('Summary sync to D1 failed:', err); }
+      try { await this.syncSummaryToD1(); } catch (err) { log.error('summary_sync_to_d1_failed', serializeError(err)); }
     }, debounceMs);
   }
 
   private async syncSummaryToD1(): Promise<void> {
     const projectId = this.getProjectId();
-    if (!projectId) { console.warn('syncSummaryToD1: projectId not yet stored in DO meta, skipping'); return; }
+    if (!projectId) { log.warn('summary_sync_skipped_no_project_id'); return; }
     const summary = await this.getSummary();
     try {
       await this.env.DATABASE.prepare('UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?')
         .bind(summary.lastActivityAt, summary.activeSessionCount, new Date().toISOString(), projectId).run();
-    } catch (err) { console.error('D1 summary sync failed for project', projectId, err); }
+    } catch (err) { log.error('d1_summary_sync_failed', { projectId, ...serializeError(err) }); }
   }
 }

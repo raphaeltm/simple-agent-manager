@@ -12,6 +12,7 @@ import * as observabilitySchema from '../db/observability-schema';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
 import type { PlatformErrorSource, PlatformErrorLevel } from '@simple-agent-manager/shared';
+import { log } from '../lib/logger';
 
 // =============================================================================
 // Constants (configurable via env)
@@ -98,7 +99,7 @@ export async function persistError(
     });
   } catch (err) {
     // Fail-silent: never let observability writes impact the caller
-    console.warn('[observability] Failed to persist error:', err instanceof Error ? err.message : err);
+    log.warn('observability.persist_error_failed', { error: err instanceof Error ? err.message : String(err) });
   }
 }
 

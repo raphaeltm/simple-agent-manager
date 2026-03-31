@@ -23,6 +23,16 @@ module.exports = {
   },
   overrides: [
     {
+      // Enforce structured logger in the API worker — no raw console.* calls.
+      // The logger itself (logger.ts) is the sole console gateway.
+      files: ['apps/api/src/**/*.ts'],
+      // logger.ts is the sole console gateway; test files live outside apps/api/src/ so they're not matched by the files glob
+      excludedFiles: ['apps/api/src/lib/logger.ts'],
+      rules: {
+        'no-console': 'error',
+      },
+    },
+    {
       files: ['*.tsx'],
       extends: [
         'plugin:react/recommended',

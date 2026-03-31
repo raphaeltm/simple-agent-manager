@@ -15,6 +15,7 @@ import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import * as projectDataService from '../../services/project-data';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { log } from '../../lib/logger';
 
 /** Default max ACP prompt size (256 KB). Override via MAX_ACP_PROMPT_BYTES env var. */
 const DEFAULT_MAX_ACP_PROMPT_BYTES = 262144;
@@ -173,15 +174,14 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
     throw errors.notFound('ACP session not found');
   }
   if (existing.nodeId !== body.nodeId) {
-    console.error(JSON.stringify({
-      event: 'acp_session.status_node_mismatch',
+    log.error('acp_session.status_node_mismatch', {
       sessionId,
       projectId,
       callerUserId: userId,
       expectedNodeId: existing.nodeId,
       receivedNodeId: body.nodeId,
       action: 'rejected',
-    }));
+    });
     throw errors.forbidden('Node identity verification failed');
   }
 
@@ -223,15 +223,14 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', async (c) => {
     throw errors.notFound('ACP session');
   }
   if (existing.nodeId !== body.nodeId) {
-    console.error(JSON.stringify({
-      event: 'acp_session.heartbeat_node_mismatch',
+    log.error('acp_session.heartbeat_node_mismatch', {
       sessionId,
       projectId,
       callerUserId: userId,
       expectedNodeId: existing.nodeId,
       receivedNodeId: body.nodeId,
       action: 'rejected',
-    }));
+    });
     throw errors.forbidden('Node identity verification failed');
   }
 

@@ -8,6 +8,8 @@
  * See: specs/018-project-first-architecture/research.md (Decision 6)
  */
 
+import { log } from '../lib/logger';
+
 export interface Migration {
   name: string;
   run: (sql: SqlStorage) => void;
@@ -262,7 +264,7 @@ export const MIGRATIONS: Migration[] = [
       } catch (e) {
         // FTS5 may not be available in all SQLite builds.
         // The system degrades gracefully — searchMessagesFts() catches errors and falls back to LIKE.
-        console.error('FTS5 virtual table creation failed — full-text search will use LIKE fallback', {
+        log.error('migrations.fts5_virtual_table_failed', {
           error: String(e),
         });
       }

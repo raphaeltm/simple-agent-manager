@@ -16,6 +16,7 @@ import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import * as projectDataService from '../services/project-data';
+import { log } from '../lib/logger';
 
 /**
  * Statuses considered "active" for each entity type when activeOnly=true.
@@ -194,7 +195,7 @@ accountMapRoutes.get('/', async (c) => {
     if (result.status === 'fulfilled') {
       allSessions.push(...result.value);
     } else {
-      console.warn('AccountMap: failed to fetch DO data:', result.reason);
+      log.warn('account_map.do_fetch_failed', { error: String(result.reason) });
     }
   }
 
@@ -295,7 +296,7 @@ accountMapRoutes.get('/', async (c) => {
 
   // --- Cache in KV (fire-and-forget) ---
   void c.env.KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: cacheTtl })
-    .catch((err: unknown) => console.warn('AccountMap: KV cache write failed:', err));
+    .catch((err: unknown) => log.warn('account_map.kv_cache_write_failed', { error: String(err) }));
 
   return c.json(payload);
 });

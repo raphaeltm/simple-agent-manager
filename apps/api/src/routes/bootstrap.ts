@@ -12,6 +12,7 @@ import { redeemBootstrapToken } from '../services/bootstrap';
 import { decrypt } from '../services/encryption';
 import { rateLimit } from '../middleware/rate-limit';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { log } from '../lib/logger';
 
 export const bootstrapRoutes = new Hono<{ Bindings: Env }>();
 
@@ -42,9 +43,9 @@ function logBootstrapAttempt(
     timestamp: new Date().toISOString(),
   };
   if (success) {
-    console.log('Bootstrap token redeemed:', JSON.stringify(logEntry));
+    log.info('bootstrap.token_redeemed', logEntry);
   } else {
-    console.warn('Bootstrap token redemption failed:', JSON.stringify(logEntry));
+    log.warn('bootstrap.token_redemption_failed', logEntry);
   }
 }
 

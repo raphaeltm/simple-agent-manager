@@ -1,4 +1,5 @@
 import type { Env } from '../index';
+import { log } from '../lib/logger';
 
 export type TelemetryMetricName =
   | 'node_agent_request'
@@ -122,10 +123,8 @@ export function getTelemetrySnapshot(): Record<string, MetricAggregate> {
  */
 export function recordNodeRoutingMetric(metric: NodeRoutingMetric, _env: Env): void {
   const aggregate = updateAggregate(metric);
-  console.log(JSON.stringify({
-    event: 'telemetry',
+  log.info('telemetry', {
     ...metric,
     aggregate,
-    ts: new Date().toISOString(),
-  }));
+  });
 }

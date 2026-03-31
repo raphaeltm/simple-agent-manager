@@ -58,7 +58,7 @@ describe('provisionNode empty IP guard', () => {
     );
     expect(ipGuardBlock).toContain('nodeId: node.id');
     expect(ipGuardBlock).toContain('providerInstanceId: vm.id');
-    expect(ipGuardBlock).toContain("action: 'node_awaiting_ip'");
+    expect(ipGuardBlock).toContain("node_provisioning.awaiting_ip_backfill");
   });
 });
 
@@ -114,13 +114,13 @@ describe('heartbeat IP backfill', () => {
   });
 
   it('logs backfill event with structured context', () => {
-    expect(heartbeatSection).toContain('Heartbeat IP backfill');
+    expect(heartbeatSection).toContain('heartbeat.ip_backfilled');
     expect(heartbeatSection).toContain('backfilledIp');
     expect(heartbeatSection).toContain("action: 'ip_backfilled'");
   });
 
   it('handles DNS errors gracefully without failing the heartbeat', () => {
-    expect(heartbeatSection).toContain('Failed to update DNS during IP backfill');
+    expect(heartbeatSection).toContain('heartbeat.dns_update_failed_during_ip_backfill');
   });
 
   it('imports updateDNSRecord and createNodeBackendDNSRecord', () => {

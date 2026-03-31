@@ -227,12 +227,14 @@ describe('sanitizeGcpError', () => {
 
     sanitizeGcpError(err, 'test-context');
 
-    expect(consoleSpy).toHaveBeenCalledWith('GCP API error:', expect.objectContaining({
-      step: 'grant_wif_user',
-      statusCode: 403,
-      rawBody: expect.stringContaining('very sensitive iam policy stuff'),
-      context: 'test-context',
-    }));
+    // Logger emits a single JSON string to console.error
+    expect(consoleSpy).toHaveBeenCalled();
+    const logEntry = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(logEntry.event).toBe('gcp_api_error');
+    expect(logEntry.step).toBe('grant_wif_user');
+    expect(logEntry.statusCode).toBe(403);
+    expect(logEntry.rawBody).toContain('very sensitive iam policy stuff');
+    expect(logEntry.context).toBe('test-context');
   });
 });
 

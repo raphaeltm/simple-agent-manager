@@ -10,7 +10,7 @@ import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared'
 import { signNodeCallbackToken } from './jwt';
 import { createProviderForUser } from './provider-credentials';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
-import { log } from '../lib/logger';
+import { log, serializeError } from '../lib/logger';
 import { persistError } from './observability';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 
@@ -159,10 +159,9 @@ export async function provisionNode(
     // Store the provider instance ID and mark as pending-ip; heartbeat backfill
     // will capture the IP when the VM agent sends its first heartbeat.
     if (!vm.ip) {
-      console.log('Provider returned empty IP — awaiting heartbeat backfill', {
+      log.info('node_provisioning.awaiting_ip_backfill', {
         nodeId: node.id,
         providerInstanceId: vm.id,
-        action: 'node_awaiting_ip',
       });
       await db
         .update(schema.nodes)
@@ -180,7 +179,7 @@ export async function provisionNode(
     try {
       backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
     } catch (dnsErr) {
-      console.error('Failed to create node backend DNS record:', dnsErr);
+      log.error('node_provisioning.dns_record_failed', { nodeId: node.id, ...serializeError(dnsErr) });
     }
 
     await db
@@ -202,7 +201,7 @@ export async function provisionNode(
     const providerName = targetProvider ?? 'unknown';
     const statusCode = err instanceof ProviderError ? err.statusCode : undefined;
 
-    console.error('Node provisioning failed:', {
+    log.error('node_provisioning.failed', {
       nodeId: node.id,
       provider: providerName,
       vmSize: node.vmSize,
@@ -230,7 +229,7 @@ export async function provisionNode(
         userId: node.userId,
       });
     } catch (obsErr) {
-      console.error('Failed to persist provisioning error to observability DB:', obsErr);
+      log.error('node_provisioning.observability_persist_failed', serializeError(obsErr));
     }
 
     // Store the actual error message (truncated) in the node record
@@ -275,7 +274,7 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
       try {
         await providerResult.provider.deleteVM(node.providerInstanceId);
       } catch (err) {
-        console.error('Failed to delete node server:', err);
+        log.error('node_stop.delete_vm_failed', { nodeId, ...serializeError(err) });
       }
     }
   }
@@ -285,7 +284,7 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     try {
       await deleteDNSRecord(node.backendDnsRecordId, env);
     } catch (err) {
-      console.error('Failed to delete node backend DNS record:', err);
+      log.error('node_stop.delete_dns_failed', { nodeId, ...serializeError(err) });
     }
   }
 
@@ -344,7 +343,7 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
       try {
         await providerResult2.provider.deleteVM(node.providerInstanceId);
       } catch (err) {
-        console.error('Failed to delete node server:', err);
+        log.error('node_delete.delete_vm_failed', { nodeId, ...serializeError(err) });
       }
     } else {
       log.error('node_cleanup.credential_missing_vm_orphaned', {
@@ -360,7 +359,7 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
     try {
       await deleteDNSRecord(node.backendDnsRecordId, env);
     } catch (err) {
-      console.error('Failed to delete node backend DNS record:', err);
+      log.error('node_delete.delete_dns_failed', { nodeId, ...serializeError(err) });
     }
   }
 

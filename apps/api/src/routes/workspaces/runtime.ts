@@ -20,6 +20,7 @@ import {
   safeParseJson,
 } from './_helpers';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { log } from '../../lib/logger';
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -162,7 +163,7 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
     })
     .where(eq(schema.credentials.id, existing.id));
 
-  console.log('agent-credential-sync: credential updated', {
+  log.info('agent_credential_sync.credential_updated', {
     workspaceId,
     agentType: body.agentType,
     credentialKind: body.credentialKind,
@@ -422,7 +423,7 @@ runtimeRoutes.post('/:id/messages', async (c) => {
       messageCount: body.messages.length,
       action: 'rejected_batch',
     };
-    console.error('Message routing mismatch: workspace linked to different session', context);
+    log.error('message_routing.session_mismatch', context);
     c.executionCtx.waitUntil(
       persistError(c.env.OBSERVABILITY_DATABASE, {
         source: 'api',
@@ -449,7 +450,7 @@ runtimeRoutes.post('/:id/messages', async (c) => {
       messageCount: body.messages.length,
       action: 'rejected_no_session_link',
     };
-    console.warn('Rejecting messages: workspace has no linked chatSessionId', context);
+    log.warn('message_routing.no_chat_session_linked', context);
     c.executionCtx.waitUntil(
       persistError(c.env.OBSERVABILITY_DATABASE, {
         source: 'api',
@@ -489,7 +490,7 @@ runtimeRoutes.post('/:id/messages', async (c) => {
 
     // Session-not-found and stopped-session errors are permanent — do not retry
     if (message.includes('not found') || message.includes('is stopped')) {
-      console.error('Message persistence rejected by DO', {
+      log.error('message_persistence.rejected_by_do', {
         workspaceId,
         projectId: workspace.projectId,
         sessionId,
@@ -500,7 +501,7 @@ runtimeRoutes.post('/:id/messages', async (c) => {
     }
 
     // All other DO errors are transient — return 503 so the outbox retries
-    console.error('Message persistence DO error (transient)', {
+    log.error('message_persistence.do_error_transient', {
       workspaceId,
       projectId: workspace.projectId,
       sessionId,

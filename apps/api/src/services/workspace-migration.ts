@@ -8,6 +8,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { ulid } from '../lib/ulid';
 import * as schema from '../db/schema';
+import { log } from '../lib/logger';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -118,10 +119,10 @@ export async function migrateOrphanedWorkspaces(db: Db): Promise<number> {
       }
     } catch (err) {
       // Best-effort per group — log and continue
-      console.error(
-        `Failed to migrate orphaned workspaces for ${group.repository}:`,
-        err
-      );
+      log.error('workspace_migration.group_failed', {
+        repository: group.repository,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

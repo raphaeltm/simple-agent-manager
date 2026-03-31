@@ -101,7 +101,7 @@ async function verifyNodeCallbackAuth(c: Context<{ Bindings: Env }>, nodeId: str
 
   // Workspace-scoped tokens CANNOT be used for node-level endpoints.
   if (payload.scope === 'workspace') {
-    console.error('Rejected workspace-scoped token on node endpoint', {
+    log.error('node_auth.rejected_workspace_scoped_token', {
       tokenWorkspace: payload.workspace,
       nodeId,
       scope: payload.scope,
@@ -590,7 +590,7 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
   if (!node.ipAddress) {
     const heartbeatIp = c.req.header('CF-Connecting-IP');
     if (heartbeatIp) {
-      console.log('Heartbeat IP backfill', {
+      log.info('heartbeat.ip_backfilled', {
         nodeId,
         backfilledIp: heartbeatIp,
         action: 'ip_backfilled',
@@ -616,7 +616,7 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
           updatePayload.backendDnsRecordId = dnsRecordId;
         }
       } catch (dnsErr) {
-        console.error('Failed to update DNS during IP backfill:', dnsErr);
+        log.error('heartbeat.dns_update_failed_during_ip_backfill', { nodeId, error: String(dnsErr) });
       }
     }
   }
@@ -660,7 +660,7 @@ function truncateString(value: string, maxLength: number): string {
  * POST /:id/errors
  *
  * Accepts a batch of VM agent error entries and logs each to
- * Workers observability via console.error(). Uses callback JWT auth
+ * Workers observability via structured logger. Uses callback JWT auth
  * (same as heartbeat/ready). Returns 204.
  *
  * Body: { errors: VMAgentErrorEntry[] }
@@ -730,7 +730,7 @@ nodesRoutes.post('/:id/errors', async (c) => {
       ? e.level
       : 'error';
 
-    console.error('[vm-agent-error]', {
+    log.error('vm_agent_error', {
       level,
       message: truncateString(message, MAX_VM_ERROR_MESSAGE_LENGTH),
       source: truncateString(source, MAX_VM_ERROR_SOURCE_LENGTH),

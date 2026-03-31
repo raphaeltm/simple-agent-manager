@@ -20,6 +20,7 @@ vi.mock('drizzle-orm/d1', () => ({
 vi.mock('drizzle-orm', () => ({
   and: (...args: unknown[]) => args,
   eq: (a: unknown, b: unknown) => [a, b],
+  sql: Object.assign((s: unknown) => s, { raw: (s: unknown) => s }),
 }));
 
 vi.mock('../../src/db/schema', () => ({

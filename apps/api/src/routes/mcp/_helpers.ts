@@ -6,6 +6,7 @@
 import type { Env } from '../../index';
 import { validateMcpToken, type McpTokenData } from '../../services/mcp-token';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { log } from '../../lib/logger';
 
 // Re-export McpTokenData for use by tool handler files
 export type { McpTokenData } from '../../services/mcp-token';
@@ -256,7 +257,7 @@ export async function resolveSessionId(env: Env, workspaceId: string): Promise<s
       .first<{ chat_session_id: string | null }>();
     return row?.chat_session_id ?? null;
   } catch (err) {
-    console.error('resolveSessionId: D1 query failed', { workspaceId, error: String(err) });
+    log.error('mcp.resolve_session_id_failed', { workspaceId, error: String(err) });
     return null;
   }
 }

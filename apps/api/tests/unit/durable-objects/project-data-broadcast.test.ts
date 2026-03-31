@@ -6,6 +6,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Mock drizzle-orm to provide sql template tag (needed by observability-schema.ts)
+vi.mock('drizzle-orm', () => ({
+  sql: Object.assign((s: unknown) => s, { raw: (s: unknown) => s }),
+  eq: (a: unknown, b: unknown) => [a, b],
+  and: (...args: unknown[]) => args,
+  desc: (col: unknown) => ({ desc: true, col }),
+}));
+
 // Mock the cloudflare:workers module
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
@@ -31,6 +39,8 @@ vi.mock('@simple-agent-manager/shared', () => ({
     DETECTION_WINDOW_MS: 30000,
     MAX_FORK_DEPTH: 5,
   },
+  DEFAULT_WORKSPACE_PROFILE: 'default',
+  PROVIDER_LOCATIONS: {},
 }));
 
 const { ProjectData } = await import('../../../src/durable-objects/project-data');

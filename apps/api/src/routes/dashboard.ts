@@ -18,6 +18,7 @@ import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import * as projectDataService from '../services/project-data';
+import { log } from '../lib/logger';
 
 const dashboardRoutes = new Hono<{ Bindings: Env }>();
 
@@ -91,7 +92,7 @@ dashboardRoutes.get('/active-tasks', async (c) => {
   // Log any DO failures but don't fail the request
   for (const result of doResults) {
     if (result.status === 'rejected') {
-      console.warn('Dashboard: failed to fetch session data from DO:', result.reason);
+      log.warn('dashboard.do_fetch_failed', { error: String(result.reason) });
     }
   }
 

@@ -299,10 +299,11 @@ describe('analytics-ingest routes', () => {
 
     expect(res.status).toBe(204);
     await mockWaitUntil.mock.calls[0][0];
-    expect(consoleSpy).toHaveBeenCalledWith(
-      'analytics-ingest: write failed',
-      expect.stringContaining('AE unavailable')
-    );
+    // Logger emits a single JSON string to console.warn
+    expect(consoleSpy).toHaveBeenCalled();
+    const warnEntry = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(warnEntry.event).toBe('analytics_ingest.write_failed');
+    expect(warnEntry.error).toContain('AE unavailable');
     consoleSpy.mockRestore();
   });
 });
