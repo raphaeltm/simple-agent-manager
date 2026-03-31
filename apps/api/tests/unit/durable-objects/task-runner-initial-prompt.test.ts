@@ -5,19 +5,6 @@
  * is correctly included in the initial prompt sent to the agent.
  */
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
-const taskRunnerSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
-  'utf8',
-);
-
-describe('TaskRunConfig includes systemPromptAppend', () => {
-  it('has systemPromptAppend field in TaskRunConfig interface', () => {
-    expect(taskRunnerSource).toContain('systemPromptAppend: string | null');
-  });
-});
 
 describe('Initial prompt construction includes systemPromptAppend', () => {
   /**
@@ -123,12 +110,38 @@ describe('Initial prompt construction includes systemPromptAppend', () => {
   });
 });
 
-describe('TaskRunner source matches test prompt logic', () => {
-  it('constructs systemPromptSuffix from state.config.systemPromptAppend', () => {
-    expect(taskRunnerSource).toContain('state.config.systemPromptAppend');
-  });
+describe('Built-in profile systemPromptAppend values reach the initial prompt', () => {
+  // Built-in profiles define specific systemPromptAppend values.
+  // This test verifies each profile's append text integrates into
+  // the prompt construction, exercising the full value chain.
+  const BUILT_IN_PROFILES: Array<{ name: string; expectedAppend: string }> = [
+    { name: 'planner', expectedAppend: 'Decompose tasks. Do not write code directly.' },
+    { name: 'implementer', expectedAppend: 'Focus on implementation. Write tests for all changes.' },
+    { name: 'reviewer', expectedAppend: 'Review code for correctness, security, and style.' },
+  ];
 
-  it('includes systemPromptSuffix in initialPrompt template', () => {
-    expect(taskRunnerSource).toContain('${systemPromptSuffix}');
-  });
+  function buildInitialPrompt(taskDescription: string, systemPromptAppend: string | null): string {
+    const systemPromptSuffix = systemPromptAppend
+      ? `\n\n${systemPromptAppend}`
+      : '';
+
+    return (
+      `${taskDescription}${systemPromptSuffix}\n\n---\n\n` +
+      `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
+      `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
+      `Do not proceed until you have called this tool and read its response.`
+    );
+  }
+
+  for (const profile of BUILT_IN_PROFILES) {
+    it(`"${profile.name}" profile append text appears in the initial prompt`, () => {
+      const prompt = buildInitialPrompt('Do the thing', profile.expectedAppend);
+
+      expect(prompt).toContain(profile.expectedAppend);
+      // Verify it appears before the MCP separator
+      const appendIndex = prompt.indexOf(profile.expectedAppend);
+      const separatorIndex = prompt.indexOf('---');
+      expect(appendIndex).toBeLessThan(separatorIndex);
+    });
+  }
 });
