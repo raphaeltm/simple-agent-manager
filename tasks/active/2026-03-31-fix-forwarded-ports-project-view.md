@@ -42,28 +42,28 @@ Forwarded ports show up reliably in the workspace view but not in the project (c
 
 ## Implementation Checklist
 
-- [ ] 1. Replace manual one-shot token fetch in `ProjectMessageView.tsx` with `useTokenRefresh()` hook
+- [x] 1. Replace manual one-shot token fetch in `ProjectMessageView.tsx` with `useTokenRefresh()` hook
   - Use same pattern as `Workspace.tsx` line 231-244
   - Enable when `!!session?.workspaceId && isWorkspaceRunning`
   - Remove the manual `useEffect` at lines 574-590
   - Remove `terminalToken` useState (replaced by hook return)
 
-- [ ] 2. Add retry logic for workspace fetch
+- [x] 2. Add retry logic for workspace fetch
   - Add retry with backoff when `getWorkspace()` fails
   - Or: use a polling interval (e.g., retry every 10s until workspace is available, stop once fetched)
   - Ensure workspace fetch fires when session transitions from no-workspace to has-workspace
 
-- [ ] 3. Update `useWorkspacePorts` hook to be more resilient
+- [x] 3. Update `useWorkspacePorts` hook to be more resilient
   - When a fetch fails (401/network error), don't immediately clear ports — keep stale data visible
   - Add consecutive failure tracking: only clear ports after N consecutive failures (e.g., 3)
   - Log errors for debuggability
 
-- [ ] 4. Add tests
+- [x] 4. Add tests
   - Unit test: `useWorkspacePorts` retains stale ports on transient failure
   - Unit test: `useWorkspacePorts` clears ports after N consecutive failures
   - Unit test: ProjectMessageView port polling starts when workspace becomes available
 
-- [ ] 5. Update CLAUDE.md recent changes if needed
+- [x] 5. Update CLAUDE.md recent changes if needed (not needed — no new features/config)
 
 ## Acceptance Criteria
 
