@@ -17,6 +17,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useTabOrder } from '../hooks/useTabOrder';
 import { useTokenRefresh } from '../hooks/useTokenRefresh';
 import { useBootLogStream } from '../hooks/useBootLogStream';
+import { BootLogList } from '../components/shared/BootLogList';
 import { useWorkspacePorts } from '../hooks/useWorkspacePorts';
 import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/WorkspaceTabStrip';
 import { WorktreeSelector } from '../components/WorktreeSelector';
@@ -2201,34 +2202,7 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
     );
   }
 
-  // Deduplicate: show latest status per step
-  const stepMap = new Map<string, BootLogEntry>();
-  for (const log of logs) {
-    stepMap.set(log.step, log);
-  }
-  const steps = Array.from(stepMap.values());
-
-  const statusIcon = (status: BootLogEntry['status']) => {
-    switch (status) {
-      case 'completed':
-        return (
-          <span className="text-success-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>&#10003;</span>
-        );
-      case 'failed':
-        return (
-          <span className="text-danger-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>&#10007;</span>
-        );
-      case 'started':
-      default:
-        return (
-          <span className="mr-2 inline-flex">
-            <Spinner size="sm" />
-          </span>
-        );
-    }
-  };
-
-  const lastStep = steps[steps.length - 1];
+  const lastStep = logs[logs.length - 1];
   const hasFailed = lastStep?.status === 'failed';
 
   return (
@@ -2242,34 +2216,7 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
       >
         {hasFailed ? 'Provisioning Failed' : 'Creating Workspace'}
       </h3>
-      <div className="flex flex-col gap-1.5 max-w-[400px] w-full">
-        {steps.map((entry, i) => (
-          <div
-            key={i}
-            className="flex items-center"
-            style={{
-              fontSize: 'var(--sam-type-caption-size)',
-              color:
-                entry.status === 'failed'
-                  ? 'var(--sam-color-danger-fg)'
-                  : entry.status === 'completed'
-                    ? 'var(--sam-color-tn-fg-muted)'
-                    : 'var(--sam-color-tn-fg)',
-            }}
-          >
-            {statusIcon(entry.status)}
-            <span>{entry.message}</span>
-          </div>
-        ))}
-      </div>
-      {lastStep?.status === 'failed' && lastStep.detail && (
-        <p
-          className="mt-3 mb-0 max-w-[400px] text-center break-words text-tn-fg-muted"
-          style={{ fontSize: 'var(--sam-type-caption-size)' }}
-        >
-          {lastStep.detail}
-        </p>
-      )}
+      <BootLogList logs={logs} />
     </div>
   );
 }
