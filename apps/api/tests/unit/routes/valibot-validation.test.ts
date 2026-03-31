@@ -7,7 +7,7 @@
  * - Discriminated union schemas work correctly (CreateCredentialSchema)
  * - parseOptionalBody falls back gracefully on invalid/missing body
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { Hono } from 'hono';
 import * as v from 'valibot';
 import { jsonValidator, parseOptionalBody } from '../../../src/schemas/_validator';

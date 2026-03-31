@@ -4,6 +4,7 @@
  */
 import { vValidator } from '@hono/valibot-validator';
 import * as v from 'valibot';
+import { log } from '../lib/logger';
 import type {
   GenericSchema,
   GenericSchemaAsync,
@@ -86,10 +87,9 @@ export async function parseOptionalBody<T extends GenericSchema>(
   const result = v.safeParse(schema, raw);
   if (!result.success) {
     // Log for observability — client sent valid JSON but wrong shape
-    console.warn(JSON.stringify({
-      event: 'parseOptionalBody_validation_failed',
+    log.warn('parseOptionalBody_validation_failed', {
       issues: result.issues.map((i) => i.message),
-    }));
+    });
     return fallback;
   }
   return result.output;
