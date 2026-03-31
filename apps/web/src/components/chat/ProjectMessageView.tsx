@@ -16,6 +16,7 @@ import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, Che
 import { TruncatedSummary } from './TruncatedSummary';
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { ChatFilePanel } from './ChatFilePanel';
+import { ChatBrowserPanel } from './ChatBrowserPanel';
 import { mergeMessages } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
 import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession, saveCachedCommands, uploadSessionFiles } from '../../lib/api';
@@ -410,12 +411,22 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     setFilePanel({ mode: 'view', path, line });
   }, []);
 
+  // Browser panel state — slide-over for remote browser sidecar
+  const [browserPanelOpen, setBrowserPanelOpen] = useState(false);
+
   const handleOpenFileBrowser = useCallback(() => {
+    setBrowserPanelOpen(false); // Mutually exclusive with browser panel
     setFilePanel({ mode: 'browse', path: '.' });
   }, []);
 
   const handleOpenGitChanges = useCallback(() => {
+    setBrowserPanelOpen(false); // Mutually exclusive with browser panel
     setFilePanel({ mode: 'git-status' });
+  }, []);
+
+  const handleOpenBrowser = useCallback(() => {
+    setFilePanel(null); // Mutually exclusive with file panel
+    setBrowserPanelOpen(true);
   }, []);
 
   const sessionState = session ? deriveSessionState(session) : 'terminated';
@@ -964,6 +975,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onSessionMutated={onSessionMutated}
           onOpenFiles={handleOpenFileBrowser}
           onOpenGit={handleOpenGitChanges}
+          onOpenBrowser={handleOpenBrowser}
         />
       )}
 
@@ -1130,6 +1142,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onClose={() => setFilePanel(null)}
         />
       )}
+
+      {/* Browser sidecar slide-over panel */}
+      {browserPanelOpen && session && (
+        <ChatBrowserPanel
+          projectId={projectId}
+          sessionId={sessionId}
+          onClose={() => setBrowserPanelOpen(false)}
+        />
+      )}
     </div>
   );
 };
@@ -1165,6 +1186,7 @@ function SessionHeader({
   onSessionMutated,
   onOpenFiles,
   onOpenGit,
+  onOpenBrowser,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -1178,6 +1200,7 @@ function SessionHeader({
   onSessionMutated?: () => void;
   onOpenFiles?: () => void;
   onOpenGit?: () => void;
+  onOpenBrowser?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -1356,6 +1379,12 @@ function SessionHeader({
                     <Button variant="ghost" size="sm" onClick={onOpenGit}>
                       <GitCompare size={14} className="mr-1" />
                       Git
+                    </Button>
+                  )}
+                  {onOpenBrowser && (
+                    <Button variant="ghost" size="sm" onClick={onOpenBrowser}>
+                      <Globe size={14} className="mr-1" />
+                      Browser
                     </Button>
                   )}
                   <a
