@@ -178,6 +178,7 @@ func (m *Manager) SyncForwardersFromPorts(ctx context.Context, workspaceID strin
 	for _, f := range currentForwarders {
 		if !desired[f.Port] {
 			if err := m.removeForwarder(ctx, containerName, f.Port); err != nil {
+				slog.Warn("Failed to remove socat forwarder", "workspace", workspaceID, "port", f.Port, "error", err)
 				// Keep in state on failure to prevent duplicate socat processes
 				continue
 			}

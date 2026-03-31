@@ -115,8 +115,9 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		}
 		// If already starting or in error, allow re-start
 		if existing.Status == StatusStarting {
+			cp := *existing
 			m.mu.Unlock()
-			return existing, fmt.Errorf("browser sidecar is already starting for workspace %s", workspaceID)
+			return &cp, fmt.Errorf("browser sidecar is already starting for workspace %s", workspaceID)
 		}
 	}
 
@@ -126,12 +127,12 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 	password, err := generateRandomPassword(32)
 	if err != nil {
 		m.mu.Unlock()
-		return nil, fmt.Errorf("failed to generate Neko password: %w", err)
+		return &SidecarState{Status: StatusError, Error: "failed to generate Neko password"}, fmt.Errorf("failed to generate Neko password: %w", err)
 	}
 	passwordAdmin, err := generateRandomPassword(32)
 	if err != nil {
 		m.mu.Unlock()
-		return nil, fmt.Errorf("failed to generate Neko admin password: %w", err)
+		return &SidecarState{Status: StatusError, Error: "failed to generate Neko admin password"}, fmt.Errorf("failed to generate Neko admin password: %w", err)
 	}
 
 	state := &SidecarState{
@@ -177,10 +178,11 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 			state.Status = StatusError
 			state.Error = fmt.Sprintf("failed to create Neko container: %v", err)
 		}
+		cp := *state
 		m.mu.Unlock()
 
 		slog.Error("Failed to start Neko sidecar", "workspace", workspaceID, "error", err)
-		return state, fmt.Errorf("failed to start Neko container: %w", err)
+		return &cp, fmt.Errorf("failed to start Neko container: %w", err)
 	}
 
 	// Get the container ID
@@ -191,6 +193,8 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 	if s, ok := m.sidecars[workspaceID]; ok && s == state {
 		if inspectErr == nil {
 			state.ContainerID = trimOutput(out)
+		} else {
+			slog.Warn("Failed to inspect Neko container ID", "workspace", workspaceID, "error", inspectErr)
 		}
 		state.Status = StatusRunning
 
@@ -199,6 +203,9 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		m.stopPolls[workspaceID] = cancel
 		go m.socatPollLoop(pollCtx, workspaceID)
 	}
+	cp := *state
+	cp.Forwarders = make([]PortForwarder, len(state.Forwarders))
+	copy(cp.Forwarders, state.Forwarders)
 	m.mu.Unlock()
 
 	slog.Info("Neko browser sidecar started",
@@ -208,20 +215,16 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		"resolution", resolution,
 	)
 
-	return state, nil
+	return &cp, nil
 }
 
 // Stop removes the Neko sidecar for a workspace.
+// The mutex is released during Docker I/O to avoid blocking other operations.
 func (m *Manager) Stop(ctx context.Context, workspaceID string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	return m.stopLocked(ctx, workspaceID)
-}
-
-func (m *Manager) stopLocked(ctx context.Context, workspaceID string) error {
 	state, ok := m.sidecars[workspaceID]
 	if !ok {
+		m.mu.Unlock()
 		return nil // nothing to stop
 	}
 
@@ -232,26 +235,54 @@ func (m *Manager) stopLocked(ctx context.Context, workspaceID string) error {
 	}
 
 	state.Status = StatusStopping
+	containerName := state.ContainerName
+
+	// Release lock during Docker I/O
+	m.mu.Unlock()
 
 	// Force-remove the container (and all socat processes with it)
-	if err := m.docker.RunSilent(ctx, "rm", "-f", state.ContainerName); err != nil {
-		slog.Warn("Failed to remove Neko container", "workspace", workspaceID, "container", state.ContainerName, "error", err)
+	if err := m.docker.RunSilent(ctx, "rm", "-f", containerName); err != nil {
+		slog.Warn("Failed to remove Neko container", "workspace", workspaceID, "container", containerName, "error", err)
 	}
 
+	// Re-acquire lock to clean up map entry
+	m.mu.Lock()
 	delete(m.sidecars, workspaceID)
+	m.mu.Unlock()
 
 	slog.Info("Neko browser sidecar stopped", "workspace", workspaceID)
 	return nil
 }
 
 // Cleanup stops and removes all sidecars. Called on server shutdown.
+// Collects container names under lock, then removes them without holding the lock.
 func (m *Manager) Cleanup(ctx context.Context) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for wsID := range m.sidecars {
-		_ = m.stopLocked(ctx, wsID)
+	// Cancel all poll loops and collect container names
+	toRemove := make(map[string]string) // workspaceID -> containerName
+	for wsID, state := range m.sidecars {
+		if cancel, ok := m.stopPolls[wsID]; ok {
+			cancel()
+		}
+		state.Status = StatusStopping
+		toRemove[wsID] = state.ContainerName
 	}
+	m.stopPolls = make(map[string]context.CancelFunc)
+	m.mu.Unlock()
+
+	// Remove containers without holding the lock
+	for wsID, containerName := range toRemove {
+		if err := m.docker.RunSilent(ctx, "rm", "-f", containerName); err != nil {
+			slog.Warn("Failed to remove Neko container during cleanup", "workspace", wsID, "container", containerName, "error", err)
+		}
+	}
+
+	// Final cleanup of the map
+	m.mu.Lock()
+	for wsID := range toRemove {
+		delete(m.sidecars, wsID)
+	}
+	m.mu.Unlock()
 }
 
 // GetStatus returns the current state of a workspace's browser sidecar.
