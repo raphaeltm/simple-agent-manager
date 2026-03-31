@@ -58,6 +58,7 @@ describe('Env interface', () => {
       'TASK_RUNNER_AGENT_POLL_INTERVAL_MS',
       'TASK_RUNNER_AGENT_READY_TIMEOUT_MS',
       'TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS',
+      'TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS',
       'TASK_RUNNER_PROVISION_POLL_INTERVAL_MS',
     ];
     for (const v of envVars) {
@@ -92,6 +93,7 @@ describe('shared constants for TaskRunner DO', () => {
     { name: 'DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS', expectedValue: '5_000' },
     { name: 'DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS', expectedValue: '600_000' },
     { name: 'DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS', expectedValue: '15' },
+    { name: 'DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS', expectedValue: '30_000' },
     { name: 'DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS', expectedValue: '10_000' },
   ];
 
