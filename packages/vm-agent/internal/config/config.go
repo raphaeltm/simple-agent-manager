@@ -215,6 +215,11 @@ type Config struct {
 	NekoPidsLimit           int           // Docker PID limit for Neko container (env: NEKO_PIDS_LIMIT, default: 512)
 	NekoSocatMinPort        int           // Minimum port for socat forwarding (env: NEKO_SOCAT_MIN_PORT, default: 1024)
 	NekoSocatMaxPort        int           // Maximum port for socat forwarding (env: NEKO_SOCAT_MAX_PORT, default: 65535)
+	NekoViewportMinWidth    int           // Min viewport width for validation (env: NEKO_VIEWPORT_MIN_WIDTH, default: 320)
+	NekoViewportMaxWidth    int           // Max viewport width for validation (env: NEKO_VIEWPORT_MAX_WIDTH, default: 7680)
+	NekoViewportMinHeight   int           // Min viewport height for validation (env: NEKO_VIEWPORT_MIN_HEIGHT, default: 240)
+	NekoViewportMaxHeight   int           // Max viewport height for validation (env: NEKO_VIEWPORT_MAX_HEIGHT, default: 4320)
+	NekoViewportMaxDPR      int           // Max device pixel ratio for validation (env: NEKO_VIEWPORT_MAX_DPR, default: 4)
 }
 
 // Load reads configuration from environment variables.
@@ -414,6 +419,11 @@ func Load() (*Config, error) {
 		NekoPidsLimit:           getEnvInt("NEKO_PIDS_LIMIT", 512),
 		NekoSocatMinPort:        getEnvInt("NEKO_SOCAT_MIN_PORT", 1024),
 		NekoSocatMaxPort:        getEnvInt("NEKO_SOCAT_MAX_PORT", 65535),
+		NekoViewportMinWidth:    getEnvInt("NEKO_VIEWPORT_MIN_WIDTH", 320),
+		NekoViewportMaxWidth:    getEnvInt("NEKO_VIEWPORT_MAX_WIDTH", 7680),
+		NekoViewportMinHeight:   getEnvInt("NEKO_VIEWPORT_MIN_HEIGHT", 240),
+		NekoViewportMaxHeight:   getEnvInt("NEKO_VIEWPORT_MAX_HEIGHT", 4320),
+		NekoViewportMaxDPR:      getEnvInt("NEKO_VIEWPORT_MAX_DPR", 4),
 	}
 
 	// Derive TLS enabled state from cert/key paths

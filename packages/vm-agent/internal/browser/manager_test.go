@@ -85,6 +85,11 @@ func testConfig() *config.Config {
 		NekoPidsLimit:           512,
 		NekoSocatMinPort:        1024,
 		NekoSocatMaxPort:        65535,
+		NekoViewportMinWidth:    320,
+		NekoViewportMaxWidth:    7680,
+		NekoViewportMinHeight:   240,
+		NekoViewportMaxHeight:   4320,
+		NekoViewportMaxDPR:      4,
 		PortScanEphemeralMin:    32768,
 	}
 }

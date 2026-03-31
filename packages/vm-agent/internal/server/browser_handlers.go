@@ -43,17 +43,17 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	// Viewport bounds validation
-	if req.ViewportWidth != 0 && (req.ViewportWidth < 320 || req.ViewportWidth > 7680) {
-		writeError(w, http.StatusBadRequest, "viewportWidth must be between 320 and 7680")
+	// Viewport bounds validation (configurable via NEKO_VIEWPORT_* env vars)
+	if req.ViewportWidth != 0 && (req.ViewportWidth < s.config.NekoViewportMinWidth || req.ViewportWidth > s.config.NekoViewportMaxWidth) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("viewportWidth must be between %d and %d", s.config.NekoViewportMinWidth, s.config.NekoViewportMaxWidth))
 		return
 	}
-	if req.ViewportHeight != 0 && (req.ViewportHeight < 240 || req.ViewportHeight > 4320) {
-		writeError(w, http.StatusBadRequest, "viewportHeight must be between 240 and 4320")
+	if req.ViewportHeight != 0 && (req.ViewportHeight < s.config.NekoViewportMinHeight || req.ViewportHeight > s.config.NekoViewportMaxHeight) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("viewportHeight must be between %d and %d", s.config.NekoViewportMinHeight, s.config.NekoViewportMaxHeight))
 		return
 	}
-	if req.DevicePixelRatio != 0 && (req.DevicePixelRatio < 1 || req.DevicePixelRatio > 4) {
-		writeError(w, http.StatusBadRequest, "devicePixelRatio must be between 1 and 4")
+	if req.DevicePixelRatio != 0 && (req.DevicePixelRatio < 1 || req.DevicePixelRatio > s.config.NekoViewportMaxDPR) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("devicePixelRatio must be between 1 and %d", s.config.NekoViewportMaxDPR))
 		return
 	}
 
