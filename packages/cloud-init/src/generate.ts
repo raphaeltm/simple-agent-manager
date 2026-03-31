@@ -33,6 +33,10 @@ export interface CloudInitVariables {
   vmAgentPort?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
+  /** Docker image for Neko browser sidecar (default: ghcr.io/m1k1o/neko/google-chrome:latest) */
+  nekoImage?: string;
+  /** Whether to pre-pull the Neko browser image during cloud-init (default: true) */
+  nekoPrePull?: boolean;
 }
 
 /**
@@ -62,6 +66,7 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
+    '{{ neko_pre_pull_cmd }}': buildNekoPrePullCmd(variables),
   };
 
   for (const [placeholder, value] of Object.entries(replacements)) {
@@ -92,6 +97,19 @@ export function indentForYamlBlock(content: string, indent: number): string {
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Build the cloud-init runcmd entry for Neko image pre-pull.
+ * Returns an empty comment line if pre-pull is disabled.
+ */
+function buildNekoPrePullCmd(variables: CloudInitVariables): string {
+  const prePull = variables.nekoPrePull ?? true;
+  if (!prePull) {
+    return '# Neko pre-pull disabled';
+  }
+  const image = variables.nekoImage ?? 'ghcr.io/m1k1o/neko/google-chrome:latest';
+  return `- docker pull ${image} || true`;
 }
 
 /**
