@@ -400,6 +400,7 @@ submitRoutes.post('/submit', async (c) => {
       taskMode,
       model: resolvedProfile?.model ?? null,
       permissionMode: resolvedProfile?.permissionMode ?? null,
+      systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
       attachments: validatedAttachments.length > 0 ? validatedAttachments : null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
