@@ -801,7 +801,7 @@ export class TaskRunner extends DurableObject<Env> {
     const protocol = this.env.VM_AGENT_PROTOCOL || 'https';
     const port = this.env.VM_AGENT_PORT || '8443';
     const workspaceId = state.stepResults.workspaceId;
-    const baseDomain = (this.env).BASE_DOMAIN || '';
+    const baseDomain = this.env.BASE_DOMAIN || '';
     const vmUrl = `${protocol}://ws-${workspaceId}.${baseDomain}:${port}`;
     // Token passed as query param — VM agent's requireWorkspaceRequestAuth() checks
     // r.URL.Query().Get("token"), not Authorization header.
