@@ -305,6 +305,10 @@ importers:
       astro:
         specifier: ^5.17.3
         version: 5.17.3(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(rollup@4.56.0)(terser@5.46.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+    devDependencies:
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
 
   infra:
     dependencies:

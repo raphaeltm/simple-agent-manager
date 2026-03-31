@@ -7,6 +7,10 @@ import path from 'node:path';
 /**
  * Vite plugin that compiles src/sw.ts → dist/sw.js during build.
  * Uses Vite's built-in esbuild transform — no extra dependencies needed.
+ *
+ * Only runs during `vite build` (apply: 'build'). In dev mode, the service
+ * worker is not served — pwa.ts registration will silently fail, which is
+ * intentional since SW caching interferes with HMR during development.
  */
 function buildServiceWorker(): Plugin {
   return {
