@@ -30,6 +30,7 @@ import {
   closeConversationTask,
   requestAttachmentUpload,
   uploadAttachmentToR2,
+  getWorkspace,
 } from '../lib/api';
 import type { ChatSessionResponse, TaskAttachmentRef } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
@@ -39,6 +40,8 @@ import { ProfileSelector } from '../components/agent-profiles/ProfileSelector';
 import { ProfileFormDialog } from '../components/agent-profiles/ProfileFormDialog';
 import { useProjectWebSocket } from '../hooks/useProjectWebSocket';
 import { useAvailableCommands } from '../hooks/useAvailableCommands';
+import { useBootLogStream } from '../hooks/useBootLogStream';
+import { BootLogPanel } from '../components/chat/BootLogPanel';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -79,6 +82,8 @@ interface ProvisioningState {
   executionStep: TaskExecutionStep | null;
   errorMessage: string | null;
   startedAt: number;
+  workspaceId: string | null;
+  workspaceUrl: string | null;
 }
 
 type SessionState = 'active' | 'idle' | 'terminated';
@@ -270,6 +275,22 @@ export function ProjectChat() {
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
 
+  // Boot log streaming during provisioning
+  const bootLogStatus = provisioning?.executionStep === 'workspace_ready' ? 'creating' : undefined;
+  const { logs: bootLogs } = useBootLogStream(
+    provisioning?.workspaceId ?? undefined,
+    provisioning?.workspaceUrl ?? undefined,
+    bootLogStatus,
+  );
+  const [bootLogPanelOpen, setBootLogPanelOpen] = useState(false);
+
+  // Auto-close boot log panel when provisioning completes
+  useEffect(() => {
+    if (!provisioning) {
+      setBootLogPanelOpen(false);
+    }
+  }, [provisioning]);
+
   // Fork dialog state
   const [forkSession, setForkSession] = useState<ChatSessionResponse | null>(null);
 
@@ -435,7 +456,27 @@ export function ProjectChat() {
     const poll = async () => {
       try {
         const task = await getProjectTask(projectId, provisioning.taskId);
-        setProvisioning((prev) => prev ? { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null } : null);
+        setProvisioning((prev) => {
+          if (!prev) return null;
+          const next = { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null };
+          // Capture workspaceId when it appears
+          if (task.workspaceId && !prev.workspaceId) {
+            next.workspaceId = task.workspaceId;
+          }
+          return next;
+        });
+
+        // Fetch workspace URL once workspaceId appears and we don't have URL yet
+        if (task.workspaceId && !provisioning.workspaceUrl) {
+          try {
+            const ws = await getWorkspace(task.workspaceId);
+            if (ws.url) {
+              setProvisioning((prev) => prev ? { ...prev, workspaceUrl: ws.url ?? null } : null);
+            }
+          } catch {
+            // Workspace may not be ready yet — will retry on next poll
+          }
+        }
 
         if (task.status === 'in_progress' && (task.workspaceId || task.executionStep === 'running')) {
           navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
@@ -478,6 +519,8 @@ export function ProjectChat() {
             executionStep: task.executionStep ?? null,
             errorMessage: task.errorMessage ?? null,
             startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
+            workspaceId: task.workspaceId ?? null,
+            workspaceUrl: null,
           });
         }
       } catch {
@@ -538,6 +581,8 @@ export function ProjectChat() {
         executionStep: null,
         errorMessage: null,
         startedAt: Date.now(),
+        workspaceId: null,
+        workspaceUrl: null,
       });
 
       // Auto-link idea to the new session if this submit came from an execute-idea flow
@@ -598,6 +643,8 @@ export function ProjectChat() {
         executionStep: null,
         errorMessage: null,
         startedAt: Date.now(),
+        workspaceId: null,
+        workspaceUrl: null,
       });
       navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
       void loadSessions();
@@ -827,7 +874,7 @@ export function ProjectChat() {
           <div className="flex-1 flex flex-col min-h-0">
             <div className={`flex-1 flex flex-col items-center gap-3 ${isMobile ? 'p-4 justify-end pb-8' : 'p-8 justify-center'}`}>
               {provisioning ? (
-                <ProvisioningIndicator state={provisioning} />
+                <ProvisioningIndicator state={provisioning} bootLogCount={bootLogs.length} onViewLogs={() => setBootLogPanelOpen(true)} />
               ) : (
                 <>
                   <span className="text-base font-semibold text-fg-primary">
@@ -870,7 +917,7 @@ export function ProjectChat() {
           /* Active session view */
           <div className="flex-1 flex flex-col min-h-0">
             {provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status) && (
-              <ProvisioningIndicator state={provisioning} />
+              <ProvisioningIndicator state={provisioning} bootLogCount={bootLogs.length} onViewLogs={() => setBootLogPanelOpen(true)} />
             )}
             <ProjectMessageView
               key={sessionId}
@@ -929,6 +976,14 @@ export function ProjectChat() {
         onClose={() => setForkSession(null)}
         onFork={handleFork}
       />
+
+      {/* Boot log panel */}
+      {bootLogPanelOpen && (
+        <BootLogPanel
+          logs={bootLogs}
+          onClose={() => setBootLogPanelOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1214,7 +1269,7 @@ const PROVISIONING_STEPS: TaskExecutionStep[] = TASK_EXECUTION_STEPS.filter(
   (s) => s !== 'running' && s !== 'awaiting_followup'
 );
 
-function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
+function ProvisioningIndicator({ state, bootLogCount, onViewLogs }: { state: ProvisioningState; bootLogCount: number; onViewLogs: () => void }) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -1245,6 +1300,15 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
           <span className="sam-type-caption text-fg-muted">{state.branchName}</span>
         )}
         <span className="sam-type-caption text-fg-muted ml-auto">{elapsedDisplay}</span>
+        {bootLogCount > 0 && (
+          <button
+            type="button"
+            onClick={onViewLogs}
+            className="sam-type-caption text-accent-primary hover:underline bg-transparent border-none cursor-pointer p-0 shrink-0"
+          >
+            View Logs
+          </button>
+        )}
       </div>
 
       {!isTerminal(state.status) && (
