@@ -22,6 +22,7 @@ import (
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/auth"
+	"github.com/workspace/vm-agent/internal/browser"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/errorreport"
@@ -75,6 +76,7 @@ type Server struct {
 	portScannerMu       sync.RWMutex
 	portScanners        map[string]*ports.Scanner
 	portDiscoveries     map[string]*container.Discovery // per-workspace container discovery
+	browserManager      *browser.Manager                // Neko browser sidecar manager
 	bootstrapComplete   bool
 	callbackTokenMu     sync.RWMutex
 	callbackToken       string
@@ -369,6 +371,8 @@ func New(cfg *config.Config) (*Server, error) {
 		bootLogBroadcasters: NewBootLogBroadcasterManager(),
 		containerDiscovery:  containerDiscoveryInstance,
 		portScanners:        make(map[string]*ports.Scanner),
+		portDiscoveries:     make(map[string]*container.Discovery),
+		browserManager:      browser.NewManager(cfg, browser.NewCLIDockerExecutor()),
 		callbackToken:       cfg.CallbackToken,
 		done:                make(chan struct{}),
 	}
@@ -688,6 +692,11 @@ func (s *Server) Stop(ctx context.Context) error {
 	// Stop all port scanners
 	s.stopAllPortScanners()
 
+	// Cleanup all browser sidecars
+	if s.browserManager != nil {
+		s.browserManager.Cleanup(ctx)
+	}
+
 	// Close JWT validator
 	s.jwtValidator.Close()
 
@@ -779,6 +788,12 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports", s.handleListWorkspacePorts)
 	mux.HandleFunc("/workspaces/{workspaceId}/ports/{port}/{path...}", s.handleWorkspacePortProxy)
 	mux.HandleFunc("/workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
+
+	// Browser sidecar (Neko) - browser-authenticated via workspace session/token
+	mux.HandleFunc("POST /workspaces/{workspaceId}/browser", s.handleStartBrowser)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/browser", s.handleGetBrowserStatus)
+	mux.HandleFunc("DELETE /workspaces/{workspaceId}/browser", s.handleStopBrowser)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/browser/ports", s.handleGetBrowserPorts)
 
 	// Boot log WebSocket (available during bootstrap for real-time streaming)
 	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)

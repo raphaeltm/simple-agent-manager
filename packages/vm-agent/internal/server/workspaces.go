@@ -379,6 +379,11 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		s.stopSessionHost(workspaceID, session.ID)
 	}
 
+	// Stop browser sidecar if running.
+	if s.browserManager != nil {
+		_ = s.browserManager.Stop(r.Context(), workspaceID)
+	}
+
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)
 
@@ -485,6 +490,11 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.stopSessionHostsForWorkspace(workspaceID)
+
+	// Stop browser sidecar if running.
+	if s.browserManager != nil {
+		_ = s.browserManager.Stop(r.Context(), workspaceID)
+	}
 
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)

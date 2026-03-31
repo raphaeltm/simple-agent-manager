@@ -383,6 +383,7 @@ export interface Env {
   GA4_FETCH_TIMEOUT_MS?: string;                  // Timeout for GA4 API fetch (default: 30000)
   // File proxy configuration (chat file browser)
   FILE_PROXY_TIMEOUT_MS?: string;                  // Timeout for VM agent file proxy requests (default: 15000)
+  BROWSER_PROXY_TIMEOUT_MS?: string;               // Timeout for browser sidecar proxy requests (default: 30000)
   FILE_PROXY_MAX_RESPONSE_BYTES?: string;          // Max response body size from VM agent file proxy (default: 2097152 = 2MB)
   FILE_RAW_PROXY_MAX_BYTES?: string;              // Max response size for raw binary file proxy (default: 52428800 = 50MB)
   // File upload/download configuration

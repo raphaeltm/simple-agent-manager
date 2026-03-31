@@ -1019,6 +1019,61 @@ export interface PortsResponse {
   ports: DetectedPort[];
 }
 
+// =============================================================================
+// Browser Sidecar (Neko)
+// =============================================================================
+
+/** Status of the Neko browser sidecar container. */
+export type BrowserSidecarStatus = 'off' | 'starting' | 'running' | 'stopping' | 'error';
+
+/** Request body for POST /workspaces/{id}/browser — start browser sidecar. */
+export interface StartBrowserSidecarRequest {
+  /** Viewport width in pixels (e.g. 1920). Overrides NEKO_SCREEN_RESOLUTION. */
+  viewportWidth?: number;
+  /** Viewport height in pixels (e.g. 1080). Overrides NEKO_SCREEN_RESOLUTION. */
+  viewportHeight?: number;
+  /** Device pixel ratio for mobile emulation (e.g. 2 for Retina). */
+  devicePixelRatio?: number;
+  /** Whether the client is a touch device — enables Chrome mobile emulation flags. */
+  isTouchDevice?: boolean;
+  /** Enable audio streaming (overrides NEKO_ENABLE_AUDIO). */
+  enableAudio?: boolean;
+}
+
+/** Response from GET /workspaces/{id}/browser — sidecar status. */
+export interface BrowserSidecarResponse {
+  status: BrowserSidecarStatus;
+  /** Neko WebRTC HTTP port on the workspace network (typically 8080). */
+  nekoPort?: number;
+  /** Full URL for accessing the Neko client via SAM port proxy. */
+  url?: string;
+  /** Neko container name for diagnostics. */
+  containerName?: string;
+  /** Error message if status is 'error'. */
+  error?: string;
+  /** Active socat forwarders. */
+  ports?: BrowserSidecarPortInfo[];
+}
+
+/** Info about a single socat port forwarder running inside the Neko container. */
+export interface BrowserSidecarPortInfo {
+  /** Port number being forwarded (e.g. 3000). */
+  port: number;
+  /** Target host inside the Docker network (the DevContainer name). */
+  targetHost: string;
+  /** Whether the socat process is currently active. */
+  active: boolean;
+}
+
+/** Response from GET /workspaces/{id}/browser/ports — list active forwarders. */
+export interface BrowserSidecarPortsResponse {
+  ports: BrowserSidecarPortInfo[];
+}
+
+// =============================================================================
+// Agent Sessions
+// =============================================================================
+
 export type AgentSessionStatus = 'running' | 'suspended' | 'stopped' | 'error';
 
 /** Live host status from the VM Agent's SessionHost (more granular than AgentSessionStatus). */

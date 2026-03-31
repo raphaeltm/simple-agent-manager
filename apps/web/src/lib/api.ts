@@ -2139,3 +2139,118 @@ export async function revokeSmokeTestToken(id: string): Promise<void> {
     method: 'DELETE',
   });
 }
+
+// =============================================================================
+// Browser Sidecar (Neko)
+// =============================================================================
+
+export interface BrowserSidecarStatusResponse {
+  status: string;
+  nekoPort?: number;
+  url?: string;
+  containerName?: string;
+  error?: string;
+  ports?: Array<{ port: number; targetHost: string; active: boolean }>;
+}
+
+/** Start a browser sidecar for a workspace session. */
+export async function startBrowserSidecar(
+  projectId: string,
+  sessionId: string,
+  opts?: {
+    viewportWidth?: number;
+    viewportHeight?: number;
+    devicePixelRatio?: number;
+    isTouchDevice?: boolean;
+    enableAudio?: boolean;
+  }
+): Promise<BrowserSidecarStatusResponse> {
+  return request<BrowserSidecarStatusResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/browser`,
+    {
+      method: 'POST',
+      body: JSON.stringify(opts ?? {}),
+    }
+  );
+}
+
+/** Get the status of a browser sidecar for a workspace session. */
+export async function getBrowserSidecarStatus(
+  projectId: string,
+  sessionId: string
+): Promise<BrowserSidecarStatusResponse> {
+  return request<BrowserSidecarStatusResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/browser`
+  );
+}
+
+/** Stop the browser sidecar for a workspace session. */
+export async function stopBrowserSidecar(
+  projectId: string,
+  sessionId: string
+): Promise<BrowserSidecarStatusResponse> {
+  return request<BrowserSidecarStatusResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/browser`,
+    { method: 'DELETE' }
+  );
+}
+
+/** Get the active socat forwarders for a workspace session's browser sidecar. */
+export async function getBrowserSidecarPorts(
+  projectId: string,
+  sessionId: string
+): Promise<{ ports: Array<{ port: number; targetHost: string; active: boolean }> }> {
+  return request<{ ports: Array<{ port: number; targetHost: string; active: boolean }> }>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/browser/ports`
+  );
+}
+
+// === Workspace-level Browser Sidecar (no session required) ===
+
+/** Start a browser sidecar for a workspace (direct, no session). */
+export async function startWorkspaceBrowserSidecar(
+  workspaceId: string,
+  opts?: {
+    viewportWidth?: number;
+    viewportHeight?: number;
+    devicePixelRatio?: number;
+    isTouchDevice?: boolean;
+    enableAudio?: boolean;
+  }
+): Promise<BrowserSidecarStatusResponse> {
+  return request<BrowserSidecarStatusResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/browser`,
+    {
+      method: 'POST',
+      body: JSON.stringify(opts ?? {}),
+    }
+  );
+}
+
+/** Get the status of a workspace's browser sidecar (direct, no session). */
+export async function getWorkspaceBrowserSidecarStatus(
+  workspaceId: string
+): Promise<BrowserSidecarStatusResponse> {
+  return request<BrowserSidecarStatusResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/browser`
+  );
+}
+
+/** Stop the browser sidecar for a workspace (direct, no session). */
+export async function stopWorkspaceBrowserSidecar(
+  workspaceId: string
+): Promise<BrowserSidecarStatusResponse> {
+  return request<BrowserSidecarStatusResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/browser`,
+    { method: 'DELETE' }
+  );
+}
+
+/** Get the active socat forwarders for a workspace's browser sidecar (direct, no session). */
+export async function getWorkspaceBrowserSidecarPorts(
+  workspaceId: string
+): Promise<{ ports: Array<{ port: number; targetHost: string; active: boolean }> }> {
+  return request<{ ports: Array<{ port: number; targetHost: string; active: boolean }> }>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/browser/ports`
+  );
+}
