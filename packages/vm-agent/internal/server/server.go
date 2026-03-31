@@ -646,6 +646,11 @@ func (s *Server) Start() error {
 	// Start error reporter background flush
 	s.errorReporter.Start()
 
+	// Recover orphaned Neko browser containers from a previous agent process.
+	if s.browserManager != nil {
+		s.browserManager.RecoverOrphanedContainers(context.Background())
+	}
+
 	if s.config.TLSEnabled {
 		slog.Info("Starting VM Agent with TLS", "addr", s.httpServer.Addr, "cert", s.config.TLSCertPath, "key", s.config.TLSKeyPath)
 		return s.httpServer.ListenAndServeTLS(s.config.TLSCertPath, s.config.TLSKeyPath)

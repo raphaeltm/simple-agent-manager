@@ -59,14 +59,17 @@ export function useBrowserSidecar(
     hasStatusRef.current = status !== null;
   }, [status]);
 
-  // Determine which API flavor to use based on options
+  // Extract stable primitives from options to avoid object-identity dependency issues
   const isWorkspaceMode = 'workspaceId' in options && !!options.workspaceId;
+  const workspaceId = isWorkspaceMode ? options.workspaceId! : undefined;
+  const projectId = !isWorkspaceMode ? options.projectId! : undefined;
+  const sessionId = !isWorkspaceMode ? options.sessionId! : undefined;
 
   const refresh = useCallback(async () => {
     try {
       const result = isWorkspaceMode
-        ? await getWorkspaceBrowserSidecarStatus(options.workspaceId!)
-        : await getBrowserSidecarStatus(options.projectId!, options.sessionId!);
+        ? await getWorkspaceBrowserSidecarStatus(workspaceId!)
+        : await getBrowserSidecarStatus(projectId!, sessionId!);
       setStatus(result);
       setError(null);
     } catch (err) {
@@ -75,7 +78,7 @@ export function useBrowserSidecar(
         setError(err instanceof Error ? err.message : 'Failed to get browser status');
       }
     }
-  }, [isWorkspaceMode, options]);
+  }, [isWorkspaceMode, workspaceId, projectId, sessionId]);
 
   const start = useCallback(
     async (opts?: {
@@ -89,8 +92,8 @@ export function useBrowserSidecar(
       setError(null);
       try {
         const result = isWorkspaceMode
-          ? await startWorkspaceBrowserSidecar(options.workspaceId!, opts)
-          : await startBrowserSidecar(options.projectId!, options.sessionId!, opts);
+          ? await startWorkspaceBrowserSidecar(workspaceId!, opts)
+          : await startBrowserSidecar(projectId!, sessionId!, opts);
         setStatus(result);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to start browser');
@@ -98,7 +101,7 @@ export function useBrowserSidecar(
         setIsLoading(false);
       }
     },
-    [isWorkspaceMode, options]
+    [isWorkspaceMode, workspaceId, projectId, sessionId]
   );
 
   const stop = useCallback(async () => {
@@ -106,15 +109,15 @@ export function useBrowserSidecar(
     setError(null);
     try {
       const result = isWorkspaceMode
-        ? await stopWorkspaceBrowserSidecar(options.workspaceId!)
-        : await stopBrowserSidecar(options.projectId!, options.sessionId!);
+        ? await stopWorkspaceBrowserSidecar(workspaceId!)
+        : await stopBrowserSidecar(projectId!, sessionId!);
       setStatus(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop browser');
     } finally {
       setIsLoading(false);
     }
-  }, [isWorkspaceMode, options]);
+  }, [isWorkspaceMode, workspaceId, projectId, sessionId]);
 
   // Poll for status when sidecar is running
   useEffect(() => {

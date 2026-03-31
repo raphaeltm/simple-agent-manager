@@ -39,16 +39,21 @@ async function proxyBrowserToVmAgent(
   const workspaceUrl = `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
   const { token } = await signTerminalToken(userId, workspaceId, env);
 
-  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/${vmPath}?token=${encodeURIComponent(token)}`;
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/${vmPath}`;
+
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${token}`,
+  };
 
   const fetchOpts: RequestInit = {
     method,
+    headers,
     signal: AbortSignal.timeout(timeoutMs),
   };
 
   if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
     fetchOpts.body = body;
-    fetchOpts.headers = { 'Content-Type': contentType || 'application/json' };
+    headers['Content-Type'] = contentType || 'application/json';
     // @ts-expect-error — duplex required for streaming bodies in Workers/Node 18+
     fetchOpts.duplex = 'half';
   }
@@ -63,7 +68,7 @@ async function proxyBrowserToVmAgent(
         event: 'browser_proxy.fetch_error',
         workspaceId,
         vmPath,
-        url: url.replace(/token=[^&]+/, 'token=REDACTED'),
+        url,
         error: errMsg,
       })
     );
@@ -88,16 +93,16 @@ async function proxyBrowserToVmAgent(
     throw errors.badRequest('VM agent returned an error');
   }
 
-  const headers = new Headers();
+  const responseHeaders = new Headers();
   for (const name of FORWARDED_RESPONSE_HEADERS) {
     const value = res.headers.get(name);
-    if (value) headers.set(name, value);
+    if (value) responseHeaders.set(name, value);
   }
-  if (!headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
+  if (!responseHeaders.has('Content-Type')) {
+    responseHeaders.set('Content-Type', 'application/json');
   }
 
-  return new Response(res.body, { status: res.status, headers });
+  return new Response(res.body, { status: res.status, headers: responseHeaders });
 }
 
 // POST /:id/browser — start browser sidecar

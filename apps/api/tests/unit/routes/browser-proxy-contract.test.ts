@@ -55,11 +55,12 @@ describe('Browser sidecar proxy — cross-boundary contract', () => {
   });
 
   describe('auth mechanism contract', () => {
-    it('API proxy passes token as query parameter (not header)', () => {
-      // The VM agent reads auth tokens from the query parameter `?token=`.
-      // The API proxy must pass the terminal token as a query parameter.
-      // This test documents the contract — if either side changes, this test
-      // must be updated.
+    it('API proxy passes token as Authorization Bearer header (not query param)', () => {
+      // The VM agent reads auth tokens from the Authorization: Bearer header first,
+      // falling back to ?token= query param for backward compatibility.
+      // The API proxy MUST pass the terminal token as a Bearer header to avoid
+      // exposing JWT tokens in URL query strings (logged by proxies/CDNs).
+      // Updated from query param to Bearer header in PR #568 fixes.
 
       // Simulated URL construction from proxyBrowserToVmAgent / proxyBrowserRequest
       const workspaceUrl = 'https://node-abc.vm.example.com:8443';
@@ -67,11 +68,17 @@ describe('Browser sidecar proxy — cross-boundary contract', () => {
       const vmPath = 'browser';
       const token = 'jwt-token-here';
 
-      const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/${vmPath}?token=${encodeURIComponent(token)}`;
-
+      // URL must NOT contain the token
+      const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/${vmPath}`;
       const parsed = new URL(url);
-      expect(parsed.searchParams.get('token')).toBe(token);
+      expect(parsed.searchParams.get('token')).toBeNull();
       expect(parsed.pathname).toBe(`/workspaces/${workspaceId}/${vmPath}`);
+
+      // Token must be in Authorization header
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${token}`,
+      };
+      expect(headers['Authorization']).toBe(`Bearer ${token}`);
     });
   });
 

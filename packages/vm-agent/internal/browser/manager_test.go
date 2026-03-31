@@ -80,6 +80,16 @@ func testConfig() *config.Config {
 		NekoShmSize:             "2g",
 		NekoBrowserStartTimeout: 60 * time.Second,
 		NekoBrowserStopTimeout:  30 * time.Second,
+		NekoMemoryLimit:         "4g",
+		NekoCPULimit:            "2",
+		NekoPidsLimit:           512,
+		NekoSocatMinPort:        1024,
+		NekoSocatMaxPort:        65535,
+		NekoViewportMinWidth:    320,
+		NekoViewportMaxWidth:    7680,
+		NekoViewportMinHeight:   240,
+		NekoViewportMaxHeight:   4320,
+		NekoViewportMaxDPR:      4,
 		PortScanEphemeralMin:    32768,
 	}
 }
@@ -245,6 +255,115 @@ func TestManagerCustomViewport(t *testing.T) {
 	if !found {
 		t.Error("expected docker run with custom resolution 375x667@30")
 	}
+}
+
+func TestManagerStartGeneratesRandomPasswords(t *testing.T) {
+	docker := newMockDocker()
+	mgr := NewManager(testConfig(), docker)
+	ctx := context.Background()
+
+	state, err := mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", StartOptions{})
+	if err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+
+	if state.Password == "" {
+		t.Error("expected non-empty random password")
+	}
+	if state.PasswordAdmin == "" {
+		t.Error("expected non-empty random admin password")
+	}
+	if state.Password == state.PasswordAdmin {
+		t.Error("password and admin password should be different")
+	}
+	if len(state.Password) != 64 { // 32 bytes = 64 hex chars
+		t.Errorf("expected 64 hex char password, got %d chars", len(state.Password))
+	}
+}
+
+func TestManagerRecoverOrphanedContainers(t *testing.T) {
+	docker := newMockDocker()
+	docker.outputs["ps -a --filter name=neko- --format {{.Names}}"] = "neko-old-ws-1\nneko-old-ws-2\n"
+	mgr := NewManager(testConfig(), docker)
+
+	mgr.RecoverOrphanedContainers(context.Background())
+
+	calls := docker.getCalls()
+	hasRm1 := false
+	hasRm2 := false
+	for _, c := range calls {
+		if c == "rm -f neko-old-ws-1" {
+			hasRm1 = true
+		}
+		if c == "rm -f neko-old-ws-2" {
+			hasRm2 = true
+		}
+	}
+	if !hasRm1 {
+		t.Error("expected 'docker rm -f neko-old-ws-1'")
+	}
+	if !hasRm2 {
+		t.Error("expected 'docker rm -f neko-old-ws-2'")
+	}
+}
+
+func TestManagerStartDeferredCleanupOnFailure(t *testing.T) {
+	// Use a mock that fails on RunSilent for the initial docker run,
+	// then check that a cleanup rm -f is attempted.
+	docker := &trackingFailDocker{
+		failAfter: 0, // fail on first RunSilent call
+		calls:     nil,
+	}
+	mgr := NewManager(testConfig(), docker)
+	ctx := context.Background()
+
+	_, err := mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", StartOptions{})
+	if err == nil {
+		t.Fatal("expected error from Start")
+	}
+
+	// Check that rm -f was called for cleanup
+	hasCleanup := false
+	for _, c := range docker.calls {
+		if strings.Contains(c, "rm -f neko-ws-1") {
+			hasCleanup = true
+		}
+	}
+	if !hasCleanup {
+		t.Error("expected deferred cleanup 'docker rm -f neko-ws-1' after start failure")
+	}
+}
+
+// trackingFailDocker fails on the Nth RunSilent call but tracks all calls.
+type trackingFailDocker struct {
+	mu         sync.Mutex
+	failAfter  int
+	silentCall int
+	calls      []string
+}
+
+func (f *trackingFailDocker) Run(ctx context.Context, args ...string) ([]byte, error) {
+	key := strings.Join(args, " ")
+	f.mu.Lock()
+	f.calls = append(f.calls, key)
+	f.mu.Unlock()
+	if len(args) > 0 && args[0] == "inspect" {
+		return []byte("abc123\n"), nil
+	}
+	return nil, nil
+}
+
+func (f *trackingFailDocker) RunSilent(ctx context.Context, args ...string) error {
+	key := strings.Join(args, " ")
+	f.mu.Lock()
+	f.calls = append(f.calls, key)
+	n := f.silentCall
+	f.silentCall++
+	f.mu.Unlock()
+	if n == f.failAfter {
+		return fmt.Errorf("docker run failed")
+	}
+	return nil
 }
 
 // failingDocker always returns an error from RunSilent.

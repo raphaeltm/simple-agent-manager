@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/workspace/vm-agent/internal/browser"
 	"github.com/workspace/vm-agent/internal/config"
@@ -39,6 +41,20 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	// Viewport bounds validation (configurable via NEKO_VIEWPORT_* env vars)
+	if req.ViewportWidth != 0 && (req.ViewportWidth < s.config.NekoViewportMinWidth || req.ViewportWidth > s.config.NekoViewportMaxWidth) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("viewportWidth must be between %d and %d", s.config.NekoViewportMinWidth, s.config.NekoViewportMaxWidth))
+		return
+	}
+	if req.ViewportHeight != 0 && (req.ViewportHeight < s.config.NekoViewportMinHeight || req.ViewportHeight > s.config.NekoViewportMaxHeight) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("viewportHeight must be between %d and %d", s.config.NekoViewportMinHeight, s.config.NekoViewportMaxHeight))
+		return
+	}
+	if req.DevicePixelRatio != 0 && (req.DevicePixelRatio < 1 || req.DevicePixelRatio > s.config.NekoViewportMaxDPR) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("devicePixelRatio must be between 1 and %d", s.config.NekoViewportMaxDPR))
+		return
 	}
 
 	// Discover the DevContainer's network and name
@@ -76,7 +92,11 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 
 	state, err := s.browserManager.Start(ctx, workspaceID, netInfo.NetworkName, netInfo.ContainerName, opts)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, state.Error)
+		errMsg := "failed to start browser sidecar"
+		if state != nil && state.Error != "" {
+			errMsg = state.Error
+		}
+		writeError(w, http.StatusInternalServerError, errMsg)
 		return
 	}
 
@@ -123,7 +143,8 @@ func (s *Server) handleStopBrowser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), s.config.NekoBrowserStopTimeout)
+	// Use a detached context with timeout so stop isn't cancelled by the client disconnecting
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.NekoBrowserStopTimeout)
 	defer cancel()
 
 	if err := s.browserManager.Stop(ctx, workspaceID); err != nil {
@@ -179,7 +200,7 @@ func (s *Server) resolveContainerID(workspaceID string) (string, error) {
 		return s.containerDiscovery.GetContainerID()
 	}
 
-	return "", nil
+	return "", fmt.Errorf("no container discovery available for workspace %s", workspaceID)
 }
 
 // browserStateToResponse converts internal state to the API response shape.
@@ -197,8 +218,8 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 		slog.Debug("Browser sidecar error detail", "workspace", workspaceID, "error", state.Error)
 	}
 	if state.NekoPort > 0 && state.Status == browser.StatusRunning {
-		resp["nekoPort"] = state.NekoPort
-		// Build the proxy URL using SAM's existing port proxy pattern.
+		// Do NOT expose nekoPort in the response — it leaks internal container topology
+		// and enables direct container bypass. The proxy URL is sufficient for the UI.
 		baseDomain := deriveBaseDomainFromURL(controlPlaneURL)
 		if baseDomain != "" {
 			resp["url"] = "https://ws-" + workspaceID + "--" + itoa(state.NekoPort) + "." + baseDomain
@@ -209,6 +230,23 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 	}
 
 	return resp
+}
+
+// stopBrowserSidecarWithTimeout stops the browser sidecar using a background context
+// with a timeout. Use this in workspace lifecycle handlers where the request context
+// may be cancelled before the stop completes.
+func (s *Server) stopBrowserSidecarWithTimeout(workspaceID string, timeout time.Duration) {
+	if s.browserManager == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := s.browserManager.Stop(ctx, workspaceID); err != nil {
+		slog.Warn("Failed to stop browser sidecar during workspace cleanup",
+			"workspace", workspaceID,
+			"error", err,
+		)
+	}
 }
 
 // deriveBaseDomainFromURL extracts the base domain from a control plane URL.
