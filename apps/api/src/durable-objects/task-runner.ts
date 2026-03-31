@@ -129,6 +129,8 @@ interface TaskRunConfig {
   model: string | null;
   /** Permission mode override from agent profile (forwarded to VM agent). Null = use agent default. */
   permissionMode: string | null;
+  /** System prompt text to append to the initial prompt (from agent profile). Null = no append. */
+  systemPromptAppend: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
   /** Per-project scaling overrides. Null values mean "use platform default". */
@@ -1029,8 +1031,13 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
           `\nThese files are available at the paths listed above. Read them to understand the task context.\n`;
       }
 
+      // Append agent profile system prompt if configured
+      const systemPromptSuffix = state.config.systemPromptAppend
+        ? `\n\n${state.config.systemPromptAppend}`
+        : '';
+
       const initialPrompt =
-        `${taskContent}${attachmentContext}\n\n---\n\n` +
+        `${taskContent}${attachmentContext}${systemPromptSuffix}\n\n---\n\n` +
         `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
         `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
         `Do not proceed until you have called this tool and read its response.`;
@@ -1606,7 +1613,12 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
   // =========================================================================
 
   private async getState(): Promise<TaskRunnerState | null> {
-    return (await this.ctx.storage.get<TaskRunnerState>('state')) ?? null;
+    const raw = await this.ctx.storage.get<TaskRunnerState>('state');
+    if (!raw) return null;
+    // Normalize fields added after initial schema version (backward compat
+    // for DOs started before deployment of the field).
+    raw.config.systemPromptAppend ??= null;
+    return raw;
   }
 
   // =========================================================================

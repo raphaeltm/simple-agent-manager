@@ -47,12 +47,12 @@ None of these are currently delivered to the agent.
 
 ## Implementation Checklist
 
-- [ ] Add `systemPromptAppend: string | null` field to `TaskRunConfig` interface in `task-runner.ts`
-- [ ] Pass `resolvedProfile?.systemPromptAppend ?? null` in the config object in `submit.ts`
-- [ ] Append `systemPromptAppend` to the initial prompt in `task-runner.ts` (before the MCP instructions separator)
-- [ ] Add unit test: verify `systemPromptAppend` is included in the initial prompt when present
-- [ ] Add unit test: verify initial prompt is unchanged when `systemPromptAppend` is null
-- [ ] Update existing tests if they assert on the exact initial prompt format
+- [x] Add `systemPromptAppend: string | null` field to `TaskRunConfig` interface in `task-runner.ts`
+- [x] Pass `resolvedProfile?.systemPromptAppend ?? null` in the config object in `submit.ts`
+- [x] Append `systemPromptAppend` to the initial prompt in `task-runner.ts` (before the MCP instructions separator)
+- [x] Add unit test: verify `systemPromptAppend` is included in the initial prompt when present
+- [x] Add unit test: verify initial prompt is unchanged when `systemPromptAppend` is null
+- [x] Update existing tests if they assert on the exact initial prompt format (none needed — existing tests are source-contract and unaffected)
 
 ## Acceptance Criteria
 
