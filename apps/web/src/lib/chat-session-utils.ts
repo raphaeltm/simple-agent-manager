@@ -4,7 +4,11 @@
 import type { ChatSessionResponse } from './api';
 
 /** Sessions with no activity in this window are considered stale and hidden by default (ms). */
-export const STALE_SESSION_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
+const DEFAULT_STALE_SESSION_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
+export const STALE_SESSION_THRESHOLD_MS = parseInt(
+  import.meta.env.VITE_STALE_SESSION_THRESHOLD_MS ||
+    String(DEFAULT_STALE_SESSION_THRESHOLD_MS),
+);
 
 export type SessionState = 'active' | 'idle' | 'terminated';
 
