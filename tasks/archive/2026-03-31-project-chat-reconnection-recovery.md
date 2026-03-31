@@ -42,33 +42,33 @@ The workspace view doesn't have this problem because it connects directly to the
 ## Implementation Checklist
 
 ### Fix 1: ACP recovery when active but disconnected
-- [ ] Add a recovery effect in `ProjectMessageView.tsx` that triggers when:
+- [x] Add a recovery effect in `ProjectMessageView.tsx` that triggers when:
   - `sessionState === 'active'` (server thinks session is alive)
   - `agentSession.session.state === 'error'` (ACP gave up)
   - Not already resuming, not provisioning
-- [ ] The recovery effect should:
+- [x] The recovery effect should:
   1. Wait a configurable delay (e.g., `VITE_ACP_RECOVERY_DELAY_MS`, default 5000ms) to avoid racing with ACP's own reconnection
   2. Call `resumeAgentSession()` to ensure the VM-side session is running
   3. Call `agentSession.reconnect()` to force a fresh ACP WebSocket connection
   4. Retry periodically (e.g., every 30s) if recovery fails, up to a max attempts limit
-- [ ] Add configurable constants: `DEFAULT_ACP_RECOVERY_DELAY_MS`, `DEFAULT_ACP_RECOVERY_INTERVAL_MS`, `DEFAULT_ACP_RECOVERY_MAX_ATTEMPTS`
-- [ ] Ensure the recovery ref resets when switching sessions (like `hasAttemptedAutoResumeRef`)
+- [x] Add configurable constants: `DEFAULT_ACP_RECOVERY_DELAY_MS`, `DEFAULT_ACP_RECOVERY_INTERVAL_MS`, `DEFAULT_ACP_RECOVERY_MAX_ATTEMPTS`
+- [x] Ensure the recovery ref resets when switching sessions (like `hasAttemptedAutoResumeRef`)
 
 ### Fix 2: Debounce the reconnecting banner
-- [ ] Add a debounce delay before showing `ConnectionBanner` — only show after connection has been down for 3+ seconds
-- [ ] Use a `useState` + `useEffect` pattern: track `connectionState` but delay the "show banner" state transition
-- [ ] Configurable via `VITE_RECONNECT_BANNER_DELAY_MS` (default 3000ms)
-- [ ] Ensure the banner still shows immediately for `disconnected` state (permanent failure)
+- [x] Add a debounce delay before showing `ConnectionBanner` — only show after connection has been down for 3+ seconds
+- [x] Use a `useState` + `useEffect` pattern: track `connectionState` but delay the "show banner" state transition
+- [x] Configurable via `VITE_RECONNECT_BANNER_DELAY_MS` (default 3000ms)
+- [x] Ensure the banner still shows immediately for `disconnected` state (permanent failure)
 
 ### Tests
-- [ ] Unit test: recovery effect triggers when sessionState='active' + ACP state='error'
-- [ ] Unit test: recovery effect does NOT trigger when sessionState='idle' (existing auto-resume handles it)
-- [ ] Unit test: recovery effect resets on session switch
-- [ ] Unit test: reconnecting banner is debounced (not shown for brief disconnects)
-- [ ] Unit test: reconnecting banner shows for sustained disconnects > threshold
+- [x] Unit test: recovery effect triggers when sessionState='active' + ACP state='error'
+- [x] Unit test: recovery effect does NOT trigger when sessionState='idle' (existing auto-resume handles it)
+- [x] Unit test: recovery effect resets on session switch
+- [x] Unit test: reconnecting banner is debounced (not shown for brief disconnects)
+- [x] Unit test: reconnecting banner shows for sustained disconnects > threshold
 
 ### Documentation
-- [ ] Update CLAUDE.md recent changes if needed
+- [x] Update CLAUDE.md recent changes if needed (no update needed — this is a bug fix, not a new feature)
 
 ## Acceptance Criteria
 
