@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/workspace/vm-agent/internal/config"
@@ -40,6 +41,8 @@ type SidecarState struct {
 	Forwarders    []PortForwarder
 	NetworkName   string
 	TargetHost    string // DevContainer hostname on the Docker network
+	Password      string // Per-container random password for Neko viewer
+	PasswordAdmin string // Per-container random password for Neko admin
 }
 
 // StartOptions configures sidecar creation.
@@ -78,22 +81,67 @@ func NewManager(cfg *config.Config, docker DockerExecutor) *Manager {
 	}
 }
 
+// RecoverOrphanedContainers removes stale Neko containers from prior agent runs.
+// Should be called once at startup before accepting requests.
+func (m *Manager) RecoverOrphanedContainers(ctx context.Context) {
+	out, err := m.docker.Run(ctx, "ps", "-a", "--filter", "name=neko-", "--format", "{{.Names}}")
+	if err != nil {
+		slog.Warn("Failed to list orphaned Neko containers", "error", err)
+		return
+	}
+	names := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		slog.Info("Removing orphaned Neko container", "container", name)
+		if err := m.docker.RunSilent(ctx, "rm", "-f", name); err != nil {
+			slog.Warn("Failed to remove orphaned Neko container", "container", name, "error", err)
+		}
+	}
+}
+
 // Start creates and starts a Neko sidecar for a workspace.
+// The mutex is released during Docker I/O to avoid blocking other operations.
 func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContainerName string, opts StartOptions) (*SidecarState, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	if existing, ok := m.sidecars[workspaceID]; ok && existing.Status == StatusRunning {
-		return existing, nil
+	if existing, ok := m.sidecars[workspaceID]; ok {
+		if existing.Status == StatusRunning {
+			cp := *existing
+			m.mu.Unlock()
+			return &cp, nil
+		}
+		// If already starting or in error, allow re-start
+		if existing.Status == StatusStarting {
+			m.mu.Unlock()
+			return existing, fmt.Errorf("browser sidecar is already starting for workspace %s", workspaceID)
+		}
 	}
 
 	containerName := nekoContainerName(workspaceID)
+
+	// Generate per-container random passwords for defense-in-depth
+	password, err := generateRandomPassword(32)
+	if err != nil {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("failed to generate Neko password: %w", err)
+	}
+	passwordAdmin, err := generateRandomPassword(32)
+	if err != nil {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("failed to generate Neko admin password: %w", err)
+	}
+
 	state := &SidecarState{
 		Status:        StatusStarting,
 		ContainerName: containerName,
 		NekoPort:      m.cfg.NekoWebRTCPort,
 		NetworkName:   networkName,
 		TargetHost:    devContainerName,
+		Password:      password,
+		PasswordAdmin: passwordAdmin,
 	}
 	m.sidecars[workspaceID] = state
 
@@ -108,29 +156,50 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		enableAudio = *opts.EnableAudio
 	}
 
-	env := buildNekoEnv(resolution, m.cfg.NekoMaxFPS, m.cfg.NekoWebRTCPort, m.cfg.NekoPassword, m.cfg.NekoPasswordAdmin, enableAudio, m.cfg.NekoTCPFallback)
+	env := buildNekoEnv(resolution, m.cfg.NekoMaxFPS, m.cfg.NekoWebRTCPort, password, passwordAdmin, enableAudio, m.cfg.NekoTCPFallback)
 
-	// Create and start the container
-	args := buildDockerRunArgs(containerName, m.cfg.NekoImage, networkName, m.cfg.NekoShmSize, m.cfg.NekoWebRTCPort, env)
+	limits := ResourceLimits{
+		MemoryLimit: m.cfg.NekoMemoryLimit,
+		CPULimit:    m.cfg.NekoCPULimit,
+		PidsLimit:   m.cfg.NekoPidsLimit,
+	}
+	args := buildDockerRunArgs(containerName, m.cfg.NekoImage, networkName, m.cfg.NekoShmSize, m.cfg.NekoWebRTCPort, env, limits)
+
+	// Release lock during Docker I/O
+	m.mu.Unlock()
+
 	if err := m.docker.RunSilent(ctx, args...); err != nil {
-		state.Status = StatusError
-		state.Error = fmt.Sprintf("failed to create Neko container: %v", err)
+		// Deferred cleanup: remove the container if it was partially created
+		_ = m.docker.RunSilent(ctx, "rm", "-f", containerName)
+
+		m.mu.Lock()
+		if s, ok := m.sidecars[workspaceID]; ok && s == state {
+			state.Status = StatusError
+			state.Error = fmt.Sprintf("failed to create Neko container: %v", err)
+		}
+		m.mu.Unlock()
+
 		slog.Error("Failed to start Neko sidecar", "workspace", workspaceID, "error", err)
 		return state, fmt.Errorf("failed to start Neko container: %w", err)
 	}
 
 	// Get the container ID
-	out, err := m.docker.Run(ctx, "inspect", "-f", "{{.Id}}", containerName)
-	if err == nil {
-		state.ContainerID = trimOutput(out)
+	out, inspectErr := m.docker.Run(ctx, "inspect", "-f", "{{.Id}}", containerName)
+
+	// Re-acquire lock to update final state
+	m.mu.Lock()
+	if s, ok := m.sidecars[workspaceID]; ok && s == state {
+		if inspectErr == nil {
+			state.ContainerID = trimOutput(out)
+		}
+		state.Status = StatusRunning
+
+		// Start socat port sync loop
+		pollCtx, cancel := context.WithCancel(context.Background())
+		m.stopPolls[workspaceID] = cancel
+		go m.socatPollLoop(pollCtx, workspaceID)
 	}
-
-	state.Status = StatusRunning
-
-	// Start socat port sync loop
-	pollCtx, cancel := context.WithCancel(context.Background())
-	m.stopPolls[workspaceID] = cancel
-	go m.socatPollLoop(pollCtx, workspaceID)
+	m.mu.Unlock()
 
 	slog.Info("Neko browser sidecar started",
 		"workspace", workspaceID,

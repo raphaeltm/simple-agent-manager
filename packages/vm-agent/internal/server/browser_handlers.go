@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/workspace/vm-agent/internal/browser"
 	"github.com/workspace/vm-agent/internal/config"
@@ -39,6 +41,20 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	// Viewport bounds validation
+	if req.ViewportWidth != 0 && (req.ViewportWidth < 320 || req.ViewportWidth > 7680) {
+		writeError(w, http.StatusBadRequest, "viewportWidth must be between 320 and 7680")
+		return
+	}
+	if req.ViewportHeight != 0 && (req.ViewportHeight < 240 || req.ViewportHeight > 4320) {
+		writeError(w, http.StatusBadRequest, "viewportHeight must be between 240 and 4320")
+		return
+	}
+	if req.DevicePixelRatio != 0 && (req.DevicePixelRatio < 1 || req.DevicePixelRatio > 4) {
+		writeError(w, http.StatusBadRequest, "devicePixelRatio must be between 1 and 4")
+		return
 	}
 
 	// Discover the DevContainer's network and name
@@ -123,7 +139,8 @@ func (s *Server) handleStopBrowser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), s.config.NekoBrowserStopTimeout)
+	// Use a detached context with timeout so stop isn't cancelled by the client disconnecting
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.NekoBrowserStopTimeout)
 	defer cancel()
 
 	if err := s.browserManager.Stop(ctx, workspaceID); err != nil {
@@ -179,7 +196,7 @@ func (s *Server) resolveContainerID(workspaceID string) (string, error) {
 		return s.containerDiscovery.GetContainerID()
 	}
 
-	return "", nil
+	return "", fmt.Errorf("no container discovery available for workspace %s", workspaceID)
 }
 
 // browserStateToResponse converts internal state to the API response shape.
@@ -209,6 +226,23 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 	}
 
 	return resp
+}
+
+// stopBrowserSidecarWithTimeout stops the browser sidecar using a background context
+// with a timeout. Use this in workspace lifecycle handlers where the request context
+// may be cancelled before the stop completes.
+func (s *Server) stopBrowserSidecarWithTimeout(workspaceID string, timeout time.Duration) {
+	if s.browserManager == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := s.browserManager.Stop(ctx, workspaceID); err != nil {
+		slog.Warn("Failed to stop browser sidecar during workspace cleanup",
+			"workspace", workspaceID,
+			"error", err,
+		)
+	}
 }
 
 // deriveBaseDomainFromURL extracts the base domain from a control plane URL.

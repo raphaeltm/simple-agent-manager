@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -77,7 +78,12 @@ func TestBuildNekoEnv(t *testing.T) {
 
 func TestBuildDockerRunArgs(t *testing.T) {
 	env := []string{"NEKO_SCREEN=1920x1080@30", "NEKO_BIND=:8080"}
-	args := buildDockerRunArgs("neko-ws-123", "ghcr.io/m1k1o/neko/google-chrome:latest", "workspace-net", "2g", 8080, env)
+	limits := ResourceLimits{
+		MemoryLimit: "4g",
+		CPULimit:    "2",
+		PidsLimit:   512,
+	}
+	args := buildDockerRunArgs("neko-ws-123", "ghcr.io/m1k1o/neko/google-chrome:latest", "workspace-net", "2g", 8080, env, limits)
 
 	// Must start with "run -d"
 	if args[0] != "run" || args[1] != "-d" {
@@ -99,6 +105,32 @@ func TestBuildDockerRunArgs(t *testing.T) {
 		t.Error("missing --shm-size=2g")
 	}
 
+	// Must use --restart no instead of --restart unless-stopped
+	if !containsPair(args, "--restart", "no") {
+		t.Error("missing --restart no")
+	}
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--restart" && args[i+1] == "unless-stopped" {
+			t.Error("should not use --restart unless-stopped")
+		}
+	}
+
+	// Must include security-opt no-new-privileges
+	if !containsPair(args, "--security-opt", "no-new-privileges") {
+		t.Error("missing --security-opt no-new-privileges")
+	}
+
+	// Must include resource limits
+	if !containsPair(args, "--memory", "4g") {
+		t.Error("missing --memory 4g")
+	}
+	if !containsPair(args, "--cpus", "2") {
+		t.Error("missing --cpus 2")
+	}
+	if !containsPair(args, "--pids-limit", "512") {
+		t.Error("missing --pids-limit 512")
+	}
+
 	// Must include env vars
 	envCount := 0
 	for _, a := range args {
@@ -116,36 +148,30 @@ func TestBuildDockerRunArgs(t *testing.T) {
 	}
 }
 
-func TestBuildViewportChromeFlags(t *testing.T) {
-	tests := []struct {
-		name     string
-		w, h     int
-		dpr      int
-		touch    bool
-		wantLen  int
-		wantNil  bool
-	}{
-		{"zero dimensions returns nil", 0, 0, 1, false, 0, true},
-		{"standard desktop", 1920, 1080, 1, false, 1, false},
-		{"mobile with HiDPI and touch", 375, 667, 3, true, 4, false},
-		{"desktop with HiDPI", 2560, 1440, 2, false, 2, false},
+func TestBuildDockerRunArgsNoLimits(t *testing.T) {
+	env := []string{"NEKO_BIND=:8080"}
+	limits := ResourceLimits{} // empty limits
+	args := buildDockerRunArgs("neko-ws-1", "image", "net", "2g", 8080, env, limits)
+
+	for _, a := range args {
+		if a == "--memory" || a == "--cpus" || a == "--pids-limit" {
+			t.Errorf("should not include resource limit flag %q when limits are empty", a)
+		}
+	}
+}
+
+func TestGenerateRandomPassword(t *testing.T) {
+	p1, err := generateRandomPassword(32)
+	if err != nil {
+		t.Fatalf("generateRandomPassword error: %v", err)
+	}
+	if len(p1) != 64 { // 32 bytes = 64 hex chars
+		t.Errorf("expected 64 hex chars, got %d", len(p1))
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			flags := buildViewportChromeFlags(tt.w, tt.h, tt.dpr, tt.touch)
-
-			if tt.wantNil && flags != nil {
-				t.Errorf("expected nil, got %v", flags)
-				return
-			}
-			if !tt.wantNil && flags == nil {
-				t.Fatal("expected non-nil flags")
-			}
-			if !tt.wantNil && len(flags) != tt.wantLen {
-				t.Errorf("expected %d flags, got %d: %v", tt.wantLen, len(flags), flags)
-			}
-		})
+	p2, _ := generateRandomPassword(32)
+	if p1 == p2 {
+		t.Error("two random passwords should not be equal")
 	}
 }
 
@@ -180,6 +206,15 @@ func TestNekoContainerName(t *testing.T) {
 func contains(ss []string, s string) bool {
 	for _, x := range ss {
 		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSubstring(ss []string, sub string) bool {
+	for _, x := range ss {
+		if strings.Contains(x, sub) {
 			return true
 		}
 	}

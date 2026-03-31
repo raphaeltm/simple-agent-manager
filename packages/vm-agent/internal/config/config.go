@@ -210,6 +210,11 @@ type Config struct {
 	NekoShmSize           string        // Shared memory size for Chrome (env: NEKO_SHM_SIZE, default: 2g)
 	NekoBrowserStartTimeout time.Duration // Timeout for browser sidecar start (env: NEKO_BROWSER_START_TIMEOUT, default: 60s)
 	NekoBrowserStopTimeout  time.Duration // Timeout for browser sidecar stop (env: NEKO_BROWSER_STOP_TIMEOUT, default: 30s)
+	NekoMemoryLimit         string        // Docker memory limit for Neko container (env: NEKO_MEMORY_LIMIT, default: 4g)
+	NekoCPULimit            string        // Docker CPU limit for Neko container (env: NEKO_CPU_LIMIT, default: 2)
+	NekoPidsLimit           int           // Docker PID limit for Neko container (env: NEKO_PIDS_LIMIT, default: 512)
+	NekoSocatMinPort        int           // Minimum port for socat forwarding (env: NEKO_SOCAT_MIN_PORT, default: 1024)
+	NekoSocatMaxPort        int           // Maximum port for socat forwarding (env: NEKO_SOCAT_MAX_PORT, default: 65535)
 }
 
 // Load reads configuration from environment variables.
@@ -404,6 +409,11 @@ func Load() (*Config, error) {
 		NekoShmSize:             getEnv("NEKO_SHM_SIZE", "2g"),
 		NekoBrowserStartTimeout: getEnvDuration("NEKO_BROWSER_START_TIMEOUT", 60*time.Second),
 		NekoBrowserStopTimeout:  getEnvDuration("NEKO_BROWSER_STOP_TIMEOUT", 30*time.Second),
+		NekoMemoryLimit:         getEnv("NEKO_MEMORY_LIMIT", "4g"),
+		NekoCPULimit:            getEnv("NEKO_CPU_LIMIT", "2"),
+		NekoPidsLimit:           getEnvInt("NEKO_PIDS_LIMIT", 512),
+		NekoSocatMinPort:        getEnvInt("NEKO_SOCAT_MIN_PORT", 1024),
+		NekoSocatMaxPort:        getEnvInt("NEKO_SOCAT_MAX_PORT", 65535),
 	}
 
 	// Derive TLS enabled state from cert/key paths

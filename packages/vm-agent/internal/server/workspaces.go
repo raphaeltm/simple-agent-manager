@@ -379,10 +379,8 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		s.stopSessionHost(workspaceID, session.ID)
 	}
 
-	// Stop browser sidecar if running.
-	if s.browserManager != nil {
-		_ = s.browserManager.Stop(r.Context(), workspaceID)
-	}
+	// Stop browser sidecar if running — use background context so it isn't cancelled by client disconnect.
+	s.stopBrowserSidecarWithTimeout(workspaceID, s.config.NekoBrowserStopTimeout)
 
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)
@@ -491,10 +489,8 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	s.stopSessionHostsForWorkspace(workspaceID)
 
-	// Stop browser sidecar if running.
-	if s.browserManager != nil {
-		_ = s.browserManager.Stop(r.Context(), workspaceID)
-	}
+	// Stop browser sidecar if running — use background context so it isn't cancelled by client disconnect.
+	s.stopBrowserSidecarWithTimeout(workspaceID, s.config.NekoBrowserStopTimeout)
 
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)
