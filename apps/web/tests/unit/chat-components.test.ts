@@ -22,10 +22,12 @@ describe('ProjectChat session sidebar (inline)', () => {
 
   it('formats relative time for timestamps', () => {
     expect(source).toContain('formatRelativeTime');
-    expect(source).toContain('Just now');
-    expect(source).toContain('m ago');
-    expect(source).toContain('h ago');
-    expect(source).toContain('d ago');
+    // Implementation now lives in chat-session-utils.ts
+    const utilsSource = readSource('lib/chat-session-utils.ts');
+    expect(utilsSource).toContain('Just now');
+    expect(utilsSource).toContain('m ago');
+    expect(utilsSource).toContain('h ago');
+    expect(utilsSource).toContain('d ago');
   });
 
   it('uses session state colors and labels', () => {
