@@ -647,6 +647,58 @@ describe('generateCloudInit', () => {
     });
   });
 
+  describe('Neko browser sidecar pre-pull', () => {
+    it('includes default Neko image pre-pull by default', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      expect(runcmdStr).toContain('docker pull ghcr.io/m1k1o/neko/google-chrome:latest');
+    });
+
+    it('uses custom Neko image when specified', () => {
+      const config = generateCloudInit(baseVariables({
+        nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
+      }));
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      expect(runcmdStr).toContain('docker pull ghcr.io/m1k1o/neko/firefox:latest');
+      expect(runcmdStr).not.toContain('google-chrome');
+    });
+
+    it('skips Neko pre-pull when nekoPrePull is false', () => {
+      const config = generateCloudInit(baseVariables({
+        nekoPrePull: false,
+      }));
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      expect(runcmdStr).not.toContain('docker pull ghcr.io/m1k1o/neko');
+      // The comment "# Neko pre-pull disabled" is in the raw YAML but stripped by parser
+      expect(config).toContain('Neko pre-pull disabled');
+    });
+
+    it('pre-pull command includes || true for fault tolerance', () => {
+      const config = generateCloudInit(baseVariables());
+      expect(config).toContain('docker pull ghcr.io/m1k1o/neko/google-chrome:latest || true');
+    });
+
+    it('config with Neko pre-pull stays within 32KB limit', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+        nekoImage: 'ghcr.io/m1k1o/neko/google-chrome:latest',
+        nekoPrePull: true,
+      }));
+
+      expect(validateCloudInitSize(config)).toBe(true);
+    });
+  });
+
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {
       const config = generateCloudInit(baseVariables({
