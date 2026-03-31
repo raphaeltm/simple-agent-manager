@@ -391,7 +391,8 @@ export async function handleDispatchTask(
       workspaceProfile: resolvedWorkspaceProfile,
       cloudProvider: resolvedProvider,
       // Agent profile resolution is not supported on the MCP dispatch path — tasks
-      // use project defaults. Profile support deferred to a future PR.
+      // use project defaults. Profile support (model, permissionMode,
+      // systemPromptAppend) deferred to a future PR.
       model: null,
       permissionMode: null,
       projectScaling: {

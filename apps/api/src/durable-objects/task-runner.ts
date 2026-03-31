@@ -1613,7 +1613,12 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
   // =========================================================================
 
   private async getState(): Promise<TaskRunnerState | null> {
-    return (await this.ctx.storage.get<TaskRunnerState>('state')) ?? null;
+    const raw = await this.ctx.storage.get<TaskRunnerState>('state');
+    if (!raw) return null;
+    // Normalize fields added after initial schema version (backward compat
+    // for DOs started before deployment of the field).
+    raw.config.systemPromptAppend ??= null;
+    return raw;
   }
 
   // =========================================================================
