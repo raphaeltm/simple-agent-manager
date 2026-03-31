@@ -8,6 +8,7 @@ import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
 import * as projectDataService from '../../services/project-data';
+import { log } from '../../lib/logger';
 
 const browserProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -148,15 +149,12 @@ async function proxyBrowserRequest(
     res = await fetch(url, fetchOpts);
   } catch (fetchErr) {
     const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-    console.error(
-      JSON.stringify({
-        event: 'browser_proxy.fetch_error',
-        workspaceId,
-        vmPath,
-        url,
-        error: errMsg,
-      })
-    );
+    log.error('browser_proxy.fetch_error', {
+      workspaceId,
+      vmPath,
+      url,
+      error: errMsg,
+    });
     throw errors.badRequest(
       `Workspace agent unreachable: ${errMsg.includes('timeout') || errMsg.includes('abort') ? 'request timed out' : 'connection failed'}`
     );
@@ -164,15 +162,12 @@ async function proxyBrowserRequest(
 
   if (!res.ok) {
     const text = await res.text();
-    console.error(
-      JSON.stringify({
-        event: 'browser_proxy.vm_agent_error',
-        workspaceId,
-        vmPath,
-        status: res.status,
-        body: text,
-      })
-    );
+    log.error('browser_proxy.vm_agent_error', {
+      workspaceId,
+      vmPath,
+      status: res.status,
+      body: text,
+    });
     if (res.status === 404) {
       throw errors.notFound('Browser sidecar not found');
     }

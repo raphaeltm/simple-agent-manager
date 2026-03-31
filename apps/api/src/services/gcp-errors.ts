@@ -7,6 +7,7 @@
  */
 
 import { AppError } from '../middleware/error';
+import { log } from '../lib/logger';
 
 /**
  * Custom error class for GCP API failures.
@@ -108,7 +109,7 @@ export function toSanitizedAppError(err: unknown, context?: string): AppError {
 export function sanitizeGcpError(err: unknown, context?: string): string {
   if (err instanceof GcpApiError) {
     // Log full details server-side
-    console.error('GCP API error:', {
+    log.error('gcp_api_error', {
       step: err.step,
       statusCode: err.statusCode,
       message: err.message,
@@ -129,11 +130,11 @@ export function sanitizeGcpError(err: unknown, context?: string): string {
 
   // Handle abort/timeout errors
   if (err instanceof Error && err.name === 'AbortError') {
-    console.error('GCP API timeout:', { message: err.message, context });
+    log.error('gcp_api_timeout', { message: err.message, context });
     return 'The request to Google Cloud timed out. Please try again.';
   }
 
   // Generic fallback — log whatever we got but don't expose it
-  console.error('GCP error (unknown type):', err, { context });
+  log.error('gcp_error_unknown_type', { error: String(err), context });
   return 'Failed to communicate with Google Cloud. Please check your project permissions and try again.';
 }

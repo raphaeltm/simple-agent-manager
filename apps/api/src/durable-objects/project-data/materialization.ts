@@ -6,6 +6,8 @@
  * Roles whose consecutive tokens are concatenated into a single grouped message.
  * Non-groupable roles (user, system, plan) pass through as individual messages.
  */
+import { log } from '../../lib/logger';
+
 const GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);
 
 /**
@@ -115,7 +117,7 @@ export function materializeAllStopped(
       materializeSession(sql, session.id as string);
       materialized++;
     } catch (e) {
-      console.error('Failed to materialize session', {
+      log.error('materialization.session_failed', {
         sessionId: session.id,
         error: String(e),
       });

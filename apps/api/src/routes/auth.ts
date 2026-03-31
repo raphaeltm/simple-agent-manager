@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { createAuth } from '../auth';
 import type { Env } from '../index';
 import { errors } from '../middleware/error';
+import { log } from '../lib/logger';
 
 const authRoutes = new Hono<{ Bindings: Env }>();
 
@@ -20,11 +21,11 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
     // Log auth errors to Worker logs for debugging
     if (response.status >= 400) {
       const body = await response.clone().text();
-      console.error(`BetterAuth ${response.status}: ${body || '(empty body)'}`);
+      log.error('auth.better_auth_error', { status: response.status, body: body || '(empty body)' });
     }
     return response;
   } catch (err) {
-    console.error('BetterAuth exception:', err instanceof Error ? err.message : err);
+    log.error('auth.better_auth_exception', { error: err instanceof Error ? err.message : String(err) });
     return c.json({ error: 'AUTH_ERROR', message: 'Internal auth error' }, 500);
   }
 });

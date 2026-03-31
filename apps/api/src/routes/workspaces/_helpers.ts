@@ -8,6 +8,7 @@ import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/share
 import { verifyCallbackToken, signCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { decrypt } from '../../services/encryption';
+import { log } from '../../lib/logger';
 
 export const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
 
@@ -105,7 +106,7 @@ export async function verifyWorkspaceCallbackAuth(
   // Node-scoped tokens CANNOT access workspace-scoped endpoints.
   // This prevents cross-workspace secret access on multi-tenant nodes.
   if (payload.scope === 'node') {
-    console.error('Rejected node-scoped token on workspace endpoint', {
+    log.error('workspace_auth.rejected_node_scoped_token', {
       tokenWorkspace: payload.workspace,
       requestedWorkspaceId: workspaceId,
       scope: payload.scope,
@@ -125,7 +126,7 @@ export async function verifyWorkspaceCallbackAuth(
   // Legacy tokens (no scope claim): backward compatible behavior.
   // Direct workspace match.
   if (payload.workspace === workspaceId) {
-    console.warn('Legacy callback token without scope claim used', {
+    log.warn('workspace_auth.legacy_token_no_scope', {
       tokenWorkspace: payload.workspace,
       workspaceId,
       action: 'allowed_legacy',
@@ -149,7 +150,7 @@ export async function verifyWorkspaceCallbackAuth(
   }
 
   if (workspace.nodeId && payload.workspace === workspace.nodeId) {
-    console.warn('Legacy node-level callback token used for workspace access (deprecated)', {
+    log.warn('workspace_auth.legacy_node_token_fallback', {
       tokenWorkspace: payload.workspace,
       workspaceId,
       nodeId: workspace.nodeId,

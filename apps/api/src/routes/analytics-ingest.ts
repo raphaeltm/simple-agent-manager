@@ -4,6 +4,7 @@ import { optionalAuth } from '../middleware/auth';
 import { rateLimit, getRateLimit } from '../middleware/rate-limit';
 import { errors } from '../middleware/error';
 import { bucketUserAgent } from '../middleware/analytics';
+import { log } from '../lib/logger';
 
 /** Default max body size: 64 KB (configurable via MAX_ANALYTICS_INGEST_BODY_BYTES) */
 const DEFAULT_MAX_BODY_BYTES = 65_536;
@@ -213,7 +214,7 @@ analyticsIngestRoutes.post('/', async (c) => {
         });
       }
     } catch (err) {
-      console.warn('analytics-ingest: write failed', err instanceof Error ? err.message : String(err));
+      log.warn('analytics_ingest.write_failed', { error: err instanceof Error ? err.message : String(err) });
     }
   };
 

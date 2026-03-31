@@ -8,6 +8,7 @@
 import type { Context, Next, MiddlewareHandler } from 'hono';
 import type { Env } from '../index';
 import { AppError } from './error';
+import { log } from '../lib/logger';
 
 /**
  * Rate limit configuration.
@@ -150,7 +151,7 @@ export function rateLimit(config: RateLimitConfig): MiddlewareHandler<{ Bindings
     } else {
       const auth = c.get('auth');
       if (!auth?.user?.id) {
-        console.warn('Rate limit middleware applied to unauthenticated request without useIp');
+        log.warn('rate_limit.unauthenticated_without_ip', {});
         return next();
       }
       identifier = auth.user.id;

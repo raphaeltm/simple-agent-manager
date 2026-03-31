@@ -1,5 +1,6 @@
 import type { Env } from '../index';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
+import { log } from '../lib/logger';
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 
@@ -207,7 +208,7 @@ export async function cleanupWorkspaceDNSRecords(
     }, cfTimeoutMs);
 
     if (!response.ok) {
-      console.error(`Failed to search DNS records for ${recordName}: ${response.status}`);
+      log.error('dns.search_records_failed', { recordName, status: response.status });
       continue;
     }
 
@@ -218,9 +219,9 @@ export async function cleanupWorkspaceDNSRecords(
       try {
         await deleteDNSRecord(record.id, env);
         deleted++;
-        console.log(`Cleaned up DNS record: ${record.name} (${record.type}) id=${record.id}`);
+        log.info('dns.record_cleaned_up', { name: record.name, type: record.type, id: record.id });
       } catch (err) {
-        console.error(`Failed to delete DNS record ${record.id}:`, err);
+        log.error('dns.delete_record_failed', { recordId: record.id, error: String(err) });
       }
     }
   }

@@ -19,6 +19,7 @@ import * as schema from '../db/schema';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
+import { log } from '../lib/logger';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
@@ -191,7 +192,7 @@ chatRoutes.get('/:sessionId', async (c) => {
       }
     } catch (err) {
       // D1 lookup failure is non-fatal — UI falls back to chat session ID
-      console.warn('Failed to fetch agentSessionId for workspace', workspaceId, err);
+      log.warn('chat.agent_session_id_lookup_failed', { workspaceId, error: err instanceof Error ? err.message : String(err) });
     }
   }
 

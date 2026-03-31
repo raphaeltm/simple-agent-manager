@@ -16,6 +16,7 @@ import {
 import * as schema from '../db/schema';
 import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
 import { getWebhookSecret } from '../lib/secrets';
+import { log } from '../lib/logger';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 
@@ -117,7 +118,7 @@ githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) =>
       allRepos.push(...result.value);
     } else {
       const inst = targetInstallations[i]!;
-      console.error(`Failed to get repos for installation ${inst.accountName} (${inst.id}):`, result.reason);
+      log.error('github.get_repos_failed', { accountName: inst.accountName, installationId: inst.id, error: String(result.reason) });
       failedInstallations.push(inst.accountName);
     }
   }
@@ -188,7 +189,7 @@ githubRoutes.get('/branches', requireAuth(), requireApproved(), async (c) => {
     return c.json(branches);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to list branches for ${repoFullName}:`, message);
+    log.error('github.list_branches_failed', { repository: repoFullName, error: message });
     throw errors.internal(`Failed to list branches: ${message}`);
   }
 });
@@ -332,7 +333,7 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`GitHub API error ${response.status} for installation ${installationId}:`, errorBody);
+      log.error('github.api_error_for_installation', { status: response.status, installationId, body: errorBody });
       return c.redirect(`${settingsUrl}?github_app=error&reason=github_api_${response.status}`);
     }
 
@@ -353,7 +354,7 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     return c.redirect(`${settingsUrl}?github_app=installed`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to save installation ${installationId}:`, message);
+    log.error('github.save_installation_failed', { installationId, error: message });
     return c.redirect(`${settingsUrl}?github_app=error&reason=${encodeURIComponent(message)}`);
   }
 });
@@ -467,7 +468,7 @@ async function syncUserInstallations(
     }
   } catch (err) {
     // Sync is best-effort — don't block the response if GitHub API is down
-    console.error('Failed to sync installations:', err instanceof Error ? err.message : err);
+    log.error('github.sync_installations_failed', { error: err instanceof Error ? err.message : String(err) });
   }
 }
 

@@ -14,6 +14,7 @@ import {
 
 import type { Env } from './types';
 import { generateId } from './types';
+import { log } from '../../lib/logger';
 
 export function createAcpSession(
   sql: SqlStorage,
@@ -141,15 +142,14 @@ export function transitionAcpSession(
   const validTargets = ACP_SESSION_VALID_TRANSITIONS[fromStatus];
 
   if (!validTargets.includes(toStatus)) {
-    console.error(JSON.stringify({
-      event: 'acp_session.invalid_transition',
+    log.error('acp_session.invalid_transition', {
       sessionId,
       chatSessionId: row.chat_session_id,
       projectId,
       fromStatus,
       toStatus,
       action: 'rejected',
-    }));
+    });
     throw new Error(
       `Invalid ACP session transition: ${fromStatus} → ${toStatus} (session ${sessionId})`
     );
@@ -195,8 +195,7 @@ export function transitionAcpSession(
     opts.metadata ?? null
   );
 
-  console.log(JSON.stringify({
-    event: 'acp_session.transitioned',
+  log.info('acp_session.transitioned', {
     sessionId,
     chatSessionId: row.chat_session_id,
     workspaceId: opts.workspaceId ?? row.workspace_id,
@@ -204,7 +203,7 @@ export function transitionAcpSession(
     projectId,
     fromStatus,
     toStatus,
-  }));
+  });
 
   return {
     session: getAcpSessionOrThrow(sql, sessionId),
@@ -228,27 +227,25 @@ export function updateHeartbeat(
   }
 
   if (session.node_id !== nodeId) {
-    console.error(JSON.stringify({
-      event: 'acp_session.heartbeat_node_mismatch',
+    log.error('acp_session.heartbeat_node_mismatch', {
       sessionId,
       expectedNodeId: session.node_id,
       receivedNodeId: nodeId,
       projectId,
       action: 'rejected',
-    }));
+    });
     throw new Error(`Node mismatch: session assigned to ${session.node_id}, heartbeat from ${nodeId}`);
   }
 
   const status = session.status as string;
   if (!['assigned', 'running'].includes(status)) {
-    console.warn(JSON.stringify({
-      event: 'acp_session.heartbeat_for_inactive_session',
+    log.warn('acp_session.heartbeat_for_inactive_session', {
       sessionId,
       nodeId,
       projectId,
       sessionStatus: status,
       action: 'rejected',
-    }));
+    });
     throw new Error(
       `Heartbeat rejected: session ${sessionId} is in "${status}" state, not assigned or running`
     );
@@ -280,13 +277,12 @@ export function forkAcpSession(
 
   const parentStatus = parent.status as AcpSessionStatus;
   if (!ACP_SESSION_TERMINAL_STATUSES.includes(parentStatus)) {
-    console.warn(JSON.stringify({
-      event: 'acp_session.fork_invalid_state',
+    log.warn('acp_session.fork_invalid_state', {
       sessionId,
       projectId,
       parentStatus,
       action: 'rejected',
-    }));
+    });
     throw new Error(
       `Cannot fork session in "${parentStatus}" state — must be completed, failed, or interrupted`
     );
@@ -298,14 +294,13 @@ export function forkAcpSession(
     10
   );
   if (parentDepth >= maxDepth) {
-    console.warn(JSON.stringify({
-      event: 'acp_session.fork_depth_exceeded',
+    log.warn('acp_session.fork_depth_exceeded', {
       sessionId,
       projectId,
       parentDepth,
       maxDepth,
       action: 'rejected',
-    }));
+    });
     throw new Error(
       `Fork depth ${parentDepth + 1} exceeds maximum ${maxDepth}`
     );
@@ -407,13 +402,13 @@ export function checkHeartbeatTimeouts(
       });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error(JSON.stringify({ event: 'acp_session.heartbeat_timeout_transition_failed', sessionId, error: errorMsg }));
+      log.error('acp_session.heartbeat_timeout_transition_failed', { sessionId, error: errorMsg });
       failures.push({ sessionId, error: errorMsg });
     }
   });
   return Promise.all(promises).then(() => {
     if (failures.length > 0) {
-      console.error(JSON.stringify({ event: 'acp_session.heartbeat_timeout_batch_failures', failureCount: failures.length, totalStale: staleSessions.length, failures }));
+      log.error('acp_session.heartbeat_timeout_batch_failures', { failureCount: failures.length, totalStale: staleSessions.length, failures });
     }
   });
 }

@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono';
 import type { Env } from '../index';
+import { log } from '../lib/logger';
 
 // ---------------------------------------------------------------------------
 // Event name mapping: HTTP method + route pattern → human-readable event name
@@ -256,7 +257,7 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
         });
       } catch (err) {
         // Analytics failures must NEVER surface to the user
-        console.warn('analytics: write failed', err instanceof Error ? err.message : String(err));
+        log.warn('analytics.write_failed', { error: err instanceof Error ? err.message : String(err) });
       }
     };
 

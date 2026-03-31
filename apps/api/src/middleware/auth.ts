@@ -3,6 +3,7 @@ import { createAuth } from '../auth';
 import { AppError, errors } from './error';
 import type { Env } from '../index';
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
+import { log } from '../lib/logger';
 
 /**
  * Extended context with authenticated user.
@@ -93,7 +94,7 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
         });
       }
     } catch (e) {
-      console.warn(JSON.stringify({ event: 'optional_auth.check_failed', error: String(e) }));
+      log.warn('optional_auth.check_failed', { error: String(e) });
     }
 
     await next();

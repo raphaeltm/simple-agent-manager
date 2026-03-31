@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../index';
 import { errors } from '../middleware/error';
 import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
+import { log } from '../lib/logger';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -114,7 +115,7 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
 
   if (!tokenResponse.ok) {
     const errBody = await tokenResponse.json().catch(() => ({})) as { error?: string };
-    console.error('Google token exchange failed', {
+    log.error('google_auth.token_exchange_failed', {
       status: tokenResponse.status,
       error: errBody.error ?? 'unknown',
     });

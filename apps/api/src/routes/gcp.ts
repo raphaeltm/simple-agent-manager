@@ -13,6 +13,7 @@ import { serializeCredentialToken } from '../services/provider-credentials';
 import * as schema from '../db/schema';
 import { DEFAULT_GCP_API_TIMEOUT_MS } from '@simple-agent-manager/shared';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { log } from '../lib/logger';
 
 const gcpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -145,7 +146,7 @@ gcpRoutes.post('/setup', async (c) => {
     try {
       await verifyGcpOidcSetup(userId, 'setup-verification', credential, c.env);
     } catch (verifyErr) {
-      console.warn('GCP OIDC verification failed (setup completed but token exchange failed):', verifyErr);
+      log.warn('gcp.oidc_verification_failed', { error: verifyErr instanceof Error ? verifyErr.message : String(verifyErr) });
       // Don't fail the setup — the resources are created. Verification failure
       // may be due to propagation delay. Return success with a warning.
       return c.json({

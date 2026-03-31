@@ -1,5 +1,6 @@
 import { SignJWT, importPKCS8 } from 'jose';
 import type { Env } from '../index';
+import { log } from '../lib/logger';
 
 /**
  * Decode a private key that may be stored in various formats:
@@ -232,7 +233,7 @@ export async function getInstallationRepositories(
 
     // Safety limit to prevent infinite loops (10,000 repos max)
     if (allRepos.length >= 10000) {
-      console.warn(`Hit safety limit of 10,000 repositories for installation ${installationId}`);
+      log.warn('github_app.repo_safety_limit_reached', { installationId, repoCount: allRepos.length });
       break;
     }
   }
@@ -286,7 +287,7 @@ export async function getRepositoryBranches(
     page++;
 
     if (allBranches.length >= maxBranches) {
-      console.warn(`Hit safety limit of ${maxBranches} branches for ${owner}/${repo}`);
+      log.warn('github_app.branch_safety_limit_reached', { owner, repo, branchCount: allBranches.length, maxBranches });
       break;
     }
   }
