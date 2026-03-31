@@ -72,7 +72,7 @@ describe('DO class export', () => {
   });
 
   it('TaskRunner extends DurableObject', () => {
-    expect(doSource).toContain('export class TaskRunner extends DurableObject<TaskRunnerEnv>');
+    expect(doSource).toContain('export class TaskRunner extends DurableObject<Env>');
   });
 
   it('exports StartTaskInput for the service layer', () => {
@@ -113,33 +113,12 @@ describe('shared constants for TaskRunner DO', () => {
 });
 
 describe('TaskRunner DO env type', () => {
-  it('defines TaskRunnerEnv type subset', () => {
-    expect(doSource).toContain('type TaskRunnerEnv =');
-  });
-
-  it('includes DATABASE binding', () => {
-    expect(doSource).toContain('DATABASE: D1Database');
-  });
-
-  it('includes OBSERVABILITY_DATABASE binding', () => {
-    expect(doSource).toContain('OBSERVABILITY_DATABASE: D1Database');
-  });
-
-  it('includes NODE_LIFECYCLE binding', () => {
-    expect(doSource).toContain('NODE_LIFECYCLE: DurableObjectNamespace');
-  });
-
-  it('includes BASE_DOMAIN for URL construction', () => {
-    expect(doSource).toContain('BASE_DOMAIN: string');
-  });
-
-  it('includes ENCRYPTION_KEY for JWT operations', () => {
-    expect(doSource).toContain('ENCRYPTION_KEY: string');
-  });
-
-  it('includes all configurable env vars as optional strings', () => {
-    expect(doSource).toContain('TASK_RUNNER_STEP_MAX_RETRIES?: string');
-    expect(doSource).toContain('TASK_RUNNER_RETRY_BASE_DELAY_MS?: string');
+  it('uses the full Env type from index.ts (no partial TaskRunnerEnv)', () => {
+    // TaskRunner uses the full Env interface so service functions receive
+    // properly typed env without `as any` casts.
+    expect(doSource).toContain("import type { Env } from '../index'");
+    expect(doSource).toContain('extends DurableObject<Env>');
+    expect(doSource).not.toContain('type TaskRunnerEnv');
   });
 });
 

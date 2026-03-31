@@ -20,6 +20,10 @@ const doSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
   'utf8'
 );
+const indexSource = readFileSync(
+  resolve(process.cwd(), 'src/index.ts'),
+  'utf8'
+);
 
 // =============================================================================
 // Node Limit Enforcement
@@ -27,8 +31,8 @@ const doSource = readFileSync(
 
 describe('node limit enforcement', () => {
   describe('MAX_NODES_PER_USER env var', () => {
-    it('TaskRunner DO env type declares MAX_NODES_PER_USER as optional', () => {
-      expect(doSource).toContain("MAX_NODES_PER_USER?: string");
+    it('Env interface declares MAX_NODES_PER_USER as optional', () => {
+      expect(indexSource).toContain("MAX_NODES_PER_USER?: string");
     });
 
     it('handleNodeProvisioning reads MAX_NODES_PER_USER via parseEnvInt', () => {
