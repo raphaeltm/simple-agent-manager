@@ -11,7 +11,7 @@ SAM is a PWA with service worker support and standalone mode detection, but has 
 
 ### What exists
 
-- **Service worker** (`apps/web/public/sw.js`): Network-first navigation, app shell caching, stale-while-revalidate for static assets. No `push` or `notificationclick` event listeners.
+- **Service worker** (`apps/web/src/sw.ts`): Network-first navigation, app shell caching, stale-while-revalidate for static assets. No `push` or `notificationclick` event listeners.
 - **PWA manifest** (`apps/web/public/manifest.webmanifest`): Standalone display mode, icons, theme colors. No notification-related config needed here (manifest doesn't control push).
 - **SW registration** (`apps/web/src/lib/pwa.ts`): `registerAppServiceWorker()` — simple registration, prod-only. No subscription management.
 - **Standalone detection** (`apps/web/src/hooks/useIsStandalone.ts`): Detects `display-mode: standalone`.
@@ -96,7 +96,7 @@ SAM is a PWA with service worker support and standalone mode detection, but has 
 
 ### Phase 3: Service Worker Push Handlers
 
-- [ ] Add `push` event listener to `sw.js`:
+- [ ] Add `push` event listener to `sw.ts`:
   - Parse notification payload
   - Call `self.registration.showNotification()` with title, body, icon, badge, tag
   - Use `tag` for notification collapsing (e.g., multiple messages from same session)
@@ -192,7 +192,7 @@ SAM is a PWA with service worker support and standalone mode detection, but has 
 
 | File | Role |
 |------|------|
-| `apps/web/public/sw.js` | Service worker — add push/notificationclick handlers |
+| `apps/web/src/sw.ts` | Service worker — add push/notificationclick handlers |
 | `apps/web/src/lib/pwa.ts` | SW registration — add subscription management |
 | `apps/web/src/hooks/useIsStandalone.ts` | Standalone detection — gate iOS notification prompt |
 | `apps/api/src/db/schema.ts` | D1 schema — add subscription + preference tables |
