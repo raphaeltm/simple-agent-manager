@@ -140,11 +140,11 @@ describe('Credentials Routes - OAuth Support', () => {
       expect(mockDB.set).toHaveBeenCalledWith({ isActive: false });
     });
 
-    it('should return 400 when credentialKind is not specified (Valibot requires it)', async () => {
+    it('should save API key when credentialKind is not specified (defaults to api-key)', async () => {
       const request = {
         agentType: 'claude-code',
         credential: 'sk-ant-api03-1234567890abcdef',
-        // credentialKind not specified — Valibot schema requires it
+        // credentialKind not specified — defaults to 'api-key' in handler
       };
 
       const res = await app.request('/api/credentials/agent', {
@@ -156,10 +156,7 @@ describe('Credentials Routes - OAuth Support', () => {
         ENCRYPTION_KEY: 'test-key',
       } as Env);
 
-      expect(res.status).toBe(400);
-      const body = await res.json();
-      expect(body.error).toBe('BAD_REQUEST');
-      expect(body.message).toContain('credentialKind');
+      expect(res.status).toBe(201);
     });
 
     it('should reject Claude OAuth token when saved as API key', async () => {

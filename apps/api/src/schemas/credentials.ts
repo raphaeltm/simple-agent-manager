@@ -33,7 +33,7 @@ export const CreateCredentialSchema = v.variant('provider', [
 
 export const SaveAgentCredentialSchema = v.object({
   agentType: AgentTypeSchema,
-  credentialKind: CredentialKindSchema,
+  credentialKind: v.optional(CredentialKindSchema),
   credential: v.string(),
   autoActivate: v.optional(v.boolean()),
 });

@@ -65,8 +65,10 @@ export function jsonValidator<T extends GenericSchema | GenericSchemaAsync>(sche
 
 /**
  * Parses and validates an optional JSON body using Valibot.
- * Returns the fallback value if the body cannot be parsed as JSON.
- * Returns a validation error (400) if JSON parses but fails schema validation.
+ * Returns the fallback value if the body cannot be parsed as JSON or fails validation.
+ *
+ * Only use for schemas where ALL fields are optional. If any field is required
+ * and missing, use jsonValidator() middleware instead — it returns 400 to the client.
  *
  * Use for routes where the body may be empty/missing (the `.catch(() => ...)` pattern).
  */
@@ -83,6 +85,11 @@ export async function parseOptionalBody<T extends GenericSchema>(
   }
   const result = v.safeParse(schema, raw);
   if (!result.success) {
+    // Log for observability — client sent valid JSON but wrong shape
+    console.warn(JSON.stringify({
+      event: 'parseOptionalBody_validation_failed',
+      issues: result.issues.map((i) => i.message),
+    }));
     return fallback;
   }
   return result.output;

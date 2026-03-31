@@ -8,7 +8,6 @@ import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
 import {
   isValidAgentType,
-  VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import type {
   AgentSettingsResponse,
@@ -91,40 +90,9 @@ agentSettingsRoutes.put('/:agentType', jsonValidator(SaveAgentSettingsSchema), a
     throw errors.badRequest(`Invalid agent type: ${agentType}`);
   }
 
+  // Body validated by SaveAgentSettingsSchema middleware (permissionMode, allowedTools,
+  // deniedTools, additionalEnv are all type-checked by Valibot)
   const body = c.req.valid('json');
-
-  // Validate permissionMode if provided
-  if (body.permissionMode !== undefined && body.permissionMode !== null) {
-    if (!VALID_PERMISSION_MODES.includes(body.permissionMode as any)) {
-      throw errors.badRequest(
-        `Invalid permission mode: ${body.permissionMode}. Must be one of: ${VALID_PERMISSION_MODES.join(', ')}`
-      );
-    }
-  }
-
-  // Validate allowedTools / deniedTools are arrays of strings if provided
-  if (body.allowedTools !== undefined && body.allowedTools !== null) {
-    if (!Array.isArray(body.allowedTools) || !body.allowedTools.every((t) => typeof t === 'string')) {
-      throw errors.badRequest('allowedTools must be an array of strings');
-    }
-  }
-  if (body.deniedTools !== undefined && body.deniedTools !== null) {
-    if (!Array.isArray(body.deniedTools) || !body.deniedTools.every((t) => typeof t === 'string')) {
-      throw errors.badRequest('deniedTools must be an array of strings');
-    }
-  }
-
-  // Validate additionalEnv is a record of string -> string
-  if (body.additionalEnv !== undefined && body.additionalEnv !== null) {
-    if (typeof body.additionalEnv !== 'object' || Array.isArray(body.additionalEnv)) {
-      throw errors.badRequest('additionalEnv must be an object');
-    }
-    for (const [key, value] of Object.entries(body.additionalEnv)) {
-      if (typeof key !== 'string' || typeof value !== 'string') {
-        throw errors.badRequest('additionalEnv must be a Record<string, string>');
-      }
-    }
-  }
 
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date();
