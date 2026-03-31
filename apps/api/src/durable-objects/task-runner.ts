@@ -25,6 +25,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { TaskExecutionStep, VMSize, VMLocation, WorkspaceProfile, CredentialProvider, TaskMode, TaskAttachment } from '@simple-agent-manager/shared';
+import type { Env } from '../index';
 import type { NodeLifecycle } from './node-lifecycle';
 import {
   DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES,
@@ -46,49 +47,9 @@ import { log } from '../lib/logger';
 // Types
 // =============================================================================
 
-/**
- * The subset of Env bindings the TaskRunner DO needs.
- * Intentionally omits BETTER_AUTH_SECRET and GITHUB_WEBHOOK_SECRET —
- * the DO only needs credential encryption (for node provisioning), not
- * session management or webhook verification.
- */
-type TaskRunnerEnv = {
-  DATABASE: D1Database;
-  OBSERVABILITY_DATABASE: D1Database;
-  NODE_LIFECYCLE: DurableObjectNamespace;
-  PROJECT_DATA: DurableObjectNamespace;
-  TASK_RUNNER_STEP_MAX_RETRIES?: string;
-  TASK_RUNNER_RETRY_BASE_DELAY_MS?: string;
-  TASK_RUNNER_RETRY_MAX_DELAY_MS?: string;
-  TASK_RUNNER_AGENT_POLL_INTERVAL_MS?: string;
-  TASK_RUNNER_AGENT_READY_TIMEOUT_MS?: string;
-  TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS?: string;
-  TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS?: string;
-  TASK_RUNNER_PROVISION_POLL_INTERVAL_MS?: string;
-  // Env vars passed through for services
-  BASE_DOMAIN: string;
-  ENCRYPTION_KEY: string;
-  CREDENTIAL_ENCRYPTION_KEY?: string;
-  JWT_PRIVATE_KEY: string;
-  JWT_PUBLIC_KEY: string;
-  MAX_NODES_PER_USER?: string;
-  MAX_WORKSPACES_PER_NODE?: string;
-  TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
-  TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
-  NODE_AGENT_READY_TIMEOUT_MS?: string;
-  NODE_AGENT_READY_POLL_INTERVAL_MS?: string;
-  NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
-  NODE_WARM_TIMEOUT_MS?: string;
-  TASK_RUN_CLEANUP_DELAY_MS?: string;
-  DEFAULT_TASK_AGENT_TYPE?: string;
-  KV: KVNamespace;
-  MCP_TOKEN_TTL_SECONDS?: string;
-  VM_AGENT_PROTOCOL?: string;
-  VM_AGENT_PORT?: string;
-  NODE_HEARTBEAT_STALE_SECONDS?: string;
-  ATTACHMENT_TRANSFER_TIMEOUT_MS?: string;
-  R2: R2Bucket;
-};
+// TaskRunner uses the full Env type because it delegates to service functions
+// (createNodeRecord, provisionNode, createWorkspaceOnNode, etc.) that expect
+// the complete Worker Env interface. DOs receive the full env at runtime.
 
 interface StepResults {
   nodeId: string | null;
@@ -182,7 +143,7 @@ import { parseEnvInt, computeBackoffMs, isTransientError } from './task-runner-h
 // TaskRunner Durable Object
 // =============================================================================
 
-export class TaskRunner extends DurableObject<TaskRunnerEnv> {
+export class TaskRunner extends DurableObject<Env> {
   // =========================================================================
   // Public RPCs (called from Worker routes)
   // =========================================================================
@@ -473,9 +434,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     // to keep the DO module lighter
     const { createNodeRecord, provisionNode } = await import('../services/nodes');
     const { getRuntimeLimits } = await import('../services/limits');
-    const limits = getRuntimeLimits(this.env as any);
+    const limits = getRuntimeLimits(this.env);
 
-    const createdNode = await createNodeRecord(this.env as any, {
+    const createdNode = await createNodeRecord(this.env, {
       userId: state.userId,
       name: `Auto: ${state.config.taskTitle.slice(0, 40)}`,
       vmSize: state.config.vmSize,
@@ -503,7 +464,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     // Provision the node with task context so the VM agent enables
     // the message reporter for chat persistence (Bug fix: previously
     // projectId/chatSessionId were empty, disabling the reporter).
-    await provisionNode(createdNode.id, this.env as any, {
+    await provisionNode(createdNode.id, this.env, {
       projectId: state.projectId,
       chatSessionId: state.stepResults.chatSessionId ?? '',
       taskId: state.taskId,
@@ -691,8 +652,8 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       const { signCallbackToken } = await import('../services/jwt');
       const { createWorkspaceOnNode } = await import('../services/node-agent');
 
-      const callbackToken = await signCallbackToken(workspaceId, this.env as any);
-      await createWorkspaceOnNode(state.stepResults.nodeId, this.env as any, state.userId, {
+      const callbackToken = await signCallbackToken(workspaceId, this.env);
+      await createWorkspaceOnNode(state.stepResults.nodeId, this.env, state.userId, {
         workspaceId,
         repository: state.config.repository,
         branch: state.config.branch,
@@ -840,7 +801,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     const protocol = this.env.VM_AGENT_PROTOCOL || 'https';
     const port = this.env.VM_AGENT_PORT || '8443';
     const workspaceId = state.stepResults.workspaceId;
-    const baseDomain = (this.env as any).BASE_DOMAIN || '';
+    const baseDomain = (this.env).BASE_DOMAIN || '';
     const vmUrl = `${protocol}://ws-${workspaceId}.${baseDomain}:${port}`;
     // Token passed as query param — VM agent's requireWorkspaceRequestAuth() checks
     // r.URL.Query().Get("token"), not Authorization header.
@@ -850,7 +811,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     const { token } = await signTerminalToken(
       state.userId,
       workspaceId,
-      this.env as any,
+      this.env,
     );
 
     log.info('task_runner_do.step.attachment_transfer_start', {
@@ -973,7 +934,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         state.stepResults.workspaceId,
         sessionId,
         sessionLabel,
-        this.env as any,
+        this.env,
         state.userId,
         state.stepResults.chatSessionId,
         state.projectId,
@@ -1051,7 +1012,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         sessionId,
         agentType,
         initialPrompt,
-        this.env as any,
+        this.env,
         state.userId,
         {
           url: mcpServerUrl,
@@ -1132,7 +1093,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     try {
       const projectDataService = await import('../services/project-data');
       await projectDataService.linkSessionToWorkspace(
-        this.env as any,
+        this.env,
         state.projectId,
         state.stepResults.chatSessionId,
         workspaceId,
@@ -1218,7 +1179,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       try {
         const { persistMessage } = await import('../services/project-data');
         await persistMessage(
-          this.env as any,
+          this.env,
           state.projectId,
           state.stepResults.chatSessionId,
           'system',
@@ -1309,7 +1270,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       try {
         const { persistMessage, stopSession } = await import('../services/project-data');
         await persistMessage(
-          this.env as any,
+          this.env,
           state.projectId,
           state.stepResults.chatSessionId,
           'system',
@@ -1317,7 +1278,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
           null
         );
         await stopSession(
-          this.env as any,
+          this.env,
           state.projectId,
           state.stepResults.chatSessionId
         );
@@ -1364,7 +1325,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         await stopWorkspaceOnNode(
           state.stepResults.nodeId,
           state.stepResults.workspaceId,
-          this.env as any,
+          this.env,
           state.userId,
         );
       } catch (err) {
@@ -1387,7 +1348,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       if (state.stepResults.workspaceId) {
         try {
           const { cleanupTaskRun } = await import('../services/task-runner');
-          await cleanupTaskRun(state.taskId, this.env as any, state.config.projectScaling?.warmNodeTimeoutMs);
+          await cleanupTaskRun(state.taskId, this.env, state.config.projectScaling?.warmNodeTimeoutMs);
         } catch (err) {
           log.error('task_runner_do.cleanup.node_cleanup_failed', {
             taskId: state.taskId,
