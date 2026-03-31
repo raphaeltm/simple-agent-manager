@@ -9,7 +9,7 @@ port = 8787
 # @mastra/core → execa → npm-run-path → unicorn-magic import chain.
 # Alias to a local shim that provides the node-condition exports.
 [alias]
-"unicorn-magic" = "./src/shims/unicorn-magic.js"
+"unicorn-magic" = "./src/shims/unicorn-magic.ts"
 
 [vars]
 BASE_DOMAIN = "workspaces.example.com"
