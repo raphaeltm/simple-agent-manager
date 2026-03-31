@@ -61,7 +61,7 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
   }, [sidecarStatus]);
 
   return (
-    <div className="browser-sidecar">
+    <div data-testid="browser-sidecar">
       {/* Control buttons */}
       <div className="flex items-center gap-2 mb-2">
         {sidecarStatus === 'off' && (
@@ -83,6 +83,7 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
               variant={isRunning ? 'primary' : 'secondary'}
               size="sm"
               onClick={() => setShowViewer(!showViewer)}
+              disabled={isLoading}
               aria-label={showViewer ? 'Hide remote browser' : 'Show remote browser'}
             >
               <Monitor size={14} aria-hidden="true" />
@@ -92,18 +93,19 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
             </Button>
             <Button
               variant="danger"
-              size="sm"
+              size="md"
               onClick={handleStop}
               loading={isLoading}
               aria-label="Stop remote browser"
             >
               <X size={14} aria-hidden="true" />
+              Stop
             </Button>
           </>
         )}
 
         {sidecarStatus === 'error' && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2">
             <Alert variant="error">
               {status?.error ?? 'Browser sidecar error'}
             </Alert>
@@ -140,7 +142,7 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
 
       {/* Port forwarders info */}
       {isRunning && status?.ports && status.ports.length > 0 && (
-        <div className="text-xs text-fg-secondary mt-1">
+        <div className="text-xs text-fg-muted mt-1">
           Forwarded ports: {status.ports.map((p) => p.port).join(', ')}
         </div>
       )}
