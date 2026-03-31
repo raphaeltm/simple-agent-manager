@@ -13,8 +13,9 @@
 import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { RunTaskRequest, RunTaskResponse, TaskStatus, VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, isValidLocationForProvider, getLocationsForProvider, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
+import type { RunTaskResponse, TaskStatus, VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, isValidLocationForProvider, getLocationsForProvider, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
+import { parseOptionalBody, RunTaskSchema } from '../../schemas';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -117,25 +118,13 @@ runRoutes.post('/:taskId/run', async (c) => {
     throw errors.badRequest('Cloud provider credentials required. Connect your account in Settings.');
   }
 
-  // Parse request body
-  const body = await c.req.json<RunTaskRequest>().catch(() => ({}) as RunTaskRequest);
+  // Parse request body (optional — empty body means use defaults)
+  const body = await parseOptionalBody(c.req.raw, RunTaskSchema, {} as Record<string, never>);
 
-  // Validate vmSize if provided
-  if (body.vmSize && !['small', 'medium', 'large'].includes(body.vmSize)) {
-    throw errors.badRequest('vmSize must be small, medium, or large');
-  }
+  // vmSize, workspaceProfile validated by schema (picklist)
 
-  // Validate vmLocation if provided
-  if (body.vmLocation !== undefined) {
-    if (typeof body.vmLocation !== 'string' || body.vmLocation.trim() === '') {
-      throw errors.badRequest('vmLocation must be a non-empty string');
-    }
-  }
-
-  // Validate workspaceProfile if provided
-  if (body.workspaceProfile && !VALID_WORKSPACE_PROFILES.includes(body.workspaceProfile)) {
-    throw errors.badRequest('workspaceProfile must be full or lightweight');
-  }
+  // vmLocation validated as string by schema
+  // workspaceProfile validated by schema (picklist)
 
   // Load project for repository/installationId
   const [project] = await db

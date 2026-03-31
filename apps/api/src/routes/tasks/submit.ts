@@ -13,7 +13,6 @@ import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
-  SubmitTaskRequest,
   SubmitTaskResponse,
   VMSize,
   VMLocation,
@@ -21,7 +20,8 @@ import type {
   CredentialProvider,
   TaskAttachment,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, MAX_CONTEXT_SUMMARY_BYTES, CREDENTIAL_PROVIDERS, ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX, isValidLocationForProvider, getLocationsForProvider, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, MAX_CONTEXT_SUMMARY_BYTES, CREDENTIAL_PROVIDERS, ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX, isValidLocationForProvider, getLocationsForProvider, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
+import { jsonValidator, SubmitTaskSchema } from '../../schemas';
 import { validateAttachments } from '../../services/attachment-upload';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
@@ -39,8 +39,6 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
 const DEFAULT_MAX_MESSAGE_LENGTH = 16_000;
-const VALID_VM_SIZES: VMSize[] = ['small', 'medium', 'large'];
-
 const submitRoutes = new Hono<{ Bindings: Env }>();
 
 submitRoutes.use('/*', requireAuth(), requireApproved());
@@ -51,7 +49,7 @@ submitRoutes.use('/*', requireAuth(), requireApproved());
  * Single-action task submission. Creates task, session, and kicks off execution.
  * Returns 202 immediately — frontend tracks progress via WebSocket/polling.
  */
-submitRoutes.post('/submit', async (c) => {
+submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = c.req.param('projectId');
@@ -64,27 +62,18 @@ submitRoutes.post('/submit', async (c) => {
   // Validate ownership
   const project = await requireOwnedProject(db, projectId, userId);
 
-  // Parse and validate request
-  const body = await c.req.json<SubmitTaskRequest>();
+  // Validated by Valibot middleware
+  const body = c.req.valid('json');
 
-  if (!body.message || typeof body.message !== 'string' || body.message.trim().length === 0) {
+  if (body.message.trim().length === 0) {
     throw errors.badRequest('Message is required');
   }
   const maxMessageLength = parsePositiveInt(c.env.MAX_TASK_MESSAGE_LENGTH, DEFAULT_MAX_MESSAGE_LENGTH);
   if (body.message.length > maxMessageLength) {
     throw errors.badRequest(`Message must be ${maxMessageLength} characters or less`);
   }
-  if (body.vmSize && !VALID_VM_SIZES.includes(body.vmSize)) {
-    throw errors.badRequest('vmSize must be small, medium, or large');
-  }
-  if (body.vmLocation !== undefined) {
-    if (typeof body.vmLocation !== 'string' || body.vmLocation.trim() === '') {
-      throw errors.badRequest('vmLocation must be a non-empty string');
-    }
-  }
-  if (body.workspaceProfile && !VALID_WORKSPACE_PROFILES.includes(body.workspaceProfile)) {
-    throw errors.badRequest('workspaceProfile must be full or lightweight');
-  }
+  // vmSize, workspaceProfile validated by schema (picklist)
+  // vmLocation validated as string by schema
 
   // Validate contextSummary size if provided
   if (body.contextSummary) {
@@ -105,10 +94,8 @@ submitRoutes.post('/submit', async (c) => {
       throw errors.badRequest(`Too many attachments: ${body.attachments.length} exceeds maximum ${maxFiles}`);
     }
 
+    // Structure validated by schema; check filename safety
     for (const att of body.attachments) {
-      if (!att.uploadId || !att.filename || typeof att.size !== 'number' || !att.contentType) {
-        throw errors.badRequest('Each attachment must have uploadId, filename, size, and contentType');
-      }
       if (!SAFE_FILENAME_REGEX.test(att.filename)) {
         throw errors.badRequest(`Unsafe filename in attachment: ${att.filename}`);
       }

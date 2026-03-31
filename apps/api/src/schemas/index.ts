@@ -1,4 +1,4 @@
-export { jsonValidator } from './_validator';
+export { jsonValidator, parseOptionalBody } from './_validator';
 export type { ValidatedBody } from './_validator';
 
 // Task schemas
