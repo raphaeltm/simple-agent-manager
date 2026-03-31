@@ -1025,8 +1025,10 @@ func TestWriteDefaultDevcontainerConfigWithVolumeAndCredentialHelper(t *testing.
 func TestWriteCredentialHelperToHost(t *testing.T) {
 	t.Parallel()
 
+	// Use t.Name() in the workspace ID to avoid collisions across parallel test runs.
+	wsID := "ws-test-cred-" + strings.ReplaceAll(t.Name(), "/", "-")
 	cfg := &config.Config{
-		WorkspaceID:   "ws-test-cred",
+		WorkspaceID:   wsID,
 		CallbackToken: "test-callback-token",
 		Port:          8080,
 		Repository:    "https://github.com/owner/repo.git",
@@ -1036,24 +1038,24 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeCredentialHelperToHost returned error: %v", err)
 	}
-	defer os.Remove(hostPath)
+	t.Cleanup(func() { os.Remove(hostPath) })
 
 	if hostPath == "" {
 		t.Fatal("expected non-empty host path")
 	}
 
-	expectedPath := credentialHelperHostPath("ws-test-cred")
+	expectedPath := credentialHelperHostPath(wsID)
 	if hostPath != expectedPath {
 		t.Errorf("expected path %s, got %s", expectedPath, hostPath)
 	}
 
-	// Verify the file exists and is executable.
+	// Verify the file exists and is executable (owner-only: 0o700).
 	info, err := os.Stat(hostPath)
 	if err != nil {
 		t.Fatalf("failed to stat credential helper: %v", err)
 	}
-	if info.Mode().Perm()&0o111 == 0 {
-		t.Errorf("expected credential helper to be executable, mode: %v", info.Mode())
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("expected mode 0700, got: %v", info.Mode())
 	}
 
 	// Verify contents contain expected script elements.
@@ -1095,7 +1097,7 @@ func TestWriteCredentialHelperToHostSkipsNonGitHub(t *testing.T) {
 func TestRemoveCredentialHelperFromHost(t *testing.T) {
 	t.Parallel()
 
-	workspaceID := "ws-cleanup-test"
+	workspaceID := "ws-cleanup-" + strings.ReplaceAll(t.Name(), "/", "-")
 	hostPath := credentialHelperHostPath(workspaceID)
 	if err := os.WriteFile(hostPath, []byte("test"), 0o644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
@@ -1114,6 +1116,29 @@ func TestRemoveCredentialHelperFromHostNonExistent(t *testing.T) {
 
 	// Should not panic or error for non-existent file.
 	RemoveCredentialHelperFromHost("ws-nonexistent-" + t.Name())
+}
+
+func TestSanitizeWorkspaceID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"ws-abc123", "ws-abc123"},
+		{"../../etc/cron.d/evil", "etccrondevil"},
+		{"ws-normal-id", "ws-normal-id"},
+		{"ws/path/traversal", "wspathtraversal"},
+		{"ws\\backslash", "wsbackslash"},
+		{"ws.dots.here", "wsdotshere"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		got := sanitizeWorkspaceID(tc.input)
+		if got != tc.expected {
+			t.Errorf("sanitizeWorkspaceID(%q) = %q, want %q", tc.input, got, tc.expected)
+		}
+	}
 }
 
 func TestInjectCredentialHelperIntoConfig(t *testing.T) {

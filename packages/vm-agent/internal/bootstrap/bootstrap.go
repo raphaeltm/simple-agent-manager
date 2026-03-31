@@ -44,9 +44,22 @@ const (
 )
 
 // credentialHelperHostPath returns the stable host path for the pre-generated
-// credential helper script for a workspace.
+// credential helper script for a workspace. The workspaceID is sanitized to
+// prevent path traversal — only alphanumeric characters and hyphens are allowed.
 func credentialHelperHostPath(workspaceID string) string {
-	return fmt.Sprintf("/tmp/git-credential-sam-%s", workspaceID)
+	return fmt.Sprintf("/tmp/git-credential-sam-%s", sanitizeWorkspaceID(workspaceID))
+}
+
+// sanitizeWorkspaceID strips any characters that are not alphanumeric or hyphens,
+// preventing path traversal via crafted workspace IDs (e.g. "../../etc/cron.d/x").
+func sanitizeWorkspaceID(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // writeCredentialHelperToHost generates the git credential helper script to a
@@ -60,6 +73,9 @@ func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
 	if cfg.CallbackToken == "" {
 		return "", fmt.Errorf("callback token is required for credential helper")
 	}
+	if cfg.Port <= 0 {
+		return "", fmt.Errorf("invalid VM agent port for credential helper: %d", cfg.Port)
+	}
 
 	script, err := renderGitCredentialHelperScript(cfg)
 	if err != nil {
@@ -67,7 +83,10 @@ func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
 	}
 
 	hostPath := credentialHelperHostPath(cfg.WorkspaceID)
-	if err := os.WriteFile(hostPath, []byte(script), 0o755); err != nil {
+	// 0o700: owner-only — the script embeds a bearer token that must not be
+	// readable by other users on the host. Docker (running as root) reads the
+	// file for the bind-mount, so owner-execute is sufficient.
+	if err := os.WriteFile(hostPath, []byte(script), 0o700); err != nil {
 		return "", fmt.Errorf("failed to write credential helper to %s: %w", hostPath, err)
 	}
 
@@ -79,9 +98,13 @@ func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
 // Exported so workspace deletion handlers in other packages can call it.
 func RemoveCredentialHelperFromHost(workspaceID string) {
 	hostPath := credentialHelperHostPath(workspaceID)
-	if err := os.Remove(hostPath); err != nil && !os.IsNotExist(err) {
-		slog.Warn("Failed to remove credential helper from host", "path", hostPath, "error", err)
+	if err := os.Remove(hostPath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("Failed to remove credential helper from host", "workspaceID", workspaceID, "path", hostPath, "error", err)
+		}
+		return
 	}
+	slog.Info("Removed credential helper from host", "workspaceID", workspaceID, "path", hostPath)
 }
 
 // credentialHelperMountEntry returns the devcontainer mount string for the
@@ -229,6 +252,17 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	if credErr != nil {
 		slog.Warn("Failed to write credential helper to host (non-fatal, git auth will be available after devcontainer up)", "error", credErr)
 	}
+	// Ensure the token-bearing file is cleaned up if bootstrap fails before the
+	// workspace is registered (workspace deletion handler won't fire in that case).
+	if credHelperHostPath != "" {
+		defer func() {
+			// Remove only if bootstrap did not succeed — successful bootstrap
+			// leaves the file for the workspace deletion handler to clean up.
+			if err != nil {
+				RemoveCredentialHelperFromHost(cfg.WorkspaceID)
+			}
+		}()
+	}
 
 	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
 	reporter.Log("devcontainer_up", "started", "Building devcontainer")
@@ -344,6 +378,16 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if credErr != nil {
 		slog.Warn("Failed to write credential helper to host (non-fatal, git auth will be available after devcontainer up)", "error", credErr)
 	}
+	// Ensure the token-bearing file is cleaned up if bootstrap fails before the
+	// workspace is registered (workspace deletion handler won't fire in that case).
+	devcontainerReady := false
+	if credHelperHostPath != "" {
+		defer func() {
+			if !devcontainerReady {
+				RemoveCredentialHelperFromHost(cfg.WorkspaceID)
+			}
+		}()
+	}
 
 	var usedFallback bool
 	var recoveryMode bool
@@ -380,6 +424,8 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 			recoveryMode = true
 		}
 	}
+
+	devcontainerReady = true // credential helper file now actively mounted — keep for deletion handler
 
 	// Ensure gh CLI is available (install if missing from custom devcontainers).
 	reporter.Log("gh_cli", "started", "Checking GitHub CLI availability")
@@ -1567,11 +1613,14 @@ func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName, credHelperHo
 	}
 
 	// Credential helper bind mount + containerEnv for early git auth during lifecycle hooks.
+	// Uses credentialHelperContainerEnv() as the single source of truth for GIT_CONFIG_* keys.
 	credMountLine := ""
 	credEnvLine := ""
 	if credHelperHostPath != "" {
 		credMountLine = fmt.Sprintf(",\n  \"mounts\": [\"%s\"]", credentialHelperMountEntry(credHelperHostPath))
-		credEnvLine = fmt.Sprintf(",\n  \"containerEnv\": {\"GIT_CONFIG_COUNT\": \"1\", \"GIT_CONFIG_KEY_0\": \"credential.helper\", \"GIT_CONFIG_VALUE_0\": \"%s\"}", credentialHelperContainerPath)
+		envEntries := credentialHelperContainerEnv()
+		credEnvJSON, _ := json.Marshal(envEntries)
+		credEnvLine = fmt.Sprintf(",\n  \"containerEnv\": %s", string(credEnvJSON))
 	}
 
 	configJSON := fmt.Sprintf(`{
@@ -1731,7 +1780,10 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to finalize temporary credential helper script: %w", err)
 	}
 
-	if err := os.Chmod(tempPath, 0o755); err != nil {
+	// chmod 0o700: owner-only — the temp file is read by docker cp running as
+	// root and then removed. os.CreateTemp defaults to 0o600 which is sufficient
+	// for reading, but the script needs execute permission inside the container.
+	if err := os.Chmod(tempPath, 0o700); err != nil {
 		return fmt.Errorf("failed to chmod temporary credential helper script: %w", err)
 	}
 
