@@ -184,8 +184,13 @@ function useAcpRecovery(opts: {
         .then(() => {
           opts.reconnectFn();
         })
-        .catch(() => {
-          // Error handled silently in test
+        .catch((err) => {
+          // Mirror the real component's 404-abort behavior: if workspace is gone, stop retrying
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
+            attemptsRef.current = opts.maxAttempts;
+            setAttempts(attemptsRef.current);
+          }
         });
     }, delay);
 
@@ -376,6 +381,93 @@ describe('ACP recovery effect', () => {
     // No more attempts
     await act(async () => {
       vi.advanceTimersByTime(60000);
+    });
+    expect(resumeFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT trigger without agentSessionId', () => {
+    renderHook(() =>
+      useAcpRecovery({
+        ...defaultOpts,
+        agentSessionId: null,
+        resumeFn,
+        reconnectFn,
+      })
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(resumeFn).not.toHaveBeenCalled();
+  });
+
+  it('does NOT trigger when provisioning', () => {
+    renderHook(() =>
+      useAcpRecovery({
+        ...defaultOpts,
+        isProvisioning: true,
+        resumeFn,
+        reconnectFn,
+      })
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(resumeFn).not.toHaveBeenCalled();
+  });
+
+  it('stops retrying on 404 error (workspace gone)', async () => {
+    resumeFn = vi.fn().mockRejectedValue(new Error('404 Not Found'));
+
+    renderHook(() =>
+      useAcpRecovery({ ...defaultOpts, resumeFn, reconnectFn })
+    );
+
+    // First attempt fires
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(resumeFn).toHaveBeenCalledTimes(1);
+    expect(reconnectFn).not.toHaveBeenCalled(); // rejected, so no reconnect
+
+    // No further attempts — 404 pins attempts to max
+    await act(async () => {
+      vi.advanceTimersByTime(60000);
+    });
+    expect(resumeFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT call reconnect when resume rejects with non-404 error', async () => {
+    resumeFn = vi.fn().mockRejectedValue(new Error('Network timeout'));
+
+    renderHook(() =>
+      useAcpRecovery({ ...defaultOpts, resumeFn, reconnectFn })
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(resumeFn).toHaveBeenCalledTimes(1);
+    expect(reconnectFn).not.toHaveBeenCalled(); // must NOT reconnect on failure
+  });
+
+  it('retries after non-404 error', async () => {
+    resumeFn = vi.fn().mockRejectedValue(new Error('Network timeout'));
+
+    renderHook(() =>
+      useAcpRecovery({ ...defaultOpts, resumeFn, reconnectFn })
+    );
+
+    // First attempt
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(resumeFn).toHaveBeenCalledTimes(1);
+
+    // Second attempt after interval (non-404 errors allow retries)
+    await act(async () => {
+      vi.advanceTimersByTime(30000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(2);
   });
