@@ -125,6 +125,30 @@ For the full list of GCP configuration variables, see the [GCP Setup Guide](./gc
 | `GCP_DEPLOY_SERVICE_ACCOUNT_ID` | `sam-deployer` | Service account for deployment operations |
 | `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS` | `600` | Identity token lifetime in seconds |
 
+**Optional Neko browser sidecar configuration** (env vars — sensible defaults provided):
+
+The Neko browser sidecar enables a remote browser inside each workspace. These variables are set as Cloudflare Worker secrets or env vars and forwarded to VMs via cloud-init.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEKO_IMAGE` | `ghcr.io/m1k1o/neko/google-chrome:latest` | Docker image for the Neko browser sidecar |
+| `NEKO_PRE_PULL` | `true` | Pre-pull the Neko image during VM cloud-init (`"true"` or `"false"`) |
+
+The following variables are configured on the VM agent (set in the VM agent's environment, not as Worker secrets):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEKO_SCREEN_RESOLUTION` | `1920x1080` | Default screen resolution for the browser |
+| `NEKO_MAX_FPS` | `30` | Maximum frames per second for streaming |
+| `NEKO_WEBRTC_PORT` | `8080` | WebRTC port for browser streaming |
+| `NEKO_SOCAT_POLL_INTERVAL` | `5s` | Interval for polling DevContainer ports to forward |
+| `NEKO_MIN_RAM_MB` | `2048` | Minimum RAM (MB) required to start the sidecar |
+| `NEKO_ENABLE_AUDIO` | `true` | Enable audio in the browser session |
+| `NEKO_TCP_FALLBACK` | `true` | Fall back to TCP if WebRTC is unavailable |
+| `NEKO_SHM_SIZE` | `2g` | Shared memory size for the Neko container |
+| `NEKO_MEMORY_LIMIT` | `4g` | Memory limit for the Neko container |
+| `NEKO_CPU_LIMIT` | `2` | CPU limit for the Neko container |
+
 > **Naming Convention**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets. Google OAuth secrets use `GOOGLE_*` directly (no prefix mapping needed).
 
 > **Note**: Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) and TLS certificates (`ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`) are **automatically generated and persisted** via Pulumi state in R2. No manual intervention required—keys are created on first deployment and reused automatically on subsequent deployments.

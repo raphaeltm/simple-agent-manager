@@ -18,7 +18,11 @@ Discovered by task-completion-validator during PR #570 review. The BrowserSideca
 
 ## Acceptance Criteria
 
-- [ ] Add unit test in `apps/api/tests/unit/` verifying NEKO_IMAGE and NEKO_PRE_PULL reach generateCloudInit()
-- [ ] Add "Neko Browser Sidecar" subsection to `docs/guides/self-hosting.md`
-- [ ] Add `packages/vm-agent/internal/server/browser_handlers_test.go` for all four handlers
-- [ ] Add SyncForwardersFromPorts early-return test to socat_test.go
+- [x] Add unit test in `apps/api/tests/unit/` verifying NEKO_IMAGE and NEKO_PRE_PULL reach generateCloudInit()
+  - Added `apps/api/tests/unit/services/cloud-init-neko.test.ts` with 6 tests
+- [x] Add "Neko Browser Sidecar" subsection to `docs/guides/self-hosting.md`
+  - Added full Neko env var table (Worker-level + VM agent-level)
+- [x] Add `packages/vm-agent/internal/server/browser_handlers_test.go` for all four handlers
+  - 19 tests: missing workspaceId (4), auth rejection (4), nil browserManager (4), no sidecar (3), resolveContainerID error (1), browserStateToResponse (3)
+- [x] Add SyncForwardersFromPorts early-return test to socat_test.go
+  - Already existed: TestSyncForwardersFromPorts_StoppedWorkspaceIsNoop (line 245), TestSyncForwardersFromPorts_NonRunningIsNoop (line 257)
