@@ -285,10 +285,6 @@ credentialsRoutes.put('/agent', jsonValidator(SaveAgentCredentialSchema), async 
   const credentialKind = body.credentialKind || 'api-key';
   const autoActivate = body.autoActivate !== false; // Default true
 
-  if (!body.agentType || !credential) {
-    throw errors.badRequest('agentType and credential are required');
-  }
-
   if (!isValidAgentType(body.agentType)) {
     throw errors.badRequest('Invalid agent type');
   }

@@ -14,10 +14,11 @@ export const SmokeTestRedeemSchema = v.object({
   token: v.optional(v.string()),
 });
 
-// Cached commands
+// Cached commands — name is optional because the handler filters entries
+// without a name (graceful degradation for agent-submitted data)
 const CachedCommandSchema = v.object({
-  name: v.string(),
-  description: v.string(),
+  name: v.optional(v.string()),
+  description: v.optional(v.string()),
 });
 
 export const SaveCachedCommandsSchema = v.object({

@@ -76,7 +76,7 @@ cachedCommandRoutes.post('/', jsonValidator(SaveCachedCommandsSchema), async (c)
   }
 
   const validCommands = body.commands
-    .filter((cmd) => cmd.name && typeof cmd.name === 'string')
+    .filter((cmd): cmd is typeof cmd & { name: string } => typeof cmd.name === 'string' && cmd.name.length > 0)
     .slice(0, maxCommands)
     .map((cmd) => ({
       name: cmd.name.trim().slice(0, maxNameLen),
