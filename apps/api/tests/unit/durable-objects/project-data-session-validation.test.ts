@@ -35,7 +35,7 @@ describe('ProjectData DO session validation contracts', () => {
     });
 
     it('logs session mismatch with diagnostic context', () => {
-      expect(file).toContain('WebSocket message.send session mismatch');
+      expect(file).toContain('websocket_session_mismatch');
       expect(file).toContain('wsSessionId');
       expect(file).toContain('messageSessionId');
     });

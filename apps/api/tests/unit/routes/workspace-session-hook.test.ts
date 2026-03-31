@@ -28,7 +28,7 @@ describe('workspace creation chat session hook source contract', () => {
   });
 
   it('session creation failure does not block workspace creation (best-effort)', () => {
-    expect(routesFile).toContain('Failed to create chat session for workspace');
+    expect(routesFile).toContain('workspace.chat_session_create_failed');
     // The session creation is wrapped in a try/catch
     expect(routesFile).toContain('} catch (err) {');
   });

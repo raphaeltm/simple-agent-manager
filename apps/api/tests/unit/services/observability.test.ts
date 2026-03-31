@@ -274,10 +274,11 @@ describe('Observability Service', () => {
         message: 'Test',
       });
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        '[observability] Failed to persist error:',
-        'D1 write failed'
-      );
+      // Logger emits a single JSON string to console.warn
+      expect(warnSpy).toHaveBeenCalled();
+      const warnEntry = JSON.parse(warnSpy.mock.calls[0][0] as string);
+      expect(warnEntry.event).toBe('observability.persist_error_failed');
+      expect(warnEntry.level).toBe('warn');
 
       warnSpy.mockRestore();
     });
@@ -291,10 +292,11 @@ describe('Observability Service', () => {
         message: 'Test',
       });
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        '[observability] Failed to persist error:',
-        'string error'
-      );
+      // Logger emits a single JSON string to console.warn
+      expect(warnSpy).toHaveBeenCalled();
+      const warnEntry = JSON.parse(warnSpy.mock.calls[0][0] as string);
+      expect(warnEntry.event).toBe('observability.persist_error_failed');
+      expect(warnEntry.level).toBe('warn');
 
       warnSpy.mockRestore();
     });

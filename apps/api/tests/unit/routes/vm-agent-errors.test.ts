@@ -172,17 +172,18 @@ describe('VM Agent Errors Route', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      expect(spy).toHaveBeenCalledWith('[vm-agent-error]', expect.objectContaining({
-        level: 'error',
-        message: 'Error A',
-        source: 'acp-gateway',
-        nodeId: 'node-123',
-      }));
+      // Logger emits a single JSON string per call
+      const firstEntry = JSON.parse(spy.mock.calls[0][0] as string);
+      expect(firstEntry.event).toBe('vm_agent_error');
+      expect(firstEntry.level).toBe('error');
+      expect(firstEntry.message).toBe('Error A');
+      expect(firstEntry.source).toBe('acp-gateway');
+      expect(firstEntry.nodeId).toBe('node-123');
 
-      expect(spy).toHaveBeenCalledWith('[vm-agent-error]', expect.objectContaining({
-        message: 'Error B',
-        nodeId: 'node-123',
-      }));
+      const secondEntry = JSON.parse(spy.mock.calls[1][0] as string);
+      expect(secondEntry.event).toBe('vm_agent_error');
+      expect(secondEntry.message).toBe('Error B');
+      expect(secondEntry.nodeId).toBe('node-123');
 
       spy.mockRestore();
     });
@@ -196,11 +197,12 @@ describe('VM Agent Errors Route', () => {
         body: makeBody([validEntry()]),
       }, createEnv());
 
-      const loggedEntry = spy.mock.calls.find(
-        (call) => call[0] === '[vm-agent-error]'
-      );
+      // Logger emits a single JSON string; find the vm_agent_error log entry
+      const loggedEntry = spy.mock.calls
+        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .find((entry) => entry?.event === 'vm_agent_error');
       expect(loggedEntry).toBeDefined();
-      expect((loggedEntry![1] as Record<string, unknown>).nodeId).toBe('node-123');
+      expect(loggedEntry!.nodeId).toBe('node-123');
 
       spy.mockRestore();
     });
@@ -285,11 +287,11 @@ describe('VM Agent Errors Route', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const vmAgentCalls = spy.mock.calls.filter(
-        (call) => call[0] === '[vm-agent-error]'
-      );
+      const vmAgentCalls = spy.mock.calls
+        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .filter((entry) => entry?.event === 'vm_agent_error');
       expect(vmAgentCalls.length).toBe(1);
-      expect((vmAgentCalls[0][1] as Record<string, unknown>).message).toBe('Valid one');
+      expect(vmAgentCalls[0].message).toBe('Valid one');
 
       spy.mockRestore();
     });
@@ -308,11 +310,11 @@ describe('VM Agent Errors Route', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const vmAgentCalls = spy.mock.calls.filter(
-        (call) => call[0] === '[vm-agent-error]'
-      );
+      const vmAgentCalls = spy.mock.calls
+        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .filter((entry) => entry?.event === 'vm_agent_error');
       expect(vmAgentCalls.length).toBe(1);
-      expect((vmAgentCalls[0][1] as Record<string, unknown>).message).toBe('Has source');
+      expect(vmAgentCalls[0].message).toBe('Has source');
 
       spy.mockRestore();
     });
@@ -329,10 +331,10 @@ describe('VM Agent Errors Route', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const vmAgentCalls = spy.mock.calls.filter(
-        (call) => call[0] === '[vm-agent-error]'
-      );
-      const loggedMessage = (vmAgentCalls[0][1] as Record<string, unknown>).message as string;
+      const vmAgentCalls = spy.mock.calls
+        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .filter((entry) => entry?.event === 'vm_agent_error');
+      const loggedMessage = vmAgentCalls[0].message as string;
       expect(loggedMessage.length).toBeLessThanOrEqual(2048 + 3); // +3 for '...'
 
       spy.mockRestore();
@@ -349,10 +351,10 @@ describe('VM Agent Errors Route', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const vmAgentCalls = spy.mock.calls.filter(
-        (call) => call[0] === '[vm-agent-error]'
-      );
-      const loggedLevel = (vmAgentCalls[0][1] as Record<string, unknown>).level;
+      const vmAgentCalls = spy.mock.calls
+        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .filter((entry) => entry?.event === 'vm_agent_error');
+      const loggedLevel = vmAgentCalls[0].level;
       expect(loggedLevel).toBe('error'); // 'info' is not in VALID_VM_ERROR_LEVELS
 
       spy.mockRestore();
@@ -369,10 +371,10 @@ describe('VM Agent Errors Route', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const vmAgentCalls = spy.mock.calls.filter(
-        (call) => call[0] === '[vm-agent-error]'
-      );
-      const loggedLevel = (vmAgentCalls[0][1] as Record<string, unknown>).level;
+      const vmAgentCalls = spy.mock.calls
+        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .filter((entry) => entry?.event === 'vm_agent_error');
+      const loggedLevel = vmAgentCalls[0].level;
       expect(loggedLevel).toBe('warn');
 
       spy.mockRestore();
@@ -390,10 +392,10 @@ describe('VM Agent Errors Route', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const vmAgentCalls = spy.mock.calls.filter(
-        (call) => call[0] === '[vm-agent-error]'
-      );
-      const logged = vmAgentCalls[0][1] as Record<string, unknown>;
+      const vmAgentCalls = spy.mock.calls
+        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .filter((entry) => entry?.event === 'vm_agent_error');
+      const logged = vmAgentCalls[0];
       expect(logged.workspaceId).toBe('ws-xyz');
       expect(logged.context).toEqual(ctx);
 
@@ -411,9 +413,9 @@ describe('VM Agent Errors Route', () => {
         body: makeBody(entries),
       }, createEnv());
 
-      const vmAgentCalls = spy.mock.calls.filter(
-        (call) => call[0] === '[vm-agent-error]'
-      );
+      const vmAgentCalls = spy.mock.calls
+        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .filter((entry) => entry?.event === 'vm_agent_error');
       expect(vmAgentCalls.length).toBe(1);
 
       spy.mockRestore();

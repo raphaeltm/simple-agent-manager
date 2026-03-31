@@ -63,9 +63,6 @@ export function serializeError(err: unknown): Record<string, unknown> {
   return { error: String(err) };
 }
 
-// eslint-disable-next-line no-console -- logger.ts is the sole console gateway
-const _console = { log: console.log, error: console.error, warn: console.warn, debug: console.debug };
-
 function emit(level: LogLevel, event: string, details: Record<string, unknown> = {}): void {
   const entry: LogEntry = {
     timestamp: new Date().toISOString(),
@@ -77,16 +74,16 @@ function emit(level: LogLevel, event: string, details: Record<string, unknown> =
   const json = JSON.stringify(entry);
   switch (level) {
     case 'error':
-      _console.error(json);
+      console.error(json);
       break;
     case 'warn':
-      _console.warn(json);
+      console.warn(json);
       break;
     case 'debug':
-      _console.debug(json);
+      console.debug(json);
       break;
     default:
-      _console.log(json);
+      console.log(json);
   }
 }
 
