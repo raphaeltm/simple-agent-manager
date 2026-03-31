@@ -56,6 +56,39 @@ const ACP_GRACE_MS = parseInt(import.meta.env.VITE_ACP_GRACE_MS || String(DEFAUL
 const DEFAULT_AUTO_RESUME_DELAY_MS = 2_000;
 const AUTO_RESUME_DELAY_MS = parseInt(import.meta.env.VITE_AUTO_RESUME_DELAY_MS || String(DEFAULT_AUTO_RESUME_DELAY_MS), 10);
 
+/**
+ * Delay (ms) before the ACP recovery effect kicks in after the ACP WebSocket
+ * enters error state while the session is still active. This gives the ACP
+ * hook's own reconnection a chance to succeed before we intervene.
+ * Configurable via VITE_ACP_RECOVERY_DELAY_MS environment variable.
+ */
+const DEFAULT_ACP_RECOVERY_DELAY_MS = 5_000;
+const ACP_RECOVERY_DELAY_MS = parseInt(import.meta.env.VITE_ACP_RECOVERY_DELAY_MS || String(DEFAULT_ACP_RECOVERY_DELAY_MS), 10);
+
+/**
+ * Interval (ms) between ACP recovery retry attempts after the first recovery
+ * attempt fails. Each attempt calls resumeAgentSession + reconnect.
+ * Configurable via VITE_ACP_RECOVERY_INTERVAL_MS environment variable.
+ */
+const DEFAULT_ACP_RECOVERY_INTERVAL_MS = 30_000;
+const ACP_RECOVERY_INTERVAL_MS = parseInt(import.meta.env.VITE_ACP_RECOVERY_INTERVAL_MS || String(DEFAULT_ACP_RECOVERY_INTERVAL_MS), 10);
+
+/**
+ * Maximum number of ACP recovery attempts before giving up. After this many
+ * failures, the user sees the error banner with a manual Reconnect button.
+ * Configurable via VITE_ACP_RECOVERY_MAX_ATTEMPTS environment variable.
+ */
+const DEFAULT_ACP_RECOVERY_MAX_ATTEMPTS = 10;
+const ACP_RECOVERY_MAX_ATTEMPTS = parseInt(import.meta.env.VITE_ACP_RECOVERY_MAX_ATTEMPTS || String(DEFAULT_ACP_RECOVERY_MAX_ATTEMPTS), 10);
+
+/**
+ * Debounce delay (ms) before showing the "Reconnecting..." banner for the DO
+ * WebSocket. Brief blips that self-heal within this window are invisible.
+ * Configurable via VITE_RECONNECT_BANNER_DELAY_MS environment variable.
+ */
+const DEFAULT_RECONNECT_BANNER_DELAY_MS = 3_000;
+const RECONNECT_BANNER_DELAY_MS = parseInt(import.meta.env.VITE_RECONNECT_BANNER_DELAY_MS || String(DEFAULT_RECONNECT_BANNER_DELAY_MS), 10);
+
 /** True for placeholder content that adds no user value. */
 function isPlaceholderContent(content: string): boolean {
   const trimmed = content.trim();
@@ -384,6 +417,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // Guard: prevent repeated auto-resume attempts for the same session
   const hasAttemptedAutoResumeRef = useRef(false);
 
+  // ACP recovery: tracks attempts to recover from ACP error while session is active
+  const acpRecoveryAttemptsRef = useRef(0);
+  const acpRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounced connection banner: only show "Reconnecting..." after sustained disconnect
+  const [showConnectionBanner, setShowConnectionBanner] = useState(false);
+
   // Grace period: keep showing ACP view after prompting ends so DO can catch up
   // (VM agent batches messages with ~2s delay before persisting to DO)
   const [acpGrace, setAcpGrace] = useState(false);
@@ -475,6 +515,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     setResumeError(null);
     pendingFollowUpRef.current = null;
     hasAttemptedAutoResumeRef.current = false;
+    acpRecoveryAttemptsRef.current = 0;
+    if (acpRecoveryTimerRef.current) {
+      clearTimeout(acpRecoveryTimerRef.current);
+      acpRecoveryTimerRef.current = null;
+    }
+    setShowConnectionBanner(false);
     if (acpGraceTimerRef.current) {
       clearTimeout(acpGraceTimerRef.current);
       acpGraceTimerRef.current = null;
@@ -750,6 +796,92 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally exclude agentSession to avoid re-triggering
   }, [sessionState, agentSession.isAgentActive, agentSession.isConnecting, isResuming, isProvisioning, session?.workspaceId, agentSessionId]);
 
+  // ACP recovery: when the session is still 'active' on the server but the ACP
+  // WebSocket has entered 'error' state (exhausted its 60s reconnect timeout),
+  // periodically attempt to resume the agent session and reconnect. This handles
+  // the gap where the existing auto-resume only fires for 'idle' sessions.
+  const acpState = agentSession.session.state;
+  useEffect(() => {
+    // Only activate when session is active but ACP has given up
+    if (
+      sessionState !== 'active' ||
+      acpState !== 'error' ||
+      isResuming ||
+      isProvisioning ||
+      !session?.workspaceId ||
+      !agentSessionId
+    ) {
+      // Clear any pending recovery timer if conditions no longer apply
+      if (acpRecoveryTimerRef.current) {
+        clearTimeout(acpRecoveryTimerRef.current);
+        acpRecoveryTimerRef.current = null;
+      }
+      // Reset attempts when agent reconnects successfully
+      if (agentSession.isAgentActive) {
+        acpRecoveryAttemptsRef.current = 0;
+      }
+      return;
+    }
+
+    // Don't exceed max attempts
+    if (acpRecoveryAttemptsRef.current >= ACP_RECOVERY_MAX_ATTEMPTS) {
+      return;
+    }
+
+    // First attempt uses a shorter delay; subsequent attempts use the interval
+    const delay = acpRecoveryAttemptsRef.current === 0
+      ? ACP_RECOVERY_DELAY_MS
+      : ACP_RECOVERY_INTERVAL_MS;
+
+    acpRecoveryTimerRef.current = setTimeout(() => {
+      acpRecoveryTimerRef.current = null;
+      const attempt = ++acpRecoveryAttemptsRef.current;
+
+      // Call resume API to ensure the VM-side session is running, then reconnect
+      resumeAgentSession(session.workspaceId!, agentSessionId)
+        .then(() => {
+          setSession((prev) => {
+            if (!prev) return prev;
+            return { ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
+          });
+          agentSession.reconnect();
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          // 404 means workspace is gone — stop retrying
+          if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
+            acpRecoveryAttemptsRef.current = ACP_RECOVERY_MAX_ATTEMPTS;
+          } else {
+            console.warn(`ACP recovery attempt ${attempt} failed:`, msg);
+          }
+        });
+    }, delay);
+
+    return () => {
+      if (acpRecoveryTimerRef.current) {
+        clearTimeout(acpRecoveryTimerRef.current);
+        acpRecoveryTimerRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- exclude agentSession object to avoid re-triggering
+  }, [sessionState, acpState, agentSession.isAgentActive, isResuming, isProvisioning, session?.workspaceId, agentSessionId]);
+
+  // Debounce the connection banner: only show "Reconnecting..." after the DO
+  // WebSocket has been disconnected for RECONNECT_BANNER_DELAY_MS. Brief blips
+  // that self-heal are invisible to the user.
+  useEffect(() => {
+    if (connectionState === 'connected' || connectionState === 'disconnected') {
+      // Connected: hide immediately. Disconnected (permanent): show immediately.
+      setShowConnectionBanner(connectionState === 'disconnected');
+      return;
+    }
+    // 'connecting' or 'reconnecting': debounce before showing
+    const timer = setTimeout(() => {
+      setShowConnectionBanner(true);
+    }, RECONNECT_BANNER_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [connectionState]);
+
   // Send follow-up message via DO WebSocket (persistence) + ACP (agent prompt)
   const handleSendFollowUp = async () => {
     const trimmed = followUp.trim();
@@ -917,7 +1049,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
 
       {/* Connection indicator (TDF-8) */}
-      {sessionState === 'active' && connectionState !== 'connected' && (
+      {sessionState === 'active' && connectionState !== 'connected' && showConnectionBanner && (
         <ConnectionBanner state={connectionState} onRetry={retryWs} />
       )}
 
@@ -1565,6 +1697,7 @@ function ConnectionBanner({ state, onRetry }: { state: ChatConnectionState; onRe
 
   return (
     <div
+      role="alert"
       className="flex items-center gap-2 px-4 py-1 border-b border-border-default text-xs"
       style={{
         backgroundColor: isRecoverable ? 'var(--sam-color-danger-tint)' : 'var(--sam-color-warning-tint, var(--sam-color-info-tint))',
