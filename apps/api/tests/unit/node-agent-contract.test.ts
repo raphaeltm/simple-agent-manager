@@ -55,7 +55,6 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
     it('validates a correct health response', () => {
       const response = {
         status: 'healthy',
-        nodeId: 'node-abc123',
       };
       const result = HealthResponseSchema.safeParse(response);
       expect(result.success).toBe(true);
@@ -64,18 +63,18 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
     it('rejects health response with wrong status literal', () => {
       const response = {
         status: 'unhealthy',
-        nodeId: 'node-abc',
       };
       const result = HealthResponseSchema.safeParse(response);
       expect(result.success).toBe(false);
     });
 
-    it('rejects health response missing nodeId', () => {
+    it('accepts health response with extra fields (forward compat)', () => {
       const response = {
         status: 'healthy',
+        extra: 'ignored',
       };
       const result = HealthResponseSchema.safeParse(response);
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
     });
   });
 

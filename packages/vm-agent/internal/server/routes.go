@@ -13,7 +13,6 @@ import (
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	response := map[string]interface{}{
 		"status": "healthy",
-		"nodeId": s.config.NodeID,
 	}
 	writeJSON(w, http.StatusOK, response)
 }

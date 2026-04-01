@@ -77,10 +77,10 @@ func TestHealthResponseContract(t *testing.T) {
 	if resp["status"] != "healthy" {
 		t.Fatalf("expected status=healthy, got %v", resp["status"])
 	}
-	if resp["nodeId"] != "node-contract-test" {
-		t.Fatalf("expected nodeId=node-contract-test, got %v", resp["nodeId"])
+	// Verify sensitive data is NOT exposed on the unauthenticated health endpoint
+	if _, ok := resp["nodeId"]; ok {
+		t.Fatal("health endpoint must NOT expose nodeId")
 	}
-	// Verify counts are NOT exposed on the unauthenticated health endpoint
 	if _, ok := resp["activeWorkspaces"]; ok {
 		t.Fatal("health endpoint must NOT expose activeWorkspaces count")
 	}
