@@ -44,16 +44,16 @@ Code audit identified 7 infrastructure inconsistencies across build config, CI, 
 
 ## Implementation Checklist
 
-- [ ] 1. Fix React peerDependencies to use `catalog:` in acp-client, terminal, and ui packages
-- [ ] 2. Rename `@workspace/cloud-init` → `@simple-agent-manager/cloud-init` and update all imports
-- [ ] 3. Rename `@workspace/vm-agent-ui` → `@simple-agent-manager/vm-agent-ui`
-- [ ] 4. Pin all GitHub Actions to commit SHAs with version comments
-- [ ] 5. Fix R2 CORS script to exit 1 when env vars missing in CI
-- [ ] 6. Add Pulumi output validation in sync-wrangler-config.ts
-- [ ] 7. Centralize GH_→GITHUB_ secret mapping in configure-secrets.sh
-- [ ] 8. Create backlog task for a11y ESLint promotion
-- [ ] 9. Run `pnpm install` to update lockfile after package.json changes
-- [ ] 10. Verify lint, typecheck, test, build pass
+- [x] 1. Fix React peerDependencies to use `catalog:` in acp-client, terminal, and ui packages
+- [x] 2. Rename `@workspace/cloud-init` → `@simple-agent-manager/cloud-init` and update all imports
+- [x] 3. Rename `@workspace/vm-agent-ui` → `@simple-agent-manager/vm-agent-ui`
+- [x] 4. Pin all GitHub Actions to commit SHAs with version comments
+- [x] 5. Fix R2 CORS script to exit 1 when env vars missing in CI
+- [x] 6. Add Pulumi output validation in sync-wrangler-config.ts
+- [x] 7. Centralize GH_→GITHUB_ secret mapping in configure-secrets.sh
+- [x] 8. Create backlog task for a11y ESLint promotion
+- [x] 9. Run `pnpm install` to update lockfile after package.json changes
+- [x] 10. Verify lint, typecheck, test, build pass
 
 ## Acceptance Criteria
 
