@@ -36,6 +36,8 @@
     "@vitejs/plugin-react": "catalog:",
     "jsdom": "catalog:",
     "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "react-router": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

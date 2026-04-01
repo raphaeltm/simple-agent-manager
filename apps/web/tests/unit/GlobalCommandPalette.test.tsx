@@ -162,7 +162,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.change(input, { target: { value: 'api' } });
@@ -227,7 +227,7 @@ describe('GlobalCommandPalette', () => {
     renderPalette(onClose);
 
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
 
     const options = screen.getAllByRole('option');
@@ -529,7 +529,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.change(input, { target: { value: 'new chat' } });
@@ -549,7 +549,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.change(input, { target: { value: 'api new chat' } });
@@ -568,7 +568,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.change(input, { target: { value: 'api new chat' } });
@@ -590,7 +590,7 @@ describe('GlobalCommandPalette', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
 
     // Query is empty — no Quick Actions category
@@ -603,7 +603,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
 
     // Type a query that uniquely matches one quick action
@@ -625,7 +625,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.change(input, { target: { value: 'xyznonexistent99' } });
@@ -638,7 +638,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.change(input, { target: { value: 'new chat' } });

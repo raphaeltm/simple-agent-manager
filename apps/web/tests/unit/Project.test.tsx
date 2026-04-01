@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route,Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -76,7 +76,9 @@ describe('Project shell (non-chat routes)', () => {
     await screen.findByTestId('overview-content');
     // No PageLayout header — project name is communicated to sidebar via AppShell context
     expect(screen.queryByRole('heading', { name: 'My Project' })).not.toBeInTheDocument();
-    expect(mockSetProjectName).toHaveBeenCalledWith('My Project');
+    await waitFor(() => {
+      expect(mockSetProjectName).toHaveBeenCalledWith('My Project');
+    });
   });
 
   it('renders child route content via Outlet', async () => {

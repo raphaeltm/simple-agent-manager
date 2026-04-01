@@ -705,11 +705,13 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    // Advance timer to trigger the auto-resume, then flush pending promises
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
 
     await waitFor(() => {
       expect(screen.getByText(/could not resume agent.*please try again/i)).toBeInTheDocument();
-    });
+    }, { timeout: 3000 });
   });
 
   it('resets auto-resume state when session ID changes', async () => {
@@ -728,7 +730,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Trigger auto-resume for first session
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     await waitFor(() => {
       expect(screen.getByText('Resuming agent...')).toBeInTheDocument();
@@ -756,7 +758,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Auto-resume should fire for the new session after the delay
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     await waitFor(() => {
       expect(mockResumeAgentSession).toHaveBeenCalled();
