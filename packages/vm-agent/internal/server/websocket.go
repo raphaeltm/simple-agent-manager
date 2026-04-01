@@ -462,6 +462,8 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				requestedWorkDir = effectiveWorkDir
 			}
 
+			data.Rows = clampTerminalDimension(data.Rows, 24)
+			data.Cols = clampTerminalDimension(data.Cols, 80)
 			ptySession, err := runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols, requestedWorkDir)
 			if err != nil && isContainerUnavailableError(err) {
 				slog.Warn("Multi-terminal session create failed due to unavailable container, attempting recovery", "workspace", workspaceID, "error", err)

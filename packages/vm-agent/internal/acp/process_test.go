@@ -181,51 +181,19 @@ func TestEnvFileOperations(t *testing.T) {
 		}
 	})
 
-	t.Run("FallbackWhenEnvFileFails", func(t *testing.T) {
+	t.Run("EnvFileFailureIsFatal", func(t *testing.T) {
 		origDir := envFileDir
 		envFileDir = "/nonexistent/path"
 		defer func() { envFileDir = origDir }()
 
-		envVars := []string{
-			"SAM_WORKSPACE_ID=ws-123",
-			"ANTHROPIC_API_KEY=sk-ant-secret",
-		}
+		secrets := []string{"ANTHROPIC_API_KEY=sk-ant-secret"}
 
-		var secrets, nonSecrets []string
-		for _, env := range envVars {
-			if isSecretEnvVar(env) {
-				secrets = append(secrets, env)
-			} else {
-				nonSecrets = append(nonSecrets, env)
-			}
-		}
-
-		args := []string{"exec", "-i"}
-		for _, env := range nonSecrets {
-			args = append(args, "-e", env)
-		}
-
-		// Attempt env file — should fail
+		// writeSecretEnvFile must return an error when the dir doesn't exist.
+		// The implementation must NOT fall back to -e flags (which would
+		// expose secrets in the process table via ps).
 		_, err := writeSecretEnvFile(secrets)
 		if err == nil {
 			t.Fatal("expected writeSecretEnvFile to fail with nonexistent dir")
-		}
-
-		// Fallback: add secrets as -e flags
-		for _, env := range secrets {
-			args = append(args, "-e", env)
-		}
-
-		// Verify all env vars are present as -e flags (fallback mode)
-		argsStr := strings.Join(args, " ")
-		if !strings.Contains(argsStr, "ANTHROPIC_API_KEY=sk-ant-secret") {
-			t.Error("fallback should include secret as -e flag")
-		}
-		if !strings.Contains(argsStr, "SAM_WORKSPACE_ID=ws-123") {
-			t.Error("non-secret should be present as -e flag")
-		}
-		if strings.Contains(argsStr, "--env-file") {
-			t.Error("--env-file should not be present in fallback mode")
 		}
 	})
 
