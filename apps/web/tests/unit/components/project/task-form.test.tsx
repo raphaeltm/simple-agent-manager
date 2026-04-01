@@ -5,7 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { TaskForm } from '../../../../src/components/project/TaskForm';
 
 // Mock the API module so listAgentProfiles doesn't make real requests
-vi.mock('../../../../src/lib/api', () => ({
+vi.mock('../../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/lib/api')>()),
   listAgentProfiles: vi.fn().mockResolvedValue([
     {
       id: 'prof-1',

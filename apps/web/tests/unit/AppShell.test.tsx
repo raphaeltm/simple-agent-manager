@@ -39,7 +39,8 @@ vi.mock('../../src/lib/auth', () => ({
 }));
 
 // Mock API calls used by GlobalCommandPalette
-vi.mock('../../src/lib/api', () => ({
+vi.mock('../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/api')>()),
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
   listNodes: vi.fn().mockResolvedValue([]),
 }));

@@ -2,7 +2,8 @@ import { act,renderHook } from '@testing-library/react';
 import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the API module
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getAdminLogStreamUrl: () => 'ws://localhost:8787/api/admin/observability/logs/stream',
 }));
 

@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => ({
   deleteCredential: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   createCredential: mocks.createCredential,
   deleteCredential: mocks.deleteCredential,
 }));

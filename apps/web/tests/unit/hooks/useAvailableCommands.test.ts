@@ -7,7 +7,8 @@ import { useAvailableCommands } from '../../../src/hooks/useAvailableCommands';
 const mockGetCachedCommands = vi.fn();
 const mockSaveCachedCommands = vi.fn();
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getCachedCommands: (...args: unknown[]) => mockGetCachedCommands(...args),
   saveCachedCommands: (...args: unknown[]) => mockSaveCachedCommands(...args),
 }));

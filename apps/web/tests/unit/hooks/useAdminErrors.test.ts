@@ -5,7 +5,8 @@ import { useAdminErrors } from '../../../src/hooks/useAdminErrors';
 
 // Mock the API
 const mockFetchAdminErrors = vi.fn();
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   fetchAdminErrors: (...args: unknown[]) => mockFetchAdminErrors(...args),
 }));
 

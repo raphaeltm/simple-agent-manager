@@ -18,12 +18,12 @@ import {
   synthesizeSpeech,
 } from '../../../src/services/tts';
 
-// Mock @mastra/core/agent — factory must not reference outer variables
+// Mock @mastra/core/agent — use regular function (not arrow) so `new Agent(...)` works in Vitest 4
 const mockGenerate = vi.fn().mockResolvedValue({ text: 'This is clean text for speech.' });
 vi.mock('@mastra/core/agent', () => ({
-  Agent: vi.fn().mockImplementation(() => ({
+  Agent: vi.fn().mockImplementation(function () { return {
     generate: mockGenerate,
-  })),
+  }; }),
 }));
 
 // Mock workers-ai-provider

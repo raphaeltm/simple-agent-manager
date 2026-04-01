@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => ({
   getGitFile: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getGitDiff: mocks.getGitDiff,
   getGitFile: mocks.getGitFile,
 }));

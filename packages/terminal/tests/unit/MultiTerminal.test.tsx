@@ -11,26 +11,28 @@ const mockTerminalFocus = vi.fn();
 const mockTerminalLoadAddon = vi.fn();
 const mockTerminalOnData = vi.fn();
 
-vi.mock('@xterm/xterm', () => ({
-  Terminal: vi.fn().mockImplementation(() => ({
-    write: mockTerminalWrite,
-    writeln: mockTerminalWriteln,
-    open: mockTerminalOpen,
-    dispose: mockTerminalDispose,
-    focus: mockTerminalFocus,
-    loadAddon: mockTerminalLoadAddon,
-    onData: mockTerminalOnData,
-    rows: 24,
-    cols: 80,
-  })),
-}));
+vi.mock('@xterm/xterm', () => {
+  class Terminal {
+    write = mockTerminalWrite;
+    writeln = mockTerminalWriteln;
+    open = mockTerminalOpen;
+    dispose = mockTerminalDispose;
+    focus = mockTerminalFocus;
+    loadAddon = mockTerminalLoadAddon;
+    onData = mockTerminalOnData;
+    rows = 24;
+    cols = 80;
+  }
+  return { Terminal };
+});
 
-vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: vi.fn().mockImplementation(() => ({
-    fit: vi.fn(),
-    dispose: vi.fn(),
-  })),
-}));
+vi.mock('@xterm/addon-fit', () => {
+  class FitAddon {
+    fit = vi.fn();
+    dispose = vi.fn();
+  }
+  return { FitAddon };
+});
 
 vi.mock('../../src/components/TabBar', () => ({
   TabBar: vi.fn(({ sessions, onNewTab, onTabActivate, onTabClose }: any) => (

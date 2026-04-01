@@ -6,7 +6,8 @@ import { ErrorTrends } from '../../../../src/components/admin/ErrorTrends';
 
 // Mock the api module
 const mockFetchAdminErrorTrends = vi.fn();
-vi.mock('../../../../src/lib/api', () => ({
+vi.mock('../../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/lib/api')>()),
   fetchAdminErrorTrends: (...args: unknown[]) => mockFetchAdminErrorTrends(...args),
 }));
 

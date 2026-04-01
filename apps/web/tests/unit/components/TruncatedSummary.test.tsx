@@ -13,7 +13,8 @@ vi.mock('../../../src/contexts/GlobalAudioContext', () => ({
 }));
 
 // Mock getTtsApiUrl so we don't hit module-scope errors in tests
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getTtsApiUrl: () => 'https://api.example.com/api/tts',
 }));
 

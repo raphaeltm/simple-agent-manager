@@ -21,26 +21,26 @@
     "lint": "eslint 'src/**/*.ts' 'src/**/*.tsx' 'tests/**/*.ts'"
   },
   "dependencies": {
-    "@xterm/xterm": "^5.5.0",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/addon-attach": "^0.11.0"
+    "@xterm/xterm": "catalog:",
+    "@xterm/addon-fit": "catalog:",
+    "@xterm/addon-attach": "0.11.0"
   },
   "peerDependencies": {
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },
   "devDependencies": {
-    "@testing-library/react": "^14.0.0",
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
-    "@vitest/coverage-v8": "^2.0.0",
-    "eslint": "^8.0.0",
-    "jsdom": "^24.0.0",
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "typescript": "^5.0.0",
-    "vitest": "^2.0.0"
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
+    "jsdom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

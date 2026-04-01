@@ -217,6 +217,7 @@ describe('sanitizeGcpError', () => {
   });
 
   it('logs full error details server-side for GcpApiError', () => {
+    vi.restoreAllMocks();
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const err = new GcpApiError({

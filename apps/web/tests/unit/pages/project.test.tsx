@@ -33,7 +33,8 @@ const mocks = vi.hoisted(() => ({
   listAgentProfiles: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getProject: mocks.getProject,
   listProjectTasks: mocks.listProjectTasks,
   getProjectTask: mocks.getProjectTask,

@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   getSmokeTestStatus: vi.fn().mockResolvedValue({ enabled: false }),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listCredentials: mocks.listCredentials,
   getSmokeTestStatus: mocks.getSmokeTestStatus,
 }));

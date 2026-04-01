@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
   getDeployOAuthResult: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getProjectDeploymentGcp: mocks.getProjectDeploymentGcp,
   setupProjectDeploymentGcp: mocks.setupProjectDeploymentGcp,
   deleteProjectDeploymentGcp: mocks.deleteProjectDeploymentGcp,

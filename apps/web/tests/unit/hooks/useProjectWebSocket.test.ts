@@ -38,7 +38,7 @@ const originalWebSocket = globalThis.WebSocket;
 beforeEach(() => {
   wsInstances = [];
 
-  globalThis.WebSocket = vi.fn((url: string) => {
+  globalThis.WebSocket = vi.fn(function (url: string) {
     const ws = createMockWs();
     ws.url = url;
     wsInstances.push(ws);

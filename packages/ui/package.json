@@ -28,15 +28,15 @@
     "tailwindcss": "^4.0.0"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.0.0",
-    "@testing-library/react": "^14.0.0",
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
-    "@vitejs/plugin-react": "^4.0.0",
-    "jsdom": "^24.0.0",
-    "lucide-react": "^0.460.0",
-    "react-router-dom": "^6.0.0",
-    "typescript": "^5.0.0",
-    "vitest": "^4.0.18"
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
+    "lucide-react": "catalog:",
+    "react-router-dom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

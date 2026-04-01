@@ -15,7 +15,8 @@ const mockFetchRetention = vi.fn();
 const mockFetchForwardStatus = vi.fn();
 const mockFetchWebsiteTraffic = vi.fn();
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   fetchAnalyticsDau: (...args: unknown[]) => mockFetchDau(...args),
   fetchAnalyticsEvents: (...args: unknown[]) => mockFetchEvents(...args),
   fetchAnalyticsFunnel: (...args: unknown[]) => mockFetchFunnel(...args),

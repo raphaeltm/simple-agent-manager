@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
   getGitHubInstallUrl: vi.fn(),
 }));
 
-vi.mock('../../src/lib/api', () => ({
+vi.mock('../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/api')>()),
   listCredentials: mocks.listCredentials,
   listGitHubInstallations: mocks.listGitHubInstallations,
   listAgentCredentials: mocks.listAgentCredentials,

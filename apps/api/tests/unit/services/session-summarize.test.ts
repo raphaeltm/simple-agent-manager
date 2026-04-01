@@ -19,12 +19,12 @@ import {
   type TaskContext,
 } from '../../../src/services/session-summarize';
 
-// Mock @mastra/core/agent
+// Mock @mastra/core/agent — use regular function (not arrow) so `new Agent(...)` works in Vitest 4
 const mockGenerate = vi.fn();
 vi.mock('@mastra/core/agent', () => ({
-  Agent: vi.fn().mockImplementation(() => ({
+  Agent: vi.fn().mockImplementation(function () { return {
     generate: mockGenerate,
-  })),
+  }; }),
 }));
 
 // Mock workers-ai-provider

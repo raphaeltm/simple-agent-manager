@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   deleteWorkspace: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listWorkspaces: mocks.listWorkspaces,
   stopWorkspace: mocks.stopWorkspace,
   restartWorkspace: mocks.restartWorkspace,

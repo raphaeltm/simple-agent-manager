@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => ({
   listBranches: vi.fn(),
 }));
 
-vi.mock('../../../../src/lib/api', () => ({
+vi.mock('../../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/lib/api')>()),
   listRepositories: mocks.listRepositories,
   listBranches: mocks.listBranches,
 }));

@@ -10,14 +10,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@pulumi/cloudflare": "^5.45.0",
-    "@pulumi/pulumi": "^3.140.0",
-    "@pulumi/random": "^4.16.0",
-    "@pulumi/tls": "^5.0.0"
+    "@pulumi/cloudflare": "5.49.1",
+    "@pulumi/pulumi": "3.217.1",
+    "@pulumi/random": "4.19.1",
+    "@pulumi/tls": "5.3.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

@@ -8,11 +8,11 @@
     "generate:default": "tsx generate.ts --template default"
   },
   "dependencies": {
-    "@resvg/resvg-js": "^2.6.2",
-    "satori": "^0.12.1"
+    "@resvg/resvg-js": "2.6.2",
+    "satori": "0.12.2"
   },
   "devDependencies": {
-    "tsx": "^4.0.0",
-    "typescript": "^5.0.0"
+    "tsx": "catalog:",
+    "typescript": "catalog:"
   }
 }

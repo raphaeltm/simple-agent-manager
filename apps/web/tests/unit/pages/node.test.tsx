@@ -32,7 +32,8 @@ const mocks = vi.hoisted(() => ({
 
 let confirmSpy: ReturnType<typeof vi.spyOn>;
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getNode: mocks.getNode,
   listWorkspaces: mocks.listWorkspaces,
   listNodeEvents: mocks.listNodeEvents,
