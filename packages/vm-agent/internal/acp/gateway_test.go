@@ -951,7 +951,7 @@ func TestGenerateCodexMcpConfig_ServerWithControlCharsRejected(t *testing.T) {
 	if strings.Contains(config, "bad.example.com") {
 		t.Fatal("expected bad server to be skipped")
 	}
-	if len(envVars) != 1 || envVars[0] != "SAM_MCP_TOKEN_0=good-token" {
+	if len(envVars) != 1 || envVars[0] != "SAM_MCP_TOKEN=good-token" {
 		t.Fatalf("unexpected env vars: %v", envVars)
 	}
 }
