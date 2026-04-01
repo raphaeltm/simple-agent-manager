@@ -75,6 +75,15 @@ export async function handleDispatchTask(
     explicitBranch = params.branch.trim();
   }
 
+  // Validate optional agentProfileId parameter
+  let agentProfileId: string | undefined;
+  if (params.agentProfileId !== undefined) {
+    if (typeof params.agentProfileId !== 'string' || params.agentProfileId.trim().length === 0) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'agentProfileId must be a non-empty string');
+    }
+    agentProfileId = params.agentProfileId.trim();
+  }
+
   // ── Look up current task to get dispatch depth ──────────────────────────
   const [currentTask] = await db
     .select({
@@ -215,6 +224,26 @@ export async function handleDispatchTask(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
   }
 
+  // ── Validate agent profile if specified ───────────────────────────────
+  if (agentProfileId) {
+    const [agentProfile] = await db
+      .select()
+      .from(schema.agentProfiles)
+      .where(and(
+        eq(schema.agentProfiles.id, agentProfileId),
+        eq(schema.agentProfiles.projectId, tokenData.projectId),
+      ))
+      .limit(1);
+
+    if (!agentProfile) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        `Agent profile '${agentProfileId}' not found or does not belong to this project`,
+      );
+    }
+  }
+
   // ── Build the task description with references ──────────────────────────
   let fullDescription = description;
   if (references.length > 0) {
@@ -265,9 +294,9 @@ export async function handleDispatchTask(
   const statusPlaceholders = ACTIVE_STATUSES.map(() => '?').join(', ');
   const conditionalInsertResult = await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
-     status, execution_step, priority, dispatch_depth, output_branch, created_by,
+     status, execution_step, priority, dispatch_depth, output_branch, agent_profile_hint, created_by,
      created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?, ?, ?
+     SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?, ?, ?, ?
      WHERE (
        SELECT count(*) FROM tasks
        WHERE parent_task_id = ? AND project_id = ?
@@ -281,7 +310,7 @@ export async function handleDispatchTask(
   ).bind(
     // INSERT values
     taskId, tokenData.projectId, tokenData.userId, tokenData.taskId,
-    taskTitle, fullDescription, priority, newDepth, branchName,
+    taskTitle, fullDescription, priority, newDepth, branchName, agentProfileId,
     tokenData.userId, now, now,
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,
@@ -396,6 +425,7 @@ export async function handleDispatchTask(
       // systemPromptAppend) deferred to a future PR.
       model: null,
       permissionMode: null,
+      agentProfileId: agentProfileId ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
         maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,

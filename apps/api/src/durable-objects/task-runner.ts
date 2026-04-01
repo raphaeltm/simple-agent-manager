@@ -93,6 +93,8 @@ interface TaskRunConfig {
   permissionMode: string | null;
   /** System prompt text to append to the initial prompt (from agent profile). Null = no append. */
   systemPromptAppend: string | null;
+  /** ID of an agent profile to use for this task. Null = use project defaults. */
+  agentProfileId: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
   /** Per-project scaling overrides. Null values mean "use platform default". */
@@ -1004,6 +1006,38 @@ export class TaskRunner extends DurableObject<Env> {
         `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
         `Do not proceed until you have called this tool and read its response.`;
 
+      // Resolve agent profile if specified
+      let resolvedModel = state.config.model;
+      let resolvedPermissionMode = state.config.permissionMode;
+      let resolvedSystemPromptAppend = state.config.systemPromptAppend;
+      let finalInitialPrompt = initialPrompt;
+      
+      if (state.config.agentProfileId) {
+        const { resolveAgentProfile } = await import('../services/agent-profiles');
+        const resolvedProfile = await resolveAgentProfile(
+          this.db,
+          state.projectId,
+          state.config.agentProfileId,
+          state.userId,
+          this.env
+        );
+        
+        // Apply profile settings, but allow explicit config to override
+        resolvedModel = state.config.model ?? resolvedProfile.model;
+        resolvedPermissionMode = state.config.permissionMode ?? resolvedProfile.permissionMode;
+        resolvedSystemPromptAppend = state.config.systemPromptAppend ?? resolvedProfile.systemPromptAppend;
+        
+        // Update the initial prompt with the resolved system prompt if it overrides the config
+        if (resolvedSystemPromptAppend) {
+          const finalSystemPromptSuffix = `\n\n${resolvedSystemPromptAppend}`;
+          finalInitialPrompt =
+            `${taskContent}${attachmentContext}${finalSystemPromptSuffix}\n\n---\n\n` +
+            `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
+            `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
+            `Do not proceed until you have called this tool and read its response.`;
+        }
+      }
+
       // Construct MCP server URL for agent platform awareness
       const mcpServerUrl = `https://api.${this.env.BASE_DOMAIN}/mcp`;
 
@@ -1012,7 +1046,7 @@ export class TaskRunner extends DurableObject<Env> {
         state.stepResults.workspaceId,
         sessionId,
         agentType,
-        initialPrompt,
+        finalInitialPrompt,
         this.env,
         state.userId,
         {
@@ -1020,8 +1054,8 @@ export class TaskRunner extends DurableObject<Env> {
           token: state.stepResults.mcpToken!,
         },
         {
-          model: state.config.model,
-          permissionMode: state.config.permissionMode,
+          model: resolvedModel,
+          permissionMode: resolvedPermissionMode,
         },
       );
 
