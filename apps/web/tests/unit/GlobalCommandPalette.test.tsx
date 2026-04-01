@@ -20,7 +20,8 @@ vi.mock('../../src/components/AuthProvider', () => ({
   useAuth: () => ({ isSuperadmin: false }),
 }));
 
-vi.mock('../../src/lib/api', () => ({
+vi.mock('../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/api')>()),
   listProjects: vi.fn().mockResolvedValue({
     projects: [
       { id: 'p1', name: 'My API Worker' },

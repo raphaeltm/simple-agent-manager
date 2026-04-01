@@ -25,6 +25,7 @@ let capturedUtterance: { text: string; onend?: () => void; onerror?: () => void 
 
 function installSpeechMocks() {
   capturedUtterance = null;
+  mockSpeak.mockReset();
   mockSpeak.mockImplementation((utterance: { text: string; onend?: () => void; onerror?: () => void }) => {
     capturedUtterance = utterance;
   });

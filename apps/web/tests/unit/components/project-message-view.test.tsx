@@ -28,7 +28,8 @@ const mocks = vi.hoisted(() => ({
   useProjectAgentSession: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getChatSession: mocks.getChatSession,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   getTtsApiUrl: vi.fn().mockReturnValue('https://api.example.com/api/tts'),

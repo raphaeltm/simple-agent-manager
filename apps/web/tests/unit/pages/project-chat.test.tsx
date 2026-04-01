@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   capturedOnSessionChange: null as (() => void) | null,
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listAgents: mocks.listAgents,
   listAgentProfiles: mocks.listAgentProfiles,
   listChatSessions: mocks.listChatSessions,

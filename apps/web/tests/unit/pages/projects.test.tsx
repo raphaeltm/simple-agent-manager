@@ -14,7 +14,8 @@ vi.mock('../../../src/hooks/useProjectData', () => ({
   useProjectList: mocks.useProjectList,
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   deleteProject: mocks.deleteProject,
 }));
 

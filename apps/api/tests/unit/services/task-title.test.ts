@@ -9,13 +9,13 @@ import {
   truncateTitle,
 } from '../../../src/services/task-title';
 
-// Mock @mastra/core/agent — factory must not reference outer variables
+// Mock @mastra/core/agent — use regular function (not arrow) so `new Agent(...)` works in Vitest 4
 vi.mock('@mastra/core/agent', () => {
   const mockGenerate = vi.fn().mockResolvedValue({ text: 'Fix authentication timeout bug' });
   return {
-    Agent: vi.fn().mockImplementation(() => ({
+    Agent: vi.fn().mockImplementation(function () { return {
       generate: mockGenerate,
-    })),
+    }; }),
   };
 });
 
@@ -213,9 +213,9 @@ describe('generateTaskTitle', () => {
 
     // Reset default mock behavior
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: 'Fix authentication timeout bug' }),
-    }));
+    }; });
 
     const { createWorkersAI } = await import('workers-ai-provider');
     (createWorkersAI as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
@@ -240,9 +240,9 @@ describe('generateTaskTitle', () => {
   it('returns empty string without AI call', async () => {
     const { Agent } = await import('@mastra/core/agent');
     const mockGenerate = vi.fn();
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: mockGenerate,
-    }));
+    }; });
 
     const result = await generateTaskTitle(mockAi, '');
     expect(result).toBe('');
@@ -252,9 +252,9 @@ describe('generateTaskTitle', () => {
   it('short message bypasses AI even when enabled defaults to true', async () => {
     const { Agent } = await import('@mastra/core/agent');
     const mockGenerate = vi.fn();
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: mockGenerate,
-    }));
+    }; });
 
     const result = await generateTaskTitle(mockAi, 'Short message');
     expect(result).toBe('Short message');
@@ -266,9 +266,9 @@ describe('generateTaskTitle', () => {
   it('calls AI for messages above threshold (101 chars)', async () => {
     const { Agent } = await import('@mastra/core/agent');
     const mockGenerate = vi.fn().mockResolvedValue({ text: 'Generated title' });
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: mockGenerate,
-    }));
+    }; });
 
     const atBoundary = 'a'.repeat(101);
     const result = await generateTaskTitle(mockAi, atBoundary);
@@ -279,9 +279,9 @@ describe('generateTaskTitle', () => {
   it('calls AI for long messages and returns generated title', async () => {
     const { Agent } = await import('@mastra/core/agent');
     const mockGenerate = vi.fn().mockResolvedValue({ text: 'Refactor auth module to use JWT' });
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: mockGenerate,
-    }));
+    }; });
 
     const long = 'I need you to refactor the authentication module to use JWT tokens instead of session cookies and also update the middleware to validate tokens properly. ' + 'a'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -302,9 +302,9 @@ describe('generateTaskTitle', () => {
 
   it('falls back to truncation when AI returns empty response', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: '' }),
-    }));
+    }; });
 
     const long = 'This is a very long task description that needs to be summarized. ' + 'x'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -313,9 +313,9 @@ describe('generateTaskTitle', () => {
 
   it('falls back to truncation when AI returns whitespace-only text', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: '   \n\t  ' }),
-    }));
+    }; });
 
     const long = 'Whitespace AI response test. ' + 'w'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -324,9 +324,9 @@ describe('generateTaskTitle', () => {
 
   it('falls back to truncation when AI returns null text', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: null }),
-    }));
+    }; });
 
     const long = 'Null AI response test. ' + 'n'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -335,9 +335,9 @@ describe('generateTaskTitle', () => {
 
   it('falls back to truncation when AI throws an error', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockRejectedValue(new Error('Model unavailable')),
-    }));
+    }; });
 
     const long = 'Some long task description that needs AI to summarize. ' + 'y'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -346,9 +346,9 @@ describe('generateTaskTitle', () => {
 
   it('falls back to truncation when AI throws a non-Error value', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockRejectedValue('plain string rejection'),
-    }));
+    }; });
 
     const long = 'Non-error rejection test. ' + 'e'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -358,7 +358,7 @@ describe('generateTaskTitle', () => {
   it('falls back to truncation on timeout', async () => {
     const { Agent } = await import('@mastra/core/agent');
     // Mock generate that respects AbortSignal (as the real implementation would)
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockImplementation((_msg: string, options?: { abortSignal?: AbortSignal }) => {
         return new Promise((resolve, reject) => {
           const timer = setTimeout(() => resolve({ text: 'Late result' }), 10000);
@@ -370,7 +370,7 @@ describe('generateTaskTitle', () => {
           }
         });
       }),
-    }));
+    }; });
 
     const long = 'Task that takes too long to generate a title for. ' + 'z'.repeat(100);
     const config: TaskTitleConfig = { timeoutMs: 50 }; // Very short timeout
@@ -383,9 +383,9 @@ describe('generateTaskTitle', () => {
   it('truncates AI output that exceeds max length', async () => {
     const { Agent } = await import('@mastra/core/agent');
     const tooLong = 'This is a title that is way too long and exceeds the configured maximum length limit for task titles';
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: tooLong }),
-    }));
+    }; });
 
     const long = 'Some message that needs a title. ' + 'q'.repeat(100);
     const config: TaskTitleConfig = { maxLength: 80 };
@@ -396,9 +396,9 @@ describe('generateTaskTitle', () => {
   it('returns AI output at exactly maxLength without truncation', async () => {
     const { Agent } = await import('@mastra/core/agent');
     const exact = 'a'.repeat(80);
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: exact }),
-    }));
+    }; });
 
     const long = 'Some message. ' + 'q'.repeat(100);
     const config: TaskTitleConfig = { maxLength: 80 };
@@ -408,9 +408,9 @@ describe('generateTaskTitle', () => {
 
   it('trims whitespace from AI response', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: '  Fix the login bug  \n' }),
-    }));
+    }; });
 
     const long = 'Please fix the login bug that occurs when users try to authenticate. ' + 'a'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -424,9 +424,9 @@ describe('generateTaskTitle', () => {
     const { createWorkersAI } = await import('workers-ai-provider');
     const mockModelFactory = vi.fn().mockReturnValue({ modelId: 'custom-model' });
     (createWorkersAI as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockModelFactory);
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: 'Test title' }),
-    }));
+    }; });
 
     const long = 'Long message for testing model configuration. ' + 'a'.repeat(100);
     const config: TaskTitleConfig = { model: '@cf/mistral/mistral-7b-instruct-v0.2' };
@@ -437,9 +437,9 @@ describe('generateTaskTitle', () => {
   it('uses configurable short message threshold', async () => {
     const { Agent } = await import('@mastra/core/agent');
     const mockGenerate = vi.fn().mockResolvedValue({ text: 'Generated' });
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: mockGenerate,
-    }));
+    }; });
 
     // Message of 60 chars — below default threshold (100) but above custom threshold (50)
     const message = 'a'.repeat(60);
@@ -451,9 +451,9 @@ describe('generateTaskTitle', () => {
   it('forwards binding to createWorkersAI', async () => {
     const { createWorkersAI } = await import('workers-ai-provider');
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: 'Title' }),
-    }));
+    }; });
 
     const long = 'Test binding forwarding. ' + 'b'.repeat(100);
     await generateTaskTitle(mockAi, long);
@@ -464,9 +464,9 @@ describe('generateTaskTitle', () => {
 
   it('strips markdown formatting from AI-generated titles', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: '**README.md** # Task Title Generator ## Project Description' }),
-    }));
+    }; });
 
     const long = 'Write a comprehensive README.md for the project. ' + 'a'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -477,9 +477,9 @@ describe('generateTaskTitle', () => {
 
   it('strips bold markers from AI-generated titles', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: '**Create** Upgrade Plan' }),
-    }));
+    }; });
 
     const long = 'Create an upgrade plan for all project dependencies. ' + 'a'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -488,9 +488,9 @@ describe('generateTaskTitle', () => {
 
   it('strips backticks from AI-generated titles', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: 'Fix `calculateTotal` Function Bug' }),
-    }));
+    }; });
 
     const long = 'The calculateTotal function in the billing module is broken. ' + 'a'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -499,9 +499,9 @@ describe('generateTaskTitle', () => {
 
   it('falls back to truncation when title is empty after markdown stripping', async () => {
     const { Agent } = await import('@mastra/core/agent');
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockResolvedValue({ text: '## ' }),
-    }));
+    }; });
 
     const long = 'Some task description that needs a title. ' + 'x'.repeat(100);
     const result = await generateTaskTitle(mockAi, long);
@@ -511,7 +511,7 @@ describe('generateTaskTitle', () => {
   it('includes no-markdown directive in system instructions (prevention layer)', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let capturedInstructions = '';
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation((config: { instructions: string }) => {
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function (config: { instructions: string }) {
       capturedInstructions = config.instructions;
       return { generate: vi.fn().mockResolvedValue({ text: 'Title' }) };
     });
@@ -524,7 +524,7 @@ describe('generateTaskTitle', () => {
   it('includes few-shot examples and anti-hallucination directive in system instructions', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let capturedInstructions = '';
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation((config: { instructions: string }) => {
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function (config: { instructions: string }) {
       capturedInstructions = config.instructions;
       return { generate: vi.fn().mockResolvedValue({ text: 'Title' }) };
     });
@@ -539,7 +539,7 @@ describe('generateTaskTitle', () => {
   it('substitutes maxLength into system instructions', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let capturedInstructions = '';
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation((config: { instructions: string }) => {
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function (config: { instructions: string }) {
       capturedInstructions = config.instructions;
       return { generate: vi.fn().mockResolvedValue({ text: 'Title' }) };
     });
@@ -556,7 +556,7 @@ describe('generateTaskTitle', () => {
   it('retries on first failure and returns title on second attempt', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let callCount = 0;
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockImplementation(() => {
         callCount++;
         if (callCount === 1) {
@@ -564,7 +564,7 @@ describe('generateTaskTitle', () => {
         }
         return Promise.resolve({ text: 'Retry Success Title' });
       }),
-    }));
+    }; });
 
     const long = 'This task needs a retry to generate a title. ' + 'r'.repeat(100);
     const config: TaskTitleConfig = { maxRetries: 2, retryDelayMs: 10 }; // Fast retry for tests
@@ -576,12 +576,12 @@ describe('generateTaskTitle', () => {
   it('falls back to truncation after all retries exhausted', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let callCount = 0;
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockImplementation(() => {
         callCount++;
         return Promise.reject(new Error('Persistent failure'));
       }),
-    }));
+    }; });
 
     const long = 'Task that fails every attempt. ' + 'f'.repeat(100);
     const config: TaskTitleConfig = { maxRetries: 2, retryDelayMs: 10 };
@@ -594,7 +594,7 @@ describe('generateTaskTitle', () => {
   it('does not retry on timeout — falls back immediately', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let callCount = 0;
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockImplementation((_msg: string, options?: { abortSignal?: AbortSignal }) => {
         callCount++;
         // Simulate timeout on every attempt
@@ -608,7 +608,7 @@ describe('generateTaskTitle', () => {
           }
         });
       }),
-    }));
+    }; });
 
     const long = 'Task that times out. ' + 't'.repeat(100);
     const config: TaskTitleConfig = { timeoutMs: 50, maxRetries: 2, retryDelayMs: 10 };
@@ -621,7 +621,7 @@ describe('generateTaskTitle', () => {
   it('retries on rate limit error then succeeds', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let callCount = 0;
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockImplementation(() => {
         callCount++;
         if (callCount === 1) {
@@ -629,7 +629,7 @@ describe('generateTaskTitle', () => {
         }
         return Promise.resolve({ text: 'Rate Limit Recovery Title' });
       }),
-    }));
+    }; });
 
     const long = 'Task that hits rate limit on first try. ' + 'r'.repeat(100);
     const config: TaskTitleConfig = { maxRetries: 1, retryDelayMs: 10 };
@@ -641,12 +641,12 @@ describe('generateTaskTitle', () => {
   it('does not retry on empty AI response — falls back immediately', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let callCount = 0;
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockImplementation(() => {
         callCount++;
         return Promise.resolve({ text: '' });
       }),
-    }));
+    }; });
 
     const long = 'Task where AI gives empty answer. ' + 'e'.repeat(100);
     const config: TaskTitleConfig = { maxRetries: 2, retryDelayMs: 10 };
@@ -658,13 +658,13 @@ describe('generateTaskTitle', () => {
   it('falls back when first attempt throws and retry returns empty string', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let callCount = 0;
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockImplementation(() => {
         callCount++;
         if (callCount === 1) return Promise.reject(new Error('Transient fail'));
         return Promise.resolve({ text: '' }); // Empty on retry
       }),
-    }));
+    }; });
 
     const long = 'Task where retry gives empty result. ' + 'x'.repeat(100);
     const config: TaskTitleConfig = { maxRetries: 2, retryDelayMs: 10 };
@@ -676,13 +676,13 @@ describe('generateTaskTitle', () => {
   it('caps retry delay at retryMaxDelayMs', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let callCount = 0;
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockImplementation(() => {
         callCount++;
         if (callCount <= 3) return Promise.reject(new Error('Fail'));
         return Promise.resolve({ text: 'Success After Many Retries' });
       }),
-    }));
+    }; });
 
     const long = 'Task with capped delay. ' + 'c'.repeat(100);
     // Base 100ms, max 150ms: delays would be 100, 150 (capped from 200), 150 (capped from 400)
@@ -695,12 +695,12 @@ describe('generateTaskTitle', () => {
   it('does not retry when maxRetries is 0', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let callCount = 0;
-    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () { return {
       generate: vi.fn().mockImplementation(() => {
         callCount++;
         return Promise.reject(new Error('Fail'));
       }),
-    }));
+    }; });
 
     const long = 'No retry task. ' + 'n'.repeat(100);
     const config: TaskTitleConfig = { maxRetries: 0 };

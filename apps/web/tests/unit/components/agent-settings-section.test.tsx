@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => ({
   deleteAgentSettings: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listAgents: mocks.listAgents,
   getAgentSettings: mocks.getAgentSettings,
   saveAgentSettings: mocks.saveAgentSettings,

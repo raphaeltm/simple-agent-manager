@@ -5,7 +5,8 @@ import { useAdminHealth } from '../../../src/hooks/useAdminHealth';
 
 // Mock the API
 const mockFetchAdminHealth = vi.fn();
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   fetchAdminHealth: (...args: unknown[]) => mockFetchAdminHealth(...args),
 }));
 

@@ -60,7 +60,8 @@ class MockWebSocket {
 }
 
 // Mock getChatSession for catch-up
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getChatSession: vi.fn().mockResolvedValue({
     session: { id: 'sess-1', status: 'active', workspaceId: null, topic: null, messageCount: 0, startedAt: 0, endedAt: null, createdAt: 0 },
     messages: [{ id: 'msg-catchup-1', sessionId: 'sess-1', role: 'assistant', content: 'caught up', toolMetadata: null, createdAt: 100 }],

@@ -14,7 +14,8 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listProjectTasks: mocks.listProjectTasks,
   listChatSessions: mocks.listChatSessions,
 }));

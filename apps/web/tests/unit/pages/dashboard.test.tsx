@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => ({
   listProjects: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listProjects: mocks.listProjects,
 }));
 

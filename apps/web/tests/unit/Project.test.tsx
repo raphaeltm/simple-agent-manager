@@ -23,7 +23,8 @@ vi.mock('../../src/lib/auth', () => ({
 }));
 
 // Mock API calls
-vi.mock('../../src/lib/api', () => ({
+vi.mock('../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/api')>()),
   getProject: vi.fn().mockResolvedValue({
     id: 'proj-1',
     name: 'My Project',

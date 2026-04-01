@@ -26,7 +26,8 @@ const mockGetTerminalToken = vi.fn();
 const mockGetTranscribeApiUrl = vi.fn().mockReturnValue('https://api.example.com/transcribe');
 const mockGetTtsApiUrl = vi.fn().mockReturnValue('https://api.example.com/tts');
 
-vi.mock('../../../../src/lib/api', () => ({
+vi.mock('../../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/lib/api')>()),
   resumeAgentSession: (...args: unknown[]) => mockResumeAgentSession(...args),
   resetIdleTimer: (...args: unknown[]) => mockResetIdleTimer(...args),
   getChatSession: (...args: unknown[]) => mockGetChatSession(...args),

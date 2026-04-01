@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
   stopAgentSession: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getWorkspace: mocks.getWorkspace,
   getTerminalToken: mocks.getTerminalToken,
   listAgentSessions: mocks.listAgentSessions,

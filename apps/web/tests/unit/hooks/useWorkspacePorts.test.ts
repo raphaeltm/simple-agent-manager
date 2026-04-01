@@ -4,7 +4,8 @@ import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 import { useWorkspacePorts } from '../../../src/hooks/useWorkspacePorts';
 
 // Mock the api module
-vi.mock('../../../src/lib/api', () => ({
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listWorkspacePorts: vi.fn(),
 }));
 
