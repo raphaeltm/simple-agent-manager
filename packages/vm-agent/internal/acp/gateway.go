@@ -476,7 +476,19 @@ func execInContainer(ctx context.Context, containerID, user, workDir string, arg
 // It creates the parent directory with 0700 permissions and the file with 0600.
 // authFilePath is relative to the user's home directory (e.g. ".codex/auth.json").
 // Content is streamed via stdin to avoid exposing secrets in process args or env.
+func validateAuthFilePath(authFilePath string) error {
+	// Prevent shell injection in the sh -c scripts used by the read/write helpers.
+	if strings.ContainsAny(authFilePath, ";\"`'$\\") || strings.Contains(authFilePath, "..") {
+		return fmt.Errorf("invalid authFilePath: %q", authFilePath)
+	}
+	return nil
+}
+
 func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
+	if err := validateAuthFilePath(authFilePath); err != nil {
+		return err
+	}
+
 	// Shell script reads credential from stdin via cat, avoiding any env/arg exposure.
 	// 1. Resolves the user's home directory reliably (docker exec -u does NOT update $HOME)
 	// 2. Creates the parent directory with restricted permissions
@@ -511,10 +523,8 @@ func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePa
 // Returns the file content, or an error if the file cannot be read.
 // Output is capped at 1 MB to prevent memory exhaustion from unexpected content.
 func readAuthFileFromContainer(ctx context.Context, containerID, user, authFilePath string) (string, error) {
-	// Validate authFilePath to prevent shell injection. Currently always a
-	// hardcoded constant, but we defend in depth against future misuse.
-	if strings.ContainsAny(authFilePath, ";\"`'$\\") || strings.Contains(authFilePath, "..") {
-		return "", fmt.Errorf("invalid authFilePath: %q", authFilePath)
+	if err := validateAuthFilePath(authFilePath); err != nil {
+		return "", err
 	}
 
 	// Same home directory resolution as writeAuthFileToContainer.

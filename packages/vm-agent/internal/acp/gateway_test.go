@@ -993,3 +993,27 @@ func TestMergeManagedCodexMcpConfigReplacesExistingManagedBlock(t *testing.T) {
 		t.Fatal("expected trailing config to be preserved")
 	}
 }
+
+func TestValidateAuthFilePathAcceptsRelativeConfigPath(t *testing.T) {
+	t.Parallel()
+
+	if err := validateAuthFilePath(".codex/config.toml"); err != nil {
+		t.Fatalf("expected valid auth file path, got %v", err)
+	}
+}
+
+func TestValidateAuthFilePathRejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	if err := validateAuthFilePath("../.codex/config.toml"); err == nil {
+		t.Fatal("expected traversal path to be rejected")
+	}
+}
+
+func TestValidateAuthFilePathRejectsShellMetacharacters(t *testing.T) {
+	t.Parallel()
+
+	if err := validateAuthFilePath(`.codex/config.toml"; rm -rf /`); err == nil {
+		t.Fatal("expected shell metacharacters to be rejected")
+	}
+}
