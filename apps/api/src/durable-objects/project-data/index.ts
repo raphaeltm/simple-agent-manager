@@ -12,6 +12,7 @@ import { runMigrations } from '../migrations';
 import type { AcpSessionStatus, AcpSessionEventActorType } from '@simple-agent-manager/shared';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import type { Env, SummaryData } from './types';
+import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 
 const log = createModuleLogger('project_data');
 import * as sessions from './sessions';
@@ -41,7 +42,7 @@ export class ProjectData extends DurableObject<Env> {
   private getProjectId(): string | null {
     if (this.cachedProjectId) return this.cachedProjectId;
     const row = this.sql.exec('SELECT value FROM do_meta WHERE key = ?', 'projectId').toArray()[0];
-    if (row) this.cachedProjectId = row.value as string;
+    if (row) this.cachedProjectId = parseMetaValue(row, 'project_data.project_id');
     return this.cachedProjectId;
   }
 
@@ -250,8 +251,9 @@ export class ProjectData extends DurableObject<Env> {
   async getSummary(): Promise<SummaryData> {
     const activeCountRow = this.sql.exec("SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'").toArray()[0];
     const lastActivityRow = this.sql.exec('SELECT MAX(created_at) as latest FROM activity_events').toArray()[0];
-    const lastActivity = lastActivityRow?.latest ? new Date(lastActivityRow.latest as number).toISOString() : new Date().toISOString();
-    return { lastActivityAt: lastActivity, activeSessionCount: (activeCountRow?.cnt as number) || 0 };
+    const latest = lastActivityRow ? parseMaxLatest(lastActivityRow, 'project_data.last_activity') : null;
+    const lastActivity = latest ? new Date(latest).toISOString() : new Date().toISOString();
+    return { lastActivityAt: lastActivity, activeSessionCount: activeCountRow ? parseCountCnt(activeCountRow, 'project_data.active_sessions') : 0 };
   }
 
   // --- DO Alarm Handler ---
@@ -332,7 +334,7 @@ export class ProjectData extends DurableObject<Env> {
   // --- Internal Helpers ---
 
   private addBaseDomain(row: Record<string, unknown>): Record<string, unknown> {
-    const workspaceId = row.workspaceId as string | null;
+    const workspaceId = typeof row.workspaceId === 'string' ? row.workspaceId : null;
     const baseDomain = this.env.BASE_DOMAIN;
     return { ...row, workspaceUrl: workspaceId && baseDomain ? `https://ws-${workspaceId}.${baseDomain}` : null };
   }

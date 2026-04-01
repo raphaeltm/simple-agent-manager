@@ -2,6 +2,7 @@
  * Activity event recording and retrieval.
  */
 import { generateId } from './types';
+import { parseActivityEventRow } from './row-schemas';
 
 export function recordActivityEventInternal(
   sql: SqlStorage,
@@ -58,17 +59,7 @@ export function listActivityEvents(
   const events = hasMore ? rows.slice(0, limit) : rows;
 
   return {
-    events: events.map((row) => ({
-      id: row.id,
-      eventType: row.event_type,
-      actorType: row.actor_type,
-      actorId: row.actor_id,
-      workspaceId: row.workspace_id,
-      sessionId: row.session_id,
-      taskId: row.task_id,
-      payload: row.payload ? JSON.parse(row.payload as string) : null,
-      createdAt: row.created_at,
-    })),
+    events: events.map((row) => parseActivityEventRow(row)),
     hasMore,
   };
 }

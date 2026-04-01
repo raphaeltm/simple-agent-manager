@@ -15,6 +15,16 @@ import {
 import type { Env } from './types';
 import { generateId } from './types';
 import { log } from '../../lib/logger';
+import {
+  parseAcpSessionRow,
+  parseAcpSessionHeartbeatCheck,
+  parseAcpSessionLineage,
+  parseAcpSessionStale,
+  parseCountCnt,
+  parseMinEarliest,
+} from './row-schemas';
+
+export { parseAcpSessionRow as mapAcpSessionRow };
 
 export function createAcpSession(
   sql: SqlStorage,
@@ -58,7 +68,7 @@ export function getAcpSession(sql: SqlStorage, sessionId: string): AcpSession | 
   const row = sql
     .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
     .toArray()[0];
-  return row ? mapAcpSessionRow(row) : null;
+  return row ? parseAcpSessionRow(row) : null;
 }
 
 export function listAcpSessions(
@@ -105,8 +115,8 @@ export function listAcpSessions(
     .toArray();
 
   return {
-    sessions: rows.map((row) => mapAcpSessionRow(row)),
-    total: (totalRow?.cnt as number) || 0,
+    sessions: rows.map((row) => parseAcpSessionRow(row)),
+    total: totalRow ? parseCountCnt(totalRow, 'acp_sessions.list_total') : 0,
   };
 }
 
@@ -130,21 +140,22 @@ export function transitionAcpSession(
   },
   projectId: string | null
 ): { session: AcpSession; fromStatus: AcpSessionStatus; chatSessionId: string } {
-  const row = sql
+  const rawRow = sql
     .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
     .toArray()[0];
 
-  if (!row) {
+  if (!rawRow) {
     throw new Error(`ACP session ${sessionId} not found`);
   }
 
-  const fromStatus = row.status as AcpSessionStatus;
+  const current = parseAcpSessionRow(rawRow);
+  const fromStatus = current.status;
   const validTargets = ACP_SESSION_VALID_TRANSITIONS[fromStatus];
 
   if (!validTargets.includes(toStatus)) {
     log.error('acp_session.invalid_transition', {
       sessionId,
-      chatSessionId: row.chat_session_id,
+      chatSessionId: current.chatSessionId,
       projectId,
       fromStatus,
       toStatus,
@@ -197,9 +208,9 @@ export function transitionAcpSession(
 
   log.info('acp_session.transitioned', {
     sessionId,
-    chatSessionId: row.chat_session_id,
-    workspaceId: opts.workspaceId ?? row.workspace_id,
-    nodeId: opts.nodeId ?? row.node_id,
+    chatSessionId: current.chatSessionId,
+    workspaceId: opts.workspaceId ?? current.workspaceId,
+    nodeId: opts.nodeId ?? current.nodeId,
     projectId,
     fromStatus,
     toStatus,
@@ -208,7 +219,7 @@ export function transitionAcpSession(
   return {
     session: getAcpSessionOrThrow(sql, sessionId),
     fromStatus,
-    chatSessionId: row.chat_session_id as string,
+    chatSessionId: current.chatSessionId,
   };
 }
 
@@ -218,36 +229,37 @@ export function updateHeartbeat(
   nodeId: string,
   projectId: string | null
 ): void {
-  const session = sql
+  const row = sql
     .exec('SELECT id, node_id, status FROM acp_sessions WHERE id = ?', sessionId)
     .toArray()[0];
 
-  if (!session) {
+  if (!row) {
     throw new Error(`ACP session ${sessionId} not found`);
   }
 
-  if (session.node_id !== nodeId) {
+  const session = parseAcpSessionHeartbeatCheck(row);
+
+  if (session.nodeId !== nodeId) {
     log.error('acp_session.heartbeat_node_mismatch', {
       sessionId,
-      expectedNodeId: session.node_id,
+      expectedNodeId: session.nodeId,
       receivedNodeId: nodeId,
       projectId,
       action: 'rejected',
     });
-    throw new Error(`Node mismatch: session assigned to ${session.node_id}, heartbeat from ${nodeId}`);
+    throw new Error(`Node mismatch: session assigned to ${session.nodeId}, heartbeat from ${nodeId}`);
   }
 
-  const status = session.status as string;
-  if (!['assigned', 'running'].includes(status)) {
+  if (!['assigned', 'running'].includes(session.status)) {
     log.warn('acp_session.heartbeat_for_inactive_session', {
       sessionId,
       nodeId,
       projectId,
-      sessionStatus: status,
+      sessionStatus: session.status,
       action: 'rejected',
     });
     throw new Error(
-      `Heartbeat rejected: session ${sessionId} is in "${status}" state, not assigned or running`
+      `Heartbeat rejected: session ${sessionId} is in "${session.status}" state, not assigned or running`
     );
   }
 
@@ -267,67 +279,68 @@ export function forkAcpSession(
   contextSummary: string,
   projectId: string | null
 ): AcpSession {
-  const parent = sql
+  const rawRow = sql
     .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
     .toArray()[0];
 
-  if (!parent) {
+  if (!rawRow) {
     throw new Error(`ACP session ${sessionId} not found`);
   }
 
-  const parentStatus = parent.status as AcpSessionStatus;
-  if (!ACP_SESSION_TERMINAL_STATUSES.includes(parentStatus)) {
+  const parent = parseAcpSessionRow(rawRow);
+
+  if (!ACP_SESSION_TERMINAL_STATUSES.includes(parent.status)) {
     log.warn('acp_session.fork_invalid_state', {
       sessionId,
       projectId,
-      parentStatus,
+      parentStatus: parent.status,
       action: 'rejected',
     });
     throw new Error(
-      `Cannot fork session in "${parentStatus}" state — must be completed, failed, or interrupted`
+      `Cannot fork session in "${parent.status}" state — must be completed, failed, or interrupted`
     );
   }
 
-  const parentDepth = parent.fork_depth as number;
   const maxDepth = parseInt(
     env.ACP_SESSION_MAX_FORK_DEPTH || String(ACP_SESSION_DEFAULTS.MAX_FORK_DEPTH),
     10
   );
-  if (parentDepth >= maxDepth) {
+  if (parent.forkDepth >= maxDepth) {
     log.warn('acp_session.fork_depth_exceeded', {
       sessionId,
       projectId,
-      parentDepth,
+      parentDepth: parent.forkDepth,
       maxDepth,
       action: 'rejected',
     });
     throw new Error(
-      `Fork depth ${parentDepth + 1} exceeds maximum ${maxDepth}`
+      `Fork depth ${parent.forkDepth + 1} exceeds maximum ${maxDepth}`
     );
   }
 
   return createAcpSession(sql, {
-    chatSessionId: parent.chat_session_id as string,
+    chatSessionId: parent.chatSessionId,
     initialPrompt: contextSummary,
-    agentType: parent.agent_type as string | null,
+    agentType: parent.agentType,
     parentSessionId: sessionId,
-    forkDepth: parentDepth + 1,
+    forkDepth: parent.forkDepth + 1,
   });
 }
 
 export function getAcpSessionLineage(sql: SqlStorage, sessionId: string): AcpSession[] {
   let rootId = sessionId;
   const visited = new Set<string>([rootId]);
-  let current = sql
+  let rawRow = sql
     .exec('SELECT id, parent_session_id FROM acp_sessions WHERE id = ?', rootId)
     .toArray()[0];
 
-  while (current?.parent_session_id) {
-    const parentId = current.parent_session_id as string;
-    if (visited.has(parentId)) break;
-    visited.add(parentId);
-    rootId = parentId;
-    current = sql
+  while (rawRow) {
+    const current = parseAcpSessionLineage(rawRow);
+    if (!current.parentSessionId) break;
+    if (visited.has(current.parentSessionId)) break;
+    visited.add(current.parentSessionId);
+    rootId = current.parentSessionId;
+    rawRow = sql
       .exec('SELECT id, parent_session_id FROM acp_sessions WHERE id = ?', rootId)
       .toArray()[0];
   }
@@ -345,7 +358,7 @@ export function getAcpSessionLineage(sql: SqlStorage, sessionId: string): AcpSes
     )
     .toArray();
 
-  return rows.map((row) => mapAcpSessionRow(row));
+  return rows.map((row) => parseAcpSessionRow(row));
 }
 
 export function listAcpSessionsByNode(
@@ -362,7 +375,7 @@ export function listAcpSessionsByNode(
       ...statuses
     )
     .toArray();
-  return rows.map((row) => mapAcpSessionRow(row));
+  return rows.map((row) => parseAcpSessionRow(row));
 }
 
 export function checkHeartbeatTimeouts(
@@ -389,21 +402,21 @@ export function checkHeartbeatTimeouts(
        AND last_heartbeat_at < ?`,
       cutoff
     )
-    .toArray();
+    .toArray()
+    .map((row) => parseAcpSessionStale(row));
 
   const failures: Array<{ sessionId: string; error: string }> = [];
   const promises = staleSessions.map(async (session) => {
-    const sessionId = session.id as string;
     try {
-      await transitionFn(sessionId, 'interrupted', {
+      await transitionFn(session.id, 'interrupted', {
         actorType: 'alarm', reason: 'Heartbeat timeout exceeded detection window',
-        errorMessage: `Heartbeat timeout: last heartbeat at ${session.last_heartbeat_at}, cutoff was ${cutoff}`,
-        metadata: { detectionWindowMs: detectionWindow, lastHeartbeatAt: session.last_heartbeat_at, cutoff },
+        errorMessage: `Heartbeat timeout: last heartbeat at ${session.lastHeartbeatAt}, cutoff was ${cutoff}`,
+        metadata: { detectionWindowMs: detectionWindow, lastHeartbeatAt: session.lastHeartbeatAt, cutoff },
       });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      log.error('acp_session.heartbeat_timeout_transition_failed', { sessionId, error: errorMsg });
-      failures.push({ sessionId, error: errorMsg });
+      log.error('acp_session.heartbeat_timeout_transition_failed', { sessionId: session.id, error: errorMsg });
+      failures.push({ sessionId: session.id, error: errorMsg });
     }
   });
   return Promise.all(promises).then(() => {
@@ -427,30 +440,7 @@ export function getAcpSessionOrThrow(sql: SqlStorage, sessionId: string): AcpSes
   if (!row) {
     throw new Error(`ACP session ${sessionId} not found`);
   }
-  return mapAcpSessionRow(row);
-}
-
-export function mapAcpSessionRow(row: Record<string, unknown>): AcpSession {
-  return {
-    id: row.id as string,
-    chatSessionId: row.chat_session_id as string,
-    workspaceId: (row.workspace_id as string) ?? null,
-    nodeId: (row.node_id as string) ?? null,
-    acpSdkSessionId: (row.acp_sdk_session_id as string) ?? null,
-    parentSessionId: (row.parent_session_id as string) ?? null,
-    status: row.status as AcpSessionStatus,
-    agentType: (row.agent_type as string) ?? null,
-    initialPrompt: (row.initial_prompt as string) ?? null,
-    errorMessage: (row.error_message as string) ?? null,
-    lastHeartbeatAt: (row.last_heartbeat_at as number) ?? null,
-    forkDepth: (row.fork_depth as number) ?? 0,
-    createdAt: row.created_at as number,
-    updatedAt: row.updated_at as number,
-    assignedAt: (row.assigned_at as number) ?? null,
-    startedAt: (row.started_at as number) ?? null,
-    completedAt: (row.completed_at as number) ?? null,
-    interruptedAt: (row.interrupted_at as number) ?? null,
-  };
+  return parseAcpSessionRow(row);
 }
 
 /**
@@ -469,7 +459,8 @@ export function computeHeartbeatAlarmTime(sql: SqlStorage, env: Env): number | n
     )
     .toArray()[0];
 
-  const earliestHeartbeat = earliestRow?.earliest as number | null;
+  if (!earliestRow) return null;
+  const earliestHeartbeat = parseMinEarliest(earliestRow, 'acp_sessions.earliest_heartbeat');
   if (earliestHeartbeat === null) return null;
 
   return earliestHeartbeat + detectionWindow;
@@ -479,5 +470,5 @@ export function hasActiveAcpSessions(sql: SqlStorage): boolean {
   const row = sql
     .exec("SELECT COUNT(*) as cnt FROM acp_sessions WHERE status IN ('assigned', 'running')")
     .toArray()[0];
-  return ((row?.cnt as number) ?? 0) > 0;
+  return row ? parseCountCnt(row, 'acp_sessions.active_count') > 0 : false;
 }

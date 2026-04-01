@@ -4,6 +4,15 @@
 import type { Env } from './types';
 import { generateId } from './types';
 import { log } from '../../lib/logger';
+import {
+  parseMaxSeq,
+  parseMessageCount,
+  parseWorkspaceId,
+  parseChatMessageRow,
+  parseSearchResultRow,
+  parseCount,
+  type SearchResultParsed,
+} from './row-schemas';
 
 /**
  * Returns the next monotonic sequence number for a session's messages.
@@ -15,7 +24,7 @@ export function nextSequence(sql: SqlStorage, sessionId: string): number {
       sessionId
     )
     .toArray()[0];
-  return ((row?.max_seq as number) ?? 0) + 1;
+  return (row ? parseMaxSeq(row, 'messages.next_sequence') : 0) + 1;
 }
 
 export function persistMessage(
@@ -34,7 +43,7 @@ export function persistMessage(
   if (!countRow) {
     throw new Error(`Session ${sessionId} not found`);
   }
-  if ((countRow.message_count as number) >= maxMessages) {
+  if (parseMessageCount(countRow, 'messages.persist_count') >= maxMessages) {
     throw new Error(`Maximum ${maxMessages} messages per session exceeded`);
   }
 
@@ -80,7 +89,7 @@ export function persistMessage(
   const wsRow = sql
     .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
     .toArray()[0];
-  const workspaceId = (wsRow?.workspace_id as string) ?? null;
+  const workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.persist_workspace') : null;
 
   return { id, now, sequence, workspaceId };
 }
@@ -182,7 +191,7 @@ export function persistMessageBatch(
       seenUserContent.add(msg.content);
     }
 
-    const currentCount = (session.message_count as number) + persisted;
+    const currentCount = parseMessageCount(session, 'messages.batch_count') + persisted;
     if (currentCount >= maxMessages) {
       break;
     }
@@ -243,7 +252,7 @@ export function persistMessageBatch(
     const wsRow = sql
       .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
       .toArray()[0];
-    workspaceId = (wsRow?.workspace_id as string) ?? null;
+    workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.batch_workspace') : null;
   }
 
   return { persisted, duplicates, persistedMessages, workspaceId, firstUserContent, hadTopic };
@@ -279,15 +288,7 @@ export function getMessages(
   const messageRows = hasMore ? rows.slice(0, limit) : rows;
 
   return {
-    messages: messageRows.reverse().map((row) => ({
-      id: row.id as string,
-      sessionId: row.session_id as string,
-      role: row.role as string,
-      content: row.content as string,
-      toolMetadata: row.tool_metadata ? JSON.parse(row.tool_metadata as string) : null,
-      createdAt: row.created_at as number,
-      sequence: row.sequence as number | null,
-    })),
+    messages: messageRows.reverse().map((row) => parseChatMessageRow(row)),
     hasMore,
   };
 }
@@ -302,8 +303,8 @@ export function getMessageCount(sql: SqlStorage, sessionId: string, roles?: stri
     params.push(...roles);
   }
 
-  const rows = sql.exec(query, ...params).toArray();
-  return (rows[0]?.count as number) ?? 0;
+  const row = sql.exec(query, ...params).toArray()[0];
+  return row ? parseCount(row, 'messages.count') : 0;
 }
 
 type SearchResult = {
@@ -341,6 +342,18 @@ export function searchMessages(
 
   results.sort((a, b) => b.createdAt - a.createdAt);
   return results.slice(0, limit);
+}
+
+function mapSearchResultToSearchResult(parsed: SearchResultParsed, query: string): SearchResult {
+  return {
+    id: parsed.id,
+    sessionId: parsed.sessionId,
+    role: parsed.role,
+    snippet: extractSnippet(parsed.content, query),
+    createdAt: parsed.createdAt,
+    sessionTopic: parsed.sessionTopic,
+    sessionTaskId: parsed.sessionTaskId,
+  };
 }
 
 function searchMessagesFts(
@@ -382,15 +395,7 @@ function searchMessagesFts(
 
   try {
     const rows = sql.exec(sqlQuery, ...params).toArray();
-    return rows.map((row) => ({
-      id: row.id as string,
-      sessionId: row.session_id as string,
-      role: row.role as string,
-      snippet: extractSnippet(row.content as string, query),
-      createdAt: row.created_at as number,
-      sessionTopic: (row.session_topic as string) ?? null,
-      sessionTaskId: (row.session_task_id as string) ?? null,
-    }));
+    return rows.map((row) => mapSearchResultToSearchResult(parseSearchResultRow(row), query));
   } catch (e) {
     log.error('messages.fts5_search_failed', { error: String(e) });
     return [];
@@ -438,15 +443,7 @@ function searchMessagesLike(
 
   const rows = sql.exec(sqlQuery, ...params).toArray();
 
-  return rows.map((row) => ({
-    id: row.id as string,
-    sessionId: row.session_id as string,
-    role: row.role as string,
-    snippet: extractSnippet(row.content as string, query),
-    createdAt: row.created_at as number,
-    sessionTopic: (row.session_topic as string) ?? null,
-    sessionTaskId: (row.session_task_id as string) ?? null,
-  }));
+  return rows.map((row) => mapSearchResultToSearchResult(parseSearchResultRow(row), query));
 }
 
 export function buildFtsQuery(query: string): string | null {

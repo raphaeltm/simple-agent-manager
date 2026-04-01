@@ -9,6 +9,7 @@
  */
 
 import { log } from '../lib/logger';
+import { parseMigrationName } from './project-data/row-schemas';
 
 export interface Migration {
   name: string;
@@ -345,7 +346,7 @@ export function runMigrations(sql: SqlStorage): void {
   const applied = new Set<string>();
   const rows = sql.exec('SELECT name FROM migrations').toArray();
   for (const row of rows) {
-    applied.add(row.name as string);
+    applied.add(parseMigrationName(row));
   }
 
   // Run each pending migration

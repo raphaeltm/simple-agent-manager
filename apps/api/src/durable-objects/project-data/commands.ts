@@ -3,6 +3,7 @@
  *
  * Used by the SlashCommandPalette to show known commands before an ACP session starts.
  */
+import { parseCachedCommandRow } from './row-schemas';
 
 export interface CachedCommand {
   agentType: string;
@@ -43,10 +44,5 @@ export function getCachedCommands(
   const rows = agentType
     ? sql.exec('SELECT agent_type, name, description, updated_at FROM cached_commands WHERE agent_type = ? ORDER BY name', agentType).toArray()
     : sql.exec('SELECT agent_type, name, description, updated_at FROM cached_commands ORDER BY name').toArray();
-  return rows.map((row) => ({
-    agentType: row.agent_type as string,
-    name: row.name as string,
-    description: row.description as string,
-    updatedAt: row.updated_at as number,
-  }));
+  return rows.map((row) => parseCachedCommandRow(row));
 }
