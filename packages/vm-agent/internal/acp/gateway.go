@@ -1012,18 +1012,35 @@ func readOptionalFileFromContainer(ctx context.Context, containerID, user, fileP
 		return "", fmt.Errorf("invalid filePath: %q", filePath)
 	}
 
-	script := fmt.Sprintf(
-		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; file="$home/%s"; if [ -f "$file" ]; then cat "$file"; fi`,
-		filePath,
-	)
+	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	if err != nil {
+		// resolveContainerHomeDir should always return a path, but handle error defensively
+		slog.Warn("resolveContainerHomeDir returned error in readOptionalFileFromContainer, falling back to /root",
+			"error", err,
+			"container", containerID,
+			"user", user)
+		homeDir = "/root"
+	}
+	targetPath := path.Join(homeDir, filePath)
 
+	// Check if file exists first
 	dockerArgs := []string{"exec"}
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
 	}
-	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
+	dockerArgs = append(dockerArgs, containerID, "test", "-f", targetPath)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	if err := cmd.Run(); err != nil {
+		// File doesn't exist, return empty string
+		return "", nil
+	}
+
+	// File exists, read its content
+	dockerArgs = dockerArgs[:len(dockerArgs)-2] // Remove "test", "-f"
+	dockerArgs = append(dockerArgs, "cat", targetPath)
+
+	cmd = exec.CommandContext(ctx, "docker", dockerArgs...)
 	const maxFileSize = 1 << 20 // 1 MB
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
