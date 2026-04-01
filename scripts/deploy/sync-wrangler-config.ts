@@ -58,7 +58,7 @@ function getPulumiOutputs(stack: string): PulumiOutputs {
   }
 }
 
-function validatePulumiOutputs(outputs: PulumiOutputs): void {
+export function validatePulumiOutputs(outputs: PulumiOutputs): void {
   const required: Array<{ key: keyof PulumiOutputs; label: string }> = [
     { key: "d1DatabaseId", label: "D1 Database ID" },
     { key: "d1DatabaseName", label: "D1 Database Name" },
@@ -313,7 +313,11 @@ async function main(): Promise<void> {
   console.log("\nSync complete.");
 }
 
-main().catch((error) => {
-  console.error("Error:", error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+// Only run main when executed directly (not when imported for testing)
+const isDirectExecution = process.argv[1]?.endsWith("sync-wrangler-config.ts");
+if (isDirectExecution) {
+  main().catch((error) => {
+    console.error("Error:", error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}
