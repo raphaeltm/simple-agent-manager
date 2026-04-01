@@ -4,10 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn(),
+  getSmokeTestStatus: vi.fn().mockResolvedValue({ enabled: false }),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
   listCredentials: mocks.listCredentials,
+  getSmokeTestStatus: mocks.getSmokeTestStatus,
 }));
 
 vi.mock('../../../src/components/HetznerTokenForm', () => ({
