@@ -486,45 +486,52 @@ func validateAuthFilePath(authFilePath string) error {
 }
 
 func resolveContainerHomeDir(ctx context.Context, containerID, user string) (string, error) {
+	// Method 1: Try getent passwd (most reliable in standard containers)
 	username, stderr, err := execInContainer(ctx, containerID, user, "", "id", "-un")
 	if err != nil {
 		if stderr != "" {
-			return "", fmt.Errorf("resolve container username: %w: %s", err, stderr)
+			slog.Debug("Failed to get username for home dir resolution", "stderr", stderr)
 		}
-		return "", fmt.Errorf("resolve container username: %w", err)
+	} else {
+		username = strings.TrimSpace(username)
+		passwdEntry, stderr, err := execInContainer(
+			ctx,
+			containerID,
+			user,
+			"",
+			"getent",
+			"passwd",
+			username,
+		)
+		if err == nil {
+			fields := strings.Split(strings.TrimSpace(passwdEntry), ":")
+			if len(fields) >= 6 && fields[5] != "" {
+				slog.Debug("Resolved home directory via getent", "path", fields[5])
+				return fields[5], nil
+			}
+		} else if stderr != "" {
+			slog.Debug("getent failed while resolving home directory", "stderr", stderr)
+		}
 	}
 
-	passwdEntry, stderr, err := execInContainer(
-		ctx,
-		containerID,
-		user,
-		"",
-		"getent",
-		"passwd",
-		strings.TrimSpace(username),
-	)
+	// Method 2: Try HOME environment variable
+	home, stderr, err := execInContainer(ctx, containerID, user, "", "printenv", "HOME")
 	if err == nil {
-		fields := strings.Split(strings.TrimSpace(passwdEntry), ":")
-		if len(fields) >= 6 && fields[5] != "" {
-			return fields[5], nil
+		trimmedHome := strings.TrimSpace(home)
+		if trimmedHome != "" {
+			slog.Debug("Resolved home directory via HOME environment variable", "path", trimmedHome)
+			return trimmedHome, nil
 		}
 	} else if stderr != "" {
-		slog.Debug("getent failed while resolving container home directory", "stderr", stderr)
+		slog.Debug("Failed to get HOME environment variable", "stderr", stderr)
 	}
 
-	home, stderr, err := execInContainer(ctx, containerID, user, "", "printenv", "HOME")
-	if err != nil {
-		if stderr != "" {
-			return "", fmt.Errorf("resolve container home dir: %w: %s", err, stderr)
-		}
-		return "", fmt.Errorf("resolve container home dir: %w", err)
-	}
-
-	trimmedHome := strings.TrimSpace(home)
-	if trimmedHome == "" {
-		return "", fmt.Errorf("resolved empty container home directory")
-	}
-	return trimmedHome, nil
+	// Method 3: Fallback to /root for minimal containers
+	// This handles edge cases where neither getent nor HOME work
+	slog.Warn("Failed to resolve container home directory via getent and HOME env, falling back to /root",
+		"container", containerID,
+		"user", user)
+	return "/root", nil
 }
 
 func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
@@ -534,7 +541,12 @@ func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePa
 
 	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
 	if err != nil {
-		return err
+		// resolveContainerHomeDir should always return a path, but handle error defensively
+		slog.Warn("resolveContainerHomeDir returned error, falling back to /root",
+			"error", err,
+			"container", containerID,
+			"user", user)
+		homeDir = "/root"
 	}
 	targetPath := path.Join(homeDir, authFilePath)
 	parentDir := path.Dir(targetPath)
@@ -588,7 +600,12 @@ func readAuthFileFromContainer(ctx context.Context, containerID, user, authFileP
 
 	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
 	if err != nil {
-		return "", err
+		// resolveContainerHomeDir should always return a path, but handle error defensively
+		slog.Warn("resolveContainerHomeDir returned error, falling back to /root",
+			"error", err,
+			"container", containerID,
+			"user", user)
+		homeDir = "/root"
 	}
 	targetPath := path.Join(homeDir, authFilePath)
 
@@ -995,18 +1012,35 @@ func readOptionalFileFromContainer(ctx context.Context, containerID, user, fileP
 		return "", fmt.Errorf("invalid filePath: %q", filePath)
 	}
 
-	script := fmt.Sprintf(
-		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; file="$home/%s"; if [ -f "$file" ]; then cat "$file"; fi`,
-		filePath,
-	)
+	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	if err != nil {
+		// resolveContainerHomeDir should always return a path, but handle error defensively
+		slog.Warn("resolveContainerHomeDir returned error in readOptionalFileFromContainer, falling back to /root",
+			"error", err,
+			"container", containerID,
+			"user", user)
+		homeDir = "/root"
+	}
+	targetPath := path.Join(homeDir, filePath)
 
+	// Check if file exists first
 	dockerArgs := []string{"exec"}
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
 	}
-	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
+	dockerArgs = append(dockerArgs, containerID, "test", "-f", targetPath)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	if err := cmd.Run(); err != nil {
+		// File doesn't exist, return empty string
+		return "", nil
+	}
+
+	// File exists, read its content
+	dockerArgs = dockerArgs[:len(dockerArgs)-2] // Remove "test", "-f"
+	dockerArgs = append(dockerArgs, "cat", targetPath)
+
+	cmd = exec.CommandContext(ctx, "docker", dockerArgs...)
 	const maxFileSize = 1 << 20 // 1 MB
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
