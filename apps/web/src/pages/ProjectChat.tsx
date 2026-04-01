@@ -17,7 +17,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ProfileFormDialog } from '../components/agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../components/agent-profiles/ProfileSelector';
 import { BootLogPanel } from '../components/chat/BootLogPanel';
-import { ProjectMessageView } from '../components/chat/ProjectMessageView';
+import { ProjectMessageView } from '../components/project-message-view';
 import { ForkDialog } from '../components/project/ForkDialog';
 import { useAvailableCommands } from '../hooks/useAvailableCommands';
 import { useBootLogStream } from '../hooks/useBootLogStream';
