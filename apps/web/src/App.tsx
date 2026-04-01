@@ -39,7 +39,7 @@ import { SettingsNotifications } from './pages/SettingsNotifications';
 import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { TaskDetail } from './pages/TaskDetail';
 import { UiStandards } from './pages/UiStandards';
-import { Workspace } from './pages/Workspace';
+import { Workspace } from './pages/workspace';
 import { Workspaces } from './pages/Workspaces';
 
 function ProtectedLayout() {
