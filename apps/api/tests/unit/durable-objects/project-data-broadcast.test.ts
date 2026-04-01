@@ -195,6 +195,14 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
     it('sends message.new only to subscribed session socket and untagged sockets', async () => {
       // Set up the SQL mock to return a valid session and next sequence
       mockCtx.storage.sql.exec = vi.fn((query: string, ..._args: any[]) => {
+        if (query.includes('SELECT workspace_id FROM chat_sessions')) {
+          return {
+            toArray: () => [{ workspace_id: null }],
+            columnNames: [],
+            rowsRead: 1,
+            rowsWritten: 0,
+          };
+        }
         if (query.includes('SELECT') && query.includes('chat_sessions')) {
           return {
             toArray: () => [{ id: 'session-a', status: 'active', message_count: 0 }],

@@ -3,6 +3,12 @@
  */
 import type { Env } from './types';
 import { generateId } from './types';
+import {
+  parseCountCnt,
+  parseChatSessionListRow,
+  parseSessionStop,
+  parseSessionStatus,
+} from './row-schemas';
 
 export function createSession(
   sql: SqlStorage,
@@ -15,7 +21,7 @@ export function createSession(
   const countRow = sql
     .exec('SELECT COUNT(*) as cnt FROM chat_sessions')
     .toArray()[0];
-  if ((countRow?.cnt as number) >= maxSessions) {
+  if (countRow && parseCountCnt(countRow, 'sessions.create_count') >= maxSessions) {
     throw new Error(`Maximum ${maxSessions} sessions per project exceeded`);
   }
 
@@ -60,15 +66,12 @@ export function stopSession(
     sessionId
   );
 
-  const session = sql
+  const row = sql
     .exec('SELECT workspace_id, message_count FROM chat_sessions WHERE id = ?', sessionId)
     .toArray()[0];
 
-  if (!session) return null;
-  return {
-    workspaceId: session.workspace_id as string | null,
-    messageCount: session.message_count as number,
-  };
+  if (!row) return null;
+  return parseSessionStop(row);
 }
 
 export function stopSessionInternal(sql: SqlStorage, sessionId: string): void {
@@ -149,7 +152,7 @@ export function listSessions(
 
   return {
     sessions: rows.map((row) => mapSessionRow(row)),
-    total: (totalRow?.cnt as number) || 0,
+    total: totalRow ? parseCountCnt(totalRow, 'sessions.list_total') : 0,
   };
 }
 
@@ -200,12 +203,13 @@ export function updateSessionTopic(
   sessionId: string,
   topic: string
 ): boolean {
-  const session = sql
+  const row = sql
     .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
     .toArray()[0];
 
-  if (!session) return false;
-  if ((session.status as string) !== 'active') return false;
+  if (!row) return false;
+  const session = parseSessionStatus(row);
+  if (session.status !== 'active') return false;
 
   const now = Date.now();
   sql.exec(
@@ -230,27 +234,7 @@ export function markAgentCompleted(sql: SqlStorage, sessionId: string): number {
 
 export function mapSessionRow(
   row: Record<string, unknown>,
-  baseDomain?: string
+  _baseDomain?: string
 ): Record<string, unknown> {
-  const status = row.status as string;
-  const agentCompletedAt = (row.agent_completed_at as number) ?? null;
-  const workspaceId = row.workspace_id as string | null;
-
-  return {
-    id: row.id,
-    workspaceId,
-    taskId: row.task_id ?? null,
-    topic: row.topic,
-    status,
-    messageCount: row.message_count,
-    startedAt: row.started_at,
-    endedAt: row.ended_at,
-    createdAt: row.created_at,
-    agentCompletedAt,
-    lastMessageAt: (row.updated_at as number) ?? null,
-    isIdle: status === 'active' && agentCompletedAt != null,
-    isTerminated: status === 'stopped',
-    workspaceUrl: workspaceId && baseDomain ? `https://ws-${workspaceId}.${baseDomain}` : null,
-    cleanupAt: (row.cleanup_at as number) ?? null,
-  };
+  return parseChatSessionListRow(row);
 }

@@ -12,6 +12,12 @@ import { recordActivityEventInternal } from './activity';
 import { stopSessionInternal } from './sessions';
 import { materializeSession } from './materialization';
 import { persistSystemMessage } from './messages';
+import {
+  parseCleanupAt,
+  parseIdleCleanupSchedule,
+  parseWorkspaceActivity,
+  parseMinEarliest,
+} from './row-schemas';
 
 const log = createModuleLogger('idle_cleanup');
 
@@ -71,7 +77,7 @@ export function getCleanupAt(sql: SqlStorage, sessionId: string): number | null 
   const row = sql
     .exec('SELECT cleanup_at FROM idle_cleanup_schedule WHERE session_id = ?', sessionId)
     .toArray()[0];
-  return row ? (row.cleanup_at as number) : null;
+  return row ? parseCleanupAt(row, 'idle_cleanup.get_cleanup_at') : null;
 }
 
 /**
@@ -94,39 +100,35 @@ export async function processExpiredCleanups(
       'SELECT session_id, workspace_id, task_id, retry_count FROM idle_cleanup_schedule WHERE cleanup_at <= ?',
       now
     )
-    .toArray();
+    .toArray()
+    .map((row) => parseIdleCleanupSchedule(row));
 
-  for (const row of expired) {
-    const sessionId = row.session_id as string;
-    const workspaceId = row.workspace_id as string;
-    const taskId = row.task_id as string | null;
-    const retryCount = (row.retry_count as number) || 0;
-
+  for (const entry of expired) {
     try {
       // Stop the session in DO SQLite
-      stopSessionInternal(sql, sessionId);
+      stopSessionInternal(sql, entry.sessionId);
 
       // Materialize grouped messages (best-effort)
       try {
-        materializeSession(sql, sessionId);
+        materializeSession(sql, entry.sessionId);
       } catch (e) {
         log.error('materialize_session_failed', {
-          sessionId,
+          sessionId: entry.sessionId,
           error: String(e),
         });
       }
 
       // Update D1
-      if (taskId) {
-        await completeTaskInD1(taskId);
+      if (entry.taskId) {
+        await completeTaskInD1(entry.taskId);
       }
-      await stopWorkspaceInD1(workspaceId);
+      await stopWorkspaceInD1(entry.workspaceId);
 
       // Clean up workspace activity tracking
-      sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', workspaceId);
+      sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', entry.workspaceId);
 
       // Remove from schedule
-      sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
+      sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', entry.sessionId);
 
       // Record activity
       recordActivityEventInternal(
@@ -134,53 +136,53 @@ export async function processExpiredCleanups(
         'session.idle_cleanup',
         'system',
         null,
-        workspaceId,
-        sessionId,
-        taskId,
-        JSON.stringify({ retryCount })
+        entry.workspaceId,
+        entry.sessionId,
+        entry.taskId,
+        JSON.stringify({ retryCount: entry.retryCount })
       );
-      broadcastEvent('session.idle_cleanup', { sessionId, workspaceId, taskId }, sessionId);
+      broadcastEvent('session.idle_cleanup', { sessionId: entry.sessionId, workspaceId: entry.workspaceId, taskId: entry.taskId }, entry.sessionId);
       scheduleSummarySync();
     } catch (err) {
-      log.error('cleanup_failed', { sessionId, ...serializeError(err) });
+      log.error('cleanup_failed', { sessionId: entry.sessionId, ...serializeError(err) });
 
-      if (retryCount >= maxRetries) {
-        sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
+      if (entry.retryCount >= maxRetries) {
+        sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', entry.sessionId);
         recordActivityEventInternal(
           sql,
           'session.idle_cleanup_failed',
           'system',
           null,
-          workspaceId,
-          sessionId,
-          taskId,
+          entry.workspaceId,
+          entry.sessionId,
+          entry.taskId,
           JSON.stringify({
             error: err instanceof Error ? err.message : String(err),
-            retryCount,
+            retryCount: entry.retryCount,
           })
         );
         const msgResult = persistSystemMessage(
           sql,
-          sessionId,
+          entry.sessionId,
           'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.'
         );
         if (msgResult) {
           broadcastEvent('message.new', {
-            sessionId,
+            sessionId: entry.sessionId,
             messageId: msgResult.id,
             role: 'system',
             content: 'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.',
             toolMetadata: null,
             createdAt: msgResult.now,
             sequence: msgResult.sequence,
-          }, sessionId);
+          }, entry.sessionId);
         }
       } else {
         sql.exec(
           'UPDATE idle_cleanup_schedule SET cleanup_at = ?, retry_count = ? WHERE session_id = ?',
           now + retryDelay,
-          retryCount + 1,
-          sessionId
+          entry.retryCount + 1,
+          entry.sessionId
         );
       }
     }
@@ -226,49 +228,43 @@ export async function checkWorkspaceIdleTimeouts(
      FROM workspace_activity wa
      INNER JOIN chat_sessions cs ON cs.workspace_id = wa.workspace_id
      WHERE cs.status = 'active'`
-  ).toArray();
+  ).toArray().map((row) => parseWorkspaceActivity(row));
 
   for (const ws of activeWorkspaces) {
-    const workspaceId = ws.workspace_id as string;
-    const sessionId = ws.session_id as string | null;
-    const lastTerminal = (ws.last_terminal_activity_at as number) || 0;
-    const lastMessage = (ws.last_message_at as number) || 0;
-    const sessionUpdatedAt = (ws.session_updated_at as number) || 0;
-
-    const lastActivity = Math.max(lastTerminal, lastMessage, sessionUpdatedAt);
+    const lastActivity = Math.max(ws.lastTerminalActivityAt, ws.lastMessageAt, ws.sessionUpdatedAt);
 
     if (lastActivity > 0 && lastActivity < idleThreshold) {
       log.info('workspace_idle_timeout', {
-        workspaceId,
-        sessionId,
+        workspaceId: ws.workspaceId,
+        sessionId: ws.sessionId,
         lastActivity,
         timeoutMs,
         idleDurationMs: now - lastActivity,
       });
 
       try {
-        if (sessionId) {
-          stopSessionInternal(sql, sessionId);
+        if (ws.sessionId) {
+          stopSessionInternal(sql, ws.sessionId);
           try {
-            materializeSession(sql, sessionId);
+            materializeSession(sql, ws.sessionId);
           } catch (e) {
             log.error('materialize_session_on_idle_timeout_failed', {
-              sessionId,
+              sessionId: ws.sessionId,
               error: String(e),
             });
           }
         }
 
-        await deleteWorkspaceInD1(workspaceId);
-        sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', workspaceId);
+        await deleteWorkspaceInD1(ws.workspaceId);
+        sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', ws.workspaceId);
 
         recordActivityEventInternal(
           sql,
           'workspace.idle_timeout',
           'system',
           null,
-          workspaceId,
-          sessionId,
+          ws.workspaceId,
+          ws.sessionId,
           null,
           JSON.stringify({
             lastActivity,
@@ -276,10 +272,10 @@ export async function checkWorkspaceIdleTimeouts(
             idleDurationMs: now - lastActivity,
           })
         );
-        broadcastEvent('workspace.idle_timeout', { workspaceId, sessionId });
+        broadcastEvent('workspace.idle_timeout', { workspaceId: ws.workspaceId, sessionId: ws.sessionId });
         scheduleSummarySync();
       } catch (err) {
-        log.error('workspace_idle_timeout_cleanup_failed', { workspaceId, ...serializeError(err) });
+        log.error('workspace_idle_timeout_cleanup_failed', { workspaceId: ws.workspaceId, ...serializeError(err) });
       }
     }
   }
@@ -295,7 +291,7 @@ export function computeIdleAlarmTimes(sql: SqlStorage): {
   const idleRow = sql
     .exec('SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule')
     .toArray()[0];
-  const idleCleanupTime = (idleRow?.earliest as number) ?? null;
+  const idleCleanupTime = idleRow ? parseMinEarliest(idleRow, 'idle_cleanup.min_cleanup_at') : null;
 
   let workspaceIdleCheckTime: number | null = null;
   const earliestActivityRow = sql
@@ -306,7 +302,7 @@ export function computeIdleAlarmTimes(sql: SqlStorage): {
       )) as earliest FROM workspace_activity`
     )
     .toArray()[0];
-  const earliestActivity = earliestActivityRow?.earliest as number | null;
+  const earliestActivity = earliestActivityRow ? parseMinEarliest(earliestActivityRow, 'idle_cleanup.min_activity') : null;
   if (earliestActivity !== null) {
     const nextCheck = earliestActivity + WORKSPACE_IDLE_CHECK_INTERVAL_MS;
     workspaceIdleCheckTime = Math.max(nextCheck, Date.now() + 60_000);

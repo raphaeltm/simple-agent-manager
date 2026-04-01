@@ -13,7 +13,6 @@ import { runNotificationMigrations } from './notification-migrations';
 import type {
   NotificationResponse,
   NotificationType,
-  NotificationUrgency,
   NotificationWsMessage,
   CreateNotificationRequest,
 } from '@simple-agent-manager/shared';
@@ -25,6 +24,8 @@ import {
   DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS,
   DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS,
 } from '@simple-agent-manager/shared';
+import { parseNotificationRow, parseNotificationPreferenceRow, parseIdRow } from './notification-row-schemas';
+import { parseCountCnt, parseEnabled } from './project-data/row-schemas';
 
 type Env = {
   MAX_NOTIFICATIONS_PER_USER?: string;
@@ -90,7 +91,7 @@ export class NotificationService extends DurableObject<Env> {
         .toArray();
 
       if (existing.length > 0) {
-        const existingId = existing[0]!.id as string;
+        const existingId = parseIdRow(existing[0]!, 'notification.progress_dedup');
         this.sql.exec(
           `UPDATE notifications SET body = ?, title = ?, metadata = ?, read_at = NULL WHERE id = ?`,
           request.body ?? null,
@@ -121,7 +122,7 @@ export class NotificationService extends DurableObject<Env> {
         .toArray();
       if (existing.length > 0) {
         // Update the existing unread needs_input notification instead of creating a new one
-        const existingId = existing[0]!.id as string;
+        const existingId = parseIdRow(existing[0]!, 'notification.needs_input_dedup');
         this.sql.exec(
           `UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?`,
           request.body ?? null,
@@ -242,9 +243,9 @@ export class NotificationService extends DurableObject<Env> {
     const hasMore = rows.length > pageSize;
     const items = hasMore ? rows.slice(0, pageSize) : rows;
 
-    const notifications = items.map((row) => this.rowToNotification(row));
-    const nextCursor = hasMore && items.length > 0
-      ? String(items[items.length - 1]!.created_at)
+    const notifications = items.map((row) => parseNotificationRow(row));
+    const nextCursor = hasMore && notifications.length > 0
+      ? String(new Date(notifications[notifications.length - 1]!.createdAt).getTime())
       : null;
 
     const unreadCount = this.getUnreadCount(userId);
@@ -317,12 +318,7 @@ export class NotificationService extends DurableObject<Env> {
       .exec(`SELECT * FROM notification_preferences WHERE user_id = ?`, userId)
       .toArray();
 
-    return rows.map((row) => ({
-      notificationType: row.notification_type as string,
-      projectId: (row.project_id as string) || null,
-      channel: row.channel as string,
-      enabled: (row.enabled as number) === 1,
-    }));
+    return rows.map((row) => parseNotificationPreferenceRow(row));
   }
 
   /** Update a notification preference. */
@@ -365,7 +361,7 @@ export class NotificationService extends DurableObject<Env> {
         )
         .toArray();
       if (rows.length > 0) {
-        return (rows[0]!.enabled as number) === 1;
+        return parseEnabled(rows[0]!, 'notification.pref_project');
       }
     }
 
@@ -379,7 +375,7 @@ export class NotificationService extends DurableObject<Env> {
       )
       .toArray();
     if (typeRows.length > 0) {
-      return (typeRows[0]!.enabled as number) === 1;
+      return parseEnabled(typeRows[0]!, 'notification.pref_type');
     }
 
     // Check wildcard global preference
@@ -391,7 +387,7 @@ export class NotificationService extends DurableObject<Env> {
       )
       .toArray();
     if (globalRows.length > 0) {
-      return (globalRows[0]!.enabled as number) === 1;
+      return parseEnabled(globalRows[0]!, 'notification.pref_global');
     }
 
     // Default: enabled
@@ -475,17 +471,17 @@ export class NotificationService extends DurableObject<Env> {
       .exec(`SELECT * FROM notifications WHERE id = ?`, id)
       .toArray();
     if (rows.length === 0) return null;
-    return this.rowToNotification(rows[0]!);
+    return parseNotificationRow(rows[0]!);
   }
 
   private getUnreadCount(userId: string): number {
-    const rows = this.sql
+    const row = this.sql
       .exec(
         `SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND read_at IS NULL AND dismissed_at IS NULL`,
         userId
       )
-      .toArray();
-    return (rows[0]?.cnt as number) ?? 0;
+      .toArray()[0];
+    return row ? parseCountCnt(row, 'notification.unread_count') : 0;
   }
 
   private enforceLimit(userId: string): void {
@@ -501,10 +497,10 @@ export class NotificationService extends DurableObject<Env> {
     );
 
     // Enforce max count (delete oldest dismissed first, then oldest read)
-    const countRows = this.sql
+    const countRow = this.sql
       .exec(`SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ?`, userId)
-      .toArray();
-    const total = (countRows[0]?.cnt as number) ?? 0;
+      .toArray()[0];
+    const total = countRow ? parseCountCnt(countRow, 'notification.enforce_limit') : 0;
 
     if (total > maxNotifications) {
       const excess = total - maxNotifications;
@@ -533,21 +529,5 @@ export class NotificationService extends DurableObject<Env> {
     }
   }
 
-  private rowToNotification(row: Record<string, unknown>): NotificationResponse {
-    return {
-      id: row.id as string,
-      projectId: (row.project_id as string) || null,
-      taskId: (row.task_id as string) ?? null,
-      sessionId: (row.session_id as string) ?? null,
-      type: row.type as NotificationType,
-      urgency: row.urgency as NotificationUrgency,
-      title: row.title as string,
-      body: (row.body as string) ?? null,
-      actionUrl: (row.action_url as string) ?? null,
-      metadata: row.metadata ? JSON.parse(row.metadata as string) : null,
-      readAt: row.read_at ? new Date(row.read_at as number).toISOString() : null,
-      dismissedAt: row.dismissed_at ? new Date(row.dismissed_at as number).toISOString() : null,
-      createdAt: new Date(row.created_at as number).toISOString(),
-    };
-  }
+  // Row-to-notification mapping is handled by parseNotificationRow from notification-row-schemas.ts
 }

@@ -1,6 +1,7 @@
 /**
  * Session–Idea (task) linking — many-to-many associations.
  */
+import { parseSessionIdeaLink, parseIdeaSessionDetail } from './row-schemas';
 
 export function linkSessionIdea(
   sql: SqlStorage,
@@ -47,11 +48,7 @@ export function getIdeasForSession(
       sessionId
     )
     .toArray();
-  return rows.map((r) => ({
-    taskId: r.task_id as string,
-    context: r.context as string | null,
-    createdAt: r.created_at as number,
-  }));
+  return rows.map((r) => parseSessionIdeaLink(r));
 }
 
 export function getSessionsForIdea(
@@ -74,11 +71,5 @@ export function getSessionsForIdea(
       taskId
     )
     .toArray();
-  return rows.map((r) => ({
-    sessionId: r.session_id as string,
-    topic: r.topic as string | null,
-    status: r.status as string,
-    context: r.context as string | null,
-    linkedAt: r.created_at as number,
-  }));
+  return rows.map((r) => parseIdeaSessionDetail(r));
 }

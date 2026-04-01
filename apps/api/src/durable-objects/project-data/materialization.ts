@@ -7,6 +7,13 @@
  * Non-groupable roles (user, system, plan) pass through as individual messages.
  */
 import { log } from '../../lib/logger';
+import {
+  parseMaterializationCheck,
+  parseMaterializationToken,
+  parseRowid,
+  parseSessionId,
+  parseCount,
+} from './row-schemas';
 
 const GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);
 
@@ -23,14 +30,16 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
     .toArray()[0];
 
   if (!session) return;
-  if (session.materialized_at !== null) return;
+  const { materializedAt } = parseMaterializationCheck(session);
+  if (materializedAt !== null) return;
 
   const tokens = sql
     .exec(
       'SELECT id, role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC, sequence ASC',
       sessionId
     )
-    .toArray();
+    .toArray()
+    .map((row) => parseMaterializationToken(row));
 
   if (tokens.length === 0) {
     sql.exec(
@@ -47,16 +56,16 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
     const last = grouped[grouped.length - 1];
     if (
       last &&
-      last.role === (token.role as string) &&
-      GROUPABLE_ROLES.has(token.role as string)
+      last.role === token.role &&
+      GROUPABLE_ROLES.has(token.role)
     ) {
-      last.content += token.content as string;
+      last.content += token.content;
     } else {
       grouped.push({
-        id: token.id as string,
-        role: token.role as string,
-        content: token.content as string,
-        createdAt: token.created_at as number,
+        id: token.id,
+        role: token.role,
+        content: token.content,
+        createdAt: token.createdAt,
       });
     }
   }
@@ -79,7 +88,7 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
       if (rowResult) {
         sql.exec(
           'INSERT OR IGNORE INTO chat_messages_grouped_fts (rowid, content) VALUES (?, ?)',
-          rowResult.rowid as number,
+          parseRowid(rowResult, 'materialization.grouped_rowid'),
           msg.content
         );
       }
@@ -112,13 +121,13 @@ export function materializeAllStopped(
 
   let materialized = 0;
   let errors = 0;
-  for (const session of sessions) {
+  for (const row of sessions) {
     try {
-      materializeSession(sql, session.id as string);
+      materializeSession(sql, parseSessionId(row, 'materialization.batch_session'));
       materialized++;
     } catch (e) {
       log.error('materialization.session_failed', {
-        sessionId: session.id,
+        sessionId: row.id,
         error: String(e),
       });
       errors++;
@@ -128,7 +137,7 @@ export function materializeAllStopped(
   const remainingRow = sql
     .exec(`SELECT COUNT(*) as count FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL`)
     .toArray()[0];
-  const remaining = (remainingRow?.count as number) ?? 0;
+  const remaining = remainingRow ? parseCount(remainingRow, 'materialization.remaining') : 0;
 
   return { materialized, errors, remaining };
 }
