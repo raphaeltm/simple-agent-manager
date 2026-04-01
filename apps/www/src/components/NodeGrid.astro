@@ -199,7 +199,7 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     const currentCount = gridInner.children.length;
     if (Math.abs(currentCount - nodeCount) < cols) return;
 
-    gridInner.innerHTML = '';
+    gridInner.replaceChildren();
 
     const fragment = document.createDocumentFragment();
     for (let i = 0; i < nodeCount; i++) {
@@ -469,7 +469,7 @@ const AGENT_COUNTS = [4, 3, 2, 3, 4, 2, 3, 4, 3, 2, 4, 3];
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       populateGrid();
-      svg.innerHTML = '';
+      svg.replaceChildren();
     }, 200);
   });
 

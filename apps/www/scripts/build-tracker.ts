@@ -2,7 +2,7 @@
  * Compiles src/scripts/tracker.ts → public/scripts/tracker.js
  * using TypeScript's transpileModule API.
  *
- * Run as part of the build: node scripts/build-tracker.mjs
+ * Run as part of the build: npx tsx scripts/build-tracker.ts
  *
  * NOTE: tracker.ts must not use top-level imports — the output is loaded
  * via a classic <script> tag, not an ES module.
@@ -19,7 +19,7 @@ const source = readFileSync(resolve(root, 'src/scripts/tracker.ts'), 'utf-8');
 const result = transpileModule(source, {
   compilerOptions: {
     target: 99, // ESNext
-    module: 1,  // CommonJS — output is a classic script, not an ES module
+    module: 1, // CommonJS — output is a classic script, not an ES module
     removeComments: false,
     strict: true,
   },

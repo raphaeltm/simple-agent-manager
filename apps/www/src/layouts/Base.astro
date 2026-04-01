@@ -10,6 +10,10 @@ const {
   title = 'SAM — Run Coding Agents in Parallel on Your Infrastructure',
   description = 'Simple Agent Manager (SAM) is an open-source platform for running coding agents on your own cloud. Run as many instances of Claude Code, Codex, or Gemini CLI as you need across cloud VMs.',
 } = Astro.props;
+
+const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
+const siteUrl = `https://www.${baseDomain}`;
+const apiUrl = `https://api.${baseDomain}`;
 ---
 
 <!doctype html>
@@ -20,17 +24,20 @@ const {
     <meta name="description" content={description} />
     <meta name="theme-color" content="#0b1110" />
 
+    <!-- Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy" content={`default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https:; connect-src 'self' ${apiUrl}; frame-src 'none'; object-src 'none'; base-uri 'self'`} />
+
     <!-- Open Graph -->
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://www.simple-agent-manager.org/images/og-default.png" />
+    <meta property="og:image" content={`${siteUrl}/images/og-default.png`} />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content="https://www.simple-agent-manager.org/images/og-default.png" />
+    <meta name="twitter:image" content={`${siteUrl}/images/og-default.png`} />
 
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>{title}</title>
@@ -39,7 +46,7 @@ const {
     <link rel="preload" href="/fonts/Chillax-Variable.woff2" as="font" type="font/woff2" crossorigin />
 
     <!-- Analytics -->
-    <script src="/scripts/tracker.js" data-api={`https://api.${import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org'}/api/t`} defer></script>
+    <script src="/scripts/tracker.js" data-api={`${apiUrl}/api/t`} defer></script>
   </head>
   <body>
     <slot />
