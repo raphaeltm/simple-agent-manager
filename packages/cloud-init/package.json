@@ -1,5 +1,5 @@
 {
-  "name": "@workspace/cloud-init",
+  "name": "@simple-agent-manager/cloud-init",
   "version": "0.1.0",
   "private": true,
   "type": "module",

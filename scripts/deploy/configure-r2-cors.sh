@@ -29,8 +29,8 @@ for VAR in CF_API_TOKEN CF_ACCOUNT_ID R2_BUCKET_NAME BASE_DOMAIN; do
 done
 
 if [ -n "$MISSING" ]; then
-  echo "::warning::R2 CORS configuration skipped — missing:${MISSING}. File attachments via presigned URLs will not work."
-  exit 0
+  echo "::error::R2 CORS configuration failed — missing required env vars:${MISSING}. File attachments via presigned URLs will not work."
+  exit 1
 fi
 
 # ---------------------------------------------------------------------------

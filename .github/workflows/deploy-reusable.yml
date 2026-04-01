@@ -103,13 +103,13 @@ jobs:
       # Phase 0: Setup
       # ========================================
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
@@ -118,7 +118,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Pulumi CLI
-        uses: pulumi/actions@v5
+        uses: pulumi/actions@cd99a7f8865434dd3532b586a26f9ebea596894f # v5
 
       - name: Determine Stack Name
         id: stack
@@ -445,7 +445,7 @@ jobs:
       # ========================================
       - name: Setup Go
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -513,7 +513,7 @@ jobs:
       # ========================================
       - name: Comment Staging URLs on PR
         if: ${{ inputs.dry_run != true && github.event_name == 'pull_request' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const body = `## Staging Deployment
