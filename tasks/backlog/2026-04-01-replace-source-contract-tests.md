@@ -1,61 +1,44 @@
-# Replace Source-Contract Tests with Behavioral Tests
-
-**Created**: 2026-04-01
-**Priority**: High
-**Context**: `.claude/rules/02-quality-gates.md` prohibits `readSource`/`readFileSync` source-contract tests for interactive components
+# Replace Source-Contract Tests with Behavioral Integration Tests
 
 ## Problem
 
-Five test files use `readSource()` (a wrapper around `readFileSync`) to read component source code as strings and assert substrings via `.toContain()`. These tests prove code is *present*, not that it *works*. They provide zero behavioral coverage and create false confidence.
+9 test files in `apps/api/tests/unit/routes/` use `readFileSync` to read route handler source code as strings and assert substrings via `.toContain()`. This is explicitly prohibited by `.claude/rules/02-quality-gates.md` under "Prohibited Test Patterns". These tests prove code is *present*, not that it *works*.
 
 ## Research Findings
 
-### Files to Replace
+### Files to Delete (9 source-contract tests)
+1. `agent-sessions.test.ts` — session lifecycle endpoints, concurrency guards
+2. `chat-agent-session-id.test.ts` — chat session detail fetches agent session ID
+3. `nodes.test.ts` — node CRUD, lifecycle, heartbeat health
+4. `projects.test.ts` — project CRUD, auth, limits, encryption
+5. `tasks.test.ts` — task CRUD, status transitions, dependencies
+6. `terminal.test.ts` — terminal token issuance, activity tracking
+7. `workspace-messages.test.ts` — message batch POST, validation
+8. `workspace-session-hook.test.ts` — workspace creation creates chat session
+9. `workspaces.test.ts` — workspace CRUD, lifecycle
 
-| File | What it tests | Replacement strategy |
-|------|--------------|---------------------|
-| `apps/web/tests/unit/task-components.test.ts` | TaskSubmitForm props/validation, ProjectChat submit, API client | Render TaskSubmitForm + simulate form interactions |
-| `apps/web/tests/unit/chat-components.test.ts` | ProjectChat sidebar, ProjectMessageView, SplitButton, routing | Render SplitButton + test interactions; mock hooks for larger components |
-| `apps/web/tests/unit/components/session-header.test.tsx` | SessionHeader mark-complete flow, UI structure | Render SessionHeader + test mark-complete confirmation dialog flow |
-| `apps/web/tests/unit/tdf-8-frontend-state-tracking.test.ts` | Execution step labels, ProvisioningIndicator, file removal | Preserve valid shared-type tests; render ProvisioningIndicator |
-| `apps/api/tests/unit/project-vm-size.test.ts` | Project CRUD defaultVmSize, task run/submit VM size precedence | Use Hono app.request() pattern with mocked DB |
-
-### Test Infrastructure Available
-- `@testing-library/react` with `render`, `screen`, `fireEvent`, `waitFor`
-- `@testing-library/user-event` for realistic interactions
-- `@testing-library/jest-dom/vitest` for DOM matchers
-- `vi.mock()` for module-level mocks
-- `vi.useFakeTimers()` for timer-based components
-- jsdom environment configured in vitest.config.ts
-- Hono `app.request()` pattern for API route testing (see dashboard.test.ts)
-
-### Key Patterns to Follow
-- Mock API functions with `vi.mock('../../src/lib/api', ...)`
-- Mock React Router hooks: `vi.mock('react-router-dom', ...)`
-- Mock custom hooks for components that are heavy in hook dependencies
-- For API tests: `buildApp()` + `buildMockDB()` + `app.request()` pattern
+### Replacement Pattern
+Follow established behavioral test pattern (e.g., `admin-observability.test.ts`, `dashboard.test.ts`):
+- Mock auth/error middleware, mock service layer
+- Create Hono app, mount routes, call `app.request()`, assert HTTP responses
 
 ## Implementation Checklist
 
-- [ ] 1. Replace `task-components.test.ts` — render TaskSubmitForm, test validation and submission
-- [ ] 2. Replace `chat-components.test.ts` — render SplitButton (interactions), test routing structure, mock hooks for ProjectChat/ProjectMessageView
-- [ ] 3. Replace `session-header.test.tsx` — render SessionHeader, test mark-complete flow with Dialog
-- [ ] 4. Replace `tdf-8-frontend-state-tracking.test.ts` — preserve shared-type tests, render ProvisioningIndicator
-- [ ] 5. Replace `project-vm-size.test.ts` — use Hono app.request() for PATCH/GET/POST handlers
-- [ ] 6. Verify zero readSource/readFileSync calls remain on component source
-- [ ] 7. Archive backlog task `tasks/backlog/2026-03-01-migrate-source-contract-tests.md`
-- [ ] 8. Run full test suite (`pnpm test`) to confirm all pass
+- [ ] Delete and replace `agent-sessions.test.ts`
+- [ ] Delete and replace `chat-agent-session-id.test.ts`
+- [ ] Delete and replace `nodes.test.ts`
+- [ ] Delete and replace `projects.test.ts`
+- [ ] Delete and replace `tasks.test.ts`
+- [ ] Delete and replace `terminal.test.ts`
+- [ ] Delete and replace `workspace-messages.test.ts`
+- [ ] Delete and replace `workspace-session-hook.test.ts`
+- [ ] Delete and replace `workspaces.test.ts`
+- [ ] Verify zero readFileSync/readSource calls remain
+- [ ] All tests pass via pnpm test
 
 ## Acceptance Criteria
 
-- [ ] Zero remaining `readSource` or `readFileSync` calls that read component/route source code as strings
-- [ ] All replacement tests use `render()` + user interaction simulation (web) or real handler invocation (API)
-- [ ] All tests pass locally via `pnpm test`
-- [ ] Backlog task archived
-
-## References
-
-- `.claude/rules/02-quality-gates.md` — Prohibited Test Patterns
-- `docs/notes/2026-03-01-new-chat-button-postmortem.md` — Source-contract tests failed to catch broken button
-- `apps/api/tests/unit/routes/dashboard.test.ts` — Example good API route test pattern
-- `apps/web/tests/unit/hooks/useChatWebSocket.behavioral.test.ts` — Example good hook test pattern
+- [ ] All 9 source-contract files deleted
+- [ ] 9 replacement files use app.request() pattern
+- [ ] Zero readFileSync/readSource on route source code in apps/api/tests/
+- [ ] All tests pass locally
