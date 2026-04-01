@@ -1,6 +1,7 @@
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { beforeAll, beforeEach,describe, expect, it, vi } from 'vitest';
+
 import { AppShell } from '../../src/components/AppShell';
 
 // Mutable auth state so individual tests can override

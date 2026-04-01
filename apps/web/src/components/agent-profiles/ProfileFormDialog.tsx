@@ -1,7 +1,7 @@
-import { type FC, useState, useEffect } from 'react';
 import type { AgentProfile, CreateAgentProfileRequest, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG, VALID_PERMISSION_MODES, AGENT_PERMISSION_MODE_LABELS } from '@simple-agent-manager/shared';
-import { Button, Input, Dialog } from '@simple-agent-manager/ui';
+import { AGENT_CATALOG, AGENT_PERMISSION_MODE_LABELS,VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
+import { Button, Dialog,Input } from '@simple-agent-manager/ui';
+import { type FC, useEffect,useState } from 'react';
 
 /** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
 const DEFAULT_AGENT_TYPE = AGENT_CATALOG[0]!.id;

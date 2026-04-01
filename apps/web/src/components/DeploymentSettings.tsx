@@ -1,16 +1,17 @@
+import { Button, Select, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Select, Spinner } from '@simple-agent-manager/ui';
+
+import { useToast } from '../hooks/useToast';
 import type { GcpProject } from '../lib/api';
 import {
-  getProjectDeploymentGcp,
-  setupProjectDeploymentGcp,
   deleteProjectDeploymentGcp,
-  listGcpProjectsForDeploy,
   getDeployOAuthResult,
+  getProjectDeploymentGcp,
+  listGcpProjectsForDeploy,
   type ProjectDeploymentGcpResponse,
+  setupProjectDeploymentGcp,
 } from '../lib/api';
-import { useToast } from '../hooks/useToast';
 import { ConfirmDialog } from './ConfirmDialog';
 
 const API_URL = import.meta.env.VITE_API_URL || '';

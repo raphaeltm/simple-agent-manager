@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Task } from '@simple-agent-manager/shared';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
 import { TaskForm } from '../../../../src/components/project/TaskForm';
 
 // Mock the API module so listAgentProfiles doesn't make real requests

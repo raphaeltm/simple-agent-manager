@@ -1,5 +1,5 @@
-import { type FC, useState, useCallback } from 'react';
-import { Copy, Check } from 'lucide-react';
+import { Check,Copy } from 'lucide-react';
+import { type FC, useCallback,useState } from 'react';
 
 interface CopyButtonProps {
   /** Returns the text to copy when the button is clicked. */

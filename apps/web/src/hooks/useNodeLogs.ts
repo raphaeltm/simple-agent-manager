@@ -1,5 +1,6 @@
+import type { NodeLogEntry, NodeLogFilter, NodeLogLevel,NodeLogSource } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NodeLogEntry, NodeLogFilter, NodeLogSource, NodeLogLevel } from '@simple-agent-manager/shared';
+
 import { getNodeLogs, getNodeLogStreamUrl } from '../lib/api';
 
 interface UseNodeLogsOptions {

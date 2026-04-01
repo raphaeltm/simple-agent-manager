@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react';
+
 import type { AudioPlaybackState } from '../hooks/useAudioPlayback';
 
 const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-accent-primary,#16a34a)]';

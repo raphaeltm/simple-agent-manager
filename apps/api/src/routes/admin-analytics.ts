@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
+
 import type { Env } from '../index';
-import { requireAuth, requireApproved, requireSuperadmin } from '../middleware/auth';
+import { log } from '../lib/logger';
+import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getForwardStatus } from '../services/analytics-forward';
-import { log } from '../lib/logger';
 
 const DEFAULT_ANALYTICS_SQL_API_URL = 'https://api.cloudflare.com/client/v4/accounts';
 const DEFAULT_PERIOD_DAYS = 30;

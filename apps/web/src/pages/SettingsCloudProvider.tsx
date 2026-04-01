@@ -1,7 +1,8 @@
 import { Skeleton } from '@simple-agent-manager/ui';
+
+import { GcpCredentialForm } from '../components/GcpCredentialForm';
 import { HetznerTokenForm } from '../components/HetznerTokenForm';
 import { ScalewayCredentialForm } from '../components/ScalewayCredentialForm';
-import { GcpCredentialForm } from '../components/GcpCredentialForm';
 import { useSettingsContext } from './SettingsContext';
 
 export function SettingsCloudProvider() {

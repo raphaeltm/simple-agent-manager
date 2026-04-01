@@ -1,6 +1,7 @@
-import { type FC, useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
 import type { BootLogEntry } from '@simple-agent-manager/shared';
+import { X } from 'lucide-react';
+import { type FC, useEffect, useRef } from 'react';
+
 import { BootLogList } from '../shared/BootLogList';
 
 interface BootLogPanelProps {

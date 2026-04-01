@@ -17,11 +17,13 @@
  * - Removal of maxWorkspacesPerNode from RuntimeLimits
  * - New default values for maxProjectsPerUser (25→100) and maxTaskDependenciesPerTask (25→50)
  */
-import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync,readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { getRuntimeLimits } from '../../../src/services/limits';
+
+import { describe, expect,it } from 'vitest';
+
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
+import { getRuntimeLimits } from '../../../src/services/limits';
 
 // =============================================================================
 // getRuntimeLimits — maxWorkspacesPerNode removal

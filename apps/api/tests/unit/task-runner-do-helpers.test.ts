@@ -6,9 +6,10 @@
  *
  * For behavioral tests, see task-runner-do-pure-functions.test.ts.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 // Read both files to verify extraction and import relationship
 const helpersSource = readFileSync(

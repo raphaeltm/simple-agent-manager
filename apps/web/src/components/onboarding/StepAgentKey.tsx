@@ -1,7 +1,8 @@
-import { useState } from 'react';
 import type { AgentType, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG } from '@simple-agent-manager/shared';
-import { Button, Input, Alert } from '@simple-agent-manager/ui';
+import { Alert,Button, Input } from '@simple-agent-manager/ui';
+import { useState } from 'react';
+
 import { saveAgentCredential } from '../../lib/api';
 
 interface StepAgentKeyProps {

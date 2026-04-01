@@ -1,6 +1,7 @@
-import { type CSSProperties, type FC, useCallback, useEffect, useState } from 'react';
-import { ChevronDown, RefreshCw, X } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
+import { ChevronDown, RefreshCw, X } from 'lucide-react';
+import { type CSSProperties, type FC, useCallback, useEffect, useState } from 'react';
+
 import { getGitStatus, type GitFileStatus, type GitStatusData } from '../lib/api';
 
 interface GitChangesPanelProps {

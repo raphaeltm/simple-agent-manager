@@ -1,15 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { Alert, Button, Dialog, Input } from '@simple-agent-manager/ui';
+import { AlertTriangle,Check, Copy, Key, Plus, Trash2 } from 'lucide-react';
+import { useCallback,useEffect, useState } from 'react';
+
+import { useToast } from '../hooks/useToast';
 import {
+  createSmokeTestToken,
   getSmokeTestStatus,
   listSmokeTestTokens,
-  createSmokeTestToken,
   revokeSmokeTestToken,
   type SmokeTestTokenResponse,
 } from '../lib/api';
-import { Alert, Button, Dialog, Input } from '@simple-agent-manager/ui';
-import { useToast } from '../hooks/useToast';
 import { ConfirmDialog } from './ConfirmDialog';
-import { Copy, Key, Plus, Trash2, Check, AlertTriangle } from 'lucide-react';
 
 function formatRelativeTime(dateStr: string | null): string {
   if (!dateStr) return 'Never';

@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
 import type { Task } from '@simple-agent-manager/shared';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
 import { TaskDelegateDialog } from '../../../../src/components/project/TaskDelegateDialog';
 
 const task: Task = {

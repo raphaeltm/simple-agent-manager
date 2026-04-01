@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+
 import { selectPrimaryGitHubEmail } from '../../src/auth';
 
 // Capture the options passed to betterAuth so we can assert on config

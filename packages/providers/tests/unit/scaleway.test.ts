@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { ScalewayProvider } from '../../src/scaleway';
-import { ProviderError } from '../../src/types';
 import type { VMConfig } from '../../src/types';
+import { ProviderError } from '../../src/types';
 import { createMockScalewayServer, createScalewayFetchMock } from '../fixtures/scaleway-mocks';
 
 describe('ScalewayProvider', () => {

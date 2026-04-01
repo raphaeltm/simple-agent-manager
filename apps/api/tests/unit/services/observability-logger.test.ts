@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // Mock the observability service before importing logger
 const mockPersistError = vi.fn().mockResolvedValue(undefined);

@@ -1,18 +1,19 @@
-import { and, eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-import { generateCloudInit, validateCloudInitSize } from '@workspace/cloud-init';
-import { ulid } from '../lib/ulid';
-import * as schema from '../db/schema';
-import type { Env } from '../index';
-import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { ProviderError } from '@simple-agent-manager/providers';
 import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
-import { signNodeCallbackToken } from './jwt';
-import { createProviderForUser } from './provider-credentials';
-import { GcpApiError, sanitizeGcpError } from './gcp-errors';
+import { generateCloudInit, validateCloudInitSize } from '@workspace/cloud-init';
+import { and, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
+import type { Env } from '../index';
 import { log, serializeError } from '../lib/logger';
-import { persistError } from './observability';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { ulid } from '../lib/ulid';
+import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
+import { GcpApiError, sanitizeGcpError } from './gcp-errors';
+import { signNodeCallbackToken } from './jwt';
+import { persistError } from './observability';
+import { createProviderForUser } from './provider-credentials';
 
 export interface CreateNodeInput {
   userId: string;

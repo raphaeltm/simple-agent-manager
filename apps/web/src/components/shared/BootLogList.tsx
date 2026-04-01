@@ -1,6 +1,6 @@
-import type { FC } from 'react';
 import type { BootLogEntry } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
+import type { FC } from 'react';
 
 function statusIcon(status: BootLogEntry['status']) {
   switch (status) {

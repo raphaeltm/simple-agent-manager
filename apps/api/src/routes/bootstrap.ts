@@ -5,14 +5,15 @@
  * No authentication required - the token itself is the auth mechanism.
  */
 
-import { Hono } from 'hono';
-import type { Env } from '../index';
 import type { BootstrapResponse } from '@simple-agent-manager/shared';
+import { Hono } from 'hono';
+
+import type { Env } from '../index';
+import { log } from '../lib/logger';
+import { getCredentialEncryptionKey } from '../lib/secrets';
+import { rateLimit } from '../middleware/rate-limit';
 import { redeemBootstrapToken } from '../services/bootstrap';
 import { decrypt } from '../services/encryption';
-import { rateLimit } from '../middleware/rate-limit';
-import { getCredentialEncryptionKey } from '../lib/secrets';
-import { log } from '../lib/logger';
 
 export const bootstrapRoutes = new Hono<{ Bindings: Env }>();
 

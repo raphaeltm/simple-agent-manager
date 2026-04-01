@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
 import type { Event, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Skeleton } from '@simple-agent-manager/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+
+import { DockerSection } from '../components/node/DockerSection';
+import { LogsSection } from '../components/node/LogsSection';
+import { NodeEventsSection } from '../components/node/NodeEventsSection';
+import { NodeOverviewSection } from '../components/node/NodeOverviewSection';
+import { NodeWorkspacesSection } from '../components/node/NodeWorkspacesSection';
+import { SoftwareSection } from '../components/node/SoftwareSection';
+import { SystemResourcesSection } from '../components/node/SystemResourcesSection';
 import { UserMenu } from '../components/UserMenu';
-import { useToast } from '../hooks/useToast';
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
+import { useToast } from '../hooks/useToast';
 import {
   deleteNode,
   deleteWorkspace,
@@ -15,13 +23,6 @@ import {
   stopNode,
   stopWorkspace,
 } from '../lib/api';
-import { NodeOverviewSection } from '../components/node/NodeOverviewSection';
-import { SystemResourcesSection } from '../components/node/SystemResourcesSection';
-import { DockerSection } from '../components/node/DockerSection';
-import { SoftwareSection } from '../components/node/SoftwareSection';
-import { NodeWorkspacesSection } from '../components/node/NodeWorkspacesSection';
-import { NodeEventsSection } from '../components/node/NodeEventsSection';
-import { LogsSection } from '../components/node/LogsSection';
 
 export function Node() {
   const navigate = useNavigate();

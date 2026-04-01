@@ -8,11 +8,11 @@
  */
 import { log } from '../../lib/logger';
 import {
+  parseCount,
   parseMaterializationCheck,
   parseMaterializationToken,
   parseRowid,
   parseSessionId,
-  parseCount,
 } from './row-schemas';
 
 const GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);

@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { Env } from '../../../src/index';
 import { projectsRoutes } from '../../../src/routes/projects';
 

@@ -1,3 +1,6 @@
+import DOMPurify from 'dompurify';
+import mermaid from 'mermaid';
+import { Highlight, themes } from 'prism-react-renderer';
 import {
   type CSSProperties,
   type FC,
@@ -7,9 +10,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Highlight, themes } from 'prism-react-renderer';
-import DOMPurify from 'dompurify';
-import mermaid from 'mermaid';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 

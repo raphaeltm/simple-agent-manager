@@ -1,5 +1,6 @@
+import { Body,Button, Card, Spinner } from '@simple-agent-manager/ui';
 import { type FC } from 'react';
-import { Card, Spinner, Button, Body } from '@simple-agent-manager/ui';
+
 import { useAdminHealth } from '../../hooks/useAdminHealth';
 
 interface MetricCardProps {

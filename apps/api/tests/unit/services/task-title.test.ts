@@ -1,11 +1,12 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import {
-  generateTaskTitle,
-  truncateTitle,
-  stripMarkdown,
-  getTaskTitleConfig,
   classifyError,
+  generateTaskTitle,
+  getTaskTitleConfig,
+  stripMarkdown,
   type TaskTitleConfig,
+  truncateTitle,
 } from '../../../src/services/task-title';
 
 // Mock @mastra/core/agent — factory must not reference outer variables

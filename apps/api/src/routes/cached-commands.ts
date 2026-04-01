@@ -3,15 +3,16 @@
  *
  * Mounted at /api/projects/:projectId/cached-commands
  */
-import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Env } from '../index';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
-import { requireOwnedProject } from '../middleware/project-auth';
-import { errors } from '../middleware/error';
+import { Hono } from 'hono';
+
 import * as schema from '../db/schema';
-import * as projectDataService from '../services/project-data';
+import type { Env } from '../index';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
+import { requireOwnedProject } from '../middleware/project-auth';
 import { jsonValidator, SaveCachedCommandsSchema } from '../schemas';
+import * as projectDataService from '../services/project-data';
 
 /** Default limits for cached commands. Override via env vars. */
 const DEFAULT_MAX_CACHED_COMMANDS = 200;

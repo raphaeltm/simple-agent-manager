@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { LogViewer } from '../../../../src/components/admin/LogViewer';
 import type { AdminLogEntry } from '@simple-agent-manager/shared';
+import { render, screen } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
+import { LogViewer } from '../../../../src/components/admin/LogViewer';
 
 // Mock the useAdminLogQuery hook
 const mockUseAdminLogQuery = vi.fn();

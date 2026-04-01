@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import type { UseTabShortcutsReturn, TabShortcutActions } from '../types/multi-terminal';
+
+import type { TabShortcutActions,UseTabShortcutsReturn } from '../types/multi-terminal';
 
 /**
  * Hook for handling keyboard shortcuts for terminal tabs

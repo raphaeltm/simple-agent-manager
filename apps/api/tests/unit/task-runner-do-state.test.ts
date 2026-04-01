@@ -4,9 +4,10 @@
  * Validates the DO's structure, state schema, step handlers, alarm dispatch,
  * retry logic, and safety mechanisms via source code analysis.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 const doSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),

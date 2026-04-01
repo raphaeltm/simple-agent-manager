@@ -1,22 +1,23 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
-  filterMessages,
-  chunkMessages,
-  formatMessagesForPrompt,
-  buildHeuristicSummary,
-  summarizeSession,
-  getSummarizeConfig,
-  type SummarizeMessage,
-  type TaskContext,
-} from '../../../src/services/session-summarize';
-import {
-  DEFAULT_CONTEXT_SUMMARY_MODEL,
   DEFAULT_CONTEXT_SUMMARY_MAX_LENGTH,
-  DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS,
   DEFAULT_CONTEXT_SUMMARY_MAX_MESSAGES,
+  DEFAULT_CONTEXT_SUMMARY_MODEL,
   DEFAULT_CONTEXT_SUMMARY_RECENT_MESSAGES,
   DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD,
+  DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
+import {
+  buildHeuristicSummary,
+  chunkMessages,
+  filterMessages,
+  formatMessagesForPrompt,
+  getSummarizeConfig,
+  type SummarizeMessage,
+  summarizeSession,
+  type TaskContext,
+} from '../../../src/services/session-summarize';
 
 // Mock @mastra/core/agent
 const mockGenerate = vi.fn();

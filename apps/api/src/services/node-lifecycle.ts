@@ -6,9 +6,10 @@
  *
  * See: specs/021-task-chat-architecture/tasks.md (Phase 5)
  */
-import type { Env } from '../index';
-import type { NodeLifecycle } from '../durable-objects/node-lifecycle';
 import type { NodeLifecycleState } from '@simple-agent-manager/shared';
+
+import type { NodeLifecycle } from '../durable-objects/node-lifecycle';
+import type { Env } from '../index';
 
 /**
  * Get a typed DO stub for the given node.

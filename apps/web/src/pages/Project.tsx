@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Outlet, useLocation, useParams } from 'react-router-dom';
 import type { GitHubInstallation, ProjectDetailResponse } from '@simple-agent-manager/shared';
 import { Alert, PageLayout, Spinner } from '@simple-agent-manager/ui';
-import { UserMenu } from '../components/UserMenu';
+import { useCallback, useEffect, useState } from 'react';
+import { Outlet, useLocation, useParams } from 'react-router-dom';
+
 import { useAppShell } from '../components/AppShell';
-import { SettingsDrawer } from '../components/project/SettingsDrawer';
 import { ProjectInfoPanel } from '../components/project/ProjectInfoPanel';
+import { SettingsDrawer } from '../components/project/SettingsDrawer';
+import { UserMenu } from '../components/UserMenu';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { getProject, listGitHubInstallations } from '../lib/api';
 import { ProjectContext } from './ProjectContext';

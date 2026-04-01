@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { getBootLogs, appendBootLog, writeBootLogs } from '../../../src/services/boot-log';
 import type { BootLogEntry } from '@simple-agent-manager/shared';
+import { describe, expect, it, vi } from 'vitest';
+
+import { appendBootLog, getBootLogs, writeBootLogs } from '../../../src/services/boot-log';
 
 function createMockKV(): KVNamespace {
   const store = new Map<string, string>();

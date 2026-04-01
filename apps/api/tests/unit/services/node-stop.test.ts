@@ -7,9 +7,10 @@
  * 3. Marks node and workspaces as 'deleted' (not 'stopped')
  * 4. All deletion paths use consistent 'deleted' terminal status
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('stopNodeResources source contract', () => {
   const file = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');

@@ -1,9 +1,10 @@
-import type { FC } from 'react';
 import type { NodeSystemInfo } from '@simple-agent-manager/shared';
-import { Container } from 'lucide-react';
 import { Skeleton } from '@simple-agent-manager/ui';
-import { SectionHeader } from './SectionHeader';
+import { Container } from 'lucide-react';
+import type { FC } from 'react';
+
 import { Section } from './Section';
+import { SectionHeader } from './SectionHeader';
 
 interface DockerSectionProps {
   docker?: NodeSystemInfo['docker'] | null;

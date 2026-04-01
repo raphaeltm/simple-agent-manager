@@ -1,14 +1,3 @@
-import { Hono } from 'hono';
-import {
-  and,
-  count,
-  desc,
-  eq,
-  gte,
-  lt,
-} from 'drizzle-orm';
-import type { SQL } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import {
   isTaskExecutionStep,
   type ListTaskEventsResponse,
@@ -17,20 +6,44 @@ import {
   type TaskDetailResponse,
   type TaskStatus,
 } from '@simple-agent-manager/shared';
+import type { SQL } from 'drizzle-orm';
 import {
-  jsonValidator,
-  CreateTaskSchema,
-  UpdateTaskSchema,
-  UpdateTaskStatusSchema,
-  CreateTaskDependencySchema,
-  DelegateTaskSchema,
-} from '../../schemas';
-import type { Env } from '../../index';
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  lt,
+} from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
 import * as schema from '../../db/schema';
+import type { Env } from '../../index';
+import { log } from '../../lib/logger';
+import { toDependencyResponse,toTaskResponse } from '../../lib/mappers';
+import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';
-import { getUserId, requireAuth, requireApproved } from '../../middleware/auth';
+import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject, requireOwnedTask, requireOwnedWorkspace } from '../../middleware/project-auth';
+import {
+  CreateTaskDependencySchema,
+  CreateTaskSchema,
+  DelegateTaskSchema,
+  jsonValidator,
+  UpdateTaskSchema,
+  UpdateTaskStatusSchema,
+} from '../../schemas';
+import { verifyCallbackToken } from '../../services/jwt';
+import { getRuntimeLimits } from '../../services/limits';
+import * as notificationService from '../../services/notification';
+import * as projectDataService from '../../services/project-data';
+import {
+  type TaskDependencyEdge,
+  wouldCreateTaskDependencyCycle,
+} from '../../services/task-graph';
+import { cleanupTaskRun } from '../../services/task-runner';
 import {
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
@@ -38,24 +51,12 @@ import {
   isTaskStatus,
 } from '../../services/task-status';
 import {
-  wouldCreateTaskDependencyCycle,
-  type TaskDependencyEdge,
-} from '../../services/task-graph';
-import { getRuntimeLimits } from '../../services/limits';
-import { verifyCallbackToken } from '../../services/jwt';
-import { cleanupTaskRun } from '../../services/task-runner';
-import * as projectDataService from '../../services/project-data';
-import { log } from '../../lib/logger';
-import { toTaskResponse, toDependencyResponse } from '../../lib/mappers';
-import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
-import * as notificationService from '../../services/notification';
-import {
-  parseTaskSortOrder,
-  requireOwnedTaskById,
   appendStatusEvent,
-  getTaskDependencies,
   computeBlockedForTask,
   computeBlockedSet,
+  getTaskDependencies,
+  parseTaskSortOrder,
+  requireOwnedTaskById,
   setTaskStatus,
 } from './_helpers';
 

@@ -9,33 +9,34 @@
  *
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
-import { Hono } from 'hono';
+import type {
+  CredentialProvider,
+  SubmitTaskResponse,
+  TaskAttachment,
+  VMLocation,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
+import { ATTACHMENT_DEFAULTS, CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, MAX_CONTEXT_SUMMARY_BYTES, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type {
-  SubmitTaskResponse,
-  VMSize,
-  VMLocation,
-  WorkspaceProfile,
-  CredentialProvider,
-  TaskAttachment,
-} from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, MAX_CONTEXT_SUMMARY_BYTES, CREDENTIAL_PROVIDERS, ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX, isValidLocationForProvider, getLocationsForProvider, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
-import { jsonValidator, SubmitTaskSchema } from '../../schemas';
-import { validateAttachments } from '../../services/attachment-upload';
-import type { Env } from '../../index';
+import { Hono } from 'hono';
+
 import * as schema from '../../db/schema';
-import { ulid } from '../../lib/ulid';
+import type { Env } from '../../index';
 import { log } from '../../lib/logger';
-import { getAuth, requireAuth, requireApproved } from '../../middleware/auth';
+import { parsePositiveInt } from '../../lib/route-helpers';
+import { ulid } from '../../lib/ulid';
+import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
-import { generateBranchName } from '../../services/branch-name';
-import { startTaskRunnerDO } from '../../services/task-runner-do';
-import * as projectDataService from '../../services/project-data';
-import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
+import { jsonValidator, SubmitTaskSchema } from '../../schemas';
 import { resolveAgentProfile } from '../../services/agent-profiles';
-import { parsePositiveInt } from '../../lib/route-helpers';
+import { validateAttachments } from '../../services/attachment-upload';
+import { generateBranchName } from '../../services/branch-name';
+import * as projectDataService from '../../services/project-data';
+import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
 const DEFAULT_MAX_MESSAGE_LENGTH = 16_000;

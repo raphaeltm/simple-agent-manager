@@ -1,5 +1,3 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
 import type {
   Task,
   TaskDetailResponse,
@@ -8,11 +6,17 @@ import type {
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+
+import { TaskDelegateDialog } from '../components/project/TaskDelegateDialog';
+import { TaskDependencyEditor } from '../components/project/TaskDependencyEditor';
 import { useGlobalAudio } from '../contexts/GlobalAudioContext';
+import { useToast } from '../hooks/useToast';
 import {
   addTaskDependency,
-  deleteProjectTask,
   delegateTask,
+  deleteProjectTask,
   getProjectTask,
   getTtsApiUrl,
   listProjectTasks,
@@ -22,9 +26,6 @@ import {
   updateProjectTask,
   updateProjectTaskStatus,
 } from '../lib/api';
-import { useToast } from '../hooks/useToast';
-import { TaskDependencyEditor } from '../components/project/TaskDependencyEditor';
-import { TaskDelegateDialog } from '../components/project/TaskDelegateDialog';
 import { useProjectContext } from './ProjectContext';
 
 const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {

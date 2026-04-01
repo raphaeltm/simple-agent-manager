@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import { useKeyboardShortcuts } from '../../src/hooks/useKeyboardShortcuts';
 
 function fireKeyDown(overrides: Partial<KeyboardEvent>): KeyboardEvent {

@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   mermaidRender: vi.fn(),

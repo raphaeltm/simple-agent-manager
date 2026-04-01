@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { Button, Card, Spinner, StatusBadge, Body } from '@simple-agent-manager/ui';
+import type { AdminUser, UserStatus } from '@simple-agent-manager/shared';
+import { Body,Button, Card, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import { useCallback, useEffect, useRef,useState } from 'react';
+
 import { useAuth } from '../components/AuthProvider';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { listAdminUsers, approveOrSuspendUser, changeUserRole } from '../lib/api';
-import type { AdminUser, UserStatus } from '@simple-agent-manager/shared';
+import { approveOrSuspendUser, changeUserRole,listAdminUsers } from '../lib/api';
 
 type StatusFilter = 'all' | UserStatus;
 

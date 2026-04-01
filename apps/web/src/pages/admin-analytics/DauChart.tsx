@@ -1,13 +1,13 @@
-import { type FC, useId } from 'react';
 import { Body } from '@simple-agent-manager/ui';
+import { type FC, useId } from 'react';
 import {
-  AreaChart,
   Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
 } from 'recharts';
 
 /** Format date for X-axis ticks — "Mar 5" style. */

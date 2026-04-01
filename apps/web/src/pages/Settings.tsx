@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Outlet } from 'react-router-dom';
-import { listCredentials, getSmokeTestStatus } from '../lib/api';
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, PageLayout, Tabs } from '@simple-agent-manager/ui';
+import { useCallback,useEffect, useState } from 'react';
+import { Outlet } from 'react-router-dom';
+
 import { UserMenu } from '../components/UserMenu';
+import { getSmokeTestStatus,listCredentials } from '../lib/api';
 import { SettingsContext } from './SettingsContext';
 
 const BASE_TABS = [

@@ -16,8 +16,9 @@
  * - Screen-reader aria-live region
  * - Green accent bar when playing
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { fireEvent,render, screen } from '@testing-library/react';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { GlobalAudioPlayer } from '../../../src/components/GlobalAudioPlayer';
 import type { GlobalAudioContextValue } from '../../../src/contexts/GlobalAudioContext';
 

@@ -4,9 +4,9 @@
  * Used across all MCP tool handler files (instruction-tools, task-tools, session-tools, idea-tools).
  */
 import type { Env } from '../../index';
-import { validateMcpToken, type McpTokenData } from '../../services/mcp-token';
-import { parsePositiveInt } from '../../lib/route-helpers';
 import { log } from '../../lib/logger';
+import { parsePositiveInt } from '../../lib/route-helpers';
+import { type McpTokenData,validateMcpToken } from '../../services/mcp-token';
 
 // Re-export McpTokenData for use by tool handler files
 export type { McpTokenData } from '../../services/mcp-token';

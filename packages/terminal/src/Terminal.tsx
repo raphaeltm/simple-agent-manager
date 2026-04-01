@@ -1,9 +1,9 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
+
 import { FitAddon } from '@xterm/addon-fit';
-import type { TerminalProps } from './types';
-import { useWebSocket } from './useWebSocket';
-import { StatusBar } from './StatusBar';
+import { Terminal as XTerm } from '@xterm/xterm';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
 import { ConnectionOverlay } from './ConnectionOverlay';
 import {
   encodeTerminalWsInput,
@@ -11,8 +11,9 @@ import {
   encodeTerminalWsResize,
   parseTerminalWsServerMessage,
 } from './protocol';
-
-import '@xterm/xterm/css/xterm.css';
+import { StatusBar } from './StatusBar';
+import type { TerminalProps } from './types';
+import { useWebSocket } from './useWebSocket';
 
 const MAX_RETRIES = 5;
 const PING_INTERVAL_MS = 30_000;

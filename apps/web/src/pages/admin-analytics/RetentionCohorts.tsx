@@ -1,5 +1,6 @@
-import { type FC } from 'react';
 import { Body } from '@simple-agent-manager/ui';
+import { type FC } from 'react';
+
 import type { AnalyticsRetentionResponse } from '../../lib/api';
 
 interface Props {

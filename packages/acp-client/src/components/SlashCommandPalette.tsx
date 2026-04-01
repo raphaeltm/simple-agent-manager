@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
+import { forwardRef,useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+
 import type { SlashCommand } from '../types';
 
 /** Maximum number of visible items before scrolling */

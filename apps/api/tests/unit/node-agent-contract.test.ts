@@ -6,28 +6,28 @@
  * parsing follows the documented contract.
  */
 
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
-import { generateKeyPair, exportPKCS8, exportSPKI } from 'jose';
 import {
+  AgentSessionResponseSchema,
+  CallbackTokenClaimsSchema,
+  CreateAgentSessionAgentRequestSchema,
   CreateWorkspaceAgentRequestSchema,
   CreateWorkspaceAgentResponseSchema,
   DeleteWorkspaceAgentResponseSchema,
+  ErrorResponseSchema,
   HealthResponseSchema,
-  CreateAgentSessionAgentRequestSchema,
-  AgentSessionResponseSchema,
-  WorkspaceReadyRequestSchema,
-  WorkspaceReadyResponseSchema,
-  ProvisioningFailedRequestSchema,
-  ProvisioningFailedResponseSchema,
+  JWT_ALGORITHM,
+  JWT_AUDIENCES,
+  MAX_BATCH_SIZE,
+  NodeManagementTokenClaimsSchema,
   PersistMessageBatchRequestSchema,
   PersistMessageBatchResponseSchema,
-  ErrorResponseSchema,
-  CallbackTokenClaimsSchema,
-  NodeManagementTokenClaimsSchema,
-  JWT_AUDIENCES,
-  JWT_ALGORITHM,
-  MAX_BATCH_SIZE,
+  ProvisioningFailedRequestSchema,
+  ProvisioningFailedResponseSchema,
+  WorkspaceReadyRequestSchema,
+  WorkspaceReadyResponseSchema,
 } from '@simple-agent-manager/shared';
+import { exportPKCS8, exportSPKI,generateKeyPair } from 'jose';
+import { afterEach,beforeAll, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
 // Key generation for JWT tests

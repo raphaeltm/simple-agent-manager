@@ -6,21 +6,22 @@
  * Generates a presigned PUT URL that the browser uses to upload a file directly
  * to R2. The Worker is not in the upload path — only in the URL generation path.
  */
-import { Hono } from 'hono';
-import { drizzle } from 'drizzle-orm/d1';
+import type { RequestAttachmentUploadResponse } from '@simple-agent-manager/shared';
 import {
   ATTACHMENT_DEFAULTS,
   SAFE_FILENAME_REGEX,
 } from '@simple-agent-manager/shared';
-import type { RequestAttachmentUploadResponse } from '@simple-agent-manager/shared';
-import { jsonValidator, RequestAttachmentUploadSchema } from '../../schemas';
-import type { Env } from '../../index';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
 import * as schema from '../../db/schema';
-import { getAuth, requireAuth, requireApproved } from '../../middleware/auth';
-import { requireOwnedProject } from '../../middleware/project-auth';
-import { errors } from '../../middleware/error';
-import { ulid } from '../../lib/ulid';
+import type { Env } from '../../index';
 import { log } from '../../lib/logger';
+import { ulid } from '../../lib/ulid';
+import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
+import { errors } from '../../middleware/error';
+import { requireOwnedProject } from '../../middleware/project-auth';
+import { jsonValidator, RequestAttachmentUploadSchema } from '../../schemas';
 import { generatePresignedUploadUrl } from '../../services/attachment-upload';
 
 const uploadRoutes = new Hono<{ Bindings: Env }>();

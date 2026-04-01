@@ -1,6 +1,7 @@
-import { type FC, useState, useCallback, useEffect } from 'react';
-import { Globe, Loader2, X, Monitor } from 'lucide-react';
-import { Button, Alert } from '@simple-agent-manager/ui';
+import { Alert,Button } from '@simple-agent-manager/ui';
+import { Globe, Loader2, Monitor,X } from 'lucide-react';
+import { type FC, useCallback, useEffect,useState } from 'react';
+
 import { useBrowserSidecar } from '../hooks/useBrowserSidecar';
 
 interface BrowserSidecarSessionProps {

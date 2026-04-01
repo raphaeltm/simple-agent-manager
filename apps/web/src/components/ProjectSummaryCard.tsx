@@ -1,6 +1,6 @@
-import { useNavigate } from 'react-router-dom';
-import { Card, StatusBadge, DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
 import type { ProjectSummary } from '@simple-agent-manager/shared';
+import { Card, DropdownMenu, type DropdownMenuItem,StatusBadge } from '@simple-agent-manager/ui';
+import { useNavigate } from 'react-router-dom';
 
 interface ProjectSummaryCardProps {
   project: ProjectSummary;

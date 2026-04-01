@@ -8,14 +8,14 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import * as projectDataService from '../../services/project-data';
 import {
-  type McpTokenData,
+  getMcpLimits,
+  INVALID_PARAMS,
+  jsonRpcError,
   type JsonRpcResponse,
   jsonRpcSuccess,
-  jsonRpcError,
-  INVALID_PARAMS,
-  sanitizeUserInput,
-  getMcpLimits,
+  type McpTokenData,
   resolveSessionId,
+  sanitizeUserInput,
 } from './_helpers';
 
 export async function handleLinkIdea(

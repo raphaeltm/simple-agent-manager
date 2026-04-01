@@ -6,12 +6,13 @@
  * See specs/023-admin-observability/data-model.md for entity definitions.
  */
 
+import type { PlatformErrorLevel,PlatformErrorSource } from '@simple-agent-manager/shared';
+import { and, count, desc, eq, gte, like, lte, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, gte, lte, like, desc, count, or } from 'drizzle-orm';
+
 import * as observabilitySchema from '../db/observability-schema';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
-import type { PlatformErrorSource, PlatformErrorLevel } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 
 // =============================================================================

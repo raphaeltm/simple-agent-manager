@@ -1,13 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import {
-  isValidLocationForProvider,
-  getLocationsForProvider,
   getDefaultLocationForProvider,
-  PROVIDER_LOCATIONS,
+  getLocationsForProvider,
+  isValidLocationForProvider,
   PROVIDER_DEFAULT_LOCATIONS,
-  VM_LOCATIONS,
+  PROVIDER_LOCATIONS,
   resolveProjectScalingConfig,
   SCALING_PARAMS,
+  VM_LOCATIONS,
 } from '../../src/constants';
 
 describe('Provider-Location Validation', () => {

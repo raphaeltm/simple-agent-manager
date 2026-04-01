@@ -5,22 +5,23 @@
  * deployment credential. GCP client libraries use this to auto-exchange
  * tokens via SAM's identity token endpoint.
  */
-import { and, eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-import type { Env } from '../../index';
-import * as schema from '../../db/schema';
 import {
   DEFAULT_GCP_DEPLOY_WIF_POOL_ID,
   DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID,
-  DEFAULT_GCP_STS_TOKEN_URL,
   DEFAULT_GCP_IAM_CREDENTIALS_BASE_URL,
+  DEFAULT_GCP_STS_TOKEN_URL,
 } from '@simple-agent-manager/shared';
+import { and, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../../db/schema';
+import type { Env } from '../../index';
 import {
-  type McpTokenData,
+  INTERNAL_ERROR,
+  jsonRpcError,
   type JsonRpcResponse,
   jsonRpcSuccess,
-  jsonRpcError,
-  INTERNAL_ERROR,
+  type McpTokenData,
 } from './_helpers';
 
 export async function handleGetDeploymentCredentials(

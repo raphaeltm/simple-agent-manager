@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { listGitHubInstallations, getGitHubInstallUrl, listRepositories } from '../lib/api';
-import { Button, Alert, Spinner } from '@simple-agent-manager/ui';
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
+import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
+import { useCallback,useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+
+import { getGitHubInstallUrl, listGitHubInstallations, listRepositories } from '../lib/api';
 
 /**
  * GitHub App section for settings page.

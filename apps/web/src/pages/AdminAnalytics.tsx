@@ -1,16 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
-import { Card, Spinner, Button, Body } from '@simple-agent-manager/ui';
+import { Body,Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { useEffect, useRef,useState } from 'react';
+
 import { useAdminAnalytics } from '../hooks/useAdminAnalytics';
 import {
   DauChart,
   EventsTable,
+  FeatureAdoptionChart,
+  ForwardingStatus,
   FunnelChart,
+  GeoDistribution,
   KpiSummary,
   PeriodSelector,
-  FeatureAdoptionChart,
-  GeoDistribution,
   RetentionCohorts,
-  ForwardingStatus,
   WebsiteTraffic,
 } from './admin-analytics';
 

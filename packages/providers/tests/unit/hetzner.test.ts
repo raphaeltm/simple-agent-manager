@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { HetznerProvider } from '../../src/hetzner';
-import { ProviderError } from '../../src/types';
 import type { VMConfig } from '../../src/types';
+import { ProviderError } from '../../src/types';
 import { createMockServer } from '../fixtures/hetzner-mocks';
 
 describe('HetznerProvider', () => {

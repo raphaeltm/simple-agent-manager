@@ -1,8 +1,8 @@
 /**
  * Valibot schemas and validated mappers for Notification DO SQLite row parsing.
  */
-import * as v from 'valibot';
 import type { NotificationResponse, NotificationType, NotificationUrgency } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import { parseRow } from './project-data/row-schemas';
 

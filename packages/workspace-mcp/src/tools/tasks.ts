@@ -4,8 +4,8 @@
  * - get_task_dependencies: upstream/downstream task dependency graph
  */
 
-import type { WorkspaceMcpConfig } from '../config.js';
 import type { ApiClient } from '../api-client.js';
+import type { WorkspaceMcpConfig } from '../config.js';
 
 interface TaskInfo {
   id: string;

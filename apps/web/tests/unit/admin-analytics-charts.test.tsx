@@ -1,13 +1,14 @@
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
-import { FeatureAdoptionChart } from '../../src/pages/admin-analytics/FeatureAdoptionChart';
-import { GeoDistribution } from '../../src/pages/admin-analytics/GeoDistribution';
-import { RetentionCohorts } from '../../src/pages/admin-analytics/RetentionCohorts';
+import { describe, expect,it } from 'vitest';
+
 import type {
   AnalyticsFeatureAdoptionResponse,
   AnalyticsGeoResponse,
   AnalyticsRetentionResponse,
 } from '../../src/lib/api';
+import { FeatureAdoptionChart } from '../../src/pages/admin-analytics/FeatureAdoptionChart';
+import { GeoDistribution } from '../../src/pages/admin-analytics/GeoDistribution';
+import { RetentionCohorts } from '../../src/pages/admin-analytics/RetentionCohorts';
 
 // ---------------------------------------------------------------------------
 // FeatureAdoptionChart (Recharts-based — renders SVG internally)

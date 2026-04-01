@@ -1,18 +1,18 @@
 /**
  * Message storage, retrieval, batch persistence, search, and sequencing.
  */
-import type { Env } from './types';
-import { generateId } from './types';
 import { log } from '../../lib/logger';
 import {
+  parseChatMessageRow,
+  parseCount,
   parseMaxSeq,
   parseMessageCount,
-  parseWorkspaceId,
-  parseChatMessageRow,
   parseSearchResultRow,
-  parseCount,
+  parseWorkspaceId,
   type SearchResultParsed,
 } from './row-schemas';
+import type { Env } from './types';
+import { generateId } from './types';
 
 /**
  * Returns the next monotonic sequence number for a session's messages.

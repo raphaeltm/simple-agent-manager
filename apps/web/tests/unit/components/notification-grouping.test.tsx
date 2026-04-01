@@ -17,10 +17,10 @@
  *  - Unread badge count within a group is accurate
  *  - notification.updated WebSocket message patches the list in-place
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
 import type { NotificationResponse } from '@simple-agent-manager/shared';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mock useNotifications so we can inject notifications without WebSocket setup

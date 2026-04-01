@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { fireEvent,render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
 import { CommandPalette } from '../../src/components/CommandPalette';
-import { getPaletteShortcuts } from '../../src/lib/keyboard-shortcuts';
 import type { WorkspaceTabItem } from '../../src/components/WorkspaceTabStrip';
+import { getPaletteShortcuts } from '../../src/lib/keyboard-shortcuts';
 
 function makeTabs(...specs: Array<[string, string, 'terminal' | 'chat']>): WorkspaceTabItem[] {
   return specs.map(([id, title, kind]) => ({

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { getBlockedTaskIds, isTaskBlocked, wouldCreateTaskDependencyCycle } from '../../../src/services/task-graph';
 
 describe('task-graph service', () => {

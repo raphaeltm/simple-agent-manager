@@ -12,9 +12,10 @@
  *
  * Source contract test — verifies correct wiring across modules.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('workspace lifecycle synchronization', () => {
   const lifecycleFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8');

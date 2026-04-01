@@ -11,8 +11,9 @@
  *
  * See docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import { AppError } from '../../src/middleware/error';
 
 // Mock better-auth before any route imports

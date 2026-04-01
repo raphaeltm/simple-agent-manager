@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+
 import { registerAppServiceWorker } from '../../../src/lib/pwa';
 
 function createWindowStub(readyState: DocumentReadyState = 'complete') {

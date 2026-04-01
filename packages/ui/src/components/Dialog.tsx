@@ -43,6 +43,7 @@ export function Dialog({ isOpen, onClose, children, maxWidth = 'md' }: DialogPro
       role="dialog"
       aria-modal="true"
     >
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- backdrop overlay; keyboard dismiss handled by Escape listener above */}
       <div
         className="fixed inset-0 bg-overlay transition-opacity duration-150 ease-in-out"
         onClick={onClose}

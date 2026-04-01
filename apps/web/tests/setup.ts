@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom/vitest';
+
 import { vi } from 'vitest';
 
 // jsdom does not implement window.matchMedia — stub it globally for useIsMobile hook

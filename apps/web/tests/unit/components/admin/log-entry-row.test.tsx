@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { LogEntryRow, formatLogEntry, formatLogEntries, type LogEntry } from '../../../../src/components/admin/LogEntryRow';
+import { fireEvent,render, screen } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
+import { formatLogEntries, formatLogEntry, type LogEntry,LogEntryRow } from '../../../../src/components/admin/LogEntryRow';
 
 // Mock clipboard API
 const mockWriteText = vi.fn(() => Promise.resolve());

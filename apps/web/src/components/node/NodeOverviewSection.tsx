@@ -1,10 +1,11 @@
-import type { FC } from 'react';
 import type { NodeResponse, NodeSystemInfo } from '@simple-agent-manager/shared';
-import { VM_SIZE_CONFIG, VM_LOCATIONS, PROVIDER_LABELS } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_CONFIG } from '@simple-agent-manager/shared';
 import { StatusBadge } from '@simple-agent-manager/ui';
 import { Server } from 'lucide-react';
-import { SectionHeader } from './SectionHeader';
+import type { FC } from 'react';
+
 import { Section } from './Section';
+import { SectionHeader } from './SectionHeader';
 
 interface NodeOverviewSectionProps {
   node: NodeResponse;

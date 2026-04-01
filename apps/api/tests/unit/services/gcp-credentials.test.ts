@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { serializeCredentialToken, buildProviderConfig } from '../../../src/services/provider-credentials';
+import { describe, expect,it } from 'vitest';
+
+import { buildProviderConfig,serializeCredentialToken } from '../../../src/services/provider-credentials';
 
 describe('GCP credential serialization', () => {
   const gcpFields = {

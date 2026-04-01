@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
 import type { Task, TaskDependency } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
+import { useMemo, useState } from 'react';
 
 interface TaskDependencyEditorProps {
   task: Task | null;

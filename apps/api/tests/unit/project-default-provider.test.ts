@@ -12,9 +12,10 @@
  *   8. TaskRunner passes cloudProvider to createNodeRecord
  *   9. Settings UI renders provider selector and calls updateProject
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 const apiSrc = (rel: string) =>
   readFileSync(resolve(process.cwd(), 'src', rel), 'utf8');

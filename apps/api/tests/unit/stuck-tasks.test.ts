@@ -6,9 +6,10 @@
  * 2. In-progress tasks with stale heartbeats ARE marked as stuck
  * 3. Tasks without a node are treated as stuck (no heartbeat to check)
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import type { Env } from '../../src/index';
+import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 
 // Mock cleanupTaskRun
 vi.mock('../../src/services/task-runner', () => ({

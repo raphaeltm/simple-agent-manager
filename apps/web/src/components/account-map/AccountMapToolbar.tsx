@@ -1,5 +1,6 @@
+import { Eye, EyeOff,RotateCcw, Search, X } from 'lucide-react';
 import type { FC } from 'react';
-import { Search, RotateCcw, X, Eye, EyeOff } from 'lucide-react';
+
 import type { EntityType } from './hooks/useMapFilters';
 
 interface FilterChip {

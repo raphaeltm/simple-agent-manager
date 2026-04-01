@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { NOTIFICATION_MIGRATIONS, runNotificationMigrations } from '../../../src/durable-objects/notification-migrations';
 
 /**

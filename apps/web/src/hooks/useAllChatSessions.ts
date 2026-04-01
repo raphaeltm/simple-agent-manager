@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { listProjects, listChatSessions } from '../lib/api';
+
 import type { ChatSessionResponse } from '../lib/api';
+import { listChatSessions,listProjects } from '../lib/api';
 import { getLastActivity } from '../lib/chat-session-utils';
 
 /** Default max projects to fetch. Override via VITE_ALL_CHATS_PROJECT_LIMIT. */

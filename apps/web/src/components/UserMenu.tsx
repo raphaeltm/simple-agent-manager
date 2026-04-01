@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
-import { useAuth } from './AuthProvider';
+import { useEffect,useRef, useState } from 'react';
+
 import { signOut } from '../lib/auth';
+import { useAuth } from './AuthProvider';
 
 /**
  * User menu with avatar and dropdown for user-specific actions.

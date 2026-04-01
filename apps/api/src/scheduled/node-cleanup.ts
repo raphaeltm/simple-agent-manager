@@ -19,20 +19,21 @@
  *
  * See: specs/021-task-chat-architecture/tasks.md (T045-T047)
  */
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import {
-  DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
   DEFAULT_MAX_AUTO_NODE_LIFETIME_MS,
+  DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
   DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
 } from '@simple-agent-manager/shared';
-import type { Env } from '../index';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
 import * as schema from '../db/schema';
-import { deleteNodeResources } from '../services/nodes';
-import { stopWorkspaceOnNode } from '../services/node-agent';
-import * as projectDataService from '../services/project-data';
+import type { Env } from '../index';
 import { log } from '../lib/logger';
+import { stopWorkspaceOnNode } from '../services/node-agent';
+import { deleteNodeResources } from '../services/nodes';
 import { persistError } from '../services/observability';
+import * as projectDataService from '../services/project-data';
 
 function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;

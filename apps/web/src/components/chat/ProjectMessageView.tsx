@@ -1,32 +1,33 @@
-import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
+import type { ConversationItem } from '@simple-agent-manager/acp-client';
+import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
 import {
-  VoiceButton,
   MessageBubble as AcpMessageBubble,
-  ToolCallCard as AcpToolCallCard,
-  ThinkingBlock as AcpThinkingBlock,
   PlanView,
   RawFallbackView,
+  ThinkingBlock as AcpThinkingBlock,
+  ToolCallCard as AcpToolCallCard,
+  VoiceButton,
 } from '@simple-agent-manager/acp-client';
-import type { ConversationItem } from '@simple-agent-manager/acp-client';
-import { mapToolCallContent, getErrorMeta } from '@simple-agent-manager/acp-client';
-import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
-import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2, Globe, ExternalLink, FolderOpen, GitCompare, Paperclip } from 'lucide-react';
-import { TruncatedSummary } from './TruncatedSummary';
+import { getErrorMeta,mapToolCallContent } from '@simple-agent-manager/acp-client';
+import type { DetectedPort,NodeResponse, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
+import { Box, CheckCircle2, ChevronDown, ChevronUp, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, Globe, MapPin, Paperclip,Server } from 'lucide-react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
-import { ChatFilePanel } from './ChatFilePanel';
+import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
+import { useChatWebSocket } from '../../hooks/useChatWebSocket';
+import { useProjectAgentSession } from '../../hooks/useProjectAgentSession';
+import { useTokenRefresh } from '../../hooks/useTokenRefresh';
+import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
+import type { ChatMessageResponse, ChatSessionDetailResponse,ChatSessionResponse } from '../../lib/api';
+import { deleteWorkspace, getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getTtsApiUrl, getWorkspace, resetIdleTimer, resumeAgentSession, saveCachedCommands, updateProjectTaskStatus, uploadSessionFiles } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
-import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken, resumeAgentSession, saveCachedCommands, uploadSessionFiles } from '../../lib/api';
-import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
-import { useTokenRefresh } from '../../hooks/useTokenRefresh';
-import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
-import type { WorkspaceResponse, NodeResponse, VMSize, DetectedPort } from '@simple-agent-manager/shared';
-import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
-import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
-import { useProjectAgentSession } from '../../hooks/useProjectAgentSession';
+import { ChatFilePanel } from './ChatFilePanel';
+import { TruncatedSummary } from './TruncatedSummary';
 
 interface ProjectMessageViewProps {
   projectId: string;

@@ -1,6 +1,7 @@
-import { type FC, useState, useCallback } from 'react';
 import type { NodeLogEntry } from '@simple-agent-manager/shared';
-import { highlightText, CopyButton } from '../shared/log';
+import { type FC, useCallback,useState } from 'react';
+
+import { CopyButton,highlightText } from '../shared/log';
 
 interface LogEntryProps {
   entry: NodeLogEntry;

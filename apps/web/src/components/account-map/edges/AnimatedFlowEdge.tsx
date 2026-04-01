@@ -1,5 +1,5 @@
+import { type EdgeProps,getBezierPath } from '@xyflow/react';
 import { type FC, useMemo, useSyncExternalStore } from 'react';
-import { getBezierPath, type EdgeProps } from '@xyflow/react';
 
 const PARTICLE_COUNT = 4;
 const CYCLE_DURATION = 3;

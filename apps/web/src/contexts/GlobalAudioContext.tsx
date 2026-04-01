@@ -1,11 +1,11 @@
 import {
   createContext,
-  useContext,
-  useState,
-  useCallback,
-  useRef,
-  useEffect,
   type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
 } from 'react';
 
 /** Playback position polling interval — 4 Hz is smooth enough for the seek bar with low CPU cost. */

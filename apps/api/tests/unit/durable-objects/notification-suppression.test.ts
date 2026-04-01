@@ -10,7 +10,7 @@
  * the real DO class through a minimal mock that mirrors the SqlStorage API.
  * For full end-to-end DO behaviour see tests/workers/ (requires workerd runtime).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // MockSqlStorage — mirrors SqlStorage exec() semantics used by the DO

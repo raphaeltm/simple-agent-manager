@@ -9,14 +9,15 @@
  * to fetch sessions. For accounts with many projects, this can be slow on
  * cold DOs (~5-20ms each). KV caching (30s TTL) absorbs repeated reads.
  */
-import { Hono } from 'hono';
-import { eq, and, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Env } from '../index';
+import { Hono } from 'hono';
+
 import * as schema from '../db/schema';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
-import * as projectDataService from '../services/project-data';
+import type { Env } from '../index';
 import { log } from '../lib/logger';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import * as projectDataService from '../services/project-data';
 
 /**
  * Statuses considered "active" for each entity type when activeOnly=true.

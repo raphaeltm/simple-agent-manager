@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getWorkspaceInfo, getCredentialStatus } from '../../src/tools/identity.js';
-import type { WorkspaceMcpConfig } from '../../src/config.js';
+import { afterEach,beforeEach, describe, expect, it } from 'vitest';
+
 import type { ApiClient } from '../../src/api-client.js';
+import type { WorkspaceMcpConfig } from '../../src/config.js';
+import { getCredentialStatus,getWorkspaceInfo } from '../../src/tools/identity.js';
 
 function makeConfig(overrides: Partial<WorkspaceMcpConfig> = {}): WorkspaceMcpConfig {
   return {

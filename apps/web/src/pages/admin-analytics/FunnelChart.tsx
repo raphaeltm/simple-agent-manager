@@ -1,5 +1,5 @@
-import { type FC } from 'react';
 import { Body } from '@simple-agent-manager/ui';
+import { type FC } from 'react';
 
 const FUNNEL_STEPS = ['signup', 'login', 'project_created', 'workspace_created', 'task_submitted'];
 const FUNNEL_LABELS: Record<string, string> = {

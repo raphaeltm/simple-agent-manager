@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { WorkspaceCard } from '../../../src/components/WorkspaceCard';
 import { useIsStandalone } from '../../../src/hooks/useIsStandalone';
-import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 
 vi.mock('../../../src/hooks/useIsStandalone', () => ({
   useIsStandalone: vi.fn(),

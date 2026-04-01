@@ -1,12 +1,13 @@
-import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Env } from '../../index';
+import { Hono } from 'hono';
+
 import * as schema from '../../db/schema';
-import { getUserId, requireAuth, requireApproved } from '../../middleware/auth';
+import type { Env } from '../../index';
+import { log } from '../../lib/logger';
+import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { signTerminalToken } from '../../services/jwt';
 import { getOwnedWorkspace, isActiveWorkspaceStatus } from './_helpers';
-import { log } from '../../lib/logger';
 
 const browserRoutes = new Hono<{ Bindings: Env }>();
 

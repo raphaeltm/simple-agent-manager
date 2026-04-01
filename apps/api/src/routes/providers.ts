@@ -1,15 +1,16 @@
-import { Hono } from 'hono';
-import { and, eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
 import type { CredentialProvider, ProviderCatalog, ProviderCatalogResponse, SizeInfo, VMSize } from '@simple-agent-manager/shared';
-import type { Env } from '../index';
-import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
+import { and, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
 import * as schema from '../db/schema';
-import { decrypt } from '../services/encryption';
-import { buildProviderConfig, parseGcpCredential } from '../services/provider-credentials';
+import type { Env } from '../index';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
+import { decrypt } from '../services/encryption';
+import { buildProviderConfig, parseGcpCredential } from '../services/provider-credentials';
 
 const providersRoutes = new Hono<{ Bindings: Env }>();
 

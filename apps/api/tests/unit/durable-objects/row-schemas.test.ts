@@ -9,42 +9,43 @@
  * - JSON string fields are parsed (toolMetadata, payload)
  * - Aggregate helpers extract the correct scalar value
  */
-import { describe, it, expect } from 'vitest';
+import * as v from 'valibot';
+import { describe, expect,it } from 'vitest';
+
 import {
-  parseRow,
-  parseCountCnt,
-  parseCount,
-  parseMaxSeq,
-  parseMaterializationCheck,
-  parseMinEarliest,
-  parseMaxLatest,
-  parseMessageCount,
-  parseWorkspaceId,
-  parseEnabled,
-  parseCleanupAt,
-  parseAcpSessionRow,
   parseAcpSessionHeartbeatCheck,
   parseAcpSessionLineage,
+  parseAcpSessionRow,
   parseAcpSessionStale,
+  parseActivityEventRow,
+  parseCachedCommandRow,
   parseChatMessageRow,
-  parseSearchResultRow,
   parseChatSessionListRow,
-  parseSessionStop,
-  parseSessionStatus,
+  parseCleanupAt,
+  parseCount,
+  parseCountCnt,
+  parseEnabled,
+  parseIdeaSessionDetail,
+  parseIdleCleanupSchedule,
+  parseMaterializationCheck,
   parseMaterializationCheck,
   parseMaterializationToken,
-  parseRowid,
-  parseSessionId,
-  parseIdleCleanupSchedule,
-  parseWorkspaceActivity,
-  parseSessionIdeaLink,
-  parseIdeaSessionDetail,
-  parseCachedCommandRow,
-  parseActivityEventRow,
-  parseMigrationName,
+  parseMaxLatest,
+  parseMaxSeq,
+  parseMessageCount,
   parseMetaValue,
+  parseMigrationName,
+  parseMinEarliest,
+  parseRow,
+  parseRowid,
+  parseSearchResultRow,
+  parseSessionId,
+  parseSessionIdeaLink,
+  parseSessionStatus,
+  parseSessionStop,
+  parseWorkspaceActivity,
+  parseWorkspaceId,
 } from '../../../src/durable-objects/project-data/row-schemas';
-import * as v from 'valibot';
 
 // =============================================================================
 // Generic helpers

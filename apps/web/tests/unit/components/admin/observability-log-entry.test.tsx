@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { ObservabilityLogEntry } from '../../../../src/components/admin/ObservabilityLogEntry';
 import type { PlatformError } from '@simple-agent-manager/shared';
+import { fireEvent,render, screen } from '@testing-library/react';
+import { describe, expect,it } from 'vitest';
+
+import { ObservabilityLogEntry } from '../../../../src/components/admin/ObservabilityLogEntry';
 
 function createEntry(overrides: Partial<PlatformError> = {}): PlatformError {
   return {

@@ -11,9 +11,11 @@
  * Uses source contract tests for the DO step handlers (which can't be
  * instantiated directly) and behavioral tests for pure helper functions.
  */
-import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect,it } from 'vitest';
+
 import { parseEnvInt } from '../../src/durable-objects/task-runner-helpers';
 
 const doSource = readFileSync(

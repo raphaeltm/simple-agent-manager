@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import {
-  validateCreateWorkspaceRequest,
   extractRepoName,
+  validateCreateWorkspaceRequest,
 } from '../../src/lib/validation';
 
 describe('validateCreateWorkspaceRequest', () => {

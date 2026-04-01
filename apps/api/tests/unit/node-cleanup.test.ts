@@ -5,9 +5,10 @@
  * 1. Layer 3 max lifetime skips nodes with active workspaces (no absolute ceiling)
  * 2. Nodes without active workspaces are destroyed normally
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import type { Env } from '../../src/index';
+import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 
 // Mock deleteNodeResources
 vi.mock('../../src/services/nodes', () => ({

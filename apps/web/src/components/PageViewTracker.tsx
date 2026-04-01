@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { track, getInitialReferrer } from '../lib/analytics';
+
+import { getInitialReferrer,track } from '../lib/analytics';
 
 /**
  * Invisible component that tracks page views on route changes.

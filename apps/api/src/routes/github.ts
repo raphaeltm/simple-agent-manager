@@ -1,22 +1,23 @@
-import { Hono } from 'hono';
+import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
+import { and,eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and } from 'drizzle-orm';
-import { ulid } from '../lib/ulid';
+import { Hono } from 'hono';
+
+import * as schema from '../db/schema';
 import type { Env } from '../index';
-import { requireAuth, requireApproved, getUserId, optionalAuth } from '../middleware/auth';
+import { log } from '../lib/logger';
+import { getWebhookSecret } from '../lib/secrets';
+import { ulid } from '../lib/ulid';
+import { getUserId, optionalAuth,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
+  generateAppJWT,
+  getAppInstallations,
   getInstallationRepositories,
   getInstallationToken,
   getRepositoryBranches,
-  getAppInstallations,
   verifyWebhookSignature,
-  generateAppJWT,
 } from '../services/github-app';
-import * as schema from '../db/schema';
-import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
-import { getWebhookSecret } from '../lib/secrets';
-import { log } from '../lib/logger';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 

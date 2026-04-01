@@ -4,13 +4,13 @@
  * Tests the state machine transition rules defined in shared types.
  * These are pure logic tests — no Miniflare or SQL storage needed.
  */
-import { describe, it, expect } from 'vitest';
-import {
-  ACP_SESSION_VALID_TRANSITIONS,
-  ACP_SESSION_TERMINAL_STATUSES,
-  ACP_SESSION_DEFAULTS,
-} from '@simple-agent-manager/shared';
 import type { AcpSessionStatus } from '@simple-agent-manager/shared';
+import {
+  ACP_SESSION_DEFAULTS,
+  ACP_SESSION_TERMINAL_STATUSES,
+  ACP_SESSION_VALID_TRANSITIONS,
+} from '@simple-agent-manager/shared';
+import { describe, expect,it } from 'vitest';
 
 const ALL_STATUSES: AcpSessionStatus[] = [
   'pending',

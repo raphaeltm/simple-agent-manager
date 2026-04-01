@@ -1,7 +1,8 @@
+import { Body, Button, Card, Container, PageTitle, Secondary } from '@simple-agent-manager/ui';
 import { Clock } from 'lucide-react';
-import { Button, Card, Container, PageTitle, Body, Secondary } from '@simple-agent-manager/ui';
-import { signOut } from '../lib/auth';
+
 import { useAuth } from '../components/AuthProvider';
+import { signOut } from '../lib/auth';
 
 /**
  * Page shown to authenticated users whose account is pending admin approval.

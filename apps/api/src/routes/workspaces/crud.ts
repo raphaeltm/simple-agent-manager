@@ -1,26 +1,27 @@
-import { Hono } from 'hono';
+import { DEFAULT_VM_LOCATION,DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { ulid } from '../../lib/ulid';
-import type { Env } from '../../index';
-import { getAuth, getUserId, requireAuth, requireApproved } from '../../middleware/auth';
-import { errors } from '../../middleware/error';
+import { Hono } from 'hono';
+
 import * as schema from '../../db/schema';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION } from '@simple-agent-manager/shared';
-import { jsonValidator, UpdateWorkspaceSchema, CreateWorkspaceSchema } from '../../schemas';
+import type { Env } from '../../index';
+import { log } from '../../lib/logger';
+import { toWorkspaceResponse } from '../../lib/mappers';
+import { ulid } from '../../lib/ulid';
+import { getAuth, getUserId, requireApproved,requireAuth } from '../../middleware/auth';
+import { errors } from '../../middleware/error';
+import { requireOwnedProject } from '../../middleware/project-auth';
+import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspaceSchema } from '../../schemas';
 import { getRuntimeLimits } from '../../services/limits';
-import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
-import { createNodeRecord, provisionNode } from '../../services/nodes';
 import {
   deleteWorkspaceOnNode,
   waitForNodeAgentReady,
 } from '../../services/node-agent';
-import { recordNodeRoutingMetric } from '../../services/telemetry';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { createNodeRecord, provisionNode } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
-import { log } from '../../lib/logger';
-import { toWorkspaceResponse } from '../../lib/mappers';
-import { getOwnedWorkspace, getOwnedNode, scheduleWorkspaceCreateOnNode } from './_helpers';
+import { recordNodeRoutingMetric } from '../../services/telemetry';
+import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
+import { getOwnedNode, getOwnedWorkspace, scheduleWorkspaceCreateOnNode } from './_helpers';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { stripMarkdown } from '../../../src/lib/text-utils';
 
 describe('stripMarkdown', () => {

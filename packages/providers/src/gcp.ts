@@ -1,7 +1,8 @@
 import type { VMSize } from '@simple-agent-manager/shared';
-import type { Provider, VMConfig, VMInstance, SizeConfig, LocationMeta } from './types';
-import { ProviderError } from './types';
+
 import { providerFetch } from './provider-fetch';
+import type { LocationMeta,Provider, SizeConfig, VMConfig, VMInstance } from './types';
+import { ProviderError } from './types';
 
 const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
 

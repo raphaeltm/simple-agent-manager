@@ -7,19 +7,20 @@
  *
  * See: specs/022-simplified-chat-ux/tasks.md (T038-T040)
  */
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import type { ProjectRuntimeConfigResponse, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
+import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+import { useToast } from '../../hooks/useToast';
 import {
+  deleteProjectRuntimeEnvVar,
+  deleteProjectRuntimeFile,
   getProjectRuntimeConfig,
   updateProject,
   upsertProjectRuntimeEnvVar,
-  deleteProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
-  deleteProjectRuntimeFile,
 } from '../../lib/api';
-import { useToast } from '../../hooks/useToast';
 import { useProjectContext } from '../../pages/ProjectContext';
 import { DeploymentSettings } from '../DeploymentSettings';
 

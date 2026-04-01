@@ -1,22 +1,23 @@
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
-import {
-  X, ChevronRight, Folder, FileText, Image, RefreshCw, ArrowLeft, Download,
-} from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
-import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
-import { SyntaxHighlightedCode, RenderedMarkdown } from '../MarkdownRenderer';
 import {
-  getSessionFileList,
-  getSessionFileContent,
-  getSessionFileRawUrl,
-  getSessionGitStatus,
-  getSessionGitDiff,
+ArrowLeft, ChevronRight, Download,
+FileText, Folder, Image, RefreshCw,   X, } from 'lucide-react';
+import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+
+import {
   downloadSessionFile,
   type FileEntry,
-  type GitStatusData,
+  getSessionFileContent,
+  getSessionFileList,
+  getSessionFileRawUrl,
+  getSessionGitDiff,
+  getSessionGitStatus,
   type GitFileStatus,
+  type GitStatusData,
 } from '../../lib/api';
 import { isImageFile } from '../../lib/file-utils';
+import { RenderedMarkdown,SyntaxHighlightedCode } from '../MarkdownRenderer';
+import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
 
 export type FilePanelMode = 'browse' | 'view' | 'diff' | 'git-status';
 

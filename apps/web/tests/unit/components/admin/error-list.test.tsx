@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { ErrorList } from '../../../../src/components/admin/ErrorList';
 import type { PlatformError } from '@simple-agent-manager/shared';
+import { render, screen } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
+import { ErrorList } from '../../../../src/components/admin/ErrorList';
 
 // Mock the useAdminErrors hook
 const mockUseAdminErrors = vi.fn();

@@ -1,8 +1,9 @@
-import type { FC } from 'react';
 import type { Event } from '@simple-agent-manager/shared';
 import { Activity } from 'lucide-react';
-import { SectionHeader } from './SectionHeader';
+import type { FC } from 'react';
+
 import { Section } from './Section';
+import { SectionHeader } from './SectionHeader';
 
 interface NodeEventsSectionProps {
   events: Event[];

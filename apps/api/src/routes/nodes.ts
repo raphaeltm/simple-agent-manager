@@ -1,20 +1,20 @@
-import { Hono } from 'hono';
-import type { Context } from 'hono';
+import type { NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, getLocationsForProvider,isValidLocationForProvider } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, isValidLocationForProvider, getLocationsForProvider } from '@simple-agent-manager/shared';
-import { jsonValidator, CreateNodeSchema, NodeHeartbeatSchema, NodeErrorBatchSchema } from '../schemas';
+import type { Context } from 'hono';
+import { Hono } from 'hono';
+
+import * as schema from '../db/schema';
 import type { Env } from '../index';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
+import { log } from '../lib/logger';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
-import * as schema from '../db/schema';
-import { getRuntimeLimits } from '../services/limits';
-import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
+import { CreateNodeSchema, jsonValidator, NodeErrorBatchSchema,NodeHeartbeatSchema } from '../schemas';
+import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import { shouldRefreshCallbackToken, signCallbackToken, signNodeCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
-import { recordNodeRoutingMetric } from '../services/telemetry';
-import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
+import { getRuntimeLimits } from '../services/limits';
 import {
   createWorkspaceOnNode,
   getNodeLogsFromNode,
@@ -22,8 +22,9 @@ import {
   listNodeEventsOnNode,
   stopWorkspaceOnNode,
 } from '../services/node-agent';
-import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
-import { log } from '../lib/logger';
+import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
+import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
+import { recordNodeRoutingMetric } from '../services/telemetry';
 
 const nodesRoutes = new Hono<{ Bindings: Env }>();
 

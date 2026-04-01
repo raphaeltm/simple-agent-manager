@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
 import type { AgentSession } from '@simple-agent-manager/shared';
+import { useEffect, useRef } from 'react';
 
 interface OrphanedSessionsBannerProps {
   orphanedSessions: AgentSession[];

@@ -3,13 +3,14 @@
  * to match the existing API error response format: { error: string, message: string }.
  */
 import { vValidator } from '@hono/valibot-validator';
-import * as v from 'valibot';
-import { log } from '../lib/logger';
 import type {
   GenericSchema,
   GenericSchemaAsync,
   InferOutput,
 } from 'valibot';
+import * as v from 'valibot';
+
+import { log } from '../lib/logger';
 
 /**
  * Formats Valibot issues into a human-readable error message string.

@@ -1,12 +1,13 @@
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import {
   EXECUTION_STEP_LABELS,
   EXECUTION_STEP_ORDER,
-  TASK_EXECUTION_STEPS,
   isTaskExecutionStep,
+  TASK_EXECUTION_STEPS,
 } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 const srcRoot = join(__dirname, '../../src');
 

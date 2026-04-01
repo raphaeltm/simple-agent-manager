@@ -1,6 +1,6 @@
-import { sqliteTable, text, integer, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
-import { sql } from 'drizzle-orm';
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import { sql } from 'drizzle-orm';
+import { index, integer, primaryKey,sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // =============================================================================
 // Users (BetterAuth compatible + custom fields)

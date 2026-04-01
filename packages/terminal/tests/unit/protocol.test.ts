@@ -1,14 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import {
-  encodeTerminalWsInput,
-  encodeTerminalWsPing,
-  encodeTerminalWsResize,
   encodeTerminalWsCreateSession,
+  encodeTerminalWsInput,
   encodeTerminalWsListSessions,
+  encodeTerminalWsPing,
   encodeTerminalWsReattachSession,
-  isSessionReattachedMessage,
+  encodeTerminalWsResize,
   isScrollbackMessage,
   isSessionListMessage,
+  isSessionReattachedMessage,
   parseTerminalWsServerMessage,
 } from '../../src/protocol';
 

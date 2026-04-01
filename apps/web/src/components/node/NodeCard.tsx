@@ -1,9 +1,10 @@
+import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import { Button, Card, DropdownMenu, type DropdownMenuItem,StatusBadge } from '@simple-agent-manager/ui';
+import { Plus,Server } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { VM_SIZE_LABELS, VM_LOCATIONS, PROVIDER_LABELS } from '@simple-agent-manager/shared';
-import { Card, Button, StatusBadge, DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
-import { Server, Plus } from 'lucide-react';
+
 import { MiniMetricBadge } from './MiniMetricBadge';
 import { NodeWorkspaceMiniCard } from './NodeWorkspaceMiniCard';
 

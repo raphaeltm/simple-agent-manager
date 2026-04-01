@@ -6,8 +6,8 @@
  *
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
-import type { Env } from '../index';
 import type { ProjectData } from '../durable-objects/project-data';
+import type { Env } from '../index';
 
 /**
  * Get a typed DO stub for the given project and ensure the DO knows its projectId.
@@ -340,8 +340,8 @@ export async function listActivityEvents(
 
 import type {
   AcpSession,
-  AcpSessionStatus,
   AcpSessionEventActorType,
+  AcpSessionStatus,
 } from '@simple-agent-manager/shared';
 
 export async function createAcpSession(

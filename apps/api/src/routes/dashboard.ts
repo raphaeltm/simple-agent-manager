@@ -4,21 +4,22 @@
  * Provides aggregated views of active tasks with session enrichment
  * from per-project Durable Objects.
  */
-import { Hono } from 'hono';
-import { and, eq, inArray } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import {
-  DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS,
   type DashboardActiveTasksResponse,
   type DashboardTask,
+  DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS,
   type TaskExecutionStep,
   type TaskStatus,
 } from '@simple-agent-manager/shared';
-import type { Env } from '../index';
+import { and, eq, inArray } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
 import * as schema from '../db/schema';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
-import * as projectDataService from '../services/project-data';
+import type { Env } from '../index';
 import { log } from '../lib/logger';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import * as projectDataService from '../services/project-data';
 
 const dashboardRoutes = new Hono<{ Bindings: Env }>();
 

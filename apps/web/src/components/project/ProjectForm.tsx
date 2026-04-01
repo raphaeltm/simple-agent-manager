@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useState, type FormEvent } from 'react';
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
 import { Button, Input } from '@simple-agent-manager/ui';
+import { type FormEvent,useCallback, useMemo, useState } from 'react';
+
 import { listBranches } from '../../lib/api';
-import { RepoSelector } from '../RepoSelector';
 import { BranchSelector } from '../BranchSelector';
+import { RepoSelector } from '../RepoSelector';
 
 export interface ProjectFormValues {
   name: string;

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import type { AgentSession } from '@simple-agent-manager/shared';
-import { isSessionActive, isOrphanedSession } from '../../../src/lib/session-utils';
+import { describe, expect, it } from 'vitest';
+
+import { isOrphanedSession,isSessionActive } from '../../../src/lib/session-utils';
 
 function makeSession(
   overrides: Partial<AgentSession> = {}

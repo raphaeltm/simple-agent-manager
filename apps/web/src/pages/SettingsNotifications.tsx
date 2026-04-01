@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Card } from '@simple-agent-manager/ui';
 import {
   NOTIFICATION_TYPES,
-  type NotificationType,
   type NotificationPreference,
+  type NotificationType,
 } from '@simple-agent-manager/shared';
+import { Card } from '@simple-agent-manager/ui';
+import { useCallback,useEffect, useState } from 'react';
+
 import { getNotificationPreferences, updateNotificationPreference } from '../lib/api';
 
 const TYPE_LABELS: Record<NotificationType, { label: string; description: string }> = {

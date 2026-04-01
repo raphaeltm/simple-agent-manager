@@ -1,5 +1,6 @@
-import { describe, expect, it, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { fireEvent,render, screen } from '@testing-library/react';
+import { beforeEach,describe, expect, it } from 'vitest';
+
 import { CollapsibleSection } from '../../../src/components/CollapsibleSection';
 
 describe('CollapsibleSection', () => {

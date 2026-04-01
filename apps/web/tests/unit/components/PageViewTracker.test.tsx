@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { act,render } from '@testing-library/react';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { PageViewTracker } from '../../../src/components/PageViewTracker';
 
 // Mock the analytics module so we can assert on track() calls
@@ -9,7 +10,7 @@ vi.mock('../../../src/lib/analytics', () => ({
   getInitialReferrer: vi.fn().mockReturnValue('https://google.com'),
 }));
 
-import { track, getInitialReferrer } from '../../../src/lib/analytics';
+import { getInitialReferrer,track } from '../../../src/lib/analytics';
 const mockTrack = vi.mocked(track);
 const mockGetInitialReferrer = vi.mocked(getInitialReferrer);
 

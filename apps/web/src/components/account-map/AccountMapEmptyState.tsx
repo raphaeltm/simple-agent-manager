@@ -1,5 +1,5 @@
-import type { FC } from 'react';
 import { Map } from 'lucide-react';
+import type { FC } from 'react';
 
 export const AccountMapEmptyState: FC = () => (
   <div className="flex flex-col items-center justify-center h-full text-center px-6">

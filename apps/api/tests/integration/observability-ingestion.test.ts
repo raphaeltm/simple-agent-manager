@@ -12,9 +12,10 @@
  * Uses source-code analysis to verify integration wiring without Miniflare,
  * consistent with existing integration test patterns in this project.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('observability error ingestion pipeline', () => {
   const clientErrorsRoute = readFileSync(resolve(process.cwd(), 'src/routes/client-errors.ts'), 'utf8');

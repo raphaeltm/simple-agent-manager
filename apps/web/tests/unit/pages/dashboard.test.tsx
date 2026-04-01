@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   listProjects: vi.fn(),
@@ -44,8 +44,8 @@ vi.mock('../../../src/components/ProjectSummaryCard', () => ({
   ),
 }));
 
-import { Dashboard } from '../../../src/pages/Dashboard';
 import { ToastProvider } from '../../../src/hooks/useToast';
+import { Dashboard } from '../../../src/pages/Dashboard';
 
 const sampleProject = {
   id: 'proj-1',

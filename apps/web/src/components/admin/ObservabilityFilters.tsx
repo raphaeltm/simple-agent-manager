@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, type FC } from 'react';
-import { useIsMobile } from '../../hooks/useIsMobile';
-import type { PlatformErrorSource, PlatformErrorLevel } from '@simple-agent-manager/shared';
+import type { PlatformErrorLevel,PlatformErrorSource } from '@simple-agent-manager/shared';
+import { type FC,useEffect, useRef, useState } from 'react';
+
 import type { TimeRange } from '../../hooks/useAdminErrors';
+import { useIsMobile } from '../../hooks/useIsMobile';
 
 interface ObservabilityFiltersProps {
   source: PlatformErrorSource | 'all';

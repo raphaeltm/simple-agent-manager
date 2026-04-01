@@ -7,22 +7,23 @@
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
  */
+import type { AcpSessionEventActorType,AcpSessionStatus } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
-import { runMigrations } from '../migrations';
-import type { AcpSessionStatus, AcpSessionEventActorType } from '@simple-agent-manager/shared';
+
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import type { Env, SummaryData } from './types';
+import { runMigrations } from '../migrations';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
+import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');
-import * as sessions from './sessions';
-import * as messages from './messages';
-import * as materialization from './materialization';
-import * as ideas from './ideas';
-import * as activity from './activity';
 import * as acpSessions from './acp-sessions';
-import * as idleCleanup from './idle-cleanup';
+import * as activity from './activity';
 import * as commands from './commands';
+import * as ideas from './ideas';
+import * as idleCleanup from './idle-cleanup';
+import * as materialization from './materialization';
+import * as messages from './messages';
+import * as sessions from './sessions';
 
 export type { Env } from './types';
 

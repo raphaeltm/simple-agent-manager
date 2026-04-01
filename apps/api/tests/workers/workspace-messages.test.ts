@@ -8,7 +8,8 @@
  * Replaces source-contract tests that only checked string presence in source code.
  */
 import { env, SELF } from 'cloudflare:test';
-import { describe, it, expect, beforeAll } from 'vitest';
+import { beforeAll,describe, expect, it } from 'vitest';
+
 import { signCallbackToken } from '../../src/services/jwt';
 
 // Unique IDs per test to avoid cross-test contamination (isolatedStorage is off)

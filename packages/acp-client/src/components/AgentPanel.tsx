@@ -1,23 +1,24 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback, useImperativeHandle } from 'react';
+import React, { useCallback, useEffect, useImperativeHandle,useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import type { AcpSessionHandle } from '../hooks/useAcpSession';
-import type { AcpMessagesHandle, ConversationItem, PlanItem } from '../hooks/useAcpMessages';
-import type { SlashCommand } from '../types';
+
 import { getErrorMeta } from '../errors';
-import { MessageBubble } from './MessageBubble';
-import { ToolCallCard } from './ToolCallCard';
-import { ThinkingBlock } from './ThinkingBlock';
-import { UsageIndicator } from './UsageIndicator';
-import { ModeSelector } from './ModeSelector';
-import { SlashCommandPalette } from './SlashCommandPalette';
-import type { SlashCommandPaletteHandle } from './SlashCommandPalette';
-import { VoiceButton } from './VoiceButton';
-import { ChatSettingsPanel } from './ChatSettingsPanel';
+import type { AcpMessagesHandle, ConversationItem, PlanItem } from '../hooks/useAcpMessages';
+import type { AcpSessionHandle } from '../hooks/useAcpSession';
+import type { SlashCommand } from '../types';
 import type { ChatSettingsData } from './ChatSettingsPanel';
-import { StickyPlanButton } from './StickyPlanButton';
+import { ChatSettingsPanel } from './ChatSettingsPanel';
+import { MessageBubble } from './MessageBubble';
+import { ModeSelector } from './ModeSelector';
 import { PlanModal } from './PlanModal';
 import { PlanView } from './PlanView';
 import { RawFallbackView } from './RawFallbackView';
+import type { SlashCommandPaletteHandle } from './SlashCommandPalette';
+import { SlashCommandPalette } from './SlashCommandPalette';
+import { StickyPlanButton } from './StickyPlanButton';
+import { ThinkingBlock } from './ThinkingBlock';
+import { ToolCallCard } from './ToolCallCard';
+import { UsageIndicator } from './UsageIndicator';
+import { VoiceButton } from './VoiceButton';
 
 // =============================================================================
 // Client-side commands (not forwarded to agent)

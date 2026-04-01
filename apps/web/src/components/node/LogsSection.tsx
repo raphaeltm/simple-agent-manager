@@ -1,12 +1,13 @@
-import { type FC, useCallback, useEffect, useRef } from 'react';
-import { ScrollText, Pause, Play, RefreshCw } from 'lucide-react';
 import { Skeleton } from '@simple-agent-manager/ui';
-import { SectionHeader } from './SectionHeader';
-import { Section } from './Section';
-import { LogEntry, formatNodeLogEntries } from './LogEntry';
-import { LogFilters } from './LogFilters';
-import { CopyButton } from '../shared/log';
+import { Pause, Play, RefreshCw,ScrollText } from 'lucide-react';
+import { type FC, useCallback, useEffect, useRef } from 'react';
+
 import { useNodeLogs } from '../../hooks/useNodeLogs';
+import { CopyButton } from '../shared/log';
+import { formatNodeLogEntries,LogEntry } from './LogEntry';
+import { LogFilters } from './LogFilters';
+import { Section } from './Section';
+import { SectionHeader } from './SectionHeader';
 
 interface LogsSectionProps {
   nodeId: string | undefined;

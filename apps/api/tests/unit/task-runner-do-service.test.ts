@@ -4,9 +4,10 @@
  * Validates that task-runner-do.ts correctly bridges routes to the DO,
  * and that the routes are properly wired to use the DO instead of waitUntil.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 const serviceSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner-do.ts'),

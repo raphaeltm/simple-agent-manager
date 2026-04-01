@@ -1,5 +1,5 @@
-import { type FC, useState, useMemo } from 'react';
 import { Body } from '@simple-agent-manager/ui';
+import { type FC, useMemo,useState } from 'react';
 
 type SortKey = 'event_name' | 'count' | 'unique_users' | 'avg_response_ms';
 type SortDir = 'asc' | 'desc';

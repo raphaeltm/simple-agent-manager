@@ -1,9 +1,10 @@
-import type { FC } from 'react';
 import type { NodeSystemInfo } from '@simple-agent-manager/shared';
-import { Package } from 'lucide-react';
 import { Skeleton } from '@simple-agent-manager/ui';
-import { SectionHeader } from './SectionHeader';
+import { Package } from 'lucide-react';
+import type { FC } from 'react';
+
 import { Section } from './Section';
+import { SectionHeader } from './SectionHeader';
 
 interface SoftwareSectionProps {
   software?: NodeSystemInfo['software'] | null;

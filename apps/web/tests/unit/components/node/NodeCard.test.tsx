@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { NodeCard } from '../../../../src/components/node/NodeCard';
-import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 
 const createNode = (overrides?: Partial<NodeResponse>): NodeResponse => ({
   id: 'node-1',

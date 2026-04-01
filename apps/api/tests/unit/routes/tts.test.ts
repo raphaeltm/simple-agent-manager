@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { Env } from '../../../src/index';
 import { ttsRoutes } from '../../../src/routes/tts';
 
@@ -22,7 +23,7 @@ vi.mock('../../../src/services/tts', async (importOriginal) => {
   };
 });
 
-import { synthesizeSpeech, getAudioFromR2 } from '../../../src/services/tts';
+import { getAudioFromR2,synthesizeSpeech } from '../../../src/services/tts';
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 

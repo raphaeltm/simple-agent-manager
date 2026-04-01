@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Button, Input, Alert, StatusBadge } from '@simple-agent-manager/ui';
-import type { AgentInfo, AgentCredentialInfo, AgentType, CredentialKind, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
+import type { AgentCredentialInfo, AgentInfo, AgentType, CredentialKind, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
 import { getAgentDefinition } from '@simple-agent-manager/shared';
+import { Alert, Button, Input, StatusBadge } from '@simple-agent-manager/ui';
+import { useState } from 'react';
 
 interface AgentKeyCardProps {
   agent: AgentInfo;

@@ -5,8 +5,9 @@
  * - Node endpoints reject workspace-scoped tokens
  * - Node endpoints accept node-scoped and legacy tokens
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import { AppError } from '../../src/middleware/error';
 import type { CallbackTokenPayload } from '../../src/services/jwt';
 

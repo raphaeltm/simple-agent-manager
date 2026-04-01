@@ -1,25 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  AlertCircle,
-  Bell,
-  CheckCircle2,
-  MessageSquare,
-  GitPullRequest,
-  Activity,
-  HelpCircle,
-  ChevronDown,
-  ChevronRight,
-  Check,
-  X,
-} from 'lucide-react';
 import type { NotificationResponse, NotificationType } from '@simple-agent-manager/shared';
-import { NOTIFICATION_TYPES, NOTIFICATION_PREVIEW_LENGTH } from '@simple-agent-manager/shared';
+import { NOTIFICATION_PREVIEW_LENGTH,NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import {
+  Activity,
+  AlertCircle,
+  Bell,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  GitPullRequest,
+  HelpCircle,
+  MessageSquare,
+  X,
+} from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+import {
+  dismissNotification,
   listNotifications,
   markNotificationRead,
-  dismissNotification,
 } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 

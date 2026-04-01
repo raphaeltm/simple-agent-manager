@@ -1,7 +1,7 @@
 /**
  * Session–Idea (task) linking — many-to-many associations.
  */
-import { parseSessionIdeaLink, parseIdeaSessionDetail } from './row-schemas';
+import { parseIdeaSessionDetail,parseSessionIdeaLink } from './row-schemas';
 
 export function linkSessionIdea(
   sql: SqlStorage,

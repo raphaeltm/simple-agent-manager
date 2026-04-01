@@ -1,5 +1,5 @@
-import { type ReactNode, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, LogOut } from 'lucide-react';
+import { type ReactNode, useEffect, useState } from 'react';
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';

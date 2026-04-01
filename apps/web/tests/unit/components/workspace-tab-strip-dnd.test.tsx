@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { WorkspaceTabStrip, type WorkspaceTabItem } from '../../../src/components/WorkspaceTabStrip';
+import { fireEvent,render, screen } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
+import { type WorkspaceTabItem,WorkspaceTabStrip } from '../../../src/components/WorkspaceTabStrip';
 
 function makeTabs(...specs: Array<[string, string, 'terminal' | 'chat']>): WorkspaceTabItem[] {
   return specs.map(([id, title, kind]) => ({

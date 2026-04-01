@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { fuzzyMatch, fileNameFromPath } from '../../../src/lib/fuzzy-match';
+import { describe, expect,it } from 'vitest';
+
+import { fileNameFromPath,fuzzyMatch } from '../../../src/lib/fuzzy-match';
 
 describe('fuzzyMatch', () => {
   it('returns score 0 and empty matches for empty query', () => {

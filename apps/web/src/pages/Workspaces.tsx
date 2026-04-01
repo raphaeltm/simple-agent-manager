@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
-import { Alert, PageLayout, Select, SkeletonCard, Spinner, EmptyState } from '@simple-agent-manager/ui';
+import { Alert, EmptyState,PageLayout, Select, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
+import { Monitor } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
 import { UserMenu } from '../components/UserMenu';
 import { WorkspaceCard } from '../components/WorkspaceCard';
-import { listWorkspaces, stopWorkspace, restartWorkspace, deleteWorkspace } from '../lib/api';
-import { Monitor } from 'lucide-react';
+import { deleteWorkspace,listWorkspaces, restartWorkspace, stopWorkspace } from '../lib/api';
 
 const STATUS_FILTERS = [
   { value: '', label: 'All statuses' },

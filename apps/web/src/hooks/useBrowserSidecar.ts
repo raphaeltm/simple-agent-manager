@@ -1,12 +1,13 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useEffect,useRef, useState } from 'react';
+
 import {
-  startBrowserSidecar,
-  stopBrowserSidecar,
-  getBrowserSidecarStatus,
-  startWorkspaceBrowserSidecar,
-  stopWorkspaceBrowserSidecar,
-  getWorkspaceBrowserSidecarStatus,
   type BrowserSidecarStatusResponse,
+  getBrowserSidecarStatus,
+  getWorkspaceBrowserSidecarStatus,
+  startBrowserSidecar,
+  startWorkspaceBrowserSidecar,
+  stopBrowserSidecar,
+  stopWorkspaceBrowserSidecar,
 } from '../lib/api';
 
 interface UseBrowserSidecarSessionOptions {

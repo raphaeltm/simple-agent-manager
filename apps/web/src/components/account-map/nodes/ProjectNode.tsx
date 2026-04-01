@@ -1,6 +1,6 @@
-import type { FC } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, type NodeProps,Position } from '@xyflow/react';
 import { FolderKanban } from 'lucide-react';
+import type { FC } from 'react';
 
 export interface ProjectNodeData {
   label: string;

@@ -1,8 +1,9 @@
-import { type FC, useEffect, useRef, useState, useCallback } from 'react';
-import { Card, Button, Body } from '@simple-agent-manager/ui';
-import { Copy, Check } from 'lucide-react';
-import { useAdminLogStream, type StreamConnectionState } from '../../hooks/useAdminLogStream';
-import { LogEntryRow, LEVEL_COLORS, formatLogEntries } from './LogEntryRow';
+import { Body,Button, Card } from '@simple-agent-manager/ui';
+import { Check,Copy } from 'lucide-react';
+import { type FC, useCallback,useEffect, useRef, useState } from 'react';
+
+import { type StreamConnectionState,useAdminLogStream } from '../../hooks/useAdminLogStream';
+import { formatLogEntries,LEVEL_COLORS, LogEntryRow } from './LogEntryRow';
 
 const STATE_COLORS: Record<StreamConnectionState, string> = {
   connected: '#4ade80',

@@ -1,15 +1,16 @@
-import { type FC } from 'react';
 import { Body } from '@simple-agent-manager/ui';
+import { type FC } from 'react';
 import {
-  BarChart,
   Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
+  BarChart,
   CartesianGrid,
   Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
+
 import type { AnalyticsWebsiteTrafficResponse } from '../../lib/api';
 
 const TOP_PAGES_DISPLAY_LIMIT = 10;

@@ -1,16 +1,17 @@
-import { useState, useEffect, useMemo, type FC } from 'react';
-import { Link } from 'react-router-dom';
-import { Button } from '@simple-agent-manager/ui';
-import { GitBranch, ExternalLink, Play, Trash2, Globe } from 'lucide-react';
-import type { AgentSession } from '@simple-agent-manager/shared';
-import { VM_SIZE_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
-import { CollapsibleSection } from './CollapsibleSection';
-import { BrowserSidecar } from './BrowserSidecar';
-import { ResourceBar } from './node/ResourceBar';
-import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
-import type { WorkspaceResponse, Event, DetectedPort } from '@simple-agent-manager/shared';
-import type { GitStatusData } from '../lib/api';
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
+import type { AgentSession } from '@simple-agent-manager/shared';
+import type { DetectedPort,Event, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { VM_LOCATIONS,VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import { Button } from '@simple-agent-manager/ui';
+import { ExternalLink, GitBranch, Globe,Play, Trash2 } from 'lucide-react';
+import { type FC,useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+
+import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
+import type { GitStatusData } from '../lib/api';
+import { BrowserSidecar } from './BrowserSidecar';
+import { CollapsibleSection } from './CollapsibleSection';
+import { ResourceBar } from './node/ResourceBar';
 
 // ─── Types ───────────────────────────────────────────────────
 

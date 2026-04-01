@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { CredentialValidator, validateOpenAICodexAuthJson } from '../../../src/services/validation';
 
 describe('CredentialValidator', () => {

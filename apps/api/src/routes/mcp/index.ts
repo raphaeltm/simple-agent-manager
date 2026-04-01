@@ -8,51 +8,52 @@
  * Auth: task-scoped opaque token stored in KV, passed as Bearer token.
  */
 import { Hono } from 'hono';
+
 import type { Env } from '../../index';
 import {
-  type JsonRpcRequest,
-  jsonRpcSuccess,
-  jsonRpcError,
-  METHOD_NOT_FOUND,
-  MCP_TOOLS,
-  MCP_PROTOCOL_VERSION,
-  MCP_SERVER_NAME,
-  MCP_SERVER_VERSION,
   authenticateMcpRequest,
   checkMcpRateLimit,
   getMcpRateLimit,
+  jsonRpcError,
+  type JsonRpcRequest,
+  jsonRpcSuccess,
+  MCP_PROTOCOL_VERSION,
+  MCP_SERVER_NAME,
+  MCP_SERVER_VERSION,
+  MCP_TOOLS,
+  METHOD_NOT_FOUND,
 } from './_helpers';
-import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
-import {
-  handleUpdateTaskStatus,
-  handleCompleteTask,
-  handleListTasks,
-  handleGetTaskDetails,
-  handleSearchTasks,
-} from './task-tools';
+import { handleGetDeploymentCredentials } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
 import {
-  handleListSessions,
+  handleCreateIdea,
+  handleFindRelatedIdeas,
+  handleGetIdea,
+  handleLinkIdea,
+  handleListIdeas,
+  handleListLinkedIdeas,
+  handleSearchIdeas,
+  handleUnlinkIdea,
+  handleUpdateIdea,
+} from './idea-tools';
+import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
+import {
   handleGetSessionMessages,
+  handleListSessions,
   handleSearchMessages,
   handleUpdateSessionTopic,
 } from './session-tools';
-import { handleGetDeploymentCredentials } from './deployment-tools';
 import {
-  handleLinkIdea,
-  handleUnlinkIdea,
-  handleListLinkedIdeas,
-  handleFindRelatedIdeas,
-  handleCreateIdea,
-  handleUpdateIdea,
-  handleGetIdea,
-  handleListIdeas,
-  handleSearchIdeas,
-} from './idea-tools';
+  handleCompleteTask,
+  handleGetTaskDetails,
+  handleListTasks,
+  handleSearchTasks,
+  handleUpdateTaskStatus,
+} from './task-tools';
 
 // Re-export public API for backward compatibility
-export { groupTokensIntoMessages } from './session-tools';
 export type { TokenRow } from './session-tools';
+export { groupTokensIntoMessages } from './session-tools';
 
 export const mcpRoutes = new Hono<{ Bindings: Env }>();
 

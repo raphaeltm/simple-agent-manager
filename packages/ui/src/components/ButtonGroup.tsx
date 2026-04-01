@@ -1,4 +1,4 @@
-import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode, type CSSProperties } from 'react';
+import { Children, cloneElement, type CSSProperties,isValidElement, type ReactElement, type ReactNode } from 'react';
 
 export interface ButtonGroupProps {
   children: ReactNode;

@@ -1,12 +1,13 @@
+import { Alert, Button, EmptyState, PageLayout, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../components/AuthProvider';
-import { UserMenu } from '../components/UserMenu';
-import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
+
 import { ActiveTaskCard } from '../components/ActiveTaskCard';
+import { useAuth } from '../components/AuthProvider';
 import { OnboardingWizard } from '../components/onboarding';
-import { useProjectList } from '../hooks/useProjectData';
+import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
+import { UserMenu } from '../components/UserMenu';
 import { useActiveTasks } from '../hooks/useActiveTasks';
-import { PageLayout, Button, Alert, EmptyState, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
+import { useProjectList } from '../hooks/useProjectData';
 
 export function Dashboard() {
   const { user } = useAuth();

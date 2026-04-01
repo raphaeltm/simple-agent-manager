@@ -8,8 +8,8 @@
  * Fix: Added AbortController to the polling useEffect so in-flight requests
  * are cancelled when the session changes.
  */
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
+import { act, fireEvent,render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // jsdom doesn't support scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -120,7 +120,7 @@ const virtuosoMock = vi.hoisted(() => {
 });
 vi.mock('react-virtuoso', () => virtuosoMock);
 
-import { ProjectMessageView, chatMessagesToConversationItems } from '../../../src/components/chat/ProjectMessageView';
+import { chatMessagesToConversationItems,ProjectMessageView } from '../../../src/components/chat/ProjectMessageView';
 
 // --- Test helpers ---
 

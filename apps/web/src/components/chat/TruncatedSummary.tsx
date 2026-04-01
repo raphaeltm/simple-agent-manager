@@ -1,5 +1,6 @@
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Dialog } from '@simple-agent-manager/ui';
+import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
 

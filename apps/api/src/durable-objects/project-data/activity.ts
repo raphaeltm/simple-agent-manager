@@ -1,8 +1,8 @@
 /**
  * Activity event recording and retrieval.
  */
-import { generateId } from './types';
 import { parseActivityEventRow } from './row-schemas';
+import { generateId } from './types';
 
 export function recordActivityEventInternal(
   sql: SqlStorage,

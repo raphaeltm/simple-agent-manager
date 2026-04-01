@@ -7,7 +7,7 @@
  * in Miniflare adds complexity without proportional value.
  */
 import { env, SELF } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
 
 describe('Worker smoke tests (workerd runtime)', () => {
   describe('health check', () => {

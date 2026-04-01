@@ -1,7 +1,8 @@
-import { beforeEach, afterEach } from 'vitest';
+import { afterEach,beforeEach } from 'vitest';
+
 import { HetznerProvider } from '../../src/hetzner';
-import { runProviderContractTests } from './provider-contract.test';
 import { createHetznerFetchMock } from '../fixtures/hetzner-mocks';
+import { runProviderContractTests } from './provider-contract.test';
 
 /**
  * Run the reusable contract test suite against HetznerProvider

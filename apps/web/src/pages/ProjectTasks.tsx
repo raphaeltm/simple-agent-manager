@@ -1,21 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import type { Task, TaskSortOrder, TaskStatus, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Button, Dialog } from '@simple-agent-manager/ui';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+
+import { NeedsAttentionSection } from '../components/project/NeedsAttentionSection';
+import { TaskDelegateDialog } from '../components/project/TaskDelegateDialog';
 import { TaskFilters, type TaskFilterState } from '../components/project/TaskFilters';
 import { TaskForm, type TaskFormValues } from '../components/project/TaskForm';
 import { TaskList } from '../components/project/TaskList';
-import { TaskDelegateDialog } from '../components/project/TaskDelegateDialog';
-import { NeedsAttentionSection } from '../components/project/NeedsAttentionSection';
+import { useToast } from '../hooks/useToast';
 import {
   createProjectTask,
-  deleteProjectTask,
   delegateTask,
+  deleteProjectTask,
   listProjectTasks,
   listWorkspaces,
   updateProjectTaskStatus,
 } from '../lib/api';
-import { useToast } from '../hooks/useToast';
 import { useProjectContext } from './ProjectContext';
 
 const VALID_STATUSES: TaskStatus[] = [

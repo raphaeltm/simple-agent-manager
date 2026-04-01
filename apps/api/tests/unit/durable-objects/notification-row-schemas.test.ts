@@ -1,11 +1,12 @@
 /**
  * Unit tests for Notification DO Valibot row mappers.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import {
-  parseNotificationRow,
-  parseNotificationPreferenceRow,
   parseIdRow,
+  parseNotificationPreferenceRow,
+  parseNotificationRow,
 } from '../../../src/durable-objects/notification-row-schemas';
 
 describe('parseNotificationRow', () => {

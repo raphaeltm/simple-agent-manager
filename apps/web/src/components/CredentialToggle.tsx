@@ -1,5 +1,5 @@
-import { useState } from 'react';
 import type { CredentialKind } from '@simple-agent-manager/shared';
+import { useState } from 'react';
 
 interface CredentialToggleProps {
   activeKind: CredentialKind;

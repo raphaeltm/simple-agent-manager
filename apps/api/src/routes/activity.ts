@@ -6,12 +6,13 @@
  *
  * See: specs/018-project-first-architecture/tasks.md (T034)
  */
-import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Env } from '../index';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
-import { errors } from '../middleware/error';
+import { Hono } from 'hono';
+
 import * as schema from '../db/schema';
+import type { Env } from '../index';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
 

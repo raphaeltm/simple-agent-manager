@@ -10,9 +10,9 @@
  * (depends on multiple hooks, WebSocket, routing), we extract and test the core logic
  * patterns using targeted hooks and source verification.
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
-import { useState, useEffect, useRef } from 'react';
+import { act,renderHook } from '@testing-library/react';
+import { useEffect, useRef,useState } from 'react';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Test 1: Connection banner debounce hook pattern
