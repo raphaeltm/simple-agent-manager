@@ -23,7 +23,7 @@ catalog:
   '@typescript-eslint/parser': 7.18.0
 
   # === Cloudflare ===
-  '@cloudflare/workers-types': 4.20260124.0
+  '@cloudflare/workers-types': 4.20260401.1
   wrangler: 3.114.17
 
   # === React Ecosystem ===

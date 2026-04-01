@@ -46,7 +46,6 @@
     "eslint": "catalog:",
     "execa": "catalog:",
     "fast-check": "4.5.3",
-    "miniflare": "3.20250718.3",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:"
