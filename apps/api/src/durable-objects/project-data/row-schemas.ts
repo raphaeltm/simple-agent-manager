@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Schema/type definition file — splitting schemas across files creates import complexity. See .claude/rules/18-file-size-limits.md
 /**
  * Valibot schemas and validated mappers for DO SQLite row parsing.
  *
