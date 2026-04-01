@@ -718,6 +718,8 @@ func TestGenerateVibeConfig_NoMcpServers(t *testing.T) {
 	}
 }
 
+const expectedMcpServerURLMessage = "expected MCP server URL"
+
 func TestGenerateVibeConfig_McpServerWithToken(t *testing.T) {
 	t.Parallel()
 
@@ -735,7 +737,7 @@ func TestGenerateVibeConfig_McpServerWithToken(t *testing.T) {
 		t.Error("expected transport = http for MCP server")
 	}
 	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
-		t.Error("expected MCP server URL")
+		t.Error(expectedMcpServerURLMessage)
 	}
 	if !strings.Contains(config, `headers = { Authorization = "Bearer test-token-123" }`) {
 		t.Error("expected Authorization header with token")
@@ -760,7 +762,7 @@ func TestGenerateVibeConfig_McpServerWithoutToken(t *testing.T) {
 		t.Error("expected transport = http for MCP server")
 	}
 	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
-		t.Error("expected MCP server URL")
+		t.Error(expectedMcpServerURLMessage)
 	}
 	// No Authorization header when token is empty
 	if strings.Contains(config, "Authorization") {
@@ -855,7 +857,7 @@ func TestGenerateVibeConfig_McpServerNewlineRejected(t *testing.T) {
 	}
 }
 
-func TestGenerateCodexMcpConfig_NoMcpServers(t *testing.T) {
+func TestGenerateCodexMcpConfigNoMcpServers(t *testing.T) {
 	t.Parallel()
 
 	config, envVars := generateCodexMcpConfig(nil)
@@ -867,7 +869,7 @@ func TestGenerateCodexMcpConfig_NoMcpServers(t *testing.T) {
 	}
 }
 
-func TestGenerateCodexMcpConfig_SingleServerWithToken(t *testing.T) {
+func TestGenerateCodexMcpConfigSingleServerWithToken(t *testing.T) {
 	t.Parallel()
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
@@ -881,7 +883,7 @@ func TestGenerateCodexMcpConfig_SingleServerWithToken(t *testing.T) {
 		t.Fatal("expected sam-mcp server entry")
 	}
 	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
-		t.Fatal("expected MCP server URL")
+		t.Fatal(expectedMcpServerURLMessage)
 	}
 	if !strings.Contains(config, `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
 		t.Fatal("expected bearer token env var entry")
@@ -894,7 +896,7 @@ func TestGenerateCodexMcpConfig_SingleServerWithToken(t *testing.T) {
 	}
 }
 
-func TestGenerateCodexMcpConfig_MultipleServers(t *testing.T) {
+func TestGenerateCodexMcpConfigMultipleServers(t *testing.T) {
 	t.Parallel()
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
@@ -919,7 +921,7 @@ func TestGenerateCodexMcpConfig_MultipleServers(t *testing.T) {
 	}
 }
 
-func TestGenerateCodexMcpConfig_ServerWithoutToken(t *testing.T) {
+func TestGenerateCodexMcpConfigServerWithoutToken(t *testing.T) {
 	t.Parallel()
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
@@ -937,7 +939,7 @@ func TestGenerateCodexMcpConfig_ServerWithoutToken(t *testing.T) {
 	}
 }
 
-func TestGenerateCodexMcpConfig_ServerWithControlCharsRejected(t *testing.T) {
+func TestGenerateCodexMcpConfigServerWithControlCharsRejected(t *testing.T) {
 	t.Parallel()
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
@@ -956,7 +958,7 @@ func TestGenerateCodexMcpConfig_ServerWithControlCharsRejected(t *testing.T) {
 	}
 }
 
-func TestMergeManagedCodexMcpConfig_ReplacesExistingManagedBlock(t *testing.T) {
+func TestMergeManagedCodexMcpConfigReplacesExistingManagedBlock(t *testing.T) {
 	t.Parallel()
 
 	existing := strings.Join([]string{
