@@ -25,9 +25,11 @@ describe('stopNodeResources source contract', () => {
   });
 
   it('uses createProvider from providers package', () => {
-    const importLine = file.slice(0, file.indexOf('\n\n'));
-    expect(importLine).not.toContain('powerOffServer');
-    expect(importLine).toContain('createProvider');
+    // Import block may span multiple groups separated by blank lines (import-sort).
+    // Search up to the first non-import line instead of just the first paragraph.
+    const importBlock = file.slice(0, file.indexOf('\nexport '));
+    expect(importBlock).not.toContain('powerOffServer');
+    expect(importBlock).toContain('createProvider');
   });
 
   it('deletes DNS record', () => {
