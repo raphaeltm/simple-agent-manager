@@ -228,7 +228,11 @@ export async function checkMcpRateLimit(
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
-/** Returns [tokenData, rawToken] or [null, null] */
+/**
+ * Returns [tokenData, rawToken] or [null, null].
+ * Unlike extractBearerToken(), this returns null on missing/malformed auth
+ * because MCP endpoints fall through to unauthenticated handling.
+ */
 export async function authenticateMcpRequest(
   authHeader: string | undefined,
   kv: KVNamespace,

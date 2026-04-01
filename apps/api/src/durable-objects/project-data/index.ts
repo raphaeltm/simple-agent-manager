@@ -94,7 +94,7 @@ export class ProjectData extends DurableObject<Env> {
     this.scheduleSummarySync();
     let parsedToolMetadata: unknown = null;
     if (toolMetadata) {
-      try { parsedToolMetadata = JSON.parse(toolMetadata); } catch { /* broadcast raw null on malformed JSON */ }
+      try { parsedToolMetadata = JSON.parse(toolMetadata); } catch (err) { log.warn('project_data.tool_metadata_parse_failed', { sessionId, error: String(err) }); }
     }
     this.broadcastEvent('message.new', {
       sessionId, messageId: result.id, role, content,

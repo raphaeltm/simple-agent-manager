@@ -46,7 +46,15 @@ notificationRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
     throw errors.badRequest('limit must be a positive integer');
   }
-  const filter = c.req.query('filter') as 'all' | 'unread' | undefined;
+  const VALID_FILTERS = ['all', 'unread'] as const;
+  const filterRaw = c.req.query('filter');
+  const filter: 'all' | 'unread' | undefined =
+    filterRaw && (VALID_FILTERS as readonly string[]).includes(filterRaw)
+      ? (filterRaw as 'all' | 'unread')
+      : undefined;
+  if (filterRaw && !filter) {
+    throw errors.badRequest(`Invalid filter value: ${filterRaw}`);
+  }
   const typeRaw = c.req.query('type');
   const type: NotificationType | undefined =
     typeRaw && NOTIFICATION_TYPES.includes(typeRaw as NotificationType)

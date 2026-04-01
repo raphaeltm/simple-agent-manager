@@ -79,12 +79,12 @@ export class AdminLogs extends DurableObject<Env> {
 
       case 'filter':
         if (Array.isArray(parsed.levels)) {
-          // Limit array size to prevent abuse — there are only 3 valid log levels
+          // Cap array to avoid processing unbounded input; invalid entries filtered by ALL_LEVELS
           const levels = parsed.levels.slice(0, 10);
           state.levels = new Set(levels.filter((l: unknown) => typeof l === 'string' && ALL_LEVELS.has(l)));
         }
         if (typeof parsed.search === 'string') {
-          state.search = parsed.search;
+          state.search = parsed.search.slice(0, 200);
         }
         this.setClientState(ws, state);
         break;
