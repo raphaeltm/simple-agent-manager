@@ -44,6 +44,8 @@ jobs:
 
       - name: Install Playwright
         run: |
+          mkdir -p /tmp/playwright-runner && cd /tmp/playwright-runner
+          npm init -y > /dev/null 2>&1
           npm install @playwright/test
           npx playwright install chromium
 
@@ -53,7 +55,7 @@ jobs:
           SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
           SMOKE_TEST_URL: https://app.sammy.party
           SMOKE_TEST_API_URL: https://api.sammy.party
-        run: npx playwright test --config=tests/smoke/playwright.config.ts
+        run: npx --prefix /tmp/playwright-runner playwright test --config=tests/smoke/playwright.config.ts
 
       - name: Skip notice (no token configured)
         if: ${{ env.SMOKE_TEST_TOKEN == '' }}
