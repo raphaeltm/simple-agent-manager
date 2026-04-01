@@ -9,7 +9,7 @@ The monorepo has 189 dependencies using `^` (caret) ranges across 15 package.jso
 ### Current State (15 package.json files)
 - **189 deps** using `^` ranges, **0** using `~`, **5** using `workspace:*`
 - **No pnpm catalog** configured in `pnpm-workspace.yaml`
-- pnpm 9.0.0 installed — supports catalogs natively
+- pnpm 9.0.0 installed — needed upgrade to 9.15.9 for catalog support
 
 ### Version Mismatches
 1. **Vitest**: `packages/ui` uses `^4.0.18` (resolves to 4.0.18), all others use `^2.0.0`/`^2.1.0` (resolve to 2.1.9)
@@ -22,7 +22,7 @@ The monorepo has 189 dependencies using `^` (caret) ranges across 15 package.jso
 - **Vite 6.4.1** — latest 6.x stable
 - **@cloudflare/vitest-pool-workers 0.14.0** — requires `vitest ^4.1.0` (compatible with upgrade)
 - **@vitejs/plugin-react 5.2.0** — supports `vite ^6.0.0`
-- **@tailwindcss/vite 4.2.2** — supports `vite ^6`
+- **@tailwindcss/vite 4.2.1** — supports `vite ^6` (kept at resolved version rather than upgrading to 4.2.2)
 - **@vitest/coverage-v8 4.1.2** — requires `vitest 4.1.2`
 
 ### Key Constraint
@@ -31,41 +31,45 @@ The monorepo has 189 dependencies using `^` (caret) ranges across 15 package.jso
 ## Implementation Checklist
 
 ### Phase 1: Set up pnpm catalog structure
-- [ ] Add `catalog:` section to `pnpm-workspace.yaml` with all shared deps
-- [ ] Start with devDependencies that appear in 3+ packages: `typescript`, `vitest`, `eslint`, `@typescript-eslint/*`, `@testing-library/*`, `prettier`
-- [ ] Add shared production deps: `react`, `react-dom`, `vite`, `hono`, `drizzle-orm`, `better-auth`, `lucide-react`, `tailwindcss`
+- [x] Add `catalog:` section to `pnpm-workspace.yaml` with all shared deps (33 entries)
+- [x] Start with devDependencies that appear in 3+ packages: `typescript`, `vitest`, `eslint`, `@typescript-eslint/*`, `@testing-library/*`
+- [x] Add shared production deps: `react`, `react-dom`, `vite`, `better-auth`, `lucide-react`
+- Note: `hono`, `drizzle-orm`, `tailwindcss`, `prettier` intentionally omitted from catalog — each appears in only one package, so catalog adds no value
 
 ### Phase 2: Pin all versions (remove ^ and ~)
-- [ ] Determine target pinned versions for all deps (use currently resolved versions from lockfile where possible)
-- [ ] Update all package.json files: replace `^x.y.z` with exact `x.y.z`
-- [ ] For catalog deps: use exact versions in catalog, reference with `catalog:` in package.json
-- [ ] For non-catalog deps (unique to one package): pin in-place
+- [x] Determine target pinned versions for all deps (used currently resolved versions from lockfile)
+- [x] Update all 15 package.json files: replace `^x.y.z` with exact `x.y.z`
+- [x] For catalog deps: use exact versions in catalog, reference with `catalog:` in package.json
+- [x] For non-catalog deps (unique to one package): pin in-place
 
 ### Phase 3: Upgrade Vite 5→6 + Vitest 2→4
-- [ ] Upgrade `vite` to `6.4.1` in catalog
-- [ ] Upgrade `@vitejs/plugin-react` to `5.2.0`
-- [ ] Upgrade `@tailwindcss/vite` to `4.2.2`
-- [ ] Upgrade `vitest` to `4.1.2` in catalog
-- [ ] Upgrade `@vitest/coverage-v8` to `4.1.2`
-- [ ] Upgrade `@cloudflare/vitest-pool-workers` to `0.14.0`
-- [ ] Update vitest config files if needed for breaking changes
-- [ ] Run all tests to verify compatibility
+- [x] Upgrade `vite` to `6.4.1` in catalog
+- [x] Upgrade `@vitejs/plugin-react` to `5.2.0`
+- [x] Upgrade `@tailwindcss/vite` pinned at `4.2.1` (resolved version)
+- [x] Upgrade `vitest` to `4.1.2` in catalog
+- [x] Upgrade `@vitest/coverage-v8` to `4.1.2`
+- [x] Upgrade `@cloudflare/vitest-pool-workers` to `0.14.0`
+- [x] Fix Vitest 4 mock compatibility (50+ test files):
+  - Arrow-function constructor mocks → regular functions
+  - Partial `vi.mock()` factories → `importOriginal` spread
+  - Mock reset for accumulated state
+- [x] Run all tests to verify compatibility — all pass
 
 ### Phase 4: Verify
-- [ ] `pnpm install` succeeds with no peer dep warnings
-- [ ] `pnpm build` passes
-- [ ] `pnpm typecheck` passes
-- [ ] `pnpm lint` passes
-- [ ] `pnpm test` passes
-- [ ] No `^` or `~` ranges remain in any package.json
-- [ ] All shared deps use `catalog:` references
+- [x] `pnpm install` succeeds (pre-existing peer dep warnings for drizzle/zod remain)
+- [x] `pnpm build` passes (all 11 build tasks)
+- [x] `pnpm typecheck` passes (all 18 packages)
+- [x] `pnpm lint` passes (0 errors, 23 pre-existing warnings)
+- [x] `pnpm test` passes (all 22 test tasks, 5000+ tests)
+- [x] No `^` or `~` ranges remain in dependencies/devDependencies (peerDependencies keep ranges by design)
+- [x] 120 catalog references across the monorepo
 
 ## Acceptance Criteria
-- [ ] pnpm catalog configured in `pnpm-workspace.yaml` with all shared deps
-- [ ] All dependency versions pinned (no `^` or `~` ranges)
-- [ ] Vite version standardized (6.x) across all packages
-- [ ] Vitest version standardized (4.x) across all packages
-- [ ] All builds, tests, and checks pass
+- [x] pnpm catalog configured in `pnpm-workspace.yaml` with all shared deps
+- [x] All dependency versions pinned (no `^` or `~` ranges)
+- [x] Vite version standardized (6.x) across all packages
+- [x] Vitest version standardized (4.x) across all packages
+- [x] All builds, tests, and checks pass
 
 ## References
 - pnpm catalog docs: https://pnpm.io/catalogs
