@@ -214,8 +214,10 @@ describe('useAdminAnalytics', () => {
       result.current.refresh();
     });
 
-    await waitFor(() => expect(result.current.error).toBeNull());
-    expect(result.current.dau).toEqual(DAU_FIXTURE);
+    await waitFor(() => {
+      expect(result.current.error).toBeNull();
+      expect(result.current.dau).toEqual(DAU_FIXTURE);
+    });
   });
 
   // -------------------------------------------------------------------------
