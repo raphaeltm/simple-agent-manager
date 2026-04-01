@@ -177,8 +177,8 @@ func writeError(w http.ResponseWriter, status int, message string) {
 }
 
 // containerIDRe matches Docker container IDs (12-64 hex chars) and container
-// names (alphanumeric with hyphens, underscores, dots, and slashes for compose).
-var containerIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,253}$`)
+// names (alphanumeric with hyphens, underscores, and dots per Docker naming rules).
+var containerIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`)
 
 // isValidContainerID checks that a container ID or name matches the expected
 // Docker format to prevent command injection via crafted container identifiers.

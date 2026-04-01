@@ -39,8 +39,8 @@ type Reporter struct {
 	sessionID   string // dynamically updated when warm node is reused for new task
 
 	// flushMu serializes flush() calls with outbox mutations in SetSessionID.
-	// SetSessionID acquires flushMu to ensure no in-progress flush can ship
-	// stale messages after the outbox is cleared.
+	// Lock ordering: flushMu must always be acquired BEFORE mu when both
+	// are held. Acquiring mu first would risk deadlock with flush().
 	flushMu sync.Mutex
 
 	stopC chan struct{}
@@ -142,17 +142,20 @@ func (r *Reporter) SetSessionID(id string) {
 	if r == nil {
 		return
 	}
+
+	// Acquire flushMu FIRST to block any concurrent flush, then read the
+	// old session ID under mu. This closes the window where a flush could
+	// start between reading oldSessionID and clearing the outbox.
+	r.flushMu.Lock()
+
 	r.mu.Lock()
 	oldSessionID := r.sessionID
 	r.mu.Unlock()
 
 	// Clear stale messages from the previous session BEFORE updating the
 	// session ID to prevent a race where Enqueue reads the new sessionID
-	// while old messages are still in the outbox. Holding flushMu ensures
-	// any in-progress flush completes before we clear, and no new flush
-	// starts until the clear is done and the session ID is updated.
+	// while old messages are still in the outbox.
 	if oldSessionID != "" && oldSessionID != id {
-		r.flushMu.Lock()
 		cleared, err := r.clearOutboxForSession(oldSessionID)
 		if err != nil {
 			slog.Error("messagereport: failed to clear outbox on session switch",
@@ -167,6 +170,7 @@ func (r *Reporter) SetSessionID(id string) {
 		r.mu.Lock()
 		r.sessionID = id
 		r.mu.Unlock()
+
 		r.flushMu.Unlock()
 
 		slog.Info("messagereport: session ID updated",
@@ -175,6 +179,8 @@ func (r *Reporter) SetSessionID(id string) {
 		r.mu.Lock()
 		r.sessionID = id
 		r.mu.Unlock()
+
+		r.flushMu.Unlock()
 	}
 }
 

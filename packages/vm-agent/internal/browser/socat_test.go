@@ -312,6 +312,10 @@ func TestAddForwarder_SocatCommand(t *testing.T) {
 	if !strings.Contains(cmd, "socat TCP-LISTEN:3000,fork,reuseaddr TCP:devcontainer-ws-1:3000") {
 		t.Errorf("expected socat command with correct port, got: %s", cmd)
 	}
+	// Verify no shell wrapper — socat args passed directly to docker exec.
+	if strings.Contains(cmd, "sh -c") {
+		t.Errorf("socat should be invoked directly without sh -c, got: %s", cmd)
+	}
 }
 
 func TestRemoveForwarder_PkillCommand(t *testing.T) {

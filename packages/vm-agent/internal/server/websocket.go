@@ -417,8 +417,8 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if data.Rows > 0 && data.Cols > 0 {
-				data.Rows = clampTerminalDimension(data.Rows, data.Rows)
-				data.Cols = clampTerminalDimension(data.Cols, data.Cols)
+				data.Rows = clampTerminalDimension(data.Rows, 24)
+				data.Cols = clampTerminalDimension(data.Cols, 80)
 				_ = ptySession.Resize(data.Rows, data.Cols)
 			}
 

@@ -220,14 +220,15 @@ func (m *Manager) addForwarder(ctx context.Context, containerName string, port i
 	if !validHostnameRe.MatchString(targetHost) {
 		return fmt.Errorf("invalid target host: %q", targetHost)
 	}
-	// Run socat in background inside the Neko container.
-	// socat listens on localhost:<port> and forwards to the DevContainer.
-	// sh -c is required for background (&); port is an int and targetHost
-	// is regex-validated above, so no shell injection is possible.
-	cmd := fmt.Sprintf("socat TCP-LISTEN:%d,fork,reuseaddr TCP:%s:%d &", port, targetHost, port)
+	// Run socat inside the Neko container. docker exec -d detaches the
+	// process, so no shell wrapper or background (&) is needed. Passing
+	// socat args directly avoids any shell injection surface.
+	portStr := strconv.Itoa(port)
 	return m.docker.RunSilent(ctx,
 		"exec", "-d", containerName,
-		"sh", "-c", cmd,
+		"socat",
+		fmt.Sprintf("TCP-LISTEN:%s,fork,reuseaddr", portStr),
+		fmt.Sprintf("TCP:%s:%s", targetHost, portStr),
 	)
 }
 
