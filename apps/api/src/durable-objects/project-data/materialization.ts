@@ -8,6 +8,7 @@
  */
 import { log } from '../../lib/logger';
 import {
+  parseMaterializationCheck,
   parseMaterializationToken,
   parseRowid,
   parseSessionId,
@@ -29,7 +30,8 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
     .toArray()[0];
 
   if (!session) return;
-  if (session.materialized_at !== null) return;
+  const { materializedAt } = parseMaterializationCheck(session);
+  if (materializedAt !== null) return;
 
   const tokens = sql
     .exec(

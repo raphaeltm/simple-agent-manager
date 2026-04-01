@@ -34,17 +34,6 @@ export function parseRow<TOutput>(
   return result.output;
 }
 
-/**
- * Parse an array of rows with a Valibot schema.
- */
-export function parseRows<TOutput>(
-  schema: v.GenericSchema<unknown, TOutput>,
-  rows: unknown[],
-  context: string
-): TOutput[] {
-  return rows.map((row, i) => parseRow(schema, row, `${context}[${i}]`));
-}
-
 // =============================================================================
 // Aggregate / utility row schemas
 // =============================================================================
@@ -581,13 +570,6 @@ const MigrationNameSchema = v.object({ name: v.string() });
 
 export function parseMigrationName(row: unknown): string {
   return parseRow(MigrationNameSchema, row, 'migration_name').name;
-}
-
-/** MAX(version) aggregate for migration versioning */
-const MaxVersionSchema = v.object({ max_version: v.nullable(v.number()) });
-
-export function parseMaxVersion(row: unknown): number {
-  return parseRow(MaxVersionSchema, row, 'max_version').max_version ?? 0;
 }
 
 // =============================================================================

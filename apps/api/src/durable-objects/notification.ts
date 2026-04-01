@@ -244,8 +244,8 @@ export class NotificationService extends DurableObject<Env> {
     const items = hasMore ? rows.slice(0, pageSize) : rows;
 
     const notifications = items.map((row) => parseNotificationRow(row));
-    const nextCursor = hasMore && items.length > 0
-      ? String(items[items.length - 1]!.created_at)
+    const nextCursor = hasMore && notifications.length > 0
+      ? String(new Date(notifications[notifications.length - 1]!.createdAt).getTime())
       : null;
 
     const unreadCount = this.getUnreadCount(userId);

@@ -9,6 +9,8 @@
  * in the constructor via `blockConcurrencyWhile()`.
  */
 
+import { parseMigrationName } from './project-data/row-schemas';
+
 export interface NotificationMigration {
   name: string;
   run: (sql: SqlStorage) => void;
@@ -82,7 +84,7 @@ export function runNotificationMigrations(sql: SqlStorage): void {
   const applied = new Set<string>();
   const rows = sql.exec('SELECT name FROM migrations').toArray();
   for (const row of rows) {
-    applied.add(row.name as string);
+    applied.add(parseMigrationName(row));
   }
 
   for (const migration of NOTIFICATION_MIGRATIONS) {

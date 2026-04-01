@@ -12,10 +12,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseRow,
-  parseRows,
   parseCountCnt,
   parseCount,
   parseMaxSeq,
+  parseMaterializationCheck,
   parseMinEarliest,
   parseMaxLatest,
   parseMessageCount,
@@ -42,7 +42,6 @@ import {
   parseCachedCommandRow,
   parseActivityEventRow,
   parseMigrationName,
-  parseMaxVersion,
   parseMetaValue,
 } from '../../../src/durable-objects/project-data/row-schemas';
 import * as v from 'valibot';
@@ -87,21 +86,6 @@ describe('parseRow', () => {
 
   it('handles non-object row input', () => {
     expect(() => parseRow(TestSchema, 'not-an-object', 'ctx')).toThrow(/Row validation failed \(ctx\)/);
-  });
-});
-
-describe('parseRows', () => {
-  const TestSchema = v.object({ id: v.string() });
-
-  it('parses array of valid rows', () => {
-    const rows = [{ id: 'a' }, { id: 'b' }];
-    expect(parseRows(TestSchema, rows, 'test')).toEqual([{ id: 'a' }, { id: 'b' }]);
-  });
-
-  it('includes index in error context', () => {
-    expect(() => parseRows(TestSchema, [{ id: 'a' }, { id: 123 }], 'test')).toThrow(
-      /test\[1\]/
-    );
   });
 });
 
@@ -637,16 +621,6 @@ describe('parseMigrationName', () => {
 
   it('rejects non-string name', () => {
     expect(() => parseMigrationName({ name: 123 })).toThrow(/Row validation failed/);
-  });
-});
-
-describe('parseMaxVersion', () => {
-  it('extracts max_version number', () => {
-    expect(parseMaxVersion({ max_version: 5 })).toBe(5);
-  });
-
-  it('returns 0 for null', () => {
-    expect(parseMaxVersion({ max_version: null })).toBe(0);
   });
 });
 
