@@ -883,6 +883,22 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
 	}
 
+	// For OpenAI Codex: write ~/.codex/config.toml with a SAM-managed MCP
+	// block so codex-acp discovers the task-scoped SAM MCP server natively.
+	// The bearer token stays in the process environment via
+	// bearer_token_env_var instead of being written to disk.
+	if agentType == "openai-codex" {
+		codexMcpEnvVars, err := writeCodexConfigToContainer(ctx, containerID, h.config.ContainerUser, h.config.McpServers)
+		if err != nil {
+			slog.Warn("Failed to write Codex config.toml",
+				"error", err,
+				"workspaceId", h.config.WorkspaceID)
+		} else {
+			envVars = append(envVars, codexMcpEnvVars...)
+			slog.Info("Wrote Codex config.toml", "mcpServers", len(h.config.McpServers))
+		}
+	}
+
 	// For Mistral Vibe: write ~/.vibe/config.toml with model aliases so the
 	// user can select models beyond the built-in devstral-2 default.
 	// The config sets the active model based on user settings or defaults

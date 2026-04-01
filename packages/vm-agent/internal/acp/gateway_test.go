@@ -854,3 +854,140 @@ func TestGenerateVibeConfig_McpServerNewlineRejected(t *testing.T) {
 		t.Error("newline in token must not inject content into TOML")
 	}
 }
+
+func TestGenerateCodexMcpConfig_NoMcpServers(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig(nil)
+	if config != "" {
+		t.Fatalf("expected empty config, got %q", config)
+	}
+	if len(envVars) != 0 {
+		t.Fatalf("expected no env vars, got %v", envVars)
+	}
+}
+
+func TestGenerateCodexMcpConfig_SingleServerWithToken(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig([]McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "test-token-123"},
+	})
+
+	if !strings.Contains(config, codexManagedMcpStartMarker) {
+		t.Fatal("expected managed start marker")
+	}
+	if !strings.Contains(config, `[mcp_servers.sam-mcp]`) {
+		t.Fatal("expected sam-mcp server entry")
+	}
+	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
+		t.Fatal("expected MCP server URL")
+	}
+	if !strings.Contains(config, `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
+		t.Fatal("expected bearer token env var entry")
+	}
+	if !strings.Contains(config, codexManagedMcpEndMarker) {
+		t.Fatal("expected managed end marker")
+	}
+	if len(envVars) != 1 || envVars[0] != "SAM_MCP_TOKEN=test-token-123" {
+		t.Fatalf("unexpected env vars: %v", envVars)
+	}
+}
+
+func TestGenerateCodexMcpConfig_MultipleServers(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig([]McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "token-1"},
+		{URL: "https://backup.example.com/mcp", Token: "token-2"},
+	})
+
+	if !strings.Contains(config, `[mcp_servers.sam-mcp-0]`) {
+		t.Fatal("expected first server entry")
+	}
+	if !strings.Contains(config, `[mcp_servers.sam-mcp-1]`) {
+		t.Fatal("expected second server entry")
+	}
+	if !strings.Contains(config, `bearer_token_env_var = "SAM_MCP_TOKEN_0"`) {
+		t.Fatal("expected first bearer token env var entry")
+	}
+	if !strings.Contains(config, `bearer_token_env_var = "SAM_MCP_TOKEN_1"`) {
+		t.Fatal("expected second bearer token env var entry")
+	}
+	if len(envVars) != 2 {
+		t.Fatalf("expected 2 env vars, got %d", len(envVars))
+	}
+}
+
+func TestGenerateCodexMcpConfig_ServerWithoutToken(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig([]McpServerEntry{
+		{URL: "https://api.example.com/mcp"},
+	})
+
+	if !strings.Contains(config, `[mcp_servers.sam-mcp]`) {
+		t.Fatal("expected server entry")
+	}
+	if strings.Contains(config, "bearer_token_env_var") {
+		t.Fatal("expected no bearer_token_env_var for tokenless server")
+	}
+	if len(envVars) != 0 {
+		t.Fatalf("expected no env vars, got %v", envVars)
+	}
+}
+
+func TestGenerateCodexMcpConfig_ServerWithControlCharsRejected(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig([]McpServerEntry{
+		{URL: "https://good.example.com/mcp", Token: "good-token"},
+		{URL: "https://bad.example.com/mcp", Token: "bad\ninjection"},
+	})
+
+	if !strings.Contains(config, `url = "https://good.example.com/mcp"`) {
+		t.Fatal("expected good server to be present")
+	}
+	if strings.Contains(config, "bad.example.com") {
+		t.Fatal("expected bad server to be skipped")
+	}
+	if len(envVars) != 1 || envVars[0] != "SAM_MCP_TOKEN_0=good-token" {
+		t.Fatalf("unexpected env vars: %v", envVars)
+	}
+}
+
+func TestMergeManagedCodexMcpConfig_ReplacesExistingManagedBlock(t *testing.T) {
+	t.Parallel()
+
+	existing := strings.Join([]string{
+		`model = "gpt-5-codex"`,
+		"",
+		codexManagedMcpStartMarker,
+		`[mcp_servers.sam-mcp]`,
+		`url = "https://old.example.com/mcp"`,
+		codexManagedMcpEndMarker,
+		"",
+		`approval_policy = "never"`,
+		"",
+	}, "\n")
+	managed := strings.Join([]string{
+		codexManagedMcpStartMarker,
+		`[mcp_servers.sam-mcp]`,
+		`url = "https://new.example.com/mcp"`,
+		codexManagedMcpEndMarker,
+	}, "\n")
+
+	merged := mergeManagedCodexMcpConfig(existing, managed)
+	if strings.Contains(merged, "old.example.com") {
+		t.Fatal("expected old managed block to be removed")
+	}
+	if !strings.Contains(merged, "new.example.com") {
+		t.Fatal("expected new managed block to be present")
+	}
+	if !strings.Contains(merged, `model = "gpt-5-codex"`) {
+		t.Fatal("expected existing config to be preserved")
+	}
+	if !strings.Contains(merged, `approval_policy = "never"`) {
+		t.Fatal("expected trailing config to be preserved")
+	}
+}

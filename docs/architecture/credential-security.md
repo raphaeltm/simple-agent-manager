@@ -236,6 +236,8 @@ Env var injection is performed at `session_host.go:startAgent()` line `envVars =
 
 Unlike Claude Code which accepts OAuth tokens via environment variable, `codex-acp` reads OAuth credentials from `~/.codex/auth.json`. There is no `CODEX_OAUTH_TOKEN` env var. The VM agent writes the auth.json file into the container before starting the agent process (see `session_host.go:startAgent()` — branches on `info.injectionMode == "auth-file"`).
 
+When SAM injects task-scoped MCP servers into a Codex ACP session, it also writes a managed block into `~/.codex/config.toml`. That block uses Codex's native `mcp_servers.<id>.url` support and `bearer_token_env_var` so the SAM MCP bearer token stays in process environment rather than being written to disk.
+
 The auth.json file contains:
 - `OPENAI_API_KEY`: `null` — indicates OAuth mode (not API key)
 - `tokens.access_token`: JWT (RS256, ~1hr expiry, auto-refreshed by codex-acp)
@@ -250,6 +252,7 @@ Security measures for auth.json injection (see `gateway.go:writeAuthFileToContai
 2. Parent directory `.codex/` created with `0700` permissions
 3. Content streamed via stdin to `docker exec` — avoids exposing secrets in process args or `/proc/<pid>/environ`
 4. `NO_BROWSER=1` set by `session_host.go:startAgent()` to prevent codex-acp from attempting browser-based login
+5. SAM-managed MCP config is merged into `~/.codex/config.toml` without storing the bearer token in the file; Codex reads the token from `bearer_token_env_var`
 
 ## Agent Credential Sync-Back (Token Refresh)
 
