@@ -1,6 +1,6 @@
 import type { ProjectSummary } from '@simple-agent-manager/shared';
 import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../../../src/hooks/useToast';

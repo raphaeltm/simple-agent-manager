@@ -1,6 +1,6 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import { type ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router';
 
 import { PendingApproval } from '../pages/PendingApproval';
 import { useAuth } from './AuthProvider';

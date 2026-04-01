@@ -7,7 +7,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router';
 
 import { TaskDelegateDialog } from '../components/project/TaskDelegateDialog';
 import { TaskDependencyEditor } from '../components/project/TaskDependencyEditor';

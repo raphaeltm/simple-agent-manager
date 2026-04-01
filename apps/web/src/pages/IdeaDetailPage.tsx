@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 
 import { RenderedMarkdown } from '../components/MarkdownRenderer';
 import { useIsMobile } from '../hooks/useIsMobile';

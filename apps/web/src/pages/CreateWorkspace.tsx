@@ -2,7 +2,7 @@ import type { CredentialProvider, GitHubInstallation, NodeResponse, Project, Pro
 import { PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 import { useCallback,useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 
 import { BranchSelector } from '../components/BranchSelector';
 import { RepoSelector } from '../components/RepoSelector';

@@ -27,7 +27,7 @@ import type { GlobalAudioContextValue } from '../../../src/contexts/GlobalAudioC
 // ---------------------------------------------------------------------------
 
 const mockNavigate = vi.fn();
-vi.mock('react-router-dom', () => ({
+vi.mock('react-router', () => ({
   useNavigate: () => mockNavigate,
 }));
 

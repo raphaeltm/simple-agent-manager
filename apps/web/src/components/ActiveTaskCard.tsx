@@ -1,7 +1,7 @@
 import type { DashboardTask } from '@simple-agent-manager/shared';
 import { EXECUTION_STEP_LABELS } from '@simple-agent-manager/shared';
 import { Card, StatusBadge } from '@simple-agent-manager/ui';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 interface ActiveTaskCardProps {
   task: DashboardTask;

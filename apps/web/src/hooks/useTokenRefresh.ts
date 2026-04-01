@@ -64,7 +64,7 @@ export function useTokenRefresh(options: UseTokenRefreshOptions): UseTokenRefres
 
   // doFetch is defined as a stable ref-based function to break the circular
   // dependency between doFetch and scheduleRefresh.
-  const doFetchRef = useRef<() => Promise<void>>();
+  const doFetchRef = useRef<() => Promise<void>>(undefined);
 
   const scheduleRefresh = useCallback(
     (expiresAt: string) => {

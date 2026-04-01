@@ -1,7 +1,7 @@
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, PageLayout, Tabs } from '@simple-agent-manager/ui';
 import { useCallback,useEffect, useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet } from 'react-router';
 
 import { UserMenu } from '../components/UserMenu';
 import { getSmokeTestStatus,listCredentials } from '../lib/api';

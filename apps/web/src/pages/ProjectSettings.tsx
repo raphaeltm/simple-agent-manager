@@ -7,7 +7,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { Button, Skeleton,Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 import { ProfileList } from '../components/agent-profiles/ProfileList';
 import { DeploymentSettings } from '../components/DeploymentSettings';

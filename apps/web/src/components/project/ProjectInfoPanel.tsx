@@ -7,7 +7,7 @@
 import type { Task, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 import { listProjectTasks, listWorkspaces } from '../../lib/api';
 

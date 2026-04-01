@@ -21,7 +21,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   const [retryCount, setRetryCount] = useState(0);
 
   const retriesRef = useRef(0);
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const socketRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
   const connectRef = useRef<() => Promise<void>>(async () => {});

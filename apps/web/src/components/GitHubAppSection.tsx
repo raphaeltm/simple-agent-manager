@@ -1,7 +1,7 @@
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
 import { useCallback,useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 
 import { getGitHubInstallUrl, listGitHubInstallations, listRepositories } from '../lib/api';
 

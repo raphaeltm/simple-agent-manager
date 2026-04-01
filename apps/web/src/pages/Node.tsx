@@ -1,7 +1,7 @@
 import type { Event, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Skeleton } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 
 import { DockerSection } from '../components/node/DockerSection';
 import { LogsSection } from '../components/node/LogsSection';

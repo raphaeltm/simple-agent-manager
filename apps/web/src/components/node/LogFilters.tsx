@@ -25,7 +25,7 @@ export const LogFilters: FC<LogFiltersProps> = ({
   onContainerChange,
 }) => {
   const [localSearch, setLocalSearch] = useState(search);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Sync external search changes into local state
   useEffect(() => {

@@ -1,7 +1,7 @@
 import type { Task, TaskSortOrder, TaskStatus, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Button, Dialog } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 
 import { NeedsAttentionSection } from '../components/project/NeedsAttentionSection';
 import { TaskDelegateDialog } from '../components/project/TaskDelegateDialog';

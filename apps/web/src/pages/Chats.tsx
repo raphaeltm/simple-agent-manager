@@ -1,6 +1,6 @@
 import { Alert,EmptyState, PageLayout, SkeletonList } from '@simple-agent-manager/ui';
 import { MessageSquare } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 import { UserMenu } from '../components/UserMenu';
 import { useAllChatSessions } from '../hooks/useAllChatSessions';

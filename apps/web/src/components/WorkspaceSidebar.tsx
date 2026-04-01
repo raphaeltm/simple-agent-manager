@@ -5,7 +5,7 @@ import { VM_LOCATIONS,VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { ExternalLink, GitBranch, Globe,Play, Trash2 } from 'lucide-react';
 import { type FC,useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
 import type { GitStatusData } from '../lib/api';

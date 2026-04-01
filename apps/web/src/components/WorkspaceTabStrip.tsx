@@ -257,7 +257,7 @@ interface SortableTabWrapperProps {
   canClose: boolean;
   isMobile: boolean;
   editValue: string;
-  editInputRef?: React.RefObject<HTMLInputElement>;
+  editInputRef?: React.RefObject<HTMLInputElement | null>;
   dragDisabled: boolean;
   onSelect: () => void;
   onDoubleClick: () => void;
@@ -380,7 +380,7 @@ function SortableTabWrapper({
 
       {isEditing ? (
         <input
-          ref={editInputRef as React.RefObject<HTMLInputElement>}
+          ref={editInputRef}
           value={editValue}
           onChange={(e) => onEditChange(e.target.value)}
           onKeyDown={(e) => {
