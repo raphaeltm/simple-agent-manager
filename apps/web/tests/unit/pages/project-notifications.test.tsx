@@ -1,7 +1,7 @@
 import type { ListNotificationsResponse,NotificationResponse } from '@simple-agent-manager/shared';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -22,8 +22,8 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   dismissNotification: mocks.dismissNotification,
 }));
 
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
   return {
     ...actual,
     useNavigate: () => mocks.navigate,

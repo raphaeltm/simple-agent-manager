@@ -5,7 +5,7 @@ EmptyState,
   PageLayout, Select, Spinner, Tabs, Tooltip, } from '@simple-agent-manager/ui';
 import { Copy,Edit, Inbox, Settings, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 import { UserMenu } from '../components/UserMenu';
 import { getActiveUiStandard, type UIStandard,upsertUiStandard } from '../lib/ui-governance';

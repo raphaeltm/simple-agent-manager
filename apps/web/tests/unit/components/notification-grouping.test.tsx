@@ -19,7 +19,7 @@
  */
 import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 import { useGlobalAudio } from '../contexts/GlobalAudioContext';
 import { useIsMobile } from '../hooks/useIsMobile';

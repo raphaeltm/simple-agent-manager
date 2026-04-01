@@ -3,7 +3,7 @@ import { DEFAULT_VM_LOCATION,PROVIDER_LABELS } from '@simple-agent-manager/share
 import { Alert, Button, EmptyState, PageLayout, Select, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
 import { Server } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 import { NodeCard } from '../components/node/NodeCard';
 import { UserMenu } from '../components/UserMenu';

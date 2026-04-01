@@ -3,7 +3,7 @@ import { dirname,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { Landing } from '../../../src/pages/Landing';

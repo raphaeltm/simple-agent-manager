@@ -37,8 +37,8 @@ export function useNotifications(): UseNotificationsReturn {
 
   const wsRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const pingTimerRef = useRef<ReturnType<typeof setInterval>>();
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const pingTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const mountedRef = useRef(true);
   const connectRef = useRef<() => void>(() => {});
 

@@ -3,7 +3,7 @@ import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-mana
 import { Button, Card, DropdownMenu, type DropdownMenuItem,StatusBadge } from '@simple-agent-manager/ui';
 import { Plus,Server } from 'lucide-react';
 import type { FC } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 import { MiniMetricBadge } from './MiniMetricBadge';
 import { NodeWorkspaceMiniCard } from './NodeWorkspaceMiniCard';

@@ -1,6 +1,6 @@
 import { ArrowLeft, Menu, Monitor,Search, Server, Shield } from 'lucide-react';
 import { createContext, type ReactNode,useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
 import { useIsMobile } from '../hooks/useIsMobile';

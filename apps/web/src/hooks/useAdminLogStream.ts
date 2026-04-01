@@ -46,7 +46,7 @@ export function useAdminLogStream(bufferSize = DEFAULT_BUFFER_SIZE): UseAdminLog
 
   const socketRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const mountedRef = useRef(true);
   const pausedRef = useRef(false);
   const filterRef = useRef(filter);

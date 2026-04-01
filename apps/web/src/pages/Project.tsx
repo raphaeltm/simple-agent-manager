@@ -1,7 +1,7 @@
 import type { GitHubInstallation, ProjectDetailResponse } from '@simple-agent-manager/shared';
 import { Alert, PageLayout, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
-import { Outlet, useLocation, useParams } from 'react-router-dom';
+import { Outlet, useLocation, useParams } from 'react-router';
 
 import { useAppShell } from '../components/AppShell';
 import { ProjectInfoPanel } from '../components/project/ProjectInfoPanel';

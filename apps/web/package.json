@@ -37,7 +37,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-markdown": "catalog:",
-    "react-router-dom": "catalog:",
+    "react-router": "catalog:",
     "react-simple-maps": "3.0.0",
     "react-virtuoso": "catalog:",
     "recharts": "3.8.1",
@@ -46,6 +46,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.58.2",
+    "@testing-library/dom": "catalog:",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "14.6.1",

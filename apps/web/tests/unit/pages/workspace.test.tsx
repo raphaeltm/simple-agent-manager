@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -532,7 +532,7 @@ describe('Workspace page', () => {
 
     expect(await screen.findByText('Connection Failed')).toBeInTheDocument();
     // With R3 useTokenRefresh, the raw error message is shown directly
-    expect(screen.getByText('Workspace not found or has no VM IP')).toBeInTheDocument();
+    expect(await screen.findByText('Workspace not found or has no VM IP')).toBeInTheDocument();
 
     const callsBeforeRetry = mocks.getTerminalToken.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Retry Connection' }));
@@ -682,7 +682,7 @@ describe('Workspace page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
 
-    expect(screen.getByRole('button', { name: 'Terminal' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Terminal' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Claude Code' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
 
@@ -810,7 +810,7 @@ describe('Workspace page', () => {
       renderWorkspace('/workspaces/ws-123');
       await screen.findByText('Workspace A');
 
-      expect(screen.getByRole('button', { name: 'Open command palette' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Open command palette' })).toBeInTheDocument();
     });
 
     it('opens command palette when mobile button is tapped', async () => {
@@ -818,8 +818,8 @@ describe('Workspace page', () => {
       renderWorkspace('/workspaces/ws-123');
       await screen.findByText('Workspace A');
 
-      fireEvent.click(screen.getByRole('button', { name: 'Open command palette' }));
-      expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole('button', { name: 'Open command palette' }));
+      expect(await screen.findByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
     });
 
     it('opens overlay with rename and events sections when menu button is clicked', async () => {

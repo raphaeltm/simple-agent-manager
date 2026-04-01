@@ -8,7 +8,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { useMemo } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 
 import { extractProjectId } from '../components/NavSidebar';
 import type { ChatSessionResponse } from '../lib/api';

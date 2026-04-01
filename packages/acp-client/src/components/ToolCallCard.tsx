@@ -161,7 +161,7 @@ function hasRenderableContent(content: ToolCallContentItem): boolean {
   return false;
 }
 
-function getRenderableFallback(data: unknown): JSX.Element | null {
+function getRenderableFallback(data: unknown): React.JSX.Element | null {
   if (data === null || data === undefined) {
     return null;
   }

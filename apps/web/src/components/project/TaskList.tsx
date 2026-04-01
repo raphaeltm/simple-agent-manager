@@ -1,6 +1,6 @@
 import type { Task, TaskStatus } from '@simple-agent-manager/shared';
 import { Button, EmptyState, Spinner, StatusBadge } from '@simple-agent-manager/ui';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 interface TaskListProps {
   tasks: Task[];

@@ -233,6 +233,6 @@ Per-project data (chat sessions, messages, activity events) is stored in a `Proj
 ## Active Technologies
 
 - TypeScript 5.x (Worker/Web), Go 1.24+ (VM Agent)
-- Hono (API framework), Drizzle ORM (D1), React 18 + Vite (Web)
+- Hono (API framework), Drizzle ORM (D1), React 19 + Vite (Web)
 - Cloudflare Workers SDK (Durable Objects, D1, KV, R2)
 - Tailwind CSS v4 (Web)

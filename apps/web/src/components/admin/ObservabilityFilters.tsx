@@ -49,7 +49,7 @@ export const ObservabilityFilters: FC<ObservabilityFiltersProps> = ({
   onTimeRangeChange,
 }) => {
   const [searchInput, setSearchInput] = useState(search);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Sync external search changes
   useEffect(() => {

@@ -18,7 +18,7 @@ import { MultiTerminal,Terminal } from '@simple-agent-manager/terminal';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { MoreVertical, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef,useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 
 import type { ChatSessionHandle } from '../components/ChatSession';
 import { ChatSession } from '../components/ChatSession';

@@ -503,7 +503,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     expect(mockResumeAgentSession).not.toHaveBeenCalled();
 
     // Advance past the 2s delay
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     await waitFor(() => {
       expect(mockResumeAgentSession).toHaveBeenCalledWith(WORKSPACE_ID, AGENT_SESSION_ID);
@@ -525,7 +525,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     await waitFor(() => {
       expect(screen.getByText('Resuming agent...')).toBeInTheDocument();
@@ -546,7 +546,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     await waitFor(() => {
       expect(mockResumeAgentSession).toHaveBeenCalled();
@@ -571,7 +571,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     await waitFor(() => {
       expect(screen.getByText(/could not resume agent.*workspace may have been cleaned up/i)).toBeInTheDocument();
@@ -592,7 +592,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     // Should NOT have called resume since agent is already active
     expect(mockResumeAgentSession).not.toHaveBeenCalled();
@@ -612,7 +612,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     expect(mockResumeAgentSession).not.toHaveBeenCalled();
   });
@@ -630,7 +630,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     expect(mockResumeAgentSession).not.toHaveBeenCalled();
   });
@@ -654,7 +654,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     expect(mockResumeAgentSession).not.toHaveBeenCalled();
   });
@@ -675,7 +675,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Trigger auto-resume
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     await waitFor(() => {
       expect(screen.getByText('Resuming agent...')).toBeInTheDocument();
@@ -705,11 +705,13 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    // Advance timer to trigger the auto-resume, then flush pending promises
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
 
     await waitFor(() => {
       expect(screen.getByText(/could not resume agent.*please try again/i)).toBeInTheDocument();
-    });
+    }, { timeout: 3000 });
   });
 
   it('resets auto-resume state when session ID changes', async () => {
@@ -728,7 +730,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Trigger auto-resume for first session
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     await waitFor(() => {
       expect(screen.getByText('Resuming agent...')).toBeInTheDocument();
@@ -756,7 +758,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Auto-resume should fire for the new session after the delay
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     await waitFor(() => {
       expect(mockResumeAgentSession).toHaveBeenCalled();
@@ -788,7 +790,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Now advance past the auto-resume timer — it should NOT fire a second resume
-    await act(async () => { vi.advanceTimersByTime(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     // Still only 1 call (from the follow-up, not from auto-resume)
     expect(mockResumeAgentSession).toHaveBeenCalledTimes(1);

@@ -69,7 +69,7 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; node: Node } | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Sync external changes
   useEffect(() => {

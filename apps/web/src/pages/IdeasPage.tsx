@@ -12,7 +12,7 @@ import {
   Search,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 import { useIsMobile } from '../hooks/useIsMobile';
 import type { ChatSessionResponse } from '../lib/api';

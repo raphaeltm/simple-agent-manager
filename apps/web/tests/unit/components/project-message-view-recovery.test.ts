@@ -58,19 +58,19 @@ describe('Connection banner debounce', () => {
     expect(result.current).toBe(false);
   });
 
-  it('shows banner after delay when reconnecting persists', () => {
+  it('shows banner after delay when reconnecting persists', async () => {
     const { result } = renderHook(() =>
       useConnectionBannerDebounce('reconnecting', 3000)
     );
     expect(result.current).toBe(false);
 
-    act(() => {
-      vi.advanceTimersByTime(3000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
     });
     expect(result.current).toBe(true);
   });
 
-  it('hides banner immediately when connection is restored before delay', () => {
+  it('hides banner immediately when connection is restored before delay', async () => {
     const { result, rerender } = renderHook(
       ({ state }: { state: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' }) =>
         useConnectionBannerDebounce(state, 3000),
@@ -81,8 +81,8 @@ describe('Connection banner debounce', () => {
     expect(result.current).toBe(false);
 
     // Advance partially
-    act(() => {
-      vi.advanceTimersByTime(1500);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
     });
     expect(result.current).toBe(false);
 
@@ -91,8 +91,8 @@ describe('Connection banner debounce', () => {
     expect(result.current).toBe(false);
 
     // Even after the full delay, banner stays hidden
-    act(() => {
-      vi.advanceTimersByTime(3000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
     });
     expect(result.current).toBe(false);
   });
@@ -105,7 +105,7 @@ describe('Connection banner debounce', () => {
     expect(result.current).toBe(true);
   });
 
-  it('does not show banner for brief connecting state', () => {
+  it('does not show banner for brief connecting state', async () => {
     const { result, rerender } = renderHook(
       ({ state }: { state: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' }) =>
         useConnectionBannerDebounce(state, 3000),
@@ -114,8 +114,8 @@ describe('Connection banner debounce', () => {
     expect(result.current).toBe(false);
 
     // Connection succeeds quickly
-    act(() => {
-      vi.advanceTimersByTime(500);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
     });
     rerender({ state: 'connected' });
     expect(result.current).toBe(false);
@@ -245,13 +245,13 @@ describe('ACP recovery effect', () => {
 
     // Trigger after initial delay
     await act(async () => {
-      vi.advanceTimersByTime(5000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(resumeFn).toHaveBeenCalledWith('ws-123', 'agent-456');
     expect(reconnectFn).toHaveBeenCalled();
   });
 
-  it('does NOT trigger when sessionState is idle (existing auto-resume handles it)', () => {
+  it('does NOT trigger when sessionState is idle (existing auto-resume handles it)', async () => {
     renderHook(() =>
       useAcpRecovery({
         ...defaultOpts,
@@ -261,13 +261,13 @@ describe('ACP recovery effect', () => {
       })
     );
 
-    act(() => {
-      vi.advanceTimersByTime(10000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
     });
     expect(resumeFn).not.toHaveBeenCalled();
   });
 
-  it('does NOT trigger when ACP is not in error state', () => {
+  it('does NOT trigger when ACP is not in error state', async () => {
     renderHook(() =>
       useAcpRecovery({
         ...defaultOpts,
@@ -277,13 +277,13 @@ describe('ACP recovery effect', () => {
       })
     );
 
-    act(() => {
-      vi.advanceTimersByTime(10000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
     });
     expect(resumeFn).not.toHaveBeenCalled();
   });
 
-  it('does NOT trigger when already resuming', () => {
+  it('does NOT trigger when already resuming', async () => {
     renderHook(() =>
       useAcpRecovery({
         ...defaultOpts,
@@ -293,13 +293,13 @@ describe('ACP recovery effect', () => {
       })
     );
 
-    act(() => {
-      vi.advanceTimersByTime(10000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
     });
     expect(resumeFn).not.toHaveBeenCalled();
   });
 
-  it('does NOT trigger without workspaceId', () => {
+  it('does NOT trigger without workspaceId', async () => {
     renderHook(() =>
       useAcpRecovery({
         ...defaultOpts,
@@ -309,8 +309,8 @@ describe('ACP recovery effect', () => {
       })
     );
 
-    act(() => {
-      vi.advanceTimersByTime(10000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
     });
     expect(resumeFn).not.toHaveBeenCalled();
   });
@@ -324,7 +324,7 @@ describe('ACP recovery effect', () => {
 
     // First recovery attempt
     await act(async () => {
-      vi.advanceTimersByTime(5000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(result.current.attempts).toBe(1);
 
@@ -340,18 +340,18 @@ describe('ACP recovery effect', () => {
 
     // First attempt at 5s (initial delay)
     await act(async () => {
-      vi.advanceTimersByTime(5000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(1);
 
     // Second attempt should wait 30s (interval), not 5s
     await act(async () => {
-      vi.advanceTimersByTime(5000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(1); // Still 1
 
     await act(async () => {
-      vi.advanceTimersByTime(25000);
+      await vi.advanceTimersByTimeAsync(25000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(2); // Now 2
   });
@@ -368,24 +368,24 @@ describe('ACP recovery effect', () => {
 
     // Attempt 1
     await act(async () => {
-      vi.advanceTimersByTime(5000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(1);
 
     // Attempt 2
     await act(async () => {
-      vi.advanceTimersByTime(30000);
+      await vi.advanceTimersByTimeAsync(30000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(2);
 
     // No more attempts
     await act(async () => {
-      vi.advanceTimersByTime(60000);
+      await vi.advanceTimersByTimeAsync(60000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(2);
   });
 
-  it('does NOT trigger without agentSessionId', () => {
+  it('does NOT trigger without agentSessionId', async () => {
     renderHook(() =>
       useAcpRecovery({
         ...defaultOpts,
@@ -395,13 +395,13 @@ describe('ACP recovery effect', () => {
       })
     );
 
-    act(() => {
-      vi.advanceTimersByTime(10000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
     });
     expect(resumeFn).not.toHaveBeenCalled();
   });
 
-  it('does NOT trigger when provisioning', () => {
+  it('does NOT trigger when provisioning', async () => {
     renderHook(() =>
       useAcpRecovery({
         ...defaultOpts,
@@ -411,8 +411,8 @@ describe('ACP recovery effect', () => {
       })
     );
 
-    act(() => {
-      vi.advanceTimersByTime(10000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
     });
     expect(resumeFn).not.toHaveBeenCalled();
   });
@@ -426,14 +426,14 @@ describe('ACP recovery effect', () => {
 
     // First attempt fires
     await act(async () => {
-      vi.advanceTimersByTime(5000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(1);
     expect(reconnectFn).not.toHaveBeenCalled(); // rejected, so no reconnect
 
     // No further attempts — 404 pins attempts to max
     await act(async () => {
-      vi.advanceTimersByTime(60000);
+      await vi.advanceTimersByTimeAsync(60000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(1);
   });
@@ -446,7 +446,7 @@ describe('ACP recovery effect', () => {
     );
 
     await act(async () => {
-      vi.advanceTimersByTime(5000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(1);
     expect(reconnectFn).not.toHaveBeenCalled(); // must NOT reconnect on failure
@@ -461,13 +461,13 @@ describe('ACP recovery effect', () => {
 
     // First attempt
     await act(async () => {
-      vi.advanceTimersByTime(5000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(1);
 
     // Second attempt after interval (non-404 errors allow retries)
     await act(async () => {
-      vi.advanceTimersByTime(30000);
+      await vi.advanceTimersByTimeAsync(30000);
     });
     expect(resumeFn).toHaveBeenCalledTimes(2);
   });

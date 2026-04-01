@@ -1,7 +1,7 @@
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { NodeCard } from '../../../../src/components/node/NodeCard';

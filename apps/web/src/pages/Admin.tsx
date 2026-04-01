@@ -1,6 +1,6 @@
 import type { Tab } from '@simple-agent-manager/ui';
 import { PageLayout, Tabs } from '@simple-agent-manager/ui';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
 import { UserMenu } from '../components/UserMenu';

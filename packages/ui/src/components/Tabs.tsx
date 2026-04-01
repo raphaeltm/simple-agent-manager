@@ -1,5 +1,5 @@
 import { type KeyboardEvent,type ReactNode, useRef } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router';
 
 export interface Tab {
   id: string;

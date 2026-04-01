@@ -1,7 +1,7 @@
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, PageLayout, Skeleton } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 import { ProjectForm, type ProjectFormValues } from '../components/project/ProjectForm';
 import { UserMenu } from '../components/UserMenu';

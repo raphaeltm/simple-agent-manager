@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { GlobalCommandPalette } from '../../src/components/GlobalCommandPalette';
@@ -9,8 +9,8 @@ import { GlobalCommandPalette } from '../../src/components/GlobalCommandPalette'
 let mockPathname = '/dashboard';
 const mockNavigate = vi.fn();
 
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
   return {
     ...actual,
     useNavigate: () => mockNavigate,

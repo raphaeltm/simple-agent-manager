@@ -10,7 +10,7 @@
 import type { ProjectRuntimeConfigResponse, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 import { useToast } from '../../hooks/useToast';
 import {

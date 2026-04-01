@@ -59,7 +59,7 @@ vi.mock('../../src/pages/Projects', () => ({
 
 // Project now uses Outlet to render child routes, so mock it to pass children through
 vi.mock('../../src/pages/Project', async () => {
-  const { Outlet } = await import('react-router-dom');
+  const { Outlet } = await import('react-router');
   return {
     Project: () => <div data-testid="project-detail-page"><Outlet /></div>,
   };

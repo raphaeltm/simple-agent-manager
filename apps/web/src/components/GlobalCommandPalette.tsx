@@ -12,7 +12,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation,useNavigate } from 'react-router-dom';
+import { useLocation,useNavigate } from 'react-router';
 
 import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
 import type { ChatSessionResponse } from '../lib/api';

@@ -22,12 +22,13 @@
   },
   "peerDependencies": {
     "lucide-react": ">=0.300.0",
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "react-router-dom": "^6.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0",
+    "react-router": "^7.0.0",
     "tailwindcss": "^4.0.0"
   },
   "devDependencies": {
+    "@testing-library/dom": "catalog:",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
@@ -35,7 +36,9 @@
     "@vitejs/plugin-react": "catalog:",
     "jsdom": "catalog:",
     "lucide-react": "catalog:",
-    "react-router-dom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
