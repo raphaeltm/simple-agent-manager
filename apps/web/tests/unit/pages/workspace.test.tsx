@@ -149,7 +149,7 @@ vi.mock('../../../src/config/features', () => ({
   useFeatureFlags: () => mocks.featureFlags,
 }));
 
-import { Workspace } from '../../../src/pages/Workspace';
+import { Workspace } from '../../../src/pages/workspace';
 
 function LocationProbe() {
   const location = useLocation();

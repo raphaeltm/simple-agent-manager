@@ -11,7 +11,7 @@
 import { act,fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ProjectMessageView } from '../../../../src/components/chat/ProjectMessageView';
+import { ProjectMessageView } from '../../../../src/components/project-message-view';
 
 // ---------------------------------------------------------------------------
 // Mocks

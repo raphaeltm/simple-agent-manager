@@ -57,7 +57,7 @@ vi.mock('@simple-agent-manager/terminal', () => ({
   MultiTerminal: () => <div data-testid="multi-terminal" />,
 }));
 
-import { Workspace } from '../../../src/pages/Workspace';
+import { Workspace } from '../../../src/pages/workspace';
 
 describe('Workspace toolbar declutter', () => {
   beforeEach(() => {

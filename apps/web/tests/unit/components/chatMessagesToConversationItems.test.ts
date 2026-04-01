@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { chatMessagesToConversationItems } from '../../../src/components/chat/ProjectMessageView';
+import { chatMessagesToConversationItems } from '../../../src/components/project-message-view';
 import type { ChatMessageResponse } from '../../../src/lib/api';
 
 // ---------------------------------------------------------------------------

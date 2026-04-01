@@ -56,7 +56,9 @@ describe('Execution step labels (shared types)', () => {
 });
 
 describe('ProvisioningIndicator (ProjectChat)', () => {
-  const source = readSource('pages/ProjectChat.tsx');
+  const source = readSource('pages/project-chat/ProvisioningIndicator.tsx')
+    + readSource('pages/project-chat/useProjectChatState.ts')
+    + readSource('pages/project-chat/types.ts');
 
   it('imports execution step constants from shared', () => {
     expect(source).toContain('EXECUTION_STEP_LABELS');

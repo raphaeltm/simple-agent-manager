@@ -10,7 +10,8 @@ function readSource(relativePath: string): string {
 }
 
 describe('SessionHeader UI structure', () => {
-  const source = readSource('components/chat/ProjectMessageView.tsx');
+  const source = readSource('components/project-message-view/SessionHeader.tsx')
+    + readSource('components/project-message-view/index.tsx');
 
   it('does not render Direct URL section', () => {
     // Direct URL was removed — ensure no remnants
@@ -78,13 +79,15 @@ describe('SessionHeader UI structure', () => {
 
 describe('SessionHeader mark complete handler logic', () => {
   it('handler requires both projectId and taskId', () => {
-    const source = readSource('components/chat/ProjectMessageView.tsx');
+    const source = readSource('components/project-message-view/SessionHeader.tsx')
+    + readSource('components/project-message-view/index.tsx');
     // The handler checks for taskEmbed?.id before proceeding
     expect(source).toContain('if (!taskEmbed?.id || completing) return');
   });
 
   it('excludes completed/cancelled/failed tasks from mark-complete eligibility', () => {
-    const source = readSource('components/chat/ProjectMessageView.tsx');
+    const source = readSource('components/project-message-view/SessionHeader.tsx')
+    + readSource('components/project-message-view/index.tsx');
     expect(source).toContain("taskEmbed.status !== 'completed'");
     expect(source).toContain("taskEmbed.status !== 'cancelled'");
     expect(source).toContain("taskEmbed.status !== 'failed'");
