@@ -25,39 +25,42 @@ The ESLint configuration is minimal — only `eslint:recommended` + `@typescript
 - **Skip type-aware rules initially:** Rules like `no-floating-promises` require `parserOptions.project` which significantly slows linting in monorepos. Add non-type-aware stricter rules now; type-aware rules can be a follow-up.
 - **Install new plugins at root level:** Since we have a single root `.eslintrc.cjs`, plugins go in root `devDependencies`.
 - **Auto-fix first, manual fix second:** `simple-import-sort` and `consistent-type-imports` are auto-fixable. Run `--fix` before manual triage.
+- **a11y rules as warnings:** 72 pre-existing a11y violations. Start as warnings for incremental adoption; fixing them is a separate effort.
 
 ## Implementation Checklist
 
 ### Phase 1: Install plugins and update config
-- [ ] Install `eslint-plugin-jsx-a11y` at root
-- [ ] Install `eslint-plugin-simple-import-sort` at root
-- [ ] Add `jsx-a11y/recommended` to the `.tsx` override in `.eslintrc.cjs`
-- [ ] Add `simple-import-sort` plugin with `simple-import-sort/imports: error` and `simple-import-sort/exports: error`
-- [ ] Add `@typescript-eslint/consistent-type-imports` rule (error, auto-fixable)
+- [x] Install `eslint-plugin-jsx-a11y` at root
+- [x] Install `eslint-plugin-simple-import-sort` at root
+- [x] Add `jsx-a11y/recommended` to the `.tsx` override in `.eslintrc.cjs`
+- [x] Add `simple-import-sort` plugin with `simple-import-sort/imports: error` and `simple-import-sort/exports: error`
+- [x] Add `@typescript-eslint/consistent-type-imports` rule (error, auto-fixable)
 
 ### Phase 2: Add stricter TypeScript rules (non-type-aware)
-- [ ] Add `@typescript-eslint/no-non-null-assertion: warn`
-- [ ] Evaluate `@typescript-eslint/no-inferrable-types: error` (auto-fixable)
+- [x] Add `@typescript-eslint/no-non-null-assertion: warn`
+- [x] Decided against `no-inferrable-types` — marginal value, wide blast radius
 
 ### Phase 3: Fix violations
-- [ ] Run `pnpm lint --fix` from root to auto-fix import ordering + type imports
-- [ ] Review and fix remaining lint violations (or downgrade rules with too many violations to warn)
-- [ ] Ensure `pnpm lint` passes with 0 errors
+- [x] Run `pnpm lint --fix` from root to auto-fix import ordering + type imports
+- [x] Review and fix remaining lint violations — downgraded high-violation a11y rules to warn
+- [x] Ensure `pnpm lint` passes with 0 errors
+- [x] Fix source-contract test broken by import reordering (node-stop.test.ts)
+- [x] Fix pre-existing settings test failure (missing getSmokeTestStatus mock)
 
 ### Phase 4: Verify
-- [ ] `pnpm lint` passes
-- [ ] `pnpm typecheck` passes
-- [ ] `pnpm test` passes
-- [ ] `pnpm build` passes
+- [x] `pnpm lint` passes
+- [x] `pnpm typecheck` passes
+- [x] `pnpm test` passes
+- [x] `pnpm build` passes
 
 ## Acceptance Criteria
 
-- [ ] Accessibility rules (`jsx-a11y/recommended`) enabled for `.tsx` files
-- [ ] Import ordering enforced via `simple-import-sort` (auto-fixable)
-- [ ] Stricter TypeScript rules enabled (at least `consistent-type-imports`)
-- [ ] `no-console` already enforced for API code (from PR #581 — verify still present)
-- [ ] `pnpm lint` passes in CI with 0 errors
-- [ ] All auto-fixable violations fixed
+- [x] Accessibility rules (`jsx-a11y/recommended`) enabled for `.tsx` files (as warnings for incremental adoption)
+- [x] Import ordering enforced via `simple-import-sort` (auto-fixable, as errors)
+- [x] Stricter TypeScript rules enabled (`consistent-type-imports` as error, `no-non-null-assertion` as warning)
+- [x] `no-console` already enforced for API code (from PR #581 — verified still present)
+- [x] `pnpm lint` passes in CI with 0 errors
+- [x] All auto-fixable violations fixed (645 files touched)
 
 ## References
 
