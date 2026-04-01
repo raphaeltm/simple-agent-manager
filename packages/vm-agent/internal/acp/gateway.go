@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -484,36 +485,94 @@ func validateAuthFilePath(authFilePath string) error {
 	return nil
 }
 
+func resolveContainerHomeDir(ctx context.Context, containerID, user string) (string, error) {
+	username, stderr, err := execInContainer(ctx, containerID, user, "", "id", "-un")
+	if err != nil {
+		if stderr != "" {
+			return "", fmt.Errorf("resolve container username: %w: %s", err, stderr)
+		}
+		return "", fmt.Errorf("resolve container username: %w", err)
+	}
+
+	passwdEntry, stderr, err := execInContainer(
+		ctx,
+		containerID,
+		user,
+		"",
+		"getent",
+		"passwd",
+		strings.TrimSpace(username),
+	)
+	if err == nil {
+		fields := strings.Split(strings.TrimSpace(passwdEntry), ":")
+		if len(fields) >= 6 && fields[5] != "" {
+			return fields[5], nil
+		}
+	} else if stderr != "" {
+		slog.Debug("getent failed while resolving container home directory", "stderr", stderr)
+	}
+
+	home, stderr, err := execInContainer(ctx, containerID, user, "", "printenv", "HOME")
+	if err != nil {
+		if stderr != "" {
+			return "", fmt.Errorf("resolve container home dir: %w: %s", err, stderr)
+		}
+		return "", fmt.Errorf("resolve container home dir: %w", err)
+	}
+
+	trimmedHome := strings.TrimSpace(home)
+	if trimmedHome == "" {
+		return "", fmt.Errorf("resolved empty container home directory")
+	}
+	return trimmedHome, nil
+}
+
 func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
 	if err := validateAuthFilePath(authFilePath); err != nil {
 		return err
 	}
 
-	// Shell script reads credential from stdin via cat, avoiding any env/arg exposure.
-	// 1. Resolves the user's home directory reliably (docker exec -u does NOT update $HOME)
-	// 2. Creates the parent directory with restricted permissions
-	// 3. Reads stdin into the target file with restricted permissions
-	//
-	// NOTE: $HOME in docker exec -u is unreliable — it inherits the container's env
-	// (often /root even when running as a non-root user). We resolve the home directory
-	// from /etc/passwd via getent, falling back to $HOME if getent is unavailable.
-	script := fmt.Sprintf(
-		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; dir="$home/%s"; mkdir -p "$(dirname "$dir")" && chmod 700 "$(dirname "$dir")"; cat > "$dir" && chmod 600 "$dir"`,
-		authFilePath,
-	)
+	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	if err != nil {
+		return err
+	}
+	targetPath := path.Join(homeDir, authFilePath)
+	parentDir := path.Dir(targetPath)
+
+	if _, stderr, err := execInContainer(ctx, containerID, user, "", "mkdir", "-p", parentDir); err != nil {
+		if stderr != "" {
+			return fmt.Errorf("create auth file parent dir: %w: %s", err, stderr)
+		}
+		return fmt.Errorf("create auth file parent dir: %w", err)
+	}
+	if _, stderr, err := execInContainer(ctx, containerID, user, "", "chmod", "700", parentDir); err != nil {
+		if stderr != "" {
+			return fmt.Errorf("chmod auth file parent dir: %w: %s", err, stderr)
+		}
+		return fmt.Errorf("chmod auth file parent dir: %w", err)
+	}
 
 	dockerArgs := []string{"exec", "-i"}
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
 	}
-	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
+	dockerArgs = append(dockerArgs, containerID, "tee", targetPath)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	cmd.Stdin = strings.NewReader(content)
+	cmd.Stdout = io.Discard
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker exec failed: %w: %s", err, strings.TrimSpace(string(output)))
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("write auth file content: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	if _, stderrText, err := execInContainer(ctx, containerID, user, "", "chmod", "600", targetPath); err != nil {
+		if stderrText != "" {
+			return fmt.Errorf("chmod auth file: %w: %s", err, stderrText)
+		}
+		return fmt.Errorf("chmod auth file: %w", err)
 	}
 	return nil
 }
@@ -527,18 +586,17 @@ func readAuthFileFromContainer(ctx context.Context, containerID, user, authFileP
 		return "", err
 	}
 
-	// Same home directory resolution as writeAuthFileToContainer.
-	script := fmt.Sprintf(
-		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; cat "$home/%s"`,
-		authFilePath,
-	)
+	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	if err != nil {
+		return "", err
+	}
+	targetPath := path.Join(homeDir, authFilePath)
 
-	// -i not needed: no stdin, stdout captured via cmd.Output().
 	dockerArgs := []string{"exec"}
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
 	}
-	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
+	dockerArgs = append(dockerArgs, containerID, "cat", targetPath)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 
