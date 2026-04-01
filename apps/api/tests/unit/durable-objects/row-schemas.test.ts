@@ -76,6 +76,18 @@ describe('parseRow', () => {
   it('includes context in error message', () => {
     expect(() => parseRow(TestSchema, {}, 'my_context')).toThrow('my_context');
   });
+
+  it('includes field path in error message', () => {
+    expect(() => parseRow(TestSchema, { name: 'Alice' }, 'ctx')).toThrow(/age/);
+  });
+
+  it('handles null row input', () => {
+    expect(() => parseRow(TestSchema, null, 'ctx')).toThrow(/Row validation failed \(ctx\)/);
+  });
+
+  it('handles non-object row input', () => {
+    expect(() => parseRow(TestSchema, 'not-an-object', 'ctx')).toThrow(/Row validation failed \(ctx\)/);
+  });
 });
 
 describe('parseRows', () => {
@@ -299,6 +311,20 @@ describe('parseChatMessageRow', () => {
     expect(result.toolMetadata).toBeNull();
     expect(result.sequence).toBeNull();
   });
+
+  it('throws on invalid JSON in tool_metadata', () => {
+    expect(() =>
+      parseChatMessageRow({
+        id: 'm1',
+        session_id: 's1',
+        role: 'user',
+        content: 'hi',
+        tool_metadata: 'not-json',
+        created_at: 1000,
+        sequence: null,
+      })
+    ).toThrow();
+  });
 });
 
 describe('parseSearchResultRow', () => {
@@ -366,6 +392,11 @@ describe('parseChatSessionListRow', () => {
     // When there's no match in idle_cleanup_schedule, cleanup_at is absent
     const result = parseChatSessionListRow(baseRow);
     expect(result.cleanupAt).toBeNull();
+  });
+
+  it('is not idle when status is stopped even with agent_completed_at', () => {
+    const result = parseChatSessionListRow({ ...baseRow, status: 'stopped', agent_completed_at: 1050 });
+    expect(result.isIdle).toBe(false);
   });
 });
 
@@ -576,6 +607,22 @@ describe('parseActivityEventRow', () => {
     });
     expect(result.payload).toBeNull();
     expect(result.actorId).toBeNull();
+  });
+
+  it('throws on invalid JSON in payload', () => {
+    expect(() =>
+      parseActivityEventRow({
+        id: 'ae1',
+        event_type: 'task_started',
+        actor_type: 'system',
+        actor_id: null,
+        workspace_id: null,
+        session_id: null,
+        task_id: null,
+        payload: 'not-json',
+        created_at: 1000,
+      })
+    ).toThrow();
   });
 });
 

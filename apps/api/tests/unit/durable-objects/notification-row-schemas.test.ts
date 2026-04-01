@@ -92,6 +92,20 @@ describe('parseNotificationRow', () => {
   it('rejects missing required fields', () => {
     expect(() => parseNotificationRow({ id: 'x' })).toThrow(/Row validation failed/);
   });
+
+  it('treats empty string project_id as null', () => {
+    const result = parseNotificationRow({ ...validRow, project_id: '' });
+    expect(result.projectId).toBeNull();
+  });
+
+  it('converts dismissed_at to ISO string when present', () => {
+    const result = parseNotificationRow({ ...validRow, dismissed_at: 1711900000000 });
+    expect(result.dismissedAt).toBe(new Date(1711900000000).toISOString());
+  });
+
+  it('throws on invalid JSON in metadata', () => {
+    expect(() => parseNotificationRow({ ...validRow, metadata: 'not-json' })).toThrow();
+  });
 });
 
 describe('parseNotificationPreferenceRow', () => {
