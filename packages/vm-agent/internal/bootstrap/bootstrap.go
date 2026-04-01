@@ -577,7 +577,10 @@ func redeemBootstrapToken(ctx context.Context, cfg *config.Config) (*bootstrapSt
 	}
 	defer res.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 8*1024))
+	body, err := io.ReadAll(io.LimitReader(res.Body, 8*1024))
+	if err != nil {
+		return nil, true, fmt.Errorf("bootstrap: read response body: %w", err)
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		retryable := res.StatusCode >= 500 || res.StatusCode == http.StatusTooManyRequests
 		if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusNotFound {

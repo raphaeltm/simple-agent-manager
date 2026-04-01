@@ -373,6 +373,9 @@ func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, 
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to resolve container: %w", err)
 	}
+	if !isValidContainerID(containerID) {
+		return "", "", "", fmt.Errorf("invalid container ID format: %q", containerID)
+	}
 
 	workDir = runtime.ContainerWorkDir
 	if workDir == "" {

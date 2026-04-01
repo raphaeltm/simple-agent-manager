@@ -39,8 +39,8 @@ type Reporter struct {
 	sessionID   string // dynamically updated when warm node is reused for new task
 
 	// flushMu serializes flush() calls with outbox mutations in SetSessionID.
-	// SetSessionID acquires flushMu to ensure no in-progress flush can ship
-	// stale messages after the outbox is cleared.
+	// Lock ordering: flushMu must always be acquired BEFORE mu when both
+	// are held. Acquiring mu first would risk deadlock with flush().
 	flushMu sync.Mutex
 
 	stopC chan struct{}
@@ -142,19 +142,21 @@ func (r *Reporter) SetSessionID(id string) {
 	if r == nil {
 		return
 	}
+
+	// Acquire flushMu FIRST to block any concurrent flush, then read the
+	// old session ID under mu. This closes the window where a flush could
+	// start between reading oldSessionID and clearing the outbox.
+	r.flushMu.Lock()
+
 	r.mu.Lock()
 	oldSessionID := r.sessionID
-	r.sessionID = id
 	r.mu.Unlock()
 
-	// Clear stale messages from the previous session to prevent
-	// cross-contamination during warm node reuse. Holding flushMu
-	// ensures any in-progress flush completes before we clear, and
-	// no new flush starts until the clear is done.
+	// Clear stale messages from the previous session BEFORE updating the
+	// session ID to prevent a race where Enqueue reads the new sessionID
+	// while old messages are still in the outbox.
 	if oldSessionID != "" && oldSessionID != id {
-		r.flushMu.Lock()
 		cleared, err := r.clearOutboxForSession(oldSessionID)
-		r.flushMu.Unlock()
 		if err != nil {
 			slog.Error("messagereport: failed to clear outbox on session switch",
 				"error", err, "oldSessionId", oldSessionID, "newSessionId", id)
@@ -162,8 +164,23 @@ func (r *Reporter) SetSessionID(id string) {
 			slog.Warn("messagereport: cleared stale outbox messages on session switch",
 				"cleared", cleared, "oldSessionId", oldSessionID, "newSessionId", id)
 		}
+
+		// Update session ID while still holding flushMu so that no flush
+		// can observe the new session ID with stale outbox contents.
+		r.mu.Lock()
+		r.sessionID = id
+		r.mu.Unlock()
+
+		r.flushMu.Unlock()
+
 		slog.Info("messagereport: session ID updated",
 			"sessionId", id, "previousSessionId", oldSessionID)
+	} else {
+		r.mu.Lock()
+		r.sessionID = id
+		r.mu.Unlock()
+
+		r.flushMu.Unlock()
 	}
 }
 
@@ -192,10 +209,14 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return nil
 	}
 
-	// Check outbox size.
+	// Check outbox size using a bounded count instead of COUNT(*) over the
+	// entire table. LIMIT caps the scan at OutboxMaxSize rows.
 	var count int
-	if err := r.db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
-		return fmt.Errorf("messagereport: count outbox: %w", err)
+	if err := r.db.QueryRow(
+		"SELECT COUNT(*) FROM (SELECT 1 FROM message_outbox LIMIT ?)",
+		r.cfg.OutboxMaxSize+1,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("messagereport: check outbox capacity: %w", err)
 	}
 	if count >= r.cfg.OutboxMaxSize {
 		slog.Warn("messagereport: outbox full, dropping message",

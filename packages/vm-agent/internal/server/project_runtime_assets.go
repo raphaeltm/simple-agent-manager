@@ -72,7 +72,10 @@ func (s *Server) fetchProjectRuntimeAssetsForWorkspace(
 	}
 	defer res.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 512*1024))
+	body, err := io.ReadAll(io.LimitReader(res.Body, 512*1024))
+	if err != nil {
+		return projectRuntimeAssets{}, fmt.Errorf("runtime-assets: read response body: %w", err)
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return projectRuntimeAssets{}, fmt.Errorf("runtime-assets endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
 	}

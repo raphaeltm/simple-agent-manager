@@ -312,6 +312,10 @@ func TestAddForwarder_SocatCommand(t *testing.T) {
 	if !strings.Contains(cmd, "socat TCP-LISTEN:3000,fork,reuseaddr TCP:devcontainer-ws-1:3000") {
 		t.Errorf("expected socat command with correct port, got: %s", cmd)
 	}
+	// Verify no shell wrapper — socat args passed directly to docker exec.
+	if strings.Contains(cmd, "sh -c") {
+		t.Errorf("socat should be invoked directly without sh -c, got: %s", cmd)
+	}
 }
 
 func TestRemoveForwarder_PkillCommand(t *testing.T) {
@@ -327,9 +331,40 @@ func TestRemoveForwarder_PkillCommand(t *testing.T) {
 		t.Fatalf("expected 1 docker command, got %d", len(docker.getCalls()))
 	}
 	cmd := docker.getCalls()[0]
-	// Verify port-prefix anchoring (comma after port number prevents 80 matching 8080)
-	if !strings.Contains(cmd, "pkill -f 'socat TCP-LISTEN:3000,'") {
-		t.Errorf("expected pkill with comma-anchored port, got: %s", cmd)
+	// Verify pkill is called directly (no shell wrapper) with comma-anchored port
+	expected := "exec neko-ws-1 pkill -f socat TCP-LISTEN:3000,"
+	if cmd != expected {
+		t.Errorf("expected pkill without shell wrapper:\n  want: %s\n  got:  %s", expected, cmd)
+	}
+}
+
+func TestAddForwarder_RejectsPrivilegedPorts(t *testing.T) {
+	testCases := []struct {
+		port    int
+		wantErr bool
+	}{
+		{0, true},
+		{22, true},
+		{80, true},
+		{443, true},
+		{1023, true},
+		{1024, false},
+		{3000, false},
+		{8080, false},
+		{65535, false},
+		{65536, true},
+	}
+
+	for _, tc := range testCases {
+		docker := newMockDocker()
+		mgr := NewManager(socatTestConfig(), docker)
+		err := mgr.addForwarder(context.Background(), "neko-ws-1", tc.port, "devcontainer-ws-1")
+		if tc.wantErr && err == nil {
+			t.Errorf("port %d: expected error for privileged/invalid port", tc.port)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("port %d: unexpected error: %v", tc.port, err)
+		}
 	}
 }
 

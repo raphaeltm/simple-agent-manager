@@ -240,20 +240,16 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		args = append(args, "-e", env)
 	}
 
-	// Write secrets to env file; fall back to -e flags on failure.
+	// Write secrets to env file. Failing here is fatal — falling back to -e flags
+	// would expose secrets in the process table (visible via `ps`).
 	var envFilePath string
 	if len(secrets) > 0 {
 		path, err := writeSecretEnvFile(secrets)
 		if err != nil {
-			slog.Warn("Failed to write secret env file, falling back to -e flags",
-				"error", err, "secretCount", len(secrets))
-			for _, env := range secrets {
-				args = append(args, "-e", env)
-			}
-		} else {
-			envFilePath = path
-			args = append(args, "--env-file", envFilePath)
+			return nil, fmt.Errorf("failed to write secret env file: %w", err)
 		}
+		envFilePath = path
+		args = append(args, "--env-file", envFilePath)
 	}
 
 	args = append(args, cfg.ContainerID, cfg.AcpCommand)

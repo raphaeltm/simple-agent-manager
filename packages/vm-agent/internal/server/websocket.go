@@ -3,6 +3,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -97,9 +98,12 @@ type wsWriter struct {
 }
 
 func (w *wsWriter) Write(p []byte) (int, error) {
-	outputData, _ := json.Marshal(map[string]string{"data": string(p)})
+	outputData, err := json.Marshal(map[string]string{"data": string(p)})
+	if err != nil {
+		return 0, fmt.Errorf("marshal terminal output: %w", err)
+	}
 	w.writeMu.Lock()
-	err := w.conn.WriteJSON(wsMessage{
+	err = w.conn.WriteJSON(wsMessage{
 		Type:      "output",
 		SessionID: w.sessionID,
 		Data:      outputData,
@@ -210,6 +214,8 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			cols = 80
 		}
 	}
+	rows = clampTerminalDimension(rows, 24)
+	cols = clampTerminalDimension(cols, 80)
 
 	ptySession, err := runtime.PTY.CreateSession(userID, rows, cols)
 	if err != nil && isContainerUnavailableError(err) {
@@ -228,7 +234,11 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	s.appendNodeEvent(workspaceID, "info", "terminal.session_open", "Terminal session opened", map[string]interface{}{"sessionId": ptySession.ID})
 
-	sessionData, _ := json.Marshal(map[string]string{"sessionId": ptySession.ID})
+	sessionData, err := json.Marshal(map[string]string{"sessionId": ptySession.ID})
+	if err != nil {
+		slog.Error("Failed to marshal session data", "error", err)
+		return
+	}
 	_ = conn.WriteJSON(wsMessage{Type: "session", Data: sessionData})
 
 	var writeMu sync.Mutex
@@ -237,16 +247,20 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		defer close(done)
 		buf := make([]byte, 4096)
 		for {
-			n, err := ptySession.Read(buf)
-			if err != nil {
+			n, readErr := ptySession.Read(buf)
+			if readErr != nil {
 				return
 			}
 			if n > 0 {
-				outputData, _ := json.Marshal(map[string]string{"data": string(buf[:n])})
+				outputData, marshalErr := json.Marshal(map[string]string{"data": string(buf[:n])})
+				if marshalErr != nil {
+					slog.Error("Failed to marshal terminal output", "error", marshalErr)
+					return
+				}
 				writeMu.Lock()
-				err = conn.WriteJSON(wsMessage{Type: "output", Data: outputData})
+				writeErr := conn.WriteJSON(wsMessage{Type: "output", Data: outputData})
 				writeMu.Unlock()
-				if err != nil {
+				if writeErr != nil {
 					return
 				}
 			}
@@ -276,6 +290,8 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Data, &resize); err != nil {
 				continue
 			}
+			resize.Rows = clampTerminalDimension(resize.Rows, 24)
+			resize.Cols = clampTerminalDimension(resize.Cols, 80)
 			_ = ptySession.Resize(resize.Rows, resize.Cols)
 		case "ping":
 			writeMu.Lock()
@@ -340,7 +356,11 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendSessionError := func(sessionID, errMsg string) {
-		errorData, _ := json.Marshal(map[string]string{"error": errMsg})
+		errorData, marshalErr := json.Marshal(map[string]string{"error": errMsg})
+		if marshalErr != nil {
+			slog.Error("Failed to marshal session error", "error", marshalErr)
+			return
+		}
 		writeMu.Lock()
 		_ = conn.WriteJSON(wsMessage{Type: "error", SessionID: sessionID, Data: errorData})
 		writeMu.Unlock()
@@ -397,6 +417,8 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if data.Rows > 0 && data.Cols > 0 {
+				data.Rows = clampTerminalDimension(data.Rows, 24)
+				data.Cols = clampTerminalDimension(data.Cols, 80)
 				_ = ptySession.Resize(data.Rows, data.Cols)
 			}
 
@@ -440,6 +462,8 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				requestedWorkDir = effectiveWorkDir
 			}
 
+			data.Rows = clampTerminalDimension(data.Rows, 24)
+			data.Cols = clampTerminalDimension(data.Cols, 80)
 			ptySession, err := runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols, requestedWorkDir)
 			if err != nil && isContainerUnavailableError(err) {
 				slog.Warn("Multi-terminal session create failed due to unavailable container, attempting recovery", "workspace", workspaceID, "error", err)
@@ -495,10 +519,14 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				func(sessionID string) {},
 			)
 
-			createdData, _ := json.Marshal(map[string]interface{}{
+			createdData, marshalErr := json.Marshal(map[string]interface{}{
 				"sessionId":        data.SessionID,
 				"workingDirectory": ptySession.Cmd.Dir,
 			})
+			if marshalErr != nil {
+				slog.Error("Failed to marshal session_created data", "error", marshalErr)
+				continue
+			}
 			writeMu.Lock()
 			_ = conn.WriteJSON(wsMessage{Type: "session_created", SessionID: data.SessionID, Data: createdData})
 			writeMu.Unlock()
@@ -535,7 +563,11 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			closedData, _ := json.Marshal(map[string]interface{}{"sessionId": data.SessionID, "reason": "user_requested"})
+			closedData, marshalErr := json.Marshal(map[string]interface{}{"sessionId": data.SessionID, "reason": "user_requested"})
+			if marshalErr != nil {
+				slog.Error("Failed to marshal session_closed data", "error", marshalErr)
+				continue
+			}
 			writeMu.Lock()
 			_ = conn.WriteJSON(wsMessage{Type: "session_closed", SessionID: data.SessionID, Data: closedData})
 			writeMu.Unlock()
@@ -580,6 +612,8 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Data, &resize); err != nil {
 				continue
 			}
+			resize.Rows = clampTerminalDimension(resize.Rows, 24)
+			resize.Cols = clampTerminalDimension(resize.Cols, 80)
 
 			ptySession := runtime.PTY.GetSession(sessionID)
 			if ptySession != nil {
@@ -609,7 +643,11 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			renamedData, _ := json.Marshal(map[string]interface{}{"sessionId": data.SessionID, "name": data.Name})
+			renamedData, marshalErr := json.Marshal(map[string]interface{}{"sessionId": data.SessionID, "name": data.Name})
+			if marshalErr != nil {
+				slog.Error("Failed to marshal session_renamed data", "error", marshalErr)
+				continue
+			}
 			writeMu.Lock()
 			_ = conn.WriteJSON(wsMessage{Type: "session_renamed", SessionID: data.SessionID, Data: renamedData})
 			writeMu.Unlock()
@@ -620,4 +658,13 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			writeMu.Unlock()
 		}
 	}
+}
+
+// clampTerminalDimension constrains a terminal dimension (rows or cols)
+// to a reasonable range [1, 500]. Out-of-range values return the fallback.
+func clampTerminalDimension(value, fallback int) int {
+	if value < 1 || value > 500 {
+		return fallback
+	}
+	return value
 }
