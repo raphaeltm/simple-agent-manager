@@ -83,11 +83,13 @@ describe('TaskSubmitForm', () => {
 });
 
 describe('ProjectChat chat-first submit integration', () => {
-  const source = readSource('pages/ProjectChat.tsx');
+  const source = readSource('pages/project-chat/useProjectChatState.ts')
+    + readSource('pages/project-chat/index.tsx')
+    + readSource('pages/project-chat/types.ts');
 
   it('uses submitTask API for chat input', () => {
     expect(source).toContain('submitTask');
-    expect(source).toContain("from '../lib/api'");
+    expect(source).toContain("from '../../lib/api'");
   });
 
   it('checks cloud credentials on mount', () => {

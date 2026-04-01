@@ -63,13 +63,13 @@ vi.mock('../../../src/hooks/useProjectWebSocket', () => ({
   },
 }));
 
-vi.mock('../../../src/components/chat/ProjectMessageView', () => ({
+vi.mock('../../../src/components/project-message-view', () => ({
   ProjectMessageView: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="message-view">{sessionId}</div>
   ),
 }));
 
-import { ProjectChat } from '../../../src/pages/ProjectChat';
+import { ProjectChat } from '../../../src/pages/project-chat';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 
 const PROJECT_ID = 'proj-1';

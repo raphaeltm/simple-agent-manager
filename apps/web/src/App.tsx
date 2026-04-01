@@ -24,8 +24,8 @@ import { Landing } from './pages/Landing';
 import { Node } from './pages/Node';
 import { Nodes } from './pages/Nodes';
 import { Project } from './pages/Project';
+import { ProjectChat } from './pages/project-chat';
 import { ProjectActivity } from './pages/ProjectActivity';
-import { ProjectChat } from './pages/ProjectChat';
 import { ProjectCreate } from './pages/ProjectCreate';
 import { ProjectNotifications } from './pages/ProjectNotifications';
 import { Projects } from './pages/Projects';
@@ -39,7 +39,7 @@ import { SettingsNotifications } from './pages/SettingsNotifications';
 import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { TaskDetail } from './pages/TaskDetail';
 import { UiStandards } from './pages/UiStandards';
-import { Workspace } from './pages/Workspace';
+import { Workspace } from './pages/workspace';
 import { Workspaces } from './pages/Workspaces';
 
 function ProtectedLayout() {

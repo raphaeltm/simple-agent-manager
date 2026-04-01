@@ -10,7 +10,9 @@ function readSource(relativePath: string): string {
 }
 
 describe('ProjectChat session sidebar (inline)', () => {
-  const source = readSource('pages/ProjectChat.tsx');
+  const source = readSource('pages/project-chat/index.tsx')
+    + readSource('pages/project-chat/useProjectChatState.ts')
+    + readSource('pages/project-chat/SessionItem.tsx');
 
   it('renders session topic or fallback ID', () => {
     expect(source).toContain('session.topic');
@@ -43,7 +45,13 @@ describe('ProjectChat session sidebar (inline)', () => {
 });
 
 describe('ProjectMessageView', () => {
-  const source = readSource('components/chat/ProjectMessageView.tsx');
+  const source = readSource('components/project-message-view/index.tsx')
+    + readSource('components/project-message-view/useSessionLifecycle.ts')
+    + readSource('components/project-message-view/useConnectionRecovery.ts')
+    + readSource('components/project-message-view/SessionHeader.tsx')
+    + readSource('components/project-message-view/MessageBanners.tsx')
+    + readSource('components/project-message-view/types.ts')
+    + readSource('components/project-message-view/AcpConversationItemView.tsx');
 
   it('exports ProjectMessageView as named export', () => {
     expect(source).toContain('export const ProjectMessageView');
@@ -191,7 +199,8 @@ describe('SplitButton', () => {
 });
 
 describe('ProjectChat page', () => {
-  const source = readSource('pages/ProjectChat.tsx');
+  const source = readSource('pages/project-chat/index.tsx')
+    + readSource('pages/project-chat/useProjectChatState.ts');
 
   it('exports ProjectChat function', () => {
     expect(source).toContain('export function ProjectChat');
@@ -204,7 +213,7 @@ describe('ProjectChat page', () => {
 
   it('uses ProjectMessageView component', () => {
     expect(source).toContain('ProjectMessageView');
-    expect(source).toContain('from \'../components/chat/ProjectMessageView\'');
+    expect(source).toContain('from \'../../components/project-message-view\'');
   });
 
   it('reads sessionId from route params', () => {
@@ -248,7 +257,7 @@ describe('Routing integration', () => {
   const projectSource = readSource('pages/Project.tsx');
 
   it('imports ProjectChat in App.tsx', () => {
-    expect(appSource).toContain('import { ProjectChat } from \'./pages/ProjectChat\'');
+    expect(appSource).toContain('import { ProjectChat } from \'./pages/project-chat\'');
   });
 
   it('registers chat route without sessionId', () => {

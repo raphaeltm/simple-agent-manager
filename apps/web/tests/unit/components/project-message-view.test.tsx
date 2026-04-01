@@ -121,7 +121,7 @@ const virtuosoMock = vi.hoisted(() => {
 });
 vi.mock('react-virtuoso', () => virtuosoMock);
 
-import { chatMessagesToConversationItems,ProjectMessageView } from '../../../src/components/chat/ProjectMessageView';
+import { chatMessagesToConversationItems,ProjectMessageView } from '../../../src/components/project-message-view';
 
 // --- Test helpers ---
 
