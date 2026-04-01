@@ -1,11 +1,12 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 import {
-  DEFAULT_SCALEWAY_ZONE,
   DEFAULT_SCALEWAY_IMAGE_NAME,
+  DEFAULT_SCALEWAY_ZONE,
 } from '@simple-agent-manager/shared';
+
+import { providerFetch } from './provider-fetch';
 import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
-import { providerFetch } from './provider-fetch';
 
 const SCALEWAY_INSTANCE_API_URL = 'https://api.scaleway.com/instance/v1/zones';
 

@@ -4,11 +4,12 @@
  * These tests call the actual exported functions and verify their return
  * values — not string matching against source code.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import {
-  parseEnvInt,
   computeBackoffMs,
   isTransientError,
+  parseEnvInt,
 } from '../../src/durable-objects/task-runner-helpers';
 
 // =============================================================================

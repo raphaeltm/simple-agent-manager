@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
 import { Spinner } from '@simple-agent-manager/ui';
-import { useIsMobile } from '../hooks/useIsMobile';
-import { useAccountMapData } from '../components/account-map/hooks/useAccountMapData';
-import { useMapFilters } from '../components/account-map/hooks/useMapFilters';
-import { AccountMapToolbar } from '../components/account-map/AccountMapToolbar';
+import { useEffect,useState } from 'react';
+
 import { AccountMapCanvas } from '../components/account-map/AccountMapCanvas';
 import { AccountMapEmptyState } from '../components/account-map/AccountMapEmptyState';
+import { AccountMapToolbar } from '../components/account-map/AccountMapToolbar';
+import { useAccountMapData } from '../components/account-map/hooks/useAccountMapData';
+import { useMapFilters } from '../components/account-map/hooks/useMapFilters';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export function AccountMap() {
   const isMobile = useIsMobile();

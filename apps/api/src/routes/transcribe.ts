@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
+
 import type { Env } from '../index';
 import { createModuleLogger, serializeError } from '../lib/logger';
-import { requireAuth, requireApproved } from '../middleware/auth';
+import { requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 
 const log = createModuleLogger('transcribe');

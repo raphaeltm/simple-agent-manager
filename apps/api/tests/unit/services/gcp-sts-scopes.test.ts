@@ -5,11 +5,11 @@
  * They are now configurable via GCP_STS_SCOPE and GCP_SA_IMPERSONATION_SCOPES
  * environment variables, with sensible defaults per Constitution Principle XI.
  */
-import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_GCP_STS_SCOPE,
   DEFAULT_GCP_SA_IMPERSONATION_SCOPES,
+  DEFAULT_GCP_STS_SCOPE,
 } from '@simple-agent-manager/shared';
+import { describe, expect,it } from 'vitest';
 
 describe('GCP scope constants', () => {
   it('DEFAULT_GCP_STS_SCOPE is cloud-platform', () => {

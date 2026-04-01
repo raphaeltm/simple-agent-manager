@@ -1,22 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import type { Task, TaskStatus } from '@simple-agent-manager/shared';
+import { Spinner } from '@simple-agent-manager/ui';
 import {
-  Search,
-  Lightbulb,
-  MessageSquare,
-  Play,
-  Check,
   Archive,
+  Check,
   ChevronDown,
   ChevronRight,
   Clock,
+  Lightbulb,
+  MessageSquare,
+  Play,
+  Search,
 } from 'lucide-react';
-import type { Task, TaskStatus } from '@simple-agent-manager/shared';
-import { listProjectTasks, listChatSessions } from '../lib/api';
-import type { ChatSessionResponse } from '../lib/api';
-import { useProjectContext } from './ProjectContext';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
 import { useIsMobile } from '../hooks/useIsMobile';
-import { Spinner } from '@simple-agent-manager/ui';
+import type { ChatSessionResponse } from '../lib/api';
+import { listChatSessions,listProjectTasks } from '../lib/api';
+import { useProjectContext } from './ProjectContext';
 
 // ---------------------------------------------------------------------------
 // Status mapping: internal task statuses -> user-facing idea statuses

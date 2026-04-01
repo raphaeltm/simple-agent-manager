@@ -1,11 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
-  initAnalytics,
-  track,
-  trackClick,
-  setUserId,
   destroyAnalytics,
   getInitialReferrer,
+  initAnalytics,
+  setUserId,
+  track,
+  trackClick,
 } from '../../src/lib/analytics';
 
 // Mock sessionStorage and localStorage

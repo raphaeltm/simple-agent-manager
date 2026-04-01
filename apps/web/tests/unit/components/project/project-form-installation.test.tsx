@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   listRepositories: vi.fn(),
@@ -11,8 +11,9 @@ vi.mock('../../../../src/lib/api', () => ({
   listBranches: mocks.listBranches,
 }));
 
-import { ProjectForm } from '../../../../src/components/project/ProjectForm';
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
+
+import { ProjectForm } from '../../../../src/components/project/ProjectForm';
 
 const personalInstall: GitHubInstallation = {
   id: 'inst-personal',

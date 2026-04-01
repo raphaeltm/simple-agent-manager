@@ -7,24 +7,24 @@
  *
  * See: tasks/active/2026-03-16-notification-system-phase1.md
  */
-import { DurableObject } from 'cloudflare:workers';
-import { runNotificationMigrations } from './notification-migrations';
-
 import type {
+  CreateNotificationRequest,
   NotificationResponse,
   NotificationType,
   NotificationWsMessage,
-  CreateNotificationRequest,
 } from '@simple-agent-manager/shared';
 import {
   DEFAULT_MAX_NOTIFICATIONS_PER_USER,
   DEFAULT_NOTIFICATION_AUTO_DELETE_AGE_MS,
-  DEFAULT_NOTIFICATION_PAGE_SIZE,
-  MAX_NOTIFICATION_PAGE_SIZE,
-  DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS,
   DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS,
+  DEFAULT_NOTIFICATION_PAGE_SIZE,
+  DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS,
+  MAX_NOTIFICATION_PAGE_SIZE,
 } from '@simple-agent-manager/shared';
-import { parseNotificationRow, parseNotificationPreferenceRow, parseIdRow } from './notification-row-schemas';
+import { DurableObject } from 'cloudflare:workers';
+
+import { runNotificationMigrations } from './notification-migrations';
+import { parseIdRow,parseNotificationPreferenceRow, parseNotificationRow } from './notification-row-schemas';
 import { parseCountCnt, parseEnabled } from './project-data/row-schemas';
 
 type Env = {

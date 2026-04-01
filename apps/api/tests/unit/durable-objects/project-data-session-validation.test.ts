@@ -6,9 +6,10 @@
  * 2. WebSocket message.send validates session exists and is active before persisting
  * 3. persistMessageBatch rejects messages to stopped sessions
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('ProjectData DO session validation contracts', () => {
   const file = [

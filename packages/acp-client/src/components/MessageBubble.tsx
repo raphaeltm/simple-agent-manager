@@ -1,8 +1,9 @@
+import { Highlight, themes } from 'prism-react-renderer';
 import React from 'react';
 import type { Components } from 'react-markdown';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Highlight, themes } from 'prism-react-renderer';
+
 import { MessageActions } from './MessageActions';
 
 interface MessageBubbleProps {

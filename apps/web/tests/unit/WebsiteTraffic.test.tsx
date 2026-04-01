@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
-import { WebsiteTraffic } from '../../src/pages/admin-analytics/WebsiteTraffic';
+import { describe, expect,it } from 'vitest';
+
 import type { AnalyticsWebsiteTrafficResponse } from '../../src/lib/api';
+import { WebsiteTraffic } from '../../src/pages/admin-analytics/WebsiteTraffic';
 
 describe('WebsiteTraffic component', () => {
   it('renders empty state when data is null', () => {

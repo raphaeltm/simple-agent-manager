@@ -1,5 +1,5 @@
-import { type FC } from 'react';
 import { GitBranch } from 'lucide-react';
+import { type FC } from 'react';
 
 interface GitChangesButtonProps {
   onClick: () => void;

@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { ToastProvider } from '../../../src/hooks/useToast';
 
 const mocks = vi.hoisted(() => ({
@@ -71,9 +72,9 @@ vi.mock('../../../src/components/AppShell', () => ({
 }));
 
 import { Project } from '../../../src/pages/Project';
-import { ProjectTasks } from '../../../src/pages/ProjectTasks';
-import { ProjectSettings } from '../../../src/pages/ProjectSettings';
 import { ProjectActivity } from '../../../src/pages/ProjectActivity';
+import { ProjectSettings } from '../../../src/pages/ProjectSettings';
+import { ProjectTasks } from '../../../src/pages/ProjectTasks';
 
 function renderProjectPage(path = '/projects/proj-1/tasks') {
   return render(

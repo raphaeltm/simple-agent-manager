@@ -1,7 +1,8 @@
 /**
  * Tests for task attachment shared types, constants, and filename regex.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX, TASK_EXECUTION_STEPS } from '../../src/types';
 
 describe('ATTACHMENT_DEFAULTS', () => {

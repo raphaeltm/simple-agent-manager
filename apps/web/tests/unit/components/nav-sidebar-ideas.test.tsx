@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({ isSuperadmin: false }),

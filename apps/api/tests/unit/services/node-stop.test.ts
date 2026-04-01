@@ -7,9 +7,10 @@
  * 3. Marks node and workspaces as 'deleted' (not 'stopped')
  * 4. All deletion paths use consistent 'deleted' terminal status
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('stopNodeResources source contract', () => {
   const file = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
@@ -24,9 +25,11 @@ describe('stopNodeResources source contract', () => {
   });
 
   it('uses createProvider from providers package', () => {
-    const importLine = file.slice(0, file.indexOf('\n\n'));
-    expect(importLine).not.toContain('powerOffServer');
-    expect(importLine).toContain('createProvider');
+    // Import block may span multiple groups separated by blank lines (import-sort).
+    // Search up to the first non-import line instead of just the first paragraph.
+    const importBlock = file.slice(0, file.indexOf('\nexport '));
+    expect(importBlock).not.toContain('powerOffServer');
+    expect(importBlock).toContain('createProvider');
   });
 
   it('deletes DNS record', () => {

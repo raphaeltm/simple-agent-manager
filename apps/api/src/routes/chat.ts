@@ -6,21 +6,22 @@
  *
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
-import { Hono } from 'hono';
-import { eq, and, inArray, desc } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-import { isTaskExecutionStep } from '@simple-agent-manager/shared';
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
-import type { Env } from '../index';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
-import { requireOwnedProject } from '../middleware/project-auth';
-import { errors } from '../middleware/error';
+import { isTaskExecutionStep } from '@simple-agent-manager/shared';
+import { and, desc,eq, inArray } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
 import * as schema from '../db/schema';
+import type { Env } from '../index';
+import { log } from '../lib/logger';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
+import { requireOwnedProject } from '../middleware/project-auth';
+import { CreateChatSessionSchema, LinkTaskToChatSchema,parseOptionalBody, SendChatMessageSchema } from '../schemas';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
-import { log } from '../lib/logger';
-import { parseOptionalBody, CreateChatSessionSchema, SendChatMessageSchema, LinkTaskToChatSchema } from '../schemas';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
 

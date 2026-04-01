@@ -4,9 +4,10 @@
  * Verifies the NodeLifecycle DO state machine, alarm handling,
  * and D1 warm_since sync.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('NodeLifecycle DO source contract', () => {
   const doFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/node-lifecycle.ts'), 'utf8');

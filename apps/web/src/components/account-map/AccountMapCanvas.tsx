@@ -1,28 +1,30 @@
-import { type FC, useCallback, useEffect, useState, useRef } from 'react';
+import '@xyflow/react/dist/style.css';
+
 import {
-  ReactFlow,
-  ReactFlowProvider,
-  MiniMap,
-  Controls,
   Background,
   BackgroundVariant,
-  useNodesState,
-  useEdgesState,
-  type Node,
+  Controls,
   type Edge,
-  type NodeTypes,
   type EdgeTypes,
-  type OnNodesChange,
+  MiniMap,
+  type Node,
+  type NodeTypes,
   type OnEdgesChange,
+  type OnNodesChange,
+  ReactFlow,
+  ReactFlowProvider,
+  useEdgesState,
+  useNodesState,
 } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import { ProjectNode } from './nodes/ProjectNode';
+import { type FC, useCallback, useEffect, useRef,useState } from 'react';
+
+import { AnimatedFlowEdge } from './edges/AnimatedFlowEdge';
+import { IdeaNode } from './nodes/IdeaNode';
 import { NodeVMNode } from './nodes/NodeVMNode';
-import { WorkspaceNode } from './nodes/WorkspaceNode';
+import { ProjectNode } from './nodes/ProjectNode';
 import { SessionNode } from './nodes/SessionNode';
 import { TaskNode } from './nodes/TaskNode';
-import { IdeaNode } from './nodes/IdeaNode';
-import { AnimatedFlowEdge } from './edges/AnimatedFlowEdge';
+import { WorkspaceNode } from './nodes/WorkspaceNode';
 
 /** Delay before hiding tooltip after mouse leaves a node (ms). */
 const TOOLTIP_HIDE_DELAY_MS = 100;

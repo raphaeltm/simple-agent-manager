@@ -9,10 +9,11 @@
  * waitForNodeAgentReady is tested by mocking global fetch to simulate
  * various failure/success scenarios.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
-  getNodeAgentReadyTimeoutMs,
   getNodeAgentReadyPollIntervalMs,
+  getNodeAgentReadyTimeoutMs,
 } from '../../src/services/node-agent';
 
 // =============================================================================

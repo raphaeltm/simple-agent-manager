@@ -1,5 +1,5 @@
-import { ReactNode, useEffect, useRef } from 'react';
 import { Button } from '@simple-agent-manager/ui';
+import { type ReactNode, useEffect, useRef } from 'react';
 
 interface ConfirmDialogProps {
   isOpen: boolean;

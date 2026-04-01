@@ -4,7 +4,7 @@
  * Tests markdown rendering, desktop side panel, mobile FAB + modal,
  * search filtering, and overflow safety with diverse mock data.
  */
-import { test, expect, type Page, type Route } from '@playwright/test';
+import { expect, type Page, type Route,test } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Mock factories

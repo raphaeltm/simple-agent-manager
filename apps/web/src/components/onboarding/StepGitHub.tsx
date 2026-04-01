@@ -1,5 +1,6 @@
+import { Alert,Button } from '@simple-agent-manager/ui';
 import { useState } from 'react';
-import { Button, Alert } from '@simple-agent-manager/ui';
+
 import { getGitHubInstallUrl } from '../../lib/api';
 
 interface StepGitHubProps {

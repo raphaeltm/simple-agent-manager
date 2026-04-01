@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { signInWithGitHub } from '../lib/auth';
-import { useAuth } from '../components/AuthProvider';
 import { Button, Typography } from '@simple-agent-manager/ui';
+import { useEffect, useRef } from 'react';
+import { useLocation,useNavigate } from 'react-router-dom';
+
+import { useAuth } from '../components/AuthProvider';
+import { signInWithGitHub } from '../lib/auth';
 
 const PUBLIC_WEBSITE_URL =
   import.meta.env.VITE_PUBLIC_WEBSITE_URL || 'https://simple-agent-manager.org';

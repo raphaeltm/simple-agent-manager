@@ -1,8 +1,9 @@
 import { type FC } from 'react';
+
 import type {
   AnalyticsDauResponse,
-  AnalyticsFunnelResponse,
   AnalyticsEventsResponse,
+  AnalyticsFunnelResponse,
 } from '../../lib/api';
 
 interface Props {

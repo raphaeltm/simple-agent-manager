@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { ActiveTaskCard } from '../../../src/components/ActiveTaskCard';
 import type { DashboardTask } from '@simple-agent-manager/shared';
+import { fireEvent,render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
+import { ActiveTaskCard } from '../../../src/components/ActiveTaskCard';
 
 const mockNavigate = vi.fn();
 

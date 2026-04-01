@@ -4,9 +4,10 @@
  * Verifies the route handler implements required validation, auth, and delegation
  * by inspecting the source code for expected patterns.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('workspace messages batch endpoint source contract', () => {
   const file = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8');

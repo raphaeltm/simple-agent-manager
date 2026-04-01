@@ -1,5 +1,6 @@
-import { type FC, useState, useCallback } from 'react';
-import { highlightText, CopyButton } from '../shared/log';
+import { type FC, useCallback,useState } from 'react';
+
+import { CopyButton,highlightText } from '../shared/log';
 
 // ---------------------------------------------------------------------------
 // Types

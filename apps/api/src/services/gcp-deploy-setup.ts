@@ -1,19 +1,20 @@
-import type { Env } from '../index';
 import type { ProjectDeploymentCredential } from '@simple-agent-manager/shared';
 import {
+  DEFAULT_GCP_API_TIMEOUT_MS,
+  DEFAULT_GCP_DEPLOY_SERVICE_ACCOUNT_ID,
   DEFAULT_GCP_DEPLOY_WIF_POOL_ID,
   DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID,
-  DEFAULT_GCP_DEPLOY_SERVICE_ACCOUNT_ID,
-  DEFAULT_GCP_API_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
+
+import type { Env } from '../index';
 import {
-  getProjectNumber,
-  enableApis,
-  createWifPool,
   createOidcProvider,
   createServiceAccount,
-  grantWifUserOnSa,
+  createWifPool,
+  enableApis,
+  getProjectNumber,
   grantProjectRoles,
+  grantWifUserOnSa,
   type SetupProgressCallback,
 } from './gcp-setup';
 

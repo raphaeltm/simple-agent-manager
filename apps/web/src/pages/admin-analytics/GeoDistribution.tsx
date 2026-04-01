@@ -1,12 +1,13 @@
-import { type FC, useState, useMemo } from 'react';
 import { Body } from '@simple-agent-manager/ui';
+import { scaleLinear } from 'd3-scale';
+import { type FC, useMemo,useState } from 'react';
 import {
   ComposableMap,
   Geographies,
   Geography,
   ZoomableGroup,
 } from 'react-simple-maps';
-import { scaleLinear } from 'd3-scale';
+
 import type { AnalyticsGeoResponse } from '../../lib/api';
 
 // TopoJSON world atlas — configurable for CSP/air-gapped environments

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { ApiClientError } from '../../../src/lib/api';
 import {
   getActiveUiStandard,

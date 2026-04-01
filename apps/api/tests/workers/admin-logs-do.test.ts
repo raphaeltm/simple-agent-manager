@@ -5,7 +5,7 @@
  * exercising real DO lifecycle and WebSocket handling.
  */
 import { env } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
 
 function getStub() {
   const id = env.ADMIN_LOGS.idFromName('admin-logs');

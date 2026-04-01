@@ -1,16 +1,17 @@
 /**
  * Tests for attachment upload service — R2 key construction, validation, and cleanup.
  */
-import { describe, it, expect, vi } from 'vitest';
+import type { TaskAttachment } from '@simple-agent-manager/shared';
+import { ATTACHMENT_DEFAULTS } from '@simple-agent-manager/shared';
+import { describe, expect, it, vi } from 'vitest';
+
 import {
   buildAttachmentR2Key,
-  generatePresignedUploadUrl,
-  validateAttachments,
   cleanupAttachments,
+  generatePresignedUploadUrl,
   getAttachmentFromR2,
+  validateAttachments,
 } from '../../../src/services/attachment-upload';
-import { ATTACHMENT_DEFAULTS } from '@simple-agent-manager/shared';
-import type { TaskAttachment } from '@simple-agent-manager/shared';
 
 // ---------------------------------------------------------------------------
 // R2 Key Construction

@@ -47,6 +47,8 @@
     "@commitlint/config-conventional": "^19.0.0",
     "@types/iarna__toml": "^2.0.5",
     "@types/node": "^20.0.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
     "husky": "^9.0.0",
     "lint-staged": "^15.0.0",
     "prettier": "^3.0.0",

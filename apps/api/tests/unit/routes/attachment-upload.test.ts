@@ -3,7 +3,7 @@
  *
  * POST /projects/:projectId/tasks/request-upload
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const mockGeneratePresignedUploadUrl = vi.hoisted(() => vi.fn());
 
@@ -34,6 +34,7 @@ vi.mock('../../../src/services/attachment-upload', () => ({
 }));
 
 import { Hono } from 'hono';
+
 import type { Env } from '../../../src/index';
 import { uploadRoutes } from '../../../src/routes/tasks/upload';
 

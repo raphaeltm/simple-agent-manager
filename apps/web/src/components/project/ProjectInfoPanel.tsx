@@ -4,10 +4,11 @@
  * Gives users visibility into what's happening in a project without leaving
  * the chat-first interface. Accessible via the info icon in the project header.
  */
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import type { Task, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+
 import { listProjectTasks, listWorkspaces } from '../../lib/api';
 
 interface ProjectInfoPanelProps {

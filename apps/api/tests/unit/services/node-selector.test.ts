@@ -8,9 +8,10 @@
  * Also tests the full selectNodeForTaskRun() flow with mocked D1
  * and Durable Object stubs to verify warm pool, capacity, and fallback paths.
  */
-import { describe, it, expect } from 'vitest';
-import { scoreNodeLoad, nodeHasCapacity } from '../../../src/services/node-selector';
 import type { NodeMetrics } from '@simple-agent-manager/shared';
+import { describe, expect,it } from 'vitest';
+
+import { nodeHasCapacity,scoreNodeLoad } from '../../../src/services/node-selector';
 
 // =============================================================================
 // scoreNodeLoad — pure function tests

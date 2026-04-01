@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { generateBranchName } from '../../../src/services/branch-name';
 
 const TASK_ID = '01JK9M2X4NABCDEF12345678';

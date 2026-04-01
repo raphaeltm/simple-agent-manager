@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { normalizeFileProxyPath } from '../../../src/routes/projects/_helpers';
 
 describe('normalizeFileProxyPath', () => {

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { providerFetch, getTimeoutMs } from '../../src/provider-fetch';
+import { afterEach,describe, expect, it, vi } from 'vitest';
+
+import { getTimeoutMs,providerFetch } from '../../src/provider-fetch';
 import { ProviderError } from '../../src/types';
 
 describe('getTimeoutMs', () => {

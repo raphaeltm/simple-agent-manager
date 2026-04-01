@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, type ReactNode, type FC } from 'react';
 import { ChevronDown } from 'lucide-react';
+import { type FC,type ReactNode, useCallback, useEffect, useState } from 'react';
 
 interface CollapsibleSectionProps {
   /** Section title displayed in the header */

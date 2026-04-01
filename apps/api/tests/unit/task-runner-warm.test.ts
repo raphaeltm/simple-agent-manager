@@ -4,9 +4,10 @@
  * Verifies that cleanupAutoProvisionedNode calls markIdle instead of
  * immediate destruction, enabling warm node pooling.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('task runner warm node marking source contract', () => {
   const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');

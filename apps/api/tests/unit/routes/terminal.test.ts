@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('terminal routes source contract', () => {
   const file = readFileSync(resolve(process.cwd(), 'src/routes/terminal.ts'), 'utf8');

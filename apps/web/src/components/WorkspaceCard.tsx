@@ -1,8 +1,9 @@
-import { useNavigate } from 'react-router-dom';
-import { StatusBadge } from './StatusBadge';
-import { Card, Button, DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
+import { Button, Card, DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
+import { useNavigate } from 'react-router-dom';
+
 import { useIsStandalone } from '../hooks/useIsStandalone';
+import { StatusBadge } from './StatusBadge';
 
 interface WorkspaceCardProps {
   workspace: WorkspaceResponse;

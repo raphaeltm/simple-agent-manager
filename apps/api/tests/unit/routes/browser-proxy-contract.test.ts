@@ -7,7 +7,7 @@
  *
  * See: .claude/rules/23-cross-boundary-contract-tests.md
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
 
 describe('Browser sidecar proxy — cross-boundary contract', () => {
   // The API Worker constructs VM agent URLs like:

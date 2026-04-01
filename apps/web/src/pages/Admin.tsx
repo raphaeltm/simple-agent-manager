@@ -1,8 +1,9 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import type { Tab } from '@simple-agent-manager/ui';
 import { PageLayout, Tabs } from '@simple-agent-manager/ui';
+import { Navigate, Outlet } from 'react-router-dom';
+
 import { useAuth } from '../components/AuthProvider';
 import { UserMenu } from '../components/UserMenu';
-import type { Tab } from '@simple-agent-manager/ui';
 
 const ADMIN_TABS: Tab[] = [
   { id: 'users', label: 'Users', path: 'users' },

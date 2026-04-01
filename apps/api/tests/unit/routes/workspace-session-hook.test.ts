@@ -4,9 +4,10 @@
  * Verifies that workspace creation always creates a chat session (projectId
  * is now required), and that the runtime endpoint returns chatSessionId.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('workspace creation chat session hook source contract', () => {
   const routesFile = [

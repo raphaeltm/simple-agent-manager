@@ -1,12 +1,13 @@
+import type { CredentialProvider,NodeResponse, ProviderCatalog, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION,PROVIDER_LABELS } from '@simple-agent-manager/shared';
+import { Alert, Button, EmptyState, PageLayout, Select, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
+import { Server } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { NodeResponse, WorkspaceResponse, ProviderCatalog, VMSize, CredentialProvider } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS, DEFAULT_VM_LOCATION } from '@simple-agent-manager/shared';
-import { Alert, Button, PageLayout, Select, SkeletonCard, EmptyState, Spinner } from '@simple-agent-manager/ui';
-import { UserMenu } from '../components/UserMenu';
+
 import { NodeCard } from '../components/node/NodeCard';
-import { createNode, getProviderCatalog, listNodes, listWorkspaces, deleteNode, stopNode } from '../lib/api';
-import { Server } from 'lucide-react';
+import { UserMenu } from '../components/UserMenu';
+import { createNode, deleteNode, getProviderCatalog, listNodes, listWorkspaces, stopNode } from '../lib/api';
 
 const FALLBACK_VM_SIZES: { value: VMSize; label: string; description: string }[] = [
   { value: 'small', label: 'Small', description: '2-3 vCPUs, 4 GB RAM' },

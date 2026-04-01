@@ -1,8 +1,9 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent-manager/shared';
+
+import { providerFetch } from './provider-fetch';
 import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
-import { providerFetch } from './provider-fetch';
 
 const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
 

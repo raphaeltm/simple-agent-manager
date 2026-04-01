@@ -18,7 +18,8 @@ import type {
   TaskStatus,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { isTaskExecutionStep, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import { DEFAULT_WORKSPACE_PROFILE,isTaskExecutionStep } from '@simple-agent-manager/shared';
+
 import type * as schema from '../db/schema';
 import { getWorkspaceUrl } from '../services/dns';
 

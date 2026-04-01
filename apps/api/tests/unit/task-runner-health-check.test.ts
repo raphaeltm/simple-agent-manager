@@ -10,9 +10,10 @@
  * The VM agent sends POST /api/nodes/:id/ready on startup and
  * POST /api/nodes/:id/heartbeat periodically, both updating D1.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 const doSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),

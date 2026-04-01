@@ -25,16 +25,17 @@
  */
 
 import { Agent } from '@mastra/core/agent';
-import { createWorkersAI } from 'workers-ai-provider';
 import {
-  DEFAULT_TASK_TITLE_MODEL,
   DEFAULT_TASK_TITLE_MAX_LENGTH,
-  DEFAULT_TASK_TITLE_TIMEOUT_MS,
-  DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD,
   DEFAULT_TASK_TITLE_MAX_RETRIES,
+  DEFAULT_TASK_TITLE_MODEL,
   DEFAULT_TASK_TITLE_RETRY_DELAY_MS,
   DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS,
+  DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD,
+  DEFAULT_TASK_TITLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
+import { createWorkersAI } from 'workers-ai-provider';
+
 import { log } from '../lib/logger';
 
 /**

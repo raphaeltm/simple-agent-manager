@@ -1,20 +1,21 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import {
+  buildChunkR2Key,
+  buildR2Key,
   cleanTextForSpeech,
-  summarizeTextForSpeech,
+  concatenateArrayBuffers,
   fallbackStripMarkdown,
   generateSpeechAudio,
   generateSpeechAudioChunk,
-  splitTextIntoChunks,
-  concatenateArrayBuffers,
-  buildR2Key,
-  buildChunkR2Key,
-  simpleHash,
   getAudioFromR2,
-  storeAudioInR2,
-  synthesizeSpeech,
   getTTSConfig,
   retryWithBackoff,
+  simpleHash,
+  splitTextIntoChunks,
+  storeAudioInR2,
+  summarizeTextForSpeech,
+  synthesizeSpeech,
 } from '../../../src/services/tts';
 
 // Mock @mastra/core/agent — factory must not reference outer variables

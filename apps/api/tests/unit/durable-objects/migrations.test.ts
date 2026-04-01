@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/migrations';
 
 /**

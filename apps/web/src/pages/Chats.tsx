@@ -1,17 +1,18 @@
-import { useNavigate } from 'react-router-dom';
+import { Alert,EmptyState, PageLayout, SkeletonList } from '@simple-agent-manager/ui';
 import { MessageSquare } from 'lucide-react';
-import { PageLayout, EmptyState, SkeletonList, Alert } from '@simple-agent-manager/ui';
+import { useNavigate } from 'react-router-dom';
+
 import { UserMenu } from '../components/UserMenu';
 import { useAllChatSessions } from '../hooks/useAllChatSessions';
 import {
-  getSessionState,
-  isStaleSession,
-  isActiveSession,
-  getLastActivity,
   formatRelativeTime,
+  getLastActivity,
+  getSessionState,
+  isActiveSession,
+  isStaleSession,
+  STATE_BADGE_BG,
   STATE_COLORS,
   STATE_LABELS,
-  STATE_BADGE_BG,
 } from '../lib/chat-session-utils';
 
 export function Chats() {

@@ -8,7 +8,8 @@
  */
 
 import type { CreateNotificationRequest } from '@simple-agent-manager/shared';
-import { NOTIFICATION_TYPE_URGENCY, MAX_NOTIFICATION_BODY_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT, type HumanInputCategory } from '@simple-agent-manager/shared';
+import { type HumanInputCategory,MAX_NOTIFICATION_BODY_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT, NOTIFICATION_TYPE_URGENCY } from '@simple-agent-manager/shared';
+
 import type { NotificationService } from '../durable-objects/notification';
 import { log } from '../lib/logger';
 

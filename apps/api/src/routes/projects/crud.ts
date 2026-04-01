@@ -1,6 +1,3 @@
-import { Hono } from 'hono';
-import { and, count, desc, eq, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import type {
   ListProjectsResponse,
   Project,
@@ -9,47 +6,51 @@ import type {
   UpdateProjectRequest,
 } from '@simple-agent-manager/shared';
 import {
-  jsonValidator,
-  CreateProjectSchema,
-  UpdateProjectSchema,
-  UpsertProjectRuntimeEnvVarSchema,
-  UpsertProjectRuntimeFileSchema,
-} from '../../schemas';
-import {
-  isValidAgentType,
-  VALID_WORKSPACE_PROFILES,
   CREDENTIAL_PROVIDERS,
-  MIN_WORKSPACE_IDLE_TIMEOUT_MS,
+  isValidAgentType,
+  isValidLocationForProvider,
+  MAX_NODE_IDLE_TIMEOUT_MS,
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
   MIN_NODE_IDLE_TIMEOUT_MS,
-  MAX_NODE_IDLE_TIMEOUT_MS,
-  isValidLocationForProvider,
+  MIN_WORKSPACE_IDLE_TIMEOUT_MS,
   SCALING_PARAMS,
+  VALID_WORKSPACE_PROFILES,
 } from '@simple-agent-manager/shared';
-import type { Env } from '../../index';
+import { and, count, desc, eq, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
 import * as schema from '../../db/schema';
+import type { Env } from '../../index';
+import { log } from '../../lib/logger';
+import { toProjectResponse, toProjectSummaryResponse } from '../../lib/mappers';
+import { parsePositiveInt } from '../../lib/route-helpers';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
-import { getRuntimeLimits } from '../../services/limits';
-import { encrypt } from '../../services/encryption';
-import { getCredentialEncryptionKey } from '../../lib/secrets';
-import * as projectDataService from '../../services/project-data';
-import { toProjectResponse, toProjectSummaryResponse } from '../../lib/mappers';
-import { parsePositiveInt } from '../../lib/route-helpers';
 import {
+  CreateProjectSchema,
+  jsonValidator,
+  UpdateProjectSchema,
+  UpsertProjectRuntimeEnvVarSchema,
+  UpsertProjectRuntimeFileSchema,
+} from '../../schemas';
+import { encrypt } from '../../services/encryption';
+import { getRuntimeLimits } from '../../services/limits';
+import * as projectDataService from '../../services/project-data';
+import {
+  assertRepositoryAccess,
+  buildProjectRuntimeConfigResponse,
+  byteLength,
+  isValidRepositoryFormat,
+  normalizeProjectFilePath,
   normalizeProjectName,
   normalizeRepository,
-  isValidRepositoryFormat,
-  byteLength,
   PROJECT_ENV_KEY_PATTERN,
-  normalizeProjectFilePath,
-  buildProjectRuntimeConfigResponse,
   requireOwnedInstallation,
-  assertRepositoryAccess,
 } from './_helpers';
-import { log } from '../../lib/logger';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 

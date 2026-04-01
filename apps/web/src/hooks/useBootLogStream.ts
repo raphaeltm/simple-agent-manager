@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
 import type { BootLogEntry } from '@simple-agent-manager/shared';
+import { useCallback,useEffect, useRef, useState } from 'react';
+
 import { getTerminalToken } from '../lib/api';
 
 interface BootLogWSMessage {

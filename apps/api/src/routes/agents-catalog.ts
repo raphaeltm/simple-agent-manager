@@ -1,11 +1,12 @@
-import { Hono } from 'hono';
-import { drizzle } from 'drizzle-orm/d1';
-import { eq, and } from 'drizzle-orm';
-import type { Env } from '../index';
-import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
-import * as schema from '../db/schema';
-import { AGENT_CATALOG } from '@simple-agent-manager/shared';
 import type { AgentInfo } from '@simple-agent-manager/shared';
+import { AGENT_CATALOG } from '@simple-agent-manager/shared';
+import { and,eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
+import * as schema from '../db/schema';
+import type { Env } from '../index';
+import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 
 const agentsCatalogRoutes = new Hono<{ Bindings: Env }>();
 

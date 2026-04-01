@@ -5,10 +5,11 @@
  * All limits are configurable via environment variables per constitution principle XI.
  */
 
-import type { Context, Next, MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler,Next } from 'hono';
+
 import type { Env } from '../index';
-import { AppError } from './error';
 import { log } from '../lib/logger';
+import { AppError } from './error';
 
 /**
  * Rate limit configuration.

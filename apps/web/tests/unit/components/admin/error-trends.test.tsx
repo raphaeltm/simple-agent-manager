@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { ErrorTrends } from '../../../../src/components/admin/ErrorTrends';
 import type { ErrorTrendResponse } from '@simple-agent-manager/shared';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
+import { ErrorTrends } from '../../../../src/components/admin/ErrorTrends';
 
 // Mock the api module
 const mockFetchAdminErrorTrends = vi.fn();

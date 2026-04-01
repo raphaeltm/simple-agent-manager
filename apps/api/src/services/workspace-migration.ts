@@ -5,10 +5,11 @@
  * See: specs/018-project-first-architecture/tasks.md (T021)
  */
 import { and, eq, isNull } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-import { ulid } from '../lib/ulid';
+import { type drizzle } from 'drizzle-orm/d1';
+
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
+import { ulid } from '../lib/ulid';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 

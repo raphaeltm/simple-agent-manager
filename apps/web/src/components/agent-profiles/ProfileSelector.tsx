@@ -1,5 +1,5 @@
-import { type FC } from 'react';
 import type { AgentProfile } from '@simple-agent-manager/shared';
+import { type FC } from 'react';
 
 interface ProfileSelectorProps {
   profiles: AgentProfile[];

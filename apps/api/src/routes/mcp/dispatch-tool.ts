@@ -1,27 +1,28 @@
 /**
  * MCP dispatch_task tool — spawns a new task in the current project.
  */
-import { and, eq, sql, inArray } from 'drizzle-orm';
+import type { CredentialProvider,VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
+import { and, eq, inArray,sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
-import type { Env } from '../../index';
+
 import * as schema from '../../db/schema';
+import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { generateBranchName } from '../../services/branch-name';
+import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
-import * as projectDataService from '../../services/project-data';
 import {
-  type McpTokenData,
-  type JsonRpcResponse,
-  jsonRpcSuccess,
-  jsonRpcError,
-  INTERNAL_ERROR,
-  INVALID_PARAMS,
   ACTIVE_STATUSES,
   getMcpLimits,
+  INTERNAL_ERROR,
+  INVALID_PARAMS,
+  jsonRpcError,
+  type JsonRpcResponse,
+  jsonRpcSuccess,
+  type McpTokenData,
 } from './_helpers';
 
 export async function handleDispatchTask(

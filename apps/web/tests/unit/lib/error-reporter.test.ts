@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
+  destroyErrorReporter,
   initErrorReporter,
   reportError,
   reportRawError,
-  destroyErrorReporter,
 } from '../../../src/lib/error-reporter';
 
 describe('error-reporter', () => {

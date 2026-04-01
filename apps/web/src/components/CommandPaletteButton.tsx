@@ -1,5 +1,5 @@
-import { type FC } from 'react';
 import { Search } from 'lucide-react';
+import { type FC } from 'react';
 
 interface CommandPaletteButtonProps {
   onClick: () => void;

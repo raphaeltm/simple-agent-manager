@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
 import type { NodeSystemInfo } from '@simple-agent-manager/shared';
+import { useEffect, useRef,useState } from 'react';
+
 import { getNodeSystemInfo } from '../lib/api';
 
 const POLL_INTERVAL_MS = 10_000;

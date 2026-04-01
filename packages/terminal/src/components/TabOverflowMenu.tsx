@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+
 import type { TerminalSession } from '../types/multi-terminal';
 
 interface TabOverflowMenuProps {

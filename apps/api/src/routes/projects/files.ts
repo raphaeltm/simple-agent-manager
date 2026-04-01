@@ -1,15 +1,16 @@
-import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Env } from '../../index';
+import { Hono } from 'hono';
+
 import * as schema from '../../db/schema';
+import type { Env } from '../../index';
+import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
-import { normalizeFileProxyPath } from './_helpers';
 import * as projectDataService from '../../services/project-data';
-import { log } from '../../lib/logger';
+import { normalizeFileProxyPath } from './_helpers';
 
 const fileProxyRoutes = new Hono<{ Bindings: Env }>();
 

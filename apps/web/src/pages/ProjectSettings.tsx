@@ -1,29 +1,30 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import type { ProjectRuntimeConfigResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
-  MIN_WORKSPACE_IDLE_TIMEOUT_MS,
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
+  MIN_WORKSPACE_IDLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
-import { Button, Spinner, Skeleton } from '@simple-agent-manager/ui';
+import { Button, Skeleton,Spinner } from '@simple-agent-manager/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+import { ProfileList } from '../components/agent-profiles/ProfileList';
+import { DeploymentSettings } from '../components/DeploymentSettings';
+import { ScalingSettings } from '../components/ScalingSettings';
+import { useAgentProfiles } from '../hooks/useAgentProfiles';
+import { useToast } from '../hooks/useToast';
 import {
+  deleteProject,
+  deleteProjectRuntimeEnvVar,
+  deleteProjectRuntimeFile,
   getProjectRuntimeConfig,
   getProviderCatalog,
   updateProject,
-  deleteProject,
   upsertProjectRuntimeEnvVar,
-  deleteProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
-  deleteProjectRuntimeFile,
 } from '../lib/api';
-import { useToast } from '../hooks/useToast';
-import { useAgentProfiles } from '../hooks/useAgentProfiles';
 import { useProjectContext } from './ProjectContext';
-import { DeploymentSettings } from '../components/DeploymentSettings';
-import { ProfileList } from '../components/agent-profiles/ProfileList';
-import { ScalingSettings } from '../components/ScalingSettings';
 
 const FALLBACK_VM_SIZES: { value: VMSize; label: string; description: string }[] = [
   { value: 'small', label: 'Small', description: '2-3 vCPUs, 4 GB RAM' },

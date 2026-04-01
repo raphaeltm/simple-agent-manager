@@ -1,9 +1,10 @@
-import { type FC, useCallback, useEffect, useState } from 'react';
 import { Spinner } from '@simple-agent-manager/ui';
+import { type FC, useCallback, useEffect, useState } from 'react';
+
 import {
-  formatFileSize,
   FILE_PREVIEW_INLINE_MAX_BYTES,
   FILE_PREVIEW_LOAD_MAX_BYTES,
+  formatFileSize,
 } from '../../lib/file-utils';
 
 interface ImageViewerProps {

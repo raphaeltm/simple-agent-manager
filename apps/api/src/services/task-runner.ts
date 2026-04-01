@@ -18,11 +18,12 @@
  * no side effects. Checks workspace/node state before taking action.
  */
 
+import { DEFAULT_TASK_RUN_CLEANUP_DELAY_MS } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { DEFAULT_TASK_RUN_CLEANUP_DELAY_MS } from '@simple-agent-manager/shared';
-import type { Env } from '../index';
+
 import * as schema from '../db/schema';
+import type { Env } from '../index';
 import { log } from '../lib/logger';
 import { stopWorkspaceOnNode } from './node-agent';
 import * as nodeLifecycleService from './node-lifecycle';

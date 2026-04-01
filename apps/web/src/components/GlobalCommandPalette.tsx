@@ -1,24 +1,25 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  Home,
+  ArrowRight,
   FolderKanban,
-  Server,
-  Monitor,
-  Settings,
-  Shield,
-  Plus,
+  Home,
   MessageSquare,
   MessageSquarePlus,
+  Monitor,
+  Plus,
   Search,
-  ArrowRight,
+  Server,
+  Settings,
+  Shield,
 } from 'lucide-react';
-import { fuzzyMatch } from '../lib/fuzzy-match';
-import { useAuth } from './AuthProvider';
-import { listProjects, listNodes, listChatSessions } from '../lib/api';
-import type { ChatSessionResponse } from '../lib/api';
-import { isMacPlatform } from '../lib/keyboard-shortcuts';
+import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation,useNavigate } from 'react-router-dom';
+
 import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
+import type { ChatSessionResponse } from '../lib/api';
+import { listChatSessions,listNodes, listProjects } from '../lib/api';
+import { fuzzyMatch } from '../lib/fuzzy-match';
+import { isMacPlatform } from '../lib/keyboard-shortcuts';
+import { useAuth } from './AuthProvider';
 
 // ── Configurable limits ──
 

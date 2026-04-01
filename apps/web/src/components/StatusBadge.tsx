@@ -1,5 +1,5 @@
-import { StatusBadge as SharedStatusBadge } from '@simple-agent-manager/ui';
 import type { WorkspaceStatus } from '@simple-agent-manager/shared';
+import { StatusBadge as SharedStatusBadge } from '@simple-agent-manager/ui';
 
 interface StatusBadgeProps {
   status: WorkspaceStatus | string;

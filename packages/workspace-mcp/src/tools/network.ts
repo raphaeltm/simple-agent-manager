@@ -7,11 +7,12 @@
  */
 
 import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
-import * as tls from 'node:tls';
 import * as dns from 'node:dns';
-import type { WorkspaceMcpConfig } from '../config.js';
+import * as tls from 'node:tls';
+import { promisify } from 'node:util';
+
 import type { ApiClient } from '../api-client.js';
+import type { WorkspaceMcpConfig } from '../config.js';
 
 /** Default timeout for shell exec commands (ms). Override via SAM_EXEC_TIMEOUT_MS. */
 const DEFAULT_EXEC_TIMEOUT_MS = 5000;

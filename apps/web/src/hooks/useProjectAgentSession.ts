@@ -13,9 +13,10 @@
  * disconnected and returns inert handles. The project chat falls back to
  * DO-persisted messages for history display.
  */
-import { useCallback, useEffect, useRef, useMemo } from 'react';
-import { useAcpSession, useAcpMessages } from '@simple-agent-manager/acp-client';
 import type { AcpLifecycleEvent } from '@simple-agent-manager/acp-client';
+import { useAcpMessages,useAcpSession } from '@simple-agent-manager/acp-client';
+import { useCallback, useEffect, useMemo,useRef } from 'react';
+
 import { getTerminalToken, getTranscribeApiUrl } from '../lib/api';
 import { reportError } from '../lib/error-reporter';
 

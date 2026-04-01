@@ -1,10 +1,11 @@
-import type { FC } from 'react';
 import type { NodeMetrics, NodeSystemInfo } from '@simple-agent-manager/shared';
-import { Cpu } from 'lucide-react';
 import { Skeleton } from '@simple-agent-manager/ui';
-import { SectionHeader } from './SectionHeader';
-import { Section } from './Section';
+import { Cpu } from 'lucide-react';
+import type { FC } from 'react';
+
 import { ResourceBar } from './ResourceBar';
+import { Section } from './Section';
+import { SectionHeader } from './SectionHeader';
 
 interface SystemResourcesSectionProps {
   systemInfo?: NodeSystemInfo | null;

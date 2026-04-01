@@ -1,3 +1,6 @@
+import { Spinner } from '@simple-agent-manager/ui';
+import { FileText,X } from 'lucide-react';
+import { Highlight, themes } from 'prism-react-renderer';
 import {
   type CSSProperties,
   type FC,
@@ -7,11 +10,9 @@ import {
   useEffect,
   useState,
 } from 'react';
-import { X, FileText } from 'lucide-react';
-import { Highlight, themes } from 'prism-react-renderer';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Spinner } from '@simple-agent-manager/ui';
+
 import { getGitDiff, getGitFile } from '../lib/api';
 import { DiffRenderer, parseDiffAddedLines } from './shared-file-viewer';
 

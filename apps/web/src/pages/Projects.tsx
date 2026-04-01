@@ -1,8 +1,9 @@
+import { Alert, Button, EmptyState, PageLayout, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Alert, Button, EmptyState, PageLayout, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
-import { UserMenu } from '../components/UserMenu';
+
 import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
+import { UserMenu } from '../components/UserMenu';
 import { useProjectList } from '../hooks/useProjectData';
 import { deleteProject } from '../lib/api';
 

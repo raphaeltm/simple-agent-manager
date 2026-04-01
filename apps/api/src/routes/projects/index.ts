@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
+
 import type { Env } from '../../index';
-import { requireAuth, requireApproved } from '../../middleware/auth';
-import { crudRoutes } from './crud';
+import { requireApproved,requireAuth } from '../../middleware/auth';
 import { acpSessionRoutes } from './acp-sessions';
-import { fileProxyRoutes } from './files';
 import { browserProxyRoutes } from './browser';
+import { crudRoutes } from './crud';
+import { fileProxyRoutes } from './files';
 
 const projectsRoutes = new Hono<{ Bindings: Env }>();
 projectsRoutes.use('/*', requireAuth(), requireApproved());

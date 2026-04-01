@@ -1,34 +1,35 @@
-import React, { useEffect, useRef, useState, useCallback, useImperativeHandle } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
+
 import { FitAddon } from '@xterm/addon-fit';
+import { Terminal as XTerm } from '@xterm/xterm';
+import React, { useCallback, useEffect, useImperativeHandle,useRef, useState } from 'react';
+
 import { TabBar } from './components/TabBar';
 import { useTerminalSessions } from './hooks/useTerminalSessions';
 import {
-  encodeTerminalWsInput,
-  encodeTerminalWsResize,
-  encodeTerminalWsPing,
-  encodeTerminalWsCreateSession,
   encodeTerminalWsCloseSession,
-  encodeTerminalWsRenameSession,
+  encodeTerminalWsCreateSession,
+  encodeTerminalWsInput,
   encodeTerminalWsListSessions,
+  encodeTerminalWsPing,
   encodeTerminalWsReattachSession,
-  parseTerminalWsServerMessage,
-  isSessionCreatedMessage,
-  isSessionClosedMessage,
-  isOutputMessage,
+  encodeTerminalWsRenameSession,
+  encodeTerminalWsResize,
   isErrorMessage,
-  isSessionReattachedMessage,
+  isOutputMessage,
   isScrollbackMessage,
+  isSessionClosedMessage,
+  isSessionCreatedMessage,
   isSessionListMessage,
+  isSessionReattachedMessage,
+  parseTerminalWsServerMessage,
 } from './protocol';
 import type {
-  MultiTerminalProps,
   MultiTerminalHandle,
+  MultiTerminalProps,
   MultiTerminalSessionSnapshot,
   TerminalConfig,
 } from './types/multi-terminal';
-
-import '@xterm/xterm/css/xterm.css';
 
 const PING_INTERVAL_MS = 30_000;
 const RECONNECT_DELAY_MS = 3000;

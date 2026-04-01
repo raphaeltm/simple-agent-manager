@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useRef, ReactNode } from 'react';
-import { useSession } from '../lib/auth';
-import { setUserId } from '../lib/analytics';
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
+import { createContext, type ReactNode,useContext, useEffect, useRef } from 'react';
+
+import { setUserId } from '../lib/analytics';
+import { useSession } from '../lib/auth';
 
 interface User {
   id: string;

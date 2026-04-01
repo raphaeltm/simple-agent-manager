@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import type { ToolCallItem, ToolCallContentItem } from '../hooks/useAcpMessages';
+
+import type { ToolCallContentItem,ToolCallItem } from '../hooks/useAcpMessages';
 import { FileDiffView } from './FileDiffView';
 import { TerminalBlock } from './TerminalBlock';
 

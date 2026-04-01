@@ -1,5 +1,5 @@
-import { useState, type FC } from 'react';
 import type { PlatformError } from '@simple-agent-manager/shared';
+import { type FC,useState } from 'react';
 
 interface ObservabilityLogEntryProps {
   error: PlatformError;

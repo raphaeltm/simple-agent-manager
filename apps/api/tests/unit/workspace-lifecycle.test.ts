@@ -10,9 +10,10 @@
  * - advanceWorkspaceReady() handles all race conditions correctly
  * - Timeout alarm catches permanent callback delivery failures
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 const doSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),

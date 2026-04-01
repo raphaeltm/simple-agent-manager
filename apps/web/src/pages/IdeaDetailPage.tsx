@@ -1,25 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import {
-  ArrowLeft,
-  MessageSquare,
-  Clock,
-  Lightbulb,
-  RefreshCw,
-  Play,
-  Check,
-  Archive,
-  Search,
-  X,
-  Rocket,
-} from 'lucide-react';
 import type { TaskDetailResponse, TaskStatus } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
-import { getProjectTask, getTaskSessions } from '../lib/api';
-import type { TaskSessionLink } from '../lib/api';
-import { useProjectContext } from './ProjectContext';
-import { useIsMobile } from '../hooks/useIsMobile';
+import {
+  Archive,
+  ArrowLeft,
+  Check,
+  Clock,
+  Lightbulb,
+  MessageSquare,
+  Play,
+  RefreshCw,
+  Rocket,
+  Search,
+  X,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+
 import { RenderedMarkdown } from '../components/MarkdownRenderer';
+import { useIsMobile } from '../hooks/useIsMobile';
+import type { TaskSessionLink } from '../lib/api';
+import { getProjectTask, getTaskSessions } from '../lib/api';
+import { useProjectContext } from './ProjectContext';
 
 // ---------------------------------------------------------------------------
 // Status mapping (mirrors IdeasPage)

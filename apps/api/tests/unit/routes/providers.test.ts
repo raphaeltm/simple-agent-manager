@@ -11,12 +11,13 @@
  * - @simple-agent-manager/providers createProvider is mocked so we control
  *   the provider instances returned (locations, sizes, locationMetadata, defaultLocation)
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Hono } from 'hono';
+import type { ProviderCatalogResponse } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { Env } from '../../../src/index';
 import { providersRoutes } from '../../../src/routes/providers';
-import type { ProviderCatalogResponse } from '@simple-agent-manager/shared';
 
 vi.mock('drizzle-orm/d1');
 

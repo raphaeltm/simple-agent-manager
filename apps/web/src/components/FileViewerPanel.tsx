@@ -1,3 +1,5 @@
+import { Spinner } from '@simple-agent-manager/ui';
+import { X } from 'lucide-react';
 import {
   type CSSProperties,
   type FC,
@@ -5,11 +7,10 @@ import {
   useEffect,
   useState,
 } from 'react';
-import { X } from 'lucide-react';
-import { Spinner } from '@simple-agent-manager/ui';
-import { getGitFile, getFileRawUrl } from '../lib/api';
+
+import { getFileRawUrl,getGitFile } from '../lib/api';
 import { isImageFile } from '../lib/file-utils';
-import { SyntaxHighlightedCode, RenderedMarkdown } from './MarkdownRenderer';
+import { RenderedMarkdown,SyntaxHighlightedCode } from './MarkdownRenderer';
 import { ImageViewer } from './shared-file-viewer';
 
 interface FileViewerPanelProps {

@@ -6,10 +6,11 @@
  */
 
 import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
-import type { WorkspaceMcpConfig } from '../config.js';
+import { promisify } from 'node:util';
+
 import type { ApiClient } from '../api-client.js';
+import type { WorkspaceMcpConfig } from '../config.js';
 
 const execAsync = promisify(exec);
 

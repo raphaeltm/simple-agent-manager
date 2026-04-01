@@ -5,7 +5,8 @@
  * exercising real SQLite storage, DO lifecycle, and migrations.
  */
 import { env } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import type { ProjectData } from '../../src/durable-objects/project-data';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {

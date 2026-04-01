@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
-import { getAllStaticCommands, CLIENT_COMMANDS } from '@simple-agent-manager/acp-client';
+import { CLIENT_COMMANDS,getAllStaticCommands } from '@simple-agent-manager/acp-client';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
 import { getCachedCommands } from '../lib/api';
 
 /**

@@ -7,13 +7,13 @@
  * - Workspace profile precedence resolution
  * - Profile-to-boolean conversion for VM agent
  */
-import { describe, expect, it } from 'vitest';
+import type { WorkspaceProfile } from '@simple-agent-manager/shared';
 import {
   CreateWorkspaceAgentRequestSchema,
-  VALID_WORKSPACE_PROFILES,
   DEFAULT_WORKSPACE_PROFILE,
+  VALID_WORKSPACE_PROFILES,
 } from '@simple-agent-manager/shared';
-import type { WorkspaceProfile } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 // =============================================================================
 // Contract Schema: CreateWorkspaceAgentRequest includes lightweight

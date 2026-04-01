@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
+
 import { createAuth } from '../auth';
 import type { Env } from '../index';
-import { errors } from '../middleware/error';
 import { log } from '../lib/logger';
+import { errors } from '../middleware/error';
 
 const authRoutes = new Hono<{ Bindings: Env }>();
 

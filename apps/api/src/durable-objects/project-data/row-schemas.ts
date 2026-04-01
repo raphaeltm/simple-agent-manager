@@ -6,8 +6,8 @@
  * Each schema matches the column names returned by SQLite (snake_case).
  * Mapper functions validate and transform to camelCase TypeScript types.
  */
-import * as v from 'valibot';
 import type { AcpSession } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 // =============================================================================
 // Generic parse helpers

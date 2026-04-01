@@ -1,21 +1,22 @@
-import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
 import {
-  Home,
-  FolderKanban,
-  Settings,
-  Shield,
-  Server,
-  Monitor,
-  MessageSquare,
-  Lightbulb,
   Activity,
-  Bell,
   ArrowLeft,
+  Bell,
   ChevronDown,
   ChevronRight,
+  FolderKanban,
+  Home,
+  Lightbulb,
   Map,
+  MessageSquare,
+  Monitor,
+  Server,
+  Settings,
+  Shield,
 } from 'lucide-react';
+import { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+
 import { useAuth } from './AuthProvider';
 
 export interface NavItem {

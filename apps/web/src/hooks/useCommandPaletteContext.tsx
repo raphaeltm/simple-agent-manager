@@ -1,14 +1,15 @@
-import { useMemo } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  MessageSquare,
-  Lightbulb,
   Activity,
-  Settings,
-  Monitor,
   ExternalLink,
   Eye,
+  Lightbulb,
+  MessageSquare,
+  Monitor,
+  Settings,
 } from 'lucide-react';
+import { useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+
 import { extractProjectId } from '../components/NavSidebar';
 import type { ChatSessionResponse } from '../lib/api';
 

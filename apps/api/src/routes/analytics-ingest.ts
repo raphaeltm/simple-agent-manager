@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
+
 import type { Env } from '../index';
-import { optionalAuth } from '../middleware/auth';
-import { rateLimit, getRateLimit } from '../middleware/rate-limit';
-import { errors } from '../middleware/error';
-import { bucketUserAgent } from '../middleware/analytics';
 import { log } from '../lib/logger';
+import { bucketUserAgent } from '../middleware/analytics';
+import { optionalAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
+import { getRateLimit,rateLimit } from '../middleware/rate-limit';
 
 /** Default max body size: 64 KB (configurable via MAX_ANALYTICS_INGEST_BODY_BYTES) */
 const DEFAULT_MAX_BODY_BYTES = 65_536;

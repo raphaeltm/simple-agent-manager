@@ -1,7 +1,8 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useEffect,useRef, useState } from 'react';
+
+import type { TabBarProps } from '../types/multi-terminal';
 import { TabItem } from './TabItem';
 import { TabOverflowMenu } from './TabOverflowMenu';
-import type { TabBarProps } from '../types/multi-terminal';
 
 const tabBarStyle: React.CSSProperties = {
   display: 'flex',

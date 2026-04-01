@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TaskDetailResponse, TaskStatus } from '@simple-agent-manager/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { TaskDetailResponse, TaskStatus } from '@simple-agent-manager/shared';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { TaskSessionLink } from '../../../src/lib/api';
 
 // ---------------------------------------------------------------------------

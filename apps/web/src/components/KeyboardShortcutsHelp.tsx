@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
-import { getShortcutsByCategory, formatShortcut } from '../lib/keyboard-shortcuts';
+
 import type { ShortcutDefinition } from '../lib/keyboard-shortcuts';
+import { formatShortcut,getShortcutsByCategory } from '../lib/keyboard-shortcuts';
 
 interface KeyboardShortcutsHelpProps {
   onClose: () => void;

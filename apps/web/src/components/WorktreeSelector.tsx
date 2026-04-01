@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
 import type { WorktreeInfo } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { Check, GitFork, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
 import { BranchSelector } from './BranchSelector';
 
 interface WorktreeSelectorProps {

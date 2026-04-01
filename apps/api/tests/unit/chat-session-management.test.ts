@@ -7,9 +7,10 @@
  * 3. Workspace-session linking via linkSessionToWorkspace RPC
  * 4. Required (not best-effort) session creation and message persistence
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 const taskSubmitSource = readFileSync(
   resolve(process.cwd(), 'src/routes/tasks/submit.ts'),

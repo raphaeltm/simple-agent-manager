@@ -1,5 +1,5 @@
-import { HealthOverview } from '../components/admin/HealthOverview';
 import { ErrorTrends } from '../components/admin/ErrorTrends';
+import { HealthOverview } from '../components/admin/HealthOverview';
 
 export function AdminOverview() {
   return (

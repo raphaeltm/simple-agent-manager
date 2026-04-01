@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import { adminAnalyticsRoutes } from '../../../src/routes/admin-analytics';
 
 // Mock auth middleware — skip auth for unit tests

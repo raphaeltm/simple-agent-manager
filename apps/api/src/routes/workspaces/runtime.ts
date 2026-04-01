@@ -1,27 +1,28 @@
-import { Hono } from 'hono';
+import { type BootstrapTokenData,isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { ulid } from '../../lib/ulid';
-import type { Env } from '../../index';
-import { requireAuth, requireApproved } from '../../middleware/auth';
-import { errors } from '../../middleware/error';
+import { Hono } from 'hono';
+
 import * as schema from '../../db/schema';
-import { isValidAgentType, type BootstrapTokenData } from '@simple-agent-manager/shared';
-import { jsonValidator, AgentTypeBodySchema, AgentCredentialSyncSchema, BootLogEntrySchema, MessageBatchSchema } from '../../schemas';
-import { getDecryptedAgentKey } from '../credentials';
-import { getInstallationToken } from '../../services/github-app';
+import type { Env } from '../../index';
+import { log } from '../../lib/logger';
+import { parsePositiveInt } from '../../lib/route-helpers';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
+import { ulid } from '../../lib/ulid';
+import { requireApproved,requireAuth } from '../../middleware/auth';
+import { errors } from '../../middleware/error';
+import { AgentCredentialSyncSchema, AgentTypeBodySchema, BootLogEntrySchema, jsonValidator, MessageBatchSchema } from '../../schemas';
 import { appendBootLog } from '../../services/boot-log';
 import { decrypt, encrypt } from '../../services/encryption';
-import * as projectDataService from '../../services/project-data';
+import { getInstallationToken } from '../../services/github-app';
 import { persistError } from '../../services/observability';
-import { getCredentialEncryptionKey } from '../../lib/secrets';
+import * as projectDataService from '../../services/project-data';
+import { getDecryptedAgentKey } from '../credentials';
 import {
-  verifyWorkspaceCallbackAuth,
   getWorkspaceRuntimeAssets,
   safeParseJson,
+  verifyWorkspaceCallbackAuth,
 } from './_helpers';
-import { parsePositiveInt } from '../../lib/route-helpers';
-import { log } from '../../lib/logger';
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 

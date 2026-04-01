@@ -1,9 +1,10 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { WorkspaceSidebar } from '../../../src/components/WorkspaceSidebar';
-import type { SessionTokenUsage, SidebarTab } from '../../../src/components/WorkspaceSidebar';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import type { Event } from '@simple-agent-manager/shared';
+import { fireEvent,render, screen } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
+import type { SessionTokenUsage, SidebarTab } from '../../../src/components/WorkspaceSidebar';
+import { WorkspaceSidebar } from '../../../src/components/WorkspaceSidebar';
 import type { GitStatusData } from '../../../src/lib/api';
 
 // ─── Helpers ─────────────────────────────────────────────────

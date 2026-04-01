@@ -1,45 +1,60 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Terminal, MultiTerminal } from '@simple-agent-manager/terminal';
+import '../styles/acp-chat.css';
+
+import type { TokenUsage } from '@simple-agent-manager/acp-client';
+import type {
+  AgentHostStatus,
+  AgentInfo,
+  AgentSession,
+  BootLogEntry,
+  Event,
+  WorkspaceResponse,
+  WorktreeInfo,
+} from '@simple-agent-manager/shared';
 import type {
   MultiTerminalHandle,
   MultiTerminalSessionSnapshot,
 } from '@simple-agent-manager/terminal';
-import { useFeatureFlags } from '../config/features';
+import { MultiTerminal,Terminal } from '@simple-agent-manager/terminal';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
-import { UserMenu } from '../components/UserMenu';
-import { ChatSession } from '../components/ChatSession';
+import { MoreVertical, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef,useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+
 import type { ChatSessionHandle } from '../components/ChatSession';
+import { ChatSession } from '../components/ChatSession';
 import { CommandPalette } from '../components/CommandPalette';
+import { CommandPaletteButton } from '../components/CommandPaletteButton';
+import { FileBrowserButton } from '../components/FileBrowserButton';
+import { FileBrowserPanel } from '../components/FileBrowserPanel';
+import { FileViewerPanel } from '../components/FileViewerPanel';
+import { GitChangesButton } from '../components/GitChangesButton';
+import { GitChangesPanel } from '../components/GitChangesPanel';
+import { GitDiffView } from '../components/GitDiffView';
 import { KeyboardShortcutsHelp } from '../components/KeyboardShortcutsHelp';
+import { OrphanedSessionsBanner } from '../components/OrphanedSessionsBanner';
+import { BootLogList } from '../components/shared/BootLogList';
+import { UserMenu } from '../components/UserMenu';
+import type { SessionTokenUsage, SidebarTab } from '../components/WorkspaceSidebar';
+import { WorkspaceSidebar } from '../components/WorkspaceSidebar';
+import { type WorkspaceTabItem,WorkspaceTabStrip } from '../components/WorkspaceTabStrip';
+import { WorktreeSelector } from '../components/WorktreeSelector';
+import { useFeatureFlags } from '../config/features';
+import { useBootLogStream } from '../hooks/useBootLogStream';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useTabOrder } from '../hooks/useTabOrder';
 import { useTokenRefresh } from '../hooks/useTokenRefresh';
-import { useBootLogStream } from '../hooks/useBootLogStream';
-import { BootLogList } from '../components/shared/BootLogList';
 import { useWorkspacePorts } from '../hooks/useWorkspacePorts';
-import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/WorkspaceTabStrip';
-import { WorktreeSelector } from '../components/WorktreeSelector';
-import { MoreVertical, X } from 'lucide-react';
-import { GitChangesButton } from '../components/GitChangesButton';
-import { CommandPaletteButton } from '../components/CommandPaletteButton';
-import { GitChangesPanel } from '../components/GitChangesPanel';
-import { GitDiffView } from '../components/GitDiffView';
-import { FileBrowserButton } from '../components/FileBrowserButton';
-import { FileBrowserPanel } from '../components/FileBrowserPanel';
-import { FileViewerPanel } from '../components/FileViewerPanel';
-import { WorkspaceSidebar } from '../components/WorkspaceSidebar';
-import type { SessionTokenUsage, SidebarTab } from '../components/WorkspaceSidebar';
+import type { GitStatusData } from '../lib/api';
 import {
   createAgentSession,
   createWorktree,
   getFileIndex,
   getGitBranches,
   getGitStatus,
-  getWorktrees,
   getTerminalToken,
   getWorkspace,
+  getWorktrees,
   listAgents,
   listAgentSessions,
   listAgentSessionsLive,
@@ -47,26 +62,13 @@ import {
   rebuildWorkspace,
   removeWorktree,
   renameAgentSession,
-  resumeAgentSession,
   restartWorkspace,
+  resumeAgentSession,
   stopAgentSession,
   stopWorkspace,
   updateWorkspace,
 } from '../lib/api';
-import { isSessionActive, isOrphanedSession } from '../lib/session-utils';
-import { OrphanedSessionsBanner } from '../components/OrphanedSessionsBanner';
-import type { GitStatusData } from '../lib/api';
-import type { TokenUsage } from '@simple-agent-manager/acp-client';
-import type {
-  AgentHostStatus,
-  AgentInfo,
-  AgentSession,
-  Event,
-  WorktreeInfo,
-  WorkspaceResponse,
-  BootLogEntry,
-} from '@simple-agent-manager/shared';
-import '../styles/acp-chat.css';
+import { isOrphanedSession,isSessionActive } from '../lib/session-utils';
 
 /** View modes */
 type ViewMode = 'terminal' | 'conversation';

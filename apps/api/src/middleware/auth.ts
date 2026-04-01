@@ -1,9 +1,10 @@
-import type { Context, Next, MiddlewareHandler } from 'hono';
-import { createAuth } from '../auth';
-import { AppError, errors } from './error';
-import type { Env } from '../index';
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
+import type { Context, MiddlewareHandler,Next } from 'hono';
+
+import { createAuth } from '../auth';
+import type { Env } from '../index';
 import { log } from '../lib/logger';
+import { AppError, errors } from './error';
 
 /**
  * Extended context with authenticated user.

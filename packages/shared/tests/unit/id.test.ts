@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import {
+  extractWorkspaceIdSuffix,
   generateWorkspaceId,
   isValidWorkspaceId,
-  extractWorkspaceIdSuffix,
 } from '../../src/lib/id';
 
 describe('generateWorkspaceId', () => {

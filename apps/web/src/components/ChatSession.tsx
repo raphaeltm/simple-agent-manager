@@ -1,24 +1,25 @@
-import React, {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useRef,
-  useImperativeHandle,
-} from 'react';
-import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
 import type {
+  AcpLifecycleEvent,
   AgentPanelHandle,
   ChatSettingsData,
-  AcpLifecycleEvent,
   TokenUsage,
 } from '@simple-agent-manager/acp-client';
+import { AgentPanel,useAcpMessages, useAcpSession } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
-import { VALID_PERMISSION_MODES, AGENT_PERMISSION_MODE_LABELS } from '@simple-agent-manager/shared';
+import { AGENT_PERMISSION_MODE_LABELS,VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
 import {
+  getAgentSettings,
   getTerminalToken,
   getTranscribeApiUrl,
-  getAgentSettings,
   saveAgentSettings,
 } from '../lib/api';
 import { reportError } from '../lib/error-reporter';

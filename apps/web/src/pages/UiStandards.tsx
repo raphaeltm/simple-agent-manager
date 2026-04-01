@@ -1,13 +1,14 @@
+import {
+Alert, Breadcrumb, Button, ButtonGroup, Card,
+  DropdownMenu,   type DropdownMenuItem,
+EmptyState,
+  PageLayout, Select, Spinner, Tabs, Tooltip, } from '@simple-agent-manager/ui';
+import { Copy,Edit, Inbox, Settings, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+
 import { UserMenu } from '../components/UserMenu';
-import { getActiveUiStandard, upsertUiStandard, type UIStandard } from '../lib/ui-governance';
-import {
-  PageLayout, Button, Alert, Select, Spinner, Card,
-  DropdownMenu, ButtonGroup, Tabs, Breadcrumb, Tooltip, EmptyState,
-  type DropdownMenuItem,
-} from '@simple-agent-manager/ui';
-import { Inbox, Settings, Trash2, Edit, Copy } from 'lucide-react';
+import { getActiveUiStandard, type UIStandard,upsertUiStandard } from '../lib/ui-governance';
 
 /* -- Component showcase sections -- */
 

@@ -1,8 +1,9 @@
-import { ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
 import { Spinner } from '@simple-agent-manager/ui';
-import { useAuth } from './AuthProvider';
+import { type ReactNode } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
+
 import { PendingApproval } from '../pages/PendingApproval';
+import { useAuth } from './AuthProvider';
 
 interface ProtectedRouteProps {
   children: ReactNode;

@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
-import { getTaskDependencies } from '../../src/tools/tasks.js';
-import type { WorkspaceMcpConfig } from '../../src/config.js';
+import { describe, expect, it, vi } from 'vitest';
+
 import type { ApiClient } from '../../src/api-client.js';
+import type { WorkspaceMcpConfig } from '../../src/config.js';
+import { getTaskDependencies } from '../../src/tools/tasks.js';
 
 function makeConfig(overrides: Partial<WorkspaceMcpConfig> = {}): WorkspaceMcpConfig {
   return {

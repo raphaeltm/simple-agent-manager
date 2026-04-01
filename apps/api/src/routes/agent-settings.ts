@@ -1,18 +1,19 @@
-import { Hono } from 'hono';
-import { and, eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-import { ulid } from '../lib/ulid';
-import type { Env } from '../index';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
-import { errors } from '../middleware/error';
-import * as schema from '../db/schema';
+import type {
+  AgentPermissionMode,
+  AgentSettingsResponse,
+} from '@simple-agent-manager/shared';
 import {
   isValidAgentType,
 } from '@simple-agent-manager/shared';
-import type {
-  AgentSettingsResponse,
-  AgentPermissionMode,
-} from '@simple-agent-manager/shared';
+import { and, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
+import * as schema from '../db/schema';
+import type { Env } from '../index';
+import { ulid } from '../lib/ulid';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
 import { jsonValidator, SaveAgentSettingsSchema } from '../schemas';
 
 export const agentSettingsRoutes = new Hono<{ Bindings: Env }>();

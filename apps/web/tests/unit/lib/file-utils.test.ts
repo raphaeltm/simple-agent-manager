@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { isImageFile, isSvgFile, formatFileSize, FILE_PREVIEW_INLINE_MAX_BYTES, FILE_PREVIEW_LOAD_MAX_BYTES } from '../../../src/lib/file-utils';
+import { describe, expect,it } from 'vitest';
+
+import { FILE_PREVIEW_INLINE_MAX_BYTES, FILE_PREVIEW_LOAD_MAX_BYTES,formatFileSize, isImageFile, isSvgFile } from '../../../src/lib/file-utils';
 
 describe('isImageFile', () => {
   it('returns true for common image extensions', () => {

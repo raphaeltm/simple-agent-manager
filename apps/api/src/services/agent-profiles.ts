@@ -1,5 +1,3 @@
-import { and, eq, isNull, or } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import type {
   AgentProfile,
   CreateAgentProfileRequest,
@@ -7,8 +5,11 @@ import type {
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
 import { isValidAgentType } from '@simple-agent-manager/shared';
-import type { Env } from '../index';
+import { and, eq, isNull, or } from 'drizzle-orm';
+import { type drizzle } from 'drizzle-orm/d1';
+
 import * as schema from '../db/schema';
+import type { Env } from '../index';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 

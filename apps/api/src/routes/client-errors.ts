@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
+
 import type { Env } from '../index';
-import { optionalAuth } from '../middleware/auth';
-import { rateLimit, getRateLimit } from '../middleware/rate-limit';
-import { errors } from '../middleware/error';
-import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import { log } from '../lib/logger';
-import { jsonValidator, ClientErrorBatchSchema } from '../schemas';
+import { optionalAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
+import { getRateLimit,rateLimit } from '../middleware/rate-limit';
+import { ClientErrorBatchSchema,jsonValidator } from '../schemas';
+import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 
 /** Default max body size: 64 KB (configurable via MAX_CLIENT_ERROR_BODY_BYTES) */
 const DEFAULT_MAX_BODY_BYTES = 65_536;

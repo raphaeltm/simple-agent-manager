@@ -1,23 +1,24 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import type { NotificationResponse, NotificationType } from '@simple-agent-manager/shared';
 import {
+  Activity,
+  AlertCircle,
   Bell,
   Check,
   CheckCheck,
-  X,
-  AlertCircle,
   CheckCircle2,
-  MessageSquare,
-  GitPullRequest,
-  Activity,
-  HelpCircle,
-  Loader2,
   ChevronDown,
   ChevronRight,
   Folder,
+  GitPullRequest,
+  HelpCircle,
+  Loader2,
+  MessageSquare,
+  X,
 } from 'lucide-react';
-import type { NotificationResponse, NotificationType } from '@simple-agent-manager/shared';
+import { useCallback, useEffect, useMemo,useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
+
 import { useNotifications } from '../hooks/useNotifications';
 
 const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, {

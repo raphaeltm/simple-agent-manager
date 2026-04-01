@@ -1,7 +1,8 @@
-import { type FC, useState } from 'react';
-import { Pencil, Trash2, Plus, Bot } from 'lucide-react';
 import type { AgentProfile, CreateAgentProfileRequest, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
+import { Bot,Pencil, Plus, Trash2 } from 'lucide-react';
+import { type FC, useState } from 'react';
+
 import { ProfileFormDialog } from './ProfileFormDialog';
 
 interface ProfileListProps {

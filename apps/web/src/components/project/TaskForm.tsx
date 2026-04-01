@@ -1,8 +1,9 @@
-import { useState, useEffect, type FormEvent } from 'react';
 import type { AgentProfile, Task } from '@simple-agent-manager/shared';
 import { Button, Input } from '@simple-agent-manager/ui';
-import { ProfileSelector } from '../agent-profiles/ProfileSelector';
+import { type FormEvent,useEffect, useState } from 'react';
+
 import { listAgentProfiles } from '../../lib/api';
+import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 
 export interface TaskFormValues {
   title: string;

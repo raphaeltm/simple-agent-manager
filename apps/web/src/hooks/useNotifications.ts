@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NotificationResponse, NotificationWsMessage } from '@simple-agent-manager/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
 import {
+  dismissNotification as apiDismiss,
+  getNotificationUnreadCount,
   getNotificationWsUrl,
   listNotifications,
-  getNotificationUnreadCount,
-  markNotificationRead as apiMarkRead,
   markAllNotificationsRead as apiMarkAllRead,
-  dismissNotification as apiDismiss,
+  markNotificationRead as apiMarkRead,
 } from '../lib/api';
 
 const RECONNECT_BASE_DELAY = 1000;

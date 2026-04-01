@@ -9,6 +9,7 @@
  * These tests exercise the actual runtime behaviour of every branch.
  */
 import { describe, expect, it } from 'vitest';
+
 import { chatMessagesToConversationItems } from '../../../src/components/chat/ProjectMessageView';
 import type { ChatMessageResponse } from '../../../src/lib/api';
 

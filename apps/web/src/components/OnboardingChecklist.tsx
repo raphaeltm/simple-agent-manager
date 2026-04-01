@@ -1,6 +1,7 @@
+import { Button,Card } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Button } from '@simple-agent-manager/ui';
+
 import { listCredentials, listGitHubInstallations, listWorkspaces } from '../lib/api';
 import { useAuth } from './AuthProvider';
 

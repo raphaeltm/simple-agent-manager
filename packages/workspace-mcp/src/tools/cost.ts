@@ -6,8 +6,9 @@
  */
 
 import * as fs from 'node:fs/promises';
-import type { WorkspaceMcpConfig } from '../config.js';
+
 import type { ApiClient } from '../api-client.js';
+import type { WorkspaceMcpConfig } from '../config.js';
 
 /** VM size pricing in USD/hour. Configurable via SAM_VM_PRICING_JSON env var. */
 function getVmPricing(): Record<string, number> {

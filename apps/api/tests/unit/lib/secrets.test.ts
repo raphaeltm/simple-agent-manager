@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import { getBetterAuthSecret, getCredentialEncryptionKey, getWebhookSecret } from '../../../src/lib/secrets';
 
 describe('Secret key resolution helpers', () => {

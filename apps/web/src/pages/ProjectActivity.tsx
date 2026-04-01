@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+
 import { ActivityFeed } from '../components/ActivityFeed';
-import { listActivityEvents } from '../lib/api';
 import type { ActivityEventResponse } from '../lib/api';
+import { listActivityEvents } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
 export function ProjectActivity() {

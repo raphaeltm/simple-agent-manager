@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { createProvider, HetznerProvider, ScalewayProvider, ProviderError } from '../../src/index';
+import { describe, expect,it } from 'vitest';
+
+import { createProvider, HetznerProvider, ProviderError,ScalewayProvider } from '../../src/index';
 
 describe('createProvider', () => {
   it('should return HetznerProvider for hetzner config', () => {

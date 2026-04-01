@@ -1,13 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn(),
+  getSmokeTestStatus: vi.fn().mockResolvedValue({ enabled: false }),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
   listCredentials: mocks.listCredentials,
+  getSmokeTestStatus: mocks.getSmokeTestStatus,
 }));
 
 vi.mock('../../../src/components/HetznerTokenForm', () => ({
@@ -45,10 +47,10 @@ vi.mock('../../../src/components/UserMenu', () => ({
 }));
 
 import { Settings } from '../../../src/pages/Settings';
+import { SettingsAgentConfig } from '../../../src/pages/SettingsAgentConfig';
+import { SettingsAgentKeys } from '../../../src/pages/SettingsAgentKeys';
 import { SettingsCloudProvider } from '../../../src/pages/SettingsCloudProvider';
 import { SettingsGitHub } from '../../../src/pages/SettingsGitHub';
-import { SettingsAgentKeys } from '../../../src/pages/SettingsAgentKeys';
-import { SettingsAgentConfig } from '../../../src/pages/SettingsAgentConfig';
 
 function renderSettings(path = '/settings/cloud-provider') {
   return render(

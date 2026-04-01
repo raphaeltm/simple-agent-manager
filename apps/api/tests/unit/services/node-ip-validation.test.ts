@@ -6,9 +6,10 @@
  * 2. Heartbeat handler backfills IP when node has empty ipAddress
  * 3. DNS records are not created with empty IPs
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('provisionNode empty IP guard', () => {
   const file = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');

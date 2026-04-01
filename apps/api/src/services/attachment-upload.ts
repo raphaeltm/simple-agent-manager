@@ -4,10 +4,11 @@
  * Generates S3-compatible presigned PUT URLs for direct browser → R2 uploads,
  * Validates attachment existence/integrity on task submission via HEAD checks.
  */
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand,S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 import type { TaskAttachment } from '@simple-agent-manager/shared';
+import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+
 import type { Env } from '../index';
 import { log } from '../lib/logger';
 

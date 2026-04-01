@@ -1,14 +1,15 @@
-import { Hono } from 'hono';
-import { drizzle } from 'drizzle-orm/d1';
-import { eq, and } from 'drizzle-orm';
-import type { Env } from '../index';
-import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
-import { errors } from '../middleware/error';
-import { signTerminalToken } from '../services/jwt';
-import * as schema from '../db/schema';
-import * as projectDataService from '../services/project-data';
 import type { TerminalTokenResponse } from '@simple-agent-manager/shared';
+import { and,eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
+import * as schema from '../db/schema';
+import type { Env } from '../index';
+import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
 import { jsonValidator, TerminalRequestSchema } from '../schemas';
+import { signTerminalToken } from '../services/jwt';
+import * as projectDataService from '../services/project-data';
 
 const terminalRoutes = new Hono<{ Bindings: Env }>();
 

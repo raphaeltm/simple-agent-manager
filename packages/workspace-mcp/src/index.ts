@@ -17,37 +17,37 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { loadConfig } from './config.js';
-import { ApiClient } from './api-client.js';
 
-// Tool implementations
-import {
-  getNetworkInfo,
-  exposePort,
-  checkDnsStatus,
-} from './tools/network.js';
-import {
-  getWorkspaceInfo,
-  getCredentialStatus,
-} from './tools/identity.js';
-import {
-  checkCostEstimate,
-  getRemainingBudget,
-} from './tools/cost.js';
-import {
-  listProjectAgents,
-  getFileLocks,
-  getPeerAgentOutput,
-} from './tools/coordination.js';
-import { getTaskDependencies } from './tools/tasks.js';
+import { ApiClient } from './api-client.js';
+import { loadConfig } from './config.js';
 import {
   getCiStatus,
   getDeploymentStatus,
 } from './tools/cicd.js';
 import {
-  reportEnvironmentIssue,
+  getFileLocks,
+  getPeerAgentOutput,
+  listProjectAgents,
+} from './tools/coordination.js';
+import {
+  checkCostEstimate,
+  getRemainingBudget,
+} from './tools/cost.js';
+import {
+  getCredentialStatus,
+  getWorkspaceInfo,
+} from './tools/identity.js';
+// Tool implementations
+import {
+  checkDnsStatus,
+  exposePort,
+  getNetworkInfo,
+} from './tools/network.js';
+import {
   getWorkspaceDiffSummary,
+  reportEnvironmentIssue,
 } from './tools/observability.js';
+import { getTaskDependencies } from './tools/tasks.js';
 
 const config = loadConfig();
 const apiClient = new ApiClient(config);

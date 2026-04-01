@@ -9,9 +9,10 @@
  * These tests validate the wiring between modules, not the individual
  * function behavior (which is covered by unit tests).
  */
-import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { describe, expect,it } from 'vitest';
 
 /**
  * Extract a section of source code between two marker strings.

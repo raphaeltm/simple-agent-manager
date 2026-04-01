@@ -5,16 +5,18 @@
  * - Behavioral tests for nodeHasCapacity() and scoreNodeLoad() with actual function calls
  * - Source contract tests for selectNodeForTaskRun() algorithm structure
  */
-import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { nodeHasCapacity, scoreNodeLoad } from '../../src/services/node-selector';
+
 import type { NodeMetrics } from '@simple-agent-manager/shared';
 import {
   DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
 } from '@simple-agent-manager/shared';
+import { describe, expect,it } from 'vitest';
+
+import { nodeHasCapacity, scoreNodeLoad } from '../../src/services/node-selector';
 
 // =============================================================================
 // Behavioral tests — nodeHasCapacity()

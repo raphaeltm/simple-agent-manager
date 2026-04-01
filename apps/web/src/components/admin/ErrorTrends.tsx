@@ -1,7 +1,8 @@
-import { type FC, useState, useEffect, useCallback } from 'react';
-import { Card, Spinner, Button, Body } from '@simple-agent-manager/ui';
+import type { ErrorTrendBucket,ErrorTrendResponse } from '@simple-agent-manager/shared';
+import { Body,Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { type FC, useCallback,useEffect, useState } from 'react';
+
 import { fetchAdminErrorTrends } from '../../lib/api';
-import type { ErrorTrendResponse, ErrorTrendBucket } from '@simple-agent-manager/shared';
 
 const RANGES = ['1h', '24h', '7d', '30d'] as const;
 type Range = (typeof RANGES)[number];

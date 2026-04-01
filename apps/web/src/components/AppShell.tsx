@@ -1,16 +1,17 @@
-import { createContext, useContext, useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
+import { ArrowLeft, Menu, Monitor,Search, Server, Shield } from 'lucide-react';
+import { createContext, type ReactNode,useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, Search, ArrowLeft, Shield, Server, Monitor } from 'lucide-react';
-import { useAuth } from './AuthProvider';
-import { useIsMobile } from '../hooks/useIsMobile';
-import { NavSidebar, GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS, extractProjectId } from './NavSidebar';
-import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
-import { GlobalCommandPalette } from './GlobalCommandPalette';
+
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
-import { isMacPlatform } from '../lib/keyboard-shortcuts';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { signOut } from '../lib/auth';
-import { NotificationCenter } from './NotificationCenter';
+import { isMacPlatform } from '../lib/keyboard-shortcuts';
+import { useAuth } from './AuthProvider';
 import { GlobalAudioPlayer } from './GlobalAudioPlayer';
+import { GlobalCommandPalette } from './GlobalCommandPalette';
+import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
+import { extractProjectId,GLOBAL_NAV_ITEMS, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
+import { NotificationCenter } from './NotificationCenter';
 
 interface AppShellContextValue {
   setProjectName: (name: string | undefined) => void;

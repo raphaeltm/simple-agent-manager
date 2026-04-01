@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
 import type { NodeLogEntry } from '@simple-agent-manager/shared';
-import { LogEntry, formatNodeLogEntry, formatNodeLogEntries } from '../../../../src/components/node/LogEntry';
+import { act,fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
+import { formatNodeLogEntries,formatNodeLogEntry, LogEntry } from '../../../../src/components/node/LogEntry';
 
 const mockWriteText = vi.fn(() => Promise.resolve());
 Object.assign(navigator, {

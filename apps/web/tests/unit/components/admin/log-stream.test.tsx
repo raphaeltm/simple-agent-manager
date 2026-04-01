@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { fireEvent,render, screen } from '@testing-library/react';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import { LogStream } from '../../../../src/components/admin/LogStream';
-import type { StreamLogEntry, StreamConnectionState } from '../../../../src/hooks/useAdminLogStream';
+import type { StreamConnectionState,StreamLogEntry } from '../../../../src/hooks/useAdminLogStream';
 
 // Mock the useAdminLogStream hook
 const mockUseAdminLogStream = vi.fn();

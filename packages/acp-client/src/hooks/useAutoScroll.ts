@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 /**
  * Threshold in pixels for determining whether the user is "at the bottom"

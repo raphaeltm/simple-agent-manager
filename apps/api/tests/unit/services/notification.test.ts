@@ -1,16 +1,17 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import {
-  sendNotification,
+  buildActionUrl,
+  getChatSessionId,
+  getProjectName,
+  notifyNeedsInput,
+  notifyPrCreated,
+  notifyProgress,
+  notifySessionEnded,
   notifyTaskComplete,
   notifyTaskFailed,
-  notifySessionEnded,
-  notifyPrCreated,
-  notifyNeedsInput,
-  notifyProgress,
-  getProjectName,
-  getChatSessionId,
-  buildActionUrl,
+  sendNotification,
 } from '../../../src/services/notification';
 
 function createMockEnv() {

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
 import type { Task, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Button, Dialog, StatusBadge } from '@simple-agent-manager/ui';
+import { useEffect, useMemo, useState } from 'react';
 
 interface TaskDelegateDialogProps {
   open: boolean;

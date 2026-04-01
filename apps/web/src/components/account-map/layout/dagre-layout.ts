@@ -1,5 +1,5 @@
+import type { Edge,Node } from '@xyflow/react';
 import dagre from 'dagre';
-import type { Node, Edge } from '@xyflow/react';
 
 interface LayoutOptions {
   direction?: 'TB' | 'LR';

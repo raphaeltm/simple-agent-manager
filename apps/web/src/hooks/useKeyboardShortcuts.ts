@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { SHORTCUTS, matchesShortcut } from '../lib/keyboard-shortcuts';
+
+import { matchesShortcut,SHORTCUTS } from '../lib/keyboard-shortcuts';
 
 export interface ShortcutHandlers {
   [shortcutId: string]: () => void;

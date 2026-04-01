@@ -1,11 +1,12 @@
-import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Env } from '../index';
-import { jsonValidator, CreateAgentProfileSchema, UpdateAgentProfileSchema, SetProjectDefaultProfileSchema } from '../schemas';
+import { Hono } from 'hono';
+
 import * as schema from '../db/schema';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
-import { requireOwnedProject } from '../middleware/project-auth';
+import type { Env } from '../index';
 import { requireRouteParam } from '../lib/route-helpers';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { requireOwnedProject } from '../middleware/project-auth';
+import { CreateAgentProfileSchema, jsonValidator, SetProjectDefaultProfileSchema,UpdateAgentProfileSchema } from '../schemas';
 import * as agentProfileService from '../services/agent-profiles';
 
 const agentProfileRoutes = new Hono<{ Bindings: Env }>();

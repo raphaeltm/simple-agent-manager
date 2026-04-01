@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { mergeMessages, getLastMessageId } from '../../../src/lib/merge-messages';
+import { describe, expect,it } from 'vitest';
+
 import type { ChatMessageResponse } from '../../../src/lib/api';
+import { getLastMessageId,mergeMessages } from '../../../src/lib/merge-messages';
 
 function msg(overrides: Partial<ChatMessageResponse> & { id: string }): ChatMessageResponse {
   return {

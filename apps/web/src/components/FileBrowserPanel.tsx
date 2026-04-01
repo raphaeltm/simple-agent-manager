@@ -1,7 +1,8 @@
-import { type CSSProperties, type FC, useCallback, useEffect, useState } from 'react';
-import { ChevronRight, Folder, FileText, RefreshCw, X } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
-import { getFileList, type FileEntry } from '../lib/api';
+import { ChevronRight, FileText, Folder, RefreshCw, X } from 'lucide-react';
+import { type CSSProperties, type FC, useCallback, useEffect, useState } from 'react';
+
+import { type FileEntry,getFileList } from '../lib/api';
 
 interface FileBrowserPanelProps {
   workspaceUrl: string;

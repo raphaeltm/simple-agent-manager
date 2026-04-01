@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
+
 import type { Env } from '../index';
-import { getAuth, requireAuth, requireApproved } from '../middleware/auth';
-import { errors } from '../middleware/error';
-import { synthesizeSpeech, getAudioFromR2, getTTSConfig } from '../services/tts';
 import { log } from '../lib/logger';
+import { getAuth, requireApproved,requireAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
 import { parseOptionalBody, TtsRequestSchema } from '../schemas';
+import { getAudioFromR2, getTTSConfig,synthesizeSpeech } from '../services/tts';
 
 const ttsRoutes = new Hono<{ Bindings: Env }>();
 

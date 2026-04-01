@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+
 import { Button } from './Button';
 
 export interface EmptyStateProps {

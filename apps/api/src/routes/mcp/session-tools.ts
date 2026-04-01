@@ -6,16 +6,16 @@
 import type { Env } from '../../index';
 import * as projectDataService from '../../services/project-data';
 import {
-  type McpTokenData,
+  getMcpLimits,
+  INVALID_PARAMS,
+  jsonRpcError,
   type JsonRpcResponse,
   jsonRpcSuccess,
-  jsonRpcError,
-  INVALID_PARAMS,
-  VALID_MESSAGE_ROLES,
-  getMcpLimits,
-  validateRoles,
-  sanitizeUserInput,
+  type McpTokenData,
   resolveSessionId,
+  sanitizeUserInput,
+  VALID_MESSAGE_ROLES,
+  validateRoles,
 } from './_helpers';
 
 export async function handleListSessions(

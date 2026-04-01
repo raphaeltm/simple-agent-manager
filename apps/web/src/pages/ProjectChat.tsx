@@ -1,55 +1,56 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight, X, Lightbulb, Paperclip } from 'lucide-react';
+import type { SlashCommand,SlashCommandPaletteHandle } from '@simple-agent-manager/acp-client';
+import { SlashCommandPalette,VoiceButton } from '@simple-agent-manager/acp-client';
+import type { AgentInfo, AgentProfile, TaskMode, UpdateAgentProfileRequest,WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { TaskExecutionStep,TaskStatus } from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
-import { formatFileSize } from '../lib/file-utils';
-import { Spinner } from '@simple-agent-manager/ui';
-import { VoiceButton, SlashCommandPalette } from '@simple-agent-manager/acp-client';
-import type { SlashCommandPaletteHandle, SlashCommand } from '@simple-agent-manager/acp-client';
-import type { AgentInfo, AgentProfile, WorkspaceProfile, TaskMode, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
-import { ProjectMessageView } from '../components/chat/ProjectMessageView';
-import { useIsMobile } from '../hooks/useIsMobile';
-import type { TaskStatus, TaskExecutionStep } from '@simple-agent-manager/shared';
 import {
   EXECUTION_STEP_LABELS,
   EXECUTION_STEP_ORDER,
   TASK_EXECUTION_STEPS,
 } from '@simple-agent-manager/shared';
+import { Spinner } from '@simple-agent-manager/ui';
+import { ChevronDown, ChevronRight, GitFork, LayoutGrid, Lightbulb, List, Paperclip,Search, Settings, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+
+import { ProfileFormDialog } from '../components/agent-profiles/ProfileFormDialog';
+import { ProfileSelector } from '../components/agent-profiles/ProfileSelector';
+import { BootLogPanel } from '../components/chat/BootLogPanel';
+import { ProjectMessageView } from '../components/chat/ProjectMessageView';
+import { ForkDialog } from '../components/project/ForkDialog';
+import { useAvailableCommands } from '../hooks/useAvailableCommands';
+import { useBootLogStream } from '../hooks/useBootLogStream';
+import { useIsMobile } from '../hooks/useIsMobile';
+import { useProjectWebSocket } from '../hooks/useProjectWebSocket';
+import type { ChatSessionResponse, TaskAttachmentRef } from '../lib/api';
 import {
-  listAgents,
+  closeConversationTask,
+  getProjectTask,
+  getTranscribeApiUrl,
+  getWorkspace,
+  linkSessionIdea,
   listAgentProfiles,
-  updateAgentProfile,
+  listAgents,
   listChatSessions,
   listCredentials,
   listProjectTasks,
-  submitTask,
-  linkSessionIdea,
-  getProjectTask,
-  getTranscribeApiUrl,
-  closeConversationTask,
   requestAttachmentUpload,
+  submitTask,
+  updateAgentProfile,
   uploadAttachmentToR2,
-  getWorkspace,
 } from '../lib/api';
-import type { ChatSessionResponse, TaskAttachmentRef } from '../lib/api';
 import {
+  formatRelativeTime,
+  getLastActivity,
   getSessionState,
   isStaleSession,
-  getLastActivity,
-  formatRelativeTime,
   STATE_COLORS,
   STATE_LABELS,
 } from '../lib/chat-session-utils';
-import { useProjectContext } from './ProjectContext';
+import { formatFileSize } from '../lib/file-utils';
 import { stripMarkdown } from '../lib/text-utils';
-import { ForkDialog } from '../components/project/ForkDialog';
-import { ProfileSelector } from '../components/agent-profiles/ProfileSelector';
-import { ProfileFormDialog } from '../components/agent-profiles/ProfileFormDialog';
-import { useProjectWebSocket } from '../hooks/useProjectWebSocket';
-import { useAvailableCommands } from '../hooks/useAvailableCommands';
-import { useBootLogStream } from '../hooks/useBootLogStream';
-import { BootLogPanel } from '../components/chat/BootLogPanel';
+import { useProjectContext } from './ProjectContext';
 
 // ---------------------------------------------------------------------------
 // Constants

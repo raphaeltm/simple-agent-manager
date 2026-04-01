@@ -1,16 +1,17 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { ChatSessionResponse } from '../../../src/lib/api';
 import {
-  getSessionState,
-  isStaleSession,
-  isActiveSession,
-  getLastActivity,
   formatRelativeTime,
+  getLastActivity,
+  getSessionState,
+  isActiveSession,
+  isStaleSession,
   STALE_SESSION_THRESHOLD_MS,
+  STATE_BADGE_BG,
   STATE_COLORS,
   STATE_LABELS,
-  STATE_BADGE_BG,
 } from '../../../src/lib/chat-session-utils';
-import type { ChatSessionResponse } from '../../../src/lib/api';
 
 function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionResponse {
   return {

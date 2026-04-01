@@ -1,10 +1,11 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, within, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import type { AgentProfile } from '@simple-agent-manager/shared';
-import { ProfileSelector } from '../../../src/components/agent-profiles/ProfileSelector';
-import { ProfileList } from '../../../src/components/agent-profiles/ProfileList';
+import { render, screen, waitFor,within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import { ProfileFormDialog } from '../../../src/components/agent-profiles/ProfileFormDialog';
+import { ProfileList } from '../../../src/components/agent-profiles/ProfileList';
+import { ProfileSelector } from '../../../src/components/agent-profiles/ProfileSelector';
 
 // ---------------------------------------------------------------------------
 // Test data

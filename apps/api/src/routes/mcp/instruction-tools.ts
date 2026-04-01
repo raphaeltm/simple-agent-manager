@@ -1,21 +1,22 @@
 /**
  * MCP instruction tools — get_instructions and request_human_input.
  */
+import type { HumanInputCategory } from '@simple-agent-manager/shared';
+import { HUMAN_INPUT_CATEGORIES,MAX_HUMAN_INPUT_CONTEXT_LENGTH, MAX_HUMAN_INPUT_OPTION_LENGTH, MAX_HUMAN_INPUT_OPTIONS_COUNT } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { MAX_HUMAN_INPUT_CONTEXT_LENGTH, MAX_HUMAN_INPUT_OPTIONS_COUNT, MAX_HUMAN_INPUT_OPTION_LENGTH, HUMAN_INPUT_CATEGORIES } from '@simple-agent-manager/shared';
-import type { HumanInputCategory } from '@simple-agent-manager/shared';
-import type { Env } from '../../index';
+
 import * as schema from '../../db/schema';
+import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import * as notificationService from '../../services/notification';
 import {
-  type McpTokenData,
-  type JsonRpcResponse,
-  jsonRpcSuccess,
-  jsonRpcError,
   INTERNAL_ERROR,
   INVALID_PARAMS,
+  jsonRpcError,
+  type JsonRpcResponse,
+  jsonRpcSuccess,
+  type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
 

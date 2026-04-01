@@ -12,8 +12,9 @@
  * See docs/notes/2026-03-25-deployment-identity-token-middleware-leak-postmortem.md
  * See docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md (same bug class)
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import { AppError } from '../../src/middleware/error';
 
 // Mock better-auth before any route imports — returns null session (unauthenticated)

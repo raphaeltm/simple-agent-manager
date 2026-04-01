@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { getNetworkInfo, exposePort, checkDnsStatus } from '../../src/tools/network.js';
-import type { WorkspaceMcpConfig } from '../../src/config.js';
+import { describe, expect,it } from 'vitest';
+
 import type { ApiClient } from '../../src/api-client.js';
+import type { WorkspaceMcpConfig } from '../../src/config.js';
+import { checkDnsStatus,exposePort, getNetworkInfo } from '../../src/tools/network.js';
 
 function makeConfig(overrides: Partial<WorkspaceMcpConfig> = {}): WorkspaceMcpConfig {
   return {

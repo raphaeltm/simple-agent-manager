@@ -7,17 +7,17 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import type { Env } from './types';
 import { recordActivityEventInternal } from './activity';
-import { stopSessionInternal } from './sessions';
 import { materializeSession } from './materialization';
 import { persistSystemMessage } from './messages';
 import {
   parseCleanupAt,
   parseIdleCleanupSchedule,
-  parseWorkspaceActivity,
   parseMinEarliest,
+  parseWorkspaceActivity,
 } from './row-schemas';
+import { stopSessionInternal } from './sessions';
+import type { Env } from './types';
 
 const log = createModuleLogger('idle_cleanup');
 

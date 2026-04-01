@@ -4,8 +4,9 @@
  * Mounts cachedCommandRoutes on a Hono app, mocks auth + service layer,
  * and verifies HTTP request/response behavior.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import type { Env } from '../../../src/index';
 import { cachedCommandRoutes } from '../../../src/routes/cached-commands';
 

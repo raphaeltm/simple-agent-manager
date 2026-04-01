@@ -14,16 +14,17 @@
  * Auth: All endpoints require authenticated user (per-route middleware).
  */
 
-import { Hono } from 'hono';
-import type { Env } from '../index';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
-import { errors } from '../middleware/error';
 import type {
   NotificationType,
 } from '@simple-agent-manager/shared';
 import { NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
-import { jsonValidator, UpdateNotificationPreferenceSchema } from '../schemas';
+import { Hono } from 'hono';
+
 import type { NotificationService } from '../durable-objects/notification';
+import type { Env } from '../index';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
+import { jsonValidator, UpdateNotificationPreferenceSchema } from '../schemas';
 
 const notificationRoutes = new Hono<{ Bindings: Env }>();
 

@@ -1,12 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect,it } from 'vitest';
+
 import {
-  SHORTCUTS,
   formatShortcut,
+  getPaletteShortcuts,
+  getShortcut,
+  getShortcutsByCategory,
   matchesShortcut,
   modifierLabel,
-  getShortcutsByCategory,
-  getShortcut,
-  getPaletteShortcuts,
+  SHORTCUTS,
 } from '../../src/lib/keyboard-shortcuts';
 
 describe('keyboard-shortcuts', () => {

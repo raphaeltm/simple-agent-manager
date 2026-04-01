@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect,useRef, useState } from 'react';
+
 import type { TabItemProps } from '../types/multi-terminal';
 
 const baseTabStyle: React.CSSProperties = {

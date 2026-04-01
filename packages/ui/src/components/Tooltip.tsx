@@ -1,4 +1,5 @@
-import { useState, useRef, useId, type ReactElement, type CSSProperties } from 'react';
+import { type CSSProperties,type ReactElement, useId, useRef, useState } from 'react';
+
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
 export interface TooltipProps {

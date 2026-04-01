@@ -8,8 +8,9 @@
  * 4. Resume failures show clear error messages
  * 5. Idle countdown pauses during resume
  */
+import { act,fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+
 import { ProjectMessageView } from '../../../../src/components/chat/ProjectMessageView';
 
 // ---------------------------------------------------------------------------

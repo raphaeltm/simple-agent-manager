@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { BootstrapTokenData } from '@simple-agent-manager/shared';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // Mock KV namespace
 const mockKV = {

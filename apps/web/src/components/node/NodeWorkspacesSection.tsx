@@ -1,9 +1,10 @@
-import type { FC } from 'react';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Monitor } from 'lucide-react';
-import { SectionHeader } from './SectionHeader';
-import { Section } from './Section';
+import type { FC } from 'react';
+
 import { WorkspaceCard } from '../WorkspaceCard';
+import { Section } from './Section';
+import { SectionHeader } from './SectionHeader';
 
 interface NodeWorkspacesSectionProps {
   workspaces: WorkspaceResponse[];

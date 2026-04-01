@@ -7,8 +7,8 @@
  * - verifyCallbackToken correctly extracts scope from tokens
  * - Legacy tokens (no scope) are parsed with scope: undefined
  */
-import { describe, expect, it } from 'vitest';
 import { decodeJwt } from 'jose';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Create a minimal JWT with given claims. No real signature needed

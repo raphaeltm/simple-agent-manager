@@ -1,10 +1,10 @@
 export { DauChart } from './DauChart';
 export { EventsTable } from './EventsTable';
+export { FeatureAdoptionChart } from './FeatureAdoptionChart';
+export { ForwardingStatus } from './ForwardingStatus';
 export { FunnelChart } from './FunnelChart';
+export { GeoDistribution } from './GeoDistribution';
 export { KpiSummary } from './KpiSummary';
 export { PeriodSelector } from './PeriodSelector';
-export { FeatureAdoptionChart } from './FeatureAdoptionChart';
-export { GeoDistribution } from './GeoDistribution';
 export { RetentionCohorts } from './RetentionCohorts';
-export { ForwardingStatus } from './ForwardingStatus';
 export { WebsiteTraffic } from './WebsiteTraffic';

@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { BootstrapResponse,BootstrapTokenData } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
-import type { BootstrapTokenData, BootstrapResponse } from '@simple-agent-manager/shared';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // Mock rate-limit middleware to be a passthrough (tested separately)
 vi.mock('../../../src/middleware/rate-limit', () => ({

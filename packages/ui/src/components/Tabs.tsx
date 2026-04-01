@@ -1,4 +1,4 @@
-import { useRef, type ReactNode, type KeyboardEvent } from 'react';
+import { type KeyboardEvent,type ReactNode, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 
 export interface Tab {

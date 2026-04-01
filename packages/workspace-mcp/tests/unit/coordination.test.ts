@@ -1,11 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import type { ApiClient } from '../../src/api-client.js';
+import type { WorkspaceMcpConfig } from '../../src/config.js';
 import {
-  listProjectAgents,
   getFileLocks,
   getPeerAgentOutput,
+  listProjectAgents,
 } from '../../src/tools/coordination.js';
-import type { WorkspaceMcpConfig } from '../../src/config.js';
-import type { ApiClient } from '../../src/api-client.js';
 
 function makeConfig(overrides: Partial<WorkspaceMcpConfig> = {}): WorkspaceMcpConfig {
   return {

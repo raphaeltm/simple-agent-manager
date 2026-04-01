@@ -1,18 +1,19 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { Project, CredentialProvider } from '@simple-agent-manager/shared';
+import type { CredentialProvider,Project } from '@simple-agent-manager/shared';
 import {
+  DEFAULT_NODE_WARM_TIMEOUT_MS,
+  MAX_NODE_IDLE_TIMEOUT_MS,
+  MIN_NODE_IDLE_TIMEOUT_MS,
+  PROVIDER_DEFAULT_LOCATIONS,
   PROVIDER_LABELS,
   PROVIDER_LOCATIONS,
-  PROVIDER_DEFAULT_LOCATIONS,
   SCALING_PARAMS,
   type ScalingParamMeta,
-  DEFAULT_NODE_WARM_TIMEOUT_MS,
-  MIN_NODE_IDLE_TIMEOUT_MS,
-  MAX_NODE_IDLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { updateProject, listCredentials } from '../lib/api';
+import { useCallback,useEffect, useState } from 'react';
+
 import { useToast } from '../hooks/useToast';
+import { listCredentials,updateProject } from '../lib/api';
 
 /** Format milliseconds as a human-readable duration. */
 function formatMs(ms: number): string {

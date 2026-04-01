@@ -70,8 +70,8 @@ vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu" />,
 }));
 
-import { Node } from '../../../src/pages/Node';
 import { ToastProvider } from '../../../src/hooks/useToast';
+import { Node } from '../../../src/pages/Node';
 
 function renderNode(path: string) {
   return render(

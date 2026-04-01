@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { createCredential, deleteCredential } from '../lib/api';
-import { useToast } from '../hooks/useToast';
-import { Button, Input, Alert } from '@simple-agent-manager/ui';
 import type { CredentialResponse } from '@simple-agent-manager/shared';
+import { Alert,Button, Input } from '@simple-agent-manager/ui';
+import { useState } from 'react';
+
+import { useToast } from '../hooks/useToast';
+import { createCredential, deleteCredential } from '../lib/api';
 
 interface HetznerTokenFormProps {
   credential?: CredentialResponse | null;

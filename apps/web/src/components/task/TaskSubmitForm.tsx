@@ -1,18 +1,19 @@
-import { type FC, useState, useEffect, useCallback, useRef } from 'react';
-import type { AgentProfile, VMSize, WorkspaceProfile, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
+import type { AgentProfile, UpdateAgentProfileRequest,VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
-import { Settings, Paperclip, X } from 'lucide-react';
-import { SplitButton } from '../ui/SplitButton';
-import { ProfileSelector } from '../agent-profiles/ProfileSelector';
-import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
+import { Paperclip, Settings, X } from 'lucide-react';
+import { type FC, useCallback, useEffect, useRef,useState } from 'react';
+
+import type { TaskAttachmentRef } from '../../lib/api';
 import {
   listAgentProfiles,
-  updateAgentProfile,
   requestAttachmentUpload,
+  updateAgentProfile,
   uploadAttachmentToR2,
 } from '../../lib/api';
-import type { TaskAttachmentRef } from '../../lib/api';
 import { formatFileSize } from '../../lib/file-utils';
+import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
+import { ProfileSelector } from '../agent-profiles/ProfileSelector';
+import { SplitButton } from '../ui/SplitButton';
 
 export interface TaskSubmitFormProps {
   projectId: string;

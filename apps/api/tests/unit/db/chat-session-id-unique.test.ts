@@ -5,11 +5,12 @@
  * causing non-deterministic message routing for follow-up prompts.
  * See: tasks/active/2026-03-03-fix-chat-session-message-leakage.md (Bug 5)
  */
-import { describe, it, expect } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/sqlite-core';
-import { workspaces } from '../../../src/db/schema';
-import { readFileSync, readdirSync } from 'fs';
+import { readdirSync,readFileSync } from 'fs';
 import { join } from 'path';
+import { describe, expect,it } from 'vitest';
+
+import { workspaces } from '../../../src/db/schema';
 
 describe('workspaces.chatSessionId unique constraint', () => {
   it('has a unique index defined in Drizzle schema', () => {

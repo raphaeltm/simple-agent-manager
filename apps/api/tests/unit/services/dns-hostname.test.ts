@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { getNodeBackendHostname, getBackendHostname, getWorkspaceUrl } from '../../../src/services/dns';
+
+import { getBackendHostname, getNodeBackendHostname, getWorkspaceUrl } from '../../../src/services/dns';
 
 describe('DNS hostname construction', () => {
   describe('getNodeBackendHostname', () => {

@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
+
 import type { Env } from '../index';
 import { log } from '../lib/logger';
 

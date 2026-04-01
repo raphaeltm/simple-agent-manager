@@ -1,6 +1,6 @@
 import type { Env } from '../index';
-import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { log } from '../lib/logger';
+import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 

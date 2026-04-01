@@ -8,7 +8,8 @@
  * secret access vulnerability where a shared node-level CALLBACK_TOKEN
  * could fetch API keys for any co-tenant workspace.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
+
 import type { CallbackTokenPayload } from '../../src/services/jwt';
 
 // Mock drizzle to return workspace with nodeId

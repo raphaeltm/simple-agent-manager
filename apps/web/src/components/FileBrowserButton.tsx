@@ -1,5 +1,5 @@
-import { type FC } from 'react';
 import { Folder } from 'lucide-react';
+import { type FC } from 'react';
 
 interface FileBrowserButtonProps {
   onClick: () => void;

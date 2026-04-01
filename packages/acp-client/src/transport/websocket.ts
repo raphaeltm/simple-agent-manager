@@ -1,7 +1,7 @@
 import type {
   AgentStatusMessage,
-  SessionStateMessage,
   LifecycleEventCallback,
+  SessionStateMessage,
 } from './types';
 import { isControlMessage } from './types';
 

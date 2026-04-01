@@ -4,7 +4,7 @@
  * Verifies that broadcastEvent filters messages to session-subscribed sockets
  * and project-wide (untagged) sockets correctly.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // Mock drizzle-orm to provide sql template tag (needed by observability-schema.ts)
 vi.mock('drizzle-orm', () => ({

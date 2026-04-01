@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { listRepositories } from '../lib/api';
-import { Alert, Input, Spinner } from '@simple-agent-manager/ui';
 import type { Repository } from '@simple-agent-manager/shared';
+import { Alert, Input, Spinner } from '@simple-agent-manager/ui';
+import { useCallback,useEffect, useRef, useState } from 'react';
+
+import { listRepositories } from '../lib/api';
 
 interface RepoSelectorProps {
   id?: string;

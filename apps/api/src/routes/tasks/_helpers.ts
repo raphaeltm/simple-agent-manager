@@ -3,15 +3,16 @@
  *
  * Extracted from the original tasks.ts to avoid duplication across sub-routers.
  */
-import { and, eq, inArray } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import type { TaskActorType, TaskSortOrder, TaskStatus } from '@simple-agent-manager/shared';
+import { and, eq, inArray } from 'drizzle-orm';
+import { type drizzle } from 'drizzle-orm/d1';
+
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
 import {
-  isTaskBlocked,
   getBlockedTaskIds,
+  isTaskBlocked,
 } from '../../services/task-graph';
 
 export function parseTaskSortOrder(value: string | undefined): TaskSortOrder {

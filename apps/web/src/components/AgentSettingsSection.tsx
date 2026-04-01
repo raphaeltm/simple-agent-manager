@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
-import { listAgents, getAgentSettings, saveAgentSettings, deleteAgentSettings } from '../lib/api';
-import { Alert, Spinner } from '@simple-agent-manager/ui';
-import type { AgentInfo, AgentSettingsResponse, AgentPermissionMode, AgentType } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentPermissionMode, AgentSettingsResponse, AgentType } from '@simple-agent-manager/shared';
 import { AGENT_PERMISSION_MODE_LABELS, VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
+import { Alert, Spinner } from '@simple-agent-manager/ui';
+import { useCallback,useEffect, useState } from 'react';
+
+import { deleteAgentSettings,getAgentSettings, listAgents, saveAgentSettings } from '../lib/api';
 
 /**
  * Per-agent settings card for model selection and permission mode.

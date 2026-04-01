@@ -6,9 +6,10 @@
  * - Empty and missing field inputs
  * - getUserCloudProviderConfig: all three DB outcome branches
  */
-import { describe, it, expect, vi } from 'vitest';
-import { serializeCredentialToken, buildProviderConfig, getUserCloudProviderConfig } from '../../../src/services/provider-credentials';
+import { describe, expect, it, vi } from 'vitest';
+
 import { decrypt } from '../../../src/services/encryption';
+import { buildProviderConfig, getUserCloudProviderConfig,serializeCredentialToken } from '../../../src/services/provider-credentials';
 
 vi.mock('../../../src/services/encryption', () => ({
   decrypt: vi.fn(),

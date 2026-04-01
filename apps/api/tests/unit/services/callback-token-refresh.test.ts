@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { shouldRefreshCallbackToken } from '../../../src/services/jwt';
+
 import type { Env } from '../../../src/index';
+import { shouldRefreshCallbackToken } from '../../../src/services/jwt';
 
 /**
  * Create a minimal JWT with given iat/exp claims.

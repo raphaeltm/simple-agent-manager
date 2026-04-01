@@ -1,19 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import type { TaskExecutionStep,TaskStatus } from '@simple-agent-manager/shared';
+import { TASK_EXECUTION_STEPS } from '@simple-agent-manager/shared';
 import fc from 'fast-check';
+import { describe, expect, it } from 'vitest';
+
 import {
+  canProgressExecutionStep,
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
+  getExecutionStepIndex,
   isExecutableTaskStatus,
   isTaskStatus,
   isTerminalStatus,
+  TASK_EXECUTION_STATUSES,
   TASK_STATUSES,
   TERMINAL_STATUSES,
-  TASK_EXECUTION_STATUSES,
-  getExecutionStepIndex,
-  canProgressExecutionStep,
 } from '../../../src/services/task-status';
-import { TASK_EXECUTION_STEPS } from '@simple-agent-manager/shared';
-import type { TaskStatus, TaskExecutionStep } from '@simple-agent-manager/shared';
 
 // =============================================================================
 // Complete transition matrix — every valid edge in the state machine

@@ -1,5 +1,5 @@
-import { createContext, useContext } from 'react';
 import type { CredentialResponse } from '@simple-agent-manager/shared';
+import { createContext, useContext } from 'react';
 
 export interface SettingsContextValue {
   credentials: CredentialResponse[];

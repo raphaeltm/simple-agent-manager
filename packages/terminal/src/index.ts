@@ -11,43 +11,43 @@
 export { Terminal } from './Terminal';
 
 // Multi-terminal components (new)
-export { MultiTerminal } from './MultiTerminal';
 export { TabBar } from './components/TabBar';
 export { TabItem } from './components/TabItem';
 export { TabOverflowMenu } from './components/TabOverflowMenu';
+export { MultiTerminal } from './MultiTerminal';
 
 // Sub-components
-export { StatusBar } from './StatusBar';
 export { ConnectionOverlay } from './ConnectionOverlay';
+export { StatusBar } from './StatusBar';
 
 // Hooks
-export { useWebSocket } from './useWebSocket';
-export { useTerminalSessions } from './hooks/useTerminalSessions';
 export { useTabShortcuts } from './hooks/useTabShortcuts';
+export { useTerminalSessions } from './hooks/useTerminalSessions';
+export { useWebSocket } from './useWebSocket';
 
 // Types for multi-terminal
 export type {
-  TerminalSession,
-  TerminalTabState,
-  TerminalConfig,
-  MultiTerminalProps,
-  TabItemProps,
-  TabBarProps,
-  UseTerminalSessionsReturn,
-  UseTabShortcutsReturn,
-  TabShortcutActions,
   MultiTerminalError,
   MultiTerminalHandle,
+  MultiTerminalProps,
   MultiTerminalSessionSnapshot,
   PersistedSession,
+  TabBarProps,
+  TabItemProps,
+  TabShortcutActions,
+  TerminalConfig,
+  TerminalSession,
+  TerminalTabState,
+  UseTabShortcutsReturn,
+  UseTerminalSessionsReturn,
 } from './types/multi-terminal';
 
 // Types
 export type {
-  ConnectionState,
-  TerminalProps,
-  StatusBarProps,
   ConnectionOverlayProps,
+  ConnectionState,
+  StatusBarProps,
+  TerminalProps,
   UseWebSocketOptions,
   UseWebSocketReturn,
 } from './types';

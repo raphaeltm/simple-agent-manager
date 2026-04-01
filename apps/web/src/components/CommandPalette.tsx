@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
-import { getPaletteShortcuts, formatShortcut } from '../lib/keyboard-shortcuts';
+import { useEffect, useMemo,useRef, useState } from 'react';
+
+import { fileNameFromPath, fuzzyMatch, type FuzzyMatchResult } from '../lib/fuzzy-match';
 import type { ShortcutDefinition } from '../lib/keyboard-shortcuts';
-import { fuzzyMatch, fileNameFromPath, type FuzzyMatchResult } from '../lib/fuzzy-match';
+import { formatShortcut,getPaletteShortcuts } from '../lib/keyboard-shortcuts';
 import type { WorkspaceTabItem } from './WorkspaceTabStrip';
 
 // ── Result types ──
