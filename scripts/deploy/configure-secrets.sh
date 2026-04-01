@@ -100,19 +100,13 @@ set_worker_secret "CF_ZONE_ID" "${CF_ZONE_ID:-}" "$ENVIRONMENT" "true" || FAILED
 set_worker_secret "CF_ACCOUNT_ID" "${CF_ACCOUNT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 
 # Configure GitHub secrets (required - platform is useless without authentication)
-# GH_* env vars (GitHub Actions reserved GITHUB_*) are mapped to GITHUB_* Worker secrets.
+# GH_* env vars (GitHub Actions reserves GITHUB_*) are mapped to GITHUB_* Worker secrets.
 # See CLAUDE.md "Env Var Naming: GH_ vs GITHUB_" and .claude/rules/07-env-and-urls.md.
-declare -A GITHUB_SECRET_MAPPINGS=(
-  [GITHUB_CLIENT_ID]="GH_CLIENT_ID"
-  [GITHUB_CLIENT_SECRET]="GH_CLIENT_SECRET"
-  [GITHUB_APP_ID]="GH_APP_ID"
-  [GITHUB_APP_PRIVATE_KEY]="GH_APP_PRIVATE_KEY"
-  [GITHUB_APP_SLUG]="GH_APP_SLUG"
-)
-for WORKER_SECRET in "${!GITHUB_SECRET_MAPPINGS[@]}"; do
-  GH_VAR="${GITHUB_SECRET_MAPPINGS[$WORKER_SECRET]}"
-  set_worker_secret "$WORKER_SECRET" "${!GH_VAR:-}" "$ENVIRONMENT" "true" || FAILED=true
-done
+set_worker_secret "GITHUB_CLIENT_ID" "${GH_CLIENT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "GITHUB_CLIENT_SECRET" "${GH_CLIENT_SECRET:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "GITHUB_APP_ID" "${GH_APP_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "GITHUB_APP_PRIVATE_KEY" "${GH_APP_PRIVATE_KEY:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "GITHUB_APP_SLUG" "${GH_APP_SLUG:-}" "$ENVIRONMENT" "true" || FAILED=true
 
 # Configure Origin CA certificate/key (required for TLS between CF edge and VM agents)
 PULUMI_ORIGIN_CA_CERT="${PULUMI_ORIGIN_CA_CERT:-}"

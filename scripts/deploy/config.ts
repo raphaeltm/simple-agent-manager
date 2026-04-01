@@ -94,23 +94,3 @@ export const DEPLOYMENT_CONFIG = {
 } as const;
 
 export type DeploymentConfig = typeof DEPLOYMENT_CONFIG;
-
-/**
- * GitHub Actions reserves the GITHUB_* prefix, so GitHub Environment secrets
- * use GH_*. The deployment script (configure-secrets.sh) maps them to
- * GITHUB_* Worker secrets at deploy time.
- *
- * This is the canonical reference for the mapping. If you add a new GitHub
- * secret, add it here AND in configure-secrets.sh's GITHUB_SECRET_MAPPINGS.
- *
- * See: CLAUDE.md "Env Var Naming: GH_ vs GITHUB_"
- * See: .claude/rules/07-env-and-urls.md
- */
-export const GITHUB_SECRET_MAPPINGS: Record<string, string> = {
-  // Worker secret name → GitHub Environment secret name
-  GITHUB_CLIENT_ID: "GH_CLIENT_ID",
-  GITHUB_CLIENT_SECRET: "GH_CLIENT_SECRET",
-  GITHUB_APP_ID: "GH_APP_ID",
-  GITHUB_APP_PRIVATE_KEY: "GH_APP_PRIVATE_KEY",
-  GITHUB_APP_SLUG: "GH_APP_SLUG",
-} as const;
