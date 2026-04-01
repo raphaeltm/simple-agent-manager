@@ -1111,7 +1111,7 @@ func TestAuthFilePathValidation(t *testing.T) {
 		},
 		{
 			name:        "Path with double quote",
-			path:        ".codex/"test".json",
+			path:        `.codex/"test".json`,
 			shouldError: true,
 		},
 		{
