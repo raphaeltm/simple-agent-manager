@@ -102,7 +102,7 @@ describe('TaskSubmitForm', () => {
 
   it('disables form during submission', async () => {
     // Use a promise we control to keep the form in submitting state
-    let resolveSubmit: () => void;
+    let resolveSubmit: (() => void) | undefined;
     const submitting = new Promise<void>((resolve) => { resolveSubmit = resolve; });
     const onRunNow = vi.fn().mockReturnValue(submitting);
 
@@ -117,7 +117,7 @@ describe('TaskSubmitForm', () => {
     });
 
     // Release the submit
-    resolveSubmit!();
+    resolveSubmit?.();
     await waitFor(() => {
       expect(input).not.toBeDisabled();
     });

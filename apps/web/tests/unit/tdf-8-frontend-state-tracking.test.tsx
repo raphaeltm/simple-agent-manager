@@ -5,14 +5,13 @@
  *   behavioral tests and are preserved from the original file.
  * - ProvisioningIndicator tests are NEW behavioral tests replacing source-contract tests.
  */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
   EXECUTION_STEP_LABELS,
   EXECUTION_STEP_ORDER,
   isTaskExecutionStep,
   TASK_EXECUTION_STEPS,
 } from '@simple-agent-manager/shared';
-import { act } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProvisioningIndicator } from '../../src/pages/project-chat/ProvisioningIndicator';

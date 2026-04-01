@@ -14,10 +14,10 @@ vi.mock('../../../src/lib/api', () => ({
   deleteWorkspace: vi.fn().mockResolvedValue(undefined),
 }));
 
-import type { ChatSessionResponse } from '../../../src/lib/api';
-import { deleteWorkspace, updateProjectTaskStatus } from '../../../src/lib/api';
 import { SessionHeader } from '../../../src/components/project-message-view/SessionHeader';
 import type { SessionState } from '../../../src/components/project-message-view/types';
+import type { ChatSessionResponse } from '../../../src/lib/api';
+import { deleteWorkspace, updateProjectTaskStatus } from '../../../src/lib/api';
 
 afterEach(cleanup);
 
