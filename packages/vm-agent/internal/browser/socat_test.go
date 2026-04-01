@@ -334,6 +334,36 @@ func TestRemoveForwarder_PkillCommand(t *testing.T) {
 	}
 }
 
+func TestAddForwarder_RejectsPrivilegedPorts(t *testing.T) {
+	testCases := []struct {
+		port    int
+		wantErr bool
+	}{
+		{0, true},
+		{22, true},
+		{80, true},
+		{443, true},
+		{1023, true},
+		{1024, false},
+		{3000, false},
+		{8080, false},
+		{65535, false},
+		{65536, true},
+	}
+
+	for _, tc := range testCases {
+		docker := newMockDocker()
+		mgr := NewManager(socatTestConfig(), docker)
+		err := mgr.addForwarder(context.Background(), "neko-ws-1", tc.port, "devcontainer-ws-1")
+		if tc.wantErr && err == nil {
+			t.Errorf("port %d: expected error for privileged/invalid port", tc.port)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("port %d: unexpected error: %v", tc.port, err)
+		}
+	}
+}
+
 func TestDetectContainerPorts_IPv6Merge(t *testing.T) {
 	docker := newMockDocker()
 	mgr := NewManager(socatTestConfig(), docker)
