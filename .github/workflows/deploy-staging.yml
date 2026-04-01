@@ -55,6 +55,7 @@ jobs:
           SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
           SMOKE_TEST_URL: https://app.sammy.party
           SMOKE_TEST_API_URL: https://api.sammy.party
+          NODE_PATH: /tmp/playwright-runner/node_modules
         run: npx --prefix /tmp/playwright-runner playwright test --config=tests/smoke/playwright.config.ts
 
       - name: Skip notice (no token configured)
