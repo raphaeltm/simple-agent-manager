@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -476,32 +477,102 @@ func execInContainer(ctx context.Context, containerID, user, workDir string, arg
 // It creates the parent directory with 0700 permissions and the file with 0600.
 // authFilePath is relative to the user's home directory (e.g. ".codex/auth.json").
 // Content is streamed via stdin to avoid exposing secrets in process args or env.
-func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
-	// Shell script reads credential from stdin via cat, avoiding any env/arg exposure.
-	// 1. Resolves the user's home directory reliably (docker exec -u does NOT update $HOME)
-	// 2. Creates the parent directory with restricted permissions
-	// 3. Reads stdin into the target file with restricted permissions
-	//
-	// NOTE: $HOME in docker exec -u is unreliable — it inherits the container's env
-	// (often /root even when running as a non-root user). We resolve the home directory
-	// from /etc/passwd via getent, falling back to $HOME if getent is unavailable.
-	script := fmt.Sprintf(
-		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; dir="$home/%s"; mkdir -p "$(dirname "$dir")" && chmod 700 "$(dirname "$dir")"; cat > "$dir" && chmod 600 "$dir"`,
-		authFilePath,
+func validateAuthFilePath(authFilePath string) error {
+	// Prevent shell injection in the sh -c scripts used by the read/write helpers.
+	if strings.ContainsAny(authFilePath, ";\"`'$\\") || strings.Contains(authFilePath, "..") {
+		return fmt.Errorf("invalid authFilePath: %q", authFilePath)
+	}
+	return nil
+}
+
+func resolveContainerHomeDir(ctx context.Context, containerID, user string) (string, error) {
+	username, stderr, err := execInContainer(ctx, containerID, user, "", "id", "-un")
+	if err != nil {
+		if stderr != "" {
+			return "", fmt.Errorf("resolve container username: %w: %s", err, stderr)
+		}
+		return "", fmt.Errorf("resolve container username: %w", err)
+	}
+
+	passwdEntry, stderr, err := execInContainer(
+		ctx,
+		containerID,
+		user,
+		"",
+		"getent",
+		"passwd",
+		strings.TrimSpace(username),
 	)
+	if err == nil {
+		fields := strings.Split(strings.TrimSpace(passwdEntry), ":")
+		if len(fields) >= 6 && fields[5] != "" {
+			return fields[5], nil
+		}
+	} else if stderr != "" {
+		slog.Debug("getent failed while resolving container home directory", "stderr", stderr)
+	}
+
+	home, stderr, err := execInContainer(ctx, containerID, user, "", "printenv", "HOME")
+	if err != nil {
+		if stderr != "" {
+			return "", fmt.Errorf("resolve container home dir: %w: %s", err, stderr)
+		}
+		return "", fmt.Errorf("resolve container home dir: %w", err)
+	}
+
+	trimmedHome := strings.TrimSpace(home)
+	if trimmedHome == "" {
+		return "", fmt.Errorf("resolved empty container home directory")
+	}
+	return trimmedHome, nil
+}
+
+func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
+	if err := validateAuthFilePath(authFilePath); err != nil {
+		return err
+	}
+
+	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	if err != nil {
+		return err
+	}
+	targetPath := path.Join(homeDir, authFilePath)
+	parentDir := path.Dir(targetPath)
+
+	if _, stderr, err := execInContainer(ctx, containerID, user, "", "mkdir", "-p", parentDir); err != nil {
+		if stderr != "" {
+			return fmt.Errorf("create auth file parent dir: %w: %s", err, stderr)
+		}
+		return fmt.Errorf("create auth file parent dir: %w", err)
+	}
+	if _, stderr, err := execInContainer(ctx, containerID, user, "", "chmod", "700", parentDir); err != nil {
+		if stderr != "" {
+			return fmt.Errorf("chmod auth file parent dir: %w: %s", err, stderr)
+		}
+		return fmt.Errorf("chmod auth file parent dir: %w", err)
+	}
 
 	dockerArgs := []string{"exec", "-i"}
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
 	}
-	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
+	dockerArgs = append(dockerArgs, containerID, "tee", targetPath)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	cmd.Stdin = strings.NewReader(content)
+	cmd.Stdout = io.Discard
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker exec failed: %w: %s", err, strings.TrimSpace(string(output)))
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("write auth file content: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	if _, stderrText, err := execInContainer(ctx, containerID, user, "", "chmod", "600", targetPath); err != nil {
+		if stderrText != "" {
+			return fmt.Errorf("chmod auth file: %w: %s", err, stderrText)
+		}
+		return fmt.Errorf("chmod auth file: %w", err)
 	}
 	return nil
 }
@@ -511,24 +582,21 @@ func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePa
 // Returns the file content, or an error if the file cannot be read.
 // Output is capped at 1 MB to prevent memory exhaustion from unexpected content.
 func readAuthFileFromContainer(ctx context.Context, containerID, user, authFilePath string) (string, error) {
-	// Validate authFilePath to prevent shell injection. Currently always a
-	// hardcoded constant, but we defend in depth against future misuse.
-	if strings.ContainsAny(authFilePath, ";\"`'$\\") || strings.Contains(authFilePath, "..") {
-		return "", fmt.Errorf("invalid authFilePath: %q", authFilePath)
+	if err := validateAuthFilePath(authFilePath); err != nil {
+		return "", err
 	}
 
-	// Same home directory resolution as writeAuthFileToContainer.
-	script := fmt.Sprintf(
-		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; cat "$home/%s"`,
-		authFilePath,
-	)
+	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	if err != nil {
+		return "", err
+	}
+	targetPath := path.Join(homeDir, authFilePath)
 
-	// -i not needed: no stdin, stdout captured via cmd.Output().
 	dockerArgs := []string{"exec"}
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
 	}
-	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
+	dockerArgs = append(dockerArgs, containerID, "cat", targetPath)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 
@@ -722,6 +790,104 @@ func tomlEscapeBasicString(s string) string {
 	return s
 }
 
+const (
+	codexManagedMcpStartMarker = "# BEGIN SAM MANAGED MCP"
+	codexManagedMcpEndMarker   = "# END SAM MANAGED MCP"
+)
+
+func codexMcpServerName(index, total int) string {
+	if total <= 1 {
+		return "sam-mcp"
+	}
+	return fmt.Sprintf("sam-mcp-%d", index)
+}
+
+func codexMcpTokenEnvVar(index, total int) string {
+	if total <= 1 {
+		return "SAM_MCP_TOKEN"
+	}
+	return fmt.Sprintf("SAM_MCP_TOKEN_%d", index)
+}
+
+func removeManagedCodexMcpBlock(existing string) string {
+	for {
+		start := strings.Index(existing, codexManagedMcpStartMarker)
+		if start == -1 {
+			return existing
+		}
+		endRel := strings.Index(existing[start:], codexManagedMcpEndMarker)
+		if endRel == -1 {
+			return existing[:start]
+		}
+		end := start + endRel + len(codexManagedMcpEndMarker)
+		if end < len(existing) && existing[end] == '\n' {
+			end++
+		}
+		existing = existing[:start] + existing[end:]
+	}
+}
+
+func mergeManagedCodexMcpConfig(existing, managed string) string {
+	cleaned := strings.TrimRight(removeManagedCodexMcpBlock(existing), "\n")
+	managed = strings.TrimSpace(managed)
+
+	switch {
+	case cleaned == "" && managed == "":
+		return ""
+	case cleaned == "":
+		return managed + "\n"
+	case managed == "":
+		return cleaned + "\n"
+	default:
+		return cleaned + "\n\n" + managed + "\n"
+	}
+}
+
+// generateCodexMcpConfig produces a managed TOML block for Codex MCP server
+// configuration plus the environment variables referenced by
+// bearer_token_env_var. Codex natively supports streamable HTTP MCP servers
+// via ~/.codex/config.toml.
+func generateCodexMcpConfig(mcpServers []McpServerEntry) (string, []string) {
+	if len(mcpServers) == 0 {
+		return "", nil
+	}
+
+	validServers := make([]McpServerEntry, 0, len(mcpServers))
+	for i, server := range mcpServers {
+		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
+			slog.Warn("Skipping Codex MCP server with control characters in URL or token",
+				"index", i, "url_length", len(server.URL))
+			continue
+		}
+		validServers = append(validServers, server)
+	}
+	if len(validServers) == 0 {
+		return "", nil
+	}
+
+	var config strings.Builder
+	envVars := make([]string, 0, len(validServers))
+
+	config.WriteString(codexManagedMcpStartMarker)
+	config.WriteString("\n# Added by SAM vm-agent for Codex ACP sessions.\n")
+
+	for i, server := range validServers {
+		name := codexMcpServerName(i, len(validServers))
+		config.WriteString(fmt.Sprintf("[mcp_servers.%s]\n", name))
+		config.WriteString(fmt.Sprintf("url = \"%s\"\n", tomlEscapeBasicString(server.URL)))
+		if server.Token != "" {
+			tokenEnvVar := codexMcpTokenEnvVar(i, len(validServers))
+			config.WriteString(fmt.Sprintf("bearer_token_env_var = \"%s\"\n", tokenEnvVar))
+			envVars = append(envVars, fmt.Sprintf("%s=%s", tokenEnvVar, server.Token))
+		}
+		config.WriteString("\n")
+	}
+
+	config.WriteString(codexManagedMcpEndMarker)
+	config.WriteString("\n")
+	return config.String(), envVars
+}
+
 // vibeDefaultActiveModel is the model alias used when no user model override
 // is configured. Defaults to Mistral Large (their most capable model).
 // Override at deployment via VIBE_DEFAULT_ACTIVE_MODEL env var.
@@ -820,4 +986,61 @@ func resolveVibeActiveModel(settings *agentSettingsPayload) string {
 func writeVibeConfigToContainer(ctx context.Context, containerID, user, activeModel string, mcpServers []McpServerEntry) error {
 	config := generateVibeConfig(activeModel, mcpServers)
 	return writeAuthFileToContainer(ctx, containerID, user, ".vibe/config.toml", config)
+}
+
+// readOptionalFileFromContainer reads a file inside a container if it exists,
+// returning an empty string when the file is absent.
+func readOptionalFileFromContainer(ctx context.Context, containerID, user, filePath string) (string, error) {
+	if strings.ContainsAny(filePath, ";\"`'$\\") || strings.Contains(filePath, "..") {
+		return "", fmt.Errorf("invalid filePath: %q", filePath)
+	}
+
+	script := fmt.Sprintf(
+		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; file="$home/%s"; if [ -f "$file" ]; then cat "$file"; fi`,
+		filePath,
+	)
+
+	dockerArgs := []string{"exec"}
+	if user != "" {
+		dockerArgs = append(dockerArgs, "-u", user)
+	}
+	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
+
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	const maxFileSize = 1 << 20 // 1 MB
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("docker exec stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("docker exec start failed: %w", err)
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, io.LimitReader(stdout, maxFileSize)); err != nil {
+		_ = cmd.Wait()
+		return "", fmt.Errorf("docker exec read failed: %w", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		return "", fmt.Errorf("docker exec failed: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// writeCodexConfigToContainer updates ~/.codex/config.toml with a SAM-managed
+// MCP block. Existing non-SAM config is preserved, and prior SAM-managed blocks
+// are replaced so resumed or restarted sessions do not accumulate stale tokens.
+func writeCodexConfigToContainer(ctx context.Context, containerID, user string, mcpServers []McpServerEntry) ([]string, error) {
+	managedConfig, envVars := generateCodexMcpConfig(mcpServers)
+	existingConfig, err := readOptionalFileFromContainer(ctx, containerID, user, ".codex/config.toml")
+	if err != nil {
+		return nil, err
+	}
+	mergedConfig := mergeManagedCodexMcpConfig(existingConfig, managedConfig)
+	if mergedConfig == "" {
+		return nil, nil
+	}
+	if err := writeAuthFileToContainer(ctx, containerID, user, ".codex/config.toml", mergedConfig); err != nil {
+		return nil, err
+	}
+	return envVars, nil
 }

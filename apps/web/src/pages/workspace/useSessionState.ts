@@ -225,7 +225,15 @@ export function useSessionState(
     const orphanIds = orphanedSessions.map((s) => s.id);
     setRecentlyStopped((prev) => new Set([...prev, ...orphanIds]));
     for (const session of orphanedSessions) {
-      try { await stopAgentSession(id, session.id); } catch {}
+      try {
+        await stopAgentSession(id, session.id);
+      } catch (error) {
+        console.warn('Failed to stop orphaned agent session', {
+          workspaceId: id,
+          sessionId: session.id,
+          error,
+        });
+      }
     }
     void loadWorkspaceState();
     setTimeout(() => {
