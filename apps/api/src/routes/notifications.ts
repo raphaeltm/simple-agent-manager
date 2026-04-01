@@ -41,13 +41,29 @@ notificationRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const stub = getNotificationStub(c.env, userId);
 
   const cursor = c.req.query('cursor');
-  const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!) : undefined;
-  const filter = c.req.query('filter') as 'all' | 'unread' | undefined;
-  const type = c.req.query('type') as NotificationType | undefined;
+  const limitRaw = c.req.query('limit');
+  const limit = limitRaw ? parseInt(limitRaw, 10) : undefined;
+  if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+    throw errors.badRequest('limit must be a positive integer');
+  }
+  const VALID_FILTERS = ['all', 'unread'] as const;
+  const filterRaw = c.req.query('filter');
+  const filter: 'all' | 'unread' | undefined =
+    filterRaw && (VALID_FILTERS as readonly string[]).includes(filterRaw)
+      ? (filterRaw as 'all' | 'unread')
+      : undefined;
+  if (filterRaw && !filter) {
+    throw errors.badRequest(`Invalid filter value: ${filterRaw}`);
+  }
+  const typeRaw = c.req.query('type');
+  const type: NotificationType | undefined =
+    typeRaw && NOTIFICATION_TYPES.includes(typeRaw as NotificationType)
+      ? (typeRaw as NotificationType)
+      : undefined;
   const projectId = c.req.query('projectId');
 
-  if (type && !NOTIFICATION_TYPES.includes(type as any)) {
-    throw errors.badRequest(`Invalid notification type: ${type}`);
+  if (typeRaw && !type) {
+    throw errors.badRequest(`Invalid notification type: ${typeRaw}`);
   }
 
   const result = await stub.listNotifications(userId, { cursor, limit, filter, type, projectId });

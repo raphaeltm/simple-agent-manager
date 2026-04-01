@@ -135,8 +135,10 @@ export {
   EXECUTION_STEP_LABELS,
   EXECUTION_STEP_ORDER,
   isTaskExecutionStep,
+  isTaskStatus,
   SAFE_FILENAME_REGEX,
   TASK_EXECUTION_STEPS,
+  TASK_STATUSES,
 } from './task';
 
 // Session (Chat, Agent, ACP)

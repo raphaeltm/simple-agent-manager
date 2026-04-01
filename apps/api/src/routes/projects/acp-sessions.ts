@@ -33,7 +33,7 @@ acpSessionRoutes.post('/:id/acp-sessions', jsonValidator(CreateAcpSessionSchema)
   const chatSessionId = body.chatSessionId ?? '';
 
   // Validate initialPrompt length (256 KB default, configurable via MAX_ACP_PROMPT_BYTES)
-  const maxPromptBytes = parsePositiveInt(c.env.MAX_ACP_PROMPT_BYTES as string, DEFAULT_MAX_ACP_PROMPT_BYTES);
+  const maxPromptBytes = parsePositiveInt(c.env.MAX_ACP_PROMPT_BYTES, DEFAULT_MAX_ACP_PROMPT_BYTES);
   if (body.initialPrompt && new TextEncoder().encode(body.initialPrompt).length > maxPromptBytes) {
     throw errors.badRequest(`initialPrompt exceeds maximum size of ${maxPromptBytes} bytes`);
   }

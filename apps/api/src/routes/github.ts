@@ -9,7 +9,7 @@ import { log } from '../lib/logger';
 import { getWebhookSecret } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { getUserId, optionalAuth,requireApproved, requireAuth } from '../middleware/auth';
-import { errors } from '../middleware/error';
+import { AppError, errors } from '../middleware/error';
 import {
   generateAppJWT,
   getAppInstallations,
@@ -213,17 +213,28 @@ githubRoutes.post('/webhook', async (c) => {
     throw errors.unauthorized('Invalid webhook signature');
   }
 
-  const data = JSON.parse(payload);
+  let data: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(payload);
+    if (!parsed || typeof parsed !== 'object') {
+      throw errors.badRequest('Webhook payload must be a JSON object');
+    }
+    data = parsed as Record<string, unknown>;
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    throw errors.badRequest('Invalid JSON in webhook payload');
+  }
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
   // Handle installation events
   if (event === 'installation') {
     const action = data.action;
-    const installation = data.installation;
-    const sender = data.sender;
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- webhook payload is signature-verified; shape is GitHub-defined
+    const installation = data.installation as Record<string, unknown> & { account?: Record<string, unknown> } | undefined;
+    const sender = data.sender as Record<string, unknown> | undefined;
 
-    if (action === 'created') {
+    if (action === 'created' && sender?.id != null && installation?.id != null) {
       // Find user by GitHub ID (from the sender who installed the app)
       const users = await db
         .select()
@@ -233,18 +244,19 @@ githubRoutes.post('/webhook', async (c) => {
 
       const foundUser = users[0];
       if (foundUser) {
+        const account = installation.account;
         // Create installation record
         await db.insert(schema.githubInstallations).values({
           id: ulid(),
           userId: foundUser.id,
           installationId: String(installation.id),
-          accountType: installation.account.type === 'Organization' ? 'organization' : 'personal',
-          accountName: installation.account.login,
+          accountType: account?.type === 'Organization' ? 'organization' : 'personal',
+          accountName: String(account?.login ?? ''),
           createdAt: now,
           updatedAt: now,
         });
       }
-    } else if (action === 'deleted') {
+    } else if (action === 'deleted' && installation?.id != null) {
       // Remove installation record
       await db
         .delete(schema.githubInstallations)
@@ -255,19 +267,19 @@ githubRoutes.post('/webhook', async (c) => {
   // Handle repository events (renamed, transferred, deleted)
   if (event === 'repository') {
     const action = data.action;
-    const repo = data.repository;
-    const repoId = repo?.id;
+    const repo = data.repository as Record<string, unknown> | undefined;
+    const repoId = typeof repo?.id === 'number' ? repo.id : undefined;
 
-    if (repoId && (action === 'renamed' || action === 'transferred')) {
+    if (repoId !== undefined && (action === 'renamed' || action === 'transferred')) {
       // Update repository name for all projects linked by github_repo_id
-      const newFullName = (repo.full_name as string)?.toLowerCase();
+      const newFullName = typeof repo?.full_name === 'string' ? repo.full_name.toLowerCase() : undefined;
       if (newFullName) {
         await db
           .update(schema.projects)
           .set({ repository: newFullName, updatedAt: now })
           .where(eq(schema.projects.githubRepoId, repoId));
       }
-    } else if (repoId && action === 'deleted') {
+    } else if (repoId !== undefined && action === 'deleted') {
       // Mark projects as detached when the repo is deleted
       await db
         .update(schema.projects)

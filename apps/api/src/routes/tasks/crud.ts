@@ -20,6 +20,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../index';
+import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { toDependencyResponse,toTaskResponse } from '../../lib/mappers';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
@@ -351,9 +352,13 @@ crudRoutes.post('/:taskId/status', jsonValidator(UpdateTaskStatusSchema), async 
     throw errors.conflict('Task is blocked by unresolved dependencies');
   }
 
-  if (!canTransitionTaskStatus(task.status as TaskStatus, body.toStatus)) {
+  if (!isTaskStatus(task.status)) {
+    throw errors.badRequest(`Invalid task status in database: ${task.status}`);
+  }
+
+  if (!canTransitionTaskStatus(task.status, body.toStatus)) {
     throw errors.conflict(
-      `Invalid transition ${task.status} -> ${body.toStatus}. Allowed: ${getAllowedTaskTransitions(task.status as TaskStatus).join(', ') || 'none'}`
+      `Invalid transition ${task.status} -> ${body.toStatus}. Allowed: ${getAllowedTaskTransitions(task.status).join(', ') || 'none'}`
     );
   }
 
@@ -401,12 +406,7 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
   const db = drizzle(c.env.DATABASE, { schema });
   const body = c.req.valid('json');
 
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-
-  const token = authHeader.slice(7);
+  const token = extractBearerToken(c.req.header('Authorization'));
   const payload = await verifyCallbackToken(token, c.env);
 
   const rows = await db
@@ -517,7 +517,7 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
           // Emit session-ended notification (best-effort)
           if (c.env.NOTIFICATION) {
             const projectName = await notificationService.getProjectName(c.env, projectId);
-            await notificationService.notifySessionEnded(c.env as any, task.userId, {
+            await notificationService.notifySessionEnded(c.env, task.userId, {
               projectId,
               projectName,
               sessionId: ws?.chatSessionId ?? '',
@@ -527,7 +527,7 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
 
             // If a PR was created, emit a separate pr_created notification
             if (body.gitPushResult?.prUrl) {
-              await notificationService.notifyPrCreated(c.env as any, task.userId, {
+              await notificationService.notifyPrCreated(c.env, task.userId, {
                 projectId,
                 projectName,
                 taskId,
@@ -559,9 +559,13 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
     throw errors.badRequest('Invalid toStatus value');
   }
 
-  if (!canTransitionTaskStatus(task.status as TaskStatus, body.toStatus)) {
+  if (!isTaskStatus(task.status)) {
+    throw errors.badRequest(`Invalid task status in database: ${task.status}`);
+  }
+
+  if (!canTransitionTaskStatus(task.status, body.toStatus)) {
     throw errors.conflict(
-      `Invalid transition ${task.status} -> ${body.toStatus}. Allowed: ${getAllowedTaskTransitions(task.status as TaskStatus).join(', ') || 'none'}`
+      `Invalid transition ${task.status} -> ${body.toStatus}. Allowed: ${getAllowedTaskTransitions(task.status).join(', ') || 'none'}`
     );
   }
 
@@ -621,7 +625,7 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
 
           const projectName = await notificationService.getProjectName(c.env, projectId);
           if (body.toStatus === 'completed') {
-            await notificationService.notifyTaskComplete(c.env as any, task.userId, {
+            await notificationService.notifyTaskComplete(c.env, task.userId, {
               projectId,
               projectName,
               taskId,
@@ -631,7 +635,7 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
               outputBranch: updatedTask.outputBranch,
             });
           } else if (body.toStatus === 'failed') {
-            await notificationService.notifyTaskFailed(c.env as any, task.userId, {
+            await notificationService.notifyTaskFailed(c.env, task.userId, {
               projectId,
               projectName,
               taskId,

@@ -99,35 +99,35 @@ const DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH = 200;
 
 export function getMcpLimits(env: Env) {
   return {
-    activityMessageMaxLength: parsePositiveInt(env.MAX_ACTIVITY_MESSAGE_LENGTH as string, DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH),
-    logMessageMaxLength: parsePositiveInt(env.MAX_LOG_MESSAGE_LENGTH as string, DEFAULT_LOG_MESSAGE_MAX_LENGTH),
-    outputSummaryMaxLength: parsePositiveInt(env.MAX_OUTPUT_SUMMARY_LENGTH as string, DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH),
+    activityMessageMaxLength: parsePositiveInt(env.MAX_ACTIVITY_MESSAGE_LENGTH, DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH),
+    logMessageMaxLength: parsePositiveInt(env.MAX_LOG_MESSAGE_LENGTH, DEFAULT_LOG_MESSAGE_MAX_LENGTH),
+    outputSummaryMaxLength: parsePositiveInt(env.MAX_OUTPUT_SUMMARY_LENGTH, DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH),
     taskListLimit: DEFAULT_MCP_TASK_LIST_LIMIT,
     taskListMax: DEFAULT_MCP_TASK_LIST_MAX,
     taskSearchMax: DEFAULT_MCP_TASK_SEARCH_MAX,
     sessionListLimit: DEFAULT_MCP_SESSION_LIST_LIMIT,
     sessionListMax: DEFAULT_MCP_SESSION_LIST_MAX,
-    messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT as string, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
-    messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX as string, DEFAULT_MCP_MESSAGE_LIST_MAX),
-    messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX as string, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
+    messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
+    messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX, DEFAULT_MCP_MESSAGE_LIST_MAX),
+    messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
     taskDescriptionSnippetLength: parsePositiveInt(
-      env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH as string,
+      env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,
       DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,
     ),
-    dispatchMaxDepth: parsePositiveInt(env.MCP_DISPATCH_MAX_DEPTH as string, DEFAULT_MCP_DISPATCH_MAX_DEPTH),
-    dispatchMaxPerTask: parsePositiveInt(env.MCP_DISPATCH_MAX_PER_TASK as string, DEFAULT_MCP_DISPATCH_MAX_PER_TASK),
-    dispatchMaxActivePerProject: parsePositiveInt(env.MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT as string, DEFAULT_MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT),
-    dispatchDescriptionMaxLength: parsePositiveInt(env.MCP_DISPATCH_DESCRIPTION_MAX_LENGTH as string, DEFAULT_MCP_DISPATCH_DESCRIPTION_MAX_LENGTH),
-    dispatchMaxReferences: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCES as string, DEFAULT_MCP_DISPATCH_MAX_REFERENCES),
-    dispatchMaxReferenceLength: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCE_LENGTH as string, DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH),
-    dispatchMaxPriority: parsePositiveInt(env.MCP_DISPATCH_MAX_PRIORITY as string, DEFAULT_MCP_DISPATCH_MAX_PRIORITY),
-    ideaContextMaxLength: parsePositiveInt(env.MCP_IDEA_CONTEXT_MAX_LENGTH as string, DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH),
-    ideaContentMaxLength: parsePositiveInt(env.MCP_IDEA_CONTENT_MAX_LENGTH as string, DEFAULT_MCP_IDEA_CONTENT_MAX_LENGTH),
-    ideaListLimit: parsePositiveInt(env.MCP_IDEA_LIST_LIMIT as string, DEFAULT_MCP_IDEA_LIST_LIMIT),
-    ideaListMax: parsePositiveInt(env.MCP_IDEA_LIST_MAX as string, DEFAULT_MCP_IDEA_LIST_MAX),
-    ideaSearchMax: parsePositiveInt(env.MCP_IDEA_SEARCH_MAX as string, DEFAULT_MCP_IDEA_SEARCH_MAX),
-    ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH as string, DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH),
-    sessionTopicMaxLength: parsePositiveInt(env.MCP_SESSION_TOPIC_MAX_LENGTH as string, DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH),
+    dispatchMaxDepth: parsePositiveInt(env.MCP_DISPATCH_MAX_DEPTH, DEFAULT_MCP_DISPATCH_MAX_DEPTH),
+    dispatchMaxPerTask: parsePositiveInt(env.MCP_DISPATCH_MAX_PER_TASK, DEFAULT_MCP_DISPATCH_MAX_PER_TASK),
+    dispatchMaxActivePerProject: parsePositiveInt(env.MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT, DEFAULT_MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT),
+    dispatchDescriptionMaxLength: parsePositiveInt(env.MCP_DISPATCH_DESCRIPTION_MAX_LENGTH, DEFAULT_MCP_DISPATCH_DESCRIPTION_MAX_LENGTH),
+    dispatchMaxReferences: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCES, DEFAULT_MCP_DISPATCH_MAX_REFERENCES),
+    dispatchMaxReferenceLength: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCE_LENGTH, DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH),
+    dispatchMaxPriority: parsePositiveInt(env.MCP_DISPATCH_MAX_PRIORITY, DEFAULT_MCP_DISPATCH_MAX_PRIORITY),
+    ideaContextMaxLength: parsePositiveInt(env.MCP_IDEA_CONTEXT_MAX_LENGTH, DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH),
+    ideaContentMaxLength: parsePositiveInt(env.MCP_IDEA_CONTENT_MAX_LENGTH, DEFAULT_MCP_IDEA_CONTENT_MAX_LENGTH),
+    ideaListLimit: parsePositiveInt(env.MCP_IDEA_LIST_LIMIT, DEFAULT_MCP_IDEA_LIST_LIMIT),
+    ideaListMax: parsePositiveInt(env.MCP_IDEA_LIST_MAX, DEFAULT_MCP_IDEA_LIST_MAX),
+    ideaSearchMax: parsePositiveInt(env.MCP_IDEA_SEARCH_MAX, DEFAULT_MCP_IDEA_SEARCH_MAX),
+    ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH, DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH),
+    sessionTopicMaxLength: parsePositiveInt(env.MCP_SESSION_TOPIC_MAX_LENGTH, DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH),
   };
 }
 
@@ -228,18 +228,19 @@ export async function checkMcpRateLimit(
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
-/** Returns [tokenData, rawToken] or [null, null] */
+/**
+ * Returns [tokenData, rawToken] or [null, null].
+ * Unlike extractBearerToken(), this returns null on missing/malformed auth
+ * because MCP endpoints fall through to unauthenticated handling.
+ */
 export async function authenticateMcpRequest(
   authHeader: string | undefined,
   kv: KVNamespace,
 ): Promise<[McpTokenData, string] | [null, null]> {
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (!authHeader?.startsWith('Bearer ') || authHeader.length <= 7) {
     return [null, null];
   }
   const token = authHeader.slice(7);
-  if (!token) {
-    return [null, null];
-  }
   const data = await validateMcpToken(kv, token);
   return data ? [data, token] : [null, null];
 }

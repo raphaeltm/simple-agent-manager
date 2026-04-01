@@ -92,9 +92,13 @@ export class ProjectData extends DurableObject<Env> {
     const result = messages.persistMessage(this.sql, this.env, sessionId, role, content, toolMetadata);
     if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
     this.scheduleSummarySync();
+    let parsedToolMetadata: unknown = null;
+    if (toolMetadata) {
+      try { parsedToolMetadata = JSON.parse(toolMetadata); } catch (err) { log.warn('project_data.tool_metadata_parse_failed', { sessionId, error: String(err) }); }
+    }
     this.broadcastEvent('message.new', {
       sessionId, messageId: result.id, role, content,
-      toolMetadata: toolMetadata ? JSON.parse(toolMetadata) : null,
+      toolMetadata: parsedToolMetadata,
       createdAt: result.now, sequence: result.sequence,
     }, sessionId);
     return result.id;
@@ -296,11 +300,17 @@ export class ProjectData extends DurableObject<Env> {
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== 'string') return;
     try {
-      const parsed = JSON.parse(message);
-      if (parsed.type === 'ping') { ws.send(JSON.stringify({ type: 'pong' })); return; }
-      if (parsed.type === 'message.send') {
-        const { sessionId, content, role } = parsed;
-        if (!sessionId || !content || typeof content !== 'string') { ws.send(JSON.stringify({ type: 'error', message: 'Missing sessionId or content' })); return; }
+      const parsed: unknown = JSON.parse(message);
+      if (!parsed || typeof parsed !== 'object') { return; }
+      const msg = parsed as Record<string, unknown>;
+      if (msg.type === 'ping') { ws.send(JSON.stringify({ type: 'pong' })); return; }
+      if (msg.type === 'message.send') {
+        const rawSessionId = msg.sessionId;
+        const rawContent = msg.content;
+        const rawRole = msg.role;
+        if (!rawSessionId || typeof rawSessionId !== 'string' || !rawContent || typeof rawContent !== 'string') { ws.send(JSON.stringify({ type: 'error', message: 'Missing sessionId or content' })); return; }
+        const sessionId = rawSessionId;
+        const content = rawContent;
         // Validate session tag
         const wsTags = this.ctx.getTags(ws);
         const wsSessionTag = wsTags.find((t) => t.startsWith('session:'));
@@ -316,7 +326,7 @@ export class ProjectData extends DurableObject<Env> {
         const targetSession = this.sql.exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId).toArray()[0];
         if (!targetSession) { ws.send(JSON.stringify({ type: 'error', message: `Session ${sessionId} not found` })); return; }
         if (targetSession.status !== 'active') { ws.send(JSON.stringify({ type: 'error', message: `Session ${sessionId} is ${targetSession.status}, not active` })); return; }
-        const sanitizedRole = role === 'user' ? 'user' : 'user'; // Only allow user role
+        const sanitizedRole = rawRole === 'user' ? 'user' : 'user'; // Only allow user role
         const trimmed = content.trim();
         if (!trimmed || trimmed.length > 2000) { ws.send(JSON.stringify({ type: 'error', message: 'Message must be 1-2000 characters' })); return; }
         try {

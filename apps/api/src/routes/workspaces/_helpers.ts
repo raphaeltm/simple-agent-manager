@@ -5,6 +5,7 @@ import type { Context } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../index';
+import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
 import { decrypt } from '../../services/encryption';
@@ -96,12 +97,7 @@ export async function verifyWorkspaceCallbackAuth(
   c: Context<{ Bindings: Env }>,
   workspaceId: string
 ): Promise<void> {
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-
-  const token = authHeader.slice(7);
+  const token = extractBearerToken(c.req.header('Authorization'));
   const payload = await verifyCallbackToken(token, c.env);
 
   // Node-scoped tokens CANNOT access workspace-scoped endpoints.

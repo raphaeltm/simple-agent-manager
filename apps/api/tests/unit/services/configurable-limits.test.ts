@@ -282,7 +282,7 @@ describe('agent sessions — configurable MAX_AGENT_SESSION_LABEL_LENGTH', () =>
   });
 
   it('defaults label max length to 50 when env var is absent', () => {
-    expect(agentSessionsSource).toContain('parsePositiveInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH as string, 50)');
+    expect(agentSessionsSource).toContain('parsePositiveInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH, 50)');
   });
 
   it('uses configurable maxLabelLength in slice (not hardcoded 50)', () => {

@@ -54,6 +54,9 @@ export function buildProviderConfig(
       } catch {
         throw new Error('Invalid Scaleway credential format: malformed stored data');
       }
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Invalid Scaleway credential format: expected JSON object');
+      }
       const obj = parsed as Record<string, unknown>;
       if (typeof obj?.secretKey !== 'string' || !obj.secretKey || typeof obj?.projectId !== 'string' || !obj.projectId) {
         throw new Error('Invalid Scaleway credential format: missing secretKey or projectId');
@@ -78,6 +81,9 @@ export function parseGcpCredential(decryptedToken: string): GcpOidcCredential {
     parsed = JSON.parse(decryptedToken);
   } catch {
     throw new Error('Invalid GCP credential format: malformed stored data');
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Invalid GCP credential format: expected JSON object');
   }
   const obj = parsed as Record<string, unknown>;
   if (

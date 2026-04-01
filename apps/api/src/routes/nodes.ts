@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../index';
+import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -93,12 +94,7 @@ function toNodeResponse(node: schema.Node): NodeResponse {
 }
 
 async function verifyNodeCallbackAuth(c: Context<{ Bindings: Env }>, nodeId: string): Promise<void> {
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-
-  const token = authHeader.slice(7);
+  const token = extractBearerToken(c.req.header('Authorization'));
   const payload = await verifyCallbackToken(token, c.env);
 
   // Workspace-scoped tokens CANNOT be used for node-level endpoints.
@@ -542,8 +538,7 @@ nodesRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c)
   await verifyNodeCallbackAuth(c, nodeId);
 
   // Extract raw token for refresh check (auth already verified above)
-  const authHeader = c.req.header('Authorization') ?? '';
-  const rawToken = authHeader.slice(7);
+  const rawToken = extractBearerToken(c.req.header('Authorization'));
   const tokenNeedsRefresh = shouldRefreshCallbackToken(rawToken, c.env);
 
   const db = drizzle(c.env.DATABASE, { schema });
