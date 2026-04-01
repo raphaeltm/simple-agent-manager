@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ChatSessionResponse } from '../../lib/api';
 import { isStaleSession } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
-
 import { SessionItem } from './SessionItem';
 
 export function MobileSessionDrawer({

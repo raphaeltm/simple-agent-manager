@@ -27,7 +27,6 @@ import {
 } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
-
 import type { ProvisioningState } from './types';
 import {
   CHAT_SESSION_LIST_LIMIT,

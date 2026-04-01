@@ -2,10 +2,9 @@ import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, LayoutGrid, List, Search, Settings, X } from 'lucide-react';
 
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
-import { ProjectMessageView } from '../../components/project-message-view';
 import { ForkDialog } from '../../components/project/ForkDialog';
+import { ProjectMessageView } from '../../components/project-message-view';
 import { useIsMobile } from '../../hooks/useIsMobile';
-
 import { ChatInput } from './ChatInput';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
 import { ProvisioningIndicator } from './ProvisioningIndicator';

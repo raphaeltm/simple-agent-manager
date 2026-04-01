@@ -5,7 +5,6 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
-
 import { AcpConversationItemView } from './AcpConversationItemView';
 import { FollowUpInput } from './FollowUpInput';
 import { AgentErrorBanner, ConnectionBanner } from './MessageBanners';

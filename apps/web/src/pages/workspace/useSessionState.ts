@@ -7,13 +7,12 @@ import type { ChatSessionHandle } from '../../components/ChatSession';
 import type { SessionTokenUsage } from '../../components/WorkspaceSidebar';
 import {
   createAgentSession,
-  listAgentSessions,
   listAgents,
+  listAgentSessions,
   resumeAgentSession,
   stopAgentSession,
 } from '../../lib/api';
 import { isOrphanedSession, isSessionActive } from '../../lib/session-utils';
-
 import type { ViewMode } from './types';
 
 export interface UseSessionStateResult {

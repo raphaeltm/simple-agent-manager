@@ -10,9 +10,8 @@ import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api';
 import { getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, resumeAgentSession, uploadSessionFiles } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
-
 import type { SessionState } from './types';
-import { VIRTUAL_START, deriveSessionState } from './types';
+import { deriveSessionState,VIRTUAL_START } from './types';
 import { useConnectionRecovery } from './useConnectionRecovery';
 
 export interface UseSessionLifecycleResult {

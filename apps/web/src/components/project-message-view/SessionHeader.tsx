@@ -7,7 +7,6 @@ import { useCallback, useState } from 'react';
 import type { ChatSessionResponse } from '../../lib/api';
 import { deleteWorkspace, updateProjectTaskStatus } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
-
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
 

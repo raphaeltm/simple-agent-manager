@@ -4,7 +4,6 @@ import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import type { UseProjectAgentSessionReturn } from '../../hooks/useProjectAgentSession';
 import type { ChatSessionResponse } from '../../lib/api';
 import { resumeAgentSession, saveCachedCommands } from '../../lib/api';
-
 import type { SessionState } from './types';
 import {
   ACP_GRACE_MS,

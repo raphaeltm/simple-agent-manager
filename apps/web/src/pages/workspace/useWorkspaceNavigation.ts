@@ -10,7 +10,6 @@ import {
   getWorktrees,
   removeWorktree,
 } from '../../lib/api';
-
 import { countGitChanges, GIT_STATUS_POLL_INTERVAL_MS, GIT_STATUS_RETRY_DELAYS_MS } from './types';
 
 export interface UseWorkspaceNavigationResult {

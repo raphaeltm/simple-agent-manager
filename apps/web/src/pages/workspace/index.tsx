@@ -27,7 +27,6 @@ import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { useTabOrder } from '../../hooks/useTabOrder';
 import { getFileIndex, listAgentSessions, renameAgentSession } from '../../lib/api';
 import { isSessionActive } from '../../lib/session-utils';
-
 import type { ViewMode, WorkspaceTab } from './types';
 import { ACTIVITY_THROTTLE_MS, deriveWorktreeBadge, workspaceTabStatusColor } from './types';
 import { useSessionState } from './useSessionState';
