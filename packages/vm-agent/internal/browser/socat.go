@@ -212,9 +212,9 @@ func (m *Manager) SyncForwardersFromPorts(ctx context.Context, workspaceID strin
 
 // addForwarder starts a socat process inside the Neko container to forward a port.
 func (m *Manager) addForwarder(ctx context.Context, containerName string, port int, targetHost string) error {
-	// Reject privileged ports — only non-root processes should be forwarded.
-	if port < 1024 || port > 65535 {
-		return fmt.Errorf("invalid port: %d (must be 1024-65535)", port)
+	// Reject ports outside the configured scan range.
+	if port < m.cfg.NekoSocatMinPort || port > m.cfg.NekoSocatMaxPort {
+		return fmt.Errorf("invalid port: %d (must be %d-%d)", port, m.cfg.NekoSocatMinPort, m.cfg.NekoSocatMaxPort)
 	}
 	// Validate targetHost to prevent shell injection — only safe container hostnames allowed.
 	if !validHostnameRe.MatchString(targetHost) {
