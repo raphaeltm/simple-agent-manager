@@ -541,7 +541,12 @@ func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePa
 
 	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
 	if err != nil {
-		return err
+		// resolveContainerHomeDir should always return a path, but handle error defensively
+		slog.Warn("resolveContainerHomeDir returned error, falling back to /root",
+			"error", err,
+			"container", containerID,
+			"user", user)
+		homeDir = "/root"
 	}
 	targetPath := path.Join(homeDir, authFilePath)
 	parentDir := path.Dir(targetPath)
