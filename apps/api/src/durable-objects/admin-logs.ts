@@ -79,7 +79,9 @@ export class AdminLogs extends DurableObject<Env> {
 
       case 'filter':
         if (Array.isArray(parsed.levels)) {
-          state.levels = new Set(parsed.levels.filter((l) => ALL_LEVELS.has(l)));
+          // Limit array size to prevent abuse — there are only 3 valid log levels
+          const levels = parsed.levels.slice(0, 10);
+          state.levels = new Set(levels.filter((l: unknown) => typeof l === 'string' && ALL_LEVELS.has(l)));
         }
         if (typeof parsed.search === 'string') {
           state.search = parsed.search;

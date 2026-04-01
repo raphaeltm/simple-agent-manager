@@ -5,15 +5,23 @@ import type { VMLocation, VMSize, WorkspaceProfile } from './workspace';
 // Task Types
 // =============================================================================
 
-export type TaskStatus =
-  | 'draft'
-  | 'ready'
-  | 'queued'
-  | 'delegated'
-  | 'in_progress'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+export const TASK_STATUSES = [
+  'draft',
+  'ready',
+  'queued',
+  'delegated',
+  'in_progress',
+  'completed',
+  'failed',
+  'cancelled',
+] as const;
+
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+/** Runtime type guard for TaskStatus values from untrusted sources (e.g. database rows). */
+export function isTaskStatus(value: unknown): value is TaskStatus {
+  return typeof value === 'string' && (TASK_STATUSES as readonly string[]).includes(value);
+}
 
 export type TaskMode = 'task' | 'conversation';
 

@@ -1,4 +1,4 @@
-import type { CredentialProvider,Project } from '@simple-agent-manager/shared';
+import type { CredentialProvider, Project, UpdateProjectRequest } from '@simple-agent-manager/shared';
 import {
   DEFAULT_NODE_WARM_TIMEOUT_MS,
   MAX_NODE_IDLE_TIMEOUT_MS,
@@ -109,8 +109,7 @@ export function ScalingSettings({
   const [scalingValues, setScalingValues] = useState<Record<string, number | null>>(() => {
     const initial: Record<string, number | null> = {};
     for (const p of SCALING_PARAMS) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      initial[p.key] = (project as any)[p.key] as number | null ?? null;
+      initial[p.key] = (project[p.key as keyof Project] as number | null) ?? null;
     }
     return initial;
   });
@@ -130,7 +129,7 @@ export function ScalingSettings({
         )];
         setConfiguredProviders(providers);
       })
-      .catch(() => {});
+      .catch((err: unknown) => { console.error('Failed to load credentials', err); });
   }, []);
 
   // Sync from project prop
@@ -139,8 +138,7 @@ export function ScalingSettings({
     setSelectedLocation(project.defaultLocation ?? null);
     const updated: Record<string, number | null> = {};
     for (const p of SCALING_PARAMS) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      updated[p.key] = (project as any)[p.key] as number | null ?? null;
+      updated[p.key] = (project[p.key as keyof Project] as number | null) ?? null;
     }
     setScalingValues(updated);
     setNodeIdleTimeoutMs(project.nodeIdleTimeoutMs ?? null);
@@ -165,9 +163,8 @@ export function ScalingSettings({
   const handleSaveScaling = useCallback(async () => {
     setSavingScaling(true);
     try {
-      const update: Record<string, number | null> = { ...scalingValues };
-      update.nodeIdleTimeoutMs = nodeIdleTimeoutMs;
-      await updateProject(projectId, update as Parameters<typeof updateProject>[1]);
+      const update: UpdateProjectRequest = { ...scalingValues, nodeIdleTimeoutMs };
+      await updateProject(projectId, update);
       await reload();
       toast.success('Scaling settings saved');
     } catch (err) {

@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../index';
+import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
@@ -327,14 +328,7 @@ deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => 
   const db = drizzle(c.env.DATABASE, { schema });
 
   // Authenticate via Bearer token (MCP token only)
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-  const token = authHeader.slice(7);
-  if (!token) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
+  const token = extractBearerToken(c.req.header('Authorization'));
 
   // Validate MCP token — callback tokens are NOT accepted here.
   // Callback tokens are operational credentials for node-to-API communication
@@ -496,7 +490,15 @@ gcpDeployCallbackRoute.get(
 
     let storedState: { projectId: string; userId: string };
     try {
-      storedState = JSON.parse(storedStateRaw) as { projectId: string; userId: string };
+      const parsed: unknown = JSON.parse(storedStateRaw);
+      if (
+        !parsed || typeof parsed !== 'object' ||
+        typeof (parsed as Record<string, unknown>).projectId !== 'string' ||
+        typeof (parsed as Record<string, unknown>).userId !== 'string'
+      ) {
+        throw new Error('Invalid state structure');
+      }
+      storedState = parsed as { projectId: string; userId: string };
     } catch {
       await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
       return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid OAuth state format')}`);

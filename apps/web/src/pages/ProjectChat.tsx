@@ -327,7 +327,7 @@ export function ProjectChat() {
           setSelectedAgentType(acpAgents[0]!.id);
         }
       })
-      .catch(() => { /* best-effort */ });
+      .catch((err: unknown) => { console.error('Failed to load agents', err); });
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -335,7 +335,7 @@ export function ProjectChat() {
   const loadProfiles = useCallback(() => {
     void listAgentProfiles(projectId)
       .then((data) => setAgentProfiles(data))
-      .catch(() => { /* best-effort */ });
+      .catch((err: unknown) => { console.error('Failed to load agent profiles', err); });
   }, [projectId]);
 
   useEffect(() => {

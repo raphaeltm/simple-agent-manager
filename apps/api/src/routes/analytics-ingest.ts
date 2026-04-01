@@ -146,7 +146,7 @@ analyticsIngestRoutes.post('/', async (c) => {
     throw errors.badRequest('Body must contain an "events" array');
   }
 
-  const { events } = body as { events: unknown };
+  const events = (body as Record<string, unknown>).events;
 
   if (!Array.isArray(events)) {
     throw errors.badRequest('"events" must be an array');

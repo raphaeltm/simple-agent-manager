@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import * as schema from './db/schema';
 import { log, serializeError } from './lib/logger';
@@ -421,7 +422,7 @@ app.onError((err, c) => {
   log.error('request_error', serializeError(err));
 
   if (err instanceof AppError) {
-    return c.json(err.toJSON(), err.statusCode as any);
+    return c.json(err.toJSON(), err.statusCode as ContentfulStatusCode);
   }
 
   // Defense-in-depth: sanitize GcpApiError if it escapes route-level catch blocks
