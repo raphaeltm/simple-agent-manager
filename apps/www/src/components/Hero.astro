@@ -1,5 +1,8 @@
 ---
 import NodeGrid from './NodeGrid.astro';
+
+const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
+const appUrl = `https://app.${baseDomain}`;
 ---
 
 <section class="hero">
@@ -21,7 +24,7 @@ import NodeGrid from './NodeGrid.astro';
     </p>
 
     <div class="hero-actions animate-on-scroll">
-      <a href="https://app.simple-agent-manager.org" class="btn-hero btn-hero-primary">
+      <a href={appUrl} class="btn-hero btn-hero-primary">
         Get Started
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
       </a>

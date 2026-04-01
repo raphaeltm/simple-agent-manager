@@ -29,6 +29,14 @@ interface AnalyticsEvent {
   const endpoint = script?.getAttribute('data-api');
   if (!endpoint) return;
 
+  // Validate endpoint is a well-formed HTTPS URL
+  try {
+    const parsed = new URL(endpoint);
+    if (parsed.protocol !== 'https:') return;
+  } catch {
+    return;
+  }
+
   const host = location.hostname;
 
   function uid(store: Storage): string {

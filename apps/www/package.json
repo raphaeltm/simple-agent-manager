@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build:tracker": "node scripts/build-tracker.mjs",
+    "build:tracker": "npx tsx scripts/build-tracker.ts",
     "build": "pnpm build:tracker && astro build",
     "preview": "astro preview"
   },
