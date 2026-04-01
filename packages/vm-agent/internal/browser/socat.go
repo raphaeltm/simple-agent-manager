@@ -212,9 +212,9 @@ func (m *Manager) SyncForwardersFromPorts(ctx context.Context, workspaceID strin
 
 // addForwarder starts a socat process inside the Neko container to forward a port.
 func (m *Manager) addForwarder(ctx context.Context, containerName string, port int, targetHost string) error {
-	// Validate port range to prevent out-of-bounds values.
-	if port < 1 || port > 65535 {
-		return fmt.Errorf("invalid port: %d", port)
+	// Reject privileged ports — only non-root processes should be forwarded.
+	if port < 1024 || port > 65535 {
+		return fmt.Errorf("invalid port: %d (must be 1024-65535)", port)
 	}
 	// Validate targetHost to prevent shell injection — only safe container hostnames allowed.
 	if !validHostnameRe.MatchString(targetHost) {
@@ -222,6 +222,8 @@ func (m *Manager) addForwarder(ctx context.Context, containerName string, port i
 	}
 	// Run socat in background inside the Neko container.
 	// socat listens on localhost:<port> and forwards to the DevContainer.
+	// sh -c is required for background (&); port is an int and targetHost
+	// is regex-validated above, so no shell injection is possible.
 	cmd := fmt.Sprintf("socat TCP-LISTEN:%d,fork,reuseaddr TCP:%s:%d &", port, targetHost, port)
 	return m.docker.RunSilent(ctx,
 		"exec", "-d", containerName,
@@ -231,13 +233,21 @@ func (m *Manager) addForwarder(ctx context.Context, containerName string, port i
 
 // removeForwarder kills the socat process for a specific port inside the Neko container.
 func (m *Manager) removeForwarder(ctx context.Context, containerName string, port int) error {
-	// Find and kill socat processes listening on this port.
+	// Use pkill directly without shell to avoid injection risk.
 	// Anchor with comma after port to prevent matching port-prefix (e.g., port 80 matching 8080).
-	cmd := fmt.Sprintf("pkill -f 'socat TCP-LISTEN:%d,' || true", port)
-	return m.docker.RunSilent(ctx,
+	// pkill returns non-zero when no processes match; we ignore that error.
+	pattern := fmt.Sprintf("socat TCP-LISTEN:%d,", port)
+	err := m.docker.RunSilent(ctx,
 		"exec", containerName,
-		"sh", "-c", cmd,
+		"pkill", "-f", pattern,
 	)
+	if err != nil {
+		// pkill exits 1 when no matching process is found — this is expected
+		// when the socat process has already exited. Only log for debugging.
+		slog.Debug("removeForwarder: pkill returned error (may be no matching process)",
+			"port", port, "error", err)
+	}
+	return nil
 }
 
 // detectContainerPorts reads /proc/net/tcp and /proc/net/tcp6 from the DevContainer to find listening ports.

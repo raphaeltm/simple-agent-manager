@@ -80,7 +80,10 @@ func (s *Server) fetchGitTokenForWorkspace(ctx context.Context, workspaceID, cal
 	}
 	defer res.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 8*1024))
+	body, err := io.ReadAll(io.LimitReader(res.Body, 8*1024))
+	if err != nil {
+		return "", fmt.Errorf("git-token: read response body: %w", err)
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return "", fmt.Errorf("git-token endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
 	}

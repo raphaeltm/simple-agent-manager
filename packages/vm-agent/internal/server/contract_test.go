@@ -80,14 +80,13 @@ func TestHealthResponseContract(t *testing.T) {
 	if resp["nodeId"] != "node-contract-test" {
 		t.Fatalf("expected nodeId=node-contract-test, got %v", resp["nodeId"])
 	}
-	if _, ok := resp["activeWorkspaces"]; !ok {
-		t.Fatal("missing activeWorkspaces field")
+	// Verify counts are NOT exposed on the unauthenticated health endpoint
+	if _, ok := resp["activeWorkspaces"]; ok {
+		t.Fatal("health endpoint must NOT expose activeWorkspaces count")
 	}
-	if _, ok := resp["sessions"]; !ok {
-		t.Fatal("missing sessions field")
+	if _, ok := resp["sessions"]; ok {
+		t.Fatal("health endpoint must NOT expose sessions count")
 	}
-
-	// Verify workspace IDs are NOT exposed (security: unauthenticated endpoint)
 	if _, ok := resp["workspaces"]; ok {
 		t.Fatal("health endpoint must NOT expose workspace details")
 	}

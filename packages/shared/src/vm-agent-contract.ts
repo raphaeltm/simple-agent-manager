@@ -45,8 +45,8 @@ export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 export const HealthResponseSchema = z.object({
   status: z.literal('healthy'),
   nodeId: z.string(),
-  activeWorkspaces: z.number(),
-  sessions: z.number(),
+  // activeWorkspaces and sessions removed — the health endpoint is
+  // unauthenticated, so it must not leak operational metrics.
 });
 
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;

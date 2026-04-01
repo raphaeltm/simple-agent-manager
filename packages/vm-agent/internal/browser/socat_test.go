@@ -327,9 +327,10 @@ func TestRemoveForwarder_PkillCommand(t *testing.T) {
 		t.Fatalf("expected 1 docker command, got %d", len(docker.getCalls()))
 	}
 	cmd := docker.getCalls()[0]
-	// Verify port-prefix anchoring (comma after port number prevents 80 matching 8080)
-	if !strings.Contains(cmd, "pkill -f 'socat TCP-LISTEN:3000,'") {
-		t.Errorf("expected pkill with comma-anchored port, got: %s", cmd)
+	// Verify pkill is called directly (no shell wrapper) with comma-anchored port
+	expected := "exec neko-ws-1 pkill -f socat TCP-LISTEN:3000,"
+	if cmd != expected {
+		t.Errorf("expected pkill without shell wrapper:\n  want: %s\n  got:  %s", expected, cmd)
 	}
 }
 

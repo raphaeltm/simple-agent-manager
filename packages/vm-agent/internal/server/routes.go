@@ -4,6 +4,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 )
 
 // handleHealth handles the health check endpoint.
@@ -11,10 +12,8 @@ import (
 // so it MUST NOT expose workspace IDs or other sensitive data.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	response := map[string]interface{}{
-		"status":           "healthy",
-		"nodeId":           s.config.NodeID,
-		"activeWorkspaces": s.activeWorkspaceCount(),
-		"sessions":         s.ptyManager.SessionCount(),
+		"status": "healthy",
+		"nodeId": s.config.NodeID,
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -175,4 +174,14 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{
 		"error": message,
 	})
+}
+
+// containerIDRe matches Docker container IDs (12-64 hex chars) and container
+// names (alphanumeric with hyphens, underscores, dots, and slashes for compose).
+var containerIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,253}$`)
+
+// isValidContainerID checks that a container ID or name matches the expected
+// Docker format to prevent command injection via crafted container identifiers.
+func isValidContainerID(id string) bool {
+	return id != "" && containerIDRe.MatchString(id)
 }

@@ -257,10 +257,10 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 		done:   make(chan struct{}),
 	}
 
-	// Start the viewer's write pump goroutine
-	go h.viewerWritePump(viewer)
-
-	// Register the viewer and cancel any pending auto-suspend timer.
+	// Register the viewer BEFORE starting the write pump goroutine to
+	// close the TOCTOU window between the status check above and the
+	// goroutine launch. If the session transitions to stopped after our
+	// check, the goroutine will exit via h.ctx.Done().
 	h.viewerMu.Lock()
 	h.viewers[id] = viewer
 	if h.suspendTimer != nil {
@@ -269,6 +269,9 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 		slog.Info("SessionHost: auto-suspend timer cancelled (viewer attached)", "sessionID", h.config.SessionID)
 	}
 	h.viewerMu.Unlock()
+
+	// Start the viewer's write pump goroutine after registration.
+	go h.viewerWritePump(viewer)
 
 	slog.Info("SessionHost: viewer attached", "sessionID", h.config.SessionID, "viewerID", id, "totalViewers", h.ViewerCount())
 
@@ -1675,7 +1678,11 @@ func (h *SessionHost) viewerWritePump(viewer *Viewer) {
 // SendPongToViewer sends an application-level pong response to a specific viewer.
 // This does NOT go through the message buffer — keepalive messages are transient.
 func (h *SessionHost) SendPongToViewer(viewerID string) {
-	data, _ := json.Marshal(map[string]string{"type": string(MsgPong)})
+	data, err := json.Marshal(map[string]string{"type": string(MsgPong)})
+	if err != nil {
+		slog.Error("SessionHost: failed to marshal pong", "error", err)
+		return
+	}
 	h.viewerMu.RLock()
 	viewer, ok := h.viewers[viewerID]
 	h.viewerMu.RUnlock()

@@ -40,7 +40,10 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		EnableAudio      *bool `json:"enableAudio"`
 	}
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON request body")
+			return
+		}
 	}
 
 	// Viewport bounds validation (configurable via NEKO_VIEWPORT_* env vars)

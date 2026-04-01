@@ -56,8 +56,6 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
       const response = {
         status: 'healthy',
         nodeId: 'node-abc123',
-        activeWorkspaces: 2,
-        sessions: 3,
       };
       const result = HealthResponseSchema.safeParse(response);
       expect(result.success).toBe(true);
@@ -67,8 +65,6 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
       const response = {
         status: 'unhealthy',
         nodeId: 'node-abc',
-        activeWorkspaces: 0,
-        sessions: 0,
       };
       const result = HealthResponseSchema.safeParse(response);
       expect(result.success).toBe(false);
@@ -77,8 +73,6 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
     it('rejects health response missing nodeId', () => {
       const response = {
         status: 'healthy',
-        activeWorkspaces: 0,
-        sessions: 0,
       };
       const result = HealthResponseSchema.safeParse(response);
       expect(result.success).toBe(false);
