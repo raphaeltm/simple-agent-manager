@@ -25,7 +25,7 @@
     "@mastra/core": "1.9.0",
     "@simple-agent-manager/providers": "workspace:*",
     "@simple-agent-manager/shared": "workspace:*",
-    "@workspace/cloud-init": "workspace:*",
+    "@simple-agent-manager/cloud-init": "workspace:*",
     "ai": "6.0.111",
     "better-auth": "catalog:",
     "better-auth-cloudflare": "0.2.9",

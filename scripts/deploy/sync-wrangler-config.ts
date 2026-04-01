@@ -49,10 +49,39 @@ function getPulumiOutputs(stack: string): PulumiOutputs {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     });
-    return JSON.parse(output) as PulumiOutputs;
+    const parsed = JSON.parse(output) as PulumiOutputs;
+    validatePulumiOutputs(parsed);
+    return parsed;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to get Pulumi outputs: ${message}`);
+  }
+}
+
+export function validatePulumiOutputs(outputs: PulumiOutputs): void {
+  const required: Array<{ key: keyof PulumiOutputs; label: string }> = [
+    { key: "d1DatabaseId", label: "D1 Database ID" },
+    { key: "d1DatabaseName", label: "D1 Database Name" },
+    { key: "observabilityD1DatabaseId", label: "Observability D1 Database ID" },
+    { key: "observabilityD1DatabaseName", label: "Observability D1 Database Name" },
+    { key: "kvId", label: "KV Namespace ID" },
+    { key: "r2Name", label: "R2 Bucket Name" },
+    { key: "cloudflareAccountId", label: "Cloudflare Account ID" },
+    { key: "pagesName", label: "Pages Project Name" },
+  ];
+
+  const missing = required.filter(({ key }) => {
+    const value = outputs[key];
+    return value === undefined || value === null || value === "";
+  });
+
+  if (missing.length > 0) {
+    const labels = missing.map(({ label, key }) => `  - ${label} (${key})`).join("\n");
+    throw new Error(`Pulumi outputs missing required fields:\n${labels}`);
+  }
+
+  if (!outputs.stackSummary?.baseDomain) {
+    throw new Error("Pulumi outputs missing required field: stackSummary.baseDomain");
   }
 }
 
@@ -284,7 +313,11 @@ async function main(): Promise<void> {
   console.log("\nSync complete.");
 }
 
-main().catch((error) => {
-  console.error("Error:", error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+// Only run main when executed directly (not when imported for testing)
+const isDirectExecution = process.argv[1]?.endsWith("sync-wrangler-config.ts");
+if (isDirectExecution) {
+  main().catch((error) => {
+    console.error("Error:", error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}

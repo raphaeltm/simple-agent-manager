@@ -100,6 +100,8 @@ set_worker_secret "CF_ZONE_ID" "${CF_ZONE_ID:-}" "$ENVIRONMENT" "true" || FAILED
 set_worker_secret "CF_ACCOUNT_ID" "${CF_ACCOUNT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 
 # Configure GitHub secrets (required - platform is useless without authentication)
+# GH_* env vars (GitHub Actions reserves GITHUB_*) are mapped to GITHUB_* Worker secrets.
+# See CLAUDE.md "Env Var Naming: GH_ vs GITHUB_" and .claude/rules/07-env-and-urls.md.
 set_worker_secret "GITHUB_CLIENT_ID" "${GH_CLIENT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "GITHUB_CLIENT_SECRET" "${GH_CLIENT_SECRET:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "GITHUB_APP_ID" "${GH_APP_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
