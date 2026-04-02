@@ -118,12 +118,18 @@ export interface UseAcpSessionOptions {
    * conversation items so replay doesn't append to stale state.
    */
   onPrepareForReplay?: () => void;
+  /**
+   * Called when the WebSocket connection is established and the first session_state
+   * is received. This is the ideal place for one-time initialization like agent
+   * auto-selection, as it runs exactly once per successful connection.
+   */
+  onFirstConnect?: (sessionState: SessionStateMessage) => void;
   /** Initial reconnect delay in ms (default: 2000) */
   reconnectDelayMs?: number;
   /** Total reconnect timeout before giving up in ms (default: 30000) */
-  reconnectTimeoutMs?: number;
-  /** Maximum delay cap for exponential backoff in ms (default: 16000) */
   reconnectMaxDelayMs?: number;
+  /** Maximum delay cap for exponential backoff in ms (default: 16000) */
+  reconnectTimeoutMs?: number;
 }
 
 /** Return type of the useAcpSession hook */
@@ -206,10 +212,17 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
   const onPrepareForReplayRef = useRef(onPrepareForReplay);
   onPrepareForReplayRef.current = onPrepareForReplay;
+  
+  const onFirstConnectRef = useRef(onFirstConnect);
+  onFirstConnectRef.current = onFirstConnect;
+  
   const wsUrlRef = useRef(wsUrl);
   wsUrlRef.current = wsUrl;
   const resolveWsUrlRef = useRef(resolveWsUrl);
   resolveWsUrlRef.current = resolveWsUrl;
+  
+  // Track whether we've called onFirstConnect for this connection
+  const hasCalledFirstConnectRef = useRef(false);
 
   // Track the server-reported status so we can restore it after replay completes.
   // Without this, reconnecting during a prompt transitions replaying → ready,
@@ -321,6 +334,14 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     // already running (or idle), so no restart is needed.
     if (status !== 'error') {
       pendingAgentRestartRef.current = false;
+    }
+
+    // Call onFirstConnect exactly once when we receive the first session_state
+    // after a successful connection. This replaces the useEffect-based auto-select
+    // logic and prevents infinite loops by design.
+    if (!hasCalledFirstConnectRef.current && onFirstConnectRef.current) {
+      hasCalledFirstConnectRef.current = true;
+      onFirstConnectRef.current(msg);
     }
 
     if (status === 'idle') {
@@ -438,6 +459,8 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       // Reset the replay-completed guard so the new connection's first
       // session_state with replayCount > 0 correctly enters replay mode.
       replayCompletedRef.current = false;
+      // Reset the first-connect flag so onFirstConnect can fire again
+      hasCalledFirstConnectRef.current = false;
       // Stay in 'connecting' until we receive session_state from the server.
       // The server will send session_state immediately after the viewer
       // attaches, telling us whether an agent is already running.
