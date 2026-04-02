@@ -1037,7 +1037,7 @@ func readOptionalFileFromContainer(ctx context.Context, containerID, user, fileP
 	}
 
 	// File exists, read its content
-	dockerArgs = dockerArgs[:len(dockerArgs)-2] // Remove "test", "-f"
+	dockerArgs = dockerArgs[:len(dockerArgs)-3] // Remove "test", "-f", targetPath
 	dockerArgs = append(dockerArgs, "cat", targetPath)
 
 	cmd = exec.CommandContext(ctx, "docker", dockerArgs...)

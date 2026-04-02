@@ -127,9 +127,9 @@ export interface UseAcpSessionOptions {
   /** Initial reconnect delay in ms (default: 2000) */
   reconnectDelayMs?: number;
   /** Total reconnect timeout before giving up in ms (default: 30000) */
-  reconnectMaxDelayMs?: number;
-  /** Maximum delay cap for exponential backoff in ms (default: 16000) */
   reconnectTimeoutMs?: number;
+  /** Maximum delay cap for exponential backoff in ms (default: 16000) */
+  reconnectMaxDelayMs?: number;
 }
 
 /** Return type of the useAcpSession hook */
@@ -179,6 +179,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     onAcpMessage,
     onLifecycleEvent,
     onPrepareForReplay,
+    onFirstConnect,
     reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
     reconnectTimeoutMs = DEFAULT_RECONNECT_TIMEOUT_MS,
     reconnectMaxDelayMs = DEFAULT_RECONNECT_MAX_DELAY_MS,
