@@ -213,7 +213,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   const onPrepareForReplayRef = useRef(onPrepareForReplay);
   onPrepareForReplayRef.current = onPrepareForReplay;
   
-  const onFirstConnectRef = useRef(onFirstConnect);
+  const onFirstConnectRef = useRef<((sessionState: SessionStateMessage) => void) | undefined>();
   onFirstConnectRef.current = onFirstConnect;
   
   const wsUrlRef = useRef(wsUrl);
