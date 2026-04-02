@@ -48,10 +48,11 @@ jobs:
           npm init -y > /dev/null 2>&1
           npm install @playwright/test
           npx playwright install chromium
-          mkdir -p $GITHUB_WORKSPACE/node_modules
+          mkdir -p $GITHUB_WORKSPACE/node_modules/.bin
           ln -sf /tmp/pw/node_modules/@playwright $GITHUB_WORKSPACE/node_modules/@playwright
           ln -sf /tmp/pw/node_modules/playwright $GITHUB_WORKSPACE/node_modules/playwright
           ln -sf /tmp/pw/node_modules/playwright-core $GITHUB_WORKSPACE/node_modules/playwright-core
+          ln -sf /tmp/pw/node_modules/.bin/playwright $GITHUB_WORKSPACE/node_modules/.bin/playwright
 
       - name: Run smoke tests
         if: ${{ env.SMOKE_TEST_TOKEN != '' }}
