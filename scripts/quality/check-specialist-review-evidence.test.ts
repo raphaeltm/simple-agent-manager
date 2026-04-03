@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   extractReviewSection,
+  hasNeedsHumanReviewLabel,
   isAgentAuthored,
   isExplicitHumanNA,
-  hasNeedsHumanReviewLabel,
   parseReviewTable,
   validateReviewEvidence,
 } from './check-specialist-review-evidence.js';
@@ -124,7 +124,7 @@ describe('parseReviewTable', () => {
 `;
     const rows = parseReviewTable(section);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.reviewer).toBe('valid-reviewer');
+    expect(rows[0]?.reviewer).toBe('valid-reviewer');
   });
 
   it('normalizes status to uppercase', () => {
@@ -135,7 +135,7 @@ describe('parseReviewTable', () => {
 `;
     const rows = parseReviewTable(section);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.status).toBe('PASS');
+    expect(rows[0]?.status).toBe('PASS');
   });
 });
 
