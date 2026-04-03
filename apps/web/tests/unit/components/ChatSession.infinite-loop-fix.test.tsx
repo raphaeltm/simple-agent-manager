@@ -1,19 +1,17 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
-import { useRef, useState } from 'react';
+import { describe, expect, it, vi } from 'vitest';
 
 // Mock the dependencies
-define vi.mock('@simple-agent-manager/acp-client', () => ({
+vi.mock('@simple-agent-manager/acp-client', () => ({
   useAcpSession: vi.fn(),
   useAcpMessages: vi.fn(),
 }));
 
-define vi.mock('../../lib/api', () => ({
+vi.mock('../../lib/api', () => ({
   getTranscribeApiUrl: vi.fn(() => 'https://api.example.com/transcribe'),
   getTerminalToken: vi.fn(() => Promise.resolve({ token: 'test-token' })),
 }));
 
-define vi.mock('../../lib/error-reporter', () => ({
+vi.mock('../../lib/error-reporter', () => ({
   reportError: vi.fn(),
 }));
 
