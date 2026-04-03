@@ -149,6 +149,16 @@ describe('POST /api/auth/codex-refresh', () => {
     expect(json.error).toBe('insufficient_scope');
   });
 
+  it('accepts legacy tokens without scope claim (backward compatibility)', async () => {
+    vi.mocked(verifyCallbackToken).mockResolvedValue({
+      workspace: 'ws-123',
+      type: 'callback',
+      // scope is undefined — legacy token
+    });
+    const res = await postRefresh(validBody);
+    expect(res.status).toBe(200);
+  });
+
   // -----------------------------------------------------------------------
   // Request validation
   // -----------------------------------------------------------------------
@@ -162,6 +172,25 @@ describe('POST /api/auth/codex-refresh', () => {
 
   it('returns 400 when refresh_token is missing', async () => {
     const res = await postRefresh({ client_id: 'test', grant_type: 'refresh_token' });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe('invalid_request');
+  });
+
+  it('returns 400 when grant_type has wrong value', async () => {
+    const res = await postRefresh({ client_id: 'test', grant_type: 'authorization_code', refresh_token: 'rt' });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe('invalid_request');
+  });
+
+  it('returns 400 for malformed JSON body', async () => {
+    const url = '/api/auth/codex-refresh?token=valid-callback-token';
+    const res = await app.request(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not-json',
+    }, makeMockEnv());
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe('invalid_request');
@@ -251,6 +280,8 @@ describe('POST /api/auth/codex-refresh', () => {
 
     const res = await postRefresh(validBody);
     expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.error).toBe('upstream_error');
   });
 
   it('returns cached tokens from DO when refresh_token is stale (already refreshed by another workspace)', async () => {
@@ -270,6 +301,9 @@ describe('POST /api/auth/codex-refresh', () => {
     expect(json.access_token).toBe('cached-access');
     expect(json.refresh_token).toBe('already-refreshed-token');
     expect(json.id_token).toBe('cached-id');
+
+    // Verify the DO was still called (not short-circuited before reaching DO)
+    expect(mockDoFetch).toHaveBeenCalledTimes(1);
   });
 
   // -----------------------------------------------------------------------
