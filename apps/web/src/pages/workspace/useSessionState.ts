@@ -1,6 +1,6 @@
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, AgentSession, AgentType } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NavigateFunction } from 'react-router';
 
 import type { ChatSessionHandle } from '../../components/ChatSession';
@@ -212,18 +212,40 @@ export function useSessionState(
     }
   };
 
-  // Orphan management
+  // Orphan management — track which sessions we've already attempted to resume
+  // to prevent the auto-resume effect from firing on every poll cycle.
+  // The orphanedSessions useMemo returns a new array ref whenever agentSessions
+  // changes (every 5s from polling), which would re-trigger the effect without dedup.
+  const attemptedOrphanResumeRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!id || orphanedSessions.length === 0) return;
     for (const session of orphanedSessions) {
+      if (attemptedOrphanResumeRef.current.has(session.id)) continue;
+      attemptedOrphanResumeRef.current.add(session.id);
       void resumeAgentSession(id, session.id).catch(() => {});
     }
   }, [id, orphanedSessions]);
+
+  // Clean up attempted set when sessions are no longer orphaned
+  useEffect(() => {
+    if (orphanedSessions.length === 0 && attemptedOrphanResumeRef.current.size > 0) {
+      attemptedOrphanResumeRef.current.clear();
+    }
+  }, [orphanedSessions.length]);
+
+  // Ref for loadWorkspaceState to avoid putting it in callback deps
+  const loadWorkspaceStateRef = useRef(loadWorkspaceState);
+  loadWorkspaceStateRef.current = loadWorkspaceState;
 
   const handleStopAllOrphans = useCallback(async () => {
     if (!id) return;
     const orphanIds = orphanedSessions.map((s) => s.id);
     setRecentlyStopped((prev) => new Set([...prev, ...orphanIds]));
+    // Clear attempted set so they can be re-attempted if stop fails and they reappear
+    for (const oid of orphanIds) {
+      attemptedOrphanResumeRef.current.delete(oid);
+    }
     for (const session of orphanedSessions) {
       try {
         await stopAgentSession(id, session.id);
@@ -235,7 +257,7 @@ export function useSessionState(
         });
       }
     }
-    void loadWorkspaceState();
+    void loadWorkspaceStateRef.current();
     setTimeout(() => {
       setRecentlyStopped((prev) => {
         const next = new Set(prev);
@@ -243,7 +265,7 @@ export function useSessionState(
         return next;
       });
     }, 10_000);
-  }, [id, orphanedSessions, loadWorkspaceState]);
+  }, [id, orphanedSessions]);
 
   useEffect(() => {
     if (orphanedSessions.length === 0) setDismissedOrphans(false);

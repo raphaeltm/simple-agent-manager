@@ -1,5 +1,5 @@
 import type { BootLogEntry } from '@simple-agent-manager/shared';
-import { useCallback,useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { getTerminalToken } from '../lib/api';
 
@@ -15,6 +15,22 @@ interface BootLogWSMessage {
 interface UseBootLogStreamResult {
   logs: BootLogEntry[];
   connected: boolean;
+}
+
+/**
+ * Closes the WebSocket stored in wsRef and resets connected state.
+ * Extracted as a plain function (not a callback) to avoid putting it
+ * in useEffect dependency arrays, which was a source of unnecessary re-renders.
+ */
+function cleanupWebSocket(
+  wsRef: React.RefObject<WebSocket | null>,
+  setConnected: React.Dispatch<React.SetStateAction<boolean>>
+): void {
+  if (wsRef.current) {
+    wsRef.current.close();
+    wsRef.current = null;
+  }
+  setConnected(false);
 }
 
 /**
@@ -34,26 +50,19 @@ export function useBootLogStream(
   const wsRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
 
-  const cleanup = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    setConnected(false);
-  }, []);
-
+  // Mount/unmount tracking — no dependencies, runs once
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      cleanup();
+      cleanupWebSocket(wsRef, setConnected);
     };
-  }, [cleanup]);
+  }, []);
 
   useEffect(() => {
     // Only connect during workspace creation
     if (status !== 'creating' || !workspaceId || !workspaceUrl) {
-      cleanup();
+      cleanupWebSocket(wsRef, setConnected);
       return;
     }
 
@@ -129,9 +138,9 @@ export function useBootLogStream(
     return () => {
       cancelled = true;
       if (retryTimeout) clearTimeout(retryTimeout);
-      cleanup();
+      cleanupWebSocket(wsRef, setConnected);
     };
-  }, [workspaceId, workspaceUrl, status, cleanup]);
+  }, [workspaceId, workspaceUrl, status]);
 
   // Reset logs when workspace changes or status leaves 'creating'
   useEffect(() => {

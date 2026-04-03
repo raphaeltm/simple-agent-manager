@@ -70,6 +70,12 @@ export function useWorkspaceCore(
   const terminalWsUrlCacheRef = useRef<{ url: string; resolvedAt: number } | null>(null);
   const wsUrlSetRef = useRef(false);
 
+  // Refs for polling effect — break the feedback loop where loadWorkspaceState
+  // and workspace?.status in deps cause the effect to re-run on every state update.
+  // The polling interval reads current values via refs instead of depending on them.
+  const loadWorkspaceStateRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const workspaceStatusRef = useRef<string | undefined>(undefined);
+
   const isRunning = isWorkspaceOperational(workspace?.status);
 
   // Proactive token refresh
@@ -102,7 +108,14 @@ export function useWorkspaceCore(
     workspace?.status
   );
 
-  // Load workspace state
+  // Ref for terminalToken so loadWorkspaceState doesn't need it as a dependency.
+  // This prevents token refreshes from invalidating the callback and cascading
+  // into the polling effect (the core cause of React error #185).
+  const terminalTokenRef = useRef(terminalToken);
+  terminalTokenRef.current = terminalToken;
+
+  // Load workspace state — depends only on `id` (stable).
+  // Reads terminalToken from ref to avoid callback identity changes on token refresh.
   const loadWorkspaceState = useCallback(async () => {
     if (!id) return;
 
@@ -110,14 +123,16 @@ export function useWorkspaceCore(
       setError(null);
       const workspaceData = await getWorkspace(id);
       setWorkspace(workspaceData);
+      workspaceStatusRef.current = workspaceData.status;
       setDisplayNameInput(workspaceData.displayName || workspaceData.name);
 
+      const currentToken = terminalTokenRef.current;
       const wsRunning = isWorkspaceOperational(workspaceData.status);
       let sessionsData: AgentSession[] = [];
-      if (wsRunning && workspaceData.url && terminalToken) {
+      if (wsRunning && workspaceData.url && currentToken) {
         try {
           const [liveSessions, cpSessions] = await Promise.all([
-            listAgentSessionsLive(workspaceData.url, id, terminalToken),
+            listAgentSessionsLive(workspaceData.url, id, currentToken),
             listAgentSessions(id).catch(() => [] as AgentSession[]),
           ]);
           const cpMap = new Map(cpSessions.map((s) => [s.id, s]));
@@ -137,27 +152,38 @@ export function useWorkspaceCore(
     } finally {
       setLoading(false);
     }
-  }, [id, terminalToken]);
+  }, [id]);
 
-  // Load/reload workspace
+  // Keep the ref in sync so the polling interval always calls the latest version
+  loadWorkspaceStateRef.current = loadWorkspaceState;
+
+  // Keep workspace status ref in sync for the polling interval's conditional check
+  useEffect(() => {
+    workspaceStatusRef.current = workspace?.status;
+  }, [workspace?.status]);
+
+  // Load/reload workspace — depends ONLY on `id`.
+  // The polling interval reads workspace status and loadWorkspaceState from refs,
+  // breaking the feedback loop that caused React error #185.
   useEffect(() => {
     if (!id) return;
 
-    void loadWorkspaceState();
+    void loadWorkspaceStateRef.current();
 
     const interval = setInterval(() => {
+      const status = workspaceStatusRef.current;
       if (
-        workspace?.status === 'creating' ||
-        workspace?.status === 'stopping' ||
-        workspace?.status === 'running' ||
-        workspace?.status === 'recovery'
+        status === 'creating' ||
+        status === 'stopping' ||
+        status === 'running' ||
+        status === 'recovery'
       ) {
-        void loadWorkspaceState();
+        void loadWorkspaceStateRef.current();
       }
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [id, workspace?.status, loadWorkspaceState]);
+  }, [id]);
 
   // Build terminal WebSocket URL
   const buildTerminalWsUrl = useCallback(
@@ -229,13 +255,23 @@ export function useWorkspaceCore(
     isRunning
   );
 
-  // Fetch workspace events from VM Agent
+  // Ref for workspace URL — avoids putting workspace?.url in polling effect deps
+  const workspaceUrlRef = useRef(workspace?.url);
   useEffect(() => {
-    if (!id || !workspace?.url || !terminalToken || !isRunning) return;
+    workspaceUrlRef.current = workspace?.url;
+  }, [workspace?.url]);
+
+  // Fetch workspace events from VM Agent — depends only on `id` and `isRunning`.
+  // Reads workspace URL and token from refs to avoid polling effect feedback loops.
+  useEffect(() => {
+    if (!id || !isRunning) return;
 
     const fetchEvents = async () => {
+      const currentUrl = workspaceUrlRef.current;
+      const currentToken = terminalTokenRef.current;
+      if (!currentUrl || !currentToken) return;
       try {
-        const data = await listWorkspaceEvents(workspace.url!, id, terminalToken, 50);
+        const data = await listWorkspaceEvents(currentUrl, id, currentToken, 50);
         setWorkspaceEvents(data.events || []);
       } catch {
         // Events are secondary — polling retries
@@ -245,7 +281,7 @@ export function useWorkspaceCore(
     void fetchEvents();
     const interval = setInterval(() => void fetchEvents(), 10000);
     return () => clearInterval(interval);
-  }, [id, workspace?.url, isRunning, terminalToken]);
+  }, [id, isRunning]);
 
   // Workspace actions
   const handleStop = async () => {
