@@ -95,6 +95,10 @@ export function getCurrentWindowStart(windowSeconds: number): number {
 
 /**
  * Check and update rate limit.
+ *
+ * NOTE: This read-increment-write pattern is not atomic. KV has no CAS primitive.
+ * Under concurrent requests from the same identifier, the true count may exceed
+ * `limit` by a small amount. For strict enforcement, use a Durable Object counter.
  */
 export async function checkRateLimit(
   kv: KVNamespace,
