@@ -37,6 +37,7 @@ export const DEFAULT_RATE_LIMITS = {
   CLIENT_ERRORS: 200,
   IDENTITY_TOKEN: 60,
   ANALYTICS_INGEST: 60,
+  CODEX_REFRESH: 30,
 } as const;
 
 /** Default time window (1 hour in seconds) */
@@ -225,4 +226,25 @@ export function rateLimitAnonymous(env: Env): MiddlewareHandler<{ Bindings: Env 
     keyPrefix: 'anonymous',
     useIp: true,
   });
+}
+
+/**
+ * Check rate limit for Codex refresh endpoint.
+ * Uses workspaceId as the identifier (extracted from verified callback token).
+ * Default: 30 requests per hour per workspace.
+ *
+ * Returns null if allowed, or a Response if rate-limited.
+ * This is a direct check (not middleware) because the codex-refresh endpoint
+ * uses callback token auth, not session auth.
+ */
+export async function checkCodexRefreshRateLimit(
+  env: Env,
+  workspaceId: string,
+): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+  const limit = getRateLimit(env, 'CODEX_REFRESH');
+  const windowSeconds = DEFAULT_WINDOW_SECONDS;
+  const windowStart = getCurrentWindowStart(windowSeconds);
+  const key = createRateLimitKey('codex-refresh', workspaceId, windowStart);
+
+  return checkRateLimit(env.KV, key, limit, windowSeconds);
 }

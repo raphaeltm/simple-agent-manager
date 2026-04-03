@@ -361,6 +361,136 @@ describe('CodexRefreshLock', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Scope validation
+  // -----------------------------------------------------------------------
+
+  it('succeeds without warning when upstream returns no scope field', async () => {
+    const { do: doInstance, env } = createDO({
+      CODEX_EXPECTED_SCOPES: 'openid,offline_access',
+    });
+    setupCredentialFound(env);
+
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'new-access',
+          refresh_token: 'new-refresh',
+          id_token: 'new-id',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(200);
+    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('unexpected_scopes'),
+      expect.anything(),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('warns when upstream returns unexpected scopes', async () => {
+    const { do: doInstance, env } = createDO({
+      CODEX_EXPECTED_SCOPES: 'openid,offline_access',
+    });
+    setupCredentialFound(env);
+
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'new-access',
+          refresh_token: 'new-refresh',
+          id_token: 'new-id',
+          scope: 'openid offline_access admin:write',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    // Should still succeed (warning only, not blocking)
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.access_token).toBe('new-access');
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      '[codex_refresh.unexpected_scopes] Upstream returned unexpected scopes',
+      expect.objectContaining({
+        unexpectedScopes: ['admin:write'],
+      }),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('does not warn when scopes match expected', async () => {
+    const { do: doInstance, env } = createDO({
+      CODEX_EXPECTED_SCOPES: 'openid,offline_access',
+    });
+    setupCredentialFound(env);
+
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'new-access',
+          refresh_token: 'new-refresh',
+          scope: 'openid offline_access',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(200);
+    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('unexpected_scopes'),
+      expect.anything(),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('skips scope validation when CODEX_EXPECTED_SCOPES is not configured', async () => {
+    const { do: doInstance, env } = createDO();
+    // No CODEX_EXPECTED_SCOPES set
+    setupCredentialFound(env);
+
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'new-access',
+          refresh_token: 'new-refresh',
+          scope: 'openid offline_access admin:write some:other:scope',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(200);
+    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('unexpected_scopes'),
+      expect.anything(),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  // -----------------------------------------------------------------------
   // Configurable upstream URL and client_id
   // -----------------------------------------------------------------------
 

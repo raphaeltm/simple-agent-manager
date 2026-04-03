@@ -31,6 +31,7 @@ interface CodexRefreshEnv {
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string;
   CODEX_REFRESH_LOCK_TIMEOUT_MS?: string;
   CODEX_CLIENT_ID?: string;
+  CODEX_EXPECTED_SCOPES?: string;
 }
 
 const DEFAULT_UPSTREAM_URL = 'https://auth.openai.com/oauth/token';
@@ -207,16 +208,20 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     // Parse new tokens from OpenAI response.
-    const newTokens: Record<string, string> = await upstreamResponse.json();
+    const newTokens: Record<string, unknown> = await upstreamResponse.json();
+
+    // Scope validation — warn (not block) when upstream returns unexpected scopes.
+    // This catches scope escalation or drift without breaking legacy tokens.
+    this.validateUpstreamScopes(newTokens, userId);
 
     // Update the stored auth.json with new tokens.
     if (!storedAuth.tokens || typeof storedAuth.tokens !== 'object') {
       storedAuth.tokens = {};
     }
     const authTokens = storedAuth.tokens as Record<string, string>;
-    if (newTokens.access_token) authTokens.access_token = newTokens.access_token;
-    if (newTokens.refresh_token) authTokens.refresh_token = newTokens.refresh_token;
-    if (newTokens.id_token) authTokens.id_token = newTokens.id_token;
+    if (typeof newTokens.access_token === 'string') authTokens.access_token = newTokens.access_token;
+    if (typeof newTokens.refresh_token === 'string') authTokens.refresh_token = newTokens.refresh_token;
+    if (typeof newTokens.id_token === 'string') authTokens.id_token = newTokens.id_token;
     authTokens.last_refresh = new Date().toISOString();
 
     // Re-encrypt with fresh IV and update the database.
@@ -232,12 +237,54 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // Return the new tokens to Codex.
     return new Response(
       JSON.stringify({
-        access_token: newTokens.access_token ?? null,
-        refresh_token: newTokens.refresh_token ?? null,
-        id_token: newTokens.id_token ?? null,
+        access_token: (typeof newTokens.access_token === 'string' ? newTokens.access_token : null),
+        refresh_token: (typeof newTokens.refresh_token === 'string' ? newTokens.refresh_token : null),
+        id_token: (typeof newTokens.id_token === 'string' ? newTokens.id_token : null),
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
+  }
+
+  /**
+   * Validate scopes in the upstream token response.
+   * Logs a warning if unexpected scopes are present — does NOT block the refresh.
+   * This catches scope escalation or drift without breaking backward compatibility
+   * with legacy tokens that may not include a scope field.
+   */
+  private validateUpstreamScopes(tokens: Record<string, unknown>, userId: string): void {
+    const scope = tokens.scope;
+    if (scope === undefined || scope === null) {
+      // No scope in response — common for legacy tokens. Nothing to validate.
+      return;
+    }
+
+    if (typeof scope !== 'string') {
+      console.warn('[codex_refresh.scope_validation] Non-string scope in upstream response', {
+        userId,
+        scopeType: typeof scope,
+      });
+      return;
+    }
+
+    // Parse expected scopes from env (comma-separated) or use empty set (accept all).
+    const expectedScopesEnv = this.env.CODEX_EXPECTED_SCOPES;
+    if (!expectedScopesEnv) {
+      // No expected scopes configured — skip validation (accept all).
+      return;
+    }
+
+    const expectedScopes = new Set(expectedScopesEnv.split(',').map(s => s.trim()).filter(Boolean));
+    const returnedScopes = scope.split(' ').filter(Boolean);
+    const unexpected = returnedScopes.filter(s => !expectedScopes.has(s));
+
+    if (unexpected.length > 0) {
+      console.warn('[codex_refresh.unexpected_scopes] Upstream returned unexpected scopes', {
+        userId,
+        expectedScopes: [...expectedScopes],
+        returnedScopes,
+        unexpectedScopes: unexpected,
+      });
+    }
   }
 
   /**
