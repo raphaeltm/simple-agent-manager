@@ -10,7 +10,7 @@ import {
   computeBackoffMs,
   isTransientError,
   parseEnvInt,
-} from '../../src/durable-objects/task-runner-helpers';
+} from '../../src/durable-objects/task-runner/helpers';
 
 // =============================================================================
 // parseEnvInt

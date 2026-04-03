@@ -125,7 +125,15 @@ describe('Project default provider — TaskRunner DO service', () => {
 });
 
 describe('Project default provider — TaskRunner DO', () => {
-  const runner = apiSrc('durable-objects/task-runner.ts');
+  const runner = [
+    'index.ts',
+    'types.ts',
+    'node-steps.ts',
+    'workspace-steps.ts',
+    'agent-session-step.ts',
+    'state-machine.ts',
+    'helpers.ts',
+  ].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
 
   it('TaskRunConfig includes cloudProvider field', () => {
     expect(runner).toContain('cloudProvider: CredentialProvider | null');

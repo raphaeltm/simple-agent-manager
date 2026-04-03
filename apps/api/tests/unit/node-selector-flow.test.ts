@@ -419,10 +419,15 @@ describe('workspace count limit (MAX_WORKSPACES_PER_NODE)', () => {
 // TaskRunner workspace count limit consistency
 // =============================================================================
 
-const taskRunnerSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
-  'utf8'
-);
+const taskRunnerSource = [
+  'index.ts',
+  'types.ts',
+  'node-steps.ts',
+  'workspace-steps.ts',
+  'agent-session-step.ts',
+  'state-machine.ts',
+  'helpers.ts',
+].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
 
 describe('TaskRunner findNodeWithCapacity workspace count limit', () => {
   it('imports DEFAULT_MAX_WORKSPACES_PER_NODE', () => {

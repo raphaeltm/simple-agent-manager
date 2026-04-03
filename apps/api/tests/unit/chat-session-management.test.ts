@@ -20,10 +20,15 @@ const taskRunsSource = readFileSync(
   resolve(process.cwd(), 'src/routes/tasks/run.ts'),
   'utf8'
 );
-const taskRunnerDoSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
-  'utf8'
-);
+const taskRunnerDoSource = [
+  'index.ts',
+  'types.ts',
+  'node-steps.ts',
+  'workspace-steps.ts',
+  'agent-session-step.ts',
+  'state-machine.ts',
+  'helpers.ts',
+].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
 const projectDataDoSource = [
   readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/messages.ts'), 'utf8'),
@@ -56,10 +61,10 @@ describe('TDF-6 Fix 1: Single session creation point', () => {
   it('TaskRunner DO does NOT call createSession in handleWorkspaceCreation', () => {
     // Extract the handleWorkspaceCreation method
     const wsCreationStart = taskRunnerDoSource.indexOf(
-      'private async handleWorkspaceCreation('
+      'export async function handleWorkspaceCreation('
     );
     const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'private async handleWorkspaceReady('
+      'export async function handleWorkspaceReady('
     );
     const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
 
@@ -69,10 +74,10 @@ describe('TDF-6 Fix 1: Single session creation point', () => {
 
   it('TaskRunner DO calls ensureSessionLinked (which calls linkSessionToWorkspace)', () => {
     const wsCreationStart = taskRunnerDoSource.indexOf(
-      'private async handleWorkspaceCreation('
+      'export async function handleWorkspaceCreation('
     );
     const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'private async handleWorkspaceReady('
+      'export async function handleWorkspaceReady('
     );
     const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
 
@@ -186,19 +191,19 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
 
     // handleWorkspaceCreation calls ensureSessionLinked
     const wsCreationStart = taskRunnerDoSource.indexOf(
-      'private async handleWorkspaceCreation('
+      'export async function handleWorkspaceCreation('
     );
     const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'private async handleWorkspaceReady('
+      'export async function handleWorkspaceReady('
     );
     const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
-    expect(wsCreationSection).toContain('this.ensureSessionLinked(');
+    expect(wsCreationSection).toContain('ensureSessionLinked(');
   });
 
   it('TaskRunner DO has separate D1 and DO session linking via ensureSessionLinked', () => {
     // Session linking is now in a dedicated helper method (ensureSessionLinked)
     // that is called from both fresh creation and crash recovery paths.
-    expect(taskRunnerDoSource).toContain('private async ensureSessionLinked(');
+    expect(taskRunnerDoSource).toContain('export async function ensureSessionLinked(');
     expect(taskRunnerDoSource).toContain('session_d1_linked');
     expect(taskRunnerDoSource).toContain('session_d1_link_failed');
     expect(taskRunnerDoSource).toContain('session_linked_to_workspace');
@@ -207,10 +212,10 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
 
   it('handleWorkspaceCreation calls ensureSessionLinked', () => {
     const wsCreationStart = taskRunnerDoSource.indexOf(
-      'private async handleWorkspaceCreation('
+      'export async function handleWorkspaceCreation('
     );
     const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'private async handleWorkspaceReady('
+      'export async function handleWorkspaceReady('
     );
     const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
 

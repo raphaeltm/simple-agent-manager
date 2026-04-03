@@ -15,26 +15,31 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const doSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
-  'utf8'
-);
+const doSource = [
+  'index.ts',
+  'types.ts',
+  'node-steps.ts',
+  'workspace-steps.ts',
+  'agent-session-step.ts',
+  'state-machine.ts',
+  'helpers.ts',
+].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
 
 describe('verifyNodeAgentHealthy helper', () => {
   const section = (() => {
-    const start = doSource.indexOf('private async verifyNodeAgentHealthy(');
-    const end = doSource.indexOf('private async tryClaimWarmNode(');
+    const start = doSource.indexOf('export async function verifyNodeAgentHealthy(');
+    const end = doSource.indexOf('async function tryClaimWarmNode(');
     return doSource.slice(start, end);
   })();
 
-  it('exists as a private method', () => {
-    expect(section).toContain('private async verifyNodeAgentHealthy(nodeId: string): Promise<boolean>');
+  it('exists as an exported function', () => {
+    expect(section).toContain('export async function verifyNodeAgentHealthy(');
   });
 
   it('queries D1 for health_status and last_heartbeat_at', () => {
     expect(section).toContain('health_status');
     expect(section).toContain('last_heartbeat_at');
-    expect(section).toContain('this.env.DATABASE.prepare');
+    expect(section).toContain('rc.env.DATABASE.prepare');
   });
 
   it('does NOT fetch the VM agent directly (same-zone bypass)', () => {
@@ -61,13 +66,13 @@ describe('verifyNodeAgentHealthy helper', () => {
 
 describe('handleNodeAgentReady D1-based health check', () => {
   const agentReadySection = (() => {
-    const start = doSource.indexOf('private async handleNodeAgentReady(');
-    const end = doSource.indexOf('private async handleWorkspaceCreation(');
+    const start = doSource.indexOf('export async function handleNodeAgentReady(');
+    const end = doSource.indexOf('export async function handleWorkspaceCreation(');
     return doSource.slice(start, end);
   })();
 
   it('queries D1 for node health status', () => {
-    expect(agentReadySection).toContain('this.env.DATABASE.prepare');
+    expect(agentReadySection).toContain('rc.env.DATABASE.prepare');
     expect(agentReadySection).toContain('health_status');
     expect(agentReadySection).toContain('last_heartbeat_at');
   });
@@ -91,7 +96,7 @@ describe('handleNodeAgentReady D1-based health check', () => {
   });
 
   it('schedules another poll when not ready', () => {
-    expect(agentReadySection).toContain('this.getAgentPollIntervalMs()');
+    expect(agentReadySection).toContain('rc.getAgentPollIntervalMs()');
   });
 
   it('documents the same-zone routing issue in comments', () => {
@@ -102,8 +107,8 @@ describe('handleNodeAgentReady D1-based health check', () => {
 
 describe('handleNodeSelection health pre-checks for node reuse', () => {
   const nodeSelectionSection = (() => {
-    const start = doSource.indexOf('private async handleNodeSelection(');
-    const end = doSource.indexOf('private async handleNodeProvisioning(');
+    const start = doSource.indexOf('export async function handleNodeSelection(');
+    const end = doSource.indexOf('export async function handleNodeProvisioning(');
     return doSource.slice(start, end);
   })();
 
@@ -112,7 +117,7 @@ describe('handleNodeSelection health pre-checks for node reuse', () => {
       nodeSelectionSection.indexOf('preferredNodeId'),
       nodeSelectionSection.indexOf('tryClaimWarmNode')
     );
-    expect(preferredSection).toContain('verifyNodeAgentHealthy(node.id)');
+    expect(preferredSection).toContain('verifyNodeAgentHealthy(node.id,');
   });
 
   it('verifies warm node agent health after claiming', () => {
@@ -120,7 +125,7 @@ describe('handleNodeSelection health pre-checks for node reuse', () => {
       nodeSelectionSection.indexOf('tryClaimWarmNode'),
       nodeSelectionSection.indexOf('findNodeWithCapacity')
     );
-    expect(warmSection).toContain('verifyNodeAgentHealthy(nodeId)');
+    expect(warmSection).toContain('verifyNodeAgentHealthy(nodeId,');
   });
 
   it('verifies existing node agent health before reusing', () => {
@@ -128,7 +133,7 @@ describe('handleNodeSelection health pre-checks for node reuse', () => {
       nodeSelectionSection.indexOf('findNodeWithCapacity'),
       nodeSelectionSection.indexOf('node_provisioning')
     );
-    expect(existingSection).toContain('verifyNodeAgentHealthy(existingNodeId)');
+    expect(existingSection).toContain('verifyNodeAgentHealthy(existingNodeId,');
   });
 
   it('logs warning when warm node fails health check', () => {
