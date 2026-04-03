@@ -8,6 +8,30 @@
  *
  * Message validation tests are NOT duplicated here — see
  * tests/workers/workspace-messages.test.ts for that coverage.
+ *
+ * === Coverage gaps (require user-auth session setup in Miniflare) ===
+ *
+ * The following invariants from deleted source-contract tests cannot be
+ * verified as worker integration tests without setting up better-auth
+ * sessions in Miniflare. They are documented here for future coverage:
+ *
+ * - C1: agentSessionId lookup does NOT filter by status='running'
+ *   (chat.ts:180-192). The query uses workspaceId + orderBy(createdAt desc)
+ *   without a status filter. Filtering by status caused UI to lose
+ *   conversation history. Verified by code inspection; a behavioral test
+ *   would require authenticated GET /api/projects/:id/chat/sessions/:id.
+ *
+ * - H1: stopNodeResources sets status='deleted' (not 'stopped') and calls
+ *   deleteVM (not powerOff). This is an integration concern requiring real
+ *   provider APIs; covered by staging verification.
+ *
+ * - H2: deriveHealthStatus is not exported from nodes.ts, so it cannot be
+ *   tested directly. Its behavior is exercised through GET /api/nodes
+ *   responses in authenticated contexts.
+ *
+ * - H3: Project idle timeout bounds validation on PATCH requires user auth.
+ *
+ * - H4: Workspace count filter (excludes 'deleted'/'error') requires user auth.
  */
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
