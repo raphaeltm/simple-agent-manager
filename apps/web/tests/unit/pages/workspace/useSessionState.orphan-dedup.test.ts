@@ -1,15 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 
 /**
- * Regression tests for orphaned session auto-resume deduplication.
+ * DOCUMENTATION TESTS for orphaned session auto-resume deduplication.
  *
- * Before the fix, the orphan auto-resume effect would fire on every poll cycle
- * (every 5 seconds) because `orphanedSessions` is a useMemo that returns a new
- * array reference whenever `agentSessions` changes. This caused repeated API
- * calls to resumeAgentSession for the same sessions.
+ * These tests document the Set-based dedup pattern that prevents duplicate
+ * resumeAgentSession API calls. They verify the algorithmic logic but do NOT
+ * render the actual useSessionState hook — they are pattern documentation,
+ * not behavioral regression guards.
  *
- * The fix uses a ref (attemptedOrphanResumeRef) to track which sessions have
- * already been attempted, preventing duplicate resume calls.
+ * For true regression coverage, the orphan integration test in workspace.test.tsx
+ * (line ~763) should be strengthened to assert `toHaveBeenCalledTimes(1)` and
+ * advance timers past a second poll cycle to verify deduplication.
+ * (See test-engineer review findings from 2026-04-03.)
+ *
+ * Before the fix, the orphan auto-resume effect fired on every poll cycle
+ * (every 5 seconds) because `orphanedSessions` useMemo returns a new array
+ * reference whenever `agentSessions` changes. The fix uses a ref
+ * (attemptedOrphanResumeRef) to track already-attempted session IDs.
  */
 
 describe('useSessionState orphan auto-resume dedup (React #185 regression)', () => {

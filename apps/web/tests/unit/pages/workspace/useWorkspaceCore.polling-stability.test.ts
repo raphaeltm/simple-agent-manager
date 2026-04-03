@@ -1,22 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 
 /**
- * Regression tests for React error #185 (infinite render loop) in workspace view.
+ * DOCUMENTATION TESTS for React error #185 (infinite render loop) in workspace view.
  *
- * These tests verify the patterns that caused the infinite loop:
- * 1. loadWorkspaceState callback depending on terminalToken (unstable dep)
- * 2. Polling effect depending on both loadWorkspaceState and workspace?.status
- * 3. Token refresh invalidating the callback → effect re-runs → state update → loop
+ * These tests document the ref-based patterns that prevent the infinite loop.
+ * They verify the algorithmic invariants (ref reads, dedup logic) but do NOT
+ * render the actual hooks — they are pattern documentation, not behavioral
+ * regression guards.
  *
- * The fix uses refs to break the feedback loop:
- * - terminalTokenRef: loadWorkspaceState reads token from ref, not closure
- * - loadWorkspaceStateRef: polling interval calls via ref, not effect dep
- * - workspaceStatusRef: polling interval checks status via ref, not effect dep
+ * For true regression coverage, the integration tests in workspace.test.tsx
+ * should assert that `getWorkspace` is not called more than expected across
+ * poll cycles and that `resumeAgentSession` is called exactly once per session.
+ * (See test-engineer review findings from 2026-04-03.)
+ *
+ * Patterns documented:
+ * 1. loadWorkspaceState reads terminalToken from ref, not closure dep
+ * 2. Polling interval reads status and loadWorkspaceState from refs, not effect deps
+ * 3. Token refresh does not invalidate the polling effect
  */
-
-// We test the patterns directly rather than rendering the full hook,
-// because the hook has many external dependencies (API calls, other hooks).
-// These tests verify the invariants that prevent the infinite loop.
 
 describe('useWorkspaceCore polling stability (React #185 regression)', () => {
   it('loadWorkspaceState callback should depend only on workspace id, not on terminalToken', async () => {
