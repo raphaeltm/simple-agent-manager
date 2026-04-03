@@ -206,6 +206,49 @@ Set via `wrangler secret put` or deployment workflow:
 - Share credentials between users
 - Store Hetzner tokens at the platform level
 
+## JWT Token Lifetimes
+
+All JWT lifetimes are configurable via environment variables with sensible defaults.
+
+| Token Type | Default Lifetime | Env Override | Refresh Mechanism | Purpose |
+|------------|-----------------|--------------|-------------------|---------|
+| Workspace callback | 24 hours | `CALLBACK_TOKEN_EXPIRY_MS` | Auto-refresh at 50% lifetime during heartbeats (`CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO`, default: 0.5) | VM agent → control plane callbacks (ready, messages, agent-key, codex-refresh) |
+| Node callback | 24 hours | `CALLBACK_TOKEN_EXPIRY_MS` | Auto-refresh at 50% lifetime during heartbeats | Node-level operations (heartbeat, ready, error reporting) |
+| Terminal | 1 hour | `TERMINAL_TOKEN_EXPIRY_MS` | New token generated per WebSocket session | Browser → VM agent WebSocket auth |
+| MCP | 4 hours | `MCP_TOKEN_TTL_SECONDS` | Non-destructive validation; reused for task duration | Agent MCP tool calls during task execution |
+| GCP identity | 10 minutes | `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS` | One-shot; new token per deployment operation | GCP OIDC federation for deployment |
+
+### Callback Token Design Rationale
+
+Workspace callback tokens use a 24-hour lifetime because:
+1. **Workspaces run for extended periods** — agents may execute tasks lasting hours
+2. **Auto-refresh during heartbeats** — the VM agent sends periodic heartbeats; when a token passes the 50% threshold, the control plane issues a fresh token in the heartbeat response
+3. **Scope discrimination** — workspace-scoped tokens (`scope: "workspace"`) can access workspace-specific endpoints; node-scoped tokens (`scope: "node"`) are restricted to node-level operations. This prevents cross-workspace credential access on multi-tenant nodes.
+
+## Accepted Risks
+
+### Token-in-URL for Codex Refresh Proxy
+
+**Risk**: The Codex token refresh endpoint (`POST /api/auth/codex-refresh`) receives the workspace callback token via the `?token=` URL query parameter rather than an HTTP header.
+
+**Why this is necessary**: Codex CLI's built-in OAuth token refresh mechanism uses a hardcoded URL override (`CODEX_REFRESH_TOKEN_URL_OVERRIDE`). The CLI constructs a POST request to this URL but does not support setting custom HTTP headers on the refresh request. The token must be embedded in the URL itself.
+
+**Exposure vector**: URL query parameters may appear in:
+- Server access logs (Cloudflare Workers do not log request URLs by default)
+- Proxy/CDN logs (Cloudflare edge logs, if enabled, retain for 72 hours max)
+- Browser history (not applicable — this endpoint is called by Codex CLI inside a container, not a browser)
+
+**Mitigations in place**:
+1. **Short-lived JWT** — Callback tokens expire after 24 hours (configurable via `CALLBACK_TOKEN_EXPIRY_MS`). Auto-refreshed at 50% of lifetime during heartbeats.
+2. **Scope enforcement** — Node-scoped tokens are rejected (`codex-refresh.ts:61-67`). Only workspace-scoped tokens can access credential endpoints.
+3. **RS256 signature verification** — Tokens are signed with the platform's RSA-2048 private key and verified on every request (`verifyCallbackToken()`). Stolen tokens cannot be forged.
+4. **Workspace binding** — Each token is bound to a specific workspace ID. A leaked token can only refresh credentials for its own workspace's user.
+5. **Access logging** — Every refresh request is logged with workspaceId and userId (`codex-refresh.ts:99-102`), enabling audit trail and anomaly detection.
+6. **Rate limiting** — Per-workspace rate limiting prevents abuse via stolen tokens (default: 30 requests/hour, configurable via `RATE_LIMIT_CODEX_REFRESH`).
+7. **Kill switch** — The entire proxy can be disabled instantly via `CODEX_REFRESH_PROXY_ENABLED=false`.
+
+**Accepted because**: There is no alternative mechanism — Codex's refresh flow is hardcoded and cannot set HTTP headers. The mitigations above bound the blast radius of a leaked token to a single workspace's credentials, for the remaining token lifetime (max 24 hours, typically less due to auto-refresh).
+
 ## Related Documentation
 
 - [Credential Security](./credential-security.md) - Encryption details

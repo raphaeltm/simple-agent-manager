@@ -48,33 +48,33 @@ PR #600 (codex-token-refresh-proxy) shipped with deferred security findings from
 ## Implementation Checklist
 
 ### Token-in-URL Documentation
-- [ ] Add "Accepted Risks" section to `docs/architecture/secrets-taxonomy.md`
-- [ ] Document token-in-URL constraint, mitigations (short-lived JWT, scope enforcement, access logging), and accepted risk
+- [x] Add "Accepted Risks" section to `docs/architecture/secrets-taxonomy.md`
+- [x] Document token-in-URL constraint, mitigations (short-lived JWT, scope enforcement, access logging), and accepted risk
 
 ### Scope Validation
-- [ ] Add scope validation in `codex-refresh-lock.ts` after parsing upstream response (line ~210)
-- [ ] Define expected scopes constant (configurable via `CODEX_EXPECTED_SCOPES`)
-- [ ] Log warning (not error) when scope field present with unexpected values
-- [ ] Pass through tokens regardless (warning only, not blocking)
-- [ ] Add unit tests for scope validation (expected scopes, unexpected scopes, missing scope field)
+- [x] Add scope validation in `codex-refresh-lock.ts` after parsing upstream response (line ~210)
+- [x] Define expected scopes constant (configurable via `CODEX_EXPECTED_SCOPES`)
+- [x] Log warning (not error) when scope field present with unexpected values
+- [x] Pass through tokens regardless (warning only, not blocking)
+- [x] Add unit tests for scope validation (expected scopes, unexpected scopes, missing scope field)
 
 ### Rate Limiting
-- [ ] Add `CODEX_REFRESH` to `DEFAULT_RATE_LIMITS` (default: 30 per hour per workspace)
-- [ ] Add `RATE_LIMIT_CODEX_REFRESH` to Env type
-- [ ] Create `rateLimitCodexRefresh()` factory function in rate-limit.ts
-- [ ] Apply rate limiting in `codex-refresh.ts` after token verification (use workspaceId as identifier)
-- [ ] Add unit tests for rate limiting behavior (allowed, exceeded)
+- [x] Add `CODEX_REFRESH` to `DEFAULT_RATE_LIMITS` (default: 30 per hour per workspace)
+- [x] Add `RATE_LIMIT_CODEX_REFRESH` to Env type
+- [x] Create `checkCodexRefreshRateLimit()` function in rate-limit.ts
+- [x] Apply rate limiting in `codex-refresh.ts` after token verification (use workspaceId as identifier)
+- [x] Add unit tests for rate limiting behavior (allowed, exceeded, workspace identity forwarding)
 
 ### JWT Lifetime Documentation
-- [ ] Add JWT lifetime reference table to secrets taxonomy
-- [ ] Document callback token 24h lifetime rationale and auto-refresh mechanism
+- [x] Add JWT lifetime reference table to secrets taxonomy
+- [x] Document callback token 24h lifetime rationale and auto-refresh mechanism
 
 ### Documentation Sync
-- [ ] Update CLAUDE.md recent changes if needed
+- [x] No CLAUDE.md changes needed (no new features, only security hardening)
 
 ## Acceptance Criteria
-- [ ] Token-in-URL risk formally documented in secrets taxonomy with mitigations
-- [ ] Scope validation added to token refresh response (warning log, not hard block)
-- [ ] Rate limiting added to `/api/auth/codex-refresh` endpoint
-- [ ] JWT lifetime for workspace callback tokens reviewed and documented
-- [ ] Tests cover rate limiting behavior and scope validation
+- [x] Token-in-URL risk formally documented in secrets taxonomy with mitigations
+- [x] Scope validation added to token refresh response (warning log, not hard block)
+- [x] Rate limiting added to `/api/auth/codex-refresh` endpoint
+- [x] JWT lifetime for workspace callback tokens reviewed and documented
+- [x] Tests cover rate limiting behavior and scope validation

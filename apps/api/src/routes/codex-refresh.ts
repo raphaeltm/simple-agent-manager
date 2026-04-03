@@ -16,6 +16,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { log } from '../lib/logger';
+import { checkCodexRefreshRateLimit } from '../middleware/rate-limit';
 import { verifyCallbackToken } from '../services/jwt';
 
 const codexRefreshRoutes = new Hono<{ Bindings: Env }>();
@@ -67,6 +68,17 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   }
 
   const workspaceId = tokenPayload.workspace;
+
+  // Rate limit per workspace (prevents abuse via stolen callback tokens).
+  const rateLimitResult = await checkCodexRefreshRateLimit(c.env, workspaceId);
+  if (!rateLimitResult.allowed) {
+    const retryAfter = rateLimitResult.resetAt - Math.floor(Date.now() / 1000);
+    log.warn('codex_refresh.rate_limited', { workspaceId });
+    return c.json(
+      { error: 'rate_limit_exceeded', message: 'Too many refresh requests' },
+      { status: 429, headers: { 'Retry-After': Math.max(1, retryAfter).toString() } },
+    );
+  }
 
   // Parse the request body (Codex sends hardcoded format).
   let body: { client_id?: string; grant_type?: string; refresh_token?: string };
