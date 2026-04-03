@@ -1,6 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
+// Capture mermaid.initialize config outside mock lifecycle so it survives clearAllMocks.
+// The MarkdownRenderer singleton calls initialize only once per module load.
+const initializeConfigs: unknown[] = [];
+
 const mocks = vi.hoisted(() => ({
   mermaidRender: vi.fn(),
   mermaidInitialize: vi.fn(),
@@ -8,7 +12,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('mermaid', () => ({
   default: {
-    initialize: mocks.mermaidInitialize,
+    initialize: (...args: unknown[]) => {
+      initializeConfigs.push(args[0]);
+      return mocks.mermaidInitialize(...args);
+    },
     render: mocks.mermaidRender,
   },
 }));
@@ -195,31 +202,17 @@ describe('RenderedMarkdown', () => {
       });
     });
 
-    it('calls mermaid.initialize with securityLevel strict', async () => {
-      // ensureMermaidInit() is called during the first mermaid render in this
-      // test suite. We check all recorded calls to mermaid.initialize across
-      // the entire module lifetime to verify securityLevel was set to 'strict'.
-      const allCalls = mocks.mermaidInitialize.mock.calls;
-      const hasStrictCall = allCalls.some(
-        (args: unknown[]) =>
-          args[0] &&
-          typeof args[0] === 'object' &&
-          (args[0] as Record<string, unknown>).securityLevel === 'strict',
+    it('calls mermaid.initialize with securityLevel strict', () => {
+      // The singleton ensureMermaidInit() fires once per module load during
+      // the first mermaid render in this suite. We capture config args outside
+      // the mock lifecycle (survives clearAllMocks) to assert on them here.
+      const hasStrictCall = initializeConfigs.some(
+        (config) =>
+          config &&
+          typeof config === 'object' &&
+          (config as Record<string, unknown>).securityLevel === 'strict',
       );
-      // If no calls recorded (singleton already initialized in a prior test),
-      // fall back to verifying the source doesn't contain 'loose'.
-      if (allCalls.length === 0) {
-        const fs = await import('fs');
-        const path = await import('path');
-        const src = fs.readFileSync(
-          path.resolve(__dirname, '../../../src/components/MarkdownRenderer.tsx'),
-          'utf-8',
-        );
-        expect(src).toContain("securityLevel: 'strict'");
-        expect(src).not.toContain("securityLevel: 'loose'");
-      } else {
-        expect(hasStrictCall).toBe(true);
-      }
+      expect(hasStrictCall).toBe(true);
     });
   });
 });
