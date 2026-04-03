@@ -58,6 +58,27 @@ jobs:
       - name: Validate agent preflight evidence
         run: pnpm quality:preflight
 
+  specialist-review-evidence:
+    name: Specialist Review Evidence
+    if: github.event_name == 'pull_request'
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate specialist review evidence
+        run: pnpm quality:specialist-review
+
   ui-compliance:
     name: UI Compliance
     runs-on: ubuntu-latest

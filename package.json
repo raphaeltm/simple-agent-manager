@@ -38,6 +38,8 @@
     "quality:ast-checks": "tsx scripts/quality/ast-checks.ts",
     "quality:file-sizes": "tsx scripts/quality/check-file-sizes.ts",
     "quality:source-contract-tests": "tsx scripts/quality/check-source-contract-tests.ts",
+    "quality:specialist-review": "tsx scripts/quality/check-specialist-review-evidence.ts",
+    "quality:specialist-review:test": "npx vitest run --config scripts/quality/vitest.config.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",
     "prepare": "husky"
   },
@@ -58,6 +60,7 @@
     "tsx": "catalog:",
     "turbo": "2.7.6",
     "typescript": "catalog:",
+    "vitest": "^4.1.2",
     "zod": "catalog:"
   },
   "packageManager": "pnpm@9.15.9",
