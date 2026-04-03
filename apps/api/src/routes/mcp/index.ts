@@ -72,20 +72,7 @@ mcpRoutes.post('/', async (c) => {
     );
   }
 
-  // ── HTTP-level rate limiting (per task/agent) ───────────────────────────
-  const rlResult = await checkMcpRateLimit(c.env.KV, tokenData.taskId, c.env);
-  c.header('X-RateLimit-Limit', getMcpRateLimit(c.env).toString());
-  c.header('X-RateLimit-Remaining', rlResult.remaining.toString());
-  c.header('X-RateLimit-Reset', rlResult.resetAt.toString());
-  if (!rlResult.allowed) {
-    c.header('Retry-After', rlResult.retryAfter.toString());
-    return c.json(
-      jsonRpcError(null, -32000, 'Rate limit exceeded. Please retry after the indicated period.'),
-      429,
-    );
-  }
-
-  // Parse JSON-RPC request
+  // Parse JSON-RPC body before rate limiting so notifications can exit early
   let rpc: JsonRpcRequest;
   try {
     rpc = await c.req.json<JsonRpcRequest>();
@@ -103,13 +90,27 @@ mcpRoutes.post('/', async (c) => {
     );
   }
 
-  // MCP Streamable HTTP: notifications have no `id` field.
-  // Per spec, return 202 Accepted with no body.
-  if (rpc.id === undefined) {
-    return c.body(null, 202);
+  // MCP Streamable HTTP: notifications have no `id` member (field absent).
+  // Per spec, return 202 Accepted with no body. Skip rate limiting for
+  // notifications since they are fire-and-forget and should not burn quota.
+  if (!('id' in rpc)) {
+    return new Response(null, { status: 202 });
   }
 
-  const requestId = rpc.id ?? null;
+  // ── HTTP-level rate limiting (per task/agent) ───────────────────────────
+  const rlResult = await checkMcpRateLimit(c.env.KV, tokenData.taskId, c.env);
+  c.header('X-RateLimit-Limit', getMcpRateLimit(c.env).toString());
+  c.header('X-RateLimit-Remaining', rlResult.remaining.toString());
+  c.header('X-RateLimit-Reset', rlResult.resetAt.toString());
+  if (!rlResult.allowed) {
+    c.header('Retry-After', rlResult.retryAfter.toString());
+    return c.json(
+      jsonRpcError(null, -32000, 'Rate limit exceeded. Please retry after the indicated period.'),
+      429,
+    );
+  }
+
+  const requestId = rpc.id;
 
   // Route by method
   switch (rpc.method) {
@@ -194,10 +195,12 @@ mcpRoutes.post('/', async (c) => {
 
 // MCP Streamable HTTP: GET returns SSE stream or 405 if unsupported
 mcpRoutes.get('/', (c) => {
+  c.header('Allow', 'POST');
   return c.text('Method Not Allowed', 405);
 });
 
 // MCP Streamable HTTP: DELETE terminates session or 405 if unsupported
 mcpRoutes.delete('/', (c) => {
+  c.header('Allow', 'POST');
   return c.text('Method Not Allowed', 405);
 });

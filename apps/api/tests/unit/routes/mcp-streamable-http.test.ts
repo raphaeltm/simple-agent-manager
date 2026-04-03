@@ -195,34 +195,51 @@ describe('MCP Streamable HTTP Compliance', () => {
       const res = await mcpPost(app, {
         jsonrpc: '2.0',
         id: null,
-        method: 'notifications/initialized',
+        method: 'unknown/method',
       });
 
-      // Should hit the method switch and get "Method not found" since it's a request
+      // Should hit the method switch and get "Method not found" since it's a request with id
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.code).toBe(-32601);
+    });
+
+    it('should not consume rate limit quota for notifications', async () => {
+      // Send a notification — rate limit KV should not be called
+      const putCallsBefore = mockKV.put.mock.calls.length;
+      await mcpPost(app, jsonRpcNotification('notifications/initialized'));
+      // Rate limit check does KV.get + KV.put; notification should skip that
+      // Auth KV.get is still called (1 call), but rate limit adds 2 more
+      // With notification early-return, we expect only the auth KV.get
+      const kvGetCalls = mockKV.get.mock.calls;
+      // First call is auth (mcp:valid-token), no rate limit call
+      expect(kvGetCalls.length).toBe(1);
+      expect(kvGetCalls[0][0]).toBe('mcp:valid-token');
+      // No KV.put calls for rate limiting
+      expect(mockKV.put.mock.calls.length).toBe(putCallsBefore);
     });
   });
 
   // ─── GET and DELETE → 405 ─────────────────────────────────────────────
 
   describe('HTTP method restrictions', () => {
-    it('should return 405 for GET /mcp', async () => {
+    it('should return 405 with Allow header for GET /mcp', async () => {
       const res = await app.request('/mcp', {
         method: 'GET',
       }, mockEnv);
 
       expect(res.status).toBe(405);
+      expect(res.headers.get('Allow')).toBe('POST');
     });
 
-    it('should return 405 for DELETE /mcp', async () => {
+    it('should return 405 with Allow header for DELETE /mcp', async () => {
       const res = await app.request('/mcp', {
         method: 'DELETE',
       }, mockEnv);
 
       expect(res.status).toBe(405);
+      expect(res.headers.get('Allow')).toBe('POST');
     });
   });
 
