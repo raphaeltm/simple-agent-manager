@@ -152,12 +152,12 @@ describe('Workspace profile precedence resolution', () => {
 //
 // The TaskRunner DO converts WorkspaceProfile to a boolean flag:
 //   lightweight: state.config.workspaceProfile === 'lightweight'
-// This exercises the exact same expression used in task-runner.ts:664
+// This exercises the exact same expression used in workspace-steps.ts:125
 // =============================================================================
 
 describe('Workspace profile to lightweight boolean conversion', () => {
   /**
-   * Mirrors the conversion from apps/api/src/durable-objects/task-runner.ts:664
+   * Mirrors the conversion from apps/api/src/durable-objects/task-runner/workspace-steps.ts:125
    */
   function profileToLightweight(profile: WorkspaceProfile | null): boolean {
     return profile === 'lightweight';
