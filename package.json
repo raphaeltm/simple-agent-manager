@@ -60,7 +60,7 @@
     "tsx": "catalog:",
     "turbo": "2.7.6",
     "typescript": "catalog:",
-    "vitest": "^4.1.2",
+    "vitest": "catalog:",
     "zod": "catalog:"
   },
   "packageManager": "pnpm@9.15.9",
