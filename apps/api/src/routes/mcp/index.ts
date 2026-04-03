@@ -72,6 +72,38 @@ mcpRoutes.post('/', async (c) => {
     );
   }
 
+  // Parse JSON-RPC body before rate limiting so notifications can exit early
+  let rpc: JsonRpcRequest;
+  try {
+    rpc = await c.req.json<JsonRpcRequest>();
+  } catch {
+    return c.json(
+      jsonRpcError(null, -32700, 'Parse error: invalid JSON'),
+      400,
+    );
+  }
+
+  if (Array.isArray(rpc)) {
+    return c.json(
+      jsonRpcError(null, -32600, 'Batch requests are not supported'),
+      400,
+    );
+  }
+
+  if (rpc.jsonrpc !== '2.0') {
+    return c.json(
+      jsonRpcError(rpc.id ?? null, -32600, 'Invalid Request: missing jsonrpc 2.0'),
+      400,
+    );
+  }
+
+  // MCP Streamable HTTP: notifications have no `id` member (field absent).
+  // Per spec, return 202 Accepted with no body. Skip rate limiting for
+  // notifications since they are fire-and-forget and should not burn quota.
+  if (!('id' in rpc)) {
+    return new Response(null, { status: 202 });
+  }
+
   // ── HTTP-level rate limiting (per task/agent) ───────────────────────────
   const rlResult = await checkMcpRateLimit(c.env.KV, tokenData.taskId, c.env);
   c.header('X-RateLimit-Limit', getMcpRateLimit(c.env).toString());
@@ -85,24 +117,8 @@ mcpRoutes.post('/', async (c) => {
     );
   }
 
-  // Parse JSON-RPC request
-  let rpc: JsonRpcRequest;
-  try {
-    rpc = await c.req.json<JsonRpcRequest>();
-  } catch {
-    return c.json(
-      jsonRpcError(null, -32700, 'Parse error: invalid JSON'),
-      400,
-    );
-  }
-
-  if (rpc.jsonrpc !== '2.0') {
-    return c.json(
-      jsonRpcError(rpc.id ?? null, -32600, 'Invalid Request: missing jsonrpc 2.0'),
-      400,
-    );
-  }
-
+  // After the notification guard above, rpc.id is always defined (string | number | null).
+  // The ?? null satisfies TypeScript since 'id' in rpc doesn't narrow the optional type.
   const requestId = rpc.id ?? null;
 
   // Route by method
@@ -184,4 +200,16 @@ mcpRoutes.post('/', async (c) => {
     default:
       return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Method not found: ${rpc.method}`));
   }
+});
+
+// MCP Streamable HTTP: GET returns SSE stream or 405 if unsupported
+mcpRoutes.get('/', (c) => {
+  c.header('Allow', 'POST');
+  return c.text('Method Not Allowed', 405);
+});
+
+// MCP Streamable HTTP: DELETE terminates session or 405 if unsupported
+mcpRoutes.delete('/', (c) => {
+  c.header('Allow', 'POST');
+  return c.text('Method Not Allowed', 405);
 });
