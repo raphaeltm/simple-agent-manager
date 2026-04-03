@@ -310,12 +310,16 @@ describe('CodexRefreshLock', () => {
     expect(json.error).toBe('upstream_error');
   });
 
-  it('forwards upstream non-OK responses with original Content-Type', async () => {
+  it('filters upstream error responses to only safe fields', async () => {
     const { do: doInstance, env } = createDO();
     setupCredentialFound(env);
 
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ error: 'invalid_grant' }), {
+      new Response(JSON.stringify({
+        error: 'invalid_grant',
+        error_description: 'Token has been revoked',
+        debug_info: 'sensitive-data-should-not-leak',
+      }), {
         status: 401,
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
       }),
@@ -328,9 +332,32 @@ describe('CodexRefreshLock', () => {
       }),
     );
     expect(res.status).toBe(401);
-    expect(res.headers.get('Content-Type')).toBe(
-      'application/json; charset=utf-8',
+    const json = await res.json();
+    expect(json.error).toBe('invalid_grant');
+    expect(json.error_description).toBe('Token has been revoked');
+    expect(json.debug_info).toBeUndefined(); // filtered out
+  });
+
+  it('returns generic error for non-JSON upstream error responses', async () => {
+    const { do: doInstance, env } = createDO();
+    setupCredentialFound(env);
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response('<html>Server Error</html>', {
+        status: 500,
+        headers: { 'Content-Type': 'text/html' },
+      }),
     );
+
+    const res = await doInstance.fetch(
+      makeRequest({
+        refreshToken: 'stored-refresh',
+        userId: 'user-1',
+      }),
+    );
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json.error).toBe('upstream_error');
   });
 
   // -----------------------------------------------------------------------

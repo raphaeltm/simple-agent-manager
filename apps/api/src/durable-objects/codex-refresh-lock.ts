@@ -73,9 +73,10 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
           { status: 504, headers: { 'Content-Type': 'application/json' } }
         );
       }
-      const message = err instanceof Error ? err.message : 'Unknown error';
+      // Log full error internally but do not expose to caller.
+      console.error('CodexRefreshLock internal error:', err instanceof Error ? err.message : err);
       return new Response(
-        JSON.stringify({ error: 'internal_error', message }),
+        JSON.stringify({ error: 'internal_error' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     } finally {
@@ -183,11 +184,21 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     if (!upstreamResponse.ok) {
-      // Forward error responses — preserve upstream Content-Type.
-      const errorBody = await upstreamResponse.text();
-      return new Response(errorBody, {
+      // Parse and filter upstream error — only forward safe fields to prevent
+      // information leakage (e.g., if OpenAI echoes back the refresh token).
+      let safeError: Record<string, string> = { error: 'upstream_error' };
+      try {
+        const parsed = await upstreamResponse.json() as Record<string, unknown>;
+        if (typeof parsed.error === 'string') safeError.error = parsed.error;
+        if (typeof parsed.error_description === 'string') {
+          safeError = { ...safeError, error_description: parsed.error_description };
+        }
+      } catch {
+        // Non-JSON upstream response — use generic error
+      }
+      return new Response(JSON.stringify(safeError), {
         status: upstreamResponse.status,
-        headers: { 'Content-Type': upstreamResponse.headers.get('Content-Type') ?? 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
       });
     }
 
