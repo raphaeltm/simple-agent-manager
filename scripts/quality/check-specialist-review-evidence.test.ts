@@ -73,6 +73,12 @@ Some exception content.`;
     expect(section).toContain('test');
     expect(section).not.toContain('Exceptions');
   });
+
+  it('stops at ## heading without a preceding blank line (H2)', () => {
+    const body = `## Specialist Review Evidence\n| Reviewer | Status | Outcome |\n|---|---|---|\n| test | PASS | ok |\n## Next Section\nContent.`;
+    const section = extractReviewSection(body);
+    expect(section).not.toContain('Next Section');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -136,6 +142,25 @@ describe('parseReviewTable', () => {
     const rows = parseReviewTable(section);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.status).toBe('PASS');
+  });
+
+  it('handles pipe characters in the outcome column (M1)', () => {
+    const section = `| Reviewer | Status | Outcome |\n|---|---|---|\n| test | PASS | fixed HIGH | MEDIUM |`;
+    const rows = parseReviewTable(section);
+    expect(rows[0]?.outcome).toBe('fixed HIGH | MEDIUM');
+  });
+
+  it('handles padded whitespace in cells (M4)', () => {
+    const section = `
+| Reviewer           | Status   | Outcome              |
+|--------------------|----------|----------------------|
+| go-specialist      | PASS     | no findings          |
+`;
+    const rows = parseReviewTable(section);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.reviewer).toBe('go-specialist');
+    expect(rows[0]?.status).toBe('PASS');
+    expect(rows[0]?.outcome).toBe('no findings');
   });
 });
 
@@ -367,5 +392,42 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`;
     const result = validateReviewEvidence(body, []);
     expect(result.pass).toBe(false);
     expect(result.failures[0]).toContain('DISPATCHED');
+  });
+
+  // --- Reviewer-requested edge cases (C1, H1, H2, H3, M1) ---
+
+  it('label-only failure does not mention missing section (C1)', () => {
+    const body = buildBody({ agentAuthored: true, omitSection: true });
+    const result = validateReviewEvidence(body, [{ name: 'needs-human-review' }]);
+    expect(result.pass).toBe(false);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toContain('needs-human-review');
+    expect(result.failures[0]).not.toContain('missing');
+    expect(result.failures[0]).not.toContain('empty');
+  });
+
+  it('passes for human-authored PR with empty table (H1)', () => {
+    const body = buildBody({ agentAuthored: false, rows: [] });
+    const result = validateReviewEvidence(body, []);
+    expect(result.pass).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('passes and ignores table rows when N/A marker is present (H3)', () => {
+    const body = buildBody({
+      agentAuthored: true,
+      humanNA: true,
+      rows: ['| go-specialist | DISPATCHED | still running |'],
+    });
+    const result = validateReviewEvidence(body, []);
+    expect(result.pass).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('fails when agent-authored PR has section but no table header (L3)', () => {
+    const body = `## Summary\n\nSome PR.\n\n## Specialist Review Evidence\n\nReviews were conducted verbally.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`;
+    const result = validateReviewEvidence(body, []);
+    expect(result.pass).toBe(false);
+    expect(result.failures[0]).toContain('empty');
   });
 });
