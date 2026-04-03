@@ -33,39 +33,39 @@ The "all reviewers must complete before merge" requirement (`.claude/rules/25-re
 
 ## Implementation Checklist
 
-- [ ] Create `scripts/quality/check-specialist-review-evidence.ts` following `check-preflight-evidence.ts` pattern
-  - [ ] Parse PR body from `GITHUB_EVENT_PATH`
-  - [ ] Find the "Specialist Review Evidence" section
-  - [ ] Parse the reviewer table rows
-  - [ ] Fail if any row has `DISPATCHED` or `FAILED` status
-  - [ ] Check for `needs-human-review` label via event payload labels
-  - [ ] Check if PR is agent-authored (Co-Authored-By: Claude in body or detect from commit messages)
-  - [ ] Fail if agent-authored and table is missing/empty
-  - [ ] Pass for human-authored PRs without the table
-  - [ ] Pass when all reviewers show `PASS` or `ADDRESSED`
-- [ ] Add `quality:specialist-review` script to root `package.json`
-- [ ] Add `specialist-review-evidence` CI job in `.github/workflows/ci.yml`
-- [ ] Write tests covering all parsing edge cases
-  - [ ] All PASS/ADDRESSED -> pass
-  - [ ] DISPATCHED status -> fail
-  - [ ] FAILED status -> fail
-  - [ ] Missing table, agent-authored -> fail
-  - [ ] Missing table, human-authored -> pass
-  - [ ] Empty table (only header) -> fail for agent PRs
-  - [ ] Mixed statuses (some PASS, one DISPATCHED) -> fail
-  - [ ] Malformed table -> fail gracefully
-  - [ ] `needs-human-review` label -> fail
-  - [ ] DEFERRED status -> pass (with warning)
-  - [ ] N/A: human-authored PR -> pass
+- [x] Create `scripts/quality/check-specialist-review-evidence.ts` following `check-preflight-evidence.ts` pattern
+  - [x] Parse PR body from `GITHUB_EVENT_PATH`
+  - [x] Find the "Specialist Review Evidence" section
+  - [x] Parse the reviewer table rows
+  - [x] Fail if any row has `DISPATCHED` or `FAILED` status
+  - [x] Check for `needs-human-review` label via event payload labels
+  - [x] Check if PR is agent-authored (Co-Authored-By: Claude in body or detect from commit messages)
+  - [x] Fail if agent-authored and table is missing/empty
+  - [x] Pass for human-authored PRs without the table
+  - [x] Pass when all reviewers show `PASS` or `ADDRESSED`
+- [x] Add `quality:specialist-review` script to root `package.json`
+- [x] Add `specialist-review-evidence` CI job in `.github/workflows/ci.yml`
+- [x] Write tests covering all parsing edge cases (33 tests, all passing)
+  - [x] All PASS/ADDRESSED -> pass
+  - [x] DISPATCHED status -> fail
+  - [x] FAILED status -> fail
+  - [x] Missing table, agent-authored -> fail
+  - [x] Missing table, human-authored -> pass
+  - [x] Empty table (only header) -> fail for agent PRs
+  - [x] Mixed statuses (some PASS, one DISPATCHED) -> fail
+  - [x] Malformed table -> fail gracefully
+  - [x] `needs-human-review` label -> fail
+  - [x] DEFERRED status -> pass (with warning)
+  - [x] N/A: human-authored PR -> pass
 
 ## Acceptance Criteria
 
-- [ ] CI fails if any reviewer in the evidence table shows `DISPATCHED` or `FAILED`
-- [ ] CI fails if `needs-human-review` label is present on the PR
-- [ ] CI fails if evidence table is missing/empty on agent-authored PRs
-- [ ] CI passes for human-authored PRs without the table (don't block human PRs)
-- [ ] CI passes when all reviewers show `PASS` or `ADDRESSED`
-- [ ] Tests cover all parsing edge cases (malformed table, missing table, mixed statuses)
+- [x] CI fails if any reviewer in the evidence table shows `DISPATCHED` or `FAILED`
+- [x] CI fails if `needs-human-review` label is present on the PR
+- [x] CI fails if evidence table is missing/empty on agent-authored PRs
+- [x] CI passes for human-authored PRs without the table (don't block human PRs)
+- [x] CI passes when all reviewers show `PASS` or `ADDRESSED`
+- [x] Tests cover all parsing edge cases (malformed table, missing table, mixed statuses)
 
 ## References
 
