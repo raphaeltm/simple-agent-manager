@@ -1,4 +1,4 @@
-# Replace Source-Contract Tests with Integration Tests
+# Replace API Source-Contract Tests with Integration Tests
 
 ## Problem
 
@@ -22,30 +22,23 @@
 11. **configurable-limits.test.ts** — Verifies all system limits are configurable via env vars
 12. **node-stop.test.ts** — Verifies node stop deletes infrastructure and marks resources as 'deleted'
 
-### Existing Integration Test Pattern
-- Worker tests use `SELF.fetch()` with `cloudflare:test` and real Miniflare bindings
-- `tests/workers/workspace-messages.test.ts` is the gold standard — seeds D1, uses `signCallbackToken`, tests HTTP responses
-- User-authenticated routes use session-based auth (better-auth), which is complex to set up in Miniflare
-
 ### Strategy
 - **Delete all source-contract tests** — they read source as strings, which is prohibited
-- **For testable behaviors** — write actual behavioral tests (worker tests or function-level unit tests)
-- **For callback-auth routes** — write worker tests with `signCallbackToken`
-- **For service helpers** — write unit tests that call actual functions
-- **For configurable-limits** — test via health endpoint (which returns limits) and function calls
-- **For node-stop** — test the `stopNodeResources` function with mocked dependencies
+- **Write worker integration tests** for callback-auth routes using `SELF.fetch()` + `signCallbackToken`
+- **Write function-level unit tests** for exported service helpers (parseEnvInt, computeBackoffMs, etc.)
+- **Write behavioral tests** for configurable limits via health endpoint and function calls
 
 ## Implementation Checklist
 
 - [ ] 1. Delete `apps/api/tests/unit/routes/workspace-messages.test.ts` (already replaced by worker test)
-- [ ] 2. Delete `apps/api/tests/unit/routes/agent-sessions.test.ts` and write replacement
-- [ ] 3. Delete `apps/api/tests/unit/routes/chat-agent-session-id.test.ts` and write replacement
-- [ ] 4. Delete `apps/api/tests/unit/routes/tasks.test.ts` and write replacement
-- [ ] 5. Delete `apps/api/tests/unit/routes/nodes.test.ts` and write replacement
-- [ ] 6. Delete `apps/api/tests/unit/routes/projects.test.ts` and write replacement
-- [ ] 7. Delete `apps/api/tests/unit/routes/terminal.test.ts` and write replacement
-- [ ] 8. Delete `apps/api/tests/unit/routes/workspaces.test.ts` and write replacement
-- [ ] 9. Delete `apps/api/tests/unit/routes/workspace-session-hook.test.ts` and write replacement
+- [ ] 2. Delete and replace `apps/api/tests/unit/routes/agent-sessions.test.ts`
+- [ ] 3. Delete and replace `apps/api/tests/unit/routes/chat-agent-session-id.test.ts`
+- [ ] 4. Delete and replace `apps/api/tests/unit/routes/tasks.test.ts`
+- [ ] 5. Delete and replace `apps/api/tests/unit/routes/nodes.test.ts`
+- [ ] 6. Delete and replace `apps/api/tests/unit/routes/projects.test.ts`
+- [ ] 7. Delete and replace `apps/api/tests/unit/routes/terminal.test.ts`
+- [ ] 8. Delete and replace `apps/api/tests/unit/routes/workspaces.test.ts`
+- [ ] 9. Delete and replace `apps/api/tests/unit/routes/workspace-session-hook.test.ts`
 - [ ] 10. Replace `apps/api/tests/unit/task-runner-do-helpers.test.ts` with function-level tests
 - [ ] 11. Replace `apps/api/tests/unit/services/configurable-limits.test.ts` with behavioral tests
 - [ ] 12. Replace `apps/api/tests/unit/services/node-stop.test.ts` with behavioral tests
