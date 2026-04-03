@@ -16,7 +16,6 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { log } from '../lib/logger';
-import { getCredentialEncryptionKey } from '../lib/secrets';
 import { verifyCallbackToken } from '../services/jwt';
 
 const codexRefreshRoutes = new Hono<{ Bindings: Env }>();
@@ -96,7 +95,6 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   }
 
   const userId = workspace.userId;
-  const encryptionKey = getCredentialEncryptionKey(c.env);
 
   log.info('codex_refresh.request_received', {
     workspaceId,
@@ -104,6 +102,7 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   });
 
   // Forward to CodexRefreshLock DO keyed by userId for serialized refresh.
+  // The DO derives the encryption key from its own env — no need to forward it.
   const doId = c.env.CODEX_REFRESH_LOCK.idFromName(userId);
   const stub = c.env.CODEX_REFRESH_LOCK.get(doId);
 
@@ -113,7 +112,6 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
     body: JSON.stringify({
       refreshToken: body.refresh_token,
       userId,
-      encryptionKey,
     }),
   });
 

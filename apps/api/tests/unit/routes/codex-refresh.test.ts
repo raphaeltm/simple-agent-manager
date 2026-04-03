@@ -25,10 +25,6 @@ vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(),
 }));
 
-// Mock secrets helper
-vi.mock('../../../src/lib/secrets', () => ({
-  getCredentialEncryptionKey: vi.fn().mockReturnValue('test-encryption-key'),
-}));
 
 const { verifyCallbackToken } = await import('../../../src/services/jwt');
 
@@ -227,7 +223,8 @@ describe('POST /api/auth/codex-refresh', () => {
     );
     expect(doRequestBody.refreshToken).toBe('rt_test_refresh_token');
     expect(doRequestBody.userId).toBe('user-abc');
-    expect(doRequestBody.encryptionKey).toBe('test-encryption-key');
+    // encryptionKey is NOT in the DO request — DO derives it from its own env
+    expect(doRequestBody.encryptionKey).toBeUndefined();
   });
 
   it('forwards DO error responses (401) back to Codex', async () => {
