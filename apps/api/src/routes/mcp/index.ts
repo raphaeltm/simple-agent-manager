@@ -117,7 +117,9 @@ mcpRoutes.post('/', async (c) => {
     );
   }
 
-  const requestId = rpc.id;
+  // After the notification guard above, rpc.id is always defined (string | number | null).
+  // The ?? null satisfies TypeScript since 'id' in rpc doesn't narrow the optional type.
+  const requestId = rpc.id ?? null;
 
   // Route by method
   switch (rpc.method) {
