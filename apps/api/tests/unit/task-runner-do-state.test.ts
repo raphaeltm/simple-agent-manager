@@ -9,10 +9,15 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const doSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
-  'utf8'
-);
+const doSource = [
+  'index.ts',
+  'types.ts',
+  'node-steps.ts',
+  'workspace-steps.ts',
+  'agent-session-step.ts',
+  'state-machine.ts',
+  'helpers.ts',
+].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
 
 describe('TaskRunner DO state schema', () => {
   it('exports TaskRunnerState interface', () => {
@@ -153,7 +158,7 @@ describe('TaskRunner DO retry logic', () => {
   });
 
   it('fails task on permanent error or max retries exceeded', () => {
-    expect(doSource).toContain('await this.failTask(state, errorMessage)');
+    expect(doSource).toContain('await failTask(state, errorMessage');
   });
 
   it('logs retry scheduling with backoff info', () => {
@@ -164,29 +169,29 @@ describe('TaskRunner DO retry logic', () => {
 
 describe('TaskRunner DO step advancement', () => {
   it('has advanceToStep helper', () => {
-    expect(doSource).toContain('private async advanceToStep(');
+    expect(doSource).toContain('advanceToStep:');
   });
 
   it('resets retryCount on step advancement', () => {
     const advanceSection = doSource.slice(
-      doSource.indexOf('private async advanceToStep('),
-      doSource.indexOf('/**', doSource.indexOf('private async advanceToStep(') + 50)
+      doSource.indexOf('advanceToStep:'),
+      doSource.indexOf('/**', doSource.indexOf('advanceToStep:') + 50)
     );
     expect(advanceSection).toContain('state.retryCount = 0');
   });
 
   it('schedules alarm immediately for next step', () => {
     const advanceSection = doSource.slice(
-      doSource.indexOf('private async advanceToStep('),
-      doSource.indexOf('/**', doSource.indexOf('private async advanceToStep(') + 50)
+      doSource.indexOf('advanceToStep:'),
+      doSource.indexOf('/**', doSource.indexOf('advanceToStep:') + 50)
     );
     expect(advanceSection).toContain('setAlarm(Date.now())');
   });
 
   it('persists state before scheduling alarm', () => {
     const advanceSection = doSource.slice(
-      doSource.indexOf('private async advanceToStep('),
-      doSource.indexOf('/**', doSource.indexOf('private async advanceToStep(') + 50)
+      doSource.indexOf('advanceToStep:'),
+      doSource.indexOf('/**', doSource.indexOf('advanceToStep:') + 50)
     );
     const putIdx = advanceSection.indexOf("storage.put('state'");
     const alarmIdx = advanceSection.indexOf('setAlarm');
@@ -199,8 +204,8 @@ describe('TaskRunner DO step handlers', () => {
   describe('handleNodeSelection', () => {
     it('updates D1 execution step', () => {
       const section = doSource.slice(
-        doSource.indexOf('private async handleNodeSelection('),
-        doSource.indexOf('private async handleNodeProvisioning(')
+        doSource.indexOf('export async function handleNodeSelection('),
+        doSource.indexOf('export async function handleNodeProvisioning(')
       );
       expect(section).toContain("updateD1ExecutionStep(state.taskId, 'node_selection')");
     });
@@ -210,11 +215,11 @@ describe('TaskRunner DO step handlers', () => {
     });
 
     it('tries warm pool', () => {
-      expect(doSource).toContain('tryClaimWarmNode(state)');
+      expect(doSource).toContain('tryClaimWarmNode(state,');
     });
 
     it('tries capacity-based selection', () => {
-      expect(doSource).toContain('findNodeWithCapacity(state)');
+      expect(doSource).toContain('findNodeWithCapacity(state,');
     });
 
     it('falls through to provisioning if no node found', () => {
@@ -252,7 +257,7 @@ describe('TaskRunner DO step handlers', () => {
     });
 
     it('checks timeout', () => {
-      expect(doSource).toContain('this.getAgentReadyTimeoutMs()');
+      expect(doSource).toContain('rc.getAgentReadyTimeoutMs()');
       expect(doSource).toContain('Node agent not ready within');
     });
 
@@ -263,7 +268,7 @@ describe('TaskRunner DO step handlers', () => {
     });
 
     it('schedules poll alarm if not ready', () => {
-      expect(doSource).toContain('this.getAgentPollIntervalMs()');
+      expect(doSource).toContain('rc.getAgentPollIntervalMs()');
     });
   });
 
@@ -274,15 +279,15 @@ describe('TaskRunner DO step handlers', () => {
 
     it('links existing chat session to workspace (TDF-6: no duplicate session creation)', () => {
       // Session linking is in ensureSessionLinked helper (shared by fresh + recovery paths)
-      expect(doSource).toContain('private async ensureSessionLinked(');
+      expect(doSource).toContain('export async function ensureSessionLinked(');
       expect(doSource).toContain('linkSessionToWorkspace');
       expect(doSource).toContain('session_linked_to_workspace');
       expect(doSource).toContain('session_d1_linked');
       expect(doSource).toContain('session_d1_link_failed');
       expect(doSource).toContain('session_do_link_failed');
       // Must NOT create a new session — session is created at submit time
-      const wsCreationStart = doSource.indexOf('private async handleWorkspaceCreation(');
-      const wsCreationEnd = doSource.indexOf('private async handleWorkspaceReady(');
+      const wsCreationStart = doSource.indexOf('export async function handleWorkspaceCreation(');
+      const wsCreationEnd = doSource.indexOf('export async function handleWorkspaceReady(');
       const wsCreationSection = doSource.slice(wsCreationStart, wsCreationEnd);
       expect(wsCreationSection).not.toContain('createSession(');
     });
@@ -311,15 +316,15 @@ describe('TaskRunner DO step handlers', () => {
     });
 
     it('checks timeout', () => {
-      expect(doSource).toContain('this.getWorkspaceReadyTimeoutMs()');
+      expect(doSource).toContain('rc.getWorkspaceReadyTimeoutMs()');
     });
 
     it('polls D1 periodically as safety net for callback delivery failures', () => {
       // D1 polling catches cases where the callback succeeded (updating D1)
       // but the DO notification failed, or where the VM agent retried via heartbeat.
       const wsReadySection = doSource.slice(
-        doSource.indexOf('private async handleWorkspaceReady('),
-        doSource.indexOf('private async handleAgentSession(')
+        doSource.indexOf('export async function handleWorkspaceReady('),
+        doSource.indexOf('export async function handleAgentSession(')
       );
       expect(wsReadySection).not.toContain('getAgentPollIntervalMs');
       expect(wsReadySection).toContain('workspace_ready_from_d1_poll');
@@ -328,8 +333,8 @@ describe('TaskRunner DO step handlers', () => {
 
     it('schedules alarm using poll interval capped by remaining timeout', () => {
       const section = doSource.slice(
-        doSource.indexOf('private async handleWorkspaceReady('),
-        doSource.indexOf('private async handleAgentSession(')
+        doSource.indexOf('export async function handleWorkspaceReady('),
+        doSource.indexOf('export async function handleAgentSession(')
       );
       expect(section).toContain('Math.min(pollIntervalMs');
       expect(section).toContain('setAlarm(Date.now() + nextPollMs)');
@@ -361,13 +366,13 @@ describe('TaskRunner DO step handlers', () => {
 
 describe('TaskRunner DO failure handling', () => {
   it('has failTask method', () => {
-    expect(doSource).toContain('private async failTask(');
+    expect(doSource).toContain('export async function failTask(');
   });
 
   it('checks for terminal status before failing (idempotent)', () => {
     const failSection = doSource.slice(
-      doSource.indexOf('private async failTask('),
-      doSource.indexOf('private async cleanupOnFailure(')
+      doSource.indexOf('export async function failTask('),
+      doSource.indexOf('export async function cleanupOnFailure(')
     );
     expect(failSection).toContain("'failed'");
     expect(failSection).toContain("'completed'");
@@ -380,13 +385,13 @@ describe('TaskRunner DO failure handling', () => {
   });
 
   it('calls cleanupOnFailure after failing', () => {
-    expect(doSource).toContain('await this.cleanupOnFailure(state)');
+    expect(doSource).toContain('await cleanupOnFailure(state');
   });
 
   it('marks DO as completed after failure', () => {
     const failSection = doSource.slice(
-      doSource.indexOf('private async failTask('),
-      doSource.indexOf('private async cleanupOnFailure(')
+      doSource.indexOf('export async function failTask('),
+      doSource.indexOf('export async function cleanupOnFailure(')
     );
     expect(failSection).toContain('state.completed = true');
   });
@@ -394,20 +399,20 @@ describe('TaskRunner DO failure handling', () => {
 
 describe('TaskRunner DO cleanup', () => {
   it('has cleanupOnFailure method', () => {
-    expect(doSource).toContain('private async cleanupOnFailure(');
+    expect(doSource).toContain('export async function cleanupOnFailure(');
   });
 
   it('stops workspace if it exists', () => {
     const cleanupSection = doSource.slice(
-      doSource.indexOf('private async cleanupOnFailure('),
-      doSource.indexOf('// =====', doSource.indexOf('private async cleanupOnFailure(') + 100)
+      doSource.indexOf('export async function cleanupOnFailure('),
+      doSource.indexOf('// =====', doSource.indexOf('export async function cleanupOnFailure(') + 100)
     );
     expect(cleanupSection).toContain('stopWorkspaceOnNode');
   });
 
-  it('delegates to cleanupTaskRun for auto-provisioned nodes', () => {
-    expect(doSource).toContain("import('../services/task-runner')");
-    expect(doSource).toContain('cleanupTaskRun');
+  it('handles auto-provisioned node cleanup on failure', () => {
+    expect(doSource).toContain('state.stepResults.autoProvisioned');
+    expect(doSource).toContain('state.stepResults.nodeId');
   });
 });
 
@@ -441,7 +446,7 @@ describe('TaskRunner DO configuration', () => {
 
 describe('TaskRunner DO warm node selection', () => {
   it('has tryClaimWarmNode helper', () => {
-    expect(doSource).toContain('private async tryClaimWarmNode(');
+    expect(doSource).toContain('async function tryClaimWarmNode(');
   });
 
   it('queries warm nodes from D1', () => {
@@ -459,7 +464,7 @@ describe('TaskRunner DO warm node selection', () => {
   });
 
   it('has findNodeWithCapacity helper', () => {
-    expect(doSource).toContain('private async findNodeWithCapacity(');
+    expect(doSource).toContain('async function findNodeWithCapacity(');
   });
 
   it('respects CPU and memory thresholds via shared constants', () => {

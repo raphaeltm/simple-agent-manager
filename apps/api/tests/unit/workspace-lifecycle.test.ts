@@ -15,10 +15,15 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const doSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
-  'utf8'
-);
+const doSource = [
+  'index.ts',
+  'types.ts',
+  'node-steps.ts',
+  'workspace-steps.ts',
+  'agent-session-step.ts',
+  'state-machine.ts',
+  'helpers.ts',
+].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
 const routeSource = [
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
@@ -31,8 +36,8 @@ const routeSource = [
 describe('handleWorkspaceReady — callback-driven with D1 polling safety net', () => {
   // Extract the handleWorkspaceReady method section for precise assertions
   const wsReadySection = doSource.slice(
-    doSource.indexOf('private async handleWorkspaceReady('),
-    doSource.indexOf('private async handleAgentSession(')
+    doSource.indexOf('export async function handleWorkspaceReady('),
+    doSource.indexOf('export async function handleAgentSession(')
   );
 
   it('polls D1 for workspace status as a safety net', () => {
@@ -68,7 +73,7 @@ describe('handleWorkspaceReady — callback-driven with D1 polling safety net', 
   });
 
   it('checks timeout when no callback received', () => {
-    expect(wsReadySection).toContain('this.getWorkspaceReadyTimeoutMs()');
+    expect(wsReadySection).toContain('rc.getWorkspaceReadyTimeoutMs()');
     expect(wsReadySection).toContain('Workspace did not become ready within');
     expect(wsReadySection).toContain('{ permanent: true }');
   });
@@ -334,8 +339,8 @@ describe('workspace lifecycle race condition handling', () => {
 
   it('alarm handler checks callback flag before doing anything else', () => {
     const wsReadySection = doSource.slice(
-      doSource.indexOf('private async handleWorkspaceReady('),
-      doSource.indexOf('private async handleAgentSession(')
+      doSource.indexOf('export async function handleWorkspaceReady('),
+      doSource.indexOf('export async function handleAgentSession(')
     );
     // callback check comes before timeout check
     const callbackCheckIdx = wsReadySection.indexOf('state.workspaceReadyReceived');
@@ -346,10 +351,10 @@ describe('workspace lifecycle race condition handling', () => {
 
   it('timeout check uses configurable env var', () => {
     const wsReadySection = doSource.slice(
-      doSource.indexOf('private async handleWorkspaceReady('),
-      doSource.indexOf('private async handleAgentSession(')
+      doSource.indexOf('export async function handleWorkspaceReady('),
+      doSource.indexOf('export async function handleAgentSession(')
     );
-    expect(wsReadySection).toContain('this.getWorkspaceReadyTimeoutMs()');
+    expect(wsReadySection).toContain('rc.getWorkspaceReadyTimeoutMs()');
   });
 
   it('alarm handler exits early if state is null or completed', () => {
@@ -367,8 +372,8 @@ describe('workspace lifecycle race condition handling', () => {
 
 describe('D1 polling in handleWorkspaceReady (periodic safety net)', () => {
   const wsReadySection = doSource.slice(
-    doSource.indexOf('private async handleWorkspaceReady('),
-    doSource.indexOf('private async handleAgentSession(')
+    doSource.indexOf('export async function handleWorkspaceReady('),
+    doSource.indexOf('export async function handleAgentSession(')
   );
 
   it('does not use agent poll interval (has its own workspace-ready poll interval)', () => {
@@ -399,12 +404,12 @@ describe('D1 polling in handleWorkspaceReady (periodic safety net)', () => {
 
 describe('workspace ready timeout and polling alarm strategy', () => {
   const wsReadySection = doSource.slice(
-    doSource.indexOf('private async handleWorkspaceReady('),
-    doSource.indexOf('private async handleAgentSession(')
+    doSource.indexOf('export async function handleWorkspaceReady('),
+    doSource.indexOf('export async function handleAgentSession(')
   );
 
   it('schedules alarm using poll interval capped by remaining timeout', () => {
-    expect(wsReadySection).toContain('const pollIntervalMs = this.getWorkspaceReadyPollIntervalMs()');
+    expect(wsReadySection).toContain('const pollIntervalMs = rc.getWorkspaceReadyPollIntervalMs()');
     expect(wsReadySection).toContain('Math.min(pollIntervalMs');
     expect(wsReadySection).toContain('Math.max(timeoutMs - elapsed, 0)');
   });

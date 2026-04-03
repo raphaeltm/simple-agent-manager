@@ -164,10 +164,15 @@ describe('systemPromptAppend wiring through submit → startTaskRunnerDO → Tas
     'utf8',
   );
 
-  const taskRunnerSource = readFileSync(
-    resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
-    'utf8',
-  );
+  const taskRunnerSource = [
+    'index.ts',
+    'types.ts',
+    'node-steps.ts',
+    'workspace-steps.ts',
+    'agent-session-step.ts',
+    'state-machine.ts',
+    'helpers.ts',
+  ].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
 
   it('submit.ts passes systemPromptAppend from resolved profile to startTaskRunnerDO', () => {
     // The submit route must read from the resolved profile and pass it

@@ -16,12 +16,19 @@ import { resolve } from 'node:path';
 
 import { describe, expect,it } from 'vitest';
 
-import { parseEnvInt } from '../../src/durable-objects/task-runner-helpers';
+import { parseEnvInt } from '../../src/durable-objects/task-runner/helpers';
 
-const doSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
-  'utf8'
-);
+// TaskRunner DO is split across task-runner/ directory — read all module files
+const doDir = resolve(process.cwd(), 'src/durable-objects/task-runner');
+const doSource = [
+  readFileSync(resolve(doDir, 'index.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'types.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'node-steps.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'workspace-steps.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'agent-session-step.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'state-machine.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'helpers.ts'), 'utf8'),
+].join('\n');
 const indexSource = readFileSync(
   resolve(process.cwd(), 'src/index.ts'),
   'utf8'
@@ -39,8 +46,8 @@ describe('node limit enforcement', () => {
 
     it('handleNodeProvisioning reads MAX_NODES_PER_USER via parseEnvInt', () => {
       const section = doSource.slice(
-        doSource.indexOf('private async handleNodeProvisioning('),
-        doSource.indexOf('private async handleNodeAgentReady(')
+        doSource.indexOf('export async function handleNodeProvisioning('),
+        doSource.indexOf('export async function handleNodeAgentReady(')
       );
       expect(section).toContain('MAX_NODES_PER_USER');
       expect(section).toContain('parseEnvInt');
@@ -48,10 +55,10 @@ describe('node limit enforcement', () => {
 
     it('defaults to 10 when env var is not set', () => {
       const section = doSource.slice(
-        doSource.indexOf('private async handleNodeProvisioning('),
-        doSource.indexOf('private async handleNodeAgentReady(')
+        doSource.indexOf('export async function handleNodeProvisioning('),
+        doSource.indexOf('export async function handleNodeAgentReady(')
       );
-      expect(section).toContain('parseEnvInt(this.env.MAX_NODES_PER_USER, 10)');
+      expect(section).toContain('parseEnvInt(rc.env.MAX_NODES_PER_USER, 10)');
     });
   });
 
@@ -88,16 +95,16 @@ describe('node limit enforcement', () => {
   describe('limit check in handleNodeProvisioning', () => {
     it('queries node count for the user from D1', () => {
       const section = doSource.slice(
-        doSource.indexOf('private async handleNodeProvisioning('),
-        doSource.indexOf('private async handleNodeAgentReady(')
+        doSource.indexOf('export async function handleNodeProvisioning('),
+        doSource.indexOf('export async function handleNodeAgentReady(')
       );
       expect(section).toContain("SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery')");
     });
 
     it('only counts active nodes (excludes deleted/stopped) in limit check', () => {
       const section = doSource.slice(
-        doSource.indexOf('private async handleNodeProvisioning('),
-        doSource.indexOf('private async handleNodeAgentReady(')
+        doSource.indexOf('export async function handleNodeProvisioning('),
+        doSource.indexOf('export async function handleNodeAgentReady(')
       );
       // Must filter by active statuses to avoid false limit hits from deleted/stopped nodes.
       // See: 2026-03-09-fix-node-workspace-limit-count-filters
@@ -106,8 +113,8 @@ describe('node limit enforcement', () => {
 
     it('throws permanent error when at or over limit', () => {
       const section = doSource.slice(
-        doSource.indexOf('private async handleNodeProvisioning('),
-        doSource.indexOf('private async handleNodeAgentReady(')
+        doSource.indexOf('export async function handleNodeProvisioning('),
+        doSource.indexOf('export async function handleNodeAgentReady(')
       );
       expect(section).toContain('>= maxNodes');
       expect(section).toContain('Cannot auto-provision');
@@ -116,16 +123,16 @@ describe('node limit enforcement', () => {
 
     it('error message includes the actual limit value', () => {
       const section = doSource.slice(
-        doSource.indexOf('private async handleNodeProvisioning('),
-        doSource.indexOf('private async handleNodeAgentReady(')
+        doSource.indexOf('export async function handleNodeProvisioning('),
+        doSource.indexOf('export async function handleNodeAgentReady(')
       );
       expect(section).toContain('`Maximum ${maxNodes} nodes allowed');
     });
 
     it('uses >= comparison (at limit = rejected)', () => {
       const section = doSource.slice(
-        doSource.indexOf('private async handleNodeProvisioning('),
-        doSource.indexOf('private async handleNodeAgentReady(')
+        doSource.indexOf('export async function handleNodeProvisioning('),
+        doSource.indexOf('export async function handleNodeAgentReady(')
       );
       // Verify it uses >= not >
       expect(section).toContain('>= maxNodes');
@@ -141,34 +148,34 @@ describe('node limit enforcement', () => {
 describe('node provisioning success path', () => {
   it('dynamically imports createNodeRecord and provisionNode', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
-    expect(section).toContain("import('../services/nodes')");
+    expect(section).toContain("import('../../services/nodes')");
     expect(section).toContain('createNodeRecord');
     expect(section).toContain('provisionNode');
   });
 
   it('uses task title in auto-provisioned node name (truncated to 40 chars)', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain("name: `Auto: ${state.config.taskTitle.slice(0, 40)}`");
   });
 
   it('sets autoProvisioned = true in step results', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('state.stepResults.autoProvisioned = true');
   });
 
   it('stores autoProvisionedNodeId on the task in D1', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('auto_provisioned_node_id');
     expect(section).toContain("UPDATE tasks SET auto_provisioned_node_id = ?");
@@ -176,32 +183,32 @@ describe('node provisioning success path', () => {
 
   it('persists state to DO storage after creating node', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
-    expect(section).toContain("this.ctx.storage.put('state', state)");
+    expect(section).toContain("rc.ctx.storage.put('state', state)");
   });
 
   it('verifies node is running after provisionNode call', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain("provisionedNode.status !== 'running'");
   });
 
   it('advances to node_agent_ready after successful provisioning', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain("advanceToStep(state, 'node_agent_ready')");
   });
 
   it('uses vmSize and vmLocation from task config', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('state.config.vmSize');
     expect(section).toContain('state.config.vmLocation');
@@ -215,8 +222,8 @@ describe('node provisioning success path', () => {
 describe('node provisioning failure handling', () => {
   it('throws error when provisioned node status is error', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain("node?.status === 'error'");
     expect(section).toContain("node.error_message || 'Node provisioning failed'");
@@ -224,16 +231,16 @@ describe('node provisioning failure handling', () => {
 
   it('throws error when provisioned node status is stopped', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain("node?.status === 'stopped'");
   });
 
   it('throws error when provisionedNode is null or not running', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain("!provisionedNode || provisionedNode.status !== 'running'");
   });
@@ -246,23 +253,23 @@ describe('node provisioning failure handling', () => {
 describe('retry for already-provisioned node', () => {
   it('checks if nodeId already exists in step results (retry scenario)', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('if (state.stepResults.nodeId)');
   });
 
   it('queries node status from D1 on retry', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain("SELECT id, status, error_message FROM nodes WHERE id = ?");
   });
 
   it('advances immediately if node is already running on retry', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeProvisioning('),
       doSource.indexOf('// Check user node limit')
     );
     expect(section).toContain("node?.status === 'running'");
@@ -271,7 +278,7 @@ describe('retry for already-provisioned node', () => {
 
   it('schedules poll alarm if node is still creating', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeProvisioning('),
       doSource.indexOf('// Check user node limit')
     );
     expect(section).toContain('getProvisionPollIntervalMs()');
@@ -286,16 +293,16 @@ describe('retry for already-provisioned node', () => {
 describe('handleNodeAgentReady', () => {
   it('throws when nodeId is missing from state', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
     expect(section).toContain('No nodeId in state');
   });
 
   it('initializes agentReadyStartedAt on first entry', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
     expect(section).toContain('if (!state.agentReadyStartedAt)');
     expect(section).toContain('state.agentReadyStartedAt = Date.now()');
@@ -303,8 +310,8 @@ describe('handleNodeAgentReady', () => {
 
   it('persists state after setting agentReadyStartedAt', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
     // Find the section between agentReadyStartedAt assignment and the timeout check
     const startAtSection = section.slice(
@@ -316,8 +323,8 @@ describe('handleNodeAgentReady', () => {
 
   it('throws permanent error when timeout is exceeded', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
     expect(section).toContain('elapsed > timeoutMs');
     expect(section).toContain('Node agent not ready within');
@@ -326,18 +333,18 @@ describe('handleNodeAgentReady', () => {
 
   it('uses configurable agent ready timeout', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
-    expect(section).toContain('this.getAgentReadyTimeoutMs()');
+    expect(section).toContain('rc.getAgentReadyTimeoutMs()');
   });
 
   it('checks health via D1 heartbeat query (not direct VM fetch)', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
-    expect(section).toContain('this.env.DATABASE.prepare');
+    expect(section).toContain('rc.env.DATABASE.prepare');
     expect(section).toContain('health_status');
     expect(section).toContain('last_heartbeat_at');
     // Must NOT use direct fetch to VM (same-zone routing intercepts it)
@@ -346,8 +353,8 @@ describe('handleNodeAgentReady', () => {
 
   it('verifies heartbeat is recent (not stale from previous boot)', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
     expect(section).toContain('heartbeatIsRecent');
     expect(section).toContain('agentReadyStartedAt');
@@ -355,8 +362,8 @@ describe('handleNodeAgentReady', () => {
 
   it('advances to workspace_creation on healthy + recent heartbeat', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
     expect(section).toContain("health_status === 'healthy'");
     expect(section).toContain("advanceToStep(state, 'workspace_creation')");
@@ -364,17 +371,17 @@ describe('handleNodeAgentReady', () => {
 
   it('schedules poll alarm when not ready', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
-    expect(section).toContain('this.getAgentPollIntervalMs()');
+    expect(section).toContain('rc.getAgentPollIntervalMs()');
     expect(section).toContain('setAlarm');
   });
 
   it('documents same-zone routing issue in comments', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeAgentReady('),
-      doSource.indexOf('private async handleWorkspaceCreation(')
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
     );
     expect(section).toContain('same-zone routing');
   });
@@ -387,8 +394,8 @@ describe('handleNodeAgentReady', () => {
 describe('task context passed to provisionNode for cloud-init', () => {
   it('passes projectId to provisionNode call', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('state.projectId');
     expect(section).toContain('provisionNode');
@@ -396,8 +403,8 @@ describe('task context passed to provisionNode for cloud-init', () => {
 
   it('passes chatSessionId from step results to provisionNode', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('chatSessionId');
     expect(section).toContain('state.stepResults.chatSessionId');
@@ -405,8 +412,8 @@ describe('task context passed to provisionNode for cloud-init', () => {
 
   it('passes taskId to provisionNode call', () => {
     const section = doSource.slice(
-      doSource.indexOf('private async handleNodeProvisioning('),
-      doSource.indexOf('private async handleNodeAgentReady(')
+      doSource.indexOf('export async function handleNodeProvisioning('),
+      doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('state.taskId');
   });

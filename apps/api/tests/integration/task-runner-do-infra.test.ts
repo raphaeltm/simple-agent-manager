@@ -17,10 +17,17 @@ const indexSource = readFileSync(
   resolve(process.cwd(), 'src/index.ts'),
   'utf8'
 );
-const doSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
-  'utf8'
-);
+// TaskRunner DO is split across task-runner/ directory — read all module files
+const doDir = resolve(process.cwd(), 'src/durable-objects/task-runner');
+const doSource = [
+  readFileSync(resolve(doDir, 'index.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'types.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'node-steps.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'workspace-steps.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'agent-session-step.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'state-machine.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'helpers.ts'), 'utf8'),
+].join('\n');
 const sharedConstants = readFileSync(
   resolve(process.cwd(), '../../packages/shared/src/constants/task-execution.ts'),
   'utf8'
@@ -119,7 +126,7 @@ describe('TaskRunner DO env type', () => {
   it('uses the full Env type from index.ts (no partial TaskRunnerEnv)', () => {
     // TaskRunner uses the full Env interface so service functions receive
     // properly typed env without `as any` casts.
-    expect(doSource).toContain("import type { Env } from '../index'");
+    expect(doSource).toContain("import type { Env } from '../../index'");
     expect(doSource).toContain('extends DurableObject<Env>');
     expect(doSource).not.toContain('type TaskRunnerEnv');
   });
@@ -127,8 +134,8 @@ describe('TaskRunner DO env type', () => {
 
 describe('Constitution Principle XI compliance', () => {
   it('all timeouts are configurable via env vars', () => {
-    // Every getXxx() method should read from this.env
-    const configMethods = doSource.match(/private get\w+\(\).*?{.*?}/gs);
+    // Every getXxx() method in the DO class should read from this.env
+    const configMethods = doSource.match(/private get\w+\(\):.*?{.*?}/gs);
     expect(configMethods).not.toBeNull();
     for (const method of configMethods!) {
       expect(method).toContain('this.env.');
@@ -137,19 +144,19 @@ describe('Constitution Principle XI compliance', () => {
   });
 
   it('no hardcoded timeout values in step handlers', () => {
-    // Step handlers should use this.getXxx() not magic numbers
+    // Step handlers should use rc.getXxx() not magic numbers
     const stepHandlers = [
       'handleNodeAgentReady',
       'handleWorkspaceReady',
       'handleNodeProvisioning',
     ];
     for (const handler of stepHandlers) {
-      const section = doSource.slice(
-        doSource.indexOf(`private async ${handler}(`),
-        doSource.indexOf('private async', doSource.indexOf(`private async ${handler}(`) + 50)
-      );
-      // Should not contain direct millisecond constants like 5000, 10000, etc.
-      // Exception: 5000 for health check AbortController timeout (acceptable)
+      // Step handlers are now exported functions (not private class methods)
+      const fnStart = doSource.indexOf(`export async function ${handler}(`);
+      if (fnStart === -1) continue; // handler may be named differently after refactor
+      const nextFn = doSource.indexOf('export async function', fnStart + 50);
+      const section = doSource.slice(fnStart, nextFn > fnStart ? nextFn : undefined);
+      // Should not contain direct millisecond constants like 30000, 60000, etc.
       expect(section).not.toMatch(/\b30000\b/);
       expect(section).not.toMatch(/\b60000\b/);
       expect(section).not.toMatch(/\b120000\b/);
@@ -239,12 +246,11 @@ describe('Initial prompt delivery: two-step idempotency', () => {
 
   it('persists state between create and start steps', () => {
     // Both steps call ctx.storage.put after their respective flag changes
-    // Count storage.put calls in handleAgentSession
-    const handleAgentSection = doSource.slice(
-      doSource.indexOf('private async handleAgentSession('),
-      doSource.indexOf('private async', doSource.indexOf('private async handleAgentSession(') + 50)
-    );
-    const storagePuts = handleAgentSection.match(/this\.ctx\.storage\.put\('state'/g);
+    // Count storage.put calls in handleAgentSession (now an exported function)
+    const fnStart = doSource.indexOf('export async function handleAgentSession(');
+    const nextFn = doSource.indexOf('export async function', fnStart + 50);
+    const handleAgentSection = doSource.slice(fnStart, nextFn > fnStart ? nextFn : undefined);
+    const storagePuts = handleAgentSection.match(/rc\.ctx\.storage\.put\('state'/g);
     expect(storagePuts).not.toBeNull();
     // At least 3: after sessionId set, after reset (edge case), and after agentStarted
     expect(storagePuts!.length).toBeGreaterThanOrEqual(3);
