@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -884,12 +885,26 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		// refresh proxy to prevent concurrent refresh race conditions.
 		// Codex reads CODEX_REFRESH_TOKEN_URL_OVERRIDE and POSTs refresh requests there
 		// instead of directly to auth.openai.com.
-		if agentType == "openai-codex" && h.config.ControlPlaneURL != "" && h.config.CallbackToken != "" {
-			refreshURL := fmt.Sprintf("%s/api/auth/codex-refresh?token=%s",
-				strings.TrimRight(h.config.ControlPlaneURL, "/"),
-				h.config.CallbackToken)
-			envVars = append(envVars, "CODEX_REFRESH_TOKEN_URL_OVERRIDE="+refreshURL)
-			slog.Info("Injected Codex refresh proxy URL", "workspaceId", h.config.WorkspaceID)
+		//
+		// The callback token is embedded in the URL query param because Codex's built-in
+		// refresh flow cannot set custom HTTP headers — it only supports a URL override.
+		// This is a hard external constraint of the CODEX_REFRESH_TOKEN_URL_OVERRIDE mechanism.
+		if agentType == "openai-codex" && cred.credentialKind == "oauth-token" &&
+			h.config.ControlPlaneURL != "" && h.config.CallbackToken != "" {
+			u, err := url.Parse(strings.TrimSuffix(h.config.ControlPlaneURL, "/") + "/api/auth/codex-refresh")
+			if err != nil {
+				slog.Warn("Invalid ControlPlaneURL for Codex refresh proxy",
+					"error", err, "workspaceId", h.config.WorkspaceID)
+			} else {
+				q := url.Values{}
+				q.Set("token", h.config.CallbackToken)
+				u.RawQuery = q.Encode()
+				envVars = append(envVars, "CODEX_REFRESH_TOKEN_URL_OVERRIDE="+u.String())
+				slog.Info("Injected Codex refresh proxy URL",
+					"workspaceId", h.config.WorkspaceID,
+					"sessionId", h.config.SessionID,
+					"credentialKind", cred.credentialKind)
+			}
 		}
 	} else {
 		envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
