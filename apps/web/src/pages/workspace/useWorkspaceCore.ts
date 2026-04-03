@@ -157,10 +157,9 @@ export function useWorkspaceCore(
   // Keep the ref in sync so the polling interval always calls the latest version
   loadWorkspaceStateRef.current = loadWorkspaceState;
 
-  // Keep workspace status ref in sync for the polling interval's conditional check
-  useEffect(() => {
-    workspaceStatusRef.current = workspace?.status;
-  }, [workspace?.status]);
+  // Note: workspaceStatusRef is updated synchronously inside loadWorkspaceState
+  // (line where workspaceStatusRef.current = workspaceData.status), so it's always
+  // current before the next interval tick. No separate sync effect needed.
 
   // Load/reload workspace — depends ONLY on `id`.
   // The polling interval reads workspace status and loadWorkspaceState from refs,

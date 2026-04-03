@@ -50,9 +50,8 @@ export function useBootLogStream(
   const wsRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
 
-  // Mount/unmount tracking — no dependencies, runs once
+  // Unmount cleanup — mountedRef is already true from useRef(true) initialization
   useEffect(() => {
-    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       cleanupWebSocket(wsRef, setConnected);
