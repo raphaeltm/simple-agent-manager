@@ -242,7 +242,8 @@ export async function checkCodexRefreshRateLimit(
   workspaceId: string,
 ): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
   const limit = getRateLimit(env, 'CODEX_REFRESH');
-  const windowSeconds = DEFAULT_WINDOW_SECONDS;
+  const envWindow = parseInt(env.RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS || '', 10);
+  const windowSeconds = Number.isFinite(envWindow) && envWindow > 0 ? envWindow : DEFAULT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const key = createRateLimitKey('codex-refresh', workspaceId, windowStart);
 
