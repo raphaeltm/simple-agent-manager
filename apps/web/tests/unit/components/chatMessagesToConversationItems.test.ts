@@ -2,9 +2,7 @@
  * Behavioral tests for chatMessagesToConversationItems().
  *
  * This function converts DO-persisted ChatMessageResponse[] into
- * ConversationItem[] for unified ACP-style rendering. The existing
- * chat-components.test.ts only does source-contract checks (readFileSync),
- * which prove the code is present but not that the logic is correct.
+ * ConversationItem[] for unified ACP-style rendering.
  *
  * These tests exercise the actual runtime behaviour of every branch.
  */
