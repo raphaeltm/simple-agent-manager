@@ -1,14 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { dirname,resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Landing } from '../../../src/pages/Landing';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const mockUseAuth = vi.fn();
 
@@ -27,30 +21,59 @@ vi.mock('@simple-agent-manager/ui', () => ({
   Card: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
-  Typography: ({ children, className }: { children: React.ReactNode; variant?: string; className?: string }) => (
-    <span className={className}>{children}</span>
+  Typography: ({ children, className, as: Tag = 'span' }: { children: React.ReactNode; variant?: string; className?: string; as?: React.ElementType }) => (
+    <Tag className={className}>{children}</Tag>
   ),
   Container: ({ children }: { children: React.ReactNode; maxWidth?: string }) => <div>{children}</div>,
 }));
 
-describe('Landing page source contract', () => {
-  const file = readFileSync(resolve(__dirname, '../../../src/pages/Landing.tsx'), 'utf8');
+function renderLanding() {
+  mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
+  return render(
+    <MemoryRouter initialEntries={['/']}>
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/dashboard" element={<div data-testid="dashboard" />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe('Landing page content', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows BYOC messaging', () => {
+    renderLanding();
+    expect(screen.getByText(/Bring your own cloud/)).toBeInTheDocument();
+    expect(screen.getByText(/your infrastructure, your costs/)).toBeInTheDocument();
+  });
+
+  it('does not show removed marketing sections', () => {
+    renderLanding();
+    expect(screen.queryByText('How It Works')).not.toBeInTheDocument();
+    expect(screen.queryByText('Choose Your Agent')).not.toBeInTheDocument();
+    expect(screen.queryByText('Platform Features')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shipped & Planned')).not.toBeInTheDocument();
+  });
 
   it('does not advertise idle-based zero-cost behavior', () => {
-    expect(file).not.toContain('Zero Cost');
-    expect(file).not.toContain('When idle');
+    renderLanding();
+    expect(screen.queryByText(/Zero Cost/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/When idle/)).not.toBeInTheDocument();
   });
 
-  it('includes BYOC messaging', () => {
-    expect(file).toContain('Bring your own cloud');
-    expect(file).toContain('your infrastructure, your costs');
+  it('shows supported agent names', () => {
+    renderLanding();
+    expect(screen.getByText('Claude Code')).toBeInTheDocument();
+    expect(screen.getByText('OpenAI Codex')).toBeInTheDocument();
+    expect(screen.getByText('Gemini CLI')).toBeInTheDocument();
   });
 
-  it('does not contain marketing sections', () => {
-    expect(file).not.toContain('How It Works');
-    expect(file).not.toContain('Choose Your Agent');
-    expect(file).not.toContain('Platform Features');
-    expect(file).not.toContain('Shipped & Planned');
+  it('shows sign-in button', () => {
+    renderLanding();
+    expect(screen.getByText('Sign in with GitHub')).toBeInTheDocument();
   });
 });
 
