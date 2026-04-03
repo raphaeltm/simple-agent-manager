@@ -84,7 +84,7 @@ describe('useWorkspaceCore polling stability (React #185 regression)', () => {
     const workspaceStatusRef = { current: 'running' as string | undefined };
 
     // Simulate the polling effect body
-    const runPollingEffect = (effectId: string) => {
+    const runPollingEffect = (_effectId: string) => {
       loadWorkspaceStateRef.current();
 
       // Simulate one interval tick
@@ -133,7 +133,7 @@ describe('useWorkspaceCore polling stability (React #185 regression)', () => {
     const terminalTokenRef = { current: 'token-v1' };
 
     // Simulate the polling effect — should run exactly once per id change
-    const simulateEffect = (id: string) => {
+    const simulateEffect = (_id: string) => {
       effectRunCount++;
       loadWorkspaceStateRef.current();
     };
