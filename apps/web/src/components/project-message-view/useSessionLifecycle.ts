@@ -228,7 +228,7 @@ export function useSessionLifecycle(
   }, [session?.workspaceId, workspace?.id]);
 
   // Token refresh for port scanning
-  const isWorkspaceRunning = workspace?.status === 'running';
+  const isWorkspaceRunning = workspace?.status === 'running' || workspace?.status === 'recovery';
   const tokenRefreshFetchToken = useCallback(async () => {
     const wsId = session?.workspaceId;
     if (!wsId) throw new Error('No workspace ID');
