@@ -83,6 +83,11 @@ class_name = "TaskRunner"
 name = "NOTIFICATION"
 class_name = "NotificationService"
 
+# Durable Object for per-user Codex OAuth token refresh serialization
+[[durable_objects.bindings]]
+name = "CODEX_REFRESH_LOCK"
+class_name = "CodexRefreshLock"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -102,6 +107,10 @@ new_classes = ["TaskRunner"]
 [[migrations]]
 tag = "v5"
 new_sqlite_classes = ["NotificationService"]
+
+[[migrations]]
+tag = "v6"
+new_classes = ["CodexRefreshLock"]
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

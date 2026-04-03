@@ -1,5 +1,6 @@
 // Re-export Durable Object classes for Cloudflare Workers runtime
 export { AdminLogs } from './durable-objects/admin-logs';
+export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectData } from './durable-objects/project-data';
@@ -27,6 +28,7 @@ import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
+import { codexRefreshRoutes } from './routes/codex-refresh';
 import { cachedCommandRoutes } from './routes/cached-commands';
 import { chatRoutes } from './routes/chat';
 import { clientErrorsRoutes } from './routes/client-errors';
@@ -79,6 +81,7 @@ export interface Env {
   ADMIN_LOGS: DurableObjectNamespace;
   TASK_RUNNER: DurableObjectNamespace;
   NOTIFICATION: DurableObjectNamespace;
+  CODEX_REFRESH_LOCK: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -326,6 +329,11 @@ export interface Env {
   NOTIFICATION_PROGRESS_BATCH_WINDOW_MS?: string;
   NOTIFICATION_DEDUP_WINDOW_MS?: string;
   NOTIFICATION_FULL_BODY_LENGTH?: string;
+  // Codex token refresh proxy configuration
+  CODEX_REFRESH_PROXY_ENABLED?: string;            // Kill switch: "false" to disable (default: enabled)
+  CODEX_REFRESH_LOCK_TIMEOUT_MS?: string;          // Per-user lock timeout (default: 15000)
+  CODEX_REFRESH_UPSTREAM_URL?: string;             // OpenAI token endpoint (default: https://auth.openai.com/oauth/token)
+  CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string;      // Upstream request timeout (default: 10000)
   // Google OAuth (for GCP OIDC integration)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -699,7 +707,11 @@ app.get('/.well-known/openid-configuration', async (c) => {
   return c.json(discovery);
 });
 
-// API routes — smoke test token routes registered before BetterAuth catch-all
+// API routes — codex refresh and smoke test routes registered before BetterAuth catch-all.
+// codexRefreshRoutes uses workspace callback token auth (query param), not session auth.
+// smokeTestTokenRoutes uses dedicated smoke test token auth, not session auth.
+// Both must be mounted before authRoutes to avoid BetterAuth's wildcard catch-all.
+app.route('/api/auth', codexRefreshRoutes);
 app.route('/api/auth', smokeTestTokenRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/credentials', credentialsRoutes);

@@ -879,6 +879,18 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		// Prevent codex-acp from trying to open a browser for login
 		envVars = append(envVars, "NO_BROWSER=1")
 		slog.Info("Injected auth file into container", "path", info.authFilePath)
+
+		// For Codex OAuth: redirect token refresh requests through SAM's centralized
+		// refresh proxy to prevent concurrent refresh race conditions.
+		// Codex reads CODEX_REFRESH_TOKEN_URL_OVERRIDE and POSTs refresh requests there
+		// instead of directly to auth.openai.com.
+		if agentType == "openai-codex" && h.config.ControlPlaneURL != "" && h.config.CallbackToken != "" {
+			refreshURL := fmt.Sprintf("%s/api/auth/codex-refresh?token=%s",
+				strings.TrimRight(h.config.ControlPlaneURL, "/"),
+				h.config.CallbackToken)
+			envVars = append(envVars, "CODEX_REFRESH_TOKEN_URL_OVERRIDE="+refreshURL)
+			slog.Info("Injected Codex refresh proxy URL", "workspaceId", h.config.WorkspaceID)
+		}
 	} else {
 		envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
 	}
