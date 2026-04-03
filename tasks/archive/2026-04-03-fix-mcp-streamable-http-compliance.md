@@ -20,30 +20,30 @@ SAM's `/mcp` endpoint treats all JSON-RPC messages as requests. When Codex sends
 ## Implementation Checklist
 
 ### A. Notification detection + 202 response
-- [ ] After parsing JSON-RPC body and validating `jsonrpc: '2.0'`, detect notifications where `rpc.id` is `undefined`
-- [ ] Return `202 Accepted` with no body for all notifications (before the method switch)
+- [x] After parsing JSON-RPC body and validating `jsonrpc: '2.0'`, detect notifications where `rpc.id` is `undefined`
+- [x] Return `202 Accepted` with no body for all notifications (before the method switch)
 
 ### B. GET and DELETE 405 handlers
-- [ ] Add `mcpRoutes.get('/', ...)` returning 405 Method Not Allowed
-- [ ] Add `mcpRoutes.delete('/', ...)` returning 405 Method Not Allowed
+- [x] Add `mcpRoutes.get('/', ...)` returning 405 Method Not Allowed
+- [x] Add `mcpRoutes.delete('/', ...)` returning 405 Method Not Allowed
 
 ### C. Tests
-- [ ] Test that POST with no `id` field returns 202 with empty body
-- [ ] Test that `notifications/initialized` returns 202
-- [ ] Test that unknown notifications return 202 (not JSON-RPC error)
-- [ ] Test that GET `/mcp` returns 405
-- [ ] Test that DELETE `/mcp` returns 405
-- [ ] Test full Codex lifecycle: initialize (200) → notifications/initialized (202) → tools/list (200) → tools/call (200)
-- [ ] Regression: existing initialize, tools/list, tools/call, ping still return 200 with JSON-RPC responses
+- [x] Test that POST with no `id` field returns 202 with empty body
+- [x] Test that `notifications/initialized` returns 202
+- [x] Test that unknown notifications return 202 (not JSON-RPC error)
+- [x] Test that GET `/mcp` returns 405
+- [x] Test that DELETE `/mcp` returns 405
+- [x] Test full Codex lifecycle: initialize (200) → notifications/initialized (202) → tools/list (200) → tools/call (200)
+- [x] Regression: existing initialize, tools/list, tools/call, ping still return 200 with JSON-RPC responses
 
 ## Acceptance Criteria
 
-- [ ] `notifications/initialized` POST returns 202 with no body
-- [ ] All notifications (no `id` field) return 202
-- [ ] GET `/mcp` returns 405
-- [ ] DELETE `/mcp` returns 405
-- [ ] Existing MCP requests (initialize, tools/list, tools/call, ping) still work
-- [ ] Automated tests cover all lifecycle steps
+- [x] `notifications/initialized` POST returns 202 with no body
+- [x] All notifications (no `id` field) return 202
+- [x] GET `/mcp` returns 405
+- [x] DELETE `/mcp` returns 405
+- [x] Existing MCP requests (initialize, tools/list, tools/call, ping) still work
+- [x] Automated tests cover all lifecycle steps
 
 ## References
 
