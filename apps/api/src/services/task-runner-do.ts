@@ -59,6 +59,8 @@ export async function startTaskRunnerDO(
     permissionMode?: string | null;
     /** System prompt text to append to the initial prompt (from agent profile). */
     systemPromptAppend?: string | null;
+    /** ID of an agent profile to use for this task. */
+    agentProfileId?: string | null;
     /** File attachments uploaded to R2 before task submission. */
     attachments?: TaskAttachment[] | null;
     /** Per-project scaling overrides. */
@@ -99,6 +101,7 @@ export async function startTaskRunnerDO(
       model: input.model ?? null,
       permissionMode: input.permissionMode ?? null,
       systemPromptAppend: input.systemPromptAppend ?? null,
+      agentProfileId: input.agentProfileId ?? null,
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,
     },

@@ -25,12 +25,12 @@ The `dispatch_task` MCP tool currently doesn't support specifying an agent profi
 
 ## Implementation Checklist
 
-- [ ] Add `agentProfileId` parameter to `dispatch_task` tool definition
-- [ ] Update `handleDispatchTask` to accept and validate `agentProfileId`
-- [ ] Pass `agentProfileId` to `startTaskRunnerDO` function
-- [ ] Add validation to ensure agent profile exists and belongs to the project
-- [ ] Update tests to cover agent profile parameter scenarios
-- [ ] Add documentation to tool description
+- [x] Add `agentProfileId` parameter to `dispatch_task` tool definition
+- [x] Update `handleDispatchTask` to accept and validate `agentProfileId`
+- [x] Pass `agentProfileId` to `startTaskRunnerDO` function
+- [x] Add validation to ensure agent profile exists and belongs to the project
+- [x] Update tests to cover agent profile parameter scenarios
+- [x] Add documentation to tool description
 
 ## Acceptance Criteria
 
