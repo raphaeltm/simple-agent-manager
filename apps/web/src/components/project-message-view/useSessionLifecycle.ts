@@ -10,6 +10,7 @@ import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api';
 import { getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, resumeAgentSession, uploadSessionFiles } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
+import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
 import { deriveSessionState,VIRTUAL_START } from './types';
 import { useConnectionRecovery } from './useConnectionRecovery';
@@ -228,7 +229,7 @@ export function useSessionLifecycle(
   }, [session?.workspaceId, workspace?.id]);
 
   // Token refresh for port scanning
-  const isWorkspaceRunning = workspace?.status === 'running';
+  const isWorkspaceRunning = isWorkspaceOperational(workspace?.status);
   const tokenRefreshFetchToken = useCallback(async () => {
     const wsId = session?.workspaceId;
     if (!wsId) throw new Error('No workspace ID');

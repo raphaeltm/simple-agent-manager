@@ -20,6 +20,7 @@ import {
   stopWorkspace,
   updateWorkspace,
 } from '../../lib/api';
+import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 
 export interface UseWorkspaceCoreResult {
   workspace: WorkspaceResponse | null;
@@ -69,7 +70,7 @@ export function useWorkspaceCore(
   const terminalWsUrlCacheRef = useRef<{ url: string; resolvedAt: number } | null>(null);
   const wsUrlSetRef = useRef(false);
 
-  const isRunning = workspace?.status === 'running' || workspace?.status === 'recovery';
+  const isRunning = isWorkspaceOperational(workspace?.status);
 
   // Proactive token refresh
   const tokenRefreshFetchToken = useCallback(async () => {
@@ -111,8 +112,7 @@ export function useWorkspaceCore(
       setWorkspace(workspaceData);
       setDisplayNameInput(workspaceData.displayName || workspaceData.name);
 
-      const wsRunning =
-        workspaceData.status === 'running' || workspaceData.status === 'recovery';
+      const wsRunning = isWorkspaceOperational(workspaceData.status);
       let sessionsData: AgentSession[] = [];
       if (wsRunning && workspaceData.url && terminalToken) {
         try {
