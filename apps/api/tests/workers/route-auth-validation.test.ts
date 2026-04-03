@@ -5,12 +5,16 @@
  * route existence and auth requirements by reading source code as strings.
  * These tests exercise the actual Hono routes in the workerd runtime
  * with real Miniflare bindings.
+ *
+ * Message validation tests are NOT duplicated here — see
+ * tests/workers/workspace-messages.test.ts for that coverage.
  */
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
 
+// Unique IDs per test run to avoid cross-test contamination (shared D1, no isolatedStorage)
 const TEST_PREFIX = `auth-val-${Date.now()}`;
 const USER_ID = `${TEST_PREFIX}-user`;
 const PROJECT_ID = `${TEST_PREFIX}-proj`;
@@ -18,13 +22,16 @@ const NODE_ID = `${TEST_PREFIX}-node`;
 const WORKSPACE_ID = `${TEST_PREFIX}-ws`;
 const SESSION_ID = `${TEST_PREFIX}-sess`;
 
+let workspaceCallbackToken: string;
+let nodeCallbackToken: string;
+
 beforeAll(async () => {
   // Seed test user
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`,
   )
-    .bind(USER_ID, 888888, 'test-user-auth', 'Auth Test User', 'https://example.com/a.png')
+    .bind(USER_ID, '888888', 'test-user-auth', 'Auth Test User', 'https://example.com/a.png')
     .run();
 
   // Seed test project
@@ -35,9 +42,9 @@ beforeAll(async () => {
     .bind(PROJECT_ID, USER_ID, 'auth-test-project', 'test-repo', 'test-owner')
     .run();
 
-  // Seed test node
+  // Seed test node (cloud_provider and vm_size are the correct column names)
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO nodes (id, user_id, name, status, provider, vm_location, vm_type, created_at, updated_at)
+    `INSERT OR IGNORE INTO nodes (id, user_id, name, status, cloud_provider, vm_location, vm_size, created_at, updated_at)
      VALUES (?, ?, ?, 'running', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`,
   )
     .bind(NODE_ID, USER_ID, 'auth-test-node')
@@ -59,10 +66,14 @@ beforeAll(async () => {
       'main',
     )
     .run();
+
+  // Sign all tokens after seeding is complete (follows workspace-messages.test.ts pattern)
+  workspaceCallbackToken = await signCallbackToken(WORKSPACE_ID, env as any);
+  nodeCallbackToken = await signNodeCallbackToken(NODE_ID, env as any);
 });
 
 // =============================================================================
-// User-authenticated routes require auth
+// User-authenticated routes require auth (401 without session)
 // =============================================================================
 
 describe('user-authenticated routes require auth', () => {
@@ -103,19 +114,18 @@ describe('workspace callback auth', () => {
   });
 
   it('accepts callback token for workspace-scoped endpoints', async () => {
-    const token = await signCallbackToken(WORKSPACE_ID, env as any);
     const response = await SELF.fetch(
       `https://api.test.example.com/api/workspaces/${WORKSPACE_ID}/messages`,
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${workspaceCallbackToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           messages: [
             {
-              messageId: `${TEST_PREFIX}-msg-1`,
+              messageId: `${TEST_PREFIX}-msg-${Math.random().toString(36).slice(2)}`,
               sessionId: SESSION_ID,
               role: 'assistant',
               content: 'test message',
@@ -136,13 +146,12 @@ describe('workspace callback auth', () => {
 
 describe('node callback auth', () => {
   it('accepts node callback token for heartbeat endpoint', async () => {
-    const token = await signNodeCallbackToken(NODE_ID, env as any);
     const response = await SELF.fetch(
       `https://api.test.example.com/api/nodes/${NODE_ID}/heartbeat`,
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${nodeCallbackToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -153,9 +162,7 @@ describe('node callback auth', () => {
         }),
       },
     );
-    // Should succeed or at least not return auth error
-    expect(response.status).toBeLessThan(500);
-    expect(response.status).not.toBe(401);
+    expect(response.status).toBe(200);
   });
 
   it('returns 401 for heartbeat without token', async () => {
@@ -173,119 +180,6 @@ describe('node callback auth', () => {
       },
     );
     expect(response.status).toBe(401);
-  });
-});
-
-// =============================================================================
-// Message validation
-// =============================================================================
-
-describe('message validation', () => {
-  let validToken: string;
-
-  beforeAll(async () => {
-    validToken = await signCallbackToken(WORKSPACE_ID, env as any);
-  });
-
-  it('rejects empty messages array', async () => {
-    const response = await SELF.fetch(
-      `https://api.test.example.com/api/workspaces/${WORKSPACE_ID}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${validToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ messages: [] }),
-      },
-    );
-    expect(response.status).toBe(400);
-  });
-
-  it('rejects invalid message role', async () => {
-    const response = await SELF.fetch(
-      `https://api.test.example.com/api/workspaces/${WORKSPACE_ID}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${validToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              messageId: `${TEST_PREFIX}-invalid-role`,
-              sessionId: SESSION_ID,
-              role: 'invalid-role',
-              content: 'test',
-              timestamp: new Date().toISOString(),
-            },
-          ],
-        }),
-      },
-    );
-    expect(response.status).toBe(400);
-  });
-
-  it('rejects messages targeting different sessions', async () => {
-    const response = await SELF.fetch(
-      `https://api.test.example.com/api/workspaces/${WORKSPACE_ID}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${validToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              messageId: `${TEST_PREFIX}-msg-a`,
-              sessionId: SESSION_ID,
-              role: 'assistant',
-              content: 'test',
-              timestamp: new Date().toISOString(),
-            },
-            {
-              messageId: `${TEST_PREFIX}-msg-b`,
-              sessionId: 'different-session',
-              role: 'assistant',
-              content: 'test',
-              timestamp: new Date().toISOString(),
-            },
-          ],
-        }),
-      },
-    );
-    expect(response.status).toBe(400);
-    const body = await response.json<{ message: string }>();
-    expect(body.message).toContain('same sessionId');
-  });
-
-  it('rejects messages with mismatched session ID', async () => {
-    const response = await SELF.fetch(
-      `https://api.test.example.com/api/workspaces/${WORKSPACE_ID}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${validToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              messageId: `${TEST_PREFIX}-mismatch`,
-              sessionId: 'wrong-session-id',
-              role: 'assistant',
-              content: 'test',
-              timestamp: new Date().toISOString(),
-            },
-          ],
-        }),
-      },
-    );
-    expect(response.status).toBe(400);
-    const body = await response.json<{ message: string }>();
-    expect(body.message).toContain('Session mismatch');
   });
 });
 
@@ -327,13 +221,12 @@ describe('workspace resolution', () => {
 
 describe('node ready callback', () => {
   it('accepts ready callback with node token', async () => {
-    const token = await signNodeCallbackToken(NODE_ID, env as any);
     const response = await SELF.fetch(
       `https://api.test.example.com/api/nodes/${NODE_ID}/ready`,
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${nodeCallbackToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -341,8 +234,8 @@ describe('node ready callback', () => {
         }),
       },
     );
-    // The node is already 'running', so this may return 200 or a status-based error
-    // but should NOT return 401 (auth) or 500 (crash)
+    // Node is already 'running', so ready callback may return 200 or
+    // a status-based error — but should NOT return 401 (auth) or 500 (crash)
     expect(response.status).toBeLessThan(500);
     expect(response.status).not.toBe(401);
   });
