@@ -847,6 +847,22 @@ new_sqlite_classes = ["ProjectData"]
 
 See `apps/api/.env.example` for the full list of configurable variables.
 
+### Codex Token Refresh Proxy
+
+SAM includes a centralized token refresh proxy for OpenAI Codex OAuth tokens. Codex uses rotating refresh tokens — when one instance refreshes, the old refresh token is permanently invalidated. If two workspaces refresh concurrently, one breaks permanently.
+
+The proxy intercepts Codex refresh requests and serializes them per user via a Durable Object, preventing the race condition. This is enabled by default and requires no additional configuration.
+
+**Configurable variables:**
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CODEX_REFRESH_PROXY_ENABLED` | Kill switch — set to `"false"` to disable | Enabled |
+| `CODEX_REFRESH_LOCK_TIMEOUT_MS` | Per-user lock timeout | `30000` (30s) |
+| `CODEX_REFRESH_UPSTREAM_URL` | OpenAI token endpoint | `https://auth.openai.com/oauth/token` |
+| `CODEX_REFRESH_UPSTREAM_TIMEOUT_MS` | Upstream request timeout | `10000` (10s) |
+| `CODEX_CLIENT_ID` | OpenAI OAuth client ID | `app_EMoamEEZ73f0CkXaXp7hrann` |
+
 ### Rotating Security Keys
 
 Security keys are managed by Pulumi and normally don't need rotation. If you need to rotate keys:
