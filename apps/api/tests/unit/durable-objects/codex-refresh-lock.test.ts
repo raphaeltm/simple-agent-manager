@@ -492,6 +492,36 @@ describe('CodexRefreshLock', () => {
     );
   });
 
+  it('warns on non-string scope in upstream response', async () => {
+    const { do: doInstance, env } = createDO({
+      CODEX_EXPECTED_SCOPES: 'openid',
+    });
+    setupCredentialFound(env);
+    mockLogWarn.mockClear();
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'new-access',
+          refresh_token: 'new-refresh',
+          scope: 42, // non-string scope
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockLogWarn).toHaveBeenCalledWith(
+      'codex_refresh.scope_validation',
+      expect.objectContaining({
+        scopeType: 'number',
+      }),
+    );
+  });
+
   // -----------------------------------------------------------------------
   // Configurable upstream URL and client_id
   // -----------------------------------------------------------------------
