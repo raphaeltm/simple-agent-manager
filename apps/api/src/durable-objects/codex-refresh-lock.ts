@@ -73,8 +73,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
           { status: 504, headers: { 'Content-Type': 'application/json' } }
         );
       }
-      // Log full error internally but do not expose to caller.
-      console.error('CodexRefreshLock internal error:', err instanceof Error ? err.message : err);
+      // Do not expose internal error details to caller.
       return new Response(
         JSON.stringify({ error: 'internal_error' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
