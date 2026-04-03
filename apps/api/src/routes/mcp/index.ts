@@ -103,6 +103,12 @@ mcpRoutes.post('/', async (c) => {
     );
   }
 
+  // MCP Streamable HTTP: notifications have no `id` field.
+  // Per spec, return 202 Accepted with no body.
+  if (rpc.id === undefined) {
+    return c.body(null, 202);
+  }
+
   const requestId = rpc.id ?? null;
 
   // Route by method
@@ -184,4 +190,14 @@ mcpRoutes.post('/', async (c) => {
     default:
       return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Method not found: ${rpc.method}`));
   }
+});
+
+// MCP Streamable HTTP: GET returns SSE stream or 405 if unsupported
+mcpRoutes.get('/', (c) => {
+  return c.text('Method Not Allowed', 405);
+});
+
+// MCP Streamable HTTP: DELETE terminates session or 405 if unsupported
+mcpRoutes.delete('/', (c) => {
+  return c.text('Method Not Allowed', 405);
 });
