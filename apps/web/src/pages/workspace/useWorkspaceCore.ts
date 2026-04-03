@@ -161,6 +161,21 @@ export function useWorkspaceCore(
   // (line where workspaceStatusRef.current = workspaceData.status), so it's always
   // current before the next interval tick. No separate sync effect needed.
 
+  // Reload once when terminal token first becomes available.
+  // The initial load (from the polling effect) may run before the token is ready,
+  // causing it to fall back to CP-only sessions. This ensures live sessions are
+  // fetched once the token arrives, without re-triggering on every token refresh.
+  const hasLoadedWithTokenRef = useRef(false);
+  useEffect(() => {
+    if (terminalToken && !hasLoadedWithTokenRef.current) {
+      hasLoadedWithTokenRef.current = true;
+      void loadWorkspaceStateRef.current();
+    }
+    if (!terminalToken) {
+      hasLoadedWithTokenRef.current = false;
+    }
+  }, [terminalToken]);
+
   // Load/reload workspace — depends ONLY on `id`.
   // The polling interval reads workspace status and loadWorkspaceState from refs,
   // breaking the feedback loop that caused React error #185.
@@ -254,23 +269,16 @@ export function useWorkspaceCore(
     isRunning
   );
 
-  // Ref for workspace URL — avoids putting workspace?.url in polling effect deps
-  const workspaceUrlRef = useRef(workspace?.url);
+  // Fetch workspace events from VM Agent.
+  // Depends on terminalToken directly (safe — this effect only reads state, it does
+  // not set any state that feeds back into terminalToken, so no feedback loop).
+  // The terminalToken dep ensures events are fetched once the token arrives.
   useEffect(() => {
-    workspaceUrlRef.current = workspace?.url;
-  }, [workspace?.url]);
-
-  // Fetch workspace events from VM Agent — depends only on `id` and `isRunning`.
-  // Reads workspace URL and token from refs to avoid polling effect feedback loops.
-  useEffect(() => {
-    if (!id || !isRunning) return;
+    if (!id || !workspace?.url || !terminalToken || !isRunning) return;
 
     const fetchEvents = async () => {
-      const currentUrl = workspaceUrlRef.current;
-      const currentToken = terminalTokenRef.current;
-      if (!currentUrl || !currentToken) return;
       try {
-        const data = await listWorkspaceEvents(currentUrl, id, currentToken, 50);
+        const data = await listWorkspaceEvents(workspace.url!, id, terminalToken, 50);
         setWorkspaceEvents(data.events || []);
       } catch {
         // Events are secondary — polling retries
@@ -280,7 +288,7 @@ export function useWorkspaceCore(
     void fetchEvents();
     const interval = setInterval(() => void fetchEvents(), 10000);
     return () => clearInterval(interval);
-  }, [id, isRunning]);
+  }, [id, workspace?.url, isRunning, terminalToken]);
 
   // Workspace actions
   const handleStop = async () => {
