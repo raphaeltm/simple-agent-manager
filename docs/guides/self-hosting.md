@@ -858,9 +858,10 @@ The proxy intercepts Codex refresh requests and serializes them per user via a D
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CODEX_REFRESH_PROXY_ENABLED` | Kill switch — set to `"false"` to disable | Enabled |
-| `CODEX_REFRESH_LOCK_TIMEOUT_MS` | Per-user lock timeout | `15000` (15s) |
+| `CODEX_REFRESH_LOCK_TIMEOUT_MS` | Per-user lock timeout | `30000` (30s) |
 | `CODEX_REFRESH_UPSTREAM_URL` | OpenAI token endpoint | `https://auth.openai.com/oauth/token` |
 | `CODEX_REFRESH_UPSTREAM_TIMEOUT_MS` | Upstream request timeout | `10000` (10s) |
+| `CODEX_CLIENT_ID` | OpenAI OAuth client ID | `app_EMoamEEZ73f0CkXaXp7hrann` |
 
 ### Rotating Security Keys
 

@@ -23,10 +23,13 @@ interface CodexRefreshEnv {
   CODEX_REFRESH_UPSTREAM_URL?: string;
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string;
   CODEX_REFRESH_LOCK_TIMEOUT_MS?: string;
+  CODEX_CLIENT_ID?: string;
 }
 
 const DEFAULT_UPSTREAM_URL = 'https://auth.openai.com/oauth/token';
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 10_000;
+const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
+const DEFAULT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 
 export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   /**
@@ -42,6 +45,26 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       });
     }
 
+    const lockTimeout = parseInt(this.env.CODEX_REFRESH_LOCK_TIMEOUT_MS || '', 10) || DEFAULT_LOCK_TIMEOUT_MS;
+
+    return Promise.race([
+      this.handleRefresh(request),
+      new Promise<Response>((resolve) =>
+        setTimeout(
+          () =>
+            resolve(
+              new Response(
+                JSON.stringify({ error: 'lock_timeout', message: 'Refresh lock timed out' }),
+                { status: 504, headers: { 'Content-Type': 'application/json' } }
+              )
+            ),
+          lockTimeout
+        )
+      ),
+    ]);
+  }
+
+  private async handleRefresh(request: Request): Promise<Response> {
     try {
       const payload: RefreshRequestPayload = await request.json();
       const { refreshToken, userId, encryptionKey } = payload;
@@ -114,7 +137,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            client_id: 'app_EMoamEEZ73f0CkXaXp7hrann',
+            client_id: this.env.CODEX_CLIENT_ID || DEFAULT_CLIENT_ID,
             grant_type: 'refresh_token',
             refresh_token: refreshToken,
           }),

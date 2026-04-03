@@ -256,6 +256,25 @@ describe('POST /api/auth/codex-refresh', () => {
     expect(res.status).toBe(502);
   });
 
+  it('returns cached tokens from DO when refresh_token is stale (already refreshed by another workspace)', async () => {
+    // Simulate the stale token case: DO returns 200 with cached tokens
+    // (meaning the request's refresh_token didn't match stored, so no upstream call was made)
+    mockDoFetch.mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: 'cached-access',
+        refresh_token: 'already-refreshed-token',
+        id_token: 'cached-id',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+
+    const res = await postRefresh(validBody);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.access_token).toBe('cached-access');
+    expect(json.refresh_token).toBe('already-refreshed-token');
+    expect(json.id_token).toBe('cached-id');
+  });
+
   // -----------------------------------------------------------------------
   // Contract tests — format matches Codex expectations
   // -----------------------------------------------------------------------

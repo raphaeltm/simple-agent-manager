@@ -331,9 +331,10 @@ export interface Env {
   NOTIFICATION_FULL_BODY_LENGTH?: string;
   // Codex token refresh proxy configuration
   CODEX_REFRESH_PROXY_ENABLED?: string;            // Kill switch: "false" to disable (default: enabled)
-  CODEX_REFRESH_LOCK_TIMEOUT_MS?: string;          // Per-user lock timeout (default: 15000)
+  CODEX_REFRESH_LOCK_TIMEOUT_MS?: string;          // Per-user lock timeout (default: 30000)
   CODEX_REFRESH_UPSTREAM_URL?: string;             // OpenAI token endpoint (default: https://auth.openai.com/oauth/token)
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string;      // Upstream request timeout (default: 10000)
+  CODEX_CLIENT_ID?: string;                        // OpenAI OAuth client_id (default: app_EMoamEEZ73f0CkXaXp7hrann)
   // Google OAuth (for GCP OIDC integration)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
