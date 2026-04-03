@@ -2,6 +2,7 @@ import type {
   AcpLifecycleEvent,
   AgentPanelHandle,
   ChatSettingsData,
+  SessionStateMessage,
   TokenUsage,
 } from '@simple-agent-manager/acp-client';
 import { AgentPanel,useAcpMessages, useAcpSession } from '@simple-agent-manager/acp-client';
@@ -155,6 +156,45 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     // conversation from the agent via session/update notifications.
     const acpMessages = useAcpMessages();
 
+    // Handle agent auto-selection on first connection using event-driven approach.
+    // This replaces the useEffect-based logic and prevents infinite loops by design.
+    const hasAutoSelectedRef = useRef(false);
+
+    // NOTE: switchAgent is used in handleFirstConnect but comes from acpSession below.
+    // We store it in a ref to break the circular dependency.
+    const switchAgentRef = useRef<((agentId: string) => void) | null>(null);
+
+    const handleFirstConnect = useCallback((sessionState: SessionStateMessage) => {
+      // Only auto-select if we haven't already done so for this session
+      if (hasAutoSelectedRef.current) return;
+
+      // Don't auto-select if:
+      // 1. No preferred agent is specified
+      // 2. An agent is already running (agentType matches preferredAgentId)
+      // 3. The session is in an error state
+      if (!preferredAgentId) return;
+      if (sessionState.agentType === preferredAgentId) return;
+      if (sessionState.status === 'error') return;
+
+      // Only auto-select for idle sessions (no agent running yet)
+      if (sessionState.status !== 'idle') return;
+
+      hasAutoSelectedRef.current = true;
+      reportError({
+        level: 'info',
+        message: `Auto-selecting agent on first connect: ${preferredAgentId}`,
+        source: 'acp-chat',
+        context: {
+          workspaceId,
+          sessionId,
+          preferredAgentId,
+          currentAgentType: sessionState.agentType,
+          sessionStatus: sessionState.status
+        },
+      });
+      switchAgentRef.current?.(preferredAgentId);
+    }, [preferredAgentId, workspaceId, sessionId]);
+
     // Own ACP session hook — separate WebSocket per chat tab
     const acpSession = useAcpSession({
       wsUrl: null,
@@ -165,7 +205,8 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
       onFirstConnect: handleFirstConnect,
     });
 
-    const { connected, agentType, state, switchAgent } = acpSession;
+    const { agentType, state, switchAgent } = acpSession;
+    switchAgentRef.current = switchAgent;
     const { clear: clearMessages } = acpMessages;
 
     // Clear messages when no agent session exists (idle SessionHost).
@@ -184,41 +225,6 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
         clearMessages();
       }
     }, [state, clearMessages, workspaceId, sessionId]);
-
-    // Handle agent auto-selection on first connection using event-driven approach.
-    // This replaces the useEffect-based logic and prevents infinite loops by design.
-    const hasAutoSelectedRef = useRef(false);
-    
-    const handleFirstConnect = useCallback((sessionState: SessionStateMessage) => {
-      // Only auto-select if we haven't already done so for this session
-      if (hasAutoSelectedRef.current) return;
-      
-      // Don't auto-select if:
-      // 1. No preferred agent is specified
-      // 2. An agent is already running (agentType matches preferredAgentId)
-      // 3. The session is in an error state
-      if (!preferredAgentId) return;
-      if (sessionState.agentType === preferredAgentId) return;
-      if (sessionState.status === 'error') return;
-      
-      // Only auto-select for idle sessions (no agent running yet)
-      if (sessionState.status !== 'idle') return;
-      
-      hasAutoSelectedRef.current = true;
-      reportError({
-        level: 'info',
-        message: `Auto-selecting agent on first connect: ${preferredAgentId}`,
-        source: 'acp-chat',
-        context: { 
-          workspaceId, 
-          sessionId, 
-          preferredAgentId, 
-          currentAgentType: sessionState.agentType,
-          sessionStatus: sessionState.status
-        },
-      });
-      switchAgent(preferredAgentId);
-    }, [preferredAgentId, workspaceId, sessionId, switchAgent]);
 
     // Report activity
     const handleActivity = useCallback(() => {
