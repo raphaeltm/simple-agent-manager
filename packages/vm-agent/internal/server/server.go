@@ -5,11 +5,9 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -33,9 +31,6 @@ import (
 	"github.com/workspace/vm-agent/internal/pty"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
-
-//go:embed static/*
-var staticFiles embed.FS
 
 // profileOverrides holds model/permissionMode overrides from agent profiles.
 // Passed from the control plane in the start-agent-session request.
@@ -743,11 +738,6 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)
 
-	// Authentication
-	mux.HandleFunc("POST /auth/token", s.handleTokenAuth)
-	mux.HandleFunc("GET /auth/session", s.handleSessionCheck)
-	mux.HandleFunc("POST /auth/logout", s.handleLogout)
-
 	// Terminal WebSocket (single-session and multi-session)
 	mux.HandleFunc("GET /terminal/ws", s.handleTerminalWS)
 	mux.HandleFunc("GET /terminal/ws/multi", s.handleMultiTerminalWS)
@@ -806,16 +796,6 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// ACP Agent WebSocket
 	mux.HandleFunc("GET /agent/ws", s.handleAgentWS)
 	mux.HandleFunc("GET /git-credential", s.handleGitCredential)
-
-	// Static files (embedded UI)
-	staticFS, err := fs.Sub(staticFiles, "static")
-	if err != nil {
-		slog.Warn("Could not load embedded static files", "error", err)
-		// Fallback to serving from disk
-		mux.Handle("/", http.FileServer(http.Dir("./ui/dist")))
-	} else {
-		mux.Handle("/", http.FileServer(http.FS(staticFS)))
-	}
 }
 
 // corsMiddleware adds CORS headers to responses.

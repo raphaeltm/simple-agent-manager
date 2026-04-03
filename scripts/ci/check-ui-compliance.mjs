@@ -3,7 +3,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 
-const UI_PATH_PREFIXES = ['apps/web/', 'packages/vm-agent/ui/', 'packages/ui/'];
+const UI_PATH_PREFIXES = ['apps/web/', 'packages/ui/'];
 const REQUIRED_CHECKLIST_ITEMS = [
   'Mobile-first layout verified',
   'Accessibility checks completed',

@@ -3,7 +3,7 @@
 ## Purpose
 
 This document is the canonical design and implementation standard for SAM interfaces.  
-All UI work in `apps/web` and `packages/vm-agent/ui` must align with this guide.
+All UI work in `apps/web` must align with this guide.
 
 ## Visual Direction
 

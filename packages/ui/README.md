@@ -12,7 +12,6 @@ Shared UI package for Simple Agent Manager.
 ## Consumers
 
 - `apps/web`
-- `packages/vm-agent/ui`
 
 ## Principles
 

@@ -1,6 +1,6 @@
 ---
 name: ui-ux-specialist
-description: "UI/UX specialist for web surfaces. Use for any UI change in apps/web, packages/vm-agent/ui, or packages/ui to enforce mobile-first layout quality, visual hierarchy, interaction clarity, and accessibility with screenshot-backed validation."
+description: "UI/UX specialist for web surfaces. Use for any UI change in apps/web or packages/ui to enforce mobile-first layout quality, visual hierarchy, interaction clarity, and accessibility with screenshot-backed validation."
 metadata:
   short-description: "UI/UX specialist for mobile-first, screenshot-backed quality gates"
 ---

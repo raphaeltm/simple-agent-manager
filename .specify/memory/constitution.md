@@ -661,10 +661,8 @@ ui:
 ```
 
 **Rules:**
-- UI source lives in `packages/vm-agent/ui/`
-- UI is built before Go compilation
-- `//go:embed ui/dist/*` embeds the built assets
-- No external static file serving (everything in binary)
+- The VM agent has no embedded web UI (removed — the control plane app at `apps/web` provides all user-facing interfaces)
+- The Go binary is a pure API server with no static file serving
 
 ### PTY Management
 

@@ -1,6 +1,6 @@
 ---
 name: ui-ux-specialist
-description: UI/UX specialist for web surfaces. Use for any UI change in apps/web, packages/vm-agent/ui, or packages/ui to enforce mobile-first layout quality, visual hierarchy, interaction clarity, and accessibility with screenshot-backed validation.
+description: UI/UX specialist for web surfaces. Use for any UI change in apps/web or packages/ui to enforce mobile-first layout quality, visual hierarchy, interaction clarity, and accessibility with screenshot-backed validation.
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: sonnet
 ---
@@ -11,7 +11,6 @@ You are a UI/UX specialist for the Simple Agent Manager web surfaces. Your role 
 
 Use this agent for any change that touches:
 - `apps/web/**`
-- `packages/vm-agent/ui/**`
 - `packages/ui/**`
 - `packages/terminal/**`
 

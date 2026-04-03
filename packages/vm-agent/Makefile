@@ -1,6 +1,6 @@
 # VM Agent Makefile
 
-.PHONY: all build build-ui embed clean test test-integration lint
+.PHONY: all build clean test test-integration lint
 
 # Go build settings
 BINARY_NAME := vm-agent
@@ -17,22 +17,12 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 # Default target
 all: build
 
-# Build UI first, then Go binary
-build: build-ui embed
+# Build Go binary
+build:
 	$(GO) build $(GOFLAGS) -o bin/$(BINARY_NAME) .
 
-# Build the embedded React UI
-build-ui:
-	cd ui && pnpm build
-
-# Copy built UI to static directory for embedding
-embed:
-	rm -rf internal/server/static
-	mkdir -p internal/server/static
-	cp -r ui/dist/* internal/server/static/
-
 # Build for all platforms
-build-all: build-ui embed
+build-all:
 	@for platform in $(PLATFORMS); do \
 		GOOS=$$(echo $$platform | cut -d/ -f1); \
 		GOARCH=$$(echo $$platform | cut -d/ -f2); \
@@ -42,11 +32,11 @@ build-all: build-ui embed
 	done
 
 # Build for Linux AMD64 (most common for VMs)
-build-linux-amd64: build-ui embed
+build-linux-amd64:
 	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o bin/$(BINARY_NAME)-linux-amd64 .
 
 # Build for Linux ARM64
-build-linux-arm64: build-ui embed
+build-linux-arm64:
 	GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) -o bin/$(BINARY_NAME)-linux-arm64 .
 
 # Run tests
@@ -64,17 +54,10 @@ lint:
 # Clean build artifacts
 clean:
 	rm -rf bin/
-	rm -rf internal/server/static
-	rm -rf ui/dist
-	rm -rf ui/node_modules
 
 # Development: run locally
 dev: build
 	./bin/$(BINARY_NAME)
-
-# Development: watch and rebuild UI
-dev-ui:
-	cd ui && pnpm dev
 
 # Generate version info
 version:

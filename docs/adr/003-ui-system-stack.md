@@ -8,7 +8,6 @@
 
 We need one UI system that works across:
 - `apps/web` (control plane)
-- `packages/vm-agent/ui` (agent interface)
 
 The system must:
 - Support a modern, beautiful UI direction with a green-forward developer aesthetic

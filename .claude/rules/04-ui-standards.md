@@ -2,7 +2,6 @@
 paths:
   - "apps/web/**"
   - "packages/ui/**"
-  - "packages/vm-agent/ui/**"
 ---
 
 # UI Standards
@@ -41,7 +40,7 @@ Before deploying any UI changes:
 
 ## UI Agent Rules
 
-For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
+For UI changes in `apps/web` or `packages/ui`:
 
 1. Prefer shared components from `@simple-agent-manager/ui` when available.
 2. Use semantic tokens from `packages/ui/src/tokens/semantic-tokens.ts` and CSS vars from `packages/ui/src/tokens/theme.css`.
