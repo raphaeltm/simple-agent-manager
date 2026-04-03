@@ -33,6 +33,16 @@ vi.mock('../../../src/lib/secrets', () => ({
   getCredentialEncryptionKey: vi.fn().mockReturnValue('test-encryption-key'),
 }));
 
+// Mock logger
+const mockLogWarn = vi.fn();
+vi.mock('../../../src/lib/logger', () => ({
+  log: {
+    info: vi.fn(),
+    warn: mockLogWarn,
+    error: vi.fn(),
+  },
+}));
+
 const { CodexRefreshLock } = await import(
   '../../../src/durable-objects/codex-refresh-lock'
 );
@@ -369,8 +379,7 @@ describe('CodexRefreshLock', () => {
       CODEX_EXPECTED_SCOPES: 'openid,offline_access',
     });
     setupCredentialFound(env);
-
-    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    mockLogWarn.mockClear();
 
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -387,11 +396,10 @@ describe('CodexRefreshLock', () => {
       makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
     );
     expect(res.status).toBe(200);
-    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('unexpected_scopes'),
+    expect(mockLogWarn).not.toHaveBeenCalledWith(
+      'codex_refresh.unexpected_scopes',
       expect.anything(),
     );
-    consoleWarnSpy.mockRestore();
   });
 
   it('warns when upstream returns unexpected scopes', async () => {
@@ -399,8 +407,7 @@ describe('CodexRefreshLock', () => {
       CODEX_EXPECTED_SCOPES: 'openid,offline_access',
     });
     setupCredentialFound(env);
-
-    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    mockLogWarn.mockClear();
 
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -422,13 +429,12 @@ describe('CodexRefreshLock', () => {
     const json = await res.json();
     expect(json.access_token).toBe('new-access');
 
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[codex_refresh.unexpected_scopes] Upstream returned unexpected scopes',
+    expect(mockLogWarn).toHaveBeenCalledWith(
+      'codex_refresh.unexpected_scopes',
       expect.objectContaining({
-        unexpectedScopes: ['admin:write'],
+        unexpectedScopes: 'admin:write',
       }),
     );
-    consoleWarnSpy.mockRestore();
   });
 
   it('does not warn when scopes match expected', async () => {
@@ -436,8 +442,7 @@ describe('CodexRefreshLock', () => {
       CODEX_EXPECTED_SCOPES: 'openid,offline_access',
     });
     setupCredentialFound(env);
-
-    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    mockLogWarn.mockClear();
 
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -454,19 +459,17 @@ describe('CodexRefreshLock', () => {
       makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
     );
     expect(res.status).toBe(200);
-    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('unexpected_scopes'),
+    expect(mockLogWarn).not.toHaveBeenCalledWith(
+      'codex_refresh.unexpected_scopes',
       expect.anything(),
     );
-    consoleWarnSpy.mockRestore();
   });
 
   it('skips scope validation when CODEX_EXPECTED_SCOPES is not configured', async () => {
     const { do: doInstance, env } = createDO();
     // No CODEX_EXPECTED_SCOPES set
     setupCredentialFound(env);
-
-    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    mockLogWarn.mockClear();
 
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -483,11 +486,10 @@ describe('CodexRefreshLock', () => {
       makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
     );
     expect(res.status).toBe(200);
-    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('unexpected_scopes'),
+    expect(mockLogWarn).not.toHaveBeenCalledWith(
+      'codex_refresh.unexpected_scopes',
       expect.anything(),
     );
-    consoleWarnSpy.mockRestore();
   });
 
   // -----------------------------------------------------------------------

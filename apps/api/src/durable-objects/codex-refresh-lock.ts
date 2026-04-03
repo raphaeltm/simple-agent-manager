@@ -13,6 +13,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 
+import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { decrypt, encrypt } from '../services/encryption';
 
@@ -259,9 +260,10 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     if (typeof scope !== 'string') {
-      console.warn('[codex_refresh.scope_validation] Non-string scope in upstream response', {
+      log.warn('codex_refresh.scope_validation', {
         userId,
         scopeType: typeof scope,
+        message: 'Non-string scope in upstream response',
       });
       return;
     }
@@ -278,11 +280,11 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     const unexpected = returnedScopes.filter(s => !expectedScopes.has(s));
 
     if (unexpected.length > 0) {
-      console.warn('[codex_refresh.unexpected_scopes] Upstream returned unexpected scopes', {
+      log.warn('codex_refresh.unexpected_scopes', {
         userId,
-        expectedScopes: [...expectedScopes],
-        returnedScopes,
-        unexpectedScopes: unexpected,
+        expectedScopes: [...expectedScopes].join(','),
+        returnedScopes: returnedScopes.join(' '),
+        unexpectedScopes: unexpected.join(','),
       });
     }
   }
