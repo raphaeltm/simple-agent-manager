@@ -83,6 +83,13 @@ mcpRoutes.post('/', async (c) => {
     );
   }
 
+  if (Array.isArray(rpc)) {
+    return c.json(
+      jsonRpcError(null, -32600, 'Batch requests are not supported'),
+      400,
+    );
+  }
+
   if (rpc.jsonrpc !== '2.0') {
     return c.json(
       jsonRpcError(rpc.id ?? null, -32600, 'Invalid Request: missing jsonrpc 2.0'),

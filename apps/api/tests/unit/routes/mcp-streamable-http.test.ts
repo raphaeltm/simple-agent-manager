@@ -205,6 +205,12 @@ describe('MCP Streamable HTTP Compliance', () => {
       expect(body.error.code).toBe(-32601);
     });
 
+    it('should return 401 for unauthenticated notification, not 202', async () => {
+      mockKV.get.mockResolvedValue(null); // invalid token
+      const res = await mcpPost(app, jsonRpcNotification('notifications/initialized'));
+      expect(res.status).toBe(401);
+    });
+
     it('should not consume rate limit quota for notifications', async () => {
       // Send a notification — rate limit KV should not be called
       const putCallsBefore = mockKV.put.mock.calls.length;
@@ -320,6 +326,18 @@ describe('MCP Streamable HTTP Compliance', () => {
       expect(body.error).toBeDefined();
       expect(body.error.code).toBe(-32601);
       expect(body.error.message).toContain('Method not found');
+    });
+
+    it('batch JSON-RPC array returns 400 error (not 500)', async () => {
+      const res = await mcpPost(app, [
+        jsonRpcRequest('initialize'),
+        jsonRpcRequest('tools/list'),
+      ]);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32600);
+      expect(body.error.message).toContain('Batch requests are not supported');
     });
   });
 });
