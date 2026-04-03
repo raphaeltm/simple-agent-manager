@@ -36,6 +36,8 @@
     "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
     "quality:wrangler-bindings": "tsx scripts/quality/check-wrangler-bindings.ts",
     "quality:ast-checks": "tsx scripts/quality/ast-checks.ts",
+    "quality:file-sizes": "tsx scripts/quality/check-file-sizes.ts",
+    "quality:source-contract-tests": "tsx scripts/quality/check-source-contract-tests.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",
     "prepare": "husky"
   },
