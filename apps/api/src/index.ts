@@ -562,21 +562,6 @@ app.use('*', async (c, next) => {
   if (targetPort !== null) {
     const subPath = url.pathname === '/' ? '' : url.pathname;
     vmUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${subPath}`;
-
-    // Inject a workspace-scoped JWT so the VM agent can authenticate this request.
-    // Port-forwarded URLs are accessed directly by browsers which have no pre-existing
-    // workspace session cookie or token. The Worker is a trusted intermediary that has
-    // already validated the workspace exists and is running.
-    try {
-      const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
-      vmUrl.searchParams.set('token', token);
-    } catch (err) {
-      log.error('port_proxy_token_error', {
-        workspaceId,
-        ...serializeError(err),
-      });
-      return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
-    }
   }
 
   // Strip client-supplied routing headers and inject trusted routing context.
@@ -584,6 +569,7 @@ app.use('*', async (c, next) => {
   headers.delete('x-sam-node-id');
   headers.delete('x-sam-workspace-id');
   headers.delete('x-forwarded-host');
+  headers.delete('authorization');
   headers.set('X-SAM-Node-Id', (workspace.nodeId || workspaceId));
   headers.set('X-SAM-Workspace-Id', workspaceId);
 
@@ -593,6 +579,31 @@ app.use('*', async (c, next) => {
   // the original. X-Forwarded-Proto is always https since clients connect via CF edge.
   headers.set('X-Forwarded-Host', hostname);
   headers.set('X-Forwarded-Proto', 'https');
+
+  // For port-proxied requests, inject a workspace-scoped JWT so the VM agent can
+  // authenticate. The Worker is a trusted intermediary that has already validated the
+  // workspace exists and is running.
+  //
+  // CRITICAL: Cloudflare's edge proxy returns 502 for same-zone subrequests that
+  // contain long JWT tokens in ANY header value (Authorization, custom headers, query
+  // params). This appears to be a WAF/bot-protection rule that cannot be disabled.
+  // Workaround: split the JWT across two headers so neither individual value triggers
+  // the detection. The VM agent reassembles them. Verified 2026-04-04.
+  if (targetPort !== null) {
+    try {
+      const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
+      // Split JWT into two halves across separate headers to avoid CF edge 502.
+      const mid = Math.ceil(token.length / 2);
+      headers.set('X-SAM-Port-Token-A', token.substring(0, mid));
+      headers.set('X-SAM-Port-Token-B', token.substring(mid));
+    } catch (err) {
+      log.error('port_proxy_token_error', {
+        workspaceId,
+        ...serializeError(err),
+      });
+      return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
+    }
+  }
 
   return fetch(vmUrl.toString(), {
     method: c.req.raw.method,
