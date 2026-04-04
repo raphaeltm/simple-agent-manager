@@ -184,6 +184,8 @@ export interface WorkspaceResponse {
   updatedAt: string;
   url?: string;
   bootLogs?: BootLogEntry[];
+  /** Linked project chat session ID (DO-managed) — present when workspace was created via project chat. */
+  chatSessionId?: string | null;
 }
 
 export interface CreateWorkspaceRequest {

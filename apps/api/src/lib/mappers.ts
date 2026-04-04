@@ -42,6 +42,7 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
     url: getWorkspaceUrl(ws.id, baseDomain),
+    chatSessionId: ws.chatSessionId ?? null,
   };
 }
 

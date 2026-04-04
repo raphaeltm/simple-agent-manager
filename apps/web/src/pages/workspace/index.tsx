@@ -11,6 +11,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ChatSessionHandle } from '../../components/ChatSession';
 import { ChatSession } from '../../components/ChatSession';
 import { CommandPalette } from '../../components/CommandPalette';
+import { ProjectMessageView } from '../../components/project-message-view';
 import { FileBrowserPanel } from '../../components/FileBrowserPanel';
 import { FileViewerPanel } from '../../components/FileViewerPanel';
 import { GitChangesPanel } from '../../components/GitChangesPanel';
@@ -99,6 +100,16 @@ export function Workspace() {
     if (initialViewResolvedRef.current) return;
     if (viewOverride) { initialViewResolvedRef.current = true; return; }
     if (sessionIdParam) { initialViewResolvedRef.current = true; return; }
+    // If workspace has a linked project chat session, auto-select conversation view
+    if (core.workspace?.chatSessionId) {
+      initialViewResolvedRef.current = true;
+      const params = new URLSearchParams(searchParams);
+      params.set('view', 'conversation');
+      params.set('sessionId', core.workspace.chatSessionId);
+      navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
+      setViewMode('conversation');
+      return;
+    }
     if (core.agentSessions.length === 0) return;
     const firstActive = core.agentSessions.find(
       (s) => isSessionActive(s) && !sessions.recentlyStopped.has(s.id)
@@ -113,7 +124,7 @@ export function Workspace() {
     } else {
       initialViewResolvedRef.current = true;
     }
-  }, [core.agentSessions, viewOverride, sessionIdParam, id, navigate, searchParams, sessions.recentlyStopped]);
+  }, [core.agentSessions, core.workspace?.chatSessionId, viewOverride, sessionIdParam, id, navigate, searchParams, sessions.recentlyStopped]);
 
   // ── Activity throttle ──
   const activityThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -135,20 +146,31 @@ export function Workspace() {
       id: `terminal:${s.id}`, kind: 'terminal', sessionId: s.id, title: s.name,
       status: s.status, badge: deriveWorktreeBadge(s.workingDirectory, nav.worktrees),
     }));
-    const chatTabs: WorkspaceTab[] = core.agentSessions
-      .filter((s) => (isSessionActive(s) || s.status === 'suspended') && !sessions.recentlyStopped.has(s.id))
-      .map((s) => {
-        const pref = sessions.preferredAgentsBySession[s.id];
-        const prefName = pref ? sessions.agentNameById.get(pref) : undefined;
-        const title = s.label?.trim() || (prefName ? `${prefName} Chat` : `Chat ${s.id.slice(-4)}`);
-        return {
-          id: `chat:${s.id}`, kind: 'chat' as const, sessionId: s.id, title,
-          status: s.status, hostStatus: s.hostStatus, viewerCount: s.viewerCount,
-          badge: deriveWorktreeBadge(s.worktreePath ?? undefined, nav.worktrees),
-        };
-      });
+    let chatTabs: WorkspaceTab[];
+    if (core.workspace?.chatSessionId) {
+      // Workspace linked to a project chat session — show a single "Chat" tab
+      chatTabs = [{
+        id: `chat:${core.workspace.chatSessionId}`, kind: 'chat' as const,
+        sessionId: core.workspace.chatSessionId, title: 'Chat',
+        status: 'running', hostStatus: null, viewerCount: null,
+      }];
+    } else {
+      // Fallback: per-agent-session tabs for workspaces without a linked project session
+      chatTabs = core.agentSessions
+        .filter((s) => (isSessionActive(s) || s.status === 'suspended') && !sessions.recentlyStopped.has(s.id))
+        .map((s) => {
+          const pref = sessions.preferredAgentsBySession[s.id];
+          const prefName = pref ? sessions.agentNameById.get(pref) : undefined;
+          const title = s.label?.trim() || (prefName ? `${prefName} Chat` : `Chat ${s.id.slice(-4)}`);
+          return {
+            id: `chat:${s.id}`, kind: 'chat' as const, sessionId: s.id, title,
+            status: s.status, hostStatus: s.hostStatus, viewerCount: s.viewerCount,
+            badge: deriveWorktreeBadge(s.worktreePath ?? undefined, nav.worktrees),
+          };
+        });
+    }
     return tabOrder.getSortedTabs([...termTabs, ...chatTabs]);
-  }, [sessions.agentNameById, core.agentSessions, sessions.preferredAgentsBySession, sessions.recentlyStopped, tabOrder, visibleTerminalTabs, nav.worktrees]);
+  }, [sessions.agentNameById, core.agentSessions, core.workspace?.chatSessionId, sessions.preferredAgentsBySession, sessions.recentlyStopped, tabOrder, visibleTerminalTabs, nav.worktrees]);
 
   const handleCreateTerminalTab = () => {
     setViewMode('terminal');
@@ -326,13 +348,27 @@ export function Workspace() {
                       action={<Button variant="secondary" size="sm" onClick={() => { core.terminalWsUrlCacheRef.current = null; void core.refreshTerminalToken(); }} disabled={core.terminalLoading}>Retry Connection</Button>} />
                   )}
                 </div>
-                {id && core.workspace?.url && sessions.runningChatSessions.map((session: AgentSession) => (
-                  <ChatSession key={session.id} ref={(h) => { if (h) chatSessionRefs.current.set(session.id, h); else chatSessionRefs.current.delete(session.id); }}
-                    workspaceId={id} workspaceUrl={core.workspace!.url!} sessionId={session.id} worktreePath={session.worktreePath}
-                    preferredAgentId={session.agentType || sessions.preferredAgentsBySession[session.id] || (sessions.configuredAgents.length > 0 ? sessions.configuredAgents[0]!.id : undefined)}
-                    configuredAgents={sessions.configuredAgents} active={viewMode === 'conversation' && sessions.activeChatSessionId === session.id}
-                    onActivity={handleTerminalActivity} onUsageChange={sessions.handleUsageChange} />
-                ))}
+                {/* Chat view — use ProjectMessageView when workspace is linked to a project chat session.
+                    This reuses the stable project chat component, avoiding the render-loop crashes
+                    that plagued the workspace-specific ChatSession component. */}
+                {viewMode === 'conversation' && core.workspace?.projectId && core.workspace?.chatSessionId ? (
+                  <div className="flex flex-col flex-1 min-h-0">
+                    <ProjectMessageView
+                      projectId={core.workspace.projectId}
+                      sessionId={core.workspace.chatSessionId}
+                      onSessionMutated={() => void core.loadWorkspaceState()}
+                    />
+                  </div>
+                ) : viewMode === 'conversation' && id && core.workspace?.url ? (
+                  /* Fallback: workspace without a linked project session — use legacy ChatSession */
+                  sessions.runningChatSessions.map((session: AgentSession) => (
+                    <ChatSession key={session.id} ref={(h) => { if (h) chatSessionRefs.current.set(session.id, h); else chatSessionRefs.current.delete(session.id); }}
+                      workspaceId={id} workspaceUrl={core.workspace!.url!} sessionId={session.id} worktreePath={session.worktreePath}
+                      preferredAgentId={session.agentType || sessions.preferredAgentsBySession[session.id] || (sessions.configuredAgents.length > 0 ? sessions.configuredAgents[0]!.id : undefined)}
+                      configuredAgents={sessions.configuredAgents} active={sessions.activeChatSessionId === session.id}
+                      onActivity={handleTerminalActivity} onUsageChange={sessions.handleUsageChange} />
+                  ))
+                ) : null}
               </>
             ) : (
               core.workspace?.status === 'creating' ? <BootProgress logs={core.streamedBootLogs.length > 0 ? core.streamedBootLogs : core.workspace.bootLogs} />
