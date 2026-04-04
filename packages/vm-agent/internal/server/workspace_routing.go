@@ -70,12 +70,28 @@ func (s *Server) requireWorkspaceRequestAuth(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Try Authorization: Bearer header first, then fall back to ?token= query param.
-	// The query param fallback exists because browser WebSocket upgrade requests cannot
-	// set custom headers. Server-to-server calls (API proxy) MUST use Bearer header.
+	// Token resolution order:
+	// 1. X-SAM-Port-Token-A + X-SAM-Port-Token-B headers (split JWT from API Worker —
+	//    Cloudflare's edge proxy returns 502 for same-zone subrequests containing a
+	//    full JWT in any single header value. Splitting across two headers bypasses this.)
+	// 2. X-SAM-Port-Token header (single-header variant, kept for backward compat)
+	// 3. Authorization: Bearer header (standard auth for server-to-server calls)
+	// 4. ?token= query parameter (fallback for browser WebSocket upgrades which
+	//    cannot set custom headers)
 	token := ""
-	if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
-		token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if partA := strings.TrimSpace(r.Header.Get("X-SAM-Port-Token-A")); partA != "" {
+		partB := strings.TrimSpace(r.Header.Get("X-SAM-Port-Token-B"))
+		token = partA + partB
+	}
+	if token == "" {
+		if portToken := strings.TrimSpace(r.Header.Get("X-SAM-Port-Token")); portToken != "" {
+			token = portToken
+		}
+	}
+	if token == "" {
+		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		}
 	}
 	if token == "" {
 		token = strings.TrimSpace(r.URL.Query().Get("token"))

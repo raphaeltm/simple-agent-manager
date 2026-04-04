@@ -46,6 +46,28 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Check if this port belongs to the Neko browser sidecar.
+	// The Neko container runs on the same Docker network but has a different bridge IP
+	// than the DevContainer, so the normal container discovery would connect to the wrong host.
+	if s.browserManager != nil {
+		if nekoIP, ok := s.browserManager.GetNekoTarget(r.Context(), workspaceID, port); ok {
+			targetURLStr := fmt.Sprintf("http://%s:%d", nekoIP, port)
+			forwardPath := r.PathValue("path")
+			if forwardPath == "" {
+				forwardPath = "/"
+			} else if forwardPath[0] != '/' {
+				forwardPath = "/" + forwardPath
+			}
+			slog.Info("Port proxy routing to Neko sidecar",
+				"workspaceId", workspaceID,
+				"port", port,
+				"nekoIP", nekoIP,
+				"forwardPath", forwardPath)
+			s.servePortProxy(w, r, workspaceID, port, targetURLStr, forwardPath)
+			return
+		}
+	}
+
 	// Resolve the container bridge IP for workspace isolation.
 	// In container mode, the bridge IP is required — we cannot fall back to 127.0.0.1
 	// because the service runs inside the container, not on the host.
@@ -134,8 +156,14 @@ func (s *Server) servePortProxy(w http.ResponseWriter, r *http.Request, workspac
 		req.URL.Path = forwardPath
 		req.URL.RawPath = ""
 		req.Host = publicHost
-		// Strip the auth token — it is consumed by the VM agent for authentication
+		// Strip auth credentials — they are consumed by the VM agent for authentication
 		// and must not leak to the container app running on the forwarded port.
+		// The token may arrive via split headers (X-SAM-Port-Token-A/B),
+		// single header (X-SAM-Port-Token), Authorization, or ?token= query parameter.
+		req.Header.Del("X-SAM-Port-Token-A")
+		req.Header.Del("X-SAM-Port-Token-B")
+		req.Header.Del("X-SAM-Port-Token")
+		req.Header.Del("Authorization")
 		q := req.URL.Query()
 		q.Del("token")
 		req.URL.RawQuery = q.Encode()
