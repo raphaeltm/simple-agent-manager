@@ -40,7 +40,7 @@ interface UseBrowserSidecarResult {
     devicePixelRatio?: number;
     isTouchDevice?: boolean;
     enableAudio?: boolean;
-  }) => Promise<void>;
+  }) => Promise<BrowserSidecarStatusResponse | null>;
   stop: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -88,7 +88,7 @@ export function useBrowserSidecar(
       devicePixelRatio?: number;
       isTouchDevice?: boolean;
       enableAudio?: boolean;
-    }) => {
+    }): Promise<BrowserSidecarStatusResponse | null> => {
       setIsLoading(true);
       setError(null);
       try {
@@ -96,8 +96,10 @@ export function useBrowserSidecar(
           ? await startWorkspaceBrowserSidecar(workspaceId!, opts)
           : await startBrowserSidecar(projectId!, sessionId!, opts);
         setStatus(result);
+        return result;
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to start browser');
+        return null;
       } finally {
         setIsLoading(false);
       }

@@ -1,9 +1,10 @@
 import type { DetectedPort, NodeResponse, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
-import { Box, CheckCircle2, ChevronDown, ChevronUp, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, Globe, MapPin, Server } from 'lucide-react';
+import { Box, CheckCircle2, ChevronDown, ChevronUp, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, Globe, Loader2, MapPin, Monitor, Server } from 'lucide-react';
 import { useCallback, useState } from 'react';
 
+import { useBrowserSidecar } from '../../hooks/useBrowserSidecar';
 import type { ChatSessionResponse } from '../../lib/api';
 import { deleteWorkspace, updateProjectTaskStatus } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
@@ -59,6 +60,34 @@ export function SessionHeader({
   const [completing, setCompleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+
+  // Remote browser sidecar (session-mode)
+  const browserSidecar = useBrowserSidecar(
+    session.workspaceId && sessionState === 'active'
+      ? { projectId, sessionId: session.id }
+      : { projectId: '', sessionId: '' } // disabled placeholder
+  );
+  const browserEnabled = !!(session.workspaceId && sessionState === 'active');
+  const browserStatus = browserSidecar.status?.status ?? 'off';
+  const browserIsRunning = browserStatus === 'running';
+  const browserIsStarting = browserStatus === 'starting';
+
+  const handleOpenBrowser = useCallback(async () => {
+    if (browserIsRunning && browserSidecar.status?.url) {
+      window.open(browserSidecar.status.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    // Start the browser and open once URL is available
+    const result = await browserSidecar.start({
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
+    });
+    if (result?.url) {
+      window.open(result.url, '_blank', 'noopener,noreferrer');
+    }
+  }, [browserIsRunning, browserSidecar]);
 
   const hasDetails = !!(
     taskEmbed?.outputBranch ||
@@ -243,6 +272,24 @@ export function SessionHeader({
                     </Button>
                   </a>
                 </>
+              )}
+
+              {/* Remote Browser — start or open in new tab */}
+              {browserEnabled && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleOpenBrowser}
+                  disabled={browserSidecar.isLoading}
+                >
+                  {browserIsStarting ? (
+                    <Loader2 size={14} className="mr-1 animate-spin" />
+                  ) : (
+                    <Monitor size={14} className="mr-1" />
+                  )}
+                  {browserIsRunning ? 'Open Browser' : browserIsStarting ? 'Starting...' : 'Remote Browser'}
+                  {browserIsRunning && <ExternalLink size={10} className="ml-0.5" />}
+                </Button>
               )}
 
               {canMarkComplete && (

@@ -1,6 +1,6 @@
-import { Alert,Button } from '@simple-agent-manager/ui';
-import { Globe, Loader2, Monitor,X } from 'lucide-react';
-import { type FC, useCallback, useEffect,useState } from 'react';
+import { Alert, Button } from '@simple-agent-manager/ui';
+import { ExternalLink, Globe, Loader2, X } from 'lucide-react';
+import { type FC, useCallback } from 'react';
 
 import { useBrowserSidecar } from '../hooks/useBrowserSidecar';
 
@@ -19,8 +19,8 @@ interface BrowserSidecarWorkspaceProps {
 type BrowserSidecarProps = BrowserSidecarSessionProps | BrowserSidecarWorkspaceProps;
 
 /**
- * BrowserSidecar provides a button to start/stop a Neko remote browser sidecar
- * and an iframe to view the browser stream when running.
+ * BrowserSidecar provides controls to start/stop a Neko remote browser sidecar
+ * and opens it in a new browser tab when running.
  *
  * Supports two modes:
  * - Session mode: requires projectId + sessionId (used in project chat)
@@ -32,7 +32,6 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
     : { projectId: props.projectId!, sessionId: props.sessionId! };
 
   const { status, isLoading, error, start, stop } = useBrowserSidecar(hookOptions);
-  const [showViewer, setShowViewer] = useState(false);
 
   const handleStart = useCallback(async () => {
     const opts = {
@@ -41,25 +40,26 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
       devicePixelRatio: window.devicePixelRatio || 1,
       isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
     };
-    await start(opts);
-    setShowViewer(true);
+    const result = await start(opts);
+    // Open in new tab once URL is available
+    if (result?.url) {
+      window.open(result.url, '_blank', 'noopener,noreferrer');
+    }
   }, [start]);
 
+  const handleOpen = useCallback(() => {
+    if (status?.url) {
+      window.open(status.url, '_blank', 'noopener,noreferrer');
+    }
+  }, [status?.url]);
+
   const handleStop = useCallback(async () => {
-    setShowViewer(false);
     await stop();
   }, [stop]);
 
   const sidecarStatus = status?.status ?? 'off';
   const isRunning = sidecarStatus === 'running';
   const isStarting = sidecarStatus === 'starting';
-
-  // Reset viewer when sidecar transitions to off or error
-  useEffect(() => {
-    if (sidecarStatus === 'off' || sidecarStatus === 'error') {
-      setShowViewer(false);
-    }
-  }, [sidecarStatus]);
 
   return (
     <div data-testid="browser-sidecar">
@@ -74,7 +74,7 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
             aria-label="Start remote browser"
           >
             <Globe size={14} aria-hidden="true" />
-            Remote Browser
+            Start Remote Browser
           </Button>
         )}
 
@@ -83,12 +83,12 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
             <Button
               variant={isRunning ? 'primary' : 'secondary'}
               size="sm"
-              onClick={() => setShowViewer(!showViewer)}
-              disabled={isLoading}
-              aria-label={showViewer ? 'Hide remote browser' : 'Show remote browser'}
+              onClick={handleOpen}
+              disabled={isLoading || !status?.url}
+              aria-label="Open remote browser in new tab"
             >
-              <Monitor size={14} aria-hidden="true" />
-              {showViewer ? 'Hide' : 'Show'} Browser
+              <ExternalLink size={14} aria-hidden="true" />
+              Open Browser
               {isStarting && <Loader2 size={12} className="animate-spin" aria-hidden="true" />}
               {isStarting && <span className="sr-only">Starting browser...</span>}
             </Button>
@@ -126,19 +126,6 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
         <Alert variant="error" className="mb-2">
           {error}
         </Alert>
-      )}
-
-      {/* Neko viewer iframe */}
-      {showViewer && isRunning && status?.url && (
-        <div className="border border-border-default rounded-lg overflow-hidden relative w-full" style={{ aspectRatio: '16/9' }}>
-          <iframe
-            src={status.url}
-            title="Remote Browser"
-            className="w-full h-full border-none"
-            allow="autoplay; clipboard-write; clipboard-read"
-            sandbox="allow-scripts allow-forms allow-popups"
-          />
-        </div>
       )}
 
       {/* Port forwarders info */}
