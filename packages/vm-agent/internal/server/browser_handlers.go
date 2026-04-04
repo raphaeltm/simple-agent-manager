@@ -103,7 +103,7 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, browserStateToResponse(state, workspaceID, s.config.ControlPlaneURL))
+	writeJSON(w, http.StatusOK, browserStateToResponse(state, workspaceID, s.config.ControlPlaneURL, s.config.NekoPassword))
 }
 
 // handleGetBrowserStatus returns the status of a workspace's browser sidecar.
@@ -125,7 +125,7 @@ func (s *Server) handleGetBrowserStatus(w http.ResponseWriter, r *http.Request) 
 	}
 
 	state := s.browserManager.GetStatus(workspaceID)
-	writeJSON(w, http.StatusOK, browserStateToResponse(state, workspaceID, s.config.ControlPlaneURL))
+	writeJSON(w, http.StatusOK, browserStateToResponse(state, workspaceID, s.config.ControlPlaneURL, s.config.NekoPassword))
 }
 
 // handleStopBrowser stops and removes a workspace's browser sidecar.
@@ -207,7 +207,7 @@ func (s *Server) resolveContainerID(workspaceID string) (string, error) {
 }
 
 // browserStateToResponse converts internal state to the API response shape.
-func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPlaneURL string) map[string]interface{} {
+func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPlaneURL, nekoPassword string) map[string]interface{} {
 	resp := map[string]interface{}{
 		"status": string(state.Status),
 	}
@@ -225,7 +225,9 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 		// and enables direct container bypass. The proxy URL is sufficient for the UI.
 		baseDomain := deriveBaseDomainFromURL(controlPlaneURL)
 		if baseDomain != "" {
-			resp["url"] = "https://ws-" + workspaceID + "--" + itoa(state.NekoPort) + "." + baseDomain
+			// Append auto-login query params so the user connects without manual credentials.
+		// Neko supports ?usr= and ?pwd= for prefilling the login form.
+		resp["url"] = "https://ws-" + workspaceID + "--" + itoa(state.NekoPort) + "." + baseDomain + "?usr=user&pwd=" + nekoPassword
 		}
 	}
 	if len(state.Forwarders) > 0 {
