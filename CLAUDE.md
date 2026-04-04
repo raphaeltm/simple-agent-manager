@@ -156,7 +156,8 @@ Claude Code supports dual authentication: **API keys** (pay-per-use from Anthrop
 
 ## Testing
 
-- **Test credentials** for the live app are at `/workspaces/.tmp/secure/demo-credentials.md` (outside repo)
+- **Staging authentication**: Use the smoke test token in `SAM_PLAYWRIGHT_PRIMARY_USER` env var. POST it to `https://api.sammy.party/api/auth/token-login` with body `{ "token": "<value>" }` to get a session cookie, then navigate to `https://app.sammy.party`. See `.claude/rules/13-staging-verification.md` for full procedure.
+- **Production authentication**: Use GitHub OAuth credentials at `/workspaces/.tmp/secure/demo-credentials.md` (outside repo)
 - **Live test cleanup required**: delete test workspaces/nodes after verification
 - **Staging verification required for every code PR** — see `.claude/rules/13-staging-verification.md`
 - See `.claude/rules/02-quality-gates.md` for full testing requirements

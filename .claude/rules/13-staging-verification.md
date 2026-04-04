@@ -62,9 +62,19 @@ If the deployment fails:
 
 After staging deployment succeeds, use Playwright to test the live app:
 
-1. Navigate to `https://app.sammy.party` (staging)
-2. Authenticate using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`
-   - If the file is missing, ask the human for credentials — do NOT skip this step
+1. Authenticate using the smoke test token via the token-login API:
+   ```typescript
+   // In Playwright, use page.request to POST to the token-login endpoint.
+   // This sets the session cookie on the browser context automatically.
+   const loginResp = await page.request.post('https://api.sammy.party/api/auth/token-login', {
+     data: { token: process.env.SAM_PLAYWRIGHT_PRIMARY_USER },
+     headers: { 'Content-Type': 'application/json' },
+   });
+   // Verify login succeeded (status 200, response has success: true)
+   ```
+   - The `SAM_PLAYWRIGHT_PRIMARY_USER` env var contains the smoke test token
+   - If the env var is not set, ask the human — do NOT skip this step
+2. Navigate to `https://app.sammy.party` (staging) — the session cookie from step 1 authenticates you
 3. Verify your changes work as intended (see verification checklists below)
 4. Verify existing core workflows still work (see regression checklist below)
 
@@ -128,7 +138,7 @@ If you find a bug unrelated to your PR, file it as a backlog task (`tasks/backlo
 - **App doesn't load** → fix the issue, do not merge
 - **Your feature doesn't work on staging** → fix the issue, do not merge
 - **Existing workflow is broken** → investigate whether your PR caused it; if yes, fix it; if pre-existing, file a backlog task but still do not merge with NEW regressions
-- **Cannot authenticate** → ask the human for credentials, do not skip verification
+- **Cannot authenticate** → check that `SAM_PLAYWRIGHT_PRIMARY_USER` env var is set; if not, ask the human — do not skip verification
 
 ## Feature-Specific Verification Is Mandatory (Not Just Page Loads)
 
