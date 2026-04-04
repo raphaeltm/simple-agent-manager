@@ -11,7 +11,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ChatSessionHandle } from '../../components/ChatSession';
 import { ChatSession } from '../../components/ChatSession';
 import { CommandPalette } from '../../components/CommandPalette';
-import { ProjectMessageView } from '../../components/project-message-view';
+import { WorkspaceChatView } from './WorkspaceChatView';
 import { FileBrowserPanel } from '../../components/FileBrowserPanel';
 import { FileViewerPanel } from '../../components/FileViewerPanel';
 import { GitChangesPanel } from '../../components/GitChangesPanel';
@@ -353,10 +353,9 @@ export function Workspace() {
                     that plagued the workspace-specific ChatSession component. */}
                 {viewMode === 'conversation' && core.workspace?.projectId && core.workspace?.chatSessionId ? (
                   <div className="flex flex-col flex-1 min-h-0">
-                    <ProjectMessageView
+                    <WorkspaceChatView
                       projectId={core.workspace.projectId}
                       sessionId={core.workspace.chatSessionId}
-                      onSessionMutated={() => void core.loadWorkspaceState()}
                     />
                   </div>
                 ) : viewMode === 'conversation' && id && core.workspace?.url ? (
