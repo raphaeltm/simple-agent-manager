@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -91,6 +92,19 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-detect startURL from DevContainer ports when the client doesn't provide one.
+	// This avoids frontend timing issues where detected ports haven't been polled yet
+	// at the time the user clicks the Browser button.
+	startURL := req.StartURL
+	if startURL == "" {
+		if ports, detectErr := s.browserManager.DetectDevContainerPorts(ctx, netInfo.ContainerName); detectErr == nil && len(ports) > 0 {
+			sort.Ints(ports)
+			startURL = fmt.Sprintf("http://localhost:%d", ports[0])
+			slog.Info("Auto-detected startURL from DevContainer ports",
+				"workspace", workspaceID, "port", ports[0], "totalPorts", len(ports))
+		}
+	}
+
 	opts := browser.StartOptions{
 		ViewportWidth:    req.ViewportWidth,
 		ViewportHeight:   req.ViewportHeight,
@@ -98,7 +112,7 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		IsTouchDevice:    req.IsTouchDevice,
 		EnableAudio:      req.EnableAudio,
 		UserAgent:        req.UserAgent,
-		StartURL:         req.StartURL,
+		StartURL:         startURL,
 	}
 
 	state, err := s.browserManager.Start(ctx, workspaceID, netInfo.NetworkName, netInfo.ContainerName, opts)
