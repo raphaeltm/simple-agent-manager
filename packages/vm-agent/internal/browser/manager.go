@@ -240,7 +240,7 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		IsTouchDevice:    opts.IsTouchDevice,
 		DevicePixelRatio: opts.DevicePixelRatio,
 	}
-	if customErr := applyChromeCustomization(ctx, m.docker, containerName, customization); customErr != nil {
+	if customErr := applyChromeCustomization(ctx, m.docker, containerName, customization, devContainerName); customErr != nil {
 		slog.Warn("Failed to apply Chrome customization — browser may show extension popups",
 			"workspace", workspaceID, "error", customErr)
 	}

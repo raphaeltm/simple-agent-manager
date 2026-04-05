@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -51,6 +52,9 @@ func chromePolicies(startURL string) map[string]interface{} {
 		"ImportBookmarks":          false,
 		"ImportHistory":            false,
 		"ImportSearchEngine":       false,
+
+		// Suppress "You are using an unsupported command-line flag" warning bar
+		"CommandLineFlagSecurityWarningsEnabled": false,
 	}
 
 	// Set startup URL via policy
@@ -86,12 +90,14 @@ func buildChromeFlags(c ChromeCustomization) []string {
 		flags = append(flags, fmt.Sprintf("--force-device-scale-factor=%d", c.DevicePixelRatio))
 	}
 
-	// Suppress various Chrome UI noise
+	// Suppress various Chrome UI noise.
+	// NOTE: --disable-infobars is intentionally omitted — it is deprecated
+	// since Chrome 77 and itself triggers the "unsupported command-line flag"
+	// info bar. Use the CommandLineFlagSecurityWarningsEnabled policy instead.
 	flags = append(flags,
 		"--disable-extensions",
 		"--no-first-run",
 		"--noerrdialogs",
-		"--disable-infobars",
 		"--disable-translate",
 		"--disable-features=TranslateUI,PrivacySandboxSettings4",
 		"--disable-sync",
@@ -149,11 +155,35 @@ func sanitizeStartURL(rawURL string) string {
 	return parsed.String()
 }
 
+// extractPortFromURL returns the port number from a localhost URL, or 0 if
+// the URL is invalid or has no explicit port.
+func extractPortFromURL(rawURL string) int {
+	if rawURL == "" {
+		return 0
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return 0
+	}
+	portStr := parsed.Port()
+	if portStr == "" {
+		return 0
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0
+	}
+	return port
+}
+
 // applyChromeCustomization injects Chrome enterprise policies and a custom
 // supervisord config into a running Neko container, then restarts Chrome so it
 // picks up the changes. This must be called after `docker run` and before the
 // user interacts with the browser.
-func applyChromeCustomization(ctx context.Context, docker DockerExecutor, containerName string, c ChromeCustomization) error {
+//
+// If startURL specifies a port, a socat forwarder for that port is started
+// BEFORE Chrome restarts so the page loads successfully on first open.
+func applyChromeCustomization(ctx context.Context, docker DockerExecutor, containerName string, c ChromeCustomization, targetHost string) error {
 	// Sanitize the startup URL — only localhost URLs allowed
 	safeURL := sanitizeStartURL(c.StartURL)
 	if c.StartURL != "" && safeURL == "" {
@@ -196,7 +226,25 @@ CONFEOF`, supervisordConf)
 	}
 	slog.Info("Chrome supervisord config written", "container", containerName, "flags", len(extraFlags))
 
-	// 3. Restart Chrome via supervisorctl so it picks up the new config + policies
+	// 3. Pre-seed socat forwarder for the startup URL port. Chrome opens the URL
+	// immediately after restart, so the forwarder must be active first.
+	if startPort := extractPortFromURL(c.StartURL); startPort > 0 && targetHost != "" {
+		portStr := strconv.Itoa(startPort)
+		if err := docker.RunSilent(ctx,
+			"exec", "-d", containerName,
+			"socat",
+			fmt.Sprintf("TCP-LISTEN:%s,fork,reuseaddr", portStr),
+			fmt.Sprintf("TCP:%s:%s", targetHost, portStr),
+		); err != nil {
+			slog.Warn("Failed to pre-seed socat forwarder for startURL port",
+				"container", containerName, "port", startPort, "error", err)
+		} else {
+			slog.Info("Pre-seeded socat forwarder for startURL",
+				"container", containerName, "port", startPort, "target", targetHost)
+		}
+	}
+
+	// 4. Restart Chrome via supervisorctl so it picks up the new config + policies
 	if err := docker.RunSilent(ctx, "exec", containerName, "supervisorctl", "reread"); err != nil {
 		slog.Warn("supervisorctl reread failed", "container", containerName, "error", err)
 	}
