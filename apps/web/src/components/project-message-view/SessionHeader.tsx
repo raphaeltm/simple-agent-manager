@@ -139,7 +139,7 @@ export function SessionHeader({
   return (
     <div className="border-b border-border-default shrink-0">
       {/* Compact row — always visible */}
-      <div className="flex items-center gap-2 px-4 py-2 min-h-[40px]">
+      <div className="flex items-center gap-2 px-4 py-2 min-h-[44px]">
         <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
           {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
         </span>
@@ -215,7 +215,7 @@ export function SessionHeader({
             onClick={() => setExpanded((v) => !v)}
             aria-expanded={expanded}
             aria-label={expanded ? 'Hide session details' : 'Show session details'}
-            className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
+            className="shrink-0 p-2 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
           >
             {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
@@ -225,90 +225,95 @@ export function SessionHeader({
       {/* Expanded details panel */}
       {expanded && hasDetails && (
         <div className="px-4 py-2 border-t border-border-default bg-inset space-y-2">
-          {/* Action row — idle countdown, PR link, action buttons */}
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Idle countdown (TDF-8) */}
-            {sessionState === 'idle' && idleCountdownMs !== null && (
-              <span
-                className="sam-type-caption font-mono"
-                style={{
-                  color: idleCountdownMs < 5 * 60 * 1000
-                    ? 'var(--sam-color-danger)'
-                    : 'var(--sam-color-warning, #f59e0b)',
-                }}
-              >
-                Cleanup in {formatCountdown(idleCountdownMs)}
-              </span>
-            )}
-
-            {/* PR link (T021) */}
-            {taskEmbed?.outputPrUrl && (
-              <a
-                href={taskEmbed.outputPrUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="sam-type-caption font-medium no-underline"
-                style={{ color: 'var(--sam-color-accent-primary)' }}
-              >
-                View PR
-              </a>
-            )}
-
-            <div className="ml-auto flex items-center gap-2">
-              {session.workspaceId && sessionState === 'active' && (
-                <>
-                  {onOpenFiles && (
-                    <Button variant="ghost" size="sm" onClick={onOpenFiles}>
-                      <FolderOpen size={14} className="mr-1" />
-                      Files
-                    </Button>
-                  )}
-                  {onOpenGit && (
-                    <Button variant="ghost" size="sm" onClick={onOpenGit}>
-                      <GitCompare size={14} className="mr-1" />
-                      Git
-                    </Button>
-                  )}
-                  {browserEnabled && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={browser.status?.status === 'running' ? 'Open remote browser' : 'Start remote browser'}
-                      onClick={browser.status?.status === 'running' ? handleOpenBrowser : handleStartAndOpen}
-                      disabled={browser.isLoading}
-                    >
-                      {browser.isLoading ? (
-                        <Loader2 size={14} className="mr-1 animate-spin" />
-                      ) : (
-                        <Monitor size={14} className="mr-1" />
-                      )}
-                      {browser.status?.status === 'running' ? 'Open Browser' : 'Remote Browser'}
-                    </Button>
-                  )}
-                  <a
-                    href={`/workspaces/${session.workspaceId}`}
-                    className="no-underline"
-                  >
-                    <Button variant="ghost" size="sm">
-                      Open Workspace
-                    </Button>
-                  </a>
-                </>
+          {/* PR link & idle countdown — separate row above buttons */}
+          {(taskEmbed?.outputPrUrl || (sessionState === 'idle' && idleCountdownMs !== null)) && (
+            <div className="flex items-center gap-3">
+              {/* Idle countdown (TDF-8) */}
+              {sessionState === 'idle' && idleCountdownMs !== null && (
+                <span
+                  className="sam-type-caption font-mono"
+                  style={{
+                    color: idleCountdownMs < 5 * 60 * 1000
+                      ? 'var(--sam-color-danger)'
+                      : 'var(--sam-color-warning, #f59e0b)',
+                  }}
+                >
+                  Cleanup in {formatCountdown(idleCountdownMs)}
+                </span>
               )}
 
-              {canMarkComplete && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setConfirmOpen(true)}
-                  disabled={completing}
-                  style={{ color: completing ? undefined : 'var(--sam-color-success)' }}
+              {/* PR link (T021) */}
+              {taskEmbed?.outputPrUrl && (
+                <a
+                  href={taskEmbed.outputPrUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="sam-type-caption font-medium no-underline"
+                  style={{ color: 'var(--sam-color-accent-primary)' }}
                 >
-                  <CheckCircle2 size={14} className="mr-1" />
-                  {completing ? 'Completing...' : 'Mark Complete'}
-                </Button>
+                  View PR
+                </a>
               )}
             </div>
+          )}
+
+          {/* Action buttons — wraps on narrow viewports */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {session.workspaceId && sessionState === 'active' && (
+              <>
+                {onOpenFiles && (
+                  <Button variant="ghost" size="sm" onClick={onOpenFiles}>
+                    <FolderOpen size={14} className="mr-1" />
+                    Files
+                  </Button>
+                )}
+                {onOpenGit && (
+                  <Button variant="ghost" size="sm" onClick={onOpenGit}>
+                    <GitCompare size={14} className="mr-1" />
+                    Git
+                  </Button>
+                )}
+                {browserEnabled && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={browser.status?.status === 'running' ? 'Open remote browser' : 'Start remote browser'}
+                    onClick={browser.status?.status === 'running' ? handleOpenBrowser : handleStartAndOpen}
+                    disabled={browser.isLoading}
+                  >
+                    {browser.isLoading ? (
+                      <Loader2 size={14} className="mr-1 animate-spin" />
+                    ) : (
+                      <Monitor size={14} className="mr-1" />
+                    )}
+                    Browser
+                  </Button>
+                )}
+                <a
+                  href={`/workspaces/${session.workspaceId}`}
+                  aria-label="Open workspace"
+                  className="no-underline"
+                >
+                  <Button variant="ghost" size="sm">
+                    <ExternalLink size={14} className="mr-1" />
+                    Workspace
+                  </Button>
+                </a>
+              </>
+            )}
+
+            {canMarkComplete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmOpen(true)}
+                disabled={completing}
+                style={{ color: completing ? undefined : 'var(--sam-color-success)' }}
+              >
+                <CheckCircle2 size={14} className="mr-1" />
+                {completing ? 'Completing...' : 'Complete'}
+              </Button>
+            )}
           </div>
 
           {/* Inline error for mark-complete failures */}

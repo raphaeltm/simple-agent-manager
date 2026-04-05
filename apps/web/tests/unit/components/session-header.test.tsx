@@ -175,41 +175,41 @@ describe('SessionHeader', () => {
     expect(screen.getByText('sam/test')).toBeInTheDocument();
   });
 
-  it('shows Open Workspace button for active sessions with workspace', () => {
+  it('shows Workspace button for active sessions with workspace', () => {
     renderHeader({ sessionState: 'active' });
     fireEvent.click(screen.getByLabelText('Show session details'));
-    expect(screen.getByText('Open Workspace')).toBeInTheDocument();
+    expect(screen.getByText('Workspace')).toBeInTheDocument();
   });
 
-  it('shows Mark Complete button when task is eligible', () => {
+  it('shows Complete button when task is eligible', () => {
     renderHeader({ taskEmbed: makeTaskEmbed({ status: 'running' }) });
     fireEvent.click(screen.getByLabelText('Show session details'));
-    expect(screen.getByText('Mark Complete')).toBeInTheDocument();
+    expect(screen.getByText('Complete')).toBeInTheDocument();
   });
 
-  it('hides Mark Complete button when task is completed', () => {
+  it('hides Complete button when task is completed', () => {
     renderHeader({ taskEmbed: makeTaskEmbed({ status: 'completed' }) });
     fireEvent.click(screen.getByLabelText('Show session details'));
-    expect(screen.queryByText('Mark Complete')).not.toBeInTheDocument();
+    expect(screen.queryByText('Complete')).not.toBeInTheDocument();
   });
 
-  it('hides Mark Complete button when task is failed', () => {
+  it('hides Complete button when task is failed', () => {
     renderHeader({ taskEmbed: makeTaskEmbed({ status: 'failed' }) });
     fireEvent.click(screen.getByLabelText('Show session details'));
-    expect(screen.queryByText('Mark Complete')).not.toBeInTheDocument();
+    expect(screen.queryByText('Complete')).not.toBeInTheDocument();
   });
 
-  it('opens confirmation dialog when Mark Complete is clicked', () => {
+  it('opens confirmation dialog when Complete is clicked', () => {
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
-    fireEvent.click(screen.getByText('Mark Complete'));
+    fireEvent.click(screen.getByText('Complete'));
     expect(screen.getByText('Mark task as complete?')).toBeInTheDocument();
   });
 
   it('calls updateProjectTaskStatus and deleteWorkspace on confirm', async () => {
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
-    fireEvent.click(screen.getByText('Mark Complete'));
+    fireEvent.click(screen.getByText('Complete'));
     fireEvent.click(screen.getByText('Complete & Delete'));
     await waitFor(() => {
       expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-1', { toStatus: 'completed' });
@@ -220,7 +220,7 @@ describe('SessionHeader', () => {
   it('calls onSessionMutated after successful mark complete', async () => {
     const { props } = renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
-    fireEvent.click(screen.getByText('Mark Complete'));
+    fireEvent.click(screen.getByText('Complete'));
     fireEvent.click(screen.getByText('Complete & Delete'));
     await waitFor(() => {
       expect(props.onSessionMutated).toHaveBeenCalled();
@@ -231,18 +231,18 @@ describe('SessionHeader', () => {
     mocks.updateProjectTaskStatus.mockRejectedValue(new Error('API error'));
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
-    fireEvent.click(screen.getByText('Mark Complete'));
+    fireEvent.click(screen.getByText('Complete'));
     fireEvent.click(screen.getByText('Complete & Delete'));
     await waitFor(() => {
       expect(screen.getByText('API error')).toBeInTheDocument();
     });
   });
 
-  it('shows Dismiss button for mark complete error', async () => {
+  it('shows Dismiss button for complete error', async () => {
     mocks.updateProjectTaskStatus.mockRejectedValue(new Error('API error'));
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
-    fireEvent.click(screen.getByText('Mark Complete'));
+    fireEvent.click(screen.getByText('Complete'));
     fireEvent.click(screen.getByText('Complete & Delete'));
     await waitFor(() => {
       expect(screen.getByText('Dismiss')).toBeInTheDocument();
@@ -279,10 +279,10 @@ describe('SessionHeader', () => {
     expect(screen.getByTestId('spinner')).toBeInTheDocument();
   });
 
-  it('uses Dialog component, not window.confirm', () => {
+  it('uses Dialog component for completion confirmation', () => {
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
-    fireEvent.click(screen.getByText('Mark Complete'));
+    fireEvent.click(screen.getByText('Complete'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
@@ -298,11 +298,11 @@ describe('SessionHeader', () => {
     expect(screen.getByText('View PR')).toBeInTheDocument();
   });
 
-  it('disables Mark Complete button while completing', async () => {
+  it('disables Complete button while completing', async () => {
     mocks.updateProjectTaskStatus.mockImplementation(() => new Promise(() => {}));
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
-    fireEvent.click(screen.getByText('Mark Complete'));
+    fireEvent.click(screen.getByText('Complete'));
     fireEvent.click(screen.getByText('Complete & Delete'));
     await waitFor(() => {
       expect(screen.getByText('Completing...')).toBeInTheDocument();
