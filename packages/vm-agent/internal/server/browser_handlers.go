@@ -37,11 +37,13 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 
 	// Parse request body for viewport options
 	var req struct {
-		ViewportWidth    int   `json:"viewportWidth"`
-		ViewportHeight   int   `json:"viewportHeight"`
-		DevicePixelRatio int   `json:"devicePixelRatio"`
-		IsTouchDevice    bool  `json:"isTouchDevice"`
-		EnableAudio      *bool `json:"enableAudio"`
+		ViewportWidth    int    `json:"viewportWidth"`
+		ViewportHeight   int    `json:"viewportHeight"`
+		DevicePixelRatio int    `json:"devicePixelRatio"`
+		IsTouchDevice    bool   `json:"isTouchDevice"`
+		EnableAudio      *bool  `json:"enableAudio"`
+		UserAgent        string `json:"userAgent"`
+		StartURL         string `json:"startURL"`
 	}
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -95,6 +97,8 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		DevicePixelRatio: req.DevicePixelRatio,
 		IsTouchDevice:    req.IsTouchDevice,
 		EnableAudio:      req.EnableAudio,
+		UserAgent:        req.UserAgent,
+		StartURL:         req.StartURL,
 	}
 
 	state, err := s.browserManager.Start(ctx, workspaceID, netInfo.NetworkName, netInfo.ContainerName, opts)

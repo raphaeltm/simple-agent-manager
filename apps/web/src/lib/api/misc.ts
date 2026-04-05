@@ -103,6 +103,8 @@ export async function startBrowserSidecar(
     devicePixelRatio?: number;
     isTouchDevice?: boolean;
     enableAudio?: boolean;
+    userAgent?: string;
+    startURL?: string;
   }
 ): Promise<BrowserSidecarStatusResponse> {
   return request<BrowserSidecarStatusResponse>(
@@ -156,6 +158,8 @@ export async function startWorkspaceBrowserSidecar(
     devicePixelRatio?: number;
     isTouchDevice?: boolean;
     enableAudio?: boolean;
+    userAgent?: string;
+    startURL?: string;
   }
 ): Promise<BrowserSidecarStatusResponse> {
   return request<BrowserSidecarStatusResponse>(

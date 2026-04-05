@@ -56,7 +56,9 @@ type StartOptions struct {
 	ViewportHeight   int
 	DevicePixelRatio int
 	IsTouchDevice    bool
-	EnableAudio      *bool // nil = use config default
+	EnableAudio      *bool  // nil = use config default
+	UserAgent        string // Custom user-agent string for Chrome (empty = default)
+	StartURL         string // URL to open on Chrome startup (empty = about:blank)
 }
 
 // Manager manages Neko browser sidecar containers for all workspaces.
@@ -228,6 +230,19 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 			"workspace", workspaceID, "error", installErr)
 	} else {
 		slog.Info("socat available in Neko container", "workspace", workspaceID)
+	}
+
+	// Apply Chrome customization: disable extensions (SponsorBlock, uBlock),
+	// suppress first-run prompts, set startup URL, user agent, and touch mode.
+	customization := ChromeCustomization{
+		UserAgent:        opts.UserAgent,
+		StartURL:         opts.StartURL,
+		IsTouchDevice:    opts.IsTouchDevice,
+		DevicePixelRatio: opts.DevicePixelRatio,
+	}
+	if customErr := applyChromeCustomization(ctx, m.docker, containerName, customization); customErr != nil {
+		slog.Warn("Failed to apply Chrome customization — browser may show extension popups",
+			"workspace", workspaceID, "error", customErr)
 	}
 
 	// Get the container ID

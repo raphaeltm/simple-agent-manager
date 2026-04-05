@@ -78,8 +78,20 @@ export function SessionHeader({
   const [pendingOpen, setPendingOpen] = useState(false);
   const handleStartAndOpen = useCallback(async () => {
     setPendingOpen(true);
-    await browser.start();
-  }, [browser]);
+    // Pass device info so Neko Chrome matches the user's real device:
+    // viewport, touch mode, user agent, and auto-navigate to first open port.
+    const firstPort = detectedPorts.length > 0
+      ? detectedPorts.slice().sort((a, b) => a.port - b.port)[0]
+      : null;
+    await browser.start({
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
+      userAgent: navigator.userAgent,
+      startURL: firstPort ? `http://localhost:${firstPort.port}` : undefined,
+    });
+  }, [browser, detectedPorts]);
 
   // Effect to open browser when it becomes running after a pending start
   const browserStatus = browser.status?.status;
