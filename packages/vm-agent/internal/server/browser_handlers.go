@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -42,7 +44,7 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		EnableAudio      *bool `json:"enableAudio"`
 	}
 	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 			writeError(w, http.StatusBadRequest, "invalid JSON request body")
 			return
 		}
