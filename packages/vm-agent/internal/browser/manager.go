@@ -162,14 +162,44 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		enableAudio = *opts.EnableAudio
 	}
 
-	env := buildNekoEnv(resolution, m.cfg.NekoMaxFPS, m.cfg.NekoWebRTCPort, password, passwordAdmin, enableAudio, m.cfg.NekoTCPFallback)
+	// Resolve public IP for WebRTC NAT traversal
+	nat1to1 := m.cfg.NekoNAT1TO1
+	if nat1to1 == "" {
+		if detectedIP, err := DetectPublicIP(); err == nil {
+			nat1to1 = detectedIP
+			slog.Info("Auto-detected public IP for Neko WebRTC", "ip", nat1to1)
+		} else {
+			slog.Warn("Failed to auto-detect public IP for Neko NAT1TO1 — WebRTC may not connect", "error", err)
+		}
+	}
+
+	env := buildNekoEnvFromOpts(NekoEnvOptions{
+		Resolution:    resolution,
+		MaxFPS:        m.cfg.NekoMaxFPS,
+		NekoPort:      m.cfg.NekoWebRTCPort,
+		Password:      password,
+		PasswordAdmin: passwordAdmin,
+		EnableAudio:   enableAudio,
+		TCPFallback:   m.cfg.NekoTCPFallback,
+		NAT1TO1:       nat1to1,
+		MuxPort:       m.cfg.NekoMuxPort,
+	})
 
 	limits := ResourceLimits{
 		MemoryLimit: m.cfg.NekoMemoryLimit,
 		CPULimit:    m.cfg.NekoCPULimit,
 		PidsLimit:   m.cfg.NekoPidsLimit,
 	}
-	args := buildDockerRunArgs(containerName, m.cfg.NekoImage, networkName, m.cfg.NekoShmSize, m.cfg.NekoWebRTCPort, env, limits)
+	args := buildDockerRunArgsFromOpts(DockerRunOptions{
+		ContainerName: containerName,
+		Image:         m.cfg.NekoImage,
+		NetworkName:   networkName,
+		ShmSize:       m.cfg.NekoShmSize,
+		NekoPort:      m.cfg.NekoWebRTCPort,
+		MuxPort:       m.cfg.NekoMuxPort,
+		EnvVars:       env,
+		Limits:        limits,
+	})
 
 	// Release lock during Docker I/O
 	m.mu.Unlock()

@@ -205,6 +205,8 @@ type Config struct {
 	NekoMinRAMMB          int           // Minimum free RAM to start sidecar in MB (env: NEKO_MIN_RAM_MB, default: 2048)
 	NekoEnableAudio       bool          // Enable audio streaming (env: NEKO_ENABLE_AUDIO, default: true)
 	NekoTCPFallback       bool          // Use TCP fallback for WebRTC (env: NEKO_TCP_FALLBACK, default: true)
+	NekoMuxPort           int           // Single port for WebRTC UDP/TCP mux (env: NEKO_MUX_PORT, default: 59000)
+	NekoNAT1TO1           string        // Public IP for WebRTC NAT traversal (env: NEKO_NAT1TO1, default: auto-detect)
 	NekoPassword          string        // Neko viewer password (env: NEKO_PASSWORD, default: neko)
 	NekoPasswordAdmin     string        // Neko admin password (env: NEKO_PASSWORD_ADMIN, default: admin)
 	NekoShmSize           string        // Shared memory size for Chrome (env: NEKO_SHM_SIZE, default: 2g)
@@ -409,6 +411,8 @@ func Load() (*Config, error) {
 		NekoMinRAMMB:            getEnvInt("NEKO_MIN_RAM_MB", 2048),
 		NekoEnableAudio:         getEnvBool("NEKO_ENABLE_AUDIO", true),
 		NekoTCPFallback:         getEnvBool("NEKO_TCP_FALLBACK", true),
+		NekoMuxPort:             getEnvInt("NEKO_MUX_PORT", 59000),
+		NekoNAT1TO1:             getEnv("NEKO_NAT1TO1", ""),
 		NekoPassword:            getEnv("NEKO_PASSWORD", "neko"),
 		NekoPasswordAdmin:       getEnv("NEKO_PASSWORD_ADMIN", "admin"),
 		NekoShmSize:             getEnv("NEKO_SHM_SIZE", "2g"),
