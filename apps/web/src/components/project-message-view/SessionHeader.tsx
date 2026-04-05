@@ -139,7 +139,7 @@ export function SessionHeader({
   return (
     <div className="border-b border-border-default shrink-0">
       {/* Compact row — always visible */}
-      <div className="flex items-center gap-2 px-4 py-2 min-h-[40px]">
+      <div className="flex items-center gap-2 px-4 py-2 min-h-[44px]">
         <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
           {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
         </span>
@@ -215,7 +215,7 @@ export function SessionHeader({
             onClick={() => setExpanded((v) => !v)}
             aria-expanded={expanded}
             aria-label={expanded ? 'Hide session details' : 'Show session details'}
-            className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
+            className="shrink-0 p-2 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
           >
             {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
@@ -291,6 +291,7 @@ export function SessionHeader({
                 )}
                 <a
                   href={`/workspaces/${session.workspaceId}`}
+                  aria-label="Open workspace"
                   className="no-underline"
                 >
                   <Button variant="ghost" size="sm">
