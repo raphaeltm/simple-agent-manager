@@ -377,10 +377,11 @@ func TestDetectContainerPorts_IPv6Merge(t *testing.T) {
    0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 27894 1 0000000000000000 100 0 0 10 0`
 	docker.outputs["exec devcontainer-ws-1 cat /proc/net/tcp"] = ipv4Data
 
-	// IPv6 has port 3000 (duplicate) and port 8080 (new)
+	// IPv6 has port 3000 (duplicate) and port 9090 (new)
+	// Note: port 8080 would be excluded by Neko port filter; use 9090 (0x2382) instead
 	ipv6Data := `  sl  local_address rem_address   st
    0: 00000000000000000000000000000000:0BB8 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 27894 1 0000000000000000 100 0 0 10 0
-   1: 00000000000000000000000000000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 27895 1 0000000000000000 100 0 0 10 0`
+   1: 00000000000000000000000000000000:2382 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 27895 1 0000000000000000 100 0 0 10 0`
 	docker.outputs["exec devcontainer-ws-1 cat /proc/net/tcp6"] = ipv6Data
 
 	ports, err := mgr.detectContainerPorts(context.Background(), "devcontainer-ws-1")
@@ -396,8 +397,8 @@ func TestDetectContainerPorts_IPv6Merge(t *testing.T) {
 	if !portSet[3000] {
 		t.Error("expected port 3000")
 	}
-	if !portSet[8080] {
-		t.Error("expected port 8080")
+	if !portSet[9090] {
+		t.Error("expected port 9090")
 	}
 	if len(ports) != 2 {
 		t.Errorf("expected 2 unique ports (deduped), got %d: %v", len(ports), ports)

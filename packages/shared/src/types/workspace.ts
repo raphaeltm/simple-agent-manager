@@ -235,6 +235,19 @@ export interface PortsResponse {
 // Browser Sidecar (Neko)
 // =============================================================================
 
+/**
+ * Known sidecar aliases for named subdomain routing.
+ * Used in ws-{id}--{alias}.{domain} patterns to route to sidecar containers
+ * instead of DevContainer ports.
+ */
+export const SIDECAR_ALIASES = ['browser'] as const;
+export type SidecarAlias = (typeof SIDECAR_ALIASES)[number];
+
+/** Check if a string is a valid sidecar alias. */
+export function isSidecarAlias(value: string): value is SidecarAlias {
+  return (SIDECAR_ALIASES as readonly string[]).includes(value);
+}
+
 /** Status of the Neko browser sidecar container. */
 export type BrowserSidecarStatus = 'off' | 'starting' | 'running' | 'stopping' | 'error';
 

@@ -11,7 +11,6 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ChatSessionHandle } from '../../components/ChatSession';
 import { ChatSession } from '../../components/ChatSession';
 import { CommandPalette } from '../../components/CommandPalette';
-import { WorkspaceChatView } from './WorkspaceChatView';
 import { FileBrowserPanel } from '../../components/FileBrowserPanel';
 import { FileViewerPanel } from '../../components/FileViewerPanel';
 import { GitChangesPanel } from '../../components/GitChangesPanel';
@@ -33,6 +32,7 @@ import { ACTIVITY_THROTTLE_MS, deriveWorktreeBadge, workspaceTabStatusColor } fr
 import { useSessionState } from './useSessionState';
 import { useWorkspaceCore } from './useWorkspaceCore';
 import { useWorkspaceNavigation } from './useWorkspaceNavigation';
+import { WorkspaceChatView } from './WorkspaceChatView';
 import { WorkspaceCreateMenu } from './WorkspaceCreateMenu';
 import { WorkspaceHeader } from './WorkspaceHeader';
 import { BootProgress, CenteredStatus, MinimalToolbar } from './WorkspaceStatus';

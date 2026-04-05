@@ -7,11 +7,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/workspace/vm-agent/internal/config"
 )
+
+// safeNetworkName validates Docker network names to prevent Go template injection.
+var safeNetworkName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // Status represents the lifecycle state of a browser sidecar.
 type Status string
@@ -41,6 +45,7 @@ type SidecarState struct {
 	Forwarders    []PortForwarder
 	NetworkName   string
 	TargetHost    string // DevContainer hostname on the Docker network
+	BridgeIP      string // Cached Neko container bridge IP (stable for container lifetime)
 	Password      string // Per-container random password for Neko viewer
 	PasswordAdmin string // Per-container random password for Neko admin
 }
@@ -313,6 +318,55 @@ func (m *Manager) GetPorts(workspaceID string) []PortForwarder {
 	result := make([]PortForwarder, len(state.Forwarders))
 	copy(result, state.Forwarders)
 	return result
+}
+
+// GetNekoBridgeIP returns the Docker bridge IP of the Neko container for a workspace.
+// This is used by the browser proxy to forward HTTP traffic to the Neko container.
+// The IP is cached in SidecarState after the first successful lookup since it is
+// stable for the container's lifetime.
+func (m *Manager) GetNekoBridgeIP(ctx context.Context, workspaceID string) (string, int, error) {
+	m.mu.RLock()
+	state, ok := m.sidecars[workspaceID]
+	if !ok || state.Status != StatusRunning {
+		m.mu.RUnlock()
+		return "", 0, fmt.Errorf("no running browser sidecar for workspace %s", workspaceID)
+	}
+	// Return cached IP if available (stable for container lifetime)
+	if state.BridgeIP != "" {
+		ip, port := state.BridgeIP, state.NekoPort
+		m.mu.RUnlock()
+		return ip, port, nil
+	}
+	containerName := state.ContainerName
+	networkName := state.NetworkName
+	nekoPort := state.NekoPort
+	m.mu.RUnlock()
+
+	// Validate network name to prevent Go template injection via crafted Docker network names.
+	if !safeNetworkName.MatchString(networkName) {
+		return "", 0, fmt.Errorf("invalid Docker network name %q for workspace %s", networkName, workspaceID)
+	}
+
+	// Use the known network name to extract exactly one IP, avoiding concatenation
+	// when the container is attached to multiple networks.
+	template := fmt.Sprintf(`{{(index .NetworkSettings.Networks "%s").IPAddress}}`, networkName)
+	out, err := m.docker.Run(ctx, "inspect", "-f", template, containerName)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to inspect Neko container %s: %w", containerName, err)
+	}
+	ip := trimOutput(out)
+	if ip == "" {
+		return "", 0, fmt.Errorf("Neko container %s has no bridge IP on network %s", containerName, networkName)
+	}
+
+	// Cache the IP under write lock
+	m.mu.Lock()
+	if s, ok := m.sidecars[workspaceID]; ok && s == state {
+		state.BridgeIP = ip
+	}
+	m.mu.Unlock()
+
+	return ip, nekoPort, nil
 }
 
 // DockerExec returns the underlying Docker executor (used by handlers for network discovery).

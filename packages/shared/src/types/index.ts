@@ -62,6 +62,7 @@ export type {
   NodeStatus,
   NodeSystemInfo,
   PortsResponse,
+  SidecarAlias,
   StartBrowserSidecarRequest,
   UpdateWorkspaceRequest,
   VMLocation,
@@ -74,6 +75,7 @@ export type {
   WorkspaceRuntimeFile,
   WorkspaceStatus,
 } from './workspace';
+export { isSidecarAlias, SIDECAR_ALIASES } from './workspace';
 
 // Provider Catalog
 export type {
