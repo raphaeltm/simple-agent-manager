@@ -7,11 +7,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/workspace/vm-agent/internal/config"
 )
+
+// safeNetworkName validates Docker network names to prevent Go template injection.
+var safeNetworkName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // Status represents the lifecycle state of a browser sidecar.
 type Status string
@@ -337,6 +341,11 @@ func (m *Manager) GetNekoBridgeIP(ctx context.Context, workspaceID string) (stri
 	networkName := state.NetworkName
 	nekoPort := state.NekoPort
 	m.mu.RUnlock()
+
+	// Validate network name to prevent Go template injection via crafted Docker network names.
+	if !safeNetworkName.MatchString(networkName) {
+		return "", 0, fmt.Errorf("invalid Docker network name %q for workspace %s", networkName, workspaceID)
+	}
 
 	// Use the known network name to extract exactly one IP, avoiding concatenation
 	// when the container is attached to multiple networks.

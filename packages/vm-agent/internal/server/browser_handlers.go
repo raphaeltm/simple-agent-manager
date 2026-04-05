@@ -321,7 +321,7 @@ func (s *Server) serveBrowserProxy(w http.ResponseWriter, r *http.Request, works
 			"workspaceId", workspaceID,
 			"target", targetURLStr,
 			"error", proxyErr)
-		writeError(rw, http.StatusBadGateway, fmt.Sprintf("browser proxy error: %v", proxyErr))
+		writeError(rw, http.StatusBadGateway, "browser sidecar unavailable")
 	}
 	proxy.ServeHTTP(w, r)
 }

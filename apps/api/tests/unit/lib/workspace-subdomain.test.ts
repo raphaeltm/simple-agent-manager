@@ -45,17 +45,17 @@ describe('parseWorkspaceSubdomain', () => {
 
     it('rejects negative port', () => {
       const result = parseWorkspaceSubdomain('ws-abc123---1.example.com', baseDomain);
-      expect(result).toEqual({ error: "Unknown sidecar alias '-1'. Valid aliases: browser" });
+      expect(result).toEqual({ error: "Unknown sidecar alias. Valid aliases: browser" });
     });
 
     it('rejects trailing -- with empty port', () => {
       const result = parseWorkspaceSubdomain('ws-abc123--.example.com', baseDomain);
-      expect(result).toEqual({ error: "Unknown sidecar alias ''. Valid aliases: browser" });
+      expect(result).toEqual({ error: "Unknown sidecar alias. Valid aliases: browser" });
     });
 
     it('rejects partial numeric port like 3000abc', () => {
       const result = parseWorkspaceSubdomain('ws-abc123--3000abc.example.com', baseDomain);
-      expect(result).toEqual({ error: "Unknown sidecar alias '3000abc'. Valid aliases: browser" });
+      expect(result).toEqual({ error: "Unknown sidecar alias. Valid aliases: browser" });
     });
   });
 
@@ -72,12 +72,12 @@ describe('parseWorkspaceSubdomain', () => {
 
     it('rejects unknown sidecar alias', () => {
       const result = parseWorkspaceSubdomain('ws-abc123--notaport.example.com', baseDomain);
-      expect(result).toEqual({ error: "Unknown sidecar alias 'notaport'. Valid aliases: browser" });
+      expect(result).toEqual({ error: "Unknown sidecar alias. Valid aliases: browser" });
     });
 
-    it('rejects mixed-case sidecar alias', () => {
+    it('handles mixed-case sidecar alias (DNS is case-insensitive)', () => {
       const result = parseWorkspaceSubdomain('ws-abc123--Browser.example.com', baseDomain);
-      expect(result).toEqual({ error: "Unknown sidecar alias 'Browser'. Valid aliases: browser" });
+      expect(result).toEqual({ workspaceId: 'ABC123', targetPort: null, sidecar: 'browser' });
     });
 
     it('port 8080 still routes to DevContainer, not sidecar', () => {

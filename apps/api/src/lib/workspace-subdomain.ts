@@ -35,7 +35,7 @@ export function parseWorkspaceSubdomain(
   if (subdomain.includes('--')) {
     const parts = subdomain.split('--', 2);
     const wsSubdomain = parts[0] ?? '';
-    const suffix = parts[1] ?? '';
+    const suffix = (parts[1] ?? '').toLowerCase();
     workspaceId = wsSubdomain.replace(/^ws-/, '').toUpperCase();
 
     // Check if suffix is a known sidecar alias (e.g., 'browser')
@@ -48,7 +48,7 @@ export function parseWorkspaceSubdomain(
       }
       targetPort = parsed;
     } else {
-      return { error: `Unknown sidecar alias '${suffix}'. Valid aliases: ${SIDECAR_ALIASES.join(', ')}` };
+      return { error: `Unknown sidecar alias. Valid aliases: ${SIDECAR_ALIASES.join(', ')}` };
     }
   } else {
     workspaceId = subdomain.replace(/^ws-/, '').toUpperCase();
