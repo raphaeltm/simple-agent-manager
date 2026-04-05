@@ -7,6 +7,14 @@ import type { ChatSessionResponse } from '../../../src/lib/api';
 const mocks = vi.hoisted(() => ({
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
+  useBrowserSidecar: vi.fn(() => ({
+    status: null,
+    isLoading: false,
+    error: null,
+    start: vi.fn(),
+    stop: vi.fn(),
+    refresh: vi.fn(),
+  })),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -17,6 +25,10 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 
 vi.mock('../../../src/lib/text-utils', () => ({
   stripMarkdown: (s: string) => s,
+}));
+
+vi.mock('../../../src/hooks/useBrowserSidecar', () => ({
+  useBrowserSidecar: mocks.useBrowserSidecar,
 }));
 
 vi.mock('@simple-agent-manager/ui', () => ({
@@ -40,7 +52,9 @@ vi.mock('lucide-react', () => ({
   GitBranch: () => <span />,
   GitCompare: () => <span />,
   Globe: () => <span />,
+  Loader2: () => <span />,
   MapPin: () => <span />,
+  Monitor: () => <span />,
   Server: () => <span />,
 }));
 

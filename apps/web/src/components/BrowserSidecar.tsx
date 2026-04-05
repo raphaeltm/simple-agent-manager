@@ -128,16 +128,19 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
         </Alert>
       )}
 
-      {/* Neko viewer iframe */}
-      {showViewer && isRunning && status?.url && (
-        <div className="border border-border-default rounded-lg overflow-hidden relative w-full" style={{ aspectRatio: '16/9' }}>
-          <iframe
-            src={status.url}
-            title="Remote Browser"
-            className="w-full h-full border-none"
-            allow="autoplay; clipboard-write; clipboard-read"
-            sandbox="allow-scripts allow-forms allow-popups"
-          />
+      {/* Open Neko in a new tab — WebRTC doesn't work well inside iframes */}
+      {isRunning && status?.url && (
+        <div className="text-xs text-fg-muted mt-1">
+          <a
+            href={status.autoLoginUrl || status.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 no-underline hover:underline"
+            style={{ color: 'var(--sam-color-accent-primary)' }}
+          >
+            <Globe size={12} />
+            Open remote browser in new tab
+          </a>
         </div>
       )}
 
