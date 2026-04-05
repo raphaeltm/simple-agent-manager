@@ -220,6 +220,16 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		return &cp, fmt.Errorf("failed to start Neko container: %w", err)
 	}
 
+	// Ensure socat is available inside Neko container for port forwarding.
+	// The default Neko images don't ship with socat, so install it on first start.
+	if installErr := m.docker.RunSilent(ctx, "exec", containerName, "sh", "-c",
+		"command -v socat >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y --no-install-recommends socat >/dev/null 2>&1)"); installErr != nil {
+		slog.Warn("Failed to install socat in Neko container — port forwarding may not work",
+			"workspace", workspaceID, "error", installErr)
+	} else {
+		slog.Info("socat available in Neko container", "workspace", workspaceID)
+	}
+
 	// Get the container ID
 	out, inspectErr := m.docker.Run(ctx, "inspect", "-f", "{{.Id}}", containerName)
 
