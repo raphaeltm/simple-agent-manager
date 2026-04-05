@@ -41,6 +41,7 @@ type SidecarState struct {
 	Forwarders    []PortForwarder
 	NetworkName   string
 	TargetHost    string // DevContainer hostname on the Docker network
+	BridgeIP      string // Cached Neko container bridge IP (stable for container lifetime)
 	Password      string // Per-container random password for Neko viewer
 	PasswordAdmin string // Per-container random password for Neko admin
 }
@@ -317,6 +318,8 @@ func (m *Manager) GetPorts(workspaceID string) []PortForwarder {
 
 // GetNekoBridgeIP returns the Docker bridge IP of the Neko container for a workspace.
 // This is used by the browser proxy to forward HTTP traffic to the Neko container.
+// The IP is cached in SidecarState after the first successful lookup since it is
+// stable for the container's lifetime.
 func (m *Manager) GetNekoBridgeIP(ctx context.Context, workspaceID string) (string, int, error) {
 	m.mu.RLock()
 	state, ok := m.sidecars[workspaceID]
@@ -324,18 +327,35 @@ func (m *Manager) GetNekoBridgeIP(ctx context.Context, workspaceID string) (stri
 		m.mu.RUnlock()
 		return "", 0, fmt.Errorf("no running browser sidecar for workspace %s", workspaceID)
 	}
+	// Return cached IP if available (stable for container lifetime)
+	if state.BridgeIP != "" {
+		ip, port := state.BridgeIP, state.NekoPort
+		m.mu.RUnlock()
+		return ip, port, nil
+	}
 	containerName := state.ContainerName
+	networkName := state.NetworkName
 	nekoPort := state.NekoPort
 	m.mu.RUnlock()
 
-	out, err := m.docker.Run(ctx, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerName)
+	// Use the known network name to extract exactly one IP, avoiding concatenation
+	// when the container is attached to multiple networks.
+	template := fmt.Sprintf(`{{(index .NetworkSettings.Networks "%s").IPAddress}}`, networkName)
+	out, err := m.docker.Run(ctx, "inspect", "-f", template, containerName)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to inspect Neko container %s: %w", containerName, err)
 	}
 	ip := trimOutput(out)
 	if ip == "" {
-		return "", 0, fmt.Errorf("Neko container %s has no bridge IP", containerName)
+		return "", 0, fmt.Errorf("Neko container %s has no bridge IP on network %s", containerName, networkName)
 	}
+
+	// Cache the IP under write lock
+	m.mu.Lock()
+	if s, ok := m.sidecars[workspaceID]; ok && s == state {
+		state.BridgeIP = ip
+	}
+	m.mu.Unlock()
 
 	return ip, nekoPort, nil
 }

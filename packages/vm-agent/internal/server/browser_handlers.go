@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -281,12 +280,12 @@ func (s *Server) handleBrowserProxy(w http.ResponseWriter, r *http.Request) {
 		"target", targetURLStr,
 		"forwardPath", forwardPath)
 
-	s.serveBrowserProxy(w, r, workspaceID, nekoPort, targetURLStr, forwardPath)
+	s.serveBrowserProxy(w, r, workspaceID, targetURLStr, forwardPath)
 }
 
 // serveBrowserProxy builds a reverse proxy for the Neko sidecar and serves the request.
 // Similar to servePortProxy but uses the sidecar alias hostname for Host header validation.
-func (s *Server) serveBrowserProxy(w http.ResponseWriter, r *http.Request, workspaceID string, nekoPort int, targetURLStr string, forwardPath string) {
+func (s *Server) serveBrowserProxy(w http.ResponseWriter, r *http.Request, workspaceID string, targetURLStr string, forwardPath string) {
 	targetURL, err := url.Parse(targetURLStr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to build proxy target")
@@ -297,8 +296,15 @@ func (s *Server) serveBrowserProxy(w http.ResponseWriter, r *http.Request, works
 	baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
 	expectedHost := fmt.Sprintf("ws-%s--browser.%s", strings.ToLower(workspaceID), baseDomain)
 	publicHost := expectedHost
-	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" && fwdHost == expectedHost {
-		publicHost = fwdHost
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+		if fwdHost == expectedHost {
+			publicHost = fwdHost
+		} else {
+			slog.Debug("Browser proxy: X-Forwarded-Host mismatch, using derived host",
+				"workspaceId", workspaceID,
+				"got", fwdHost,
+				"expected", expectedHost)
+		}
 	}
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
@@ -340,8 +346,4 @@ func (s *Server) stopBrowserSidecarWithTimeout(workspaceID string, timeout time.
 // deriveBaseDomainFromURL extracts the base domain from a control plane URL.
 func deriveBaseDomainFromURL(controlPlaneURL string) string {
 	return config.DeriveBaseDomain(controlPlaneURL)
-}
-
-func itoa(n int) string {
-	return strconv.Itoa(n)
 }
