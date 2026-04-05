@@ -1,5 +1,5 @@
-import { isSidecarAlias } from '@simple-agent-manager/shared';
 import type { SidecarAlias } from '@simple-agent-manager/shared';
+import { isSidecarAlias } from '@simple-agent-manager/shared';
 
 /**
  * Parsed workspace subdomain result.
