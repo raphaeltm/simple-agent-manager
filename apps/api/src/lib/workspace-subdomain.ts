@@ -1,5 +1,5 @@
 import type { SidecarAlias } from '@simple-agent-manager/shared';
-import { isSidecarAlias } from '@simple-agent-manager/shared';
+import { isSidecarAlias, SIDECAR_ALIASES } from '@simple-agent-manager/shared';
 
 /**
  * Parsed workspace subdomain result.
@@ -48,7 +48,7 @@ export function parseWorkspaceSubdomain(
       }
       targetPort = parsed;
     } else {
-      return { error: `Unknown sidecar alias '${suffix}'. Valid aliases: browser` };
+      return { error: `Unknown sidecar alias '${suffix}'. Valid aliases: ${SIDECAR_ALIASES.join(', ')}` };
     }
   } else {
     workspaceId = subdomain.replace(/^ws-/, '').toUpperCase();
