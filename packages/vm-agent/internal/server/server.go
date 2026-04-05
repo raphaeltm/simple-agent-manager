@@ -789,6 +789,9 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/browser", s.handleGetBrowserStatus)
 	mux.HandleFunc("DELETE /workspaces/{workspaceId}/browser", s.handleStopBrowser)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/browser/ports", s.handleGetBrowserPorts)
+	// Browser sidecar proxy — handles ws-{id}--browser.{domain} subdomain traffic
+	mux.HandleFunc("/workspaces/{workspaceId}/browser/proxy/{path...}", s.handleBrowserProxy)
+	mux.HandleFunc("/workspaces/{workspaceId}/browser/proxy", s.handleBrowserProxy)
 
 	// Boot log WebSocket (available during bootstrap for real-time streaming)
 	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)

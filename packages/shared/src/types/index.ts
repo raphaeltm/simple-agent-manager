@@ -41,6 +41,7 @@ export type {
   BrowserSidecarPortsResponse,
   BrowserSidecarResponse,
   BrowserSidecarStatus,
+  SidecarAlias,
   ContainerInfo,
   ContainerState,
   CreateNodeRequest,
@@ -74,6 +75,7 @@ export type {
   WorkspaceRuntimeFile,
   WorkspaceStatus,
 } from './workspace';
+export { isSidecarAlias, SIDECAR_ALIASES } from './workspace';
 
 // Provider Catalog
 export type {

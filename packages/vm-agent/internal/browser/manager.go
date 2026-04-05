@@ -315,6 +315,31 @@ func (m *Manager) GetPorts(workspaceID string) []PortForwarder {
 	return result
 }
 
+// GetNekoBridgeIP returns the Docker bridge IP of the Neko container for a workspace.
+// This is used by the browser proxy to forward HTTP traffic to the Neko container.
+func (m *Manager) GetNekoBridgeIP(ctx context.Context, workspaceID string) (string, int, error) {
+	m.mu.RLock()
+	state, ok := m.sidecars[workspaceID]
+	if !ok || state.Status != StatusRunning {
+		m.mu.RUnlock()
+		return "", 0, fmt.Errorf("no running browser sidecar for workspace %s", workspaceID)
+	}
+	containerName := state.ContainerName
+	nekoPort := state.NekoPort
+	m.mu.RUnlock()
+
+	out, err := m.docker.Run(ctx, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerName)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to inspect Neko container %s: %w", containerName, err)
+	}
+	ip := trimOutput(out)
+	if ip == "" {
+		return "", 0, fmt.Errorf("Neko container %s has no bridge IP", containerName)
+	}
+
+	return ip, nekoPort, nil
+}
+
 // DockerExec returns the underlying Docker executor (used by handlers for network discovery).
 func (m *Manager) DockerExec() DockerExecutor {
 	return m.docker

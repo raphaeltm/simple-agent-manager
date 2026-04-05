@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/browser"
@@ -221,11 +224,11 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 		slog.Debug("Browser sidecar error detail", "workspace", workspaceID, "error", state.Error)
 	}
 	if state.NekoPort > 0 && state.Status == browser.StatusRunning {
-		// Do NOT expose nekoPort in the response — it leaks internal container topology
-		// and enables direct container bypass. The proxy URL is sufficient for the UI.
+		// Use named sidecar alias instead of numeric port to avoid collision with
+		// DevContainer ports. ws-{id}--browser routes to the Neko container exclusively.
 		baseDomain := deriveBaseDomainFromURL(controlPlaneURL)
 		if baseDomain != "" {
-			resp["url"] = "https://ws-" + workspaceID + "--" + itoa(state.NekoPort) + "." + baseDomain
+			resp["url"] = "https://ws-" + workspaceID + "--browser." + baseDomain
 		}
 	}
 	if len(state.Forwarders) > 0 {
@@ -233,6 +236,88 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 	}
 
 	return resp
+}
+
+// handleBrowserProxy proxies HTTP/WebSocket requests to the Neko browser sidecar.
+// This is the endpoint for ws-{id}--browser.{domain} subdomain routing.
+// GET/POST/etc. /workspaces/{workspaceId}/browser/proxy/{path...}
+func (s *Server) handleBrowserProxy(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		return
+	}
+
+	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+		return
+	}
+
+	if s.browserManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "browser sidecar not available")
+		return
+	}
+
+	nekoIP, nekoPort, err := s.browserManager.GetNekoBridgeIP(r.Context(), workspaceID)
+	if err != nil {
+		slog.Error("Failed to resolve Neko container bridge IP",
+			"workspace", workspaceID,
+			"error", err,
+		)
+		writeError(w, http.StatusServiceUnavailable, "browser sidecar not running or not ready")
+		return
+	}
+
+	targetURLStr := fmt.Sprintf("http://%s:%d", nekoIP, nekoPort)
+
+	forwardPath := r.PathValue("path")
+	if forwardPath == "" {
+		forwardPath = "/"
+	} else if forwardPath[0] != '/' {
+		forwardPath = "/" + forwardPath
+	}
+
+	slog.Info("Browser proxy forwarding",
+		"workspaceId", workspaceID,
+		"target", targetURLStr,
+		"forwardPath", forwardPath)
+
+	s.serveBrowserProxy(w, r, workspaceID, nekoPort, targetURLStr, forwardPath)
+}
+
+// serveBrowserProxy builds a reverse proxy for the Neko sidecar and serves the request.
+// Similar to servePortProxy but uses the sidecar alias hostname for Host header validation.
+func (s *Server) serveBrowserProxy(w http.ResponseWriter, r *http.Request, workspaceID string, nekoPort int, targetURLStr string, forwardPath string) {
+	targetURL, err := url.Parse(targetURLStr)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build proxy target")
+		return
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
+	expectedHost := fmt.Sprintf("ws-%s--browser.%s", strings.ToLower(workspaceID), baseDomain)
+	publicHost := expectedHost
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" && fwdHost == expectedHost {
+		publicHost = fwdHost
+	}
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.URL.Path = forwardPath
+		req.URL.RawPath = ""
+		req.Host = publicHost
+		q := req.URL.Query()
+		q.Del("token")
+		req.URL.RawQuery = q.Encode()
+	}
+	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
+		slog.Error("Browser proxy upstream error",
+			"workspaceId", workspaceID,
+			"target", targetURLStr,
+			"error", proxyErr)
+		writeError(rw, http.StatusBadGateway, fmt.Sprintf("browser proxy error: %v", proxyErr))
+	}
+	proxy.ServeHTTP(w, r)
 }
 
 // stopBrowserSidecarWithTimeout stops the browser sidecar using a background context

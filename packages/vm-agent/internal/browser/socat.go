@@ -252,6 +252,7 @@ func (m *Manager) removeForwarder(ctx context.Context, containerName string, por
 }
 
 // detectContainerPorts reads /proc/net/tcp and /proc/net/tcp6 from the DevContainer to find listening ports.
+// Excludes the Neko WebRTC port to prevent socat from binding a port that Neko itself is using.
 func (m *Manager) detectContainerPorts(ctx context.Context, containerName string) ([]int, error) {
 	// Read IPv4
 	out4, err := m.docker.Run(ctx, "exec", containerName, "cat", "/proc/net/tcp")
@@ -278,7 +279,17 @@ func (m *Manager) detectContainerPorts(ctx context.Context, containerName string
 		}
 	}
 
-	return ports, nil
+	// Exclude the Neko WebRTC port — socat must not try to bind a port that
+	// Neko itself is already listening on inside the sidecar container.
+	nekoPort := m.cfg.NekoWebRTCPort
+	filtered := ports[:0]
+	for _, p := range ports {
+		if p != nekoPort {
+			filtered = append(filtered, p)
+		}
+	}
+
+	return filtered, nil
 }
 
 // parseProcNetTCP parses /proc/net/tcp or /proc/net/tcp6 output to extract listening port numbers.
