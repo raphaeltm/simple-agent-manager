@@ -200,11 +200,13 @@ type Config struct {
 	NekoImage             string        // Docker image for Neko browser (env: NEKO_IMAGE, default: ghcr.io/m1k1o/neko/google-chrome:latest)
 	NekoScreenResolution  string        // Default screen resolution (env: NEKO_SCREEN_RESOLUTION, default: 1920x1080)
 	NekoMaxFPS            int           // Max WebRTC framerate (env: NEKO_MAX_FPS, default: 30)
-	NekoWebRTCPort        int           // HTTP port for Neko web client (env: NEKO_WEBRTC_PORT, default: 8080)
+	NekoWebRTCPort        int           // HTTP port for Neko web client (env: NEKO_WEBRTC_PORT, default: 6080)
 	NekoSocatPollInterval time.Duration // Interval for port scan / socat sync (env: NEKO_SOCAT_POLL_INTERVAL, default: 5s)
 	NekoMinRAMMB          int           // Minimum free RAM to start sidecar in MB (env: NEKO_MIN_RAM_MB, default: 2048)
 	NekoEnableAudio       bool          // Enable audio streaming (env: NEKO_ENABLE_AUDIO, default: true)
 	NekoTCPFallback       bool          // Use TCP fallback for WebRTC (env: NEKO_TCP_FALLBACK, default: true)
+	NekoMuxPort           int           // Single port for WebRTC UDP/TCP mux (env: NEKO_MUX_PORT, default: 59000)
+	NekoNAT1TO1           string        // Public IP for WebRTC NAT traversal (env: NEKO_NAT1TO1, default: auto-detect)
 	NekoPassword          string        // Neko viewer password (env: NEKO_PASSWORD, default: neko)
 	NekoPasswordAdmin     string        // Neko admin password (env: NEKO_PASSWORD_ADMIN, default: admin)
 	NekoShmSize           string        // Shared memory size for Chrome (env: NEKO_SHM_SIZE, default: 2g)
@@ -404,11 +406,13 @@ func Load() (*Config, error) {
 		NekoImage:               getEnv("NEKO_IMAGE", "ghcr.io/m1k1o/neko/google-chrome:latest"),
 		NekoScreenResolution:    getEnv("NEKO_SCREEN_RESOLUTION", "1920x1080"),
 		NekoMaxFPS:              getEnvInt("NEKO_MAX_FPS", 30),
-		NekoWebRTCPort:          getEnvInt("NEKO_WEBRTC_PORT", 8080),
+		NekoWebRTCPort:          getEnvInt("NEKO_WEBRTC_PORT", 6080),
 		NekoSocatPollInterval:   getEnvDuration("NEKO_SOCAT_POLL_INTERVAL", 5*time.Second),
 		NekoMinRAMMB:            getEnvInt("NEKO_MIN_RAM_MB", 2048),
 		NekoEnableAudio:         getEnvBool("NEKO_ENABLE_AUDIO", true),
 		NekoTCPFallback:         getEnvBool("NEKO_TCP_FALLBACK", true),
+		NekoMuxPort:             getEnvInt("NEKO_MUX_PORT", 59000),
+		NekoNAT1TO1:             getEnv("NEKO_NAT1TO1", ""),
 		NekoPassword:            getEnv("NEKO_PASSWORD", "neko"),
 		NekoPasswordAdmin:       getEnv("NEKO_PASSWORD_ADMIN", "admin"),
 		NekoShmSize:             getEnv("NEKO_SHM_SIZE", "2g"),

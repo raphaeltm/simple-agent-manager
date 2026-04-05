@@ -78,27 +78,26 @@ describe('BrowserSidecar', () => {
     expect(screen.getByRole('button', { name: /show remote browser/i })).toBeDisabled();
   });
 
-  it('toggles iframe visibility on show/hide click', () => {
+  it('shows open-in-new-tab link when running', () => {
     mockHookReturn.status = { status: 'running', url: 'https://example.com' };
     render(<BrowserSidecar workspaceId="ws-1" />);
-    // Initially hidden
-    expect(screen.queryByTitle('Remote Browser')).not.toBeInTheDocument();
-    // Click show
-    fireEvent.click(screen.getByRole('button', { name: /show remote browser/i }));
-    expect(screen.getByTitle('Remote Browser')).toBeInTheDocument();
-    // Click hide
-    fireEvent.click(screen.getByRole('button', { name: /hide remote browser/i }));
-    expect(screen.queryByTitle('Remote Browser')).not.toBeInTheDocument();
+    const link = screen.getByText(/open remote browser in new tab/i);
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', 'https://example.com');
+    expect(link).toHaveAttribute('target', '_blank');
   });
 
-  it('calls stop and hides viewer on stop click', async () => {
+  it('uses autoLoginUrl when available', () => {
+    mockHookReturn.status = { status: 'running', url: 'https://example.com', autoLoginUrl: 'https://example.com?usr=user&pwd=secret' } as typeof mockHookReturn.status;
+    render(<BrowserSidecar workspaceId="ws-1" />);
+    const link = screen.getByText(/open remote browser in new tab/i);
+    expect(link).toHaveAttribute('href', 'https://example.com?usr=user&pwd=secret');
+  });
+
+  it('calls stop on stop click', async () => {
     mockHookReturn.status = { status: 'running', url: 'https://example.com' };
     mockStop.mockResolvedValue(undefined);
     render(<BrowserSidecar workspaceId="ws-1" />);
-    // Show the viewer first
-    fireEvent.click(screen.getByRole('button', { name: /show remote browser/i }));
-    expect(screen.getByTitle('Remote Browser')).toBeInTheDocument();
-    // Stop
     fireEvent.click(screen.getByRole('button', { name: /stop remote browser/i }));
     await waitFor(() => expect(mockStop).toHaveBeenCalledTimes(1));
   });

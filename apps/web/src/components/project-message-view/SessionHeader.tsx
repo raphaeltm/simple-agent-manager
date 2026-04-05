@@ -1,9 +1,10 @@
 import type { DetectedPort, NodeResponse, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
-import { Box, CheckCircle2, ChevronDown, ChevronUp, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, Globe, MapPin, Server } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { Box, CheckCircle2, ChevronDown, ChevronUp, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, Globe, Loader2, MapPin, Monitor, Server } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { useBrowserSidecar } from '../../hooks/useBrowserSidecar';
 import type { ChatSessionResponse } from '../../lib/api';
 import { deleteWorkspace, updateProjectTaskStatus } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
@@ -59,6 +60,40 @@ export function SessionHeader({
   const [completing, setCompleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+
+  // Browser sidecar — always initialize the hook (React rules of hooks), but only
+  // render the button when the workspace exists and session is active.
+  const browserEnabled = !!(session.workspaceId && sessionState === 'active');
+  const browser = useBrowserSidecar({ projectId, sessionId: session.id });
+
+  const handleOpenBrowser = useCallback(() => {
+    if (browser.status?.status === 'running') {
+      // Already running — open the auto-login URL in a new tab
+      const url = browser.status.autoLoginUrl || browser.status.url;
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  }, [browser.status]);
+
+  // When status transitions to running after a start, open the URL
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const handleStartAndOpen = useCallback(async () => {
+    setPendingOpen(true);
+    await browser.start();
+  }, [browser]);
+
+  // Effect to open browser when it becomes running after a pending start
+  const browserStatus = browser.status?.status;
+  const browserAutoLoginUrl = browser.status?.autoLoginUrl;
+  const browserUrl = browser.status?.url;
+  useEffect(() => {
+    if (pendingOpen && browserStatus === 'running') {
+      const url = browserAutoLoginUrl || browserUrl;
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+        setPendingOpen(false);
+      }
+    }
+  }, [pendingOpen, browserStatus, browserAutoLoginUrl, browserUrl]);
 
   const hasDetails = !!(
     taskEmbed?.outputBranch ||
@@ -232,6 +267,22 @@ export function SessionHeader({
                     <Button variant="ghost" size="sm" onClick={onOpenGit}>
                       <GitCompare size={14} className="mr-1" />
                       Git
+                    </Button>
+                  )}
+                  {browserEnabled && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={browser.status?.status === 'running' ? 'Open remote browser' : 'Start remote browser'}
+                      onClick={browser.status?.status === 'running' ? handleOpenBrowser : handleStartAndOpen}
+                      disabled={browser.isLoading}
+                    >
+                      {browser.isLoading ? (
+                        <Loader2 size={14} className="mr-1 animate-spin" />
+                      ) : (
+                        <Monitor size={14} className="mr-1" />
+                      )}
+                      {browser.status?.status === 'running' ? 'Open Browser' : 'Remote Browser'}
                     </Button>
                   )}
                   <a

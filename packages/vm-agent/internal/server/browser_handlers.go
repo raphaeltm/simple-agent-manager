@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -42,7 +44,7 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		EnableAudio      *bool `json:"enableAudio"`
 	}
 	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 			writeError(w, http.StatusBadRequest, "invalid JSON request body")
 			return
 		}
@@ -227,7 +229,14 @@ func browserStateToResponse(state *browser.SidecarState, workspaceID, controlPla
 		// DevContainer ports. ws-{id}--browser routes to the Neko container exclusively.
 		baseDomain := deriveBaseDomainFromURL(controlPlaneURL)
 		if baseDomain != "" {
-			resp["url"] = "https://ws-" + workspaceID + "--browser." + baseDomain
+			baseURL := "https://ws-" + workspaceID + "--browser." + baseDomain
+			resp["url"] = baseURL
+			// Include auto-login URL with Neko credentials so the user doesn't
+			// have to enter a password. Neko's connect.vue auto-connects when
+			// both ?usr= and ?pwd= query params are present.
+			if state.Password != "" {
+				resp["autoLoginUrl"] = baseURL + "?usr=user&pwd=" + state.Password
+			}
 		}
 	}
 	if len(state.Forwarders) > 0 {

@@ -162,14 +162,44 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		enableAudio = *opts.EnableAudio
 	}
 
-	env := buildNekoEnv(resolution, m.cfg.NekoMaxFPS, m.cfg.NekoWebRTCPort, password, passwordAdmin, enableAudio, m.cfg.NekoTCPFallback)
+	// Resolve public IP for WebRTC NAT traversal
+	nat1to1 := m.cfg.NekoNAT1TO1
+	if nat1to1 == "" {
+		if detectedIP, err := DetectPublicIP(); err == nil {
+			nat1to1 = detectedIP
+			slog.Info("Auto-detected public IP for Neko WebRTC", "ip", nat1to1)
+		} else {
+			slog.Warn("Failed to auto-detect public IP for Neko NAT1TO1 — WebRTC may not connect", "error", err)
+		}
+	}
+
+	env := buildNekoEnvFromOpts(NekoEnvOptions{
+		Resolution:    resolution,
+		MaxFPS:        m.cfg.NekoMaxFPS,
+		NekoPort:      m.cfg.NekoWebRTCPort,
+		Password:      password,
+		PasswordAdmin: passwordAdmin,
+		EnableAudio:   enableAudio,
+		TCPFallback:   m.cfg.NekoTCPFallback,
+		NAT1TO1:       nat1to1,
+		MuxPort:       m.cfg.NekoMuxPort,
+	})
 
 	limits := ResourceLimits{
 		MemoryLimit: m.cfg.NekoMemoryLimit,
 		CPULimit:    m.cfg.NekoCPULimit,
 		PidsLimit:   m.cfg.NekoPidsLimit,
 	}
-	args := buildDockerRunArgs(containerName, m.cfg.NekoImage, networkName, m.cfg.NekoShmSize, m.cfg.NekoWebRTCPort, env, limits)
+	args := buildDockerRunArgsFromOpts(DockerRunOptions{
+		ContainerName: containerName,
+		Image:         m.cfg.NekoImage,
+		NetworkName:   networkName,
+		ShmSize:       m.cfg.NekoShmSize,
+		NekoPort:      m.cfg.NekoWebRTCPort,
+		MuxPort:       m.cfg.NekoMuxPort,
+		EnvVars:       env,
+		Limits:        limits,
+	})
 
 	// Release lock during Docker I/O
 	m.mu.Unlock()
@@ -188,6 +218,16 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 
 		slog.Error("Failed to start Neko sidecar", "workspace", workspaceID, "error", err)
 		return &cp, fmt.Errorf("failed to start Neko container: %w", err)
+	}
+
+	// Ensure socat is available inside Neko container for port forwarding.
+	// The default Neko images don't ship with socat, so install it on first start.
+	if installErr := m.docker.RunSilent(ctx, "exec", containerName, "sh", "-c",
+		"command -v socat >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y --no-install-recommends socat >/dev/null 2>&1)"); installErr != nil {
+		slog.Warn("Failed to install socat in Neko container — port forwarding may not work",
+			"workspace", workspaceID, "error", installErr)
+	} else {
+		slog.Info("socat available in Neko container", "workspace", workspaceID)
 	}
 
 	// Get the container ID

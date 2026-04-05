@@ -86,6 +86,8 @@ export async function revokeSmokeTestToken(id: string): Promise<void> {
 export interface BrowserSidecarStatusResponse {
   status: 'off' | 'starting' | 'running' | 'error';
   url?: string;
+  /** URL with auto-login query params (?usr=user&pwd=...) for seamless Neko access. */
+  autoLoginUrl?: string;
   containerName?: string;
   error?: string;
   ports?: Array<{ port: number; targetHost: string; active: boolean }>;
