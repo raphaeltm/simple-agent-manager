@@ -293,7 +293,23 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('search_ideas');
       // Deployment tools
       expect(toolNames).toContain('get_deployment_credentials');
-      expect(body.result.tools).toHaveLength(22);
+      // Workspace tools (unified from workspace-mcp)
+      expect(toolNames).toContain('get_workspace_info');
+      expect(toolNames).toContain('get_credential_status');
+      expect(toolNames).toContain('get_network_info');
+      expect(toolNames).toContain('expose_port');
+      expect(toolNames).toContain('check_dns_status');
+      expect(toolNames).toContain('check_cost_estimate');
+      expect(toolNames).toContain('get_remaining_budget');
+      expect(toolNames).toContain('list_project_agents');
+      expect(toolNames).toContain('get_file_locks');
+      expect(toolNames).toContain('get_peer_agent_output');
+      expect(toolNames).toContain('get_task_dependencies');
+      expect(toolNames).toContain('get_ci_status');
+      expect(toolNames).toContain('get_deployment_status');
+      expect(toolNames).toContain('get_workspace_diff_summary');
+      expect(toolNames).toContain('report_environment_issue');
+      expect(body.result.tools).toHaveLength(37);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

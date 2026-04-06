@@ -16,20 +16,18 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { signTerminalToken } from '../../services/jwt';
-
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { decrypt } from '../../services/encryption';
-
+import { signTerminalToken } from '../../services/jwt';
 import {
-  type McpTokenData,
+  ACTIVE_STATUSES,
+  getMcpLimits,
   INTERNAL_ERROR,
   INVALID_PARAMS,
-  type JsonRpcResponse,
   jsonRpcError,
+  type JsonRpcResponse,
   jsonRpcSuccess,
-  getMcpLimits,
-  ACTIVE_STATUSES,
+  type McpTokenData,
 } from './_helpers';
 
 // ─── Configurable defaults (Constitution Principle XI) ──────────────────────
