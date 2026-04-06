@@ -22,11 +22,11 @@ The viewport IS used to set the Neko container's streaming resolution (`NEKO_SCR
 
 ## Implementation Checklist
 
-- [ ] Add `ViewportWidth` and `ViewportHeight` fields to `ChromeCustomization` struct
-- [ ] Pass viewport from `opts` to `ChromeCustomization` in `manager.go:251-256`
-- [ ] In `buildChromeFlags()`, add `--window-size=W,H` flag when viewport dimensions are provided
-- [ ] In `customSupervisordConf()`, accept viewport dimensions and conditionally replace `--start-maximized` with `--window-size=W,H`
-- [ ] Add/update tests for `buildChromeFlags()` and `customSupervisordConf()` with viewport parameters
+- [x] Add `ViewportWidth` and `ViewportHeight` fields to `ChromeCustomization` struct
+- [x] Pass viewport from `opts` to `ChromeCustomization` in `manager.go:251-256`
+- [x] In `buildChromeFlags()`, add `--window-size=W,H` flag when viewport dimensions are provided
+- [x] In `customSupervisordConf()`, accept viewport dimensions and conditionally replace `--start-maximized` with `--window-size=W,H`
+- [x] Add/update tests for `buildChromeFlags()` and `customSupervisordConf()` with viewport parameters
 
 ## Acceptance Criteria
 
