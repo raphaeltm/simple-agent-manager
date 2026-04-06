@@ -1,6 +1,8 @@
+import type { PlanItem } from '@simple-agent-manager/acp-client';
+import { PlanModal } from '@simple-agent-manager/acp-client';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown } from 'lucide-react';
-import { type FC, useRef } from 'react';
+import { ChevronDown, ListChecks } from 'lucide-react';
+import { type FC, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { ChatFilePanel } from '../chat/ChatFilePanel';
@@ -31,6 +33,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onSessionMutated,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
 
   const lc = useSessionLifecycle(projectId, sessionId, isProvisioning, onSessionMutated);
 
@@ -201,20 +204,51 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       })()}
 
       {/* Agent working indicator */}
-      {lc.agentSession.isPrompting && (
-        <div className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
-          <Spinner size="sm" />
-          <span className="text-xs text-fg-muted">Agent is working...</span>
-          <button
-            type="button"
-            onClick={lc.agentSession.cancelPrompt}
-            className="ml-auto px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer"
-            style={{ color: 'var(--sam-color-danger)' }}
-          >
-            Cancel
-          </button>
-        </div>
-      )}
+      {lc.agentSession.isPrompting && (() => {
+        const currentPlan = lc.agentSession.messages.items.find(
+          (item): item is PlanItem => item.kind === 'plan'
+        ) ?? null;
+        const activeStep = currentPlan?.entries.find(e => e.status === 'in_progress') ?? null;
+
+        return (
+          <>
+            <div className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
+              {currentPlan ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setPlanModalOpen(true)}
+                    className="relative flex-shrink-0 p-0.5 rounded cursor-pointer hover:bg-surface-raised"
+                    aria-label="View agent plan"
+                  >
+                    <ListChecks size={16} className="text-fg-muted" />
+                    <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                  </button>
+                  <span className="text-xs text-fg-muted truncate min-w-0">
+                    Agent is working on: {activeStep?.content ?? 'next step'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Spinner size="sm" />
+                  <span className="text-xs text-fg-muted">Agent is working...</span>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={lc.agentSession.cancelPrompt}
+                className="ml-auto flex-shrink-0 px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer"
+                style={{ color: 'var(--sam-color-danger)' }}
+              >
+                Cancel
+              </button>
+            </div>
+            {currentPlan && (
+              <PlanModal plan={currentPlan} isOpen={planModalOpen} onClose={() => setPlanModalOpen(false)} />
+            )}
+          </>
+        );
+      })()}
 
       {/* ACP connecting indicator */}
       {lc.agentSession.isConnecting && lc.session?.workspaceId && (
