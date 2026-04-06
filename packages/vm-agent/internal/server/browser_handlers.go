@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,11 @@ import (
 	"github.com/workspace/vm-agent/internal/browser"
 	"github.com/workspace/vm-agent/internal/config"
 )
+
+// safeUserAgentRe allows only printable ASCII and common UA characters.
+// Rejects newlines, carriage returns, NUL, and other control characters that
+// could break heredoc boundaries in the supervisord config.
+var safeUserAgentRe = regexp.MustCompile(`^[\x20-\x7E]+$`)
 
 // handleStartBrowser starts a Neko browser sidecar for a workspace.
 // POST /workspaces/{workspaceId}/browser
@@ -65,6 +71,19 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 	if req.DevicePixelRatio != 0 && (req.DevicePixelRatio < 1 || req.DevicePixelRatio > s.config.NekoViewportMaxDPR) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("devicePixelRatio must be between 1 and %d", s.config.NekoViewportMaxDPR))
 		return
+	}
+
+	// Validate UserAgent: reject control characters (newlines, tabs) that could
+	// break heredoc boundaries in the supervisord config, and enforce a length limit.
+	if req.UserAgent != "" {
+		if len(req.UserAgent) > 512 {
+			writeError(w, http.StatusBadRequest, "userAgent must be 512 characters or fewer")
+			return
+		}
+		if !safeUserAgentRe.MatchString(req.UserAgent) {
+			writeError(w, http.StatusBadRequest, "userAgent contains invalid characters")
+			return
+		}
 	}
 
 	// Discover the DevContainer's network and name

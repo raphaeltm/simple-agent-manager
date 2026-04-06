@@ -21,8 +21,8 @@ type ChromeCustomization struct {
 // - Disables all extensions (including pre-installed SponsorBlock, uBlock)
 // - Suppresses Privacy Sandbox, sign-in, sync, and first-run prompts
 // - Sets startup URL if provided
-func chromePolicies(startURL string) map[string]interface{} {
-	policies := map[string]interface{}{
+func chromePolicies(startURL string) map[string]any {
+	policies := map[string]any{
 		// Disable all extensions — removes SponsorBlock, uBlock Origin Lite
 		"ExtensionInstallBlocklist":  []string{"*"},
 		"ExtensionInstallForcelist":  []string{},
@@ -151,6 +151,9 @@ func sanitizeStartURL(rawURL string) string {
 	if host != "localhost" && host != "127.0.0.1" && host != "::1" {
 		return ""
 	}
+	// Strip fragment — '#' in supervisord command= lines starts a comment,
+	// which would silently truncate the URL.
+	parsed.Fragment = ""
 	return parsed.String()
 }
 
