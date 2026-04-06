@@ -10,7 +10,7 @@ const STAGING_API = 'https://api.sammy.party';
 const STAGING_APP = 'https://app.sammy.party';
 
 const PROJECT_ID = '01KJNR9R3TEN3KX1ETE33852R8';
-const SESSION_ID = 'bf6ffab5-ae2a-436e-b33a-c6b50d672cc8';
+const SESSION_ID = '81f67f29-13dd-4113-9a89-5ab10fe78254';
 
 test.use({
   viewport: { width: 375, height: 667 },
