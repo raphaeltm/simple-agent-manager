@@ -75,13 +75,14 @@ async function proxyToVmAgent(
   env: Env,
   workspaceId: string,
   userId: string,
+  projectId: string,
   toolPath: VmAgentToolPath,
   method: 'GET' | 'POST' = 'GET',
   body?: unknown,
 ): Promise<unknown> {
   const db = drizzle(env.DATABASE, { schema });
 
-  // Look up workspace to get nodeId
+  // Look up workspace to get nodeId — scoped to project for defense-in-depth
   const [workspace] = await db
     .select({
       id: schema.workspaces.id,
@@ -90,7 +91,12 @@ async function proxyToVmAgent(
       projectId: schema.workspaces.projectId,
     })
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
+    .where(
+      and(
+        eq(schema.workspaces.id, workspaceId),
+        eq(schema.workspaces.projectId, projectId),
+      ),
+    )
     .limit(1);
 
   if (!workspace) {
@@ -107,18 +113,26 @@ async function proxyToVmAgent(
   const { token } = await signTerminalToken(userId, workspaceId, env);
 
   // Construct VM agent URL (two-level subdomain to bypass CF same-zone routing)
+  // Token sent as Bearer header (not query param) per workspace_routing.go contract
   const protocol = env.VM_AGENT_PROTOCOL || 'https';
   const port = env.VM_AGENT_PORT || '8443';
-  const vmUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}/workspaces/${encodeURIComponent(workspaceId)}/mcp/${toolPath}?token=${encodeURIComponent(token)}`;
+  const vmUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}/workspaces/${encodeURIComponent(workspaceId)}/mcp/${toolPath}`;
 
   const timeoutMs = getWorkspaceToolTimeout(env);
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+  };
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const fetchOpts: RequestInit = {
     method,
+    headers,
     signal: AbortSignal.timeout(timeoutMs),
   };
   if (body) {
-    fetchOpts.headers = { 'Content-Type': 'application/json' };
     fetchOpts.body = JSON.stringify(body);
   }
 
@@ -159,7 +173,7 @@ export async function handleGetWorkspaceInfo(
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, 'workspace-info');
+    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'workspace-info');
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
   } catch (e) {
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get workspace info: ${e instanceof Error ? e.message : String(e)}`);
@@ -174,7 +188,7 @@ export async function handleGetCredentialStatus(
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, 'credential-status');
+    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'credential-status');
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
   } catch (e) {
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get credential status: ${e instanceof Error ? e.message : String(e)}`);
@@ -189,7 +203,7 @@ export async function handleGetNetworkInfo(
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, 'network-info');
+    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'network-info');
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
   } catch (e) {
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get network info: ${e instanceof Error ? e.message : String(e)}`);
@@ -213,7 +227,7 @@ export async function handleExposePort(
 
   try {
     const result = await proxyToVmAgent(
-      env, tokenData.workspaceId, tokenData.userId, 'expose-port', 'POST',
+      env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'expose-port', 'POST',
       { port, label },
     );
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
@@ -230,7 +244,7 @@ export async function handleCheckCostEstimate(
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, 'cost-estimate');
+    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'cost-estimate');
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
   } catch (e) {
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get cost estimate: ${e instanceof Error ? e.message : String(e)}`);
@@ -245,7 +259,7 @@ export async function handleGetWorkspaceDiffSummary(
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, 'diff-summary');
+    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'diff-summary');
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
   } catch (e) {
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get diff summary: ${e instanceof Error ? e.message : String(e)}`);
@@ -596,6 +610,9 @@ export async function handleGetCiStatus(
         content: [{ type: 'text', text: JSON.stringify({ status: 'no_repository', note: 'No repository configured for this project' }) }],
       });
     }
+    if (!validateRepository(project.repository)) {
+      return jsonRpcError(requestId, INTERNAL_ERROR, 'Invalid repository format');
+    }
 
     const branch = task?.outputBranch;
     if (!branch) {
@@ -768,6 +785,12 @@ export async function handleCheckDnsStatus(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Validate that a repository string matches the expected owner/repo format. */
+const REPO_FORMAT_RE = /^[\w.-]+\/[\w.-]+$/;
+function validateRepository(repo: string): boolean {
+  return REPO_FORMAT_RE.test(repo);
+}
 
 /**
  * Get the user's GitHub token from encrypted credentials.
