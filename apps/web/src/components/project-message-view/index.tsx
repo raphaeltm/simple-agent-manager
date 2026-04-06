@@ -218,13 +218,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setPlanModalOpen(true)}
-                    className="relative flex-shrink-0 p-0.5 rounded cursor-pointer hover:bg-surface-raised"
+                    className="relative flex-shrink-0 p-2.5 -m-1 rounded cursor-pointer hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                     aria-label="View agent plan"
                   >
                     <ListChecks size={16} className="text-fg-muted" />
-                    <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                    <span aria-hidden="true" className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-green-500 animate-pulse" />
                   </button>
-                  <span className="text-xs text-fg-muted truncate min-w-0">
+                  <span className="text-xs text-fg-muted truncate min-w-0 flex-1">
                     Agent is working on: {activeStep?.content ?? 'next step'}
                   </span>
                 </>
@@ -237,8 +237,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               <button
                 type="button"
                 onClick={lc.agentSession.cancelPrompt}
-                className="ml-auto flex-shrink-0 px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer"
-                style={{ color: 'var(--sam-color-danger)' }}
+                className="ml-auto flex-shrink-0 px-2 py-2 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 Cancel
               </button>
