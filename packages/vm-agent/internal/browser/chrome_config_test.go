@@ -43,6 +43,21 @@ func TestSanitizeStartURL_Rejected(t *testing.T) {
 	}
 }
 
+func TestSanitizeStartURL_StripsNewlines(t *testing.T) {
+	// Percent-encoded newlines must not survive into the supervisord heredoc
+	got := sanitizeStartURL("http://localhost:3000/path%0ACONFEOF")
+	if strings.Contains(got, "\n") {
+		t.Errorf("sanitizeStartURL must strip newlines, got %q", got)
+	}
+	if strings.Contains(got, "CONFEOF") && strings.Contains(got, "\n") {
+		t.Error("heredoc terminator injection must be prevented")
+	}
+	got2 := sanitizeStartURL("http://localhost:3000/path%0D%0Ainjection")
+	if strings.Contains(got2, "\r") || strings.Contains(got2, "\n") {
+		t.Errorf("sanitizeStartURL must strip CR/LF, got %q", got2)
+	}
+}
+
 func TestSanitizeStartURL_StripsFragment(t *testing.T) {
 	got := sanitizeStartURL("http://localhost:3000/page#section")
 	if strings.Contains(got, "#") {

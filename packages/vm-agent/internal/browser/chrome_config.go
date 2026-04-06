@@ -123,7 +123,7 @@ func customSupervisordConf(extraFlags []string) string {
 
 	return fmt.Sprintf(`[program:google-chrome]
 environment=HOME="/home/neko",USER="neko",DISPLAY=":99.0"
-command=/usr/bin/google-chrome --no-sandbox --window-position=0,0 --start-maximized --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-breakpad --disable-component-extensions-with-background-pages --disable-component-update --disable-default-apps --disable-dev-shm-usage --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --metrics-recording-only --password-store=basic --use-mock-keychain --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222%s
+command=/usr/bin/google-chrome --no-sandbox --window-position=0,0 --start-maximized --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-breakpad --disable-component-extensions-with-background-pages --disable-component-update --disable-default-apps --disable-dev-shm-usage --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --metrics-recording-only --password-store=basic --use-mock-keychain --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222%s
 autorestart=true
 priority=800
 user=neko
@@ -154,7 +154,12 @@ func sanitizeStartURL(rawURL string) string {
 	// Strip fragment — '#' in supervisord command= lines starts a comment,
 	// which would silently truncate the URL.
 	parsed.Fragment = ""
-	return parsed.String()
+	result := parsed.String()
+	// Belt-and-suspenders: strip any newlines that could break heredoc boundaries.
+	// Go's url.Parse may preserve percent-encoded newlines (%0A) in some positions.
+	result = strings.ReplaceAll(result, "\n", "")
+	result = strings.ReplaceAll(result, "\r", "")
+	return result
 }
 
 // applyChromeCustomization injects Chrome enterprise policies and a custom
