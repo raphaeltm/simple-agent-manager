@@ -2,7 +2,7 @@ import type { DetectedPort, NodeResponse, VMSize, WorkspaceResponse } from '@sim
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
 import { Box, CheckCircle2, ChevronDown, ChevronUp, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, Globe, Loader2, MapPin, Monitor, Server } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { useBrowserSidecar } from '../../hooks/useBrowserSidecar';
 import type { ChatSessionResponse } from '../../lib/api';
@@ -74,16 +74,15 @@ export function SessionHeader({
     }
   }, [browser.status]);
 
-  // When status transitions to running after a start, open the URL
-  const [pendingOpen, setPendingOpen] = useState(false);
   const handleStartAndOpen = useCallback(async () => {
-    setPendingOpen(true);
-    // Pass device info so Neko Chrome matches the user's real device:
-    // viewport, touch mode, user agent, and auto-navigate to first open port.
+    // Open a blank window immediately in the user gesture context to avoid
+    // mobile popup blockers. We'll set the URL once the API responds.
+    const newWindow = window.open('about:blank', '_blank');
+
     const firstPort = detectedPorts.length > 0
       ? detectedPorts.slice().sort((a, b) => a.port - b.port)[0]
       : null;
-    await browser.start({
+    const result = await browser.start({
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
       devicePixelRatio: window.devicePixelRatio || 1,
@@ -91,21 +90,15 @@ export function SessionHeader({
       userAgent: navigator.userAgent,
       startURL: firstPort ? `http://localhost:${firstPort.port}` : undefined,
     });
-  }, [browser, detectedPorts]);
 
-  // Effect to open browser when it becomes running after a pending start
-  const browserStatus = browser.status?.status;
-  const browserAutoLoginUrl = browser.status?.autoLoginUrl;
-  const browserUrl = browser.status?.url;
-  useEffect(() => {
-    if (pendingOpen && browserStatus === 'running') {
-      const url = browserAutoLoginUrl || browserUrl;
-      if (url) {
-        window.open(url, '_blank', 'noopener,noreferrer');
-        setPendingOpen(false);
-      }
+    const url = result?.autoLoginUrl || result?.url;
+    if (url && newWindow && !newWindow.closed) {
+      newWindow.location.href = url;
+    } else {
+      // Close the blank tab if start failed or returned no URL
+      newWindow?.close();
     }
-  }, [pendingOpen, browserStatus, browserAutoLoginUrl, browserUrl]);
+  }, [browser, detectedPorts]);
 
   const hasDetails = !!(
     taskEmbed?.outputBranch ||
@@ -327,6 +320,13 @@ export function SessionHeader({
               </Button>
             )}
           </div>
+
+          {/* Inline error for browser sidecar failures */}
+          {browser.error && (
+            <div className="flex items-center gap-2 px-1 py-1">
+              <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>Browser: {browser.error}</span>
+            </div>
+          )}
 
           {/* Inline error for mark-complete failures */}
           {completeError && (
