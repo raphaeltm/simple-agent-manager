@@ -60,6 +60,8 @@ export interface TaskRunConfig {
   permissionMode: string | null;
   /** System prompt text to append to the initial prompt (from agent profile). Null = no append. */
   systemPromptAppend: string | null;
+  /** ID of an agent profile to use for this task. Null = use project defaults. */
+  agentProfileId: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
   /** Per-project scaling overrides. Null values mean "use platform default". */

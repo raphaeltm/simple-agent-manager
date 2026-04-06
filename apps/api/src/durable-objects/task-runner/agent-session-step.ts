@@ -136,6 +136,42 @@ export async function handleAgentSession(
       `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
       `Do not proceed until you have called this tool and read its response.`;
 
+    // Resolve agent profile if specified — profile settings override config defaults
+    let resolvedModel = state.config.model;
+    let resolvedPermissionMode = state.config.permissionMode;
+    let resolvedSystemPromptAppend = state.config.systemPromptAppend;
+    let finalInitialPrompt = initialPrompt;
+
+    if (state.config.agentProfileId) {
+      const { resolveAgentProfile } = await import('../../services/agent-profiles');
+      const { drizzle } = await import('drizzle-orm/d1');
+      const schema = await import('../../db/schema');
+      const db = drizzle(rc.env.DATABASE, { schema });
+
+      const resolvedProfile = await resolveAgentProfile(
+        db,
+        state.projectId,
+        state.config.agentProfileId,
+        state.userId,
+        rc.env,
+      );
+
+      // Apply profile settings, but allow explicit config to override
+      resolvedModel = state.config.model ?? resolvedProfile.model;
+      resolvedPermissionMode = state.config.permissionMode ?? resolvedProfile.permissionMode;
+      resolvedSystemPromptAppend = state.config.systemPromptAppend ?? resolvedProfile.systemPromptAppend;
+
+      // Rebuild the initial prompt if the resolved system prompt differs from config
+      if (resolvedSystemPromptAppend && resolvedSystemPromptAppend !== state.config.systemPromptAppend) {
+        const finalSystemPromptSuffix = `\n\n${resolvedSystemPromptAppend}`;
+        finalInitialPrompt =
+          `${taskContent}${attachmentContext}${finalSystemPromptSuffix}\n\n---\n\n` +
+          `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
+          `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
+          `Do not proceed until you have called this tool and read its response.`;
+      }
+    }
+
     // Construct MCP server URL for agent platform awareness
     const mcpServerUrl = `https://api.${rc.env.BASE_DOMAIN}/mcp`;
 
@@ -144,7 +180,7 @@ export async function handleAgentSession(
       state.stepResults.workspaceId,
       sessionId,
       agentType,
-      initialPrompt,
+      finalInitialPrompt,
       rc.env,
       state.userId,
       {
@@ -152,8 +188,8 @@ export async function handleAgentSession(
         token: state.stepResults.mcpToken!,
       },
       {
-        model: state.config.model,
-        permissionMode: state.config.permissionMode,
+        model: resolvedModel,
+        permissionMode: resolvedPermissionMode,
       },
     );
 

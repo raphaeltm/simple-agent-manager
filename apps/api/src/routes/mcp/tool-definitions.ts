@@ -76,6 +76,10 @@ export const MCP_TOOLS = [
           type: 'string',
           description: 'Git branch for the new workspace to check out. Defaults to the project\'s default branch (usually main). Only set this if you have already pushed the branch to the remote.',
         },
+        agentProfileId: {
+          type: 'string',
+          description: 'ID of an agent profile to use for this task. Profile settings override project defaults but are overridden by explicit task-level fields.',
+        },
       },
       required: ['description'],
       additionalProperties: false,
