@@ -1631,6 +1631,21 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to locate devcontainer for credential helper setup: %w", err)
 	}
 
+	// If the credential helper was already bind-mounted into the container
+	// (pre-devcontainer-up), skip the copy — docker cp cannot overwrite a
+	// bind-mounted file ("device or resource busy"). The GIT_CONFIG env vars
+	// are also already set via containerEnv in this case.
+	installPath := credentialHelperContainerPath
+	checkCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "test", "-f", installPath)
+	if checkCmd.Run() == nil {
+		slog.Info("Git credential helper already present (bind-mounted), skipping post-build install", "containerID", containerID)
+		// Still install the gh wrapper since it depends on the credential helper.
+		if err := installGhWrapper(ctx, cfg, containerID); err != nil {
+			slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+		}
+		return nil
+	}
+
 	script, err := renderGitCredentialHelperScript(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to render git credential helper script: %w", err)
@@ -1655,7 +1670,6 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to chmod temporary credential helper script: %w", err)
 	}
 
-	installPath := "/usr/local/bin/git-credential-sam"
 	cmd := exec.CommandContext(ctx, "docker", "cp", tempPath, containerID+":"+installPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to copy credential helper into devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
@@ -1663,7 +1677,7 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 
 	// Use -u root because the container's default user (e.g. "node") may not have
 	// write permissions to /usr/local/bin/.
-	cmd = exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "chmod", "0755", installPath)
+	cmd = exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "chmod", "0700", installPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to chmod credential helper in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
