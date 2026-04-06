@@ -166,6 +166,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
 	if credErr != nil {
 		slog.Warn("Failed to write credential helper to host (non-fatal)", "error", credErr)
+		reporter.Log("git_credential_helper", "failed", "Credential helper setup failed — git auth may be unavailable in lifecycle hooks", credErr.Error())
 	}
 	bootstrapSucceeded := false
 	if credHelperHostPath != "" {
@@ -234,6 +235,13 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		readyStatus = workspaceReadyStatusRecovery
 	}
 
+	// The container is fully provisioned at this point. Mark the credential
+	// helper as persistent so it is NOT cleaned up by the deferred function,
+	// even if the markWorkspaceReady callback fails (CallbackError). A
+	// CallbackError means the workspace is running but the control plane was
+	// not notified — the credential file must persist for the running container.
+	bootstrapSucceeded = true
+
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
@@ -241,7 +249,6 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	}
 	reporter.Log("workspace_ready", "completed", "Workspace is ready")
 
-	bootstrapSucceeded = true
 	return nil
 }
 
@@ -293,6 +300,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
 	if credErr != nil {
 		slog.Warn("Failed to write credential helper to host (non-fatal)", "error", credErr)
+		reporter.Log("git_credential_helper", "failed", "Credential helper setup failed — git auth may be unavailable in lifecycle hooks", credErr.Error())
 	}
 	prepareSucceeded := false
 	if credHelperHostPath != "" {
@@ -373,6 +381,10 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		return recoveryMode, err
 	}
 
+	// Container is fully provisioned — keep the credential helper file even if
+	// markWorkspaceReady fails (CallbackError means workspace is running).
+	prepareSucceeded = true
+
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	readyStatus := workspaceReadyStatusRunning
 	if recoveryMode {
@@ -387,7 +399,6 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 	reporter.Log("workspace_ready", "completed", "Workspace is ready")
 
-	prepareSucceeded = true
 	return recoveryMode, nil
 }
 
@@ -1848,8 +1859,21 @@ func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
 	}
 
 	hostPath := credentialHelperHostPath(cfg.WorkspaceID)
-	if err := os.WriteFile(hostPath, []byte(script), 0o700); err != nil {
+
+	// Use O_EXCL to fail if the file already exists, preventing TOCTOU races
+	// in the world-writable /tmp directory (e.g., symlink attacks).
+	f, err := os.OpenFile(hostPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		return "", fmt.Errorf("failed to create credential helper on host: %w", err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		_ = f.Close()
+		os.Remove(hostPath)
 		return "", fmt.Errorf("failed to write credential helper to host: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(hostPath)
+		return "", fmt.Errorf("failed to finalize credential helper on host: %w", err)
 	}
 
 	slog.Info("Wrote credential helper to host", "path", hostPath, "workspaceID", cfg.WorkspaceID)
@@ -1921,65 +1945,6 @@ func writeCredentialOverrideConfig(credHelperHostPath string) (string, error) {
 
 	slog.Info("Wrote credential override config", "path", tmpFile.Name())
 	return tmpFile.Name(), nil
-}
-
-// injectCredentialHelperIntoConfig merges the credential helper bind mount and
-// containerEnv into an existing devcontainer override config file. This is used
-// when a volume mount override already exists — we add the credential helper
-// mount and env vars to the existing config rather than creating a separate override.
-func injectCredentialHelperIntoConfig(configPath, credHelperHostPath string) error {
-	if credHelperHostPath == "" || configPath == "" {
-		return nil
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to read config for credential helper injection: %w", err)
-	}
-
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("failed to parse config for credential helper injection: %w", err)
-	}
-
-	// Add mount entry.
-	mountEntry := credentialHelperMountEntry(credHelperHostPath)
-	if existing, ok := cfg["mounts"]; ok {
-		if arr, ok := existing.([]interface{}); ok {
-			cfg["mounts"] = append(arr, mountEntry)
-		} else {
-			cfg["mounts"] = []string{mountEntry}
-		}
-	} else {
-		cfg["mounts"] = []string{mountEntry}
-	}
-
-	// Add containerEnv entries.
-	envEntries := credentialHelperContainerEnv()
-	if existing, ok := cfg["containerEnv"]; ok {
-		if envMap, ok := existing.(map[string]interface{}); ok {
-			for k, v := range envEntries {
-				envMap[k] = v
-			}
-		} else {
-			cfg["containerEnv"] = envEntries
-		}
-	} else {
-		cfg["containerEnv"] = envEntries
-	}
-
-	updated, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated config: %w", err)
-	}
-	updated = append(updated, '\n')
-
-	if err := os.WriteFile(configPath, updated, 0o644); err != nil {
-		return fmt.Errorf("failed to write updated config: %w", err)
-	}
-
-	slog.Info("Injected credential helper into config", "path", configPath)
-	return nil
 }
 
 func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error) {

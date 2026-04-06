@@ -2053,11 +2053,6 @@ func TestCredentialHelperHostPathSanitizes(t *testing.T) {
 func TestWriteCredentialHelperToHost(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
 	cfg := &config.Config{
 		WorkspaceID:   "test-ws-123",
 		Repository:    "https://github.com/test/repo",
@@ -2252,111 +2247,6 @@ func TestWriteCredentialOverrideConfigEmpty(t *testing.T) {
 	}
 	if path != "" {
 		t.Fatalf("expected empty path for empty input, got %q", path)
-	}
-}
-
-func TestInjectCredentialHelperIntoConfig(t *testing.T) {
-	t.Parallel()
-
-	// Create a config with existing mounts and containerEnv.
-	tmpFile, err := os.CreateTemp("", "inject-test-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp failed: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	existingConfig := `{
-  "image": "ubuntu:22.04",
-  "mounts": ["source=vol1,target=/data,type=volume"],
-  "containerEnv": {
-    "MY_VAR": "my_value"
-  }
-}
-`
-	if _, err := tmpFile.WriteString(existingConfig); err != nil {
-		t.Fatalf("write failed: %v", err)
-	}
-	tmpFile.Close()
-
-	if err := injectCredentialHelperIntoConfig(tmpFile.Name(), "/tmp/git-credential-sam-test"); err != nil {
-		t.Fatalf("injectCredentialHelperIntoConfig failed: %v", err)
-	}
-
-	data, err := os.ReadFile(tmpFile.Name())
-	if err != nil {
-		t.Fatalf("read failed: %v", err)
-	}
-
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-
-	// Verify original mount preserved and new mount added.
-	mounts, ok := cfg["mounts"].([]interface{})
-	if !ok || len(mounts) != 2 {
-		t.Fatalf("expected 2 mounts, got %v", cfg["mounts"])
-	}
-
-	// Verify original env preserved and new env added.
-	envMap, ok := cfg["containerEnv"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected containerEnv to be a map")
-	}
-	if envMap["MY_VAR"] != "my_value" {
-		t.Fatalf("expected MY_VAR preserved, got %v", envMap["MY_VAR"])
-	}
-	if envMap["GIT_CONFIG_COUNT"] != "1" {
-		t.Fatalf("expected GIT_CONFIG_COUNT=1, got %v", envMap["GIT_CONFIG_COUNT"])
-	}
-}
-
-func TestInjectCredentialHelperIntoConfigEmpty(t *testing.T) {
-	t.Parallel()
-
-	// Create a config with no mounts or containerEnv.
-	tmpFile, err := os.CreateTemp("", "inject-empty-test-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp failed: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.WriteString(`{"image": "ubuntu:22.04"}`); err != nil {
-		t.Fatalf("write failed: %v", err)
-	}
-	tmpFile.Close()
-
-	if err := injectCredentialHelperIntoConfig(tmpFile.Name(), "/tmp/git-credential-sam-test"); err != nil {
-		t.Fatalf("injectCredentialHelperIntoConfig failed: %v", err)
-	}
-
-	data, err := os.ReadFile(tmpFile.Name())
-	if err != nil {
-		t.Fatalf("read failed: %v", err)
-	}
-
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-
-	// Verify mounts and containerEnv were added.
-	mounts, ok := cfg["mounts"].([]interface{})
-	if !ok || len(mounts) != 1 {
-		t.Fatalf("expected 1 mount, got %v", cfg["mounts"])
-	}
-	if _, ok := cfg["containerEnv"]; !ok {
-		t.Fatal("expected containerEnv to be added")
-	}
-}
-
-func TestInjectCredentialHelperSkipsEmpty(t *testing.T) {
-	t.Parallel()
-
-	// Should be a no-op when credHelperHostPath is empty.
-	err := injectCredentialHelperIntoConfig("/tmp/some-config.json", "")
-	if err != nil {
-		t.Fatalf("expected no error for empty credHelperHostPath, got %v", err)
 	}
 }
 
