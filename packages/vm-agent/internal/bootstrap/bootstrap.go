@@ -160,9 +160,29 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	}
 	reporter.Log("git_clone", "completed", "Repository cloned")
 
+	// Pre-generate credential helper on the VM host so it can be bind-mounted
+	// into the container. This makes git authentication available during
+	// devcontainer lifecycle hooks (postCreateCommand, postStartCommand, etc.).
+	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
+	if credErr != nil {
+		slog.Warn("Failed to write credential helper to host (non-fatal)", "error", credErr)
+		reporter.Log("git_credential_helper", "failed", "Credential helper setup failed — git auth may be unavailable in lifecycle hooks", credErr.Error())
+	}
+	bootstrapSucceeded := false
+	if credHelperHostPath != "" {
+		defer func() {
+			// Clean up the host-side file if bootstrap fails; on success the
+			// file stays for the lifetime of the workspace and is removed in
+			// handleDeleteWorkspace via RemoveCredentialHelperFromHost.
+			if !bootstrapSucceeded {
+				RemoveCredentialHelperFromHost(cfg.WorkspaceID)
+			}
+		}()
+	}
+
 	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
 	reporter.Log("devcontainer_up", "started", "Building devcontainer")
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath)
 	if err != nil {
 		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
 		return err
@@ -214,6 +234,13 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	if usedFallback {
 		readyStatus = workspaceReadyStatusRecovery
 	}
+
+	// The container is fully provisioned at this point. Mark the credential
+	// helper as persistent so it is NOT cleaned up by the deferred function,
+	// even if the markWorkspaceReady callback fails (CallbackError). A
+	// CallbackError means the workspace is running but the control plane was
+	// not notified — the credential file must persist for the running container.
+	bootstrapSucceeded = true
 
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
@@ -268,6 +295,22 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 	reporter.Log("git_clone", "completed", "Repository cloned")
 
+	// Pre-generate credential helper on the VM host so it can be bind-mounted
+	// into the container during devcontainer lifecycle hooks.
+	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
+	if credErr != nil {
+		slog.Warn("Failed to write credential helper to host (non-fatal)", "error", credErr)
+		reporter.Log("git_credential_helper", "failed", "Credential helper setup failed — git auth may be unavailable in lifecycle hooks", credErr.Error())
+	}
+	prepareSucceeded := false
+	if credHelperHostPath != "" {
+		defer func() {
+			if !prepareSucceeded {
+				RemoveCredentialHelperFromHost(cfg.WorkspaceID)
+			}
+		}()
+	}
+
 	var usedFallback bool
 	var recoveryMode bool
 	if state.Lightweight {
@@ -276,7 +319,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		reporter.Log("devcontainer_up", "started", "Starting lightweight container (skipping devcontainer build)")
 		slog.Info("Lightweight mode: forcing fallback image, skipping devcontainer build", "workspaceID", cfg.WorkspaceID)
 		var fallbackErr error
-		usedFallback, fallbackErr = ensureDevcontainerFallback(ctx, cfg, volumeName)
+		usedFallback, fallbackErr = ensureDevcontainerFallback(ctx, cfg, volumeName, credHelperHostPath)
 		if fallbackErr != nil {
 			reporter.Log("devcontainer_up", "failed", "Lightweight container startup failed", fallbackErr.Error())
 			return false, fallbackErr
@@ -285,7 +328,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	} else {
 		reporter.Log("devcontainer_up", "started", "Building devcontainer")
 		var devErr error
-		usedFallback, devErr = ensureDevcontainerReady(ctx, cfg, volumeName)
+		usedFallback, devErr = ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath)
 		if devErr != nil {
 			reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", devErr.Error())
 			return false, devErr
@@ -337,6 +380,10 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if err := ensureProjectRuntimeAssets(ctx, cfg, state.ProjectEnvVars, state.ProjectFiles); err != nil {
 		return recoveryMode, err
 	}
+
+	// Container is fully provisioned — keep the credential helper file even if
+	// markWorkspaceReady fails (CallbackError means workspace is running).
+	prepareSucceeded = true
 
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	readyStatus := workspaceReadyStatusRunning
@@ -699,7 +746,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 // deliberately skipping the project's .devcontainer config. Used by lightweight mode
 // to avoid the expensive devcontainer build while still providing a working container
 // with git clone, git credentials, and agent support.
-func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
+func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		slog.Info("Container already running (lightweight)", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
 		ensureContainerUserResolved(ctx, cfg)
@@ -714,7 +761,7 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 	}
 
 	slog.Info("Starting lightweight container (default image)", "workspaceDir", cfg.WorkspaceDir)
-	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName); err != nil {
+	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath); err != nil {
 		return false, err
 	}
 
@@ -733,7 +780,7 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 // volume mounted at /workspaces instead of the default bind mount. This eliminates
 // host/container permission mismatches because the container user owns everything
 // inside the volume.
-func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
+func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		slog.Info("Devcontainer already running", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
 		ensureContainerUserResolved(ctx, cfg)
@@ -764,17 +811,28 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		var overridePath string
 		if volumeName != "" {
 			var mountErr error
-			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName)
+			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName, credHelperHostPath)
 			if mountErr != nil {
 				slog.Warn("Failed to prepare repo mount override config, falling back to default image", "error", mountErr)
 				fallbackOutput := []byte(fmt.Sprintf("failed to prepare repo devcontainer mount override: %v\n", mountErr))
 				var fallbackErr error
-				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, mountErr, fallbackOutput)
+				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, credHelperHostPath, mountErr, fallbackOutput)
 				if fallbackErr != nil {
 					return false, fallbackErr
 				}
 			}
 			defer os.Remove(overridePath)
+		} else if credHelperHostPath != "" {
+			// Repo has config but no volume — use a credential-only override.
+			var credErr error
+			overridePath, credErr = writeCredentialOverrideConfig(credHelperHostPath)
+			if credErr != nil {
+				slog.Warn("Failed to write credential override config", "error", credErr)
+				// Non-fatal: continue without pre-mounted credential helper.
+			}
+			if overridePath != "" {
+				defer os.Remove(overridePath)
+			}
 		}
 
 		if !usedFallback {
@@ -789,7 +847,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 				// Repo config failed — log the error and fall back to default image.
 				slog.Warn("Devcontainer build failed with repo config, falling back to default image", "error", err, "output", strings.TrimSpace(string(output)))
 				var fallbackErr error
-				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, err, output)
+				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, credHelperHostPath, err, output)
 				if fallbackErr != nil {
 					return false, fallbackErr
 				}
@@ -797,7 +855,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		}
 	} else {
 		// No config — use default.
-		_, err := runDevcontainerWithDefault(ctx, cfg, volumeName)
+		_, err := runDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath)
 		if err != nil {
 			return false, err
 		}
@@ -817,6 +875,7 @@ func fallbackToDefaultDevcontainer(
 	ctx context.Context,
 	cfg *config.Config,
 	volumeName string,
+	credHelperHostPath string,
 	originalErr error,
 	output []byte,
 ) (bool, error) {
@@ -835,7 +894,7 @@ func fallbackToDefaultDevcontainer(
 	// broken container instead of creating a new one from the fallback image.
 	removeStaleContainers(ctx, cfg)
 
-	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName); err != nil {
+	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath); err != nil {
 		return false, fmt.Errorf("devcontainer fallback also failed: %w (original error: %v)", err, originalErr)
 	}
 
@@ -1262,7 +1321,7 @@ func statContainerPathOwnership(ctx context.Context, containerID, path string) (
 // writeMountOverrideConfig resolves the repo devcontainer configuration via
 // `devcontainer read-configuration` and writes a full override config that
 // includes workspaceMount/workspaceFolder for named-volume workspaces.
-func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeName string) (string, error) {
+func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) (string, error) {
 	repoDirName := config.DeriveRepoDirName(cfg.Repository)
 	if repoDirName == "" {
 		repoDirName = filepath.Base(cfg.WorkspaceDir)
@@ -1282,6 +1341,33 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 	normalizeMergedLifecycleCommands(readResult.MergedConfiguration)
 	readResult.MergedConfiguration["workspaceMount"] = fmt.Sprintf("source=%s,target=/workspaces,type=volume", volumeName)
 	readResult.MergedConfiguration["workspaceFolder"] = fmt.Sprintf("/workspaces/%s", repoDirName)
+
+	// Add credential helper mount and containerEnv if a host path is provided.
+	if credHelperHostPath != "" {
+		mountEntry := credentialHelperMountEntry(credHelperHostPath)
+		if existing, ok := readResult.MergedConfiguration["mounts"]; ok {
+			if arr, ok := existing.([]interface{}); ok {
+				readResult.MergedConfiguration["mounts"] = append(arr, mountEntry)
+			} else {
+				readResult.MergedConfiguration["mounts"] = []string{mountEntry}
+			}
+		} else {
+			readResult.MergedConfiguration["mounts"] = []string{mountEntry}
+		}
+
+		envEntries := credentialHelperContainerEnv()
+		if existing, ok := readResult.MergedConfiguration["containerEnv"]; ok {
+			if envMap, ok := existing.(map[string]interface{}); ok {
+				for k, v := range envEntries {
+					envMap[k] = v
+				}
+			} else {
+				readResult.MergedConfiguration["containerEnv"] = envEntries
+			}
+		} else {
+			readResult.MergedConfiguration["containerEnv"] = envEntries
+		}
+	}
 
 	configJSON, err := json.MarshalIndent(readResult.MergedConfiguration, "", "  ")
 	if err != nil {
@@ -1310,8 +1396,8 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 
 // runDevcontainerWithDefault writes a default devcontainer config and runs devcontainer up
 // with --override-config and optional --additional-features.
-func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
-	configPath, err := writeDefaultDevcontainerConfig(cfg, volumeName)
+func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) (bool, error) {
+	configPath, err := writeDefaultDevcontainerConfig(cfg, volumeName, credHelperHostPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to write default devcontainer config: %w", err)
 	}
@@ -1367,7 +1453,7 @@ func removeStaleContainers(ctx context.Context, cfg *config.Config) {
 // The remoteUser field is only included when DefaultDevcontainerRemoteUser is explicitly
 // set. When omitted, the container runs as the image's default USER (e.g., "vscode" for
 // Microsoft devcontainer images), which is the correct behavior for most images.
-func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName string) (string, error) {
+func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName, credHelperHostPath string) (string, error) {
 	configPath := cfg.DefaultDevcontainerConfigPath
 	if configPath == "" {
 		configPath = config.DefaultDevcontainerConfigPath
@@ -1401,6 +1487,13 @@ func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName string) (stri
 		mountLines = fmt.Sprintf(",\n  \"workspaceMount\": \"source=%s,target=/workspaces,type=volume\",\n  \"workspaceFolder\": \"/workspaces/%s\"", volumeName, repoDirName)
 	}
 
+	// When a credential helper host path is provided, add a bind mount and
+	// containerEnv so the helper is available during devcontainer lifecycle hooks.
+	credLines := ""
+	if credHelperHostPath != "" {
+		credLines = fmt.Sprintf(",\n  \"mounts\": [\"%s\"],\n  \"containerEnv\": {\n    \"GIT_CONFIG_COUNT\": \"1\",\n    \"GIT_CONFIG_KEY_0\": \"credential.helper\",\n    \"GIT_CONFIG_VALUE_0\": \"%s\"\n  }", credentialHelperMountEntry(credHelperHostPath), credentialHelperContainerPath)
+	}
+
 	configJSON := fmt.Sprintf(`{
   "name": "Default Workspace",
   "image": %q,
@@ -1408,9 +1501,9 @@ func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName string) (stri
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
-  }%s%s
+  }%s%s%s
 }
-`, image, remoteUserLine, mountLines)
+`, image, remoteUserLine, mountLines, credLines)
 
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write default config: %w", err)
@@ -1538,6 +1631,26 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to locate devcontainer for credential helper setup: %w", err)
 	}
 
+	// If the credential helper was already bind-mounted into the container
+	// (pre-devcontainer-up), skip the copy — docker cp cannot overwrite a
+	// bind-mounted file ("device or resource busy"). The GIT_CONFIG env vars
+	// are also already set via containerEnv in this case.
+	installPath := credentialHelperContainerPath
+	checkCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "test", "-f", installPath)
+	if checkCmd.Run() == nil {
+		slog.Info("Git credential helper already present (bind-mounted), skipping post-build copy", "containerID", containerID)
+		// Still configure git to use the helper (belt-and-suspenders with containerEnv)
+		// and install the gh wrapper.
+		if err := configureGitCredentialHelper(ctx, containerID, installPath); err != nil {
+			return err
+		}
+		slog.Info("Configured git credential helper in devcontainer", "containerID", containerID)
+		if err := installGhWrapper(ctx, cfg, containerID); err != nil {
+			slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+		}
+		return nil
+	}
+
 	script, err := renderGitCredentialHelperScript(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to render git credential helper script: %w", err)
@@ -1558,11 +1671,10 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to finalize temporary credential helper script: %w", err)
 	}
 
-	if err := os.Chmod(tempPath, 0o755); err != nil {
+	if err := os.Chmod(tempPath, 0o700); err != nil {
 		return fmt.Errorf("failed to chmod temporary credential helper script: %w", err)
 	}
 
-	installPath := "/usr/local/bin/git-credential-sam"
 	cmd := exec.CommandContext(ctx, "docker", "cp", tempPath, containerID+":"+installPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to copy credential helper into devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
@@ -1570,7 +1682,7 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 
 	// Use -u root because the container's default user (e.g. "node") may not have
 	// write permissions to /usr/local/bin/.
-	cmd = exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "chmod", "0755", installPath)
+	cmd = exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "chmod", "0700", installPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to chmod credential helper in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -1717,6 +1829,141 @@ done
 
 exit 0
 `, curlTLSFlag, cfg.CallbackToken, scheme, cfg.Port, query), nil
+}
+
+// sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
+// to prevent path-traversal attacks when constructing host-side file paths.
+func sanitizeWorkspaceID(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// credentialHelperHostPath returns the host-side path where the credential helper
+// script is written before devcontainer up. The path uses a sanitized workspace ID
+// to prevent path traversal.
+func credentialHelperHostPath(workspaceID string) string {
+	return "/tmp/git-credential-sam-" + sanitizeWorkspaceID(workspaceID)
+}
+
+// credentialHelperContainerPath is the path inside the container where the
+// credential helper is bind-mounted (and also installed post-build).
+const credentialHelperContainerPath = "/usr/local/bin/git-credential-sam"
+
+// writeCredentialHelperToHost renders the git credential helper script and writes
+// it to the VM host BEFORE devcontainer up. This allows the script to be
+// bind-mounted into the container so that devcontainer lifecycle hooks
+// (postCreateCommand, postStartCommand, etc.) can authenticate to private repos.
+//
+// Returns the host path of the written file, or empty string if skipped.
+func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
+	if !isGitHubRepo(cfg.Repository) {
+		slog.Info("Repository is not GitHub, skipping host-side credential helper", "repository", cfg.Repository)
+		return "", nil
+	}
+	if cfg.CallbackToken == "" {
+		return "", errors.New("callback token is required for credential helper")
+	}
+	if cfg.Port <= 0 {
+		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
+	}
+
+	script, err := renderGitCredentialHelperScript(cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to render credential helper script: %w", err)
+	}
+
+	hostPath := credentialHelperHostPath(cfg.WorkspaceID)
+
+	// Use O_EXCL to fail if the file already exists, preventing TOCTOU races
+	// in the world-writable /tmp directory (e.g., symlink attacks).
+	f, err := os.OpenFile(hostPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		return "", fmt.Errorf("failed to create credential helper on host: %w", err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		_ = f.Close()
+		os.Remove(hostPath)
+		return "", fmt.Errorf("failed to write credential helper to host: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(hostPath)
+		return "", fmt.Errorf("failed to finalize credential helper on host: %w", err)
+	}
+
+	slog.Info("Wrote credential helper to host", "path", hostPath, "workspaceID", cfg.WorkspaceID)
+	return hostPath, nil
+}
+
+// RemoveCredentialHelperFromHost removes the host-side credential helper script.
+// This is called during workspace deletion to clean up.
+func RemoveCredentialHelperFromHost(workspaceID string) {
+	hostPath := credentialHelperHostPath(workspaceID)
+	if err := os.Remove(hostPath); err != nil && !os.IsNotExist(err) {
+		slog.Warn("Failed to remove credential helper from host", "path", hostPath, "error", err)
+	}
+}
+
+// credentialHelperMountEntry returns the Docker bind mount string for mounting
+// the host-side credential helper into the container.
+func credentialHelperMountEntry(hostPath string) string {
+	return fmt.Sprintf("source=%s,target=%s,type=bind,readonly", hostPath, credentialHelperContainerPath)
+}
+
+// credentialHelperContainerEnv returns the containerEnv entries that configure
+// git to use the credential helper via GIT_CONFIG_* environment variables.
+// These are set as containerEnv so they are available from the first lifecycle hook.
+//
+// Known limitation: if the repo's devcontainer.json already sets GIT_CONFIG_COUNT,
+// these values will collide. See tasks/backlog/2026-03-31-git-config-count-collision.md.
+func credentialHelperContainerEnv() map[string]string {
+	return map[string]string{
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "credential.helper",
+		"GIT_CONFIG_VALUE_0": credentialHelperContainerPath,
+	}
+}
+
+// writeCredentialOverrideConfig writes a minimal devcontainer override config that
+// only adds the credential helper bind mount and containerEnv. This is used when
+// the repo has its own devcontainer config but no volume mount override is needed.
+func writeCredentialOverrideConfig(credHelperHostPath string) (string, error) {
+	if credHelperHostPath == "" {
+		return "", nil
+	}
+
+	overrideCfg := map[string]interface{}{
+		"mounts":       []string{credentialHelperMountEntry(credHelperHostPath)},
+		"containerEnv": credentialHelperContainerEnv(),
+	}
+
+	configJSON, err := json.MarshalIndent(overrideCfg, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal credential override config: %w", err)
+	}
+	configJSON = append(configJSON, '\n')
+
+	tmpFile, err := os.CreateTemp("", "devcontainer-cred-override-*.json")
+	if err != nil {
+		return "", fmt.Errorf("failed to create credential override config: %w", err)
+	}
+
+	if _, err := tmpFile.Write(configJSON); err != nil {
+		_ = tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to write credential override config: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to finalize credential override config: %w", err)
+	}
+
+	slog.Info("Wrote credential override config", "path", tmpFile.Name())
+	return tmpFile.Name(), nil
 }
 
 func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error) {

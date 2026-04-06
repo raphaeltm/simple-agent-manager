@@ -501,6 +501,7 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Remove the devcontainer and its Docker volume.
 	// The container must be removed before the volume (Docker won't remove a volume in use).
 	s.removeWorkspaceContainer(workspaceID)
+	bootstrap.RemoveCredentialHelperFromHost(workspaceID)
 	if err := bootstrap.RemoveVolume(context.Background(), workspaceID); err != nil {
 		slog.Warn("Failed to remove Docker volume for workspace", "workspace", workspaceID, "error", err)
 	}
