@@ -122,7 +122,11 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 			// creation time and cannot be changed without restarting the container.
 			requestedResolution := m.cfg.NekoScreenResolution
 			if opts.ViewportWidth > 0 && opts.ViewportHeight > 0 {
-				requestedResolution = fmt.Sprintf("%dx%d", opts.ViewportWidth, opts.ViewportHeight)
+				w := opts.ViewportWidth
+				if w < chromeMinWidth {
+					w = chromeMinWidth
+				}
+				requestedResolution = fmt.Sprintf("%dx%d", w, opts.ViewportHeight)
 			}
 			if existing.Resolution != "" && existing.Resolution != requestedResolution {
 				slog.Info("Viewport changed — restarting Neko sidecar",
@@ -172,10 +176,17 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		return &SidecarState{Status: StatusError, Error: "failed to generate Neko admin password"}, fmt.Errorf("failed to generate Neko admin password: %w", err)
 	}
 
-	// Build Neko container config
+	// Build Neko container config.
+	// Store the effective resolution (after Chrome min-width clamping) so that
+	// resolution-change detection in Start() compares against what was actually
+	// applied, avoiding unnecessary restarts.
 	resolution := m.cfg.NekoScreenResolution
 	if opts.ViewportWidth > 0 && opts.ViewportHeight > 0 {
-		resolution = fmt.Sprintf("%dx%d", opts.ViewportWidth, opts.ViewportHeight)
+		w := opts.ViewportWidth
+		if w < chromeMinWidth {
+			w = chromeMinWidth
+		}
+		resolution = fmt.Sprintf("%dx%d", w, opts.ViewportHeight)
 	}
 
 	state := &SidecarState{

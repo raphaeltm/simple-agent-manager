@@ -97,7 +97,8 @@ func TestBuildChromeFlags_NonTouchDevice(t *testing.T) {
 	}
 }
 
-func TestBuildChromeFlags_DPR(t *testing.T) {
+func TestBuildChromeFlags_DPR_NoViewport(t *testing.T) {
+	// DPR is only applied when no custom viewport is set
 	flags := buildChromeFlags(ChromeCustomization{DevicePixelRatio: 3})
 	found := false
 	for _, f := range flags {
@@ -106,7 +107,21 @@ func TestBuildChromeFlags_DPR(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("expected --force-device-scale-factor=3 for DPR 3")
+		t.Error("expected --force-device-scale-factor=3 when no viewport set")
+	}
+}
+
+func TestBuildChromeFlags_DPR_WithViewport(t *testing.T) {
+	// DPR should NOT be applied when viewport is set (display controlled by xrandr)
+	flags := buildChromeFlags(ChromeCustomization{
+		DevicePixelRatio: 2,
+		ViewportWidth:    375,
+		ViewportHeight:   667,
+	})
+	for _, f := range flags {
+		if strings.Contains(f, "force-device-scale-factor") {
+			t.Errorf("should not have DPR flag when viewport is set, got %q", f)
+		}
 	}
 }
 
@@ -169,16 +184,14 @@ func TestChromePolicies_NoStartURL(t *testing.T) {
 	}
 }
 
-func TestBuildChromeFlags_Viewport(t *testing.T) {
+func TestBuildChromeFlags_NoWindowSize(t *testing.T) {
+	// Viewport control is now handled by xrandr display resize, not --window-size.
+	// Chrome always uses --start-maximized to fill the display.
 	flags := buildChromeFlags(ChromeCustomization{ViewportWidth: 375, ViewportHeight: 812})
-	found := false
 	for _, f := range flags {
-		if f == "--window-size=375,812" {
-			found = true
+		if strings.Contains(f, "--window-size") {
+			t.Errorf("should not have --window-size (viewport controlled by xrandr), got %q", f)
 		}
-	}
-	if !found {
-		t.Error("expected --window-size=375,812 for viewport 375x812")
 	}
 }
 
@@ -191,23 +204,8 @@ func TestBuildChromeFlags_NoViewport(t *testing.T) {
 	}
 }
 
-func TestBuildChromeFlags_PartialViewport(t *testing.T) {
-	cases := []ChromeCustomization{
-		{ViewportWidth: 375},  // height zero
-		{ViewportHeight: 812}, // width zero
-	}
-	for _, c := range cases {
-		flags := buildChromeFlags(c)
-		for _, f := range flags {
-			if strings.Contains(f, "--window-size") {
-				t.Errorf("should not have --window-size for partial viewport %+v, got %q", c, f)
-			}
-		}
-	}
-}
-
 func TestCustomSupervisordConf_ContainsCommand(t *testing.T) {
-	conf := customSupervisordConf([]string{"--no-first-run"}, false)
+	conf := customSupervisordConf([]string{"--no-first-run"})
 	if !strings.Contains(conf, "[program:google-chrome]") {
 		t.Error("expected supervisord program header")
 	}
@@ -217,10 +215,14 @@ func TestCustomSupervisordConf_ContainsCommand(t *testing.T) {
 	if !strings.Contains(conf, "user=neko") {
 		t.Error("expected user=neko in config")
 	}
+	// Must include openbox section to avoid supervisorctl update removing the window manager
+	if !strings.Contains(conf, "[program:openbox]") {
+		t.Error("expected openbox section in supervisord config")
+	}
 }
 
 func TestCustomSupervisordConf_NoExtraFlags(t *testing.T) {
-	conf := customSupervisordConf(nil, false)
+	conf := customSupervisordConf(nil)
 	if !strings.Contains(conf, "command=/usr/bin/google-chrome") {
 		t.Error("expected base chrome command")
 	}
@@ -230,19 +232,52 @@ func TestCustomSupervisordConf_NoExtraFlags(t *testing.T) {
 	}
 }
 
-func TestCustomSupervisordConf_DefaultHasStartMaximized(t *testing.T) {
-	conf := customSupervisordConf(nil, false)
+func TestCustomSupervisordConf_AlwaysHasStartMaximized(t *testing.T) {
+	// Chrome always uses --start-maximized; viewport controlled by xrandr display resize
+	conf := customSupervisordConf(nil)
 	if !strings.Contains(conf, "--start-maximized") {
-		t.Error("expected --start-maximized when hasViewport is false")
+		t.Error("expected --start-maximized (always present, viewport via xrandr)")
 	}
 }
 
-func TestCustomSupervisordConf_ViewportOmitsStartMaximized(t *testing.T) {
-	conf := customSupervisordConf([]string{"--window-size=375,812"}, true)
-	if strings.Contains(conf, "--start-maximized") {
-		t.Error("should NOT have --start-maximized when hasViewport is true")
+func TestComputeModeline_375x667(t *testing.T) {
+	name, params := computeModeline(375, 667, 30)
+	if name != "375x667_30" {
+		t.Errorf("expected mode name 375x667_30, got %q", name)
 	}
-	if !strings.Contains(conf, "--window-size=375,812") {
-		t.Error("expected --window-size=375,812 in extra flags")
+	// Params should contain pixel clock, dimensions, and sync flags
+	if !strings.Contains(params, "375") || !strings.Contains(params, "667") {
+		t.Errorf("modeline params should contain dimensions, got %q", params)
+	}
+	if !strings.Contains(params, "-HSync +Vsync") {
+		t.Errorf("modeline params should contain sync flags, got %q", params)
+	}
+}
+
+func TestComputeModeline_StandardResolution(t *testing.T) {
+	name, params := computeModeline(1920, 1080, 60)
+	if name != "1920x1080_60" {
+		t.Errorf("expected mode name 1920x1080_60, got %q", name)
+	}
+	if !strings.Contains(params, "1920") || !strings.Contains(params, "1080") {
+		t.Errorf("modeline params should contain dimensions, got %q", params)
+	}
+}
+
+func TestHasViewport(t *testing.T) {
+	tests := []struct {
+		c    ChromeCustomization
+		want bool
+	}{
+		{ChromeCustomization{ViewportWidth: 375, ViewportHeight: 667}, true},
+		{ChromeCustomization{ViewportWidth: 0, ViewportHeight: 667}, false},
+		{ChromeCustomization{ViewportWidth: 375, ViewportHeight: 0}, false},
+		{ChromeCustomization{}, false},
+	}
+	for _, tt := range tests {
+		got := tt.c.HasViewport()
+		if got != tt.want {
+			t.Errorf("HasViewport(%+v) = %v, want %v", tt.c, got, tt.want)
+		}
 	}
 }
