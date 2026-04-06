@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // ---------- Response types ----------
@@ -64,7 +66,7 @@ type McpExposePortResponse struct {
 	Label       string `json:"label,omitempty"`
 }
 
-// McpCostEstimateResponse contains cost estimation for the workspace.
+// McpCostEstimateResponse contains cost estimation for the workspace session.
 type McpCostEstimateResponse struct {
 	VMSize     string  `json:"vmSize"`
 	HourlyRate float64 `json:"hourlyRate"`
@@ -76,26 +78,30 @@ type McpCostEstimateResponse struct {
 
 // McpDiffSummaryResponse contains a summary of git changes since workspace creation.
 type McpDiffSummaryResponse struct {
-	Branch       string   `json:"branch"`
-	CommitCount  int      `json:"commitCount"`
-	FilesChanged int      `json:"filesChanged"`
-	Insertions   int      `json:"insertions"`
-	Deletions    int      `json:"deletions"`
-	NewFiles     []string `json:"newFiles"`
-	ModifiedFiles []string `json:"modifiedFiles"`
-	DeletedFiles  []string `json:"deletedFiles"`
+	Branch         string   `json:"branch"`
+	CommitCount    int      `json:"commitCount"`
+	FilesChanged   int      `json:"filesChanged"`
+	Insertions     int      `json:"insertions"`
+	Deletions      int      `json:"deletions"`
+	NewFiles       []string `json:"newFiles"`
+	ModifiedFiles  []string `json:"modifiedFiles"`
+	DeletedFiles   []string `json:"deletedFiles"`
 	UntrackedFiles []string `json:"untrackedFiles"`
+	Truncated      bool     `json:"truncated,omitempty"`
 }
 
-// ---------- VM pricing defaults (configurable via WORKSPACE_TOOL_COST_PRICING_JSON) ----------
-
 // defaultVMPricing maps VM size to hourly rate in USD.
+// Currently the VM agent does not track per-workspace VM size, so "small" is used
+// as a default. The Worker-side handler can override via WORKSPACE_TOOL_COST_PRICING_JSON.
 var defaultVMPricing = map[string]float64{
 	"small":   0.007,
 	"medium":  0.017,
 	"large":   0.033,
 	"x-large": 0.065,
 }
+
+// maxFileListEntries caps file lists in diff summary responses to prevent unbounded output.
+const maxFileListEntries = 500
 
 // ---------- Handlers ----------
 
@@ -121,16 +127,6 @@ func (s *Server) handleMcpWorkspaceInfo(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	// Read /proc/uptime inside container
-	var uptimeSecs float64
-	uptimeOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "cat", "/proc/uptime")
-	if err == nil {
-		fields := strings.Fields(strings.TrimSpace(uptimeOut))
-		if len(fields) > 0 {
-			uptimeSecs, _ = strconv.ParseFloat(fields[0], 64)
-		}
-	}
-
 	// Read current git branch
 	branch := ""
 	branchOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
@@ -138,25 +134,29 @@ func (s *Server) handleMcpWorkspaceInfo(w http.ResponseWriter, r *http.Request) 
 		branch = strings.TrimSpace(branchOut)
 	}
 
-	// Get workspace runtime info
+	// Get workspace runtime info (single read under lock)
 	s.workspaceMu.RLock()
 	runtime, ok := s.workspaces[workspaceID]
+	var runtimeCopy WorkspaceRuntime
+	if ok {
+		runtimeCopy = *runtime
+	}
 	s.workspaceMu.RUnlock()
 
 	resp := McpWorkspaceInfoResponse{
 		WorkspaceID: workspaceID,
 		NodeID:      s.config.NodeID,
 		WorkDir:     workDir,
-		UptimeSecs:  uptimeSecs,
 		Branch:      branch,
 	}
 
 	if ok {
-		resp.Repository = runtime.Repository
-		resp.Status = runtime.Status
-		resp.CreatedAt = runtime.CreatedAt.Format(time.RFC3339)
+		resp.Repository = runtimeCopy.Repository
+		resp.Status = runtimeCopy.Status
+		resp.CreatedAt = runtimeCopy.CreatedAt.Format(time.RFC3339)
+		resp.UptimeSecs = time.Since(runtimeCopy.CreatedAt).Seconds()
 		if branch == "" {
-			resp.Branch = runtime.Branch
+			resp.Branch = runtimeCopy.Branch
 		}
 	}
 
@@ -188,7 +188,9 @@ func (s *Server) handleMcpCredentialStatus(w http.ResponseWriter, r *http.Reques
 	// Get all env vars from container (never return values, only check presence)
 	envOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "printenv")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check credentials: "+err.Error())
+		slog.Error("credential-status: printenv failed",
+			"workspaceID", workspaceID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to check credentials")
 		return
 	}
 
@@ -222,8 +224,7 @@ func (s *Server) handleMcpNetworkInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get base domain from control plane URL
-	baseDomain := extractBaseDomain(s.config.ControlPlaneURL)
+	baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
 	workspaceURL := fmt.Sprintf("https://ws-%s.%s", workspaceID, baseDomain)
 
 	// Get detected ports from port scanner
@@ -275,7 +276,7 @@ func (s *Server) handleMcpExposePort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseDomain := extractBaseDomain(s.config.ControlPlaneURL)
+	baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
 	externalURL := fmt.Sprintf("https://ws-%s--%d.%s", workspaceID, req.Port, baseDomain)
 
 	// Check if port is actually listening via port scanner
@@ -313,31 +314,12 @@ func (s *Server) handleMcpCostEstimate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-
-	// Read /proc/uptime
+	// Compute uptime from workspace CreatedAt (avoids docker exec for /proc/uptime)
 	var uptimeSecs float64
-	uptimeOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "cat", "/proc/uptime")
-	if err == nil {
-		fields := strings.Fields(strings.TrimSpace(uptimeOut))
-		if len(fields) > 0 {
-			uptimeSecs, _ = strconv.ParseFloat(fields[0], 64)
-		}
-	}
-
-	// Determine VM size from workspace metadata or config
-	vmSize := "small"
+	vmSize := "small" // VM agent does not currently track per-workspace VM size
 	s.workspaceMu.RLock()
 	if runtime, ok := s.workspaces[workspaceID]; ok {
-		// VMSize might be stored differently — check what's available
-		_ = runtime // vmSize stays default unless we can determine it
+		uptimeSecs = time.Since(runtime.CreatedAt).Seconds()
 	}
 	s.workspaceMu.RUnlock()
 
@@ -396,21 +378,34 @@ func (s *Server) handleMcpDiffSummary(w http.ResponseWriter, r *http.Request) {
 		resp.Branch = strings.TrimSpace(branchOut)
 	}
 
-	// Fetch origin/main (best-effort, may fail on fresh repos)
-	_, _, _ = s.execInContainer(ctx, containerID, user, workDir, "git", "fetch", "origin", "main", "--quiet")
+	// Determine the default remote branch (try origin/main, fall back to origin/master)
+	baseBranch := "origin/main"
+	_, _, err = s.execInContainer(ctx, containerID, user, workDir, "git", "fetch", "origin", "main", "--quiet")
+	if err != nil {
+		// main doesn't exist — try master
+		_, _, err = s.execInContainer(ctx, containerID, user, workDir, "git", "fetch", "origin", "master", "--quiet")
+		if err == nil {
+			baseBranch = "origin/master"
+		}
+	}
 
-	// Get diff stats against origin/main
-	shortstatOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "diff", "--shortstat", "origin/main...HEAD")
+	// Get diff stats against base branch
+	shortstatOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "diff", "--shortstat", baseBranch+"...HEAD")
 	if err == nil {
 		parseShortstat(strings.TrimSpace(shortstatOut), &resp)
 	}
 
-	// Get file-level name-status
-	nameStatusOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "diff", "--name-status", "origin/main...HEAD")
+	// Get file-level name-status (capped)
+	nameStatusOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "diff", "--name-status", baseBranch+"...HEAD")
 	if err == nil {
+		totalFiles := 0
 		for _, line := range strings.Split(strings.TrimSpace(nameStatusOut), "\n") {
 			if line == "" {
 				continue
+			}
+			if totalFiles >= maxFileListEntries {
+				resp.Truncated = true
+				break
 			}
 			parts := strings.SplitN(line, "\t", 2)
 			if len(parts) < 2 {
@@ -426,21 +421,28 @@ func (s *Server) handleMcpDiffSummary(w http.ResponseWriter, r *http.Request) {
 			case strings.HasPrefix(status, "D"):
 				resp.DeletedFiles = append(resp.DeletedFiles, file)
 			}
+			totalFiles++
 		}
 	}
 
 	// Get commit count
-	commitCountOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "rev-list", "--count", "origin/main...HEAD")
+	commitCountOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "rev-list", "--count", baseBranch+"...HEAD")
 	if err == nil {
 		resp.CommitCount, _ = strconv.Atoi(strings.TrimSpace(commitCountOut))
 	}
 
-	// Get untracked files
+	// Get untracked files (capped)
 	untrackedOut, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "ls-files", "--others", "--exclude-standard")
 	if err == nil {
+		count := 0
 		for _, line := range strings.Split(strings.TrimSpace(untrackedOut), "\n") {
 			if line != "" {
+				if count >= maxFileListEntries {
+					resp.Truncated = true
+					break
+				}
 				resp.UntrackedFiles = append(resp.UntrackedFiles, line)
+				count++
 			}
 		}
 	}
@@ -449,23 +451,6 @@ func (s *Server) handleMcpDiffSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- Helpers ----------
-
-// extractBaseDomain extracts the base domain from a control plane URL.
-// e.g., "https://api.example.com" -> "example.com"
-func extractBaseDomain(controlPlaneURL string) string {
-	// Strip protocol
-	url := controlPlaneURL
-	for _, prefix := range []string{"https://", "http://"} {
-		url = strings.TrimPrefix(url, prefix)
-	}
-	// Strip port
-	if host, _, err := net.SplitHostPort(url); err == nil {
-		url = host
-	}
-	// Strip api. prefix
-	url = strings.TrimPrefix(url, "api.")
-	return url
-}
 
 // parseShortstat parses the output of git diff --shortstat.
 // Example: " 3 files changed, 10 insertions(+), 5 deletions(-)"
