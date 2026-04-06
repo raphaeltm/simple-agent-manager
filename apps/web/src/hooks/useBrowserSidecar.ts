@@ -40,6 +40,8 @@ interface UseBrowserSidecarResult {
     devicePixelRatio?: number;
     isTouchDevice?: boolean;
     enableAudio?: boolean;
+    userAgent?: string;
+    startURL?: string;
   }) => Promise<void>;
   stop: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -88,6 +90,8 @@ export function useBrowserSidecar(
       devicePixelRatio?: number;
       isTouchDevice?: boolean;
       enableAudio?: boolean;
+      userAgent?: string;
+      startURL?: string;
     }) => {
       setIsLoading(true);
       setError(null);

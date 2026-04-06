@@ -10,12 +10,19 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/browser"
 	"github.com/workspace/vm-agent/internal/config"
 )
+
+// safeUserAgentRe allows only printable ASCII and common UA characters.
+// Rejects newlines, carriage returns, NUL, and other control characters that
+// could break heredoc boundaries in the supervisord config.
+var safeUserAgentRe = regexp.MustCompile(`^[\x20-\x7E]+$`)
 
 // handleStartBrowser starts a Neko browser sidecar for a workspace.
 // POST /workspaces/{workspaceId}/browser
@@ -37,11 +44,13 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 
 	// Parse request body for viewport options
 	var req struct {
-		ViewportWidth    int   `json:"viewportWidth"`
-		ViewportHeight   int   `json:"viewportHeight"`
-		DevicePixelRatio int   `json:"devicePixelRatio"`
-		IsTouchDevice    bool  `json:"isTouchDevice"`
-		EnableAudio      *bool `json:"enableAudio"`
+		ViewportWidth    int    `json:"viewportWidth"`
+		ViewportHeight   int    `json:"viewportHeight"`
+		DevicePixelRatio int    `json:"devicePixelRatio"`
+		IsTouchDevice    bool   `json:"isTouchDevice"`
+		EnableAudio      *bool  `json:"enableAudio"`
+		UserAgent        string `json:"userAgent"`
+		StartURL         string `json:"startURL"`
 	}
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -62,6 +71,19 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 	if req.DevicePixelRatio != 0 && (req.DevicePixelRatio < 1 || req.DevicePixelRatio > s.config.NekoViewportMaxDPR) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("devicePixelRatio must be between 1 and %d", s.config.NekoViewportMaxDPR))
 		return
+	}
+
+	// Validate UserAgent: reject control characters (newlines, tabs) that could
+	// break heredoc boundaries in the supervisord config, and enforce a length limit.
+	if req.UserAgent != "" {
+		if len(req.UserAgent) > 512 {
+			writeError(w, http.StatusBadRequest, "userAgent must be 512 characters or fewer")
+			return
+		}
+		if !safeUserAgentRe.MatchString(req.UserAgent) {
+			writeError(w, http.StatusBadRequest, "userAgent contains invalid characters")
+			return
+		}
 	}
 
 	// Discover the DevContainer's network and name
@@ -89,15 +111,30 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-detect startURL from DevContainer ports when the client doesn't provide one.
+	// This avoids frontend timing issues where detected ports haven't been polled yet
+	// at the time the user clicks the Browser button.
+	startURL := req.StartURL
+	if startURL == "" {
+		if ports, detectErr := s.browserManager.DetectDevContainerPorts(ctx, netInfo.ContainerName); detectErr == nil && len(ports) > 0 {
+			sort.Ints(ports)
+			startURL = fmt.Sprintf("http://localhost:%d", ports[0])
+			slog.Info("Auto-detected startURL from DevContainer ports",
+				"workspace", workspaceID, "port", ports[0], "totalPorts", len(ports))
+		}
+	}
+
 	opts := browser.StartOptions{
 		ViewportWidth:    req.ViewportWidth,
 		ViewportHeight:   req.ViewportHeight,
 		DevicePixelRatio: req.DevicePixelRatio,
 		IsTouchDevice:    req.IsTouchDevice,
 		EnableAudio:      req.EnableAudio,
+		UserAgent:        req.UserAgent,
+		StartURL:         startURL,
 	}
 
-	state, err := s.browserManager.Start(ctx, workspaceID, netInfo.NetworkName, netInfo.ContainerName, opts)
+	state, err := s.browserManager.Start(ctx, workspaceID, netInfo.NetworkName, netInfo.ContainerName, netInfo.IPAddress, opts)
 	if err != nil {
 		errMsg := "failed to start browser sidecar"
 		if state != nil && state.Error != "" {

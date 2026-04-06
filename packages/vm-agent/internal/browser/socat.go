@@ -251,6 +251,13 @@ func (m *Manager) removeForwarder(ctx context.Context, containerName string, por
 	return nil
 }
 
+// DetectDevContainerPorts returns listening ports on the given DevContainer.
+// This is the public interface used by the browser start handler to auto-detect
+// a startURL when the client doesn't provide one.
+func (m *Manager) DetectDevContainerPorts(ctx context.Context, devContainerName string) ([]int, error) {
+	return m.detectContainerPorts(ctx, devContainerName)
+}
+
 // detectContainerPorts reads /proc/net/tcp and /proc/net/tcp6 from the DevContainer to find listening ports.
 // Excludes the Neko WebRTC port to prevent socat from binding a port that Neko itself is using.
 func (m *Manager) detectContainerPorts(ctx context.Context, containerName string) ([]int, error) {

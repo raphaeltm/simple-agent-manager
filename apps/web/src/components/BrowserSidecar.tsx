@@ -40,6 +40,7 @@ export const BrowserSidecar: FC<BrowserSidecarProps> = (props) => {
       viewportHeight: window.innerHeight,
       devicePixelRatio: window.devicePixelRatio || 1,
       isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
+      userAgent: navigator.userAgent,
     };
     await start(opts);
     setShowViewer(true);
