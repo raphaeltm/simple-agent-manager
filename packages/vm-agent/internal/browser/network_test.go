@@ -9,7 +9,7 @@ import (
 func TestDiscoverContainerNetwork_CustomNetwork(t *testing.T) {
 	docker := newMockDocker()
 	docker.outputs[`inspect -f {{.Name}} container-abc`] = "/my-devcontainer\n"
-	docker.outputs[`inspect -f {{json .NetworkSettings.Networks}} container-abc`] = `{"my-custom-network":{}, "bridge":{}}`
+	docker.outputs[`inspect -f {{json .NetworkSettings.Networks}} container-abc`] = `{"my-custom-network":{"IPAddress":"172.17.0.3"}, "bridge":{"IPAddress":"172.17.0.1"}}`
 
 	info, err := DiscoverContainerNetwork(context.Background(), docker, "container-abc")
 	if err != nil {
@@ -21,12 +21,15 @@ func TestDiscoverContainerNetwork_CustomNetwork(t *testing.T) {
 	if info.NetworkName != "my-custom-network" {
 		t.Errorf("expected network 'my-custom-network', got %q", info.NetworkName)
 	}
+	if info.IPAddress != "172.17.0.3" {
+		t.Errorf("expected IP '172.17.0.3', got %q", info.IPAddress)
+	}
 }
 
 func TestDiscoverContainerNetwork_BridgeFallback(t *testing.T) {
 	docker := newMockDocker()
 	docker.outputs[`inspect -f {{.Name}} container-abc`] = "/my-container\n"
-	docker.outputs[`inspect -f {{json .NetworkSettings.Networks}} container-abc`] = `{"bridge":{}}`
+	docker.outputs[`inspect -f {{json .NetworkSettings.Networks}} container-abc`] = `{"bridge":{"IPAddress":"172.17.0.2"}}`
 
 	info, err := DiscoverContainerNetwork(context.Background(), docker, "container-abc")
 	if err != nil {
@@ -34,6 +37,9 @@ func TestDiscoverContainerNetwork_BridgeFallback(t *testing.T) {
 	}
 	if info.NetworkName != "bridge" {
 		t.Errorf("expected fallback to 'bridge', got %q", info.NetworkName)
+	}
+	if info.IPAddress != "172.17.0.2" {
+		t.Errorf("expected IP '172.17.0.2', got %q", info.IPAddress)
 	}
 }
 
@@ -72,7 +78,7 @@ func TestDiscoverContainerNetwork_InspectFailure(t *testing.T) {
 func TestDiscoverContainerNetwork_SkipsDefaultNetworks(t *testing.T) {
 	docker := newMockDocker()
 	docker.outputs[`inspect -f {{.Name}} cid`] = "/c\n"
-	docker.outputs[`inspect -f {{json .NetworkSettings.Networks}} cid`] = `{"host":{}, "none":{}, "devnet":{}}`
+	docker.outputs[`inspect -f {{json .NetworkSettings.Networks}} cid`] = `{"host":{}, "none":{}, "devnet":{"IPAddress":"10.0.0.5"}}`
 
 	info, err := DiscoverContainerNetwork(context.Background(), docker, "cid")
 	if err != nil {
@@ -80,5 +86,8 @@ func TestDiscoverContainerNetwork_SkipsDefaultNetworks(t *testing.T) {
 	}
 	if info.NetworkName != "devnet" {
 		t.Errorf("expected 'devnet', got %q", info.NetworkName)
+	}
+	if info.IPAddress != "10.0.0.5" {
+		t.Errorf("expected IP '10.0.0.5', got %q", info.IPAddress)
 	}
 }

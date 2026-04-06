@@ -101,7 +101,7 @@ func TestManagerStartStop(t *testing.T) {
 	ctx := context.Background()
 
 	// Start sidecar
-	state, err := mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", StartOptions{})
+	state, err := mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", "", StartOptions{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -148,8 +148,8 @@ func TestManagerStartIdempotent(t *testing.T) {
 	mgr := NewManager(testConfig(), docker)
 	ctx := context.Background()
 
-	state1, _ := mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", StartOptions{})
-	state2, _ := mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", StartOptions{})
+	state1, _ := mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", "", StartOptions{})
+	state2, _ := mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", "", StartOptions{})
 
 	// Second call should return same state without re-creating
 	if state1.ContainerName != state2.ContainerName {
@@ -172,7 +172,7 @@ func TestManagerStartError(t *testing.T) {
 	mgr = NewManager(testConfig(), failDocker)
 
 	ctx := context.Background()
-	state, err := mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", StartOptions{})
+	state, err := mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", "", StartOptions{})
 
 	if err == nil {
 		t.Fatal("expected error from Start")
@@ -197,7 +197,7 @@ func TestManagerGetPorts(t *testing.T) {
 	mgr := NewManager(testConfig(), docker)
 	ctx := context.Background()
 
-	mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", StartOptions{})
+	mgr.Start(ctx, "ws-1", "workspace-net", "devcontainer-ws-1", "", StartOptions{})
 
 	// Initially no ports
 	ports := mgr.GetPorts("ws-1")
@@ -217,8 +217,8 @@ func TestManagerCleanup(t *testing.T) {
 	mgr := NewManager(testConfig(), docker)
 	ctx := context.Background()
 
-	mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", StartOptions{})
-	mgr.Start(ctx, "ws-2", "workspace-net", "dc-2", StartOptions{})
+	mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", "", StartOptions{})
+	mgr.Start(ctx, "ws-2", "workspace-net", "dc-2", "", StartOptions{})
 
 	mgr.Cleanup(ctx)
 
@@ -236,7 +236,7 @@ func TestManagerCustomViewport(t *testing.T) {
 	mgr := NewManager(testConfig(), docker)
 	ctx := context.Background()
 
-	_, err := mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", StartOptions{
+	_, err := mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", "", StartOptions{
 		ViewportWidth:  375,
 		ViewportHeight: 667,
 	})
@@ -262,7 +262,7 @@ func TestManagerStartGeneratesRandomPasswords(t *testing.T) {
 	mgr := NewManager(testConfig(), docker)
 	ctx := context.Background()
 
-	state, err := mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", StartOptions{})
+	state, err := mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", "", StartOptions{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestManagerStartDeferredCleanupOnFailure(t *testing.T) {
 	mgr := NewManager(testConfig(), docker)
 	ctx := context.Background()
 
-	_, err := mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", StartOptions{})
+	_, err := mgr.Start(ctx, "ws-1", "workspace-net", "dc-1", "", StartOptions{})
 	if err == nil {
 		t.Fatal("expected error from Start")
 	}
