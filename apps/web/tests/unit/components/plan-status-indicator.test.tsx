@@ -107,9 +107,13 @@ describe('AgentWorkingBar — plan status indicator', () => {
       expect(screen.queryByTestId('active-step-text')).not.toBeInTheDocument();
     });
 
-    it('shows Cancel button', () => {
-      render(<AgentWorkingBar items={[]} cancelPrompt={vi.fn()} />);
+    it('shows Cancel button and calls cancelPrompt on click', () => {
+      const cancel = vi.fn();
+      render(<AgentWorkingBar items={[]} cancelPrompt={cancel} />);
       expect(screen.getByTestId('cancel-button')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('cancel-button'));
+      expect(cancel).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -209,6 +213,23 @@ describe('AgentWorkingBar — plan status indicator', () => {
       // Close modal via close button
       fireEvent.click(screen.getByTestId('plan-modal-close'));
       expect(screen.queryByTestId('plan-modal')).not.toBeInTheDocument();
+    });
+
+    it('handles plan with zero entries gracefully', () => {
+      const emptyPlan: PlanItem = {
+        kind: 'plan',
+        id: 'plan-empty',
+        entries: [],
+        timestamp: Date.now(),
+      };
+      render(<AgentWorkingBar items={[emptyPlan]} cancelPrompt={vi.fn()} />);
+
+      // Should show plan icon (not spinner) even with empty entries
+      expect(screen.getByTestId('plan-icon-button')).toBeInTheDocument();
+      expect(screen.getByTestId('active-step-text')).toHaveTextContent(
+        'Agent is working on: next step'
+      );
+      expect(screen.queryByTestId('spinner')).not.toBeInTheDocument();
     });
   });
 
