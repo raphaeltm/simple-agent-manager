@@ -34,14 +34,36 @@ import {
 
 /** Timeout for VM agent proxy calls. Override via WORKSPACE_TOOL_TIMEOUT_MS. */
 const DEFAULT_WORKSPACE_TOOL_TIMEOUT_MS = 15_000;
+/** Timeout for GitHub API calls. Override via WORKSPACE_TOOL_GITHUB_TIMEOUT_MS. */
+const DEFAULT_GITHUB_API_TIMEOUT_MS = 10_000;
+/** Timeout for DNS check calls. Override via WORKSPACE_TOOL_DNS_TIMEOUT_MS. */
+const DEFAULT_DNS_CHECK_TIMEOUT_MS = 10_000;
 /** Max CI runs to return. Override via WORKSPACE_TOOL_CI_RUNS_LIMIT. */
 const DEFAULT_CI_RUNS_LIMIT = 10;
 /** Max deployment runs to return. Override via WORKSPACE_TOOL_DEPLOY_RUNS_LIMIT. */
 const DEFAULT_DEPLOY_RUNS_LIMIT = 5;
+/** Max size (bytes) for diagnostic data in report_environment_issue. Override via WORKSPACE_TOOL_DIAGNOSTIC_MAX_BYTES. */
+const DEFAULT_DIAGNOSTIC_MAX_BYTES = 4096;
 
 function getWorkspaceToolTimeout(env: Env): number {
   return parsePositiveInt(env.WORKSPACE_TOOL_TIMEOUT_MS, DEFAULT_WORKSPACE_TOOL_TIMEOUT_MS);
 }
+function getGitHubApiTimeout(env: Env): number {
+  return parsePositiveInt(env.WORKSPACE_TOOL_GITHUB_TIMEOUT_MS, DEFAULT_GITHUB_API_TIMEOUT_MS);
+}
+function getDnsCheckTimeout(env: Env): number {
+  return parsePositiveInt(env.WORKSPACE_TOOL_DNS_TIMEOUT_MS, DEFAULT_DNS_CHECK_TIMEOUT_MS);
+}
+
+// ─── VM agent tool paths (typed union prevents path traversal) ──────────────
+
+type VmAgentToolPath =
+  | 'workspace-info'
+  | 'credential-status'
+  | 'network-info'
+  | 'expose-port'
+  | 'cost-estimate'
+  | 'diff-summary';
 
 // ─── Shared proxy helper ────────────────────────────────────────────────────
 
@@ -53,7 +75,7 @@ async function proxyToVmAgent(
   env: Env,
   workspaceId: string,
   userId: string,
-  toolPath: string,
+  toolPath: VmAgentToolPath,
   method: 'GET' | 'POST' = 'GET',
   body?: unknown,
 ): Promise<unknown> {
@@ -376,6 +398,10 @@ export async function handleGetTaskDependencies(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
+  if (!tokenData.taskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'This tool requires a task-scoped MCP token');
+  }
+
   try {
     const db = drizzle(env.DATABASE, { schema });
 
@@ -394,25 +420,49 @@ export async function handleGetTaskDependencies(
       return jsonRpcError(requestId, INTERNAL_ERROR, 'Current task not found');
     }
 
-    // Get all project tasks to build graph
-    const allTasks = await db
-      .select({
-        id: schema.tasks.id,
-        title: schema.tasks.title,
-        status: schema.tasks.status,
-        parentTaskId: schema.tasks.parentTaskId,
-        outputBranch: schema.tasks.outputBranch,
-      })
-      .from(schema.tasks)
-      .where(eq(schema.tasks.projectId, tokenData.projectId));
+    // Targeted queries instead of fetching all project tasks
+    const taskSelect = {
+      id: schema.tasks.id,
+      title: schema.tasks.title,
+      status: schema.tasks.status,
+      parentTaskId: schema.tasks.parentTaskId,
+      outputBranch: schema.tasks.outputBranch,
+    };
 
-    // Build dependency graph
+    // Upstream: parent task (if any)
     const upstream = currentTask.parentTaskId
-      ? allTasks.filter((t) => t.id === currentTask.parentTaskId)
+      ? await db
+          .select(taskSelect)
+          .from(schema.tasks)
+          .where(eq(schema.tasks.id, currentTask.parentTaskId))
+          .limit(1)
       : [];
-    const downstream = allTasks.filter((t) => t.parentTaskId === tokenData.taskId);
+
+    // Downstream: tasks whose parent is the current task
+    const downstream = await db
+      .select(taskSelect)
+      .from(schema.tasks)
+      .where(
+        and(
+          eq(schema.tasks.parentTaskId, tokenData.taskId),
+          eq(schema.tasks.projectId, tokenData.projectId),
+        ),
+      )
+      .limit(50);
+
+    // Siblings: tasks with the same parent (excluding self)
     const siblings = currentTask.parentTaskId
-      ? allTasks.filter((t) => t.parentTaskId === currentTask.parentTaskId && t.id !== tokenData.taskId)
+      ? (await db
+          .select(taskSelect)
+          .from(schema.tasks)
+          .where(
+            and(
+              eq(schema.tasks.parentTaskId, currentTask.parentTaskId),
+              eq(schema.tasks.projectId, tokenData.projectId),
+            ),
+          )
+          .limit(51))
+          .filter((t) => t.id !== tokenData.taskId)
       : [];
 
     return jsonRpcSuccess(requestId, {
@@ -473,6 +523,19 @@ export async function handleReportEnvironmentIssue(
   try {
     // Store in observability database if available
     if (env.OBSERVABILITY_DATABASE) {
+      // Cap diagnostic data to prevent unbounded D1 writes
+      const maxDiagnosticBytes = parsePositiveInt(
+        env.WORKSPACE_TOOL_DIAGNOSTIC_MAX_BYTES,
+        DEFAULT_DIAGNOSTIC_MAX_BYTES,
+      );
+      let diagnosticData = params.diagnosticData;
+      if (diagnosticData) {
+        const serialized = JSON.stringify(diagnosticData);
+        if (serialized.length > maxDiagnosticBytes) {
+          diagnosticData = serialized.slice(0, maxDiagnosticBytes) + '... [truncated]';
+        }
+      }
+
       await env.OBSERVABILITY_DATABASE.prepare(
         `INSERT INTO errors (id, source, level, message, context, created_at)
          VALUES (?, 'workspace-agent', ?, ?, ?, datetime('now'))`,
@@ -485,7 +548,7 @@ export async function handleReportEnvironmentIssue(
             workspaceId: tokenData.workspaceId,
             projectId: tokenData.projectId,
             taskId: tokenData.taskId,
-            diagnosticData: params.diagnosticData,
+            diagnosticData,
           }),
         )
         .run();
@@ -507,6 +570,10 @@ export async function handleGetCiStatus(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
+  if (!tokenData.taskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'This tool requires a task-scoped MCP token');
+  }
+
   try {
     const db = drizzle(env.DATABASE, { schema });
 
@@ -546,6 +613,7 @@ export async function handleGetCiStatus(
     }
 
     const runsLimit = parsePositiveInt(env.WORKSPACE_TOOL_CI_RUNS_LIMIT, DEFAULT_CI_RUNS_LIMIT);
+    const ghTimeoutMs = getGitHubApiTimeout(env);
     const apiUrl = `https://api.github.com/repos/${project.repository}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=${runsLimit}`;
 
     const res = await fetch(apiUrl, {
@@ -555,7 +623,7 @@ export async function handleGetCiStatus(
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'SAM-MCP/1.0',
       },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(ghTimeoutMs),
     });
 
     if (!res.ok) {
@@ -621,11 +689,12 @@ export async function handleGetDeploymentStatus(
     }
 
     const runsLimit = parsePositiveInt(env.WORKSPACE_TOOL_DEPLOY_RUNS_LIMIT, DEFAULT_DEPLOY_RUNS_LIMIT);
+    const ghTimeoutMs = getGitHubApiTimeout(env);
 
     // Fetch staging and production deployment workflows
     const [stagingRes, prodRes] = await Promise.all([
-      fetchWorkflowRuns(ghToken, project.repository, 'deploy-staging.yml', runsLimit),
-      fetchWorkflowRuns(ghToken, project.repository, 'deploy.yml', runsLimit),
+      fetchWorkflowRuns(ghToken, project.repository, 'deploy-staging.yml', runsLimit, ghTimeoutMs),
+      fetchWorkflowRuns(ghToken, project.repository, 'deploy.yml', runsLimit, ghTimeoutMs),
     ]);
 
     return jsonRpcSuccess(requestId, {
@@ -654,12 +723,14 @@ export async function handleCheckDnsStatus(
 
   const workspaceUrl = `https://ws-${tokenData.workspaceId}.${env.BASE_DOMAIN}`;
   const hostname = `ws-${tokenData.workspaceId}.${env.BASE_DOMAIN}`;
+  const dnsTimeoutMs = getDnsCheckTimeout(env);
 
   try {
-    // Try to fetch the workspace URL to check DNS + TLS in one call
+    // Try to fetch the workspace URL to check DNS + TLS in one call.
+    // Note: this only confirms Cloudflare edge reachability, not VM agent health.
     const res = await fetch(workspaceUrl, {
       method: 'HEAD',
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(dnsTimeoutMs),
     });
 
     return jsonRpcSuccess(requestId, {
@@ -671,21 +742,25 @@ export async function handleCheckDnsStatus(
           dnsResolved: true,
           tlsValid: true,
           httpStatus: res.status,
-          status: 'healthy',
+          note: 'Confirms Cloudflare edge reachability. Does not verify VM agent health.',
         }, null, 2),
       }],
     });
   } catch (e) {
+    // Distinguish TLS errors from DNS/network errors
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    const isTlsError = errorMsg.includes('SSL') || errorMsg.includes('TLS') || errorMsg.includes('certificate');
+
     return jsonRpcSuccess(requestId, {
       content: [{
         type: 'text',
         text: JSON.stringify({
           hostname,
           workspaceUrl,
-          dnsResolved: false,
+          dnsResolved: isTlsError, // TLS error means DNS resolved but cert failed
           tlsValid: false,
-          status: 'dns_not_resolved',
-          error: e instanceof Error ? e.message : String(e),
+          status: isTlsError ? 'tls_error' : 'dns_not_resolved',
+          error: errorMsg,
         }, null, 2),
       }],
     });
@@ -736,6 +811,7 @@ async function fetchWorkflowRuns(
   repository: string,
   workflowFile: string,
   limit: number,
+  timeoutMs: number,
 ): Promise<{ lastDeploy: unknown; isDeploying: boolean; recentRuns: unknown[] } | { error: string }> {
   try {
     const apiUrl = `https://api.github.com/repos/${repository}/actions/workflows/${workflowFile}/runs?per_page=${limit}`;
@@ -746,7 +822,7 @@ async function fetchWorkflowRuns(
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'SAM-MCP/1.0',
       },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!res.ok) {

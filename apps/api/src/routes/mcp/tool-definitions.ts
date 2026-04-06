@@ -538,7 +538,7 @@ export const MCP_TOOLS = [
   {
     name: 'get_remaining_budget',
     description:
-      'Get remaining project cost budget if configured. Returns budget, spent, and remaining amounts.',
+      'Get remaining project cost budget. Budget tracking is not yet implemented — always returns null values. Will return budget, spent, and remaining amounts once configured.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
