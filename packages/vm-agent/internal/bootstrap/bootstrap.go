@@ -1638,8 +1638,13 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	installPath := credentialHelperContainerPath
 	checkCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "test", "-f", installPath)
 	if checkCmd.Run() == nil {
-		slog.Info("Git credential helper already present (bind-mounted), skipping post-build install", "containerID", containerID)
-		// Still install the gh wrapper since it depends on the credential helper.
+		slog.Info("Git credential helper already present (bind-mounted), skipping post-build copy", "containerID", containerID)
+		// Still configure git to use the helper (belt-and-suspenders with containerEnv)
+		// and install the gh wrapper.
+		if err := configureGitCredentialHelper(ctx, containerID, installPath); err != nil {
+			return err
+		}
+		slog.Info("Configured git credential helper in devcontainer", "containerID", containerID)
 		if err := installGhWrapper(ctx, cfg, containerID); err != nil {
 			slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
 		}
