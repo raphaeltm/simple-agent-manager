@@ -86,14 +86,16 @@ type ResourceLimits struct {
 
 // DockerRunOptions configures the docker run command for a Neko container.
 type DockerRunOptions struct {
-	ContainerName string
-	Image         string
-	NetworkName   string
-	ShmSize       string
-	NekoPort      int
-	MuxPort       int // If > 0, expose this port on the host for WebRTC UDP/TCP mux
-	EnvVars       []string
-	Limits        ResourceLimits
+	ContainerName    string
+	Image            string
+	NetworkName      string
+	ShmSize          string
+	NekoPort         int
+	MuxPort          int // If > 0, expose this port on the host for WebRTC UDP/TCP mux
+	EnvVars          []string
+	Limits           ResourceLimits
+	DevContainerName string // For --add-host DNS fallback
+	DevContainerIP   string // IP of DevContainer on the shared network
 }
 
 // buildDockerRunArgs constructs the full `docker run` argument list for the Neko container.
@@ -118,6 +120,12 @@ func buildDockerRunArgsFromOpts(opts DockerRunOptions) []string {
 		fmt.Sprintf("--shm-size=%s", opts.ShmSize), // Chrome requires shared memory for rendering
 		"--restart", "no",                           // Manager controls lifecycle, not Docker daemon
 		"--security-opt", "no-new-privileges",       // Prevent privilege escalation inside container
+	}
+
+	// Add DevContainer hostname→IP mapping so socat can resolve it immediately
+	// without waiting for Docker DNS propagation on the shared network.
+	if opts.DevContainerName != "" && opts.DevContainerIP != "" {
+		args = append(args, "--add-host", fmt.Sprintf("%s:%s", opts.DevContainerName, opts.DevContainerIP))
 	}
 
 	// Resource limits

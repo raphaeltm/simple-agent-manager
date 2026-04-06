@@ -11,6 +11,7 @@ import (
 type ContainerNetworkInfo struct {
 	ContainerName string
 	NetworkName   string
+	IPAddress     string // Container's IP on the network (for --add-host DNS fallback)
 }
 
 // DiscoverContainerNetwork finds the Docker network and container name for a container ID.
@@ -29,7 +30,11 @@ func DiscoverContainerNetwork(ctx context.Context, docker DockerExecutor, contai
 		return nil, fmt.Errorf("failed to inspect container networks: %w", err)
 	}
 
-	var networks map[string]json.RawMessage
+	// Parse network details including IP addresses
+	type networkEndpoint struct {
+		IPAddress string `json:"IPAddress"`
+	}
+	var networks map[string]networkEndpoint
 	if err := json.Unmarshal(netOut, &networks); err != nil {
 		return nil, fmt.Errorf("failed to parse network info: %w", err)
 	}
@@ -37,16 +42,19 @@ func DiscoverContainerNetwork(ctx context.Context, docker DockerExecutor, contai
 	// Pick the first non-default network (devcontainer creates a project-specific one).
 	// Fall back to any network if all are default.
 	var networkName string
-	for name := range networks {
+	var ipAddress string
+	for name, ep := range networks {
 		if name != "bridge" && name != "host" && name != "none" {
 			networkName = name
+			ipAddress = ep.IPAddress
 			break
 		}
 	}
 	if networkName == "" {
 		// Fallback: use "bridge" if no custom network found
-		for name := range networks {
+		for name, ep := range networks {
 			networkName = name
+			ipAddress = ep.IPAddress
 			break
 		}
 	}
@@ -58,5 +66,6 @@ func DiscoverContainerNetwork(ctx context.Context, docker DockerExecutor, contai
 	return &ContainerNetworkInfo{
 		ContainerName: containerName,
 		NetworkName:   networkName,
+		IPAddress:     ipAddress,
 	}, nil
 }

@@ -111,7 +111,7 @@ func (m *Manager) RecoverOrphanedContainers(ctx context.Context) {
 
 // Start creates and starts a Neko sidecar for a workspace.
 // The mutex is released during Docker I/O to avoid blocking other operations.
-func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContainerName string, opts StartOptions) (*SidecarState, error) {
+func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContainerName, devContainerIP string, opts StartOptions) (*SidecarState, error) {
 	m.mu.Lock()
 
 	if existing, ok := m.sidecars[workspaceID]; ok {
@@ -193,14 +193,16 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		PidsLimit:   m.cfg.NekoPidsLimit,
 	}
 	args := buildDockerRunArgsFromOpts(DockerRunOptions{
-		ContainerName: containerName,
-		Image:         m.cfg.NekoImage,
-		NetworkName:   networkName,
-		ShmSize:       m.cfg.NekoShmSize,
-		NekoPort:      m.cfg.NekoWebRTCPort,
-		MuxPort:       m.cfg.NekoMuxPort,
-		EnvVars:       env,
-		Limits:        limits,
+		ContainerName:    containerName,
+		Image:            m.cfg.NekoImage,
+		NetworkName:      networkName,
+		ShmSize:          m.cfg.NekoShmSize,
+		NekoPort:         m.cfg.NekoWebRTCPort,
+		MuxPort:          m.cfg.NekoMuxPort,
+		EnvVars:          env,
+		Limits:           limits,
+		DevContainerName: devContainerName,
+		DevContainerIP:   devContainerIP,
 	})
 
 	// Release lock during Docker I/O
@@ -232,6 +234,18 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		slog.Info("socat available in Neko container", "workspace", workspaceID)
 	}
 
+	// Run an initial port sync BEFORE Chrome customization. This ensures socat
+	// forwarders are established and tracked in state before Chrome opens the
+	// startURL. The pre-seed in applyChromeCustomization is removed — this
+	// initial sync handles it properly with state tracking.
+	m.mu.Lock()
+	if s, ok := m.sidecars[workspaceID]; ok && s == state {
+		state.Status = StatusRunning
+		state.TargetHost = devContainerName
+	}
+	m.mu.Unlock()
+	m.syncForwarders(ctx, workspaceID)
+
 	// Apply Chrome customization: disable extensions (SponsorBlock, uBlock),
 	// suppress first-run prompts, set startup URL, user agent, and touch mode.
 	customization := ChromeCustomization{
@@ -240,7 +254,7 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		IsTouchDevice:    opts.IsTouchDevice,
 		DevicePixelRatio: opts.DevicePixelRatio,
 	}
-	if customErr := applyChromeCustomization(ctx, m.docker, containerName, customization, devContainerName); customErr != nil {
+	if customErr := applyChromeCustomization(ctx, m.docker, containerName, customization); customErr != nil {
 		slog.Warn("Failed to apply Chrome customization — browser may show extension popups",
 			"workspace", workspaceID, "error", customErr)
 	}

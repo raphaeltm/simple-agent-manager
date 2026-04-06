@@ -115,7 +115,7 @@ func (s *Server) handleStartBrowser(w http.ResponseWriter, r *http.Request) {
 		StartURL:         startURL,
 	}
 
-	state, err := s.browserManager.Start(ctx, workspaceID, netInfo.NetworkName, netInfo.ContainerName, opts)
+	state, err := s.browserManager.Start(ctx, workspaceID, netInfo.NetworkName, netInfo.ContainerName, netInfo.IPAddress, opts)
 	if err != nil {
 		errMsg := "failed to start browser sidecar"
 		if state != nil && state.Error != "" {
