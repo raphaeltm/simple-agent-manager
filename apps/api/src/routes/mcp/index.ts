@@ -52,21 +52,23 @@ import {
 } from './task-tools';
 import {
   handleCheckCostEstimate,
-  handleCheckDnsStatus,
   handleExposePort,
-  handleGetCiStatus,
   handleGetCredentialStatus,
+  handleGetNetworkInfo,
+  handleGetWorkspaceDiffSummary,
+  handleGetWorkspaceInfo,
+} from './workspace-tools';
+import {
+  handleCheckDnsStatus,
+  handleGetCiStatus,
   handleGetDeploymentStatus,
   handleGetFileLocks,
-  handleGetNetworkInfo,
   handleGetPeerAgentOutput,
   handleGetRemainingBudget,
   handleGetTaskDependencies,
-  handleGetWorkspaceDiffSummary,
-  handleGetWorkspaceInfo,
   handleListProjectAgents,
   handleReportEnvironmentIssue,
-} from './workspace-tools';
+} from './workspace-tools-direct';
 
 // Re-export public API for backward compatibility
 export type { TokenRow } from './session-tools';
