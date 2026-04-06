@@ -757,7 +757,7 @@ func TestWriteDefaultDevcontainerConfig(t *testing.T) {
 		DefaultDevcontainerConfigPath: configPath,
 	}
 
-	gotPath, err := writeDefaultDevcontainerConfig(cfg, "")
+	gotPath, err := writeDefaultDevcontainerConfig(cfg, "", "")
 	if err != nil {
 		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
 	}
@@ -815,7 +815,7 @@ func TestWriteDefaultDevcontainerConfigWithRemoteUser(t *testing.T) {
 		DefaultDevcontainerRemoteUser: "vscode",
 	}
 
-	_, err := writeDefaultDevcontainerConfig(cfg, "")
+	_, err := writeDefaultDevcontainerConfig(cfg, "", "")
 	if err != nil {
 		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
 	}
@@ -842,7 +842,7 @@ func TestWriteDefaultDevcontainerConfigCustomImage(t *testing.T) {
 		DefaultDevcontainerConfigPath: configPath,
 	}
 
-	_, err := writeDefaultDevcontainerConfig(cfg, "")
+	_, err := writeDefaultDevcontainerConfig(cfg, "", "")
 	if err != nil {
 		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
 	}
@@ -869,7 +869,7 @@ func TestWriteDefaultDevcontainerConfigFallbackDefaults(t *testing.T) {
 		DefaultDevcontainerConfigPath: configPath,
 	}
 
-	_, err := writeDefaultDevcontainerConfig(cfg, "")
+	_, err := writeDefaultDevcontainerConfig(cfg, "", "")
 	if err != nil {
 		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
 	}
@@ -897,7 +897,7 @@ func TestWriteDefaultDevcontainerConfigWithVolume(t *testing.T) {
 		Repository:                    "owner/my-repo",
 	}
 
-	_, err := writeDefaultDevcontainerConfig(cfg, "sam-ws-abc123")
+	_, err := writeDefaultDevcontainerConfig(cfg, "sam-ws-abc123", "")
 	if err != nil {
 		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
 	}
@@ -1077,7 +1077,7 @@ exit 1
 		Repository:   "owner/my-repo",
 	}
 
-	path, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123")
+	path, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123", "")
 	if err != nil {
 		t.Fatalf("writeMountOverrideConfig returned error: %v", err)
 	}
@@ -1131,7 +1131,7 @@ exit 1
 		Repository:   "owner/my-repo",
 	}
 
-	_, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123")
+	_, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123", "")
 	if err == nil {
 		t.Fatal("expected writeMountOverrideConfig to fail when runtime source is missing")
 	}
@@ -1782,7 +1782,7 @@ exit 1
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "")
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", "")
 	if err != nil {
 		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
 	}
@@ -1876,7 +1876,7 @@ exit 0
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "sam-ws-logfail")
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "sam-ws-logfail", "")
 	if err == nil {
 		t.Fatal("expected ensureDevcontainerReady to fail when build logs cannot be persisted")
 	}
@@ -1988,11 +1988,454 @@ func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "")
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", "")
 	if err != nil {
 		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
 	}
 	if usedFallback {
 		t.Fatal("expected usedFallback=false when repo config succeeds")
+	}
+}
+
+// --- Credential helper host-side tests ---
+
+func TestSanitizeWorkspaceID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"simple id", "abc123", "abc123"},
+		{"with hyphens", "ws-abc-123", "ws-abc-123"},
+		{"path traversal", "../../../etc/passwd", "etcpasswd"},
+		{"special chars", "ws_abc.123!@#", "wsabc123"},
+		{"empty", "", ""},
+		{"only special", "!@#$%^&*()", ""},
+		{"mixed case", "Ws-AbC-123", "Ws-AbC-123"},
+		{"spaces", "ws abc 123", "wsabc123"},
+		{"slashes", "ws/abc\\123", "wsabc123"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := sanitizeWorkspaceID(tc.in)
+			if got != tc.want {
+				t.Fatalf("sanitizeWorkspaceID(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCredentialHelperHostPath(t *testing.T) {
+	t.Parallel()
+
+	got := credentialHelperHostPath("ws-abc-123")
+	want := "/tmp/git-credential-sam-ws-abc-123"
+	if got != want {
+		t.Fatalf("credentialHelperHostPath = %q, want %q", got, want)
+	}
+}
+
+func TestCredentialHelperHostPathSanitizes(t *testing.T) {
+	t.Parallel()
+
+	got := credentialHelperHostPath("../../../etc/passwd")
+	want := "/tmp/git-credential-sam-etcpasswd"
+	if got != want {
+		t.Fatalf("credentialHelperHostPath = %q, want %q", got, want)
+	}
+}
+
+func TestWriteCredentialHelperToHost(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:   "test-ws-123",
+		Repository:    "https://github.com/test/repo",
+		CallbackToken: "test-token",
+		Port:          8080,
+	}
+
+	hostPath, err := writeCredentialHelperToHost(cfg)
+	if err != nil {
+		t.Fatalf("writeCredentialHelperToHost failed: %v", err)
+	}
+	if hostPath == "" {
+		t.Fatal("expected non-empty host path")
+	}
+	defer os.Remove(hostPath)
+
+	// Verify file exists and has correct permissions.
+	info, err := os.Stat(hostPath)
+	if err != nil {
+		t.Fatalf("stat failed: %v", err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("expected permissions 0700, got %o", info.Mode().Perm())
+	}
+
+	// Verify content is a valid script.
+	content, err := os.ReadFile(hostPath)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if !strings.HasPrefix(string(content), "#!/bin/sh") {
+		t.Fatal("expected script to start with #!/bin/sh")
+	}
+	if !strings.Contains(string(content), "test-token") {
+		t.Fatal("expected script to contain callback token")
+	}
+}
+
+func TestWriteCredentialHelperToHostSkipsNonGitHub(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		WorkspaceID:   "test-ws",
+		Repository:    "https://gitlab.com/test/repo",
+		CallbackToken: "test-token",
+		Port:          8080,
+	}
+
+	hostPath, err := writeCredentialHelperToHost(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hostPath != "" {
+		defer os.Remove(hostPath)
+		t.Fatal("expected empty path for non-GitHub repo")
+	}
+}
+
+func TestWriteCredentialHelperToHostMissingToken(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		WorkspaceID: "test-ws",
+		Repository:  "https://github.com/test/repo",
+		Port:        8080,
+	}
+
+	_, err := writeCredentialHelperToHost(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing callback token")
+	}
+}
+
+func TestWriteCredentialHelperToHostInvalidPort(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		WorkspaceID:   "test-ws",
+		Repository:    "https://github.com/test/repo",
+		CallbackToken: "test-token",
+		Port:          0,
+	}
+
+	_, err := writeCredentialHelperToHost(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid port")
+	}
+}
+
+func TestRemoveCredentialHelperFromHost(t *testing.T) {
+	t.Parallel()
+
+	// Create a temp file to simulate a credential helper.
+	workspaceID := fmt.Sprintf("test-rm-%d", time.Now().UnixNano())
+	hostPath := credentialHelperHostPath(workspaceID)
+	if err := os.WriteFile(hostPath, []byte("test"), 0o700); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	RemoveCredentialHelperFromHost(workspaceID)
+
+	if _, err := os.Stat(hostPath); !os.IsNotExist(err) {
+		t.Fatal("expected file to be removed")
+	}
+}
+
+func TestRemoveCredentialHelperFromHostNonExistent(t *testing.T) {
+	t.Parallel()
+
+	// Should not panic on non-existent file.
+	RemoveCredentialHelperFromHost("non-existent-workspace-id-9999")
+}
+
+func TestCredentialHelperContainerEnv(t *testing.T) {
+	t.Parallel()
+
+	env := credentialHelperContainerEnv()
+	if env["GIT_CONFIG_COUNT"] != "1" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=1, got %q", env["GIT_CONFIG_COUNT"])
+	}
+	if env["GIT_CONFIG_KEY_0"] != "credential.helper" {
+		t.Fatalf("expected GIT_CONFIG_KEY_0=credential.helper, got %q", env["GIT_CONFIG_KEY_0"])
+	}
+	if env["GIT_CONFIG_VALUE_0"] != credentialHelperContainerPath {
+		t.Fatalf("expected GIT_CONFIG_VALUE_0=%s, got %q", credentialHelperContainerPath, env["GIT_CONFIG_VALUE_0"])
+	}
+}
+
+func TestCredentialHelperMountEntry(t *testing.T) {
+	t.Parallel()
+
+	got := credentialHelperMountEntry("/tmp/git-credential-sam-test")
+	if !strings.Contains(got, "source=/tmp/git-credential-sam-test") {
+		t.Fatalf("expected source in mount entry, got %q", got)
+	}
+	if !strings.Contains(got, "target="+credentialHelperContainerPath) {
+		t.Fatalf("expected target in mount entry, got %q", got)
+	}
+	if !strings.Contains(got, "type=bind") {
+		t.Fatalf("expected type=bind in mount entry, got %q", got)
+	}
+	if !strings.Contains(got, "readonly") {
+		t.Fatalf("expected readonly in mount entry, got %q", got)
+	}
+}
+
+func TestWriteCredentialOverrideConfig(t *testing.T) {
+	t.Parallel()
+
+	path, err := writeCredentialOverrideConfig("/tmp/git-credential-sam-test")
+	if err != nil {
+		t.Fatalf("writeCredentialOverrideConfig failed: %v", err)
+	}
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Verify mounts array.
+	mounts, ok := cfg["mounts"].([]interface{})
+	if !ok || len(mounts) != 1 {
+		t.Fatalf("expected mounts array with 1 entry, got %v", cfg["mounts"])
+	}
+	mount := mounts[0].(string)
+	if !strings.Contains(mount, "git-credential-sam-test") {
+		t.Fatalf("expected mount to reference host path, got %q", mount)
+	}
+
+	// Verify containerEnv.
+	envMap, ok := cfg["containerEnv"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected containerEnv to be a map, got %T", cfg["containerEnv"])
+	}
+	if envMap["GIT_CONFIG_COUNT"] != "1" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=1, got %v", envMap["GIT_CONFIG_COUNT"])
+	}
+}
+
+func TestWriteCredentialOverrideConfigEmpty(t *testing.T) {
+	t.Parallel()
+
+	path, err := writeCredentialOverrideConfig("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != "" {
+		t.Fatalf("expected empty path for empty input, got %q", path)
+	}
+}
+
+func TestInjectCredentialHelperIntoConfig(t *testing.T) {
+	t.Parallel()
+
+	// Create a config with existing mounts and containerEnv.
+	tmpFile, err := os.CreateTemp("", "inject-test-*.json")
+	if err != nil {
+		t.Fatalf("CreateTemp failed: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	existingConfig := `{
+  "image": "ubuntu:22.04",
+  "mounts": ["source=vol1,target=/data,type=volume"],
+  "containerEnv": {
+    "MY_VAR": "my_value"
+  }
+}
+`
+	if _, err := tmpFile.WriteString(existingConfig); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	tmpFile.Close()
+
+	if err := injectCredentialHelperIntoConfig(tmpFile.Name(), "/tmp/git-credential-sam-test"); err != nil {
+		t.Fatalf("injectCredentialHelperIntoConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Verify original mount preserved and new mount added.
+	mounts, ok := cfg["mounts"].([]interface{})
+	if !ok || len(mounts) != 2 {
+		t.Fatalf("expected 2 mounts, got %v", cfg["mounts"])
+	}
+
+	// Verify original env preserved and new env added.
+	envMap, ok := cfg["containerEnv"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected containerEnv to be a map")
+	}
+	if envMap["MY_VAR"] != "my_value" {
+		t.Fatalf("expected MY_VAR preserved, got %v", envMap["MY_VAR"])
+	}
+	if envMap["GIT_CONFIG_COUNT"] != "1" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=1, got %v", envMap["GIT_CONFIG_COUNT"])
+	}
+}
+
+func TestInjectCredentialHelperIntoConfigEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Create a config with no mounts or containerEnv.
+	tmpFile, err := os.CreateTemp("", "inject-empty-test-*.json")
+	if err != nil {
+		t.Fatalf("CreateTemp failed: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(`{"image": "ubuntu:22.04"}`); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	tmpFile.Close()
+
+	if err := injectCredentialHelperIntoConfig(tmpFile.Name(), "/tmp/git-credential-sam-test"); err != nil {
+		t.Fatalf("injectCredentialHelperIntoConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Verify mounts and containerEnv were added.
+	mounts, ok := cfg["mounts"].([]interface{})
+	if !ok || len(mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %v", cfg["mounts"])
+	}
+	if _, ok := cfg["containerEnv"]; !ok {
+		t.Fatal("expected containerEnv to be added")
+	}
+}
+
+func TestInjectCredentialHelperSkipsEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Should be a no-op when credHelperHostPath is empty.
+	err := injectCredentialHelperIntoConfig("/tmp/some-config.json", "")
+	if err != nil {
+		t.Fatalf("expected no error for empty credHelperHostPath, got %v", err)
+	}
+}
+
+func TestWriteDefaultDevcontainerConfigWithCredentialHelper(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "config.json"),
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
+	}
+
+	path, err := writeDefaultDevcontainerConfig(cfg, "", "/tmp/git-credential-sam-test")
+	if err != nil {
+		t.Fatalf("writeDefaultDevcontainerConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Verify mounts array.
+	mounts, ok := parsed["mounts"].([]interface{})
+	if !ok || len(mounts) != 1 {
+		t.Fatalf("expected mounts array with 1 entry, got %v", parsed["mounts"])
+	}
+	mount := mounts[0].(string)
+	if !strings.Contains(mount, "git-credential-sam-test") {
+		t.Fatalf("expected mount to reference host path, got %q", mount)
+	}
+
+	// Verify containerEnv.
+	envMap, ok := parsed["containerEnv"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected containerEnv to be a map")
+	}
+	if envMap["GIT_CONFIG_COUNT"] != "1" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=1")
+	}
+}
+
+func TestWriteDefaultDevcontainerConfigWithVolumeAndCredentialHelper(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "config.json"),
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
+		Repository:                    "https://github.com/test/my-repo.git",
+		WorkspaceDir:                  "/tmp/workspace",
+	}
+
+	path, err := writeDefaultDevcontainerConfig(cfg, "sam-ws-abc123", "/tmp/git-credential-sam-test")
+	if err != nil {
+		t.Fatalf("writeDefaultDevcontainerConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Verify both workspaceMount (volume) and mounts (cred helper) are present.
+	if _, ok := parsed["workspaceMount"]; !ok {
+		t.Fatal("expected workspaceMount for volume")
+	}
+	if _, ok := parsed["mounts"]; !ok {
+		t.Fatal("expected mounts for credential helper")
+	}
+	if _, ok := parsed["containerEnv"]; !ok {
+		t.Fatal("expected containerEnv for credential helper")
 	}
 }
