@@ -192,11 +192,16 @@ func TestBuildChromeFlags_NoViewport(t *testing.T) {
 }
 
 func TestBuildChromeFlags_PartialViewport(t *testing.T) {
-	// Only width set, height is zero — should NOT add --window-size
-	flags := buildChromeFlags(ChromeCustomization{ViewportWidth: 375})
-	for _, f := range flags {
-		if strings.Contains(f, "--window-size") {
-			t.Errorf("should not have --window-size with only width set, got %q", f)
+	cases := []ChromeCustomization{
+		{ViewportWidth: 375},  // height zero
+		{ViewportHeight: 812}, // width zero
+	}
+	for _, c := range cases {
+		flags := buildChromeFlags(c)
+		for _, f := range flags {
+			if strings.Contains(f, "--window-size") {
+				t.Errorf("should not have --window-size for partial viewport %+v, got %q", c, f)
+			}
 		}
 	}
 }
@@ -219,9 +224,9 @@ func TestCustomSupervisordConf_NoExtraFlags(t *testing.T) {
 	if !strings.Contains(conf, "command=/usr/bin/google-chrome") {
 		t.Error("expected base chrome command")
 	}
-	// Should not have double space when no extra flags
-	if strings.Contains(conf, "--use-mock-keychain ") && strings.Contains(conf, "--use-mock-keychain  ") {
-		t.Error("should not have double space when no extra flags")
+	// Should not have double space after last base flag when no extra flags
+	if strings.Contains(conf, "--use-mock-keychain  ") {
+		t.Error("should not have double space after last base flag when no extra flags")
 	}
 }
 

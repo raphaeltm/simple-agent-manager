@@ -19,6 +19,11 @@ type ChromeCustomization struct {
 	ViewportHeight   int // Chrome window height (0 = use --start-maximized)
 }
 
+// HasViewport reports whether both viewport dimensions are valid positive values.
+func (c ChromeCustomization) HasViewport() bool {
+	return c.ViewportWidth > 0 && c.ViewportHeight > 0
+}
+
 // chromePolicies returns a Chrome enterprise policy map that:
 // - Disables all extensions (including pre-installed SponsorBlock, uBlock)
 // - Suppresses Privacy Sandbox, sign-in, sync, and first-run prompts
@@ -91,7 +96,7 @@ func buildChromeFlags(c ChromeCustomization) []string {
 		flags = append(flags, fmt.Sprintf("--force-device-scale-factor=%d", c.DevicePixelRatio))
 	}
 
-	if c.ViewportWidth > 0 && c.ViewportHeight > 0 {
+	if c.HasViewport() {
 		flags = append(flags, fmt.Sprintf("--window-size=%d,%d", c.ViewportWidth, c.ViewportHeight))
 	}
 
@@ -212,8 +217,7 @@ POLICYEOF`, string(policyJSON))
 
 	// 2. Write custom supervisord config with Chrome flags
 	extraFlags := buildChromeFlags(c)
-	hasViewport := c.ViewportWidth > 0 && c.ViewportHeight > 0
-	supervisordConf := customSupervisordConf(extraFlags, hasViewport)
+	supervisordConf := customSupervisordConf(extraFlags, c.HasViewport())
 
 	// Escape the config for shell heredoc
 	confCmd := fmt.Sprintf(
