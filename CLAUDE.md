@@ -17,8 +17,7 @@ packages/
 ├── cloud-init/   # Cloud-init template generator
 ├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)
 ├── ui/           # Design system tokens and shared UI components
-├── workspace-mcp/ # Workspace MCP server
-└── vm-agent/     # Go VM agent (PTY, WebSocket, ACP)
+└── vm-agent/     # Go VM agent (PTY, WebSocket, ACP, MCP tool endpoints)
 tasks/            # Task tracking (backlog -> active -> archive)
 specs/            # Feature specifications
 docs/             # Documentation
