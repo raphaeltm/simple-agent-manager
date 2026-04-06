@@ -244,16 +244,17 @@ func TestManagerCustomViewport(t *testing.T) {
 		t.Fatalf("Start error: %v", err)
 	}
 
-	// Verify the docker run command included the custom resolution
+	// Verify the docker run command included the clamped resolution.
+	// Chrome on Linux has a minimum window width of 500px, so 375 is clamped to 500.
 	calls := docker.getCalls()
 	found := false
 	for _, c := range calls {
-		if strings.Contains(c, "NEKO_SCREEN=375x667@30") {
+		if strings.Contains(c, "NEKO_SCREEN=500x667@30") {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected docker run with custom resolution 375x667@30")
+		t.Error("expected docker run with clamped resolution 500x667@30 (375 clamped to Chrome minimum 500)")
 	}
 }
 
