@@ -182,6 +182,23 @@ func sanitizeStartURL(rawURL string) string {
 	return result
 }
 
+// customXvfbConf generates a supervisord config for Xvfb with the requested
+// screen resolution. The default Neko image configures Xvfb via NEKO_SCREEN
+// env var, but some image versions ignore it. Writing the supervisord config
+// directly and restarting ensures the correct resolution is applied.
+func customXvfbConf(width, height int) string {
+	return fmt.Sprintf(`[program:xvfb]
+command=/usr/bin/Xvfb :99 -screen 0 %dx%dx24
+autorestart=true
+priority=300
+user=neko
+stdout_logfile=/var/log/neko/xvfb.log
+stdout_logfile_maxbytes=100KB
+stdout_logfile_backups=0
+redirect_stderr=true
+`, width, height)
+}
+
 // applyChromeCustomization injects Chrome enterprise policies and a custom
 // supervisord config into a running Neko container, then restarts Chrome so it
 // picks up the changes. This must be called after `docker run` and after the
@@ -194,6 +211,25 @@ func applyChromeCustomization(ctx context.Context, docker DockerExecutor, contai
 		slog.Warn("Rejected non-localhost startURL", "container", containerName, "url", c.StartURL)
 	}
 	c.StartURL = safeURL
+
+	// 0. Override the Xvfb virtual display resolution if a specific viewport is requested.
+	// The NEKO_SCREEN env var should control this at container start, but some Neko
+	// image versions ignore it. Writing the Xvfb supervisord config explicitly and
+	// restarting ensures the virtual display matches the requested dimensions.
+	if c.HasViewport() {
+		xvfbConf := customXvfbConf(c.ViewportWidth, c.ViewportHeight)
+		xvfbCmd := fmt.Sprintf(
+			`cat > /etc/neko/supervisord/xvfb.conf << 'XVFBEOF'
+%s
+XVFBEOF`, xvfbConf)
+
+		if err := docker.RunSilent(ctx, "exec", containerName, "sh", "-c", xvfbCmd); err != nil {
+			slog.Warn("Failed to write Xvfb supervisord config", "container", containerName, "error", err)
+		} else {
+			slog.Info("Xvfb supervisord config written", "container", containerName,
+				"width", c.ViewportWidth, "height", c.ViewportHeight)
+		}
+	}
 
 	// 1. Write Chrome enterprise policy JSON
 	policyMap := chromePolicies(c.StartURL)
@@ -230,12 +266,24 @@ CONFEOF`, supervisordConf)
 	}
 	slog.Info("Chrome supervisord config written", "container", containerName, "flags", len(extraFlags))
 
-	// 3. Restart Chrome via supervisorctl so it picks up the new config + policies
+	// 3. Restart Xvfb and Chrome via supervisorctl.
+	// Xvfb must restart first to apply the new screen resolution, then Chrome
+	// restarts to pick up the new config + policies.
 	// NOTE: socat forwarders are pre-established by the initial syncForwarders()
 	// call in Manager.Start() before this function runs, so the startURL port
 	// is already forwarded and properly tracked in state.
 	if err := docker.RunSilent(ctx, "exec", containerName, "supervisorctl", "reread"); err != nil {
 		slog.Warn("supervisorctl reread failed", "container", containerName, "error", err)
+	}
+	if c.HasViewport() {
+		// Restart Xvfb to apply the new display resolution. This also kills Chrome
+		// since Chrome depends on the X display. Supervisord auto-restarts Chrome.
+		if err := docker.RunSilent(ctx, "exec", containerName, "supervisorctl", "restart", "xvfb"); err != nil {
+			slog.Warn("Failed to restart Xvfb in Neko container", "container", containerName, "error", err)
+		} else {
+			slog.Info("Xvfb restarted with custom resolution", "container", containerName,
+				"width", c.ViewportWidth, "height", c.ViewportHeight)
+		}
 	}
 	if err := docker.RunSilent(ctx, "exec", containerName, "supervisorctl", "restart", "google-chrome"); err != nil {
 		slog.Warn("Failed to restart Chrome in Neko container", "container", containerName, "error", err)
