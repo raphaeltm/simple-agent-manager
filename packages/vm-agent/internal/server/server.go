@@ -793,6 +793,14 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/workspaces/{workspaceId}/browser/proxy/{path...}", s.handleBrowserProxy)
 	mux.HandleFunc("/workspaces/{workspaceId}/browser/proxy", s.handleBrowserProxy)
 
+	// MCP workspace tools (proxied from sam-mcp via API Worker)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/workspace-info", s.handleMcpWorkspaceInfo)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/credential-status", s.handleMcpCredentialStatus)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/network-info", s.handleMcpNetworkInfo)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/expose-port", s.handleMcpExposePort)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/cost-estimate", s.handleMcpCostEstimate)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/diff-summary", s.handleMcpDiffSummary)
+
 	// Boot log WebSocket (available during bootstrap for real-time streaming)
 	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)
 

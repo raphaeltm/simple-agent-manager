@@ -21,7 +21,7 @@ Claude Code and Mistral Vibe can use the same SAM MCP server successfully, so th
 - Claude MCP servers are injected directly through ACP `NewSessionRequest.McpServers` and `LoadSessionRequest.McpServers` in [session_host.go](/workspaces/simple-agent-manager/packages/vm-agent/internal/acp/session_host.go#L1049) and [session_host.go](/workspaces/simple-agent-manager/packages/vm-agent/internal/acp/session_host.go#L1090).
 - That path uses `acpsdk.McpServerHttp` objects built by `buildAcpMcpServers()` in [session_host.go](/workspaces/simple-agent-manager/packages/vm-agent/internal/acp/session_host.go#L47).
 - Claude Code's ACP adapter handles translation from ACP MCP config to Claude's internal MCP implementation. SAM does not need to write a Claude-specific TOML/JSON config file for the main `sam-mcp` server.
-- Claude also gets a separate workspace-local stdio MCP server via `injectWorkspaceMcpIfAvailable()` in [session_host.go](/workspaces/simple-agent-manager/packages/vm-agent/internal/acp/session_host.go#L930) and [workspace_mcp.go](/workspaces/simple-agent-manager/packages/vm-agent/internal/acp/workspace_mcp.go), but that is additive and not the same HTTP path as `sam-mcp`.
+- **Note**: The separate workspace-local stdio MCP server (`workspace_mcp.go` / `injectWorkspaceMcpIfAvailable()`) was removed in the unify-workspace-mcp PR. All workspace tools are now served through the main `sam-mcp` HTTP server.
 
 ### 2. Mistral Vibe works because its native MCP config path is already shaped the way Vibe expects
 
@@ -130,7 +130,7 @@ Claude Code and Mistral Vibe can use the same SAM MCP server successfully, so th
 - [apps/api/src/routes/mcp/index.ts](/workspaces/simple-agent-manager/apps/api/src/routes/mcp/index.ts)
 - [packages/vm-agent/internal/acp/session_host.go](/workspaces/simple-agent-manager/packages/vm-agent/internal/acp/session_host.go)
 - [packages/vm-agent/internal/acp/gateway.go](/workspaces/simple-agent-manager/packages/vm-agent/internal/acp/gateway.go)
-- [packages/vm-agent/internal/acp/workspace_mcp.go](/workspaces/simple-agent-manager/packages/vm-agent/internal/acp/workspace_mcp.go)
+- ~~`packages/vm-agent/internal/acp/workspace_mcp.go`~~ (removed — workspace tools unified into sam-mcp)
 - `tasks/archive/2026-03-07-agent-platform-awareness-mcp.md`
 - `tasks/archive/2026-03-15-fix-vibe-mcp-configuration.md`
 - `tasks/archive/2026-03-15-vibe-mcp-transport-field.md`

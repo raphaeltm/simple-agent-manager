@@ -17,6 +17,6 @@ Discovered during security audit of workspace-mcp PR. The `.gitignore` guard pre
 
 ## References
 
-- `packages/vm-agent/internal/acp/workspace_mcp.go`
+- ~~`packages/vm-agent/internal/acp/workspace_mcp.go`~~ (removed — workspace-mcp unified into sam-mcp; `.mcp.json` injection no longer exists, this task may be obsolete)
 - `packages/vm-agent/internal/acp/session_host.go` (stop/suspend paths)
 - Security audit finding: MEDIUM severity

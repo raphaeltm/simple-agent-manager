@@ -6,7 +6,7 @@ Agent environment variables (ANTHROPIC_API_KEY, GH_TOKEN, CLAUDE_CODE_OAUTH_TOKE
 
 ## Context
 
-Discovered during security audit of workspace-mcp PR. The workspace-mcp `.mcp.json` injection correctly uses stdin piping to avoid this issue, but the main agent process startup still uses `-e` flags.
+Discovered during security audit. The main agent process startup uses `-e` flags which can expose tokens. Note: the workspace-mcp stdio injection that previously used stdin piping was removed in the unify-workspace-mcp PR.
 
 ## Acceptance Criteria
 
