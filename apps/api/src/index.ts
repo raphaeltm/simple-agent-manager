@@ -321,6 +321,11 @@ export interface Env {
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string;  // "https" (default) or "http"
   VM_AGENT_PORT?: string;      // "8443" (default) or custom port
+  // Workspace tool proxy configuration (unified from workspace-mcp)
+  WORKSPACE_TOOL_TIMEOUT_MS?: string;         // Timeout for VM agent proxy calls (default: 15000)
+  WORKSPACE_TOOL_COST_PRICING_JSON?: string;  // VM hourly pricing JSON (default: built-in pricing table)
+  WORKSPACE_TOOL_CI_RUNS_LIMIT?: string;      // Max CI runs to return (default: 10)
+  WORKSPACE_TOOL_DEPLOY_RUNS_LIMIT?: string;  // Max deployment runs to return (default: 5)
   // Origin CA certificate/key (injected into cloud-init for VM TLS)
   ORIGIN_CA_CERT?: string;
   ORIGIN_CA_KEY?: string;

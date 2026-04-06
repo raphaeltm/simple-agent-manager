@@ -50,6 +50,23 @@ import {
   handleSearchTasks,
   handleUpdateTaskStatus,
 } from './task-tools';
+import {
+  handleCheckCostEstimate,
+  handleCheckDnsStatus,
+  handleExposePort,
+  handleGetCiStatus,
+  handleGetCredentialStatus,
+  handleGetDeploymentStatus,
+  handleGetFileLocks,
+  handleGetNetworkInfo,
+  handleGetPeerAgentOutput,
+  handleGetRemainingBudget,
+  handleGetTaskDependencies,
+  handleGetWorkspaceDiffSummary,
+  handleGetWorkspaceInfo,
+  handleListProjectAgents,
+  handleReportEnvironmentIssue,
+} from './workspace-tools';
 
 // Re-export public API for backward compatibility
 export type { TokenRow } from './session-tools';
@@ -178,6 +195,37 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleSearchIdeas(requestId, toolArgs, tokenData, c.env));
         case 'get_deployment_credentials':
           return c.json(await handleGetDeploymentCredentials(requestId, tokenData, c.env, rawToken!));
+        // ─── Workspace tools (unified from workspace-mcp) ──────────────
+        case 'get_workspace_info':
+          return c.json(await handleGetWorkspaceInfo(requestId, tokenData, c.env));
+        case 'get_credential_status':
+          return c.json(await handleGetCredentialStatus(requestId, tokenData, c.env));
+        case 'get_network_info':
+          return c.json(await handleGetNetworkInfo(requestId, tokenData, c.env));
+        case 'expose_port':
+          return c.json(await handleExposePort(requestId, toolArgs, tokenData, c.env));
+        case 'check_dns_status':
+          return c.json(await handleCheckDnsStatus(requestId, tokenData, c.env));
+        case 'check_cost_estimate':
+          return c.json(await handleCheckCostEstimate(requestId, tokenData, c.env));
+        case 'get_remaining_budget':
+          return c.json(await handleGetRemainingBudget(requestId, tokenData, c.env));
+        case 'list_project_agents':
+          return c.json(await handleListProjectAgents(requestId, tokenData, c.env));
+        case 'get_file_locks':
+          return c.json(await handleGetFileLocks(requestId, tokenData, c.env));
+        case 'get_peer_agent_output':
+          return c.json(await handleGetPeerAgentOutput(requestId, toolArgs, tokenData, c.env));
+        case 'get_task_dependencies':
+          return c.json(await handleGetTaskDependencies(requestId, tokenData, c.env));
+        case 'get_ci_status':
+          return c.json(await handleGetCiStatus(requestId, tokenData, c.env));
+        case 'get_deployment_status':
+          return c.json(await handleGetDeploymentStatus(requestId, tokenData, c.env));
+        case 'get_workspace_diff_summary':
+          return c.json(await handleGetWorkspaceDiffSummary(requestId, tokenData, c.env));
+        case 'report_environment_issue':
+          return c.json(await handleReportEnvironmentIssue(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }
