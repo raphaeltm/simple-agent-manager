@@ -48,6 +48,7 @@ type SidecarState struct {
 	BridgeIP      string // Cached Neko container bridge IP (stable for container lifetime)
 	Password      string // Per-container random password for Neko viewer
 	PasswordAdmin string // Per-container random password for Neko admin
+	Resolution    string // Screen resolution the container was started with (e.g. "375x667")
 }
 
 // StartOptions configures sidecar creation.
@@ -116,6 +117,35 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 
 	if existing, ok := m.sidecars[workspaceID]; ok {
 		if existing.Status == StatusRunning {
+			// Check if the requested resolution differs from the running container.
+			// The Neko virtual display resolution (NEKO_SCREEN) is set at container
+			// creation time and cannot be changed without restarting the container.
+			requestedResolution := m.cfg.NekoScreenResolution
+			if opts.ViewportWidth > 0 && opts.ViewportHeight > 0 {
+				requestedResolution = fmt.Sprintf("%dx%d", opts.ViewportWidth, opts.ViewportHeight)
+			}
+			if existing.Resolution != "" && existing.Resolution != requestedResolution {
+				slog.Info("Viewport changed — restarting Neko sidecar",
+					"workspace", workspaceID,
+					"oldResolution", existing.Resolution,
+					"newResolution", requestedResolution,
+				)
+				containerName := existing.ContainerName
+				// Cancel poll loop
+				if cancel, ok := m.stopPolls[workspaceID]; ok {
+					cancel()
+					delete(m.stopPolls, workspaceID)
+				}
+				delete(m.sidecars, workspaceID)
+				m.mu.Unlock()
+
+				// Remove old container (without holding lock)
+				_ = m.docker.RunSilent(ctx, "rm", "-f", containerName)
+
+				// Re-enter Start to create fresh container with new resolution
+				return m.Start(ctx, workspaceID, networkName, devContainerName, devContainerIP, opts)
+			}
+
 			cp := *existing
 			m.mu.Unlock()
 			return &cp, nil
@@ -142,6 +172,12 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		return &SidecarState{Status: StatusError, Error: "failed to generate Neko admin password"}, fmt.Errorf("failed to generate Neko admin password: %w", err)
 	}
 
+	// Build Neko container config
+	resolution := m.cfg.NekoScreenResolution
+	if opts.ViewportWidth > 0 && opts.ViewportHeight > 0 {
+		resolution = fmt.Sprintf("%dx%d", opts.ViewportWidth, opts.ViewportHeight)
+	}
+
 	state := &SidecarState{
 		Status:        StatusStarting,
 		ContainerName: containerName,
@@ -150,14 +186,9 @@ func (m *Manager) Start(ctx context.Context, workspaceID, networkName, devContai
 		TargetHost:    devContainerName,
 		Password:      password,
 		PasswordAdmin: passwordAdmin,
+		Resolution:    resolution,
 	}
 	m.sidecars[workspaceID] = state
-
-	// Build Neko container config
-	resolution := m.cfg.NekoScreenResolution
-	if opts.ViewportWidth > 0 && opts.ViewportHeight > 0 {
-		resolution = fmt.Sprintf("%dx%d", opts.ViewportWidth, opts.ViewportHeight)
-	}
 
 	enableAudio := m.cfg.NekoEnableAudio
 	if opts.EnableAudio != nil {
