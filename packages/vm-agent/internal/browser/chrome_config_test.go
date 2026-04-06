@@ -169,8 +169,40 @@ func TestChromePolicies_NoStartURL(t *testing.T) {
 	}
 }
 
+func TestBuildChromeFlags_Viewport(t *testing.T) {
+	flags := buildChromeFlags(ChromeCustomization{ViewportWidth: 375, ViewportHeight: 812})
+	found := false
+	for _, f := range flags {
+		if f == "--window-size=375,812" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected --window-size=375,812 for viewport 375x812")
+	}
+}
+
+func TestBuildChromeFlags_NoViewport(t *testing.T) {
+	flags := buildChromeFlags(ChromeCustomization{})
+	for _, f := range flags {
+		if strings.Contains(f, "--window-size") {
+			t.Errorf("should not have --window-size when viewport is zero, got %q", f)
+		}
+	}
+}
+
+func TestBuildChromeFlags_PartialViewport(t *testing.T) {
+	// Only width set, height is zero — should NOT add --window-size
+	flags := buildChromeFlags(ChromeCustomization{ViewportWidth: 375})
+	for _, f := range flags {
+		if strings.Contains(f, "--window-size") {
+			t.Errorf("should not have --window-size with only width set, got %q", f)
+		}
+	}
+}
+
 func TestCustomSupervisordConf_ContainsCommand(t *testing.T) {
-	conf := customSupervisordConf([]string{"--no-first-run"})
+	conf := customSupervisordConf([]string{"--no-first-run"}, false)
 	if !strings.Contains(conf, "[program:google-chrome]") {
 		t.Error("expected supervisord program header")
 	}
@@ -183,12 +215,29 @@ func TestCustomSupervisordConf_ContainsCommand(t *testing.T) {
 }
 
 func TestCustomSupervisordConf_NoExtraFlags(t *testing.T) {
-	conf := customSupervisordConf(nil)
+	conf := customSupervisordConf(nil, false)
 	if !strings.Contains(conf, "command=/usr/bin/google-chrome") {
 		t.Error("expected base chrome command")
 	}
-	// Should not have trailing space after base flags
+	// Should not have double space when no extra flags
 	if strings.Contains(conf, "--use-mock-keychain ") && strings.Contains(conf, "--use-mock-keychain  ") {
 		t.Error("should not have double space when no extra flags")
+	}
+}
+
+func TestCustomSupervisordConf_DefaultHasStartMaximized(t *testing.T) {
+	conf := customSupervisordConf(nil, false)
+	if !strings.Contains(conf, "--start-maximized") {
+		t.Error("expected --start-maximized when hasViewport is false")
+	}
+}
+
+func TestCustomSupervisordConf_ViewportOmitsStartMaximized(t *testing.T) {
+	conf := customSupervisordConf([]string{"--window-size=375,812"}, true)
+	if strings.Contains(conf, "--start-maximized") {
+		t.Error("should NOT have --start-maximized when hasViewport is true")
+	}
+	if !strings.Contains(conf, "--window-size=375,812") {
+		t.Error("expected --window-size=375,812 in extra flags")
 	}
 }

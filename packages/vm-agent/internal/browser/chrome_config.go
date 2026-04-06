@@ -15,6 +15,8 @@ type ChromeCustomization struct {
 	StartURL         string
 	IsTouchDevice    bool
 	DevicePixelRatio int
+	ViewportWidth    int // Chrome window width (0 = use --start-maximized)
+	ViewportHeight   int // Chrome window height (0 = use --start-maximized)
 }
 
 // chromePolicies returns a Chrome enterprise policy map that:
@@ -89,6 +91,10 @@ func buildChromeFlags(c ChromeCustomization) []string {
 		flags = append(flags, fmt.Sprintf("--force-device-scale-factor=%d", c.DevicePixelRatio))
 	}
 
+	if c.ViewportWidth > 0 && c.ViewportHeight > 0 {
+		flags = append(flags, fmt.Sprintf("--window-size=%d,%d", c.ViewportWidth, c.ViewportHeight))
+	}
+
 	// Suppress various Chrome UI noise.
 	// NOTE: --disable-infobars is intentionally omitted — it is deprecated
 	// since Chrome 77 and itself triggers the "unsupported command-line flag"
@@ -115,15 +121,24 @@ func buildChromeFlags(c ChromeCustomization) []string {
 // customSupervisordConf generates a supervisord config for Chrome that includes
 // custom flags. The default Neko google-chrome image hardcodes Chrome flags in
 // its supervisord config with no env var expansion, so we must override it.
-func customSupervisordConf(extraFlags []string) string {
+// When hasViewport is true, --start-maximized is omitted since --window-size
+// in the extra flags controls the window dimensions instead.
+func customSupervisordConf(extraFlags []string, hasViewport bool) string {
 	flagStr := ""
 	if len(extraFlags) > 0 {
 		flagStr = " " + strings.Join(extraFlags, " ")
 	}
 
+	// When a specific viewport is requested, skip --start-maximized so
+	// the --window-size flag in extraFlags controls Chrome's dimensions.
+	windowFlag := " --start-maximized"
+	if hasViewport {
+		windowFlag = ""
+	}
+
 	return fmt.Sprintf(`[program:google-chrome]
 environment=HOME="/home/neko",USER="neko",DISPLAY=":99.0"
-command=/usr/bin/google-chrome --no-sandbox --window-position=0,0 --start-maximized --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-breakpad --disable-component-extensions-with-background-pages --disable-component-update --disable-default-apps --disable-dev-shm-usage --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --metrics-recording-only --password-store=basic --use-mock-keychain --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222%s
+command=/usr/bin/google-chrome --no-sandbox --window-position=0,0%s --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-breakpad --disable-component-extensions-with-background-pages --disable-component-update --disable-default-apps --disable-dev-shm-usage --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --metrics-recording-only --password-store=basic --use-mock-keychain --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222%s
 autorestart=true
 priority=800
 user=neko
@@ -131,7 +146,7 @@ stdout_logfile=/var/log/neko/chrome.log
 stdout_logfile_maxbytes=100KB
 stdout_logfile_backups=0
 redirect_stderr=true
-`, flagStr)
+`, windowFlag, flagStr)
 }
 
 // sanitizeStartURL validates and sanitizes the startup URL. Only http/https
@@ -197,7 +212,8 @@ POLICYEOF`, string(policyJSON))
 
 	// 2. Write custom supervisord config with Chrome flags
 	extraFlags := buildChromeFlags(c)
-	supervisordConf := customSupervisordConf(extraFlags)
+	hasViewport := c.ViewportWidth > 0 && c.ViewportHeight > 0
+	supervisordConf := customSupervisordConf(extraFlags, hasViewport)
 
 	// Escape the config for shell heredoc
 	confCmd := fmt.Sprintf(
