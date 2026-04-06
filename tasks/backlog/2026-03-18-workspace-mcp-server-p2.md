@@ -1,7 +1,7 @@
 # Workspace-Aware MCP Server — Priority 2 (Extended Tools)
 
 **Created**: 2026-03-18
-**Depends on**: `tasks/backlog/2026-03-18-workspace-mcp-server-p1.md` (server scaffold and core tools must exist first)
+**Depends on**: Core workspace tools are now in `apps/api/src/routes/mcp/workspace-tools.ts` (unified from workspace-mcp)
 **Context**: Second batch of workspace MCP tools. These are useful but less urgent — they enhance agent intelligence, enable advanced workflows, and improve the developer experience.
 
 ## Implementation Checklist
@@ -61,7 +61,7 @@
 
 ## References
 
-- `tasks/backlog/2026-03-18-workspace-mcp-server-p1.md` — prerequisite (server scaffold + core tools)
-- `apps/api/src/routes/mcp.ts` — existing SAM MCP server
+- ~~`tasks/backlog/2026-03-18-workspace-mcp-server-p1.md`~~ — superseded (workspace tools unified into sam-mcp)
+- `apps/api/src/routes/mcp/index.ts` — SAM MCP server (workspace tools in `workspace-tools.ts`)
 - `packages/vm-agent/internal/server/` — VM agent HTTP API
 - `apps/api/src/services/project-data.ts` — control plane data access
