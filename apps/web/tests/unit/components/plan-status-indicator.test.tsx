@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 /**
@@ -29,7 +30,7 @@ function AgentWorkingBar({
   items: Array<{ kind: string }>;
   cancelPrompt: () => void;
 }) {
-  const [planModalOpen, setPlanModalOpen] = vi.fn(() => [false, vi.fn()] as [boolean, (v: boolean) => void])();
+  const [planModalOpen, setPlanModalOpen] = useState(false);
 
   const currentPlan = items.find(
     (item): item is PlanItem => item.kind === 'plan'
@@ -70,8 +71,25 @@ function AgentWorkingBar({
         </button>
       </div>
       {currentPlan && planModalOpen && (
-        <div data-testid="plan-modal" role="dialog">
-          Plan Modal Open
+        <div data-testid="plan-modal" role="dialog" aria-label="Agent plan progress">
+          <div data-testid="plan-modal-header">
+            Plan ({currentPlan.entries.filter(e => e.status === 'completed').length}/{currentPlan.entries.length})
+          </div>
+          <ul>
+            {currentPlan.entries.map((entry, idx) => (
+              <li key={idx} data-testid={`plan-entry-${idx}`} data-status={entry.status}>
+                {entry.content}
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => setPlanModalOpen(false)}
+            data-testid="plan-modal-close"
+            aria-label="Close plan"
+          >
+            Close
+          </button>
         </div>
       )}
     </>
@@ -154,6 +172,82 @@ describe('AgentWorkingBar — plan status indicator', () => {
 
       const btn = screen.getByTestId('plan-icon-button');
       expect(btn).toHaveAttribute('aria-label', 'View agent plan');
+    });
+
+    it('clicking plan icon opens modal showing all plan entries', () => {
+      render(<AgentWorkingBar items={[planWithActiveStep]} cancelPrompt={vi.fn()} />);
+
+      // Modal should not be visible initially
+      expect(screen.queryByTestId('plan-modal')).not.toBeInTheDocument();
+
+      // Click plan icon
+      fireEvent.click(screen.getByTestId('plan-icon-button'));
+
+      // Modal should now be visible
+      expect(screen.getByTestId('plan-modal')).toBeInTheDocument();
+      expect(screen.getByTestId('plan-modal')).toHaveAttribute('aria-label', 'Agent plan progress');
+
+      // All entries should be listed with correct status
+      expect(screen.getByTestId('plan-entry-0')).toHaveTextContent('Install dependencies');
+      expect(screen.getByTestId('plan-entry-0')).toHaveAttribute('data-status', 'completed');
+      expect(screen.getByTestId('plan-entry-1')).toHaveTextContent('Run all required tests');
+      expect(screen.getByTestId('plan-entry-1')).toHaveAttribute('data-status', 'in_progress');
+      expect(screen.getByTestId('plan-entry-2')).toHaveTextContent('Deploy to staging');
+      expect(screen.getByTestId('plan-entry-2')).toHaveAttribute('data-status', 'pending');
+
+      // Header shows completion count
+      expect(screen.getByTestId('plan-modal-header')).toHaveTextContent('Plan (1/3)');
+    });
+
+    it('clicking close button in modal closes it', () => {
+      render(<AgentWorkingBar items={[planWithActiveStep]} cancelPrompt={vi.fn()} />);
+
+      // Open modal
+      fireEvent.click(screen.getByTestId('plan-icon-button'));
+      expect(screen.getByTestId('plan-modal')).toBeInTheDocument();
+
+      // Close modal via close button
+      fireEvent.click(screen.getByTestId('plan-modal-close'));
+      expect(screen.queryByTestId('plan-modal')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('real-time plan updates', () => {
+    it('updates active step text when plan entries change', () => {
+      const initialPlan: PlanItem = {
+        kind: 'plan',
+        id: 'plan-1',
+        entries: [
+          { content: 'Step A', priority: 'high', status: 'in_progress' },
+          { content: 'Step B', priority: 'medium', status: 'pending' },
+        ],
+        timestamp: Date.now(),
+      };
+
+      const updatedPlan: PlanItem = {
+        kind: 'plan',
+        id: 'plan-1',
+        entries: [
+          { content: 'Step A', priority: 'high', status: 'completed' },
+          { content: 'Step B', priority: 'medium', status: 'in_progress' },
+        ],
+        timestamp: Date.now(),
+      };
+
+      const { rerender } = render(
+        <AgentWorkingBar items={[initialPlan]} cancelPrompt={vi.fn()} />
+      );
+
+      expect(screen.getByTestId('active-step-text')).toHaveTextContent(
+        'Agent is working on: Step A'
+      );
+
+      // Simulate ACP update — plan entries change
+      rerender(<AgentWorkingBar items={[updatedPlan]} cancelPrompt={vi.fn()} />);
+
+      expect(screen.getByTestId('active-step-text')).toHaveTextContent(
+        'Agent is working on: Step B'
+      );
     });
   });
 
