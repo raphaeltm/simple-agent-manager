@@ -10,8 +10,10 @@ import { and, desc,eq, like, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import type { ProjectData } from '../../durable-objects/project-data';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
+import { resolveParentSessionContext } from '../../services/inbox-drain';
 import * as notificationService from '../../services/notification';
 import {
   ACTIVE_STATUSES,
@@ -22,6 +24,7 @@ import {
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
+  sanitizeUserInput,
 } from './_helpers';
 
 export async function handleUpdateTaskStatus(
@@ -310,6 +313,48 @@ export async function handleCompleteTask(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // Enqueue inbox message to parent session (best-effort)
+  try {
+    const parentTaskId = await env.DATABASE.prepare(
+      'SELECT parent_task_id FROM tasks WHERE id = ? AND project_id = ?',
+    ).bind(tokenData.taskId, tokenData.projectId).first<{ parent_task_id: string | null }>();
+
+    if (parentTaskId?.parent_task_id) {
+      const parentCtx = await resolveParentSessionContext(env.DATABASE, parentTaskId.parent_task_id);
+      if (parentCtx && parentCtx.parentUserId === tokenData.userId) {
+        const limits = getMcpLimits(env);
+        const doId = env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
+        const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
+        const outputInfo = [
+          summary ? `Summary: ${sanitizeUserInput(summary).slice(0, 500)}` : null,
+          taskRow?.output_branch ? `Branch: ${sanitizeUserInput(taskRow.output_branch)}` : null,
+          taskRow?.output_pr_url ? `PR: ${sanitizeUserInput(taskRow.output_pr_url)}` : null,
+        ].filter(Boolean).join('. ');
+        await doStub.enqueueInboxMessage(
+          {
+            targetSessionId: parentCtx.parentChatSessionId,
+            sourceTaskId: tokenData.taskId,
+            messageType: 'child_completed',
+            content: sanitizeUserInput(`Sub-task '${taskRow?.title ?? tokenData.taskId}' completed.${outputInfo ? ` ${outputInfo}` : ''}`),
+            priority: 'normal',
+          },
+          limits.inboxMaxSize,
+          limits.inboxMessageMaxLength,
+        );
+        log.info('mcp.complete_task.parent_inbox_enqueued', {
+          taskId: tokenData.taskId,
+          parentTaskId: parentTaskId.parent_task_id,
+          parentSessionId: parentCtx.parentChatSessionId,
+        });
+      }
+    }
+  } catch (err) {
+    log.warn('mcp.complete_task.parent_inbox_failed', {
+      taskId: tokenData.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   log.info('mcp.complete_task', {

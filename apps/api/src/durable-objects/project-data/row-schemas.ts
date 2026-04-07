@@ -563,6 +563,45 @@ export function parseActivityEventRow(row: unknown): Record<string, unknown> {
 }
 
 // =============================================================================
+// Session inbox row schemas
+// =============================================================================
+
+/** Full inbox message row */
+const InboxMessageRowSchema = v.object({
+  id: v.string(),
+  target_session_id: v.string(),
+  source_task_id: v.nullable(v.string()),
+  message_type: v.string(),
+  content: v.string(),
+  priority: v.string(),
+  created_at: v.number(),
+  delivered_at: v.nullable(v.number()),
+});
+
+export function parseInboxMessageRow(row: unknown): {
+  id: string;
+  targetSessionId: string;
+  sourceTaskId: string | null;
+  messageType: string;
+  content: string;
+  priority: string;
+  createdAt: number;
+  deliveredAt: number | null;
+} {
+  const r = parseRow(InboxMessageRowSchema, row, 'inbox_message');
+  return {
+    id: r.id,
+    targetSessionId: r.target_session_id,
+    sourceTaskId: r.source_task_id,
+    messageType: r.message_type,
+    content: r.content,
+    priority: r.priority,
+    createdAt: r.created_at,
+    deliveredAt: r.delivered_at,
+  };
+}
+
+// =============================================================================
 // Migration row schema
 // =============================================================================
 

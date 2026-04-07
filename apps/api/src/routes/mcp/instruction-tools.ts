@@ -7,10 +7,14 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import type { ProjectData } from '../../durable-objects/project-data';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
+import { resolveParentSessionContext } from '../../services/inbox-drain';
 import * as notificationService from '../../services/notification';
 import {
+  ACTIVE_STATUSES,
+  getMcpLimits,
   INTERNAL_ERROR,
   INVALID_PARAMS,
   jsonRpcError,
@@ -183,6 +187,50 @@ export async function handleRequestHumanInput(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // Also enqueue to parent session inbox if this task has a parent (best-effort)
+  try {
+    const parentRow = await env.DATABASE.prepare(
+      'SELECT parent_task_id FROM tasks WHERE id = ? AND project_id = ?',
+    ).bind(tokenData.taskId, tokenData.projectId).first<{ parent_task_id: string | null }>();
+
+    if (parentRow?.parent_task_id) {
+      // Check if parent task is still active
+      const parentStatus = await env.DATABASE.prepare(
+        'SELECT status FROM tasks WHERE id = ?',
+      ).bind(parentRow.parent_task_id).first<{ status: string }>();
+
+      if (parentStatus && (ACTIVE_STATUSES as readonly string[]).includes(parentStatus.status)) {
+        const parentCtx = await resolveParentSessionContext(env.DATABASE, parentRow.parent_task_id);
+        if (parentCtx && parentCtx.parentUserId === tokenData.userId) {
+          const limits = getMcpLimits(env);
+          const doId = env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
+          const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
+          await doStub.enqueueInboxMessage(
+            {
+              targetSessionId: parentCtx.parentChatSessionId,
+              sourceTaskId: tokenData.taskId,
+              messageType: 'child_needs_input',
+              content: sanitizeUserInput(`Sub-task '${taskRow.title}' needs your input: ${sanitizedContext}. Respond via send_message_to_subtask(taskId='${tokenData.taskId}', message='your answer')`),
+              priority: 'urgent',
+            },
+            limits.inboxMaxSize,
+            limits.inboxMessageMaxLength,
+          );
+          log.info('mcp.request_human_input.parent_inbox_enqueued', {
+            taskId: tokenData.taskId,
+            parentTaskId: parentRow.parent_task_id,
+            parentSessionId: parentCtx.parentChatSessionId,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    log.warn('mcp.request_human_input.parent_inbox_failed', {
+      taskId: tokenData.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   log.info('mcp.request_human_input', {
