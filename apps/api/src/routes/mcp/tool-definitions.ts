@@ -650,4 +650,18 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
+  // ─── Onboarding tools ──────────────────────────────────────────────────
+  {
+    name: 'get_repo_setup_guide',
+    description:
+      'Get a comprehensive guide for preparing this repository for SAM-aware agent workflows. ' +
+      'Returns a detailed briefing covering SAM environment detection, MCP tools, workflow patterns, ' +
+      'and step-by-step instructions for analyzing the repo and updating agent configuration files. ' +
+      'Call this when onboarding a new repository to SAM.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
 ];
