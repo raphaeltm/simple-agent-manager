@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
 import { GitFork, Lightbulb } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import {

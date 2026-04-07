@@ -28,7 +28,6 @@ import {
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import type { ProvisioningState } from './types';
-import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
 import {
   CHAT_SESSION_LIST_LIMIT,
   CHAT_TASK_LIST_LIMIT,
@@ -37,6 +36,7 @@ import {
   TASK_STATUS_POLL_MS,
 } from './types';
 import { useAttachments } from './useAttachments';
+import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
 
 export function useProjectChatState() {
   const navigate = useNavigate();
