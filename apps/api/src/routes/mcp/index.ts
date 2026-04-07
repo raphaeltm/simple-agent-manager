@@ -38,7 +38,6 @@ import {
 } from './idea-tools';
 import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
-import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-tools';
 import {
   handleAddDependency,
   handleRemovePendingSubtask,
@@ -169,10 +168,12 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleRequestHumanInput(requestId, toolArgs, tokenData, c.env));
         case 'dispatch_task':
           return c.json(await handleDispatchTask(requestId, toolArgs, tokenData, c.env));
-        case 'send_message_to_subtask':
-          return c.json(await handleSendMessageToSubtask(requestId, toolArgs, tokenData, c.env));
-        case 'stop_subtask':
-          return c.json(await handleStopSubtask(requestId, toolArgs, tokenData, c.env));
+        case 'retry_subtask':
+          return c.json(await handleRetrySubtask(requestId, toolArgs, tokenData, c.env));
+        case 'add_dependency':
+          return c.json(await handleAddDependency(requestId, toolArgs, tokenData, c.env));
+        case 'remove_pending_subtask':
+          return c.json(await handleRemovePendingSubtask(requestId, toolArgs, tokenData, c.env));
         case 'list_tasks':
           return c.json(await handleListTasks(requestId, toolArgs, tokenData, c.env));
         case 'get_task_details':
@@ -240,13 +241,6 @@ mcpRoutes.post('/', async (c) => {
         case 'get_repo_setup_guide':
           // Synchronous — no async I/O needed for static content
           return c.json(handleGetRepoSetupGuide(requestId));
-        // ─── Orchestration tools (agent-to-agent control) ─────────────
-        case 'retry_subtask':
-          return c.json(await handleRetrySubtask(requestId, toolArgs, tokenData, c.env));
-        case 'add_dependency':
-          return c.json(await handleAddDependency(requestId, toolArgs, tokenData, c.env));
-        case 'remove_pending_subtask':
-          return c.json(await handleRemovePendingSubtask(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }

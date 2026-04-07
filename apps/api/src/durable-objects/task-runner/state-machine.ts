@@ -5,7 +5,6 @@
  * cleanup on failure, and D1 execution step updates.
  */
 import { log } from '../../lib/logger';
-import type { ProjectData } from '../project-data';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 // =========================================================================
@@ -269,48 +268,6 @@ export async function failTask(
       });
     }
     state.stepResults.mcpToken = null;
-  }
-
-  // Enqueue inbox message to parent session (best-effort)
-  try {
-    const parentRow = await rc.env.DATABASE.prepare(
-      'SELECT parent_task_id, title FROM tasks WHERE id = ? AND project_id = ?',
-    ).bind(state.taskId, state.projectId).first<{ parent_task_id: string | null; title: string | null }>();
-
-    if (parentRow?.parent_task_id) {
-      const { resolveParentSessionContext } = await import('../../services/inbox-drain');
-      const parentCtx = await resolveParentSessionContext(rc.env.DATABASE, parentRow.parent_task_id);
-      if (parentCtx && parentCtx.parentUserId === state.userId) {
-        const { parsePositiveInt } = await import('../../lib/route-helpers');
-        const { DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH, sanitizeUserInput } = await import('../../routes/mcp/_helpers');
-        const maxSize = parsePositiveInt(rc.env.ORCHESTRATOR_INBOX_MAX_SIZE, DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE);
-        const maxLen = parsePositiveInt(rc.env.ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH);
-        const doId = rc.env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
-        const doStub = rc.env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
-        await doStub.enqueueInboxMessage(
-          {
-            targetSessionId: parentCtx.parentChatSessionId,
-            sourceTaskId: state.taskId,
-            messageType: 'child_failed',
-            content: sanitizeUserInput(`Sub-task '${parentRow.title ?? state.taskId}' failed at step "${state.currentStep}": ${errorMessage}`),
-            priority: 'normal',
-          },
-          maxSize,
-          maxLen,
-        );
-        log.info('task_runner_do.parent_inbox_enqueued', {
-          taskId: state.taskId,
-          parentTaskId: parentRow.parent_task_id,
-          parentSessionId: parentCtx.parentChatSessionId,
-          messageType: 'child_failed',
-        });
-      }
-    }
-  } catch (err) {
-    log.warn('task_runner_do.parent_inbox_failed', {
-      taskId: state.taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
   }
 
   // Best-effort cleanup

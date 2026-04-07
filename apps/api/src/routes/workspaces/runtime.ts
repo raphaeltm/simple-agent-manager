@@ -15,7 +15,6 @@ import { AgentCredentialSyncSchema, AgentTypeBodySchema, BootLogEntrySchema, jso
 import { appendBootLog } from '../../services/boot-log';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken } from '../../services/github-app';
-import { drainSessionInbox } from '../../services/inbox-drain';
 import { persistError } from '../../services/observability';
 import * as projectDataService from '../../services/project-data';
 import { getDecryptedAgentKey } from '../credentials';
@@ -480,21 +479,6 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
     return c.json(
       { error: 'SERVICE_UNAVAILABLE', message: 'Message persistence temporarily unavailable' },
       503
-    );
-  }
-
-  // Trigger inbox drain for this session (best-effort, non-blocking).
-  // If this session has pending inbox messages (from child task completions/failures),
-  // attempt to deliver them now that the session just finished processing.
-  if (result.persisted > 0 && workspace.projectId && sessionId) {
-    c.executionCtx.waitUntil(
-      drainSessionInbox(workspace.projectId, sessionId, c.env).catch((err) => {
-        log.warn('message_batch.inbox_drain_failed', {
-          projectId: workspace.projectId,
-          sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
     );
   }
 
