@@ -10,9 +10,9 @@ import { and, desc,eq, like, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import type { ProjectData } from '../../durable-objects/project-data';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
-import type { ProjectData } from '../../durable-objects/project-data';
 import { resolveParentSessionContext } from '../../services/inbox-drain';
 import * as notificationService from '../../services/notification';
 import {
