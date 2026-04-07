@@ -8,7 +8,7 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import { ChatInput } from './ChatInput';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
 import { ProvisioningIndicator } from './ProvisioningIndicator';
-import { SessionItem } from './SessionItem';
+import { SessionList } from './SessionList';
 import { isTerminal } from './types';
 import { useProjectChatState } from './useProjectChatState';
 
@@ -118,16 +118,15 @@ export function ProjectChat() {
           {/* Session list — scrollable */}
           {state.hasSessions ? (
             <nav className="flex-1 overflow-y-auto min-h-0">
-              {state.filteredRecent.map((session) => (
-                <SessionItem
-                  key={session.id}
-                  session={session}
-                  isSelected={session.id === state.sessionId}
-                  onSelect={state.handleSelect}
-                  onFork={state.setForkSession}
-                  ideaTitle={session.taskId ? state.taskTitleMap.get(session.taskId) : undefined}
-                />
-              ))}
+              <SessionList
+                sessions={state.filteredRecent}
+                selectedSessionId={state.sessionId ?? null}
+                onSelect={state.handleSelect}
+                onFork={state.setForkSession}
+                taskTitleMap={state.taskTitleMap}
+                taskInfoMap={state.taskInfoMap}
+                searchQuery={state.searchQuery}
+              />
               {state.filteredStale.length > 0 && (
                 <>
                   <button
@@ -138,15 +137,17 @@ export function ProjectChat() {
                     {state.effectiveShowStale ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     <span>Older ({state.filteredStale.length})</span>
                   </button>
-                  {state.effectiveShowStale && state.filteredStale.map((session) => (
-                    <SessionItem
-                      key={session.id}
-                      session={session}
-                      isSelected={session.id === state.sessionId}
+                  {state.effectiveShowStale && (
+                    <SessionList
+                      sessions={state.filteredStale}
+                      selectedSessionId={state.sessionId ?? null}
                       onSelect={state.handleSelect}
                       onFork={state.setForkSession}
+                      taskTitleMap={state.taskTitleMap}
+                      taskInfoMap={state.taskInfoMap}
+                      searchQuery={state.searchQuery}
                     />
-                  ))}
+                  )}
                 </>
               )}
               {state.filteredRecent.length === 0 && !state.effectiveShowStale && (
@@ -292,6 +293,7 @@ export function ProjectChat() {
           isRefreshing={state.isRefreshing}
           onRefresh={() => void state.loadSessions()}
           taskTitleMap={state.taskTitleMap}
+          taskInfoMap={state.taskInfoMap}
         />
       )}
 

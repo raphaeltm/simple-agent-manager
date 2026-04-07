@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ChatSessionResponse } from '../../lib/api';
 import { isStaleSession } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
-import { SessionItem } from './SessionItem';
+import { SessionList } from './SessionList';
+import type { TaskInfo } from './useTaskGroups';
 
 export function MobileSessionDrawer({
   sessions,
@@ -17,6 +18,7 @@ export function MobileSessionDrawer({
   isRefreshing = false,
   onRefresh,
   taskTitleMap = new Map(),
+  taskInfoMap = new Map(),
 }: {
   sessions: ChatSessionResponse[];
   selectedSessionId: string | null;
@@ -28,6 +30,7 @@ export function MobileSessionDrawer({
   isRefreshing?: boolean;
   onRefresh?: () => void;
   taskTitleMap?: Map<string, string>;
+  taskInfoMap?: Map<string, TaskInfo>;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
   const [mobileShowStale, setMobileShowStale] = useState(false);
@@ -155,16 +158,15 @@ export function MobileSessionDrawer({
 
         {/* Session list */}
         <nav className="flex-1 overflow-y-auto min-h-0">
-          {filteredR.map((session) => (
-            <SessionItem
-              key={session.id}
-              session={session}
-              isSelected={session.id === selectedSessionId}
-              onSelect={onSelect}
-              onFork={onFork}
-              ideaTitle={session.taskId ? taskTitleMap.get(session.taskId) : undefined}
-            />
-          ))}
+          <SessionList
+            sessions={filteredR}
+            selectedSessionId={selectedSessionId}
+            onSelect={onSelect}
+            onFork={onFork}
+            taskTitleMap={taskTitleMap}
+            taskInfoMap={taskInfoMap}
+            searchQuery={mobileSearch}
+          />
           {filteredS.length > 0 && (
             <>
               <button
@@ -175,16 +177,17 @@ export function MobileSessionDrawer({
                 {showOlder ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                 <span>Older ({filteredS.length})</span>
               </button>
-              {showOlder && filteredS.map((session) => (
-                <SessionItem
-                  key={session.id}
-                  session={session}
-                  isSelected={session.id === selectedSessionId}
+              {showOlder && (
+                <SessionList
+                  sessions={filteredS}
+                  selectedSessionId={selectedSessionId}
                   onSelect={onSelect}
                   onFork={onFork}
-                  ideaTitle={session.taskId ? taskTitleMap.get(session.taskId) : undefined}
+                  taskTitleMap={taskTitleMap}
+                  taskInfoMap={taskInfoMap}
+                  searchQuery={mobileSearch}
                 />
-              ))}
+              )}
             </>
           )}
         </nav>
