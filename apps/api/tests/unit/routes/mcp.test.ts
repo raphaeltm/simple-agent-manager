@@ -309,7 +309,9 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_deployment_status');
       expect(toolNames).toContain('get_workspace_diff_summary');
       expect(toolNames).toContain('report_environment_issue');
-      expect(body.result.tools).toHaveLength(37);
+      // Onboarding tools
+      expect(toolNames).toContain('get_repo_setup_guide');
+      expect(body.result.tools).toHaveLength(38);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -384,6 +386,47 @@ describe('MCP Routes', () => {
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.code).toBe(-32602);
+    });
+  });
+
+  // ─── get_repo_setup_guide ───────────────────────────────────────────
+
+  describe('get_repo_setup_guide', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should return SAM Environment Briefing markdown', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_repo_setup_guide',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
+      expect(body.result.content).toHaveLength(1);
+      expect(body.result.content[0].type).toBe('text');
+      const text = body.result.content[0].text;
+      expect(text).toContain('SAM Environment Briefing');
+      expect(text).toContain('SAM_WORKSPACE_ID');
+      expect(text).toContain('Part 1: Understanding Your SAM Environment');
+      expect(text).toContain('Part 2: Your Actual Task');
+      expect(text).toContain('get_instructions');
+      expect(text).toContain('update_task_status');
+      expect(text).toContain('expose_port');
+    });
+
+    it('should not require any arguments', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_repo_setup_guide',
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
     });
   });
 

@@ -37,6 +37,7 @@ import {
   handleUpdateIdea,
 } from './idea-tools';
 import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
+import { handleGetRepoSetupGuide } from './onboarding-tools';
 import {
   handleGetSessionMessages,
   handleListSessions,
@@ -228,6 +229,9 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleGetWorkspaceDiffSummary(requestId, tokenData, c.env));
         case 'report_environment_issue':
           return c.json(await handleReportEnvironmentIssue(requestId, toolArgs, tokenData, c.env));
+        // ─── Onboarding tools ─────────────────────────────────────────
+        case 'get_repo_setup_guide':
+          return c.json(handleGetRepoSetupGuide(requestId));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }
