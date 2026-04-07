@@ -752,7 +752,7 @@ export const MCP_TOOLS = [
     name: 'remove_pending_subtask',
     description:
       'Remove a not-yet-started (queued) child task from the execution graph. The task is marked as cancelled and all dependency edges are cleaned up. ' +
-      'Only the direct parent can remove a subtask. Cannot remove running tasks — use stop_subtask for those.',
+      'Only the direct parent can remove a subtask. Cannot remove running tasks — use retry_subtask for those.',
     inputSchema: {
       type: 'object' as const,
       properties: {

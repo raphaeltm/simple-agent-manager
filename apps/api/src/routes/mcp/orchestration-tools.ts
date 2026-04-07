@@ -171,9 +171,8 @@ export async function handleRetrySubtask(
     maxLength: branchMaxLength,
   });
 
-  // Inherit dispatch depth from original child
-  const resolvedVmSize: VMSize = (childTask.executionStep as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
+  // Resolve VM size from project defaults (not executionStep, which tracks runner state)
+  const resolvedVmSize: VMSize = (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
   const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
   const resolvedVmLocation: VMLocation = (project.defaultLocation as VMLocation | null)
@@ -354,7 +353,7 @@ export async function handleAddDependency(
     return jsonRpcError(requestId, INVALID_PARAMS, 'One or both tasks not found in this project');
   }
 
-  // Authorization: caller must be parent of both tasks, or both tasks are siblings under same parent
+  // Authorization: caller must be parent of both tasks, or caller is a sibling
   const taskA = tasks.find((t) => t.id === taskId)!;
   const taskB = tasks.find((t) => t.id === dependsOnTaskId)!;
 
@@ -362,19 +361,13 @@ export async function handleAddDependency(
     taskA.parentTaskId === tokenData.taskId &&
     taskB.parentTaskId === tokenData.taskId;
 
-  const bothAreSiblings =
-    taskA.parentTaskId != null &&
-    taskA.parentTaskId === taskB.parentTaskId &&
-    taskA.parentTaskId === tokenData.taskId;
-
-  // callerIsParentOfBoth already covers the sibling case when caller is parent.
-  // Also allow if caller IS one of the tasks and both share same parent.
+  // Allow if caller IS one of the tasks and both share the same parent
   const callerIsSibling =
     (tokenData.taskId === taskId || tokenData.taskId === dependsOnTaskId) &&
     taskA.parentTaskId != null &&
     taskA.parentTaskId === taskB.parentTaskId;
 
-  if (!callerIsParentOfBoth && !bothAreSiblings && !callerIsSibling) {
+  if (!callerIsParentOfBoth && !callerIsSibling) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
@@ -398,8 +391,29 @@ export async function handleAddDependency(
     );
   }
 
-  // Cycle detection: BFS from dependsOnTaskId through existing edges
-  // If we can reach taskId by following edges from dependsOnTaskId, adding this edge would create a cycle
+  // Cycle detection: pre-fetch all project edges, then BFS in memory
+  // This avoids N+1 queries — one query gets all edges for the project
+  const allEdges = await db
+    .select({
+      fromTask: schema.taskDependencies.taskId,
+      toTask: schema.taskDependencies.dependsOnTaskId,
+    })
+    .from(schema.taskDependencies)
+    .innerJoin(schema.tasks, eq(schema.taskDependencies.taskId, schema.tasks.id))
+    .where(eq(schema.tasks.projectId, tokenData.projectId));
+
+  // Build adjacency list: taskId -> [dependsOnTaskIds]
+  const adjacency = new Map<string, string[]>();
+  for (const edge of allEdges) {
+    const existing = adjacency.get(edge.fromTask);
+    if (existing) {
+      existing.push(edge.toTask);
+    } else {
+      adjacency.set(edge.fromTask, [edge.toTask]);
+    }
+  }
+
+  // BFS from dependsOnTaskId — if we can reach taskId, adding this edge creates a cycle
   const visited = new Set<string>();
   const queue = [dependsOnTaskId];
 
@@ -415,15 +429,10 @@ export async function handleAddDependency(
     if (visited.has(current)) continue;
     visited.add(current);
 
-    // Find tasks that `current` depends on
-    const deps = await db
-      .select({ dependsOn: schema.taskDependencies.dependsOnTaskId })
-      .from(schema.taskDependencies)
-      .where(eq(schema.taskDependencies.taskId, current));
-
+    const deps = adjacency.get(current) ?? [];
     for (const dep of deps) {
-      if (!visited.has(dep.dependsOn)) {
-        queue.push(dep.dependsOn);
+      if (!visited.has(dep)) {
+        queue.push(dep);
       }
     }
   }
@@ -511,14 +520,14 @@ export async function handleRemovePendingSubtask(
     );
   }
 
-  // Only queued tasks can be removed — running tasks must use stop_subtask
+  // Only queued tasks can be removed — running tasks must use retry_subtask
   if (childTask.status !== 'queued') {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
       `Cannot remove task in '${childTask.status}' status. Only 'queued' tasks can be removed. ` +
       (ACTIVE_STATUSES.includes(childTask.status)
-        ? 'Use stop_subtask to stop running tasks.'
+        ? 'Use retry_subtask to stop and retry running tasks.'
         : 'Task has already completed.'),
     );
   }

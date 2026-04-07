@@ -512,9 +512,9 @@ describe('MCP Orchestration Tools', () => {
         result: { count: 5 },
       });
 
-      // BFS: deps of dependsOnTaskId — empty = no cycle
+      // BFS: pre-fetch all project edges via innerJoin — empty = no cycle
       mockD1._handlers.push({
-        match: 'from "task_dependencies"',
+        match: 'inner join "tasks"',
         method: 'raw',
         result: [],
       });
@@ -546,12 +546,11 @@ describe('MCP Orchestration Tools', () => {
         result: { count: 5 },
       });
 
-      // BFS from task-b: depends on task-a → creates cycle
+      // BFS pre-fetch: existing edge task-b → task-a (fromTask, toTask)
       mockD1._handlers.push({
-        match: 'from "task_dependencies"',
+        match: 'inner join "tasks"',
         method: 'raw',
-        result: [['task-a']],
-        once: true,
+        result: [['task-b', 'task-a']],
       });
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
@@ -581,23 +580,13 @@ describe('MCP Orchestration Tools', () => {
         result: { count: 5 },
       });
 
-      // BFS from task-a: task-a depends on task-b
+      // BFS pre-fetch: all project edges A→B and B→C (fromTask, toTask)
       mockD1._handlers.push({
-        match: 'from "task_dependencies"',
+        match: 'inner join "tasks"',
         method: 'raw',
-        result: [['task-b']],
-        once: true,
+        result: [['task-a', 'task-b'], ['task-b', 'task-c']],
       });
-      // BFS continues: task-b depends on task-c
-      mockD1._handlers.push({
-        match: 'from "task_dependencies"',
-        method: 'raw',
-        result: [['task-c']],
-        once: true,
-      });
-      // task-c has no deps (but we already found the cycle: task-c is the taskId)
-      // Actually the cycle is detected when current === taskId ('task-c')
-      // BFS visits: task-a -> task-b -> task-c (=== taskId) -> CYCLE
+      // BFS from task-a: follows A→B→C, finds C === taskId → CYCLE
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'add_dependency',
@@ -691,7 +680,7 @@ describe('MCP Orchestration Tools', () => {
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain("Cannot remove task in 'in_progress' status");
-      expect(body.error.message).toContain('stop_subtask');
+      expect(body.error.message).toContain('retry_subtask');
     });
 
     it('should reject completed tasks', async () => {
