@@ -207,7 +207,7 @@ export async function handleRequestHumanInput(
           const limits = getMcpLimits(env);
           const doId = env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
           const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
-          doStub.enqueueInboxMessage(
+          await doStub.enqueueInboxMessage(
             {
               targetSessionId: parentCtx.parentChatSessionId,
               sourceTaskId: tokenData.taskId,

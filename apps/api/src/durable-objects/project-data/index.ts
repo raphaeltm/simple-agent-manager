@@ -255,19 +255,19 @@ export class ProjectData extends DurableObject<Env> {
 
   // --- Session Inbox ---
 
-  enqueueInboxMessage(input: InboxMessageInput, maxSize: number, maxContentLength: number): string {
+  async enqueueInboxMessage(input: InboxMessageInput, maxSize: number, maxContentLength: number): Promise<string> {
     return inbox.enqueueInboxMessage(this.sql, input, maxSize, maxContentLength);
   }
 
-  getPendingInboxMessages(targetSessionId: string, limit: number): inbox.InboxMessage[] {
+  async getPendingInboxMessages(targetSessionId: string, limit: number): Promise<inbox.InboxMessage[]> {
     return inbox.getPendingInboxMessages(this.sql, targetSessionId, limit);
   }
 
-  markInboxDelivered(messageIds: string[]): number {
+  async markInboxDelivered(messageIds: string[]): Promise<number> {
     return inbox.markInboxDelivered(this.sql, messageIds);
   }
 
-  getInboxStats(targetSessionId: string): { pending: number } {
+  async getInboxStats(targetSessionId: string): Promise<{ pending: number }> {
     return inbox.getInboxStats(this.sql, targetSessionId);
   }
 

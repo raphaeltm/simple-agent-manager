@@ -331,7 +331,7 @@ export async function handleCompleteTask(
           taskRow?.output_branch ? `Branch: ${taskRow.output_branch}` : null,
           taskRow?.output_pr_url ? `PR: ${taskRow.output_pr_url}` : null,
         ].filter(Boolean).join('. ');
-        doStub.enqueueInboxMessage(
+        await doStub.enqueueInboxMessage(
           {
             targetSessionId: parentCtx.parentChatSessionId,
             sourceTaskId: tokenData.taskId,

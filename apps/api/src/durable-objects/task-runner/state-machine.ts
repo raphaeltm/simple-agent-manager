@@ -287,7 +287,7 @@ export async function failTask(
         const maxLen = parsePositiveInt(rc.env.ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH);
         const doId = rc.env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
         const doStub = rc.env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
-        doStub.enqueueInboxMessage(
+        await doStub.enqueueInboxMessage(
           {
             targetSessionId: parentCtx.parentChatSessionId,
             sourceTaskId: state.taskId,
