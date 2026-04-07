@@ -310,7 +310,10 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('report_environment_issue');
       // Onboarding tools
       expect(toolNames).toContain('get_repo_setup_guide');
-      expect(body.result.tools).toHaveLength(40);
+      // Orchestration tools (Phase 1: parent → child communication)
+      expect(toolNames).toContain('send_message_to_subtask');
+      expect(toolNames).toContain('stop_subtask');
+      expect(body.result.tools).toHaveLength(42);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

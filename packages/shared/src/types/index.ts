@@ -250,6 +250,10 @@ export type {
   RemovePendingSubtaskResponse,
   RetrySubtaskRequest,
   RetrySubtaskResponse,
+  SendMessageToSubtaskRequest,
+  SendMessageToSubtaskResponse,
+  StopSubtaskRequest,
+  StopSubtaskResponse,
 } from './orchestration';
 
 // API Error

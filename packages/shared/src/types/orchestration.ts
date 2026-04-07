@@ -2,6 +2,30 @@
  * Shared types for orchestration MCP tools (agent-to-agent communication).
  */
 
+// ─── send_message_to_subtask ────────────────────────────────────────────────
+
+export interface SendMessageToSubtaskRequest {
+  taskId: string;
+  message: string;
+}
+
+export interface SendMessageToSubtaskResponse {
+  delivered: boolean;
+  reason?: 'agent_busy';
+}
+
+// ─── stop_subtask ───────────────────────────────────────────────────────────
+
+export interface StopSubtaskRequest {
+  taskId: string;
+  reason?: string;
+}
+
+export interface StopSubtaskResponse {
+  stopped: boolean;
+  taskId: string;
+}
+
 // ─── retry_subtask ──────────────────────────────────────────────────────────
 
 export interface RetrySubtaskRequest {
