@@ -1,4 +1,4 @@
-import type { AgentInfo, AgentProfile, TaskMode, UpdateAgentProfileRequest, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, Task, TaskMode, UpdateAgentProfileRequest, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -36,6 +36,7 @@ import {
   TASK_STATUS_POLL_MS,
 } from './types';
 import { useAttachments } from './useAttachments';
+import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
 
 export function useProjectChatState() {
   const navigate = useNavigate();
@@ -113,8 +114,9 @@ export function useProjectChatState() {
   // Fork dialog state
   const [forkSession, setForkSession] = useState<ChatSessionResponse | null>(null);
 
-  // Task/idea title map for session tagging
+  // Task/idea title map for session tagging + task info map for grouping
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
+  const [taskInfoMap, setTaskInfoMap] = useState<Map<string, TaskInfo>>(new Map());
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
@@ -222,6 +224,7 @@ export function useProjectChatState() {
           const titleMap = new Map<string, string>();
           for (const t of tasksResult.tasks) titleMap.set(t.id, t.title);
           setTaskTitleMap(titleMap);
+          setTaskInfoMap(buildTaskInfoMap(tasksResult.tasks as Task[]));
         })
         .catch(() => { /* task titles are cosmetic */ });
 
@@ -442,7 +445,7 @@ export function useProjectChatState() {
     loadSessions, realtimeDegraded,
     sidebarOpen, setSidebarOpen,
     searchQuery, setSearchQuery, showStale, setShowStale,
-    filteredRecent, filteredStale, effectiveShowStale, taskTitleMap,
+    filteredRecent, filteredStale, effectiveShowStale, taskTitleMap, taskInfoMap,
     message, setMessage, submitting, submitError,
     handleSubmit, handleNewChat, handleSelect,
     configuredAgents, selectedAgentType, setSelectedAgentType,
