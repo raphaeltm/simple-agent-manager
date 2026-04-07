@@ -313,7 +313,8 @@ describe('MCP Routes', () => {
       // Orchestration tools
       expect(toolNames).toContain('send_message_to_subtask');
       expect(toolNames).toContain('stop_subtask');
-      expect(body.result.tools).toHaveLength(39);
+      expect(toolNames).toContain('get_inbox_status');
+      expect(body.result.tools).toHaveLength(40);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
