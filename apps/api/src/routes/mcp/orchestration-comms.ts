@@ -4,8 +4,8 @@
  * send_message_to_subtask: Injects a user-role message into a running child agent's ACP session.
  * stop_subtask: Gracefully stops a child agent's session with an optional warning message.
  */
-import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { and, desc, eq } from 'drizzle-orm';
+import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
