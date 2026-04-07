@@ -306,6 +306,10 @@ export interface Env {
   ORCHESTRATOR_INBOX_MAX_SIZE?: string;             // Max pending messages per session inbox (default: 100)
   ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE?: string;     // Max messages to deliver in one drain cycle (default: 10)
   ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH?: string;   // Max content length per inbox message (default: 8192)
+  // Orchestrator cancel/interrupt configuration (agent-to-agent downward communication)
+  ORCHESTRATOR_CANCEL_SETTLE_MS?: string;           // Wait time (ms) between cancel and re-prompt (default: 2000)
+  ORCHESTRATOR_CANCEL_TIMEOUT_MS?: string;          // Timeout (ms) for cancel→stop sequence (default: 5000)
+  ORCHESTRATOR_URGENT_RETRY_ATTEMPTS?: string;      // Max cancel+retry attempts for urgent messages (default: 2)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;

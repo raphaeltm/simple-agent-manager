@@ -3,16 +3,26 @@
  *
  * Called after a parent session goes idle (e.g., after message batch persistence).
  * Concatenates pending messages into a single prompt and sends to the parent agent.
- * If the agent is busy (409), messages are left in the inbox for retry on the next cycle.
+ *
+ * Urgent messages trigger cancel+re-prompt when the agent is busy:
+ * 1. Try normal delivery (agent might be idle)
+ * 2. If 409 and urgent messages exist: cancel current prompt, wait, retry
+ * 3. Normal-priority messages just stay in the inbox for the next cycle
  */
 import type { ProjectData } from '../durable-objects/project-data';
 import type { Env } from '../index';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE } from '../routes/mcp/_helpers';
-import { sendPromptToAgentOnNode } from './node-agent';
+import { cancelAgentSessionOnNode, sendPromptToAgentOnNode } from './node-agent';
 
-interface DrainResult {
+/** Default wait time (ms) between cancel and re-prompt attempt. */
+const DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS = 2000;
+
+/** Default max cancel+retry attempts for urgent messages. */
+const DEFAULT_ORCHESTRATOR_URGENT_RETRY_ATTEMPTS = 2;
+
+export interface DrainResult {
   delivered: number;
   pending: number;
   skipped: boolean;
@@ -62,7 +72,8 @@ export async function resolveParentSessionContext(
 /**
  * Drain pending inbox messages for a session, delivering them as a prompt to the parent agent.
  *
- * Returns the drain result indicating how many messages were delivered.
+ * For urgent messages: if the agent is busy, attempts cancel+re-prompt to deliver immediately.
+ * For normal messages: if the agent is busy, leaves them in the inbox for retry on the next cycle.
  */
 export async function drainSessionInbox(
   projectId: string,
@@ -105,6 +116,9 @@ export async function drainSessionInbox(
       return { delivered: 0, pending: 0, skipped: true, error: 'parent_not_active' };
     }
 
+    // Check if any messages are urgent
+    const hasUrgent = messages.some((m) => m.priority === 'urgent');
+
     // Build the prompt from pending messages
     const prompt = formatInboxPrompt(messages);
 
@@ -133,8 +147,22 @@ export async function drainSessionInbox(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
 
-      // 409 = agent is busy, leave messages for retry
+      // 409 = agent is busy
       if (errMsg.includes('409')) {
+        // If there are urgent messages, try cancel+re-prompt
+        if (hasUrgent) {
+          return attemptUrgentInterrupt(
+            projectId,
+            sessionId,
+            sessionRow,
+            messages,
+            prompt,
+            projectData,
+            env,
+          );
+        }
+
+        // Normal messages — leave in inbox for next cycle
         log.info('inbox_drain.agent_busy', { projectId, sessionId, pending: messages.length });
         return { delivered: 0, pending: messages.length, skipped: true, error: 'agent_busy' };
       }
@@ -148,6 +176,106 @@ export async function drainSessionInbox(
     log.error('inbox_drain.error', { projectId, sessionId, error: errMsg });
     return { delivered: 0, pending: 0, skipped: true, error: errMsg };
   }
+}
+
+/**
+ * Attempt urgent interrupt delivery: cancel current prompt, wait, then re-prompt.
+ * Retries up to ORCHESTRATOR_URGENT_RETRY_ATTEMPTS times.
+ */
+async function attemptUrgentInterrupt(
+  projectId: string,
+  sessionId: string,
+  sessionRow: { workspace_id: string; node_id: string; user_id: string },
+  messages: Array<{ id: string; messageType: string; sourceTaskId: string | null; content: string; priority: string }>,
+  prompt: string,
+  projectData: DurableObjectStub<ProjectData>,
+  env: Env,
+): Promise<DrainResult> {
+  const cancelSettleMs = parsePositiveInt(
+    env.ORCHESTRATOR_CANCEL_SETTLE_MS,
+    DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS,
+  );
+  const maxRetries = parsePositiveInt(
+    env.ORCHESTRATOR_URGENT_RETRY_ATTEMPTS,
+    DEFAULT_ORCHESTRATOR_URGENT_RETRY_ATTEMPTS,
+  );
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    log.info('inbox_drain.urgent_interrupt_attempt', {
+      projectId,
+      sessionId,
+      attempt: attempt + 1,
+      maxRetries,
+    });
+
+    // Cancel the running prompt
+    const cancelResult = await cancelAgentSessionOnNode(
+      sessionRow.node_id,
+      sessionRow.workspace_id,
+      sessionId,
+      env,
+      sessionRow.user_id,
+    );
+
+    if (!cancelResult.success && cancelResult.status !== 409) {
+      // Cancel failed for a non-409 reason — give up on interrupt
+      log.warn('inbox_drain.urgent_cancel_failed', {
+        projectId,
+        sessionId,
+        cancelStatus: cancelResult.status,
+      });
+      break;
+    }
+
+    // Wait for the cancel to settle
+    await new Promise((resolve) => setTimeout(resolve, cancelSettleMs));
+
+    // Retry prompt delivery
+    try {
+      await sendPromptToAgentOnNode(
+        sessionRow.node_id,
+        sessionRow.workspace_id,
+        sessionId,
+        prompt,
+        env,
+        sessionRow.user_id,
+      );
+
+      // Success — mark messages as delivered
+      const ids = messages.map((m) => m.id);
+      await projectData.markInboxDelivered(ids);
+
+      log.info('inbox_drain.urgent_delivered', {
+        projectId,
+        sessionId,
+        count: messages.length,
+        attempt: attempt + 1,
+      });
+
+      return { delivered: messages.length, pending: 0, skipped: false };
+    } catch (retryErr) {
+      const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      if (!retryMsg.includes('409')) {
+        // Non-409 error — something else is wrong
+        log.error('inbox_drain.urgent_retry_failed', {
+          projectId,
+          sessionId,
+          error: retryMsg,
+          attempt: attempt + 1,
+        });
+        return { delivered: 0, pending: messages.length, skipped: true, error: retryMsg };
+      }
+      // Still 409 — agent hasn't become idle yet, try again
+    }
+  }
+
+  // All retries exhausted — leave messages pending for next drain cycle
+  log.info('inbox_drain.urgent_exhausted', {
+    projectId,
+    sessionId,
+    pending: messages.length,
+  });
+  return { delivered: 0, pending: messages.length, skipped: true, error: 'agent_busy_after_cancel' };
 }
 
 /**
