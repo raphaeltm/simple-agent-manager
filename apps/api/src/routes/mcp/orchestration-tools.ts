@@ -3,8 +3,10 @@
  *
  * - send_message_to_subtask: Send a message to a child task's session inbox
  * - stop_subtask: Gracefully stop a child task (cancel → warning → hard stop)
+ * - get_inbox_status: Check the caller's session inbox for pending messages
  */
 import type { ProjectData } from '../../durable-objects/project-data';
+import type { InboxStats } from '../../durable-objects/project-data/inbox';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -268,4 +270,43 @@ export async function handleStopSubtask(
     });
     return jsonRpcError(requestId, INTERNAL_ERROR, `Stop sub-task failed: ${errMsg}`);
   }
+}
+
+// ─── get_inbox_status ──────────────────────────────────────────────────────
+
+export async function handleGetInboxStatus(
+  requestId: string | number | null,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  // Resolve the caller's chat session ID from their workspace
+  const workspaceRow = await env.DATABASE.prepare(
+    'SELECT chat_session_id FROM workspaces WHERE id = ?',
+  ).bind(tokenData.workspaceId).first<{ chat_session_id: string | null }>();
+
+  if (!workspaceRow?.chat_session_id) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'No active session found for this workspace');
+  }
+
+  const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
+  const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
+  const stats: InboxStats = await doStub.getInboxStats(workspaceRow.chat_session_id);
+
+  log.info('mcp.get_inbox_status', {
+    taskId: tokenData.taskId,
+    sessionId: workspaceRow.chat_session_id,
+    pending: stats.pending,
+    urgentCount: stats.urgentCount,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        pendingCount: stats.pending,
+        urgentCount: stats.urgentCount,
+        oldestMessageAgeMs: stats.oldestMessageAgeMs,
+      }),
+    }],
+  });
 }

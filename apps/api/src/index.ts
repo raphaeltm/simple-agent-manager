@@ -311,6 +311,7 @@ export interface Env {
   ORCHESTRATOR_CANCEL_TIMEOUT_MS?: string;          // Timeout (ms) for cancel→stop sequence (default: 5000)
   ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS?: string;   // Cap (ms) on warning-phase settle within cancel→stop sequence (default: 3000)
   ORCHESTRATOR_URGENT_RETRY_ATTEMPTS?: string;      // Max cancel+retry attempts for urgent messages (default: 2)
+  ORCHESTRATOR_PARENT_ROUTING_ENABLED?: string;     // Enable parent routing for request_human_input (default: true)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;
