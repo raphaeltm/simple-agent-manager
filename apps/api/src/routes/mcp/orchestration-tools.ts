@@ -6,6 +6,7 @@
  * - get_inbox_status: Check the caller's session inbox for pending messages
  */
 import type { ProjectData } from '../../durable-objects/project-data';
+import type { InboxStats } from '../../durable-objects/project-data/inbox';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -289,7 +290,7 @@ export async function handleGetInboxStatus(
 
   const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
   const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
-  const stats = await doStub.getInboxStats(workspaceRow.chat_session_id);
+  const stats: InboxStats = await doStub.getInboxStats(workspaceRow.chat_session_id);
 
   log.info('mcp.get_inbox_status', {
     taskId: tokenData.taskId,
