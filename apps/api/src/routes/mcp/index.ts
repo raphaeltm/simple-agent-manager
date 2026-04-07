@@ -231,6 +231,7 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleReportEnvironmentIssue(requestId, toolArgs, tokenData, c.env));
         // ─── Onboarding tools ─────────────────────────────────────────
         case 'get_repo_setup_guide':
+          // Synchronous — no async I/O needed for static content
           return c.json(handleGetRepoSetupGuide(requestId));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
