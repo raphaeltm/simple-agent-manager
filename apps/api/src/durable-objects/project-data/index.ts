@@ -21,8 +21,6 @@ import * as activity from './activity';
 import * as commands from './commands';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
-import type { InboxMessageInput } from './inbox';
-import * as inbox from './inbox';
 import * as materialization from './materialization';
 import * as messages from './messages';
 import * as sessions from './sessions';
@@ -252,24 +250,6 @@ export class ProjectData extends DurableObject<Env> {
 
   async getAcpSessionLineage(sessionId: string) { return acpSessions.getAcpSessionLineage(this.sql, sessionId); }
   async listAcpSessionsByNode(nodeId: string, statuses: AcpSessionStatus[]) { return acpSessions.listAcpSessionsByNode(this.sql, nodeId, statuses); }
-
-  // --- Session Inbox ---
-
-  async enqueueInboxMessage(input: InboxMessageInput, maxSize: number, maxContentLength: number): Promise<string> {
-    return inbox.enqueueInboxMessage(this.sql, input, maxSize, maxContentLength);
-  }
-
-  async getPendingInboxMessages(targetSessionId: string, limit: number): Promise<inbox.InboxMessage[]> {
-    return inbox.getPendingInboxMessages(this.sql, targetSessionId, limit);
-  }
-
-  async markInboxDelivered(messageIds: string[]): Promise<number> {
-    return inbox.markInboxDelivered(this.sql, messageIds);
-  }
-
-  async getInboxStats(targetSessionId: string): Promise<inbox.InboxStats> {
-    return inbox.getInboxStats(this.sql, targetSessionId);
-  }
 
   // --- Summary ---
 

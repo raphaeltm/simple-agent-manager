@@ -81,67 +81,6 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
-  // ─── Orchestration tools (parent-to-child communication) ────────────────
-  {
-    name: 'send_message_to_subtask',
-    description:
-      'Send a message to a child sub-task agent. The message is queued in the child\'s session inbox and delivered when the agent goes idle. ' +
-      'Use priority "urgent" to interrupt the agent immediately (cancels current work and re-prompts). ' +
-      'Only works for tasks you dispatched (you must be the parent).',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        taskId: {
-          type: 'string',
-          description: 'The child task ID to send the message to',
-        },
-        message: {
-          type: 'string',
-          description: 'Message content to deliver to the child agent',
-        },
-        priority: {
-          type: 'string',
-          description: 'Message priority. "normal" (default) waits for agent idle; "urgent" interrupts the agent immediately.',
-          enum: ['normal', 'urgent'],
-        },
-      },
-      required: ['taskId', 'message'],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: 'stop_subtask',
-    description:
-      'Gracefully stop a child sub-task agent. Cancels any running prompt, sends a warning message, then hard-stops the session. ' +
-      'Only works for tasks you dispatched (you must be the parent).',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        taskId: {
-          type: 'string',
-          description: 'The child task ID to stop',
-        },
-        reason: {
-          type: 'string',
-          description: 'Optional reason for stopping (shown to the child agent before shutdown)',
-        },
-      },
-      required: ['taskId'],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: 'get_inbox_status',
-    description:
-      'Check the status of your session inbox. Returns counts of pending and urgent messages, ' +
-      'and how old the oldest undelivered message is. Use this to proactively check if child tasks ' +
-      'have sent you messages that haven\'t been delivered yet.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {},
-      additionalProperties: false,
-    },
-  },
   // ─── Agent-initiated notifications ──────────────────────────────────────
   {
     name: 'request_human_input',
@@ -712,6 +651,68 @@ export const MCP_TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {},
+      additionalProperties: false,
+    },
+  },
+  // ─── Orchestration tools (agent-to-agent control) ───────────────────
+  {
+    name: 'retry_subtask',
+    description:
+      'Stop a failed or stalled child task and dispatch a replacement with optionally modified instructions. ' +
+      'Only the direct parent can retry a subtask. The replacement inherits the same dispatch depth and project defaults. ' +
+      'Rate-limited: max retries per task apply (configurable via ORCHESTRATOR_MAX_RETRIES_PER_TASK).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The task ID of the child task to retry',
+        },
+        newDescription: {
+          type: 'string',
+          description: 'Optional replacement description. If omitted, the original description is reused with failure context appended.',
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'add_dependency',
+    description:
+      'Add a dependency edge between two tasks in the execution graph. The first task (taskId) will depend on the second task (dependsOnTaskId). ' +
+      'Caller must be the parent of both tasks. Cycle detection prevents circular dependencies. ' +
+      'Idempotent: adding the same dependency twice is a no-op.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The task that should depend on another task',
+        },
+        dependsOnTaskId: {
+          type: 'string',
+          description: 'The task that must complete first',
+        },
+      },
+      required: ['taskId', 'dependsOnTaskId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'remove_pending_subtask',
+    description:
+      'Remove a not-yet-started (queued) child task from the execution graph. The task is marked as cancelled and all dependency edges are cleaned up. ' +
+      'Only the direct parent can remove a subtask. Cannot remove running tasks — use retry_subtask for those.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The task ID of the queued child task to remove',
+        },
+      },
+      required: ['taskId'],
       additionalProperties: false,
     },
   },

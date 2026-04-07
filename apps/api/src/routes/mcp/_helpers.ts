@@ -96,23 +96,10 @@ const DEFAULT_MCP_IDEA_SEARCH_MAX = 20;
 const DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH = 200;
 /** Max length for session topic. Override via MCP_SESSION_TOPIC_MAX_LENGTH env var. */
 const DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH = 200;
-
-/** Default max pending messages per session inbox. Override via ORCHESTRATOR_INBOX_MAX_SIZE env var. */
-export const DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE = 100;
-/** Default max messages to deliver in one drain cycle. Override via ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE env var. */
-export const DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE = 10;
-/** Default max content length per inbox message. Override via ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH env var. */
-export const DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH = 8192;
-/** Default wait time (ms) between cancel and re-prompt attempt. Override via ORCHESTRATOR_CANCEL_SETTLE_MS env var. */
-export const DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS = 2000;
-/** Default timeout (ms) for cancel→stop sequence. Override via ORCHESTRATOR_CANCEL_TIMEOUT_MS env var. */
-export const DEFAULT_ORCHESTRATOR_CANCEL_TIMEOUT_MS = 5000;
-/** Default max cancel+retry attempts for urgent messages. Override via ORCHESTRATOR_URGENT_RETRY_ATTEMPTS env var. */
-export const DEFAULT_ORCHESTRATOR_URGENT_RETRY_ATTEMPTS = 2;
-/** Default cap (ms) on warning-phase settle within cancel→stop sequence. Override via ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS env var. */
-export const DEFAULT_ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS = 3000;
-/** Whether parent routing is enabled for request_human_input. Override via ORCHESTRATOR_PARENT_ROUTING_ENABLED env var. */
-export const DEFAULT_ORCHESTRATOR_PARENT_ROUTING_ENABLED = true;
+/** Max retry attempts for a single task via retry_subtask. Override via ORCHESTRATOR_MAX_RETRIES_PER_TASK env var. */
+const DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK = 3;
+/** Max dependency edges per project via add_dependency. Override via ORCHESTRATOR_DEPENDENCY_MAX_EDGES env var. */
+const DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES = 50;
 
 export function getMcpLimits(env: Env) {
   return {
@@ -145,9 +132,8 @@ export function getMcpLimits(env: Env) {
     ideaSearchMax: parsePositiveInt(env.MCP_IDEA_SEARCH_MAX, DEFAULT_MCP_IDEA_SEARCH_MAX),
     ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH, DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH),
     sessionTopicMaxLength: parsePositiveInt(env.MCP_SESSION_TOPIC_MAX_LENGTH, DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH),
-    inboxMaxSize: parsePositiveInt(env.ORCHESTRATOR_INBOX_MAX_SIZE, DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE),
-    inboxDrainBatchSize: parsePositiveInt(env.ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE, DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE),
-    inboxMessageMaxLength: parsePositiveInt(env.ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH),
+    orchestratorMaxRetriesPerTask: parsePositiveInt(env.ORCHESTRATOR_MAX_RETRIES_PER_TASK, DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK),
+    orchestratorDependencyMaxEdges: parsePositiveInt(env.ORCHESTRATOR_DEPENDENCY_MAX_EDGES, DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES),
   };
 }
 

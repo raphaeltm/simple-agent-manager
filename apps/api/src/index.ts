@@ -279,6 +279,9 @@ export interface Env {
   MCP_DISPATCH_MAX_REFERENCES?: string;            // Max reference URLs per dispatch (default: 20)
   MCP_DISPATCH_MAX_REFERENCE_LENGTH?: string;      // Max length per reference string (default: 500)
   MCP_DISPATCH_MAX_PRIORITY?: string;              // Max priority for agent-dispatched tasks (default: 100)
+  // Orchestration tools (retry, dependency, remove)
+  ORCHESTRATOR_MAX_RETRIES_PER_TASK?: string;      // Max retry attempts per task (default: 3)
+  ORCHESTRATOR_DEPENDENCY_MAX_EDGES?: string;      // Max dependency edges per project (default: 50)
   // MCP get_session_messages limits
   MCP_MESSAGE_LIST_LIMIT?: string;                 // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string;                   // Max raw tokens per request (default: 200)
@@ -302,16 +305,6 @@ export interface Env {
   MCP_IDEA_SEARCH_MAX?: string;                    // Max results for search_ideas (default: 20)
   MCP_IDEA_TITLE_MAX_LENGTH?: string;              // Max length for idea title (default: 200)
   MCP_SESSION_TOPIC_MAX_LENGTH?: string;           // Max length for session topic (default: 200)
-  // Orchestrator inbox configuration (agent-to-agent upward communication)
-  ORCHESTRATOR_INBOX_MAX_SIZE?: string;             // Max pending messages per session inbox (default: 100)
-  ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE?: string;     // Max messages to deliver in one drain cycle (default: 10)
-  ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH?: string;   // Max content length per inbox message (default: 8192)
-  // Orchestrator cancel/interrupt configuration (agent-to-agent downward communication)
-  ORCHESTRATOR_CANCEL_SETTLE_MS?: string;           // Wait time (ms) between cancel and re-prompt (default: 2000)
-  ORCHESTRATOR_CANCEL_TIMEOUT_MS?: string;          // Timeout (ms) for cancel→stop sequence (default: 5000)
-  ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS?: string;   // Cap (ms) on warning-phase settle within cancel→stop sequence (default: 3000)
-  ORCHESTRATOR_URGENT_RETRY_ATTEMPTS?: string;      // Max cancel+retry attempts for urgent messages (default: 2)
-  ORCHESTRATOR_PARENT_ROUTING_ENABLED?: string;     // Enable parent routing for request_human_input (default: true)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;

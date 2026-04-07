@@ -310,10 +310,6 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('report_environment_issue');
       // Onboarding tools
       expect(toolNames).toContain('get_repo_setup_guide');
-      // Orchestration tools
-      expect(toolNames).toContain('send_message_to_subtask');
-      expect(toolNames).toContain('stop_subtask');
-      expect(toolNames).toContain('get_inbox_status');
       expect(body.result.tools).toHaveLength(40);
     });
 

@@ -242,5 +242,15 @@ export type {
   UpdateAgentProfileRequest,
 } from './agent-settings';
 
+// Orchestration (agent-to-agent communication)
+export type {
+  AddDependencyRequest,
+  AddDependencyResponse,
+  RemovePendingSubtaskRequest,
+  RemovePendingSubtaskResponse,
+  RetrySubtaskRequest,
+  RetrySubtaskResponse,
+} from './orchestration';
+
 // API Error
 export type { ApiError } from './api-error';
