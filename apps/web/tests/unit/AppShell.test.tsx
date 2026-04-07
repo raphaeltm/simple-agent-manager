@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter, useNavigate } from 'react-router';
 import { beforeAll, beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { AppShell } from '../../src/components/AppShell';
@@ -148,6 +148,44 @@ describe('AppShell (project context)', () => {
     const globalNav = container.querySelector('nav[aria-label="Primary navigation"]');
     expect(globalNav).toBeTruthy();
     expect(globalNav?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('resets toggle state when navigating to a different route', () => {
+    // Use a helper component to trigger navigation from inside the router
+    let navigateFn: (path: string) => void;
+    function NavHelper() {
+      const nav = useNavigate();
+      navigateFn = nav;
+      return null;
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/projects/proj-123/chat']}>
+        <NavHelper />
+        <AppShell>
+          <div data-testid="page-content">Page content</div>
+        </AppShell>
+      </MemoryRouter>,
+    );
+
+    // Global nav panel should be hidden initially
+    const container = document.body;
+    const globalNav = container.querySelector('nav[aria-label="Primary navigation"]');
+    expect(globalNav?.getAttribute('aria-hidden')).toBe('true');
+
+    // Toggle to show global nav
+    const toggleBtn = screen.getByRole('button', { name: 'Show global navigation' });
+    fireEvent.click(toggleBtn);
+
+    // Global nav panel should now be visible (aria-hidden removed or false)
+    expect(globalNav?.getAttribute('aria-hidden')).not.toBe('true');
+
+    // Navigate to a different route
+    act(() => { navigateFn('/projects/proj-123/ideas'); });
+
+    // Global nav should be hidden again after route change
+    const globalNavAfter = container.querySelector('nav[aria-label="Primary navigation"]');
+    expect(globalNavAfter?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('shows global nav on /projects/new (not treated as project context)', () => {
