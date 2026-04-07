@@ -148,7 +148,8 @@ export function markInboxDelivered(
 export interface InboxStats {
   pending: number;
   urgentCount: number;
-  oldestMessageAge: number;
+  /** Age of the oldest undelivered message in milliseconds, or null if inbox is empty. */
+  oldestMessageAgeMs: number | null;
 }
 
 /**
@@ -161,7 +162,7 @@ export function getInboxStats(
   const row = sql.exec(
     `SELECT
        COUNT(*) as cnt,
-       SUM(CASE WHEN priority = 'urgent' THEN 1 ELSE 0 END) as urgent_cnt,
+       COALESCE(SUM(CASE WHEN priority = 'urgent' THEN 1 ELSE 0 END), 0) as urgent_cnt,
        MIN(created_at) as oldest_created_at
      FROM session_inbox
      WHERE target_session_id = ? AND delivered_at IS NULL`,
@@ -171,7 +172,7 @@ export function getInboxStats(
   const pending = row ? parseCountCnt(row, 'inbox.stats') : 0;
   const urgentCnt = row && typeof row['urgent_cnt'] === 'number' ? row['urgent_cnt'] : 0;
   const oldestCreatedAt = row && typeof row['oldest_created_at'] === 'number' ? row['oldest_created_at'] : 0;
-  const oldestMessageAge = oldestCreatedAt > 0 ? Date.now() - oldestCreatedAt : 0;
+  const oldestMessageAgeMs = oldestCreatedAt > 0 ? Date.now() - oldestCreatedAt : null;
 
-  return { pending, urgentCount: urgentCnt, oldestMessageAge };
+  return { pending, urgentCount: urgentCnt, oldestMessageAgeMs };
 }

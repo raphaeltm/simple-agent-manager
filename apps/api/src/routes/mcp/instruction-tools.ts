@@ -143,12 +143,13 @@ export async function handleRequestHumanInput(
     if (options.length === 0) options = null;
   }
 
-  // Fetch task title (user_id verified against token below)
+  // Fetch task info including parent_task_id in a single query (reduces D1 round-trips)
   const taskRow = await env.DATABASE.prepare(
-    `SELECT user_id, title FROM tasks WHERE id = ? AND project_id = ?`,
+    'SELECT user_id, title, parent_task_id FROM tasks WHERE id = ? AND project_id = ?',
   ).bind(tokenData.taskId, tokenData.projectId).first<{
     user_id: string;
     title: string;
+    parent_task_id: string | null;
   }>();
 
   if (!taskRow) {
@@ -166,50 +167,46 @@ export async function handleRequestHumanInput(
   }
 
   // Attempt parent routing if enabled (best-effort, before human notification)
-  const parentRoutingEnabled = env.ORCHESTRATOR_PARENT_ROUTING_ENABLED !== undefined
-    ? env.ORCHESTRATOR_PARENT_ROUTING_ENABLED !== 'false'
+  const rawFlag = env.ORCHESTRATOR_PARENT_ROUTING_ENABLED;
+  const parentRoutingEnabled = rawFlag !== undefined && rawFlag !== ''
+    ? rawFlag !== 'false'
     : DEFAULT_ORCHESTRATOR_PARENT_ROUTING_ENABLED;
 
   let parentRouted = false;
   let parentTaskTitle: string | null = null;
 
-  if (parentRoutingEnabled) {
+  if (parentRoutingEnabled && taskRow.parent_task_id) {
     try {
-      const parentRow = await env.DATABASE.prepare(
-        'SELECT parent_task_id FROM tasks WHERE id = ? AND project_id = ?',
-      ).bind(tokenData.taskId, tokenData.projectId).first<{ parent_task_id: string | null }>();
-
-      if (parentRow?.parent_task_id) {
-        // Check if parent task is still active and get its title
+      // Resolve parent session context first (includes project_id for scoping)
+      const parentCtx = await resolveParentSessionContext(env.DATABASE, taskRow.parent_task_id);
+      if (parentCtx && parentCtx.parentUserId === tokenData.userId) {
+        // Check if parent task is still active and get its title (scoped to parent's project)
         const parentInfo = await env.DATABASE.prepare(
-          'SELECT status, title FROM tasks WHERE id = ?',
-        ).bind(parentRow.parent_task_id).first<{ status: string; title: string }>();
+          'SELECT status, title FROM tasks WHERE id = ? AND project_id = ?',
+        ).bind(taskRow.parent_task_id, parentCtx.parentProjectId).first<{ status: string; title: string }>();
 
         if (parentInfo && (ACTIVE_STATUSES as readonly string[]).includes(parentInfo.status)) {
-          const parentCtx = await resolveParentSessionContext(env.DATABASE, parentRow.parent_task_id);
-          if (parentCtx && parentCtx.parentUserId === tokenData.userId) {
-            const limits = getMcpLimits(env);
-            const doId = env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
-            const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
-            await doStub.enqueueInboxMessage(
-              {
-                targetSessionId: parentCtx.parentChatSessionId,
-                sourceTaskId: tokenData.taskId,
-                messageType: 'child_needs_input',
-                content: sanitizeUserInput(`Sub-task '${taskRow.title}' needs your input: ${sanitizedContext}. Respond via send_message_to_subtask(taskId='${tokenData.taskId}', message='your answer')`),
-                priority: 'urgent',
-              },
-              limits.inboxMaxSize,
-              limits.inboxMessageMaxLength,
-            );
-            parentRouted = true;
-            parentTaskTitle = parentInfo.title;
-            log.info('mcp.request_human_input.parent_inbox_enqueued', {
-              taskId: tokenData.taskId,
-              parentTaskId: parentRow.parent_task_id,
-              parentSessionId: parentCtx.parentChatSessionId,
-            });
-          }
+          const limits = getMcpLimits(env);
+          const doId = env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
+          const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
+          await doStub.enqueueInboxMessage(
+            {
+              targetSessionId: parentCtx.parentChatSessionId,
+              sourceTaskId: tokenData.taskId,
+              messageType: 'child_needs_input',
+              content: sanitizeUserInput(`Sub-task '${taskRow.title}' needs your input: ${sanitizedContext}. Respond via send_message_to_subtask(taskId='${tokenData.taskId}', message='your answer')`),
+              priority: 'urgent',
+            },
+            limits.inboxMaxSize,
+            limits.inboxMessageMaxLength,
+          );
+          parentRouted = true;
+          parentTaskTitle = parentInfo.title;
+          log.info('mcp.request_human_input.parent_inbox_enqueued', {
+            taskId: tokenData.taskId,
+            parentTaskId: taskRow.parent_task_id,
+            parentSessionId: parentCtx.parentChatSessionId,
+          });
         }
       }
     } catch (err) {
@@ -258,7 +255,11 @@ export async function handleRequestHumanInput(
     hasOptions: options !== null,
   });
 
+  const routingNote = parentRouted && parentTaskTitle
+    ? ` It was also routed to your parent agent task '${parentTaskTitle}' for programmatic handling.`
+    : '';
+
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: 'Human input request sent. The user has been notified. You may continue working or end your turn.' }],
+    content: [{ type: 'text', text: `Human input request sent. The user has been notified.${routingNote} You may continue working or end your turn.` }],
   });
 }
