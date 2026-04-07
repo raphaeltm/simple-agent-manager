@@ -360,6 +360,26 @@ describe('MCP Orchestration Tools', () => {
       expect(content.newBranch).toBeDefined();
     });
 
+    it('should reject newDescription exceeding max length', async () => {
+      const childTask = makeTask();
+      mockD1._handlers.push({
+        match: 'from "tasks"',
+        method: 'raw',
+        result: [toRawRow(TASK_COLUMNS, childTask)],
+        once: true,
+      });
+
+      // Create a description that exceeds the default max (32000)
+      const longDesc = 'x'.repeat(33000);
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1', newDescription: longDesc },
+      }));
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('exceeds maximum length');
+    });
+
     it('should reject when retry limit is reached', async () => {
       const childTask = makeTask();
       mockD1._handlers.push({
@@ -488,6 +508,28 @@ describe('MCP Orchestration Tools', () => {
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'add_dependency',
         arguments: { taskId: 'task-1', dependsOnTaskId: 'task-2' },
+      }));
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Caller must be the parent');
+    });
+
+    it('should reject sibling trying to block others (caller as dependsOnTaskId)', async () => {
+      // Caller (parent-task-1) tries to make task-a depend on itself — blocked because
+      // callerIsSibling only allows caller as the dependent (taskId), not the blocker
+      mockD1._handlers.push({
+        match: 'from "tasks"',
+        method: 'raw',
+        result: [
+          ['task-a', 'proj-456', 'some-grandparent'],
+          ['parent-task-1', 'proj-456', 'some-grandparent'],
+        ],
+        once: true,
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-a', dependsOnTaskId: 'parent-task-1' },
       }));
       const body = await res.json();
       expect(body.error).toBeDefined();

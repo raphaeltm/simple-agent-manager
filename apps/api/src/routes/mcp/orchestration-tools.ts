@@ -24,6 +24,7 @@ import {
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
+  sanitizeUserInput,
 } from './_helpers';
 
 // ─── retry_subtask ──────────────────────────────────────────────────────────
@@ -43,9 +44,18 @@ export async function handleRetrySubtask(
     return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
   }
 
-  const newDescription = typeof params.newDescription === 'string'
-    ? params.newDescription.trim()
+  const rawNewDescription = typeof params.newDescription === 'string'
+    ? sanitizeUserInput(params.newDescription.trim())
     : undefined;
+
+  if (rawNewDescription && rawNewDescription.length > limits.dispatchDescriptionMaxLength) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `newDescription exceeds maximum length of ${limits.dispatchDescriptionMaxLength}`,
+    );
+  }
+  const newDescription = rawNewDescription;
 
   // Fetch the child task
   const [childTask] = await db
@@ -72,8 +82,9 @@ export async function handleRetrySubtask(
     );
   }
 
-  // Check retry limit — count existing sibling tasks (same parent) that look like retries
-  // This is a simple count: how many children does the parent have for the original description
+  // Check retry limit — counts ALL children of the parent, not just retries of this specific child.
+  // This is intentionally approximate: it caps the total number of child tasks a parent can have,
+  // which bounds retry activity without requiring a separate retry lineage column.
   const [retryCountResult] = await db
     .select({ count: sql<number>`count(*)` })
     .from(schema.tasks)
@@ -139,11 +150,14 @@ export async function handleRetrySubtask(
     }
   }
 
-  // Build replacement task description
+  // Build replacement task description — sanitize errorMessage to avoid reflecting internal details
   const originalDescription = childTask.description ?? '';
+  const truncatedError = childTask.errorMessage
+    ? sanitizeUserInput(childTask.errorMessage.slice(0, 500))
+    : '';
   const replacementDescription = newDescription
     ?? `${originalDescription}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
-      childTask.errorMessage ? ` Error: ${childTask.errorMessage}` : ''
+      truncatedError ? ` Error: ${truncatedError}` : ''
     }${childTask.outputBranch ? ` Branch with partial work: ${childTask.outputBranch}` : ''}`;
 
   // Dispatch replacement task — reuse logic from dispatch-tool
@@ -361,9 +375,11 @@ export async function handleAddDependency(
     taskA.parentTaskId === tokenData.taskId &&
     taskB.parentTaskId === tokenData.taskId;
 
-  // Allow if caller IS one of the tasks and both share the same parent
+  // Allow if caller IS the dependent task (taskId) and both share the same parent.
+  // Restricting to taskId only prevents a task from declaring itself as a blocker
+  // for siblings — a task can only add dependencies on itself, not block others.
   const callerIsSibling =
-    (tokenData.taskId === taskId || tokenData.taskId === dependsOnTaskId) &&
+    tokenData.taskId === taskId &&
     taskA.parentTaskId != null &&
     taskA.parentTaskId === taskB.parentTaskId;
 
@@ -414,10 +430,16 @@ export async function handleAddDependency(
   }
 
   // BFS from dependsOnTaskId — if we can reach taskId, adding this edge creates a cycle
+  // Hard cap on iterations to prevent runaway memory/CPU in misconfigured environments
+  const MAX_BFS_ITERATIONS = 500;
   const visited = new Set<string>();
   const queue = [dependsOnTaskId];
+  let bfsIterations = 0;
 
   while (queue.length > 0) {
+    if (++bfsIterations > MAX_BFS_ITERATIONS) {
+      return jsonRpcError(requestId, INTERNAL_ERROR, 'Dependency graph too complex for cycle check');
+    }
     const current = queue.shift()!;
     if (current === taskId) {
       return jsonRpcError(
