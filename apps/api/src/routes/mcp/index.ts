@@ -63,7 +63,6 @@ import {
   handleCheckDnsStatus,
   handleGetCiStatus,
   handleGetDeploymentStatus,
-  handleGetFileLocks,
   handleGetPeerAgentOutput,
   handleGetRemainingBudget,
   handleGetTaskDependencies,
@@ -215,8 +214,6 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleGetRemainingBudget(requestId, tokenData, c.env));
         case 'list_project_agents':
           return c.json(await handleListProjectAgents(requestId, tokenData, c.env));
-        case 'get_file_locks':
-          return c.json(await handleGetFileLocks(requestId, tokenData, c.env));
         case 'get_peer_agent_output':
           return c.json(await handleGetPeerAgentOutput(requestId, toolArgs, tokenData, c.env));
         case 'get_task_dependencies':
