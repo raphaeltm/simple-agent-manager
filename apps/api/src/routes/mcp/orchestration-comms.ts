@@ -4,6 +4,7 @@
  * send_message_to_subtask: Injects a user-role message into a running child agent's ACP session.
  * stop_subtask: Gracefully stops a child agent's session with an optional warning message.
  */
+import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -51,9 +52,8 @@ async function resolveChildAgent(
   requestId: string | number | null,
   childTaskId: string,
   tokenData: McpTokenData,
-  env: Env,
+  db: DrizzleD1Database<typeof schema>,
 ): Promise<JsonRpcResponse | ResolvedChild> {
-  const db = drizzle(env.DATABASE, { schema });
 
   // 1. Validate caller is a task agent
   if (!tokenData.taskId) {
@@ -106,7 +106,8 @@ async function resolveChildAgent(
     );
   }
 
-  // 5. Resolve workspace
+  // 5. Resolve workspace (project scoping is inherited — the task query above already
+  //    filters by projectId, so the workspace belongs to the same project by definition)
   if (!childTask.workspaceId) {
     return jsonRpcError(
       requestId,
@@ -203,7 +204,8 @@ export async function handleSendMessageToSubtask(
   const message = sanitizeUserInput(rawMessage).slice(0, limits.orchestratorMessageMaxLength);
 
   // Resolve child agent
-  const resolution = await resolveChildAgent(requestId, taskId, tokenData, env);
+  const db = drizzle(env.DATABASE, { schema });
+  const resolution = await resolveChildAgent(requestId, taskId, tokenData, db);
   if (isError(resolution)) {
     return resolution;
   }
@@ -285,7 +287,8 @@ export async function handleStopSubtask(
     : undefined;
 
   // Resolve child agent
-  const resolution = await resolveChildAgent(requestId, taskId, tokenData, env);
+  const db = drizzle(env.DATABASE, { schema });
+  const resolution = await resolveChildAgent(requestId, taskId, tokenData, db);
   if (isError(resolution)) {
     return resolution;
   }
@@ -312,8 +315,9 @@ export async function handleStopSubtask(
       });
     }
 
-    // Grace period to let the agent process the warning
-    await new Promise((resolve) => setTimeout(resolve, limits.orchestratorStopGraceMs));
+    // Grace period to let the agent process the warning (capped at 30s to prevent misconfiguration)
+    const gracePeriodMs = Math.min(limits.orchestratorStopGraceMs, 30_000);
+    await new Promise((resolve) => setTimeout(resolve, gracePeriodMs));
   }
 
   // Hard stop the agent session
@@ -339,33 +343,32 @@ export async function handleStopSubtask(
     );
   }
 
-  // Update task status to failed with parent-stop reason
-  const db = drizzle(env.DATABASE, { schema });
+  // Update task status to failed with parent-stop reason (atomic batch)
   const now = new Date().toISOString();
   const failReason = reason
     ? `stopped_by_parent: ${reason}`
     : 'stopped_by_parent';
 
   try {
-    await db.update(schema.tasks)
-      .set({
-        status: 'failed',
-        errorMessage: failReason,
-        updatedAt: now,
-      })
-      .where(eq(schema.tasks.id, taskId));
-
-    // Record status event
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId,
-      fromStatus: task.status,
-      toStatus: 'failed',
-      actorType: 'agent',
-      actorId: tokenData.workspaceId,
-      reason: failReason,
-      createdAt: now,
-    });
+    await db.batch([
+      db.update(schema.tasks)
+        .set({
+          status: 'failed',
+          errorMessage: failReason,
+          updatedAt: now,
+        })
+        .where(eq(schema.tasks.id, taskId)),
+      db.insert(schema.taskStatusEvents).values({
+        id: ulid(),
+        taskId,
+        fromStatus: task.status,
+        toStatus: 'failed',
+        actorType: 'agent',
+        actorId: tokenData.workspaceId,
+        reason: failReason,
+        createdAt: now,
+      }),
+    ]);
   } catch (err) {
     // Status update failure is non-fatal — the agent session is already stopped
     log.error('mcp.stop_subtask.status_update_failed', {
