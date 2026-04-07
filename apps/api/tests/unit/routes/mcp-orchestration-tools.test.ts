@@ -299,6 +299,7 @@ describe('MCP Orchestration Tools', () => {
       // DO mocks
       mockDoStub.createSession = vi.fn().mockResolvedValue('sess-retry');
       mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-retry');
+      mockTaskRunnerStub.start = vi.fn().mockResolvedValue(undefined);
 
       return childTask;
     }
@@ -357,6 +358,59 @@ describe('MCP Orchestration Tools', () => {
       expect(content.newTaskId).toBeDefined();
       expect(content.newSessionId).toBeDefined();
       expect(content.newBranch).toBeDefined();
+    });
+
+    it('should reject when retry limit is reached', async () => {
+      const childTask = makeTask();
+      mockD1._handlers.push({
+        match: 'from "tasks"',
+        method: 'raw',
+        result: [toRawRow(TASK_COLUMNS, childTask)],
+        once: true,
+      });
+
+      // Sibling count = 4 (original + 3 retries = at limit with default max of 3)
+      mockD1._handlers.push({
+        match: 'count',
+        method: 'raw',
+        result: [[4]],
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Retry limit reached');
+    });
+
+    it('should handle session creation failure gracefully', async () => {
+      setupRetryHappyPath();
+      // Override createSession to fail
+      mockDoStub.createSession = vi.fn().mockRejectedValue(new Error('DO unavailable'));
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Failed to create chat session');
+    });
+
+    it('should handle task runner DO startup failure gracefully', async () => {
+      setupRetryHappyPath();
+      // Override TaskRunner stub to fail
+      mockTaskRunnerStub.start = vi.fn().mockRejectedValue(new Error('DO start failed'));
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Failed to start task runner');
     });
 
     it('should stop running child task before retrying', async () => {
@@ -503,6 +557,51 @@ describe('MCP Orchestration Tools', () => {
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'add_dependency',
         arguments: { taskId: 'task-a', dependsOnTaskId: 'task-b' },
+      }));
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('cycle');
+    });
+
+    it('should detect multi-hop cycle: A->B->C, adding C->A', async () => {
+      // All three tasks are children of caller
+      mockD1._handlers.push({
+        match: 'from "tasks"',
+        method: 'raw',
+        result: [
+          ['task-c', 'proj-456', 'parent-task-1'],
+          ['task-a', 'proj-456', 'parent-task-1'],
+        ],
+        once: true,
+      });
+
+      mockD1._handlers.push({
+        match: 'task_dependencies td',
+        method: 'first',
+        result: { count: 5 },
+      });
+
+      // BFS from task-a: task-a depends on task-b
+      mockD1._handlers.push({
+        match: 'from "task_dependencies"',
+        method: 'raw',
+        result: [['task-b']],
+        once: true,
+      });
+      // BFS continues: task-b depends on task-c
+      mockD1._handlers.push({
+        match: 'from "task_dependencies"',
+        method: 'raw',
+        result: [['task-c']],
+        once: true,
+      });
+      // task-c has no deps (but we already found the cycle: task-c is the taskId)
+      // Actually the cycle is detected when current === taskId ('task-c')
+      // BFS visits: task-a -> task-b -> task-c (=== taskId) -> CYCLE
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-c', dependsOnTaskId: 'task-a' },
       }));
       const body = await res.json();
       expect(body.error).toBeDefined();
