@@ -304,7 +304,7 @@ export async function handleGetInboxStatus(
       text: JSON.stringify({
         pendingCount: stats.pending,
         urgentCount: stats.urgentCount,
-        oldestMessageAge: stats.oldestMessageAge,
+        oldestMessageAgeMs: stats.oldestMessageAgeMs,
       }),
     }],
   });

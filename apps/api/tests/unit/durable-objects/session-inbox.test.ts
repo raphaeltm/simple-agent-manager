@@ -334,7 +334,7 @@ describe('session inbox', () => {
       const stats = inbox.getInboxStats(sql as unknown as SqlStorage, 'session-1');
       expect(stats.pending).toBe(2);
       expect(stats.urgentCount).toBe(0);
-      expect(stats.oldestMessageAge).toBeGreaterThanOrEqual(0);
+      expect(stats.oldestMessageAgeMs).toBeGreaterThanOrEqual(0);
     });
 
     it('should return 0 for empty inbox', () => {
@@ -342,7 +342,7 @@ describe('session inbox', () => {
       const stats = inbox.getInboxStats(sql as unknown as SqlStorage, 'nonexistent');
       expect(stats.pending).toBe(0);
       expect(stats.urgentCount).toBe(0);
-      expect(stats.oldestMessageAge).toBe(0);
+      expect(stats.oldestMessageAgeMs).toBeNull();
     });
 
     it('should not count delivered messages', () => {
@@ -357,7 +357,7 @@ describe('session inbox', () => {
       const stats = inbox.getInboxStats(sql as unknown as SqlStorage, 'session-1');
       expect(stats.pending).toBe(0);
       expect(stats.urgentCount).toBe(0);
-      expect(stats.oldestMessageAge).toBe(0);
+      expect(stats.oldestMessageAgeMs).toBeNull();
     });
 
     it('should count urgent messages separately', () => {
@@ -381,7 +381,7 @@ describe('session inbox', () => {
       const stats = inbox.getInboxStats(sql as unknown as SqlStorage, 'session-1');
       expect(stats.pending).toBe(3);
       expect(stats.urgentCount).toBe(2);
-      expect(stats.oldestMessageAge).toBeGreaterThanOrEqual(0);
+      expect(stats.oldestMessageAgeMs).toBeGreaterThanOrEqual(0);
     });
   });
 

@@ -54,7 +54,7 @@ function createMockEnv(
 ) {
   const mockDoStub = {
     enqueueInboxMessage: vi.fn().mockResolvedValue('msg-1'),
-    getInboxStats: vi.fn().mockResolvedValue({ pending: 0, urgentCount: 0, oldestMessageAge: 0 }),
+    getInboxStats: vi.fn().mockResolvedValue({ pending: 0, urgentCount: 0, oldestMessageAgeMs: null }),
   };
   const mockProjectData = {
     idFromName: vi.fn().mockReturnValue('do-id'),
@@ -103,10 +103,8 @@ function parentRoutingQueries(opts: {
   } = opts;
 
   return {
-    // Task lookup: SELECT user_id, title FROM tasks WHERE id = ? AND project_id = ?
-    'SELECT user_id, title FROM tasks': { user_id: 'user-1', title: 'Child Task' },
-    // Parent task ID: SELECT parent_task_id FROM tasks
-    'SELECT parent_task_id FROM tasks': { parent_task_id: parentTaskId },
+    // Task lookup (merged): SELECT user_id, title, parent_task_id FROM tasks WHERE id = ? AND project_id = ?
+    'SELECT user_id, title, parent_task_id FROM tasks': { user_id: 'user-1', title: 'Child Task', parent_task_id: parentTaskId },
     // Parent status+title: SELECT status, title FROM tasks WHERE id = ?
     'SELECT status, title FROM tasks': parentTaskId
       ? { status: parentStatus, title: parentTitle }
@@ -286,7 +284,7 @@ describe('handleGetInboxStatus', () => {
       getInboxStats: vi.fn().mockResolvedValue({
         pending: 3,
         urgentCount: 1,
-        oldestMessageAge: 5000,
+        oldestMessageAgeMs: 5000,
       }),
     };
     const mockProjectData = {
@@ -308,7 +306,7 @@ describe('handleGetInboxStatus', () => {
     const parsed = JSON.parse(body.result.content[0]!.text);
     expect(parsed.pendingCount).toBe(3);
     expect(parsed.urgentCount).toBe(1);
-    expect(parsed.oldestMessageAge).toBe(5000);
+    expect(parsed.oldestMessageAgeMs).toBe(5000);
   });
 
   it('should return error when workspace has no session', async () => {
