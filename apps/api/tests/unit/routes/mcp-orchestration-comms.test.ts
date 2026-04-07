@@ -267,6 +267,67 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(content.reason).toBe('agent_busy');
     });
 
+    it('should return internal error for non-409 delivery failures', async () => {
+      mockD1ResultSequence([
+        [{
+          id: 'child-001',
+          status: 'in_progress',
+          workspace_id: 'ws-child-001',
+          project_id: 'proj-001',
+          parent_task_id: 'parent-task-001',
+        }],
+        [{
+          id: 'ws-child-001',
+          node_id: 'node-001',
+          status: 'active',
+        }],
+        [{
+          id: 'agent-session-001',
+        }],
+      ]);
+
+      mockSendPromptToAgentOnNode.mockRejectedValue(new Error('Network timeout'));
+
+      const result = await handleSendMessageToSubtask(
+        1,
+        { taskId: 'child-001', message: 'hello' },
+        parentTokenData,
+        mockEnv as Env,
+      );
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.code).toBe(-32603);
+      expect(result.error?.message).toContain('Failed to send message');
+    });
+
+    it('should reject when no running agent session exists', async () => {
+      mockD1ResultSequence([
+        [{
+          id: 'child-001',
+          status: 'in_progress',
+          workspace_id: 'ws-child-001',
+          project_id: 'proj-001',
+          parent_task_id: 'parent-task-001',
+        }],
+        [{
+          id: 'ws-child-001',
+          node_id: 'node-001',
+          status: 'active',
+        }],
+        [],
+      ]);
+
+      const result = await handleSendMessageToSubtask(
+        1,
+        { taskId: 'child-001', message: 'hello' },
+        parentTokenData,
+        mockEnv as Env,
+      );
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.message).toContain('No running agent session');
+    });
+
     it('should truncate message to max length', async () => {
       mockD1ResultSequence([
         [{
@@ -459,6 +520,39 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(content.stopped).toBe(true);
 
       expect(mockStopAgentSessionOnNode).toHaveBeenCalled();
+    });
+
+    it('should return internal error when hard stop fails', async () => {
+      mockD1ResultSequence([
+        [{
+          id: 'child-001',
+          status: 'in_progress',
+          workspace_id: 'ws-child-001',
+          project_id: 'proj-001',
+          parent_task_id: 'parent-task-001',
+        }],
+        [{
+          id: 'ws-child-001',
+          node_id: 'node-001',
+          status: 'active',
+        }],
+        [{
+          id: 'agent-session-001',
+        }],
+      ]);
+
+      mockStopAgentSessionOnNode.mockRejectedValue(new Error('VM agent unreachable'));
+
+      const result = await handleStopSubtask(
+        1,
+        { taskId: 'child-001' },
+        parentTokenData,
+        mockEnv as Env,
+      );
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.code).toBe(-32603);
+      expect(result.error?.message).toContain('Failed to stop child agent session');
     });
 
     it('should reject when child task is completed', async () => {
