@@ -100,6 +100,10 @@ const DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH = 200;
 const DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK = 3;
 /** Max dependency edges per project via add_dependency. Override via ORCHESTRATOR_DEPENDENCY_MAX_EDGES env var. */
 const DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES = 50;
+/** Grace period in ms before hard stop after warning message. Override via ORCHESTRATOR_STOP_GRACE_MS env var. */
+const DEFAULT_ORCHESTRATOR_STOP_GRACE_MS = 5000;
+/** Max length for injected messages to child agents. Override via ORCHESTRATOR_MESSAGE_MAX_LENGTH env var. */
+const DEFAULT_ORCHESTRATOR_MESSAGE_MAX_LENGTH = 32_768;
 
 export function getMcpLimits(env: Env) {
   return {
@@ -134,6 +138,8 @@ export function getMcpLimits(env: Env) {
     sessionTopicMaxLength: parsePositiveInt(env.MCP_SESSION_TOPIC_MAX_LENGTH, DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH),
     orchestratorMaxRetriesPerTask: parsePositiveInt(env.ORCHESTRATOR_MAX_RETRIES_PER_TASK, DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK),
     orchestratorDependencyMaxEdges: parsePositiveInt(env.ORCHESTRATOR_DEPENDENCY_MAX_EDGES, DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES),
+    orchestratorStopGraceMs: parsePositiveInt(env.ORCHESTRATOR_STOP_GRACE_MS, DEFAULT_ORCHESTRATOR_STOP_GRACE_MS),
+    orchestratorMessageMaxLength: parsePositiveInt(env.ORCHESTRATOR_MESSAGE_MAX_LENGTH, DEFAULT_ORCHESTRATOR_MESSAGE_MAX_LENGTH),
   };
 }
 
