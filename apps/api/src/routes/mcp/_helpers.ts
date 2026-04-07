@@ -103,6 +103,14 @@ export const DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE = 100;
 export const DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE = 10;
 /** Default max content length per inbox message. Override via ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH env var. */
 export const DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH = 8192;
+/** Default wait time (ms) between cancel and re-prompt attempt. Override via ORCHESTRATOR_CANCEL_SETTLE_MS env var. */
+export const DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS = 2000;
+/** Default timeout (ms) for cancel→stop sequence. Override via ORCHESTRATOR_CANCEL_TIMEOUT_MS env var. */
+export const DEFAULT_ORCHESTRATOR_CANCEL_TIMEOUT_MS = 5000;
+/** Default max cancel+retry attempts for urgent messages. Override via ORCHESTRATOR_URGENT_RETRY_ATTEMPTS env var. */
+export const DEFAULT_ORCHESTRATOR_URGENT_RETRY_ATTEMPTS = 2;
+/** Default cap (ms) on warning-phase settle within cancel→stop sequence. Override via ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS env var. */
+export const DEFAULT_ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS = 3000;
 
 export function getMcpLimits(env: Env) {
   return {

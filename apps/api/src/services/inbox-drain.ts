@@ -13,14 +13,12 @@ import type { ProjectData } from '../durable-objects/project-data';
 import type { Env } from '../index';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE } from '../routes/mcp/_helpers';
+import {
+  DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS,
+  DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE,
+  DEFAULT_ORCHESTRATOR_URGENT_RETRY_ATTEMPTS,
+} from '../routes/mcp/_helpers';
 import { cancelAgentSessionOnNode, sendPromptToAgentOnNode } from './node-agent';
-
-/** Default wait time (ms) between cancel and re-prompt attempt. */
-const DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS = 2000;
-
-/** Default max cancel+retry attempts for urgent messages. */
-const DEFAULT_ORCHESTRATOR_URGENT_RETRY_ATTEMPTS = 2;
 
 export interface DrainResult {
   delivered: number;

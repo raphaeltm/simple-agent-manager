@@ -309,6 +309,7 @@ export interface Env {
   // Orchestrator cancel/interrupt configuration (agent-to-agent downward communication)
   ORCHESTRATOR_CANCEL_SETTLE_MS?: string;           // Wait time (ms) between cancel and re-prompt (default: 2000)
   ORCHESTRATOR_CANCEL_TIMEOUT_MS?: string;          // Timeout (ms) for cancel→stop sequence (default: 5000)
+  ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS?: string;   // Cap (ms) on warning-phase settle within cancel→stop sequence (default: 3000)
   ORCHESTRATOR_URGENT_RETRY_ATTEMPTS?: string;      // Max cancel+retry attempts for urgent messages (default: 2)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;

@@ -11,6 +11,9 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { cancelAgentSessionOnNode, sendPromptToAgentOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
 import {
   ACTIVE_STATUSES,
+  DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS,
+  DEFAULT_ORCHESTRATOR_CANCEL_TIMEOUT_MS,
+  DEFAULT_ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS,
   getMcpLimits,
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -20,12 +23,6 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
-
-/** Default wait time (ms) after cancel before sending warning/re-prompt. */
-const DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS = 2000;
-
-/** Default timeout (ms) for the full cancel→stop sequence. */
-const DEFAULT_ORCHESTRATOR_CANCEL_TIMEOUT_MS = 5000;
 
 function getCancelSettleMs(env: Env): number {
   return parsePositiveInt(
@@ -41,50 +38,11 @@ function getCancelTimeoutMs(env: Env): number {
   );
 }
 
-/**
- * Resolve a child task's active agent session context.
- * Returns null if the child task has no workspace, session, or node.
- */
-async function resolveChildAgentContext(
-  db: D1Database,
-  childTaskId: string,
-  parentProjectId: string,
-  parentUserId: string,
-): Promise<{
-  workspaceId: string;
-  chatSessionId: string;
-  nodeId: string;
-} | null> {
-  const row = await db.prepare(`
-    SELECT t.project_id, t.user_id, t.status, w.id as workspace_id, w.chat_session_id, w.node_id
-    FROM tasks t
-    LEFT JOIN workspaces w ON w.id = t.workspace_id
-    WHERE t.id = ?
-  `).bind(childTaskId).first<{
-    project_id: string;
-    user_id: string;
-    status: string;
-    workspace_id: string | null;
-    chat_session_id: string | null;
-    node_id: string | null;
-  }>();
-
-  if (!row) return null;
-
-  // Verify same project and user
-  if (row.project_id !== parentProjectId || row.user_id !== parentUserId) {
-    return null;
-  }
-
-  if (!row.workspace_id || !row.chat_session_id || !row.node_id) {
-    return null;
-  }
-
-  return {
-    workspaceId: row.workspace_id,
-    chatSessionId: row.chat_session_id,
-    nodeId: row.node_id,
-  };
+function getCancelWarningSettleMs(env: Env): number {
+  return parsePositiveInt(
+    env.ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS,
+    DEFAULT_ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS,
+  );
 }
 
 // ─── send_message_to_subtask ────────────────────────────────────────────────
@@ -109,14 +67,21 @@ export async function handleSendMessageToSubtask(
 
   const sanitizedMessage = sanitizeUserInput(message.trim());
 
-  // Verify the child task belongs to the same project and user
-  const childRow = await env.DATABASE.prepare(
-    'SELECT project_id, user_id, parent_task_id, status FROM tasks WHERE id = ?',
-  ).bind(taskId.trim()).first<{
+  // Single query: verify ownership + resolve workspace/session context
+  const childRow = await env.DATABASE.prepare(`
+    SELECT t.project_id, t.user_id, t.parent_task_id, t.status,
+           w.id as workspace_id, w.chat_session_id, w.node_id
+    FROM tasks t
+    LEFT JOIN workspaces w ON w.id = t.workspace_id
+    WHERE t.id = ?
+  `).bind(taskId.trim()).first<{
     project_id: string;
     user_id: string;
     parent_task_id: string | null;
     status: string;
+    workspace_id: string | null;
+    chat_session_id: string | null;
+    node_id: string | null;
   }>();
 
   if (!childRow) {
@@ -127,7 +92,6 @@ export async function handleSendMessageToSubtask(
     return jsonRpcError(requestId, INVALID_PARAMS, 'Child task does not belong to this project or user');
   }
 
-  // Verify calling agent is the parent
   if (childRow.parent_task_id !== tokenData.taskId) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'You are not the parent of this task');
   }
@@ -136,15 +100,7 @@ export async function handleSendMessageToSubtask(
     return jsonRpcError(requestId, INVALID_PARAMS, `Child task is not active (status: ${childRow.status})`);
   }
 
-  // Resolve the child task's workspace/session to find its project
-  const childCtx = await resolveChildAgentContext(
-    env.DATABASE,
-    taskId.trim(),
-    tokenData.projectId,
-    tokenData.userId,
-  );
-
-  if (!childCtx) {
+  if (!childRow.workspace_id || !childRow.chat_session_id || !childRow.node_id) {
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Child task has no active workspace or session');
   }
 
@@ -155,7 +111,7 @@ export async function handleSendMessageToSubtask(
 
   await doStub.enqueueInboxMessage(
     {
-      targetSessionId: childCtx.chatSessionId,
+      targetSessionId: childRow.chat_session_id,
       sourceTaskId: tokenData.taskId,
       messageType: 'parent_message',
       content: sanitizedMessage,
@@ -169,7 +125,7 @@ export async function handleSendMessageToSubtask(
     parentTaskId: tokenData.taskId,
     childTaskId: taskId.trim(),
     priority,
-    sessionId: childCtx.chatSessionId,
+    sessionId: childRow.chat_session_id,
   });
 
   return jsonRpcSuccess(requestId, {
@@ -195,14 +151,21 @@ export async function handleStopSubtask(
 
   const reason = typeof params.reason === 'string' ? params.reason.trim() : 'Stopped by parent task';
 
-  // Verify the child task belongs to the same project and user
-  const childRow = await env.DATABASE.prepare(
-    'SELECT project_id, user_id, parent_task_id, status FROM tasks WHERE id = ?',
-  ).bind(taskId.trim()).first<{
+  // Single query: verify ownership + resolve workspace/session context
+  const childRow = await env.DATABASE.prepare(`
+    SELECT t.project_id, t.user_id, t.parent_task_id, t.status,
+           w.id as workspace_id, w.chat_session_id, w.node_id
+    FROM tasks t
+    LEFT JOIN workspaces w ON w.id = t.workspace_id
+    WHERE t.id = ?
+  `).bind(taskId.trim()).first<{
     project_id: string;
     user_id: string;
     parent_task_id: string | null;
     status: string;
+    workspace_id: string | null;
+    chat_session_id: string | null;
+    node_id: string | null;
   }>();
 
   if (!childRow) {
@@ -223,14 +186,7 @@ export async function handleStopSubtask(
     });
   }
 
-  const childCtx = await resolveChildAgentContext(
-    env.DATABASE,
-    taskId.trim(),
-    tokenData.projectId,
-    tokenData.userId,
-  );
-
-  if (!childCtx) {
+  if (!childRow.workspace_id || !childRow.chat_session_id || !childRow.node_id) {
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Child task has no active workspace or session');
   }
 
@@ -240,9 +196,9 @@ export async function handleStopSubtask(
   try {
     // Step 1: Cancel any running prompt
     const cancelResult = await cancelAgentSessionOnNode(
-      childCtx.nodeId,
-      childCtx.workspaceId,
-      childCtx.chatSessionId,
+      childRow.node_id,
+      childRow.workspace_id,
+      childRow.chat_session_id,
       env,
       tokenData.userId,
     );
@@ -261,9 +217,9 @@ export async function handleStopSubtask(
     try {
       const warningMsg = `[System] You are being stopped by your parent task. Reason: ${sanitizeUserInput(reason)}. Save your work and finish up.`;
       await sendPromptToAgentOnNode(
-        childCtx.nodeId,
-        childCtx.workspaceId,
-        childCtx.chatSessionId,
+        childRow.node_id,
+        childRow.workspace_id,
+        childRow.chat_session_id,
         warningMsg,
         env,
         tokenData.userId,
@@ -272,7 +228,8 @@ export async function handleStopSubtask(
 
       // Give the agent a moment to process the warning
       const timeoutMs = getCancelTimeoutMs(env);
-      await new Promise((resolve) => setTimeout(resolve, Math.min(timeoutMs, 3000)));
+      const warningSettleMs = getCancelWarningSettleMs(env);
+      await new Promise((resolve) => setTimeout(resolve, Math.min(timeoutMs, warningSettleMs)));
     } catch {
       steps.push('Warning message delivery failed (agent may be busy)');
     }
@@ -280,9 +237,9 @@ export async function handleStopSubtask(
     // Step 3: Hard stop the session
     try {
       await stopAgentSessionOnNode(
-        childCtx.nodeId,
-        childCtx.workspaceId,
-        childCtx.chatSessionId,
+        childRow.node_id,
+        childRow.workspace_id,
+        childRow.chat_session_id,
         env,
         tokenData.userId,
       );

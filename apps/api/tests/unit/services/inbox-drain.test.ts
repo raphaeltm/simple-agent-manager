@@ -31,6 +31,8 @@ vi.mock('../../../src/lib/route-helpers', () => ({
 
 vi.mock('../../../src/routes/mcp/_helpers', () => ({
   DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE: 10,
+  DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS: 2000,
+  DEFAULT_ORCHESTRATOR_URGENT_RETRY_ATTEMPTS: 2,
 }));
 
 const mockedSendPrompt = vi.mocked(sendPromptToAgentOnNode);
