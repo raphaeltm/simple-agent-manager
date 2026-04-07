@@ -135,3 +135,105 @@
     to   { transform: translateY(0); }
   }
 }
+
+/* GlobalAudioPlayer — full-width seek bar styled as a thin progress bar */
+.sam-player-seek {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  display: block;
+}
+/* Keyboard focus ring — matches FOCUS_RING on buttons */
+.sam-player-seek:focus-visible {
+  outline: 2px solid var(--sam-color-focus-ring, #34d399);
+  outline-offset: 2px;
+}
+/* Track — WebKit uses gradient to show filled portion, Firefox uses ::-moz-range-progress */
+.sam-player-seek::-webkit-slider-runnable-track {
+  height: 4px;
+  background: linear-gradient(
+    to right,
+    var(--sam-color-accent-primary, #16a34a) var(--seek-pct, 0%),
+    var(--sam-color-bg-inset, #333) var(--seek-pct, 0%)
+  );
+  border: none;
+}
+.sam-player-seek::-moz-range-track {
+  height: 4px;
+  background: var(--sam-color-bg-inset, #333);
+  border: none;
+}
+/* Filled portion (Firefox) */
+.sam-player-seek::-moz-range-progress {
+  height: 4px;
+  background: var(--sam-color-accent-primary, #16a34a);
+}
+/* Thumb */
+.sam-player-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--sam-color-accent-primary, #16a34a);
+  border: none;
+  margin-top: -4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.sam-player-seek::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--sam-color-accent-primary, #16a34a);
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+/* Show thumb on hover/focus */
+.sam-player-seek:hover::-webkit-slider-thumb,
+.sam-player-seek:focus::-webkit-slider-thumb {
+  opacity: 1;
+}
+.sam-player-seek:hover::-moz-range-thumb,
+.sam-player-seek:focus::-moz-range-thumb {
+  opacity: 1;
+}
+/* Expand track on hover for easier touch target */
+.sam-player-seek:hover::-webkit-slider-runnable-track {
+  height: 6px;
+  background: linear-gradient(
+    to right,
+    var(--sam-color-accent-primary, #16a34a) var(--seek-pct, 0%),
+    var(--sam-color-bg-inset, #333) var(--seek-pct, 0%)
+  );
+}
+.sam-player-seek:hover::-moz-range-track {
+  height: 6px;
+}
+.sam-player-seek:hover::-moz-range-progress {
+  height: 6px;
+}
+/* Touch target: the input itself has padding for easier tapping on mobile */
+@media (pointer: coarse) {
+  .sam-player-seek {
+    height: 20px;
+    padding: 8px 0;
+  }
+  .sam-player-seek::-webkit-slider-thumb {
+    opacity: 1;
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+  }
+  .sam-player-seek::-moz-range-thumb {
+    opacity: 1;
+    width: 14px;
+    height: 14px;
+  }
+}
