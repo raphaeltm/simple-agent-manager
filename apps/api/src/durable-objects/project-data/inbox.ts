@@ -145,17 +145,33 @@ export function markInboxDelivered(
   return updated;
 }
 
+export interface InboxStats {
+  pending: number;
+  urgentCount: number;
+  oldestMessageAge: number;
+}
+
 /**
- * Get inbox stats for a session (count of pending messages).
+ * Get inbox stats for a session (count of pending/urgent messages and oldest message age).
  */
 export function getInboxStats(
   sql: SqlStorage,
   targetSessionId: string,
-): { pending: number } {
+): InboxStats {
   const row = sql.exec(
-    'SELECT COUNT(*) as cnt FROM session_inbox WHERE target_session_id = ? AND delivered_at IS NULL',
+    `SELECT
+       COUNT(*) as cnt,
+       SUM(CASE WHEN priority = 'urgent' THEN 1 ELSE 0 END) as urgent_cnt,
+       MIN(created_at) as oldest_created_at
+     FROM session_inbox
+     WHERE target_session_id = ? AND delivered_at IS NULL`,
     targetSessionId,
   ).toArray()[0];
 
-  return { pending: row ? parseCountCnt(row, 'inbox.stats') : 0 };
+  const pending = row ? parseCountCnt(row, 'inbox.stats') : 0;
+  const urgentCnt = row && typeof row['urgent_cnt'] === 'number' ? row['urgent_cnt'] : 0;
+  const oldestCreatedAt = row && typeof row['oldest_created_at'] === 'number' ? row['oldest_created_at'] : 0;
+  const oldestMessageAge = oldestCreatedAt > 0 ? Date.now() - oldestCreatedAt : 0;
+
+  return { pending, urgentCount: urgentCnt, oldestMessageAge };
 }

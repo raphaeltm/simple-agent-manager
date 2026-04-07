@@ -130,6 +130,18 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'get_inbox_status',
+    description:
+      'Check the status of your session inbox. Returns counts of pending and urgent messages, ' +
+      'and how old the oldest undelivered message is. Use this to proactively check if child tasks ' +
+      'have sent you messages that haven\'t been delivered yet.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
   // ─── Agent-initiated notifications ──────────────────────────────────────
   {
     name: 'request_human_input',

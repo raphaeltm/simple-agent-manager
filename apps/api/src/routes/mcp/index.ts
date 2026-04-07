@@ -38,7 +38,7 @@ import {
 } from './idea-tools';
 import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
-import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-tools';
+import { handleGetInboxStatus, handleSendMessageToSubtask, handleStopSubtask } from './orchestration-tools';
 import {
   handleGetSessionMessages,
   handleListSessions,
@@ -168,6 +168,8 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleSendMessageToSubtask(requestId, toolArgs, tokenData, c.env));
         case 'stop_subtask':
           return c.json(await handleStopSubtask(requestId, toolArgs, tokenData, c.env));
+        case 'get_inbox_status':
+          return c.json(await handleGetInboxStatus(requestId, tokenData, c.env));
         case 'list_tasks':
           return c.json(await handleListTasks(requestId, toolArgs, tokenData, c.env));
         case 'get_task_details':

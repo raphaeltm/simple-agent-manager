@@ -111,6 +111,8 @@ export const DEFAULT_ORCHESTRATOR_CANCEL_TIMEOUT_MS = 5000;
 export const DEFAULT_ORCHESTRATOR_URGENT_RETRY_ATTEMPTS = 2;
 /** Default cap (ms) on warning-phase settle within cancel→stop sequence. Override via ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS env var. */
 export const DEFAULT_ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS = 3000;
+/** Whether parent routing is enabled for request_human_input. Override via ORCHESTRATOR_PARENT_ROUTING_ENABLED env var. */
+export const DEFAULT_ORCHESTRATOR_PARENT_ROUTING_ENABLED = true;
 
 export function getMcpLimits(env: Env) {
   return {

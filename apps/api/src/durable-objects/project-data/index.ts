@@ -267,7 +267,7 @@ export class ProjectData extends DurableObject<Env> {
     return inbox.markInboxDelivered(this.sql, messageIds);
   }
 
-  async getInboxStats(targetSessionId: string): Promise<{ pending: number }> {
+  async getInboxStats(targetSessionId: string): Promise<inbox.InboxStats> {
     return inbox.getInboxStats(this.sql, targetSessionId);
   }
 

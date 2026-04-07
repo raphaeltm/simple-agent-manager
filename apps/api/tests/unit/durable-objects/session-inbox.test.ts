@@ -27,13 +27,18 @@ class MockSqlStorage {
     const normalized = query.trim().toUpperCase();
     let rowsWritten = 0;
 
-    // COUNT for specific session
+    // COUNT/SUM/MIN for getInboxStats (extended stats query)
     if (normalized.includes('COUNT(*)') && normalized.includes('SESSION_INBOX') && normalized.includes('DELIVERED_AT IS NULL')) {
       const targetId = params[0] as string;
-      const count = this.rows.filter(
+      const pending = this.rows.filter(
         (r) => r.target_session_id === targetId && r.delivered_at === null,
-      ).length;
-      return { toArray: () => [{ cnt: count }], rowsWritten: 0 };
+      );
+      const count = pending.length;
+      const urgentCnt = pending.filter((r) => r.priority === 'urgent').length;
+      const oldestCreatedAt = pending.length > 0
+        ? Math.min(...pending.map((r) => r.created_at))
+        : null;
+      return { toArray: () => [{ cnt: count, urgent_cnt: urgentCnt, oldest_created_at: oldestCreatedAt }], rowsWritten: 0 };
     }
 
     // DELETE overflow
@@ -328,12 +333,16 @@ describe('session inbox', () => {
 
       const stats = inbox.getInboxStats(sql as unknown as SqlStorage, 'session-1');
       expect(stats.pending).toBe(2);
+      expect(stats.urgentCount).toBe(0);
+      expect(stats.oldestMessageAge).toBeGreaterThanOrEqual(0);
     });
 
     it('should return 0 for empty inbox', () => {
       const sql = createMockSql();
       const stats = inbox.getInboxStats(sql as unknown as SqlStorage, 'nonexistent');
       expect(stats.pending).toBe(0);
+      expect(stats.urgentCount).toBe(0);
+      expect(stats.oldestMessageAge).toBe(0);
     });
 
     it('should not count delivered messages', () => {
@@ -347,6 +356,32 @@ describe('session inbox', () => {
 
       const stats = inbox.getInboxStats(sql as unknown as SqlStorage, 'session-1');
       expect(stats.pending).toBe(0);
+      expect(stats.urgentCount).toBe(0);
+      expect(stats.oldestMessageAge).toBe(0);
+    });
+
+    it('should count urgent messages separately', () => {
+      const sql = createMockSql();
+      inbox.enqueueInboxMessage(
+        sql as unknown as SqlStorage,
+        { targetSessionId: 'session-1', sourceTaskId: 'task-1', messageType: 'child_completed', content: 'A', priority: 'normal' },
+        DEFAULT_MAX_SIZE, DEFAULT_MAX_CONTENT_LENGTH,
+      );
+      inbox.enqueueInboxMessage(
+        sql as unknown as SqlStorage,
+        { targetSessionId: 'session-1', sourceTaskId: 'task-2', messageType: 'child_needs_input', content: 'B', priority: 'urgent' },
+        DEFAULT_MAX_SIZE, DEFAULT_MAX_CONTENT_LENGTH,
+      );
+      inbox.enqueueInboxMessage(
+        sql as unknown as SqlStorage,
+        { targetSessionId: 'session-1', sourceTaskId: 'task-3', messageType: 'child_needs_input', content: 'C', priority: 'urgent' },
+        DEFAULT_MAX_SIZE, DEFAULT_MAX_CONTENT_LENGTH,
+      );
+
+      const stats = inbox.getInboxStats(sql as unknown as SqlStorage, 'session-1');
+      expect(stats.pending).toBe(3);
+      expect(stats.urgentCount).toBe(2);
+      expect(stats.oldestMessageAge).toBeGreaterThanOrEqual(0);
     });
   });
 
