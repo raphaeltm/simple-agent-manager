@@ -153,13 +153,17 @@ describe('handleRequestHumanInput — parent routing', () => {
     expect(enqueueCall[0].content).toContain('Need help with deployment');
     expect(enqueueCall[0].content).toContain('send_message_to_subtask');
 
+    // Size limit args must be passed (prevents unbounded inbox growth)
+    expect(enqueueCall[1]).toBeGreaterThan(0); // inboxMaxSize
+    expect(enqueueCall[2]).toBeGreaterThan(0); // inboxMessageMaxLength
+
     // Should return success
     const body = result as { result: { content: Array<{ text: string }> } };
     expect(body.result.content[0]!.text).toContain('Human input request sent');
   });
 
   it('should send human notification only when child has no parent', async () => {
-    const { env, mockDoStub } = createMockEnv(
+    const { env, mockDoStub, mockNotificationStub } = createMockEnv(
       parentRoutingQueries({ parentTaskId: null }),
     );
 
@@ -171,6 +175,24 @@ describe('handleRequestHumanInput — parent routing', () => {
     );
 
     // Should NOT enqueue to parent inbox
+    expect(mockDoStub.enqueueInboxMessage).not.toHaveBeenCalled();
+    // Should still send human notification
+    expect(mockNotificationStub.createNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not route to parent inbox when parent belongs to a different user', async () => {
+    const { env, mockDoStub } = createMockEnv(
+      parentRoutingQueries({ parentUserId: 'user-different' }),
+    );
+
+    await handleRequestHumanInput(
+      1,
+      { context: 'Need help' },
+      tokenData,
+      env as any,
+    );
+
+    // Cross-user guard: should NOT enqueue to parent inbox
     expect(mockDoStub.enqueueInboxMessage).not.toHaveBeenCalled();
   });
 
@@ -265,12 +287,11 @@ describe('handleRequestHumanInput — parent routing', () => {
       env as any,
     );
 
-    // Notification should NOT contain parent note since routing failed
-    if (mockNotificationStub.createNotification.mock.calls.length > 0) {
-      const notifCall = mockNotificationStub.createNotification.mock.calls[0]![1] as Record<string, unknown>;
-      const body = notifCall['body'] as string;
-      expect(body).not.toContain('Also sent to parent agent task');
-    }
+    // Notification should still fire and NOT contain parent note since routing failed
+    expect(mockNotificationStub.createNotification).toHaveBeenCalledTimes(1);
+    const notifCall = mockNotificationStub.createNotification.mock.calls[0]![1] as Record<string, unknown>;
+    const notifBody = notifCall['body'] as string;
+    expect(notifBody).not.toContain('Also sent to parent agent task');
   });
 });
 
