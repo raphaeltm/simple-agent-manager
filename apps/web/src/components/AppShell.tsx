@@ -1,5 +1,5 @@
-import { ArrowLeft, Menu, Monitor,Search, Server, Shield } from 'lucide-react';
-import { createContext, type ReactNode,useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Menu, Monitor, Search, Server, Shield } from 'lucide-react';
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
@@ -10,7 +10,7 @@ import { useAuth } from './AuthProvider';
 import { GlobalAudioPlayer } from './GlobalAudioPlayer';
 import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
-import { extractProjectId,GLOBAL_NAV_ITEMS, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
+import { extractProjectId, GLOBAL_NAV_ITEMS, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { NotificationCenter } from './NotificationCenter';
 
 interface AppShellContextValue {
@@ -34,10 +34,15 @@ export function AppShell({ children }: AppShellProps) {
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [projectName, setProjectNameState] = useState<string | undefined>(undefined);
+  const [showGlobalNav, setShowGlobalNav] = useState(false);
   const commandPalette = useGlobalCommandPalette();
 
   const setProjectName = useCallback((name: string | undefined) => {
     setProjectNameState(name);
+  }, []);
+
+  const handleToggleGlobalNav = useCallback(() => {
+    setShowGlobalNav((prev) => !prev);
   }, []);
 
   // Detect project context from URL (excludes reserved paths like /projects/new)
@@ -45,14 +50,11 @@ export function AppShell({ children }: AppShellProps) {
 
   const mobileNavItems = useMemo((): MobileNavItem[] => {
     if (projectId) {
-      return [
-        { label: 'Back to Projects', path: '/projects', icon: <ArrowLeft size={18} /> },
-        ...PROJECT_NAV_ITEMS.map((item) => ({
-          label: item.label,
-          path: `/projects/${projectId}/${item.path}`,
-          icon: item.icon,
-        })),
-      ];
+      return PROJECT_NAV_ITEMS.map((item) => ({
+        label: item.label,
+        path: `/projects/${projectId}/${item.path}`,
+        icon: item.icon,
+      }));
     }
     const items: MobileNavItem[] = GLOBAL_NAV_ITEMS.map((item) => ({
       label: item.label,
@@ -65,19 +67,32 @@ export function AppShell({ children }: AppShellProps) {
     return items;
   }, [isSuperadmin, projectId]);
 
+  const mobileGlobalNavItems = useMemo((): MobileNavItem[] => {
+    const items: MobileNavItem[] = GLOBAL_NAV_ITEMS.map((item) => ({
+      label: item.label,
+      path: item.path,
+      icon: item.icon,
+    }));
+    if (isSuperadmin) {
+      items.push({ label: 'Admin', path: '/admin', icon: <Shield size={18} /> });
+    }
+    return items;
+  }, [isSuperadmin]);
+
   const mobileInfraSection = useMemo(() => {
-    if (!isSuperadmin || projectId) return undefined;
+    if (!isSuperadmin) return undefined;
     return {
       items: [
         { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
         { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
       ],
     };
-  }, [isSuperadmin, projectId]);
+  }, [isSuperadmin]);
 
-  // Close drawer on route change
+  // Close drawer and reset nav toggle on route change
   useEffect(() => {
     setDrawerOpen(false);
+    setShowGlobalNav(false);
   }, [location.pathname]);
 
   // Clear project name when leaving project context
@@ -147,11 +162,14 @@ export function AppShell({ children }: AppShellProps) {
             onClose={() => setDrawerOpen(false)}
             user={{ name: user.name, email: user.email, image: user.image }}
             navItems={mobileNavItems}
+            globalNavItems={projectId ? mobileGlobalNavItems : undefined}
             currentPath={location.pathname}
             onNavigate={(path) => { navigate(path); setDrawerOpen(false); }}
             onSignOut={handleSignOut}
             projectName={projectId ? (projectName || 'Project') : undefined}
             infraSection={mobileInfraSection}
+            showGlobalNav={showGlobalNav}
+            onToggleGlobalNav={projectId ? handleToggleGlobalNav : undefined}
           />
         )}
 
@@ -183,7 +201,11 @@ export function AppShell({ children }: AppShellProps) {
             {isMacPlatform() ? '\u2318K' : 'Ctrl+K'}
           </kbd>
         </button>
-        <NavSidebar projectName={projectName} />
+        <NavSidebar
+          projectName={projectName}
+          showGlobalNav={showGlobalNav}
+          onToggleGlobalNav={handleToggleGlobalNav}
+        />
         {user && (
           <div className="mt-auto p-3 border-t border-border-default flex items-center gap-2">
             {avatarElement}
