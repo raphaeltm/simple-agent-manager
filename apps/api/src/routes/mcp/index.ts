@@ -38,6 +38,7 @@ import {
 } from './idea-tools';
 import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
+import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
   handleAddDependency,
   handleRemovePendingSubtask,
@@ -168,6 +169,10 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleRequestHumanInput(requestId, toolArgs, tokenData, c.env));
         case 'dispatch_task':
           return c.json(await handleDispatchTask(requestId, toolArgs, tokenData, c.env));
+        case 'send_message_to_subtask':
+          return c.json(await handleSendMessageToSubtask(requestId, toolArgs, tokenData, c.env));
+        case 'stop_subtask':
+          return c.json(await handleStopSubtask(requestId, toolArgs, tokenData, c.env));
         case 'retry_subtask':
           return c.json(await handleRetrySubtask(requestId, toolArgs, tokenData, c.env));
         case 'add_dependency':

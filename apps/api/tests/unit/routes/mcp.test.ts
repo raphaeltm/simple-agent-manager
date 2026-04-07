@@ -278,6 +278,9 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('search_messages');
       expect(toolNames).toContain('update_session_topic');
       expect(toolNames).toContain('dispatch_task');
+      // Orchestration communication tools
+      expect(toolNames).toContain('send_message_to_subtask');
+      expect(toolNames).toContain('stop_subtask');
       // Agent-initiated notifications
       expect(toolNames).toContain('request_human_input');
       // Session–Idea linking tools
@@ -310,7 +313,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('report_environment_issue');
       // Onboarding tools
       expect(toolNames).toContain('get_repo_setup_guide');
-      expect(body.result.tools).toHaveLength(40);
+      expect(body.result.tools).toHaveLength(42);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

@@ -773,6 +773,8 @@ describe('MCP Orchestration Tools', () => {
       const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
       const body = await res.json();
       const toolNames = body.result.tools.map((t: { name: string }) => t.name);
+      expect(toolNames).toContain('send_message_to_subtask');
+      expect(toolNames).toContain('stop_subtask');
       expect(toolNames).toContain('retry_subtask');
       expect(toolNames).toContain('add_dependency');
       expect(toolNames).toContain('remove_pending_subtask');

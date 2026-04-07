@@ -654,7 +654,51 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
-  // ─── Orchestration tools (agent-to-agent control) ───────────────────
+  // ─── Orchestration tools (agent-to-agent communication & control) ───
+  {
+    name: 'send_message_to_subtask',
+    description:
+      'Send a message to a running child task\'s agent. The message is injected as a user-role prompt into the child\'s ACP session. ' +
+      'Only the direct parent task can message a child — grandparents and siblings are rejected. ' +
+      'Returns { delivered: true } on success, or { delivered: false, reason: "agent_busy" } if the child agent is currently processing.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The child task ID to send the message to',
+        },
+        message: {
+          type: 'string',
+          description: 'The message to inject into the child agent\'s session (max 32768 chars)',
+        },
+      },
+      required: ['taskId', 'message'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'stop_subtask',
+    description:
+      'Gracefully stop a running child task\'s agent session. If a reason is provided, it is sent as a warning message ' +
+      'before the hard stop (with a configurable grace period). The task status is updated to "failed" with the stop reason. ' +
+      'Only the direct parent task can stop a child.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The child task ID to stop',
+        },
+        reason: {
+          type: 'string',
+          description: 'Optional reason for stopping — sent as a warning message to the child before the hard stop',
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
   {
     name: 'retry_subtask',
     description:
