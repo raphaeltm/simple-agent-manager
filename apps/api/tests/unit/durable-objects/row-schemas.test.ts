@@ -18,7 +18,6 @@ import {
   parseAcpSessionRow,
   parseAcpSessionStale,
   parseActivityEventRow,
-  parseInboxMessageRow,
   parseCachedCommandRow,
   parseChatMessageRow,
   parseChatSessionListRow,
@@ -28,6 +27,7 @@ import {
   parseEnabled,
   parseIdeaSessionDetail,
   parseIdleCleanupSchedule,
+  parseInboxMessageRow,
   parseMaterializationCheck,
   parseMaterializationCheck,
   parseMaterializationToken,
@@ -671,7 +671,8 @@ describe('parseInboxMessageRow', () => {
   });
 
   it('throws on missing required field', () => {
-    const { id: _, ...missing } = validRow;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id: _id, ...missing } = validRow;
     expect(() => parseInboxMessageRow(missing)).toThrow(/Row validation failed/);
   });
 
