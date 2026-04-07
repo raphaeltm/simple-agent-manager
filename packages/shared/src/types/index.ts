@@ -242,5 +242,13 @@ export type {
   UpdateAgentProfileRequest,
 } from './agent-settings';
 
+// Orchestration (Parent ↔ Child Agent Communication)
+export type {
+  SendMessageToSubtaskRequest,
+  SendMessageToSubtaskResponse,
+  StopSubtaskRequest,
+  StopSubtaskResponse,
+} from './orchestration';
+
 // API Error
 export type { ApiError } from './api-error';

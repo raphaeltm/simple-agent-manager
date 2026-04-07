@@ -431,6 +431,9 @@ export interface Env {
   ATTACHMENT_PRESIGN_EXPIRY_SECONDS?: string;
   // Timeout for transferring attachments from R2 to workspace VM (default: 60000ms)
   ATTACHMENT_TRANSFER_TIMEOUT_MS?: string;
+  // Orchestration tools (parent → child agent communication)
+  ORCHESTRATOR_STOP_GRACE_MS?: string;              // Grace period before hard stop after warning message (default: 5000)
+  ORCHESTRATOR_MESSAGE_MAX_LENGTH?: string;          // Max injected message length (default: 32768)
 }
 
 const app = new Hono<{ Bindings: Env }>();

@@ -97,6 +97,11 @@ const DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH = 200;
 /** Max length for session topic. Override via MCP_SESSION_TOPIC_MAX_LENGTH env var. */
 const DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH = 200;
 
+/** Default grace period in ms before hard stop after warning message. Override via ORCHESTRATOR_STOP_GRACE_MS env var. */
+const DEFAULT_ORCHESTRATOR_STOP_GRACE_MS = 5000;
+/** Default max length for injected messages to child agents. Override via ORCHESTRATOR_MESSAGE_MAX_LENGTH env var. */
+const DEFAULT_ORCHESTRATOR_MESSAGE_MAX_LENGTH = 32_768;
+
 export function getMcpLimits(env: Env) {
   return {
     activityMessageMaxLength: parsePositiveInt(env.MAX_ACTIVITY_MESSAGE_LENGTH, DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH),
@@ -128,6 +133,8 @@ export function getMcpLimits(env: Env) {
     ideaSearchMax: parsePositiveInt(env.MCP_IDEA_SEARCH_MAX, DEFAULT_MCP_IDEA_SEARCH_MAX),
     ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH, DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH),
     sessionTopicMaxLength: parsePositiveInt(env.MCP_SESSION_TOPIC_MAX_LENGTH, DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH),
+    orchestratorStopGraceMs: parsePositiveInt(env.ORCHESTRATOR_STOP_GRACE_MS, DEFAULT_ORCHESTRATOR_STOP_GRACE_MS),
+    orchestratorMessageMaxLength: parsePositiveInt(env.ORCHESTRATOR_MESSAGE_MAX_LENGTH, DEFAULT_ORCHESTRATOR_MESSAGE_MAX_LENGTH),
   };
 }
 
