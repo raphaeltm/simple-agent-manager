@@ -206,7 +206,7 @@ export function GlobalAudioPlayer() {
             type="button"
             onClick={handleGoToSource}
             disabled={!audio.sourceHref}
-            className={`hidden min-[321px]:flex items-center gap-1 max-w-[120px] md:max-w-[200px] text-xs truncate transition-colors disabled:cursor-default ${FOCUS_RING}`}
+            className={`hidden min-[321px]:flex items-center gap-1 max-w-[120px] md:max-w-[200px] text-xs truncate transition-colors disabled:cursor-default min-h-[44px] ${FOCUS_RING}`}
             style={{ color: 'var(--sam-color-fg-muted)' }}
             aria-label={`Go to source: ${audio.sourceLabel}`}
             title={audio.sourceLabel}

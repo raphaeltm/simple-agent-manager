@@ -146,6 +146,11 @@
   padding: 0;
   display: block;
 }
+/* Keyboard focus ring — matches FOCUS_RING on buttons */
+.sam-player-seek:focus-visible {
+  outline: 2px solid var(--sam-color-focus-ring, #34d399);
+  outline-offset: 2px;
+}
 /* Track — WebKit uses gradient to show filled portion, Firefox uses ::-moz-range-progress */
 .sam-player-seek::-webkit-slider-runnable-track {
   height: 4px;
