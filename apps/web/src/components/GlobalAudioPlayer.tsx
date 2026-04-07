@@ -24,6 +24,8 @@ function formatTime(seconds: number): string {
  * Global persistent audio player bar.
  * Renders at the bottom of AppShell when audio is active.
  * Survives page navigation because it lives above the router outlet.
+ *
+ * Layout: full-width seek bar on top, controls row below.
  */
 export function GlobalAudioPlayer() {
   const audio = useGlobalAudio();
@@ -61,8 +63,8 @@ export function GlobalAudioPlayer() {
 
   if (!isVisible) return null;
 
-  const playerHeight = isMobile ? '72px' : expanded ? '80px' : '56px';
-  const btnSize = isMobile ? 'min-w-[56px] min-h-[56px]' : 'min-w-[44px] min-h-[44px]';
+  const controlsHeight = isMobile ? '56px' : '48px';
+  const btnSize = isMobile ? 'min-w-[48px] min-h-[48px]' : 'min-w-[44px] min-h-[44px]';
 
   return (
     <div
@@ -70,24 +72,51 @@ export function GlobalAudioPlayer() {
       aria-label="Audio player"
       className="flex-shrink-0 z-player"
       style={{
-        height: playerHeight,
         animation: 'sam-player-slide-in 200ms ease-out',
-        ['--sam-player-height' as string]: playerHeight,
         backgroundColor: 'var(--sam-color-bg-surface)',
         borderTopWidth: '1px',
         borderTopStyle: 'solid',
         borderTopColor: 'var(--sam-color-border-default)',
       }}
     >
-      {/* Green accent top border when playing */}
-      {isPlaying && (
+      {/* Full-width progress bar / seek bar at the top */}
+      {showSeekBar ? (
+        <div className="w-full" style={{ marginTop: '-1px' }}>
+          <input
+            type="range"
+            min={0}
+            max={audio.duration || 0}
+            step={0.1}
+            value={audio.currentTime}
+            onChange={handleSeek}
+            className="sam-player-seek w-full block cursor-pointer"
+            style={{
+              ['--seek-pct' as string]: `${audio.duration ? (audio.currentTime / audio.duration) * 100 : 0}%`,
+            }}
+            aria-label="Seek position"
+            aria-valuemin={0}
+            aria-valuemax={audio.duration}
+            aria-valuenow={audio.currentTime}
+            aria-valuetext={`${formatTime(audio.currentTime)} of ${formatTime(audio.duration)}`}
+          />
+        </div>
+      ) : (
+        /* Shimmer placeholder while loading */
         <div
+          className="w-full overflow-hidden"
           style={{
-            height: '2px',
-            backgroundColor: 'var(--sam-color-accent-primary, #16a34a)',
+            height: '3px',
             marginTop: '-1px',
+            backgroundColor: isLoading ? 'var(--sam-color-bg-inset)' : 'transparent',
           }}
-        />
+        >
+          {isLoading && (
+            <div
+              className="h-full w-1/3 animate-pulse"
+              style={{ backgroundColor: 'var(--sam-color-accent-primary, #16a34a)', opacity: 0.4 }}
+            />
+          )}
+        </div>
       )}
 
       {/* Screen reader state announcements */}
@@ -95,10 +124,10 @@ export function GlobalAudioPlayer() {
         {isLoading ? 'Loading audio' : isPlaying ? 'Now playing' : audio.state === 'paused' ? 'Paused' : ''}
       </span>
 
-      {/* Main controls row */}
+      {/* Controls row */}
       <div
-        className="flex items-center gap-1 px-3 h-full"
-        style={{ maxHeight: isMobile ? '72px' : '56px' }}
+        className="flex items-center gap-1 px-2"
+        style={{ height: controlsHeight }}
       >
         {/* Skip back */}
         <button
@@ -158,49 +187,26 @@ export function GlobalAudioPlayer() {
           </svg>
         </button>
 
-        {/* Progress bar */}
-        {showSeekBar ? (
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <span className="text-[10px] tabular-nums shrink-0" style={{ color: 'var(--sam-color-fg-muted)' }}>
-              {formatTime(audio.currentTime)}
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={audio.duration || 0}
-              step={0.1}
-              value={audio.currentTime}
-              onChange={handleSeek}
-              className="flex-1 h-2 accent-[var(--sam-color-accent-primary,#16a34a)] cursor-pointer min-w-0"
-              aria-label="Seek position"
-              aria-valuemin={0}
-              aria-valuemax={audio.duration}
-              aria-valuenow={audio.currentTime}
-              aria-valuetext={`${formatTime(audio.currentTime)} of ${formatTime(audio.duration)}`}
-            />
-            <span className="text-[10px] tabular-nums shrink-0" style={{ color: 'var(--sam-color-fg-muted)' }}>
-              {formatTime(audio.duration)}
-            </span>
-          </div>
-        ) : (
-          /* Shimmer placeholder for progress bar while loading */
-          <div className="flex-1 h-1 rounded-full overflow-hidden min-w-0" style={{ backgroundColor: 'var(--sam-color-bg-inset)' }}>
-            {isLoading && (
-              <div
-                className="h-full w-1/3 rounded-full animate-pulse"
-                style={{ backgroundColor: 'var(--sam-color-accent-primary, #16a34a)', opacity: 0.4 }}
-              />
-            )}
-          </div>
+        {/* Time display */}
+        {showSeekBar && (
+          <span
+            className="text-[11px] tabular-nums shrink-0 ml-1"
+            style={{ color: 'var(--sam-color-fg-muted)' }}
+          >
+            {formatTime(audio.currentTime)} / {formatTime(audio.duration)}
+          </span>
         )}
 
-        {/* Source label — hidden on very narrow viewports */}
+        {/* Spacer pushes remaining items to the right */}
+        <div className="flex-1" />
+
+        {/* Source label */}
         {audio.sourceLabel && (
           <button
             type="button"
             onClick={handleGoToSource}
             disabled={!audio.sourceHref}
-            className={`hidden min-[321px]:flex items-center gap-1 max-w-[150px] md:max-w-[200px] text-xs truncate transition-colors disabled:cursor-default ${FOCUS_RING}`}
+            className={`hidden min-[321px]:flex items-center gap-1 max-w-[120px] md:max-w-[200px] text-xs truncate transition-colors disabled:cursor-default ${FOCUS_RING}`}
             style={{ color: 'var(--sam-color-fg-muted)' }}
             aria-label={`Go to source: ${audio.sourceLabel}`}
             title={audio.sourceLabel}
@@ -245,7 +251,7 @@ export function GlobalAudioPlayer() {
         <button
           type="button"
           onClick={audio.stop}
-          className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
+          className={`${btnSize} flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
           style={{ color: 'var(--sam-color-fg-muted)' }}
           aria-label="Close player"
         >

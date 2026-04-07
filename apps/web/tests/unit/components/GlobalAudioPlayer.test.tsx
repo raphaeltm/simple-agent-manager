@@ -14,7 +14,7 @@
  * - Error alert rendered when audio.error is set
  * - formatTime helper (via rendered time displays)
  * - Screen-reader aria-live region
- * - Green accent bar when playing
+ * - Full-width seek bar at top replaces green accent bar
  */
 import { fireEvent,render, screen } from '@testing-library/react';
 import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
@@ -210,28 +210,25 @@ describe('GlobalAudioPlayer', () => {
 
     it('renders formatted current time and duration', () => {
       renderPlayer({ state: 'playing', currentTime: 90, duration: 3661 });
-      // 90s = 1:30, 3661s = 1:01:01
-      expect(screen.getByText('1:30')).toBeTruthy();
-      expect(screen.getByText('1:01:01')).toBeTruthy();
+      // 90s = 1:30, 3661s = 1:01:01 — displayed as "1:30 / 1:01:01"
+      expect(screen.getByText('1:30 / 1:01:01')).toBeTruthy();
     });
   });
 
   describe('formatTime edge cases', () => {
-    it('shows 0:00 for zero duration', () => {
+    it('shows 0:00 for zero current time', () => {
       renderPlayer({ state: 'playing', currentTime: 0, duration: 100 });
-      const times = screen.getAllByText('0:00');
-      expect(times.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('0:00 / 1:40')).toBeTruthy();
     });
 
     it('formats minutes and seconds correctly', () => {
       renderPlayer({ state: 'playing', currentTime: 65, duration: 300 });
-      expect(screen.getByText('1:05')).toBeTruthy();
+      expect(screen.getByText('1:05 / 5:00')).toBeTruthy();
     });
 
     it('formats hours correctly', () => {
       renderPlayer({ state: 'playing', currentTime: 3725, duration: 7200 });
-      expect(screen.getByText('1:02:05')).toBeTruthy();
-      expect(screen.getByText('2:00:00')).toBeTruthy();
+      expect(screen.getByText('1:02:05 / 2:00:00')).toBeTruthy();
     });
   });
 
@@ -259,24 +256,24 @@ describe('GlobalAudioPlayer', () => {
     });
   });
 
-  describe('green accent bar', () => {
-    it('renders accent bar (2px height div) when playing', () => {
-      const { container } = renderPlayer({ state: 'playing' });
-      // The accent bar is a div with inline style containing height 2px — find it by iterating divs
-      const divs = container.querySelectorAll('div');
-      const accentBar = Array.from(divs).find(
-        (d) => (d as HTMLElement).style.height === '2px'
-      );
-      expect(accentBar).toBeDefined();
+  describe('top seek bar replaces green accent bar', () => {
+    it('seek bar is rendered as the first interactive element when playing', () => {
+      const { container } = renderPlayer({ state: 'playing', currentTime: 10, duration: 60 });
+      const region = container.querySelector('[role="region"]');
+      // The seek bar input should be within the first child div of the region
+      const seekInput = region?.querySelector('input[type="range"]');
+      expect(seekInput).toBeTruthy();
+      expect(seekInput?.getAttribute('aria-label')).toBe('Seek position');
     });
 
-    it('does not render accent bar when paused', () => {
-      const { container } = renderPlayer({ state: 'paused' });
-      const divs = container.querySelectorAll('div');
-      const accentBar = Array.from(divs).find(
-        (d) => (d as HTMLElement).style.height === '2px'
-      );
-      expect(accentBar).toBeUndefined();
+    it('seek bar is also rendered when paused (not just playing)', () => {
+      renderPlayer({ state: 'paused', currentTime: 10, duration: 60 });
+      expect(screen.getByLabelText('Seek position')).toBeTruthy();
+    });
+
+    it('shimmer is shown instead of seek bar when loading', () => {
+      renderPlayer({ state: 'loading' });
+      expect(screen.queryByLabelText('Seek position')).toBeNull();
     });
   });
 
