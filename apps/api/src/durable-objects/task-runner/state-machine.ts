@@ -274,15 +274,15 @@ export async function failTask(
   // Enqueue inbox message to parent session (best-effort)
   try {
     const parentRow = await rc.env.DATABASE.prepare(
-      'SELECT parent_task_id, title FROM tasks WHERE id = ?',
-    ).bind(state.taskId).first<{ parent_task_id: string | null; title: string | null }>();
+      'SELECT parent_task_id, title FROM tasks WHERE id = ? AND project_id = ?',
+    ).bind(state.taskId, state.projectId).first<{ parent_task_id: string | null; title: string | null }>();
 
     if (parentRow?.parent_task_id) {
       const { resolveParentSessionContext } = await import('../../services/inbox-drain');
       const parentCtx = await resolveParentSessionContext(rc.env.DATABASE, parentRow.parent_task_id);
-      if (parentCtx) {
+      if (parentCtx && parentCtx.parentUserId === state.userId) {
         const { parsePositiveInt } = await import('../../lib/route-helpers');
-        const { DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH } = await import('../../routes/mcp/_helpers');
+        const { DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH, sanitizeUserInput } = await import('../../routes/mcp/_helpers');
         const maxSize = parsePositiveInt(rc.env.ORCHESTRATOR_INBOX_MAX_SIZE, DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE);
         const maxLen = parsePositiveInt(rc.env.ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH);
         const doId = rc.env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
@@ -292,7 +292,7 @@ export async function failTask(
             targetSessionId: parentCtx.parentChatSessionId,
             sourceTaskId: state.taskId,
             messageType: 'child_failed',
-            content: `Sub-task '${parentRow.title ?? state.taskId}' failed at step "${state.currentStep}": ${errorMessage}`,
+            content: sanitizeUserInput(`Sub-task '${parentRow.title ?? state.taskId}' failed at step "${state.currentStep}": ${errorMessage}`),
             priority: 'normal',
           },
           maxSize,

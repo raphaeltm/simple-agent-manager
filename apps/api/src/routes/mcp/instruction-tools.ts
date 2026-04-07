@@ -203,7 +203,7 @@ export async function handleRequestHumanInput(
 
       if (parentStatus && (ACTIVE_STATUSES as readonly string[]).includes(parentStatus.status)) {
         const parentCtx = await resolveParentSessionContext(env.DATABASE, parentRow.parent_task_id);
-        if (parentCtx) {
+        if (parentCtx && parentCtx.parentUserId === tokenData.userId) {
           const limits = getMcpLimits(env);
           const doId = env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
           const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
@@ -212,7 +212,7 @@ export async function handleRequestHumanInput(
               targetSessionId: parentCtx.parentChatSessionId,
               sourceTaskId: tokenData.taskId,
               messageType: 'child_needs_input',
-              content: `Sub-task '${taskRow.title}' needs your input: ${sanitizedContext}. Respond via send_message_to_subtask(taskId='${tokenData.taskId}', message='your answer')`,
+              content: sanitizeUserInput(`Sub-task '${taskRow.title}' needs your input: ${sanitizedContext}. Respond via send_message_to_subtask(taskId='${tokenData.taskId}', message='your answer')`),
               priority: 'urgent',
             },
             limits.inboxMaxSize,

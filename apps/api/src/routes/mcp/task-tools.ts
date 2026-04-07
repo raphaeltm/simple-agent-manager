@@ -24,6 +24,7 @@ import {
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
+  sanitizeUserInput,
 } from './_helpers';
 
 export async function handleUpdateTaskStatus(
@@ -317,26 +318,26 @@ export async function handleCompleteTask(
   // Enqueue inbox message to parent session (best-effort)
   try {
     const parentTaskId = await env.DATABASE.prepare(
-      'SELECT parent_task_id FROM tasks WHERE id = ?',
-    ).bind(tokenData.taskId).first<{ parent_task_id: string | null }>();
+      'SELECT parent_task_id FROM tasks WHERE id = ? AND project_id = ?',
+    ).bind(tokenData.taskId, tokenData.projectId).first<{ parent_task_id: string | null }>();
 
     if (parentTaskId?.parent_task_id) {
       const parentCtx = await resolveParentSessionContext(env.DATABASE, parentTaskId.parent_task_id);
-      if (parentCtx) {
+      if (parentCtx && parentCtx.parentUserId === tokenData.userId) {
         const limits = getMcpLimits(env);
         const doId = env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
         const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
         const outputInfo = [
-          summary ? `Summary: ${summary.slice(0, 500)}` : null,
-          taskRow?.output_branch ? `Branch: ${taskRow.output_branch}` : null,
-          taskRow?.output_pr_url ? `PR: ${taskRow.output_pr_url}` : null,
+          summary ? `Summary: ${sanitizeUserInput(summary).slice(0, 500)}` : null,
+          taskRow?.output_branch ? `Branch: ${sanitizeUserInput(taskRow.output_branch)}` : null,
+          taskRow?.output_pr_url ? `PR: ${sanitizeUserInput(taskRow.output_pr_url)}` : null,
         ].filter(Boolean).join('. ');
         await doStub.enqueueInboxMessage(
           {
             targetSessionId: parentCtx.parentChatSessionId,
             sourceTaskId: tokenData.taskId,
             messageType: 'child_completed',
-            content: `Sub-task '${taskRow?.title ?? tokenData.taskId}' completed.${outputInfo ? ` ${outputInfo}` : ''}`,
+            content: sanitizeUserInput(`Sub-task '${taskRow?.title ?? tokenData.taskId}' completed.${outputInfo ? ` ${outputInfo}` : ''}`),
             priority: 'normal',
           },
           limits.inboxMaxSize,
