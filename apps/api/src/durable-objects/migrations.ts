@@ -327,6 +327,29 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '015-session-inbox',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS session_inbox (
+          id TEXT PRIMARY KEY,
+          target_session_id TEXT NOT NULL,
+          source_task_id TEXT,
+          message_type TEXT NOT NULL,
+          content TEXT NOT NULL,
+          priority TEXT NOT NULL DEFAULT 'normal',
+          created_at INTEGER NOT NULL,
+          delivered_at INTEGER,
+          FOREIGN KEY (target_session_id) REFERENCES chat_sessions(id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_inbox_pending
+          ON session_inbox(target_session_id, delivered_at)
+          WHERE delivered_at IS NULL
+      `);
+    },
+  },
 ];
 
 /**

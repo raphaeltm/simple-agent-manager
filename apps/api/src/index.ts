@@ -302,6 +302,10 @@ export interface Env {
   MCP_IDEA_SEARCH_MAX?: string;                    // Max results for search_ideas (default: 20)
   MCP_IDEA_TITLE_MAX_LENGTH?: string;              // Max length for idea title (default: 200)
   MCP_SESSION_TOPIC_MAX_LENGTH?: string;           // Max length for session topic (default: 200)
+  // Orchestrator inbox configuration (agent-to-agent upward communication)
+  ORCHESTRATOR_INBOX_MAX_SIZE?: string;             // Max pending messages per session inbox (default: 100)
+  ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE?: string;     // Max messages to deliver in one drain cycle (default: 10)
+  ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH?: string;   // Max content length per inbox message (default: 8192)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;
