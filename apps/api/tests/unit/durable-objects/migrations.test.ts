@@ -198,7 +198,8 @@ describe('DO Migrations', () => {
       // acp_sessions: 5 (chat, workspace, node, parent, status) from migration 008
       // acp_session_events: 1 (session+created) from migration 008
       // chat_messages: 1 (user content dedup) from migration 014
-      expect(indexes.length).toBe(20);
+      // session_inbox: 1 (pending messages) from migration 015
+      expect(indexes.length).toBe(21);
     });
   });
 });
