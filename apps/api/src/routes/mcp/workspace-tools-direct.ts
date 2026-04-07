@@ -91,49 +91,6 @@ export async function handleListProjectAgents(
   }
 }
 
-export async function handleGetFileLocks(
-  requestId: string | number | null,
-  tokenData: McpTokenData,
-  env: Env,
-): Promise<JsonRpcResponse> {
-  try {
-    const db = drizzle(env.DATABASE, { schema });
-    const tasks = await db
-      .select({
-        id: schema.tasks.id,
-        title: schema.tasks.title,
-        outputBranch: schema.tasks.outputBranch,
-      })
-      .from(schema.tasks)
-      .where(
-        and(
-          eq(schema.tasks.projectId, tokenData.projectId),
-          inArray(schema.tasks.status, ACTIVE_STATUSES),
-        ),
-      );
-
-    const otherAgents = tasks
-      .filter((t) => t.id !== tokenData.taskId)
-      .map((t) => ({
-        taskId: t.id,
-        title: t.title,
-        branch: t.outputBranch,
-      }));
-
-    return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          note: 'File-level lock detection is best-effort. Check the branches of other active agents to avoid conflicts.',
-          otherAgents,
-        }, null, 2),
-      }],
-    });
-  } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get file locks: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
 export async function handleGetPeerAgentOutput(
   requestId: string | number | null,
   params: Record<string, unknown>,

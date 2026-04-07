@@ -85,8 +85,7 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 - \`get_remaining_budget\` — Project budget remaining, if configured.
 
 **Multi-Agent Coordination:**
-- \`list_project_agents\` — Other agents currently working on this project. Check this before starting work.
-- \`get_file_locks\` — Which files other agents are modifying. Check this to avoid merge conflicts with parallel agents working on the same project.
+- \`list_project_agents\` — Other agents currently working on this project, their branches, and statuses. Check this before starting work to avoid merge conflicts.
 - \`get_peer_agent_output\` — Read the result of a completed sibling task.
 
 **Task Dependencies:**
@@ -106,7 +105,7 @@ These are patterns that work well across different types of tasks:
 
 **Starting a task:**
 1. Call \`get_instructions\` to get your task context and output branch
-2. Call \`list_project_agents\` and \`get_file_locks\` to check for conflicts
+2. Call \`list_project_agents\` to check for conflicts
 3. Call \`search_tasks\` to see if related work has been done recently
 4. Call \`search_ideas\` to find relevant ideas or context
 5. Read the project's agent instructions (CLAUDE.md, etc.) for project-specific guidance
@@ -114,7 +113,7 @@ These are patterns that work well across different types of tasks:
 
 **During work:**
 - \`update_task_status\` after each significant milestone
-- \`get_file_locks\` before touching heavily-shared files
+- \`list_project_agents\` before touching heavily-shared files
 - \`get_ci_status\` after pushing to verify CI passes
 - \`create_idea\` when you notice something worth tracking but out of scope
 - \`request_human_input\` when genuinely blocked — don't guess at ambiguous requirements
@@ -158,7 +157,7 @@ Think about how SAM's capabilities map to this specific project's workflows. Con
 - **Is this a monorepo?** If so, agents should know build order, which packages to test after changes, and how to scope their work.
 - **Does it have a deployment process?** Agents should know about \`get_deployment_status\` and any staging/production verification steps.
 - **Are there dev servers to run?** Agents should know to \`expose_port\` when running preview servers so humans can see their work.
-- **Are there shared files that multiple agents might touch?** Identify hotspots where \`get_file_locks\` is especially important.
+- **Are there shared files that multiple agents might touch?** Identify hotspots where \`list_project_agents\` is especially important for conflict avoidance.
 - **What kind of tasks are typical?** Bug fixes, features, refactors, docs? Tailor the push/commit frequency guidance to the project's rhythm.
 - **Are there expensive operations?** Large build steps, long test suites, or resource-intensive processes where cost awareness matters?
 
@@ -172,15 +171,15 @@ Guidelines for what to write:
 
 2. **Integrate with existing workflows.** If the project's instructions say "run tests before committing," augment that with "and after pushing, check \`get_ci_status\` to verify CI agrees." Don't create a separate "SAM section" that feels bolted on — weave it in.
 
-3. **Be specific to this project.** Don't just say "push frequently." Say "after updating schema files in \`src/db/\`, push immediately — these are high-conflict files. Check \`get_file_locks\` before modifying them." Tailor the guidance to what you learned about the project.
+3. **Be specific to this project.** Don't just say "push frequently." Say "after updating schema files in \`src/db/\`, push immediately — these are high-conflict files. Check \`list_project_agents\` before modifying them." Tailor the guidance to what you learned about the project.
 
-4. **Teach the tools in context.** Don't list all MCP tools in a wall of text. Introduce them where they're relevant: mention \`expose_port\` in the section about running the dev server, mention \`get_file_locks\` in the section about shared modules, mention \`check_cost_estimate\` near the section about running the full test suite.
+4. **Teach the tools in context.** Don't list all MCP tools in a wall of text. Introduce them where they're relevant: mention \`expose_port\` in the section about running the dev server, mention \`list_project_agents\` in the section about shared modules, mention \`check_cost_estimate\` near the section about running the full test suite.
 
 5. **Include the knowledge/history tools.** Agents should know they can \`search_tasks\` and \`search_messages\` to understand project context, \`create_idea\` to capture things worth tracking, and \`search_ideas\` to find existing ideas before creating duplicates.
 
 6. **Emphasize the ephemeral environment.** This must be unmissable. Agents must understand that unpushed work is lost work. Frame it in terms of the project's specific workflow — "after completing a migration file, push immediately" is better than "push frequently."
 
-7. **Cover multi-agent scenarios.** If the project has areas where parallel agents might conflict (shared config files, lock files, generated code), call those out specifically and tell agents to use \`get_file_locks\` and \`list_project_agents\`.
+7. **Cover multi-agent scenarios.** If the project has areas where parallel agents might conflict (shared config files, lock files, generated code), call those out specifically and tell agents to use \`list_project_agents\`.
 
 ### Step 4: Validate
 

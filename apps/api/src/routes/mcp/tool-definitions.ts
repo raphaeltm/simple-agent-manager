@@ -556,16 +556,6 @@ export const MCP_TOOLS = [
     },
   },
   {
-    name: 'get_file_locks',
-    description:
-      'Check which branches other agents are working on to avoid merge conflicts. Returns a list of active agents and their branches.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {},
-      additionalProperties: false,
-    },
-  },
-  {
     name: 'get_peer_agent_output',
     description:
       'Retrieve the result/summary from a sibling task agent by task ID. Use this to check what another agent accomplished.',
