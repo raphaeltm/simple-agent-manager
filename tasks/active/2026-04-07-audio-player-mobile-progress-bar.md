@@ -22,7 +22,7 @@ On a 375px viewport, the buttons (3x 56px + close 44px + source ~80px) consume ~
 
 ## Solution
 
-Replace the decorative green accent bar with the interactive progress/seek bar, positioned above the controls. This gives the scrubber the full width of the player on all viewports.
+Replace the decorative green accent bar with the interactive progress/seek bar, positioned above the controls. This gives the scrubber the full width of the player on all viewports. Selected Prototype C (native range input on top) after evaluating 4 prototypes.
 
 ### Layout — Before:
 ```
@@ -44,25 +44,25 @@ Replace the decorative green accent bar with the interactive progress/seek bar, 
 
 ## Implementation Checklist
 
-- [ ] Create Playwright prototype pages with mock HTML to test different layouts
-- [ ] Screenshot prototypes at mobile (375px) and desktop (1280px) viewports
-- [ ] Review prototypes critically and select the best design
-- [ ] Implement selected design in `GlobalAudioPlayer.tsx`
-- [ ] Update the seek bar to be full-width above controls
-- [ ] Replace the green accent bar with the seek bar (use green track fill)
-- [ ] Move time display (current / duration) to the controls row
-- [ ] Ensure loading shimmer state still works
-- [ ] Update existing unit tests in `GlobalAudioPlayer.test.tsx`
-- [ ] Run visual audit with Playwright on mobile + desktop
-- [ ] Verify no horizontal overflow on mobile
+- [x] Create Playwright prototype pages with mock HTML to test different layouts
+- [x] Screenshot prototypes at mobile (375px) and desktop (1280px) viewports
+- [x] Review prototypes critically and select the best design (Prototype C — native range input)
+- [x] Implement selected design in `GlobalAudioPlayer.tsx`
+- [x] Update the seek bar to be full-width above controls
+- [x] Replace the green accent bar with the seek bar (use green track fill)
+- [x] Move time display (current / duration) to the controls row
+- [x] Ensure loading shimmer state still works
+- [x] Update existing unit tests in `GlobalAudioPlayer.test.tsx`
+- [x] Run visual audit with Playwright on mobile + desktop
+- [x] Verify no horizontal overflow on mobile
 
 ## Acceptance Criteria
 
-- [ ] Progress bar spans full width of the player at all viewport sizes
-- [ ] Progress bar is interactive (draggable/tappable) for seeking
-- [ ] Time indicators are visible and readable on mobile
-- [ ] All playback controls (skip, play/pause, close) remain accessible with proper touch targets
-- [ ] Loading shimmer state displays correctly
-- [ ] No horizontal overflow on 375px viewport
-- [ ] Existing unit tests pass or are updated
-- [ ] Accessible — proper aria labels, screen reader support maintained
+- [x] Progress bar spans full width of the player at all viewport sizes
+- [x] Progress bar is interactive (draggable/tappable) for seeking
+- [x] Time indicators are visible and readable on mobile
+- [x] All playback controls (skip, play/pause, close) remain accessible with proper touch targets
+- [x] Loading shimmer state displays correctly
+- [x] No horizontal overflow on 375px viewport
+- [x] Existing unit tests pass or are updated (40/40 pass)
+- [x] Accessible — proper aria labels, screen reader support maintained
