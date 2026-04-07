@@ -81,6 +81,55 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
+  // ─── Orchestration tools (parent-to-child communication) ────────────────
+  {
+    name: 'send_message_to_subtask',
+    description:
+      'Send a message to a child sub-task agent. The message is queued in the child\'s session inbox and delivered when the agent goes idle. ' +
+      'Use priority "urgent" to interrupt the agent immediately (cancels current work and re-prompts). ' +
+      'Only works for tasks you dispatched (you must be the parent).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The child task ID to send the message to',
+        },
+        message: {
+          type: 'string',
+          description: 'Message content to deliver to the child agent',
+        },
+        priority: {
+          type: 'string',
+          description: 'Message priority. "normal" (default) waits for agent idle; "urgent" interrupts the agent immediately.',
+          enum: ['normal', 'urgent'],
+        },
+      },
+      required: ['taskId', 'message'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'stop_subtask',
+    description:
+      'Gracefully stop a child sub-task agent. Cancels any running prompt, sends a warning message, then hard-stops the session. ' +
+      'Only works for tasks you dispatched (you must be the parent).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The child task ID to stop',
+        },
+        reason: {
+          type: 'string',
+          description: 'Optional reason for stopping (shown to the child agent before shutdown)',
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
   // ─── Agent-initiated notifications ──────────────────────────────────────
   {
     name: 'request_human_input',

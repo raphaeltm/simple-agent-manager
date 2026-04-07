@@ -336,6 +336,39 @@ export async function sendPromptToAgentOnNode(
   );
 }
 
+/**
+ * Cancel a running prompt on an agent session.
+ * Returns { success, status } instead of throwing on non-2xx responses,
+ * so callers can distinguish 409 (no prompt in flight) from other errors.
+ */
+export async function cancelAgentSessionOnNode(
+  nodeId: string,
+  workspaceId: string,
+  sessionId: string,
+  env: Env,
+  userId: string,
+): Promise<{ success: boolean; status: number }> {
+  try {
+    await nodeAgentRequest(
+      nodeId,
+      env,
+      `/workspaces/${workspaceId}/agent-sessions/${sessionId}/cancel`,
+      {
+        method: 'POST',
+        userId,
+        workspaceId,
+      },
+    );
+    return { success: true, status: 200 };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Extract HTTP status from error message (format: "Node Agent request failed: 409 ...")
+    const statusMatch = msg.match(/failed:\s*(\d{3})/);
+    const status = statusMatch?.[1] ? parseInt(statusMatch[1], 10) : 500;
+    return { success: false, status };
+  }
+}
+
 export async function stopAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,

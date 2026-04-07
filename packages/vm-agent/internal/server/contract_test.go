@@ -596,6 +596,7 @@ func TestContractEndpointRegistration(t *testing.T) {
 		`"DELETE /workspaces/{workspaceId}"`,
 		`"POST /workspaces/{workspaceId}/agent-sessions"`,
 		`"POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/start"`,
+		`"POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/cancel"`,
 		`"POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop"`,
 		`"GET /workspaces/{workspaceId}/agent-sessions"`,
 	}

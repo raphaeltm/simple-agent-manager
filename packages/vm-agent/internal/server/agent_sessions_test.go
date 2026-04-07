@@ -19,6 +19,7 @@ func TestAgentSessionsSourceContract(t *testing.T) {
 		"handleListAgentSessions",
 		"handleCreateAgentSession",
 		"handleStartAgentSession",
+		"handleCancelAgentSession",
 		"handleStopAgentSession",
 		"Idempotency-Key",
 		// Session visibility enrichment

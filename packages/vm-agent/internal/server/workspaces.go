@@ -925,6 +925,50 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleCancelAgentSession(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	if workspaceID == "" || sessionID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId and sessionId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+
+	// Look up the existing SessionHost for this session.
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	host := s.sessionHosts[hostKey]
+	s.sessionHostMu.Unlock()
+
+	if host == nil {
+		writeError(w, http.StatusNotFound, "no active agent session found")
+		return
+	}
+
+	// Only cancel if a prompt is actually in flight.
+	if !host.IsPrompting() {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"status":  "idle",
+			"message": "No prompt in flight to cancel",
+		})
+		return
+	}
+
+	host.CancelPrompt()
+
+	slog.Info("Agent session prompt cancelled via HTTP", "workspace", workspaceID, "session", sessionID)
+	s.appendNodeEvent(workspaceID, "info", "agent_session.prompt_cancelled", "Agent prompt cancelled via HTTP", map[string]interface{}{
+		"sessionId": sessionID,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "cancelled",
+		"message": "Prompt cancel signal sent",
+	})
+}
+
 func (s *Server) handleStopAgentSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")
