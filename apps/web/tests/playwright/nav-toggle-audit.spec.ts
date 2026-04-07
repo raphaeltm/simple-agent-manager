@@ -60,63 +60,81 @@ async function setupApiMocks(
     const url = new URL(route.request().url());
     const path = url.pathname;
 
+    const respond = (status: number, body: unknown) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
     // Auth — match all auth endpoints
     if (path.includes('/api/auth/')) {
-      return route.fulfill({ status: 200, json: MOCK_USER });
+      return respond(200, MOCK_USER);
+    }
+
+    // Sessions list
+    if (path.match(/^\/api\/projects\/[^/]+\/sessions/)) {
+      return respond(200, { sessions: MOCK_SESSIONS, total: 0 });
+    }
+
+    // Tasks list
+    if (path.match(/^\/api\/projects\/[^/]+\/tasks/)) {
+      return respond(200, { tasks: MOCK_TASKS, nextCursor: null });
+    }
+
+    // Project activity
+    if (path.match(/^\/api\/projects\/[^/]+\/activity/)) {
+      return respond(200, []);
     }
 
     // Project detail
     if (path.match(/^\/api\/projects\/[^/]+$/) && route.request().method() === 'GET') {
-      return route.fulfill({ status: 200, json: project });
-    }
-
-    // Sessions list
-    if (path.match(/^\/api\/projects\/[^/]+\/sessions$/)) {
-      return route.fulfill({ status: 200, json: MOCK_SESSIONS });
-    }
-
-    // Tasks list
-    if (path.match(/^\/api\/projects\/[^/]+\/tasks$/)) {
-      return route.fulfill({ status: 200, json: MOCK_TASKS });
-    }
-
-    // Project activity
-    if (path.match(/^\/api\/projects\/[^/]+\/activity$/)) {
-      return route.fulfill({ status: 200, json: [] });
+      return respond(200, project);
     }
 
     // Notifications
     if (path.includes('/notifications')) {
-      return route.fulfill({ status: 200, json: { notifications: [], unreadCount: 0 } });
+      return respond(200, { notifications: [], unreadCount: 0 });
     }
 
-    // Credentials
-    if (path.includes('/credentials')) {
-      return route.fulfill({ status: 200, json: { credentials: [] } });
+    // Agent profiles (returns { items: [...] })
+    if (path.match(/^\/api\/projects\/[^/]+\/agent-profiles/)) {
+      return respond(200, { items: [] });
+    }
+
+    // Credentials (returns plain array)
+    if (path === '/api/credentials') {
+      return respond(200, []);
+    }
+
+    // Agent credentials
+    if (path.includes('/credentials/agent')) {
+      return respond(200, { credentials: [] });
     }
 
     // Dashboard active tasks
     if (path === '/api/dashboard/active-tasks') {
-      return route.fulfill({ status: 200, json: { tasks: [] } });
+      return respond(200, { tasks: [] });
     }
 
     // GitHub installations
     if (path === '/api/github/installations') {
-      return route.fulfill({ status: 200, json: [] });
+      return respond(200, []);
     }
 
-    // Agents
+    // Agents (returns { agents: [...] })
     if (path === '/api/agents') {
-      return route.fulfill({ status: 200, json: [] });
+      return respond(200, { agents: [] });
     }
 
     // Projects list
     if (path === '/api/projects') {
-      return route.fulfill({ status: 200, json: [project] });
+      return respond(200, { projects: [project] });
     }
 
-    // Default fallback
-    return route.fulfill({ status: 200, json: {} });
+    // Runtime config
+    if (path.includes('/runtime-config')) {
+      return respond(200, { envVars: [], files: [] });
+    }
+
+    // Default fallback — log unhandled routes for debugging
+    return respond(200, {});
   });
 }
 
@@ -144,6 +162,8 @@ async function assertNoHorizontalOverflow(page: Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('Nav Toggle — Mobile', () => {
+  test.use({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+
   test('project nav shows toggle button instead of link', async ({ page }) => {
     await setupApiMocks(page);
     await page.goto('/projects/proj-test-1/chat');
@@ -192,7 +212,7 @@ test.describe('Nav Toggle — Mobile', () => {
     await expect(homeBtn).toBeVisible();
     const projectsBtn = page.getByRole('button', { name: 'Projects' });
     await expect(projectsBtn).toBeVisible();
-    const settingsBtn = page.getByRole('button', { name: 'Settings' });
+    const settingsBtn = page.getByTestId('mobile-nav-panel').getByRole('button', { name: 'Settings' });
     await expect(settingsBtn).toBeVisible();
 
     await screenshot(page, 'nav-toggle-mobile-global-view');

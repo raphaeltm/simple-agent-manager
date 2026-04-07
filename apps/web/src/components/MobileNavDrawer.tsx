@@ -165,7 +165,7 @@ export function MobileNavDrawer({
             {/* Panel 1: Project / default nav items */}
             <div
               className="w-full shrink-0 pt-2 overflow-y-auto"
-              aria-hidden={canToggle && showGlobalNav}
+              aria-hidden={(canToggle && showGlobalNav) || undefined}
               inert={canToggle && showGlobalNav ? true : undefined}
             >
               {(canToggle ? projectItems : navItems).map((item) => {
@@ -229,7 +229,7 @@ export function MobileNavDrawer({
             {canToggle && (
               <div
                 className="w-full shrink-0 pt-2 overflow-y-auto"
-                aria-hidden={!showGlobalNav}
+                aria-hidden={!showGlobalNav || undefined}
                 inert={!showGlobalNav ? true : undefined}
               >
                 {(globalNavItems ?? []).map((item) => {

@@ -15,7 +15,7 @@ import {
   Settings,
   Shield,
 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
 
 import { useAuth } from './AuthProvider';
@@ -78,7 +78,6 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
   const location = useLocation();
   const { isSuperadmin } = useAuth();
   const [infraOpen, setInfraOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const projectId = extractProjectId(location.pathname);
   const insideProject = Boolean(projectId);
@@ -90,7 +89,7 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
       : GLOBAL_NAV_ITEMS;
 
     return (
-      <div ref={containerRef} className={`relative overflow-hidden ${className ?? ''}`}>
+      <div className={`relative overflow-hidden ${className ?? ''}`}>
         {/* Sliding container — holds both panels side by side */}
         <div
           className="flex transition-transform duration-200 ease-out motion-reduce:transition-none"
@@ -100,13 +99,13 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
           <nav
             aria-label="Project navigation"
             className="flex flex-col gap-1 p-2 w-full shrink-0"
-            aria-hidden={showGlobalNav}
+            aria-hidden={showGlobalNav || undefined}
             inert={showGlobalNav ? true : undefined}
           >
             {/* Toggle to global nav */}
             <button
               onClick={onToggleGlobalNav}
-              className={`flex items-center gap-2 px-3 py-2 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
+              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
               aria-label="Show global navigation"
             >
               <ArrowLeft size={16} />
@@ -143,13 +142,13 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
           <nav
             aria-label="Primary navigation"
             className="flex flex-col gap-1 p-2 w-full shrink-0"
-            aria-hidden={!showGlobalNav}
+            aria-hidden={!showGlobalNav || undefined}
             inert={!showGlobalNav ? true : undefined}
           >
             {/* Toggle back to project nav */}
             <button
               onClick={onToggleGlobalNav}
-              className={`flex items-center gap-2 px-3 py-2 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
+              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
               aria-label={`Back to ${projectName || 'project'} navigation`}
             >
               <ArrowRight size={16} />
