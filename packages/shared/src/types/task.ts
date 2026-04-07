@@ -101,6 +101,41 @@ export interface TaskDependency {
   createdAt: string;
 }
 
+/**
+ * Enriched task dependency entry returned by get_task_dependencies for downstream/sibling tasks.
+ * Includes execution state so orchestrator agents can poll child status efficiently.
+ */
+export interface EnhancedTaskDependency {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  branch: string | null;
+  outputSummary: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+  executionStep: TaskExecutionStep | null;
+  pendingInput: boolean;
+}
+
+/** Request for the get_subtask_summary MCP tool. */
+export interface GetSubtaskSummaryRequest {
+  taskId: string;
+}
+
+/** Response from the get_subtask_summary MCP tool. */
+export interface GetSubtaskSummaryResponse {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  outputSummary: string | null;
+  outputBranch: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+  executionStep: TaskExecutionStep | null;
+  description: string | null;
+  sessionMessageCount: number | null;
+}
+
 export interface TaskStatusEvent {
   id: string;
   taskId: string;

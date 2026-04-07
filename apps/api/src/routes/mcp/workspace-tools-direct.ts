@@ -172,27 +172,37 @@ export async function handleGetTaskDependencies(
       return jsonRpcError(requestId, INTERNAL_ERROR, 'Current task not found');
     }
 
-    // Targeted queries instead of fetching all project tasks
-    const taskSelect = {
+    // Upstream: minimal fields (parent doesn't need enrichment)
+    const upstreamSelect = {
       id: schema.tasks.id,
       title: schema.tasks.title,
       status: schema.tasks.status,
-      parentTaskId: schema.tasks.parentTaskId,
       outputBranch: schema.tasks.outputBranch,
     };
 
-    // Upstream: parent task (if any)
     const upstream = currentTask.parentTaskId
       ? await db
-          .select(taskSelect)
+          .select(upstreamSelect)
           .from(schema.tasks)
           .where(eq(schema.tasks.id, currentTask.parentTaskId))
           .limit(1)
       : [];
 
+    // Enriched select for downstream and siblings
+    const enrichedSelect = {
+      id: schema.tasks.id,
+      title: schema.tasks.title,
+      status: schema.tasks.status,
+      outputBranch: schema.tasks.outputBranch,
+      outputSummary: schema.tasks.outputSummary,
+      completedAt: schema.tasks.completedAt,
+      errorMessage: schema.tasks.errorMessage,
+      executionStep: schema.tasks.executionStep,
+    };
+
     // Downstream: tasks whose parent is the current task
     const downstream = await db
-      .select(taskSelect)
+      .select(enrichedSelect)
       .from(schema.tasks)
       .where(
         and(
@@ -205,7 +215,7 @@ export async function handleGetTaskDependencies(
     // Siblings: tasks with the same parent (excluding self)
     const siblings = currentTask.parentTaskId
       ? (await db
-          .select(taskSelect)
+          .select(enrichedSelect)
           .from(schema.tasks)
           .where(
             and(
@@ -217,14 +227,27 @@ export async function handleGetTaskDependencies(
           .filter((t) => t.id !== tokenData.taskId)
       : [];
 
+    const mapEnriched = (t: typeof downstream[number]) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      branch: t.outputBranch,
+      outputSummary: t.outputSummary,
+      completedAt: t.completedAt,
+      errorMessage: t.errorMessage,
+      executionStep: t.executionStep,
+      // Derived from execution step — awaiting_followup means the agent called request_human_input
+      pendingInput: t.executionStep === 'awaiting_followup',
+    });
+
     return jsonRpcSuccess(requestId, {
       content: [{
         type: 'text',
         text: JSON.stringify({
           currentTask: { id: currentTask.id, title: currentTask.title },
           upstream: upstream.map((t) => ({ id: t.id, title: t.title, status: t.status, branch: t.outputBranch })),
-          downstream: downstream.map((t) => ({ id: t.id, title: t.title, status: t.status, branch: t.outputBranch })),
-          siblings: siblings.map((t) => ({ id: t.id, title: t.title, status: t.status, branch: t.outputBranch })),
+          downstream: downstream.map(mapEnriched),
+          siblings: siblings.map(mapEnriched),
         }, null, 2),
       }],
     });

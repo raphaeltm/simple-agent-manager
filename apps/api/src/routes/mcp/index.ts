@@ -25,6 +25,7 @@ import {
 } from './_helpers';
 import { handleGetDeploymentCredentials } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
+import { handleGetSubtaskSummary } from './orchestration-tools';
 import {
   handleCreateIdea,
   handleFindRelatedIdeas,
@@ -218,6 +219,8 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleGetPeerAgentOutput(requestId, toolArgs, tokenData, c.env));
         case 'get_task_dependencies':
           return c.json(await handleGetTaskDependencies(requestId, tokenData, c.env));
+        case 'get_subtask_summary':
+          return c.json(await handleGetSubtaskSummary(requestId, toolArgs, tokenData, c.env));
         case 'get_ci_status':
           return c.json(await handleGetCiStatus(requestId, tokenData, c.env));
         case 'get_deployment_status':

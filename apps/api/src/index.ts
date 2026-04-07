@@ -279,6 +279,8 @@ export interface Env {
   MCP_DISPATCH_MAX_REFERENCES?: string;            // Max reference URLs per dispatch (default: 20)
   MCP_DISPATCH_MAX_REFERENCE_LENGTH?: string;      // Max length per reference string (default: 500)
   MCP_DISPATCH_MAX_PRIORITY?: string;              // Max priority for agent-dispatched tasks (default: 100)
+  // MCP orchestration tools
+  ORCHESTRATOR_SUMMARY_DESCRIPTION_MAX_LENGTH?: string; // Max description chars in get_subtask_summary (default: 500)
   // MCP get_session_messages limits
   MCP_MESSAGE_LIST_LIMIT?: string;                 // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string;                   // Max raw tokens per request (default: 200)

@@ -574,10 +574,26 @@ export const MCP_TOOLS = [
   {
     name: 'get_task_dependencies',
     description:
-      'Get the upstream/downstream task dependency graph for the current task. Shows parent, children, and sibling tasks with their statuses.',
+      'Get the upstream/downstream task dependency graph for the current task. Shows parent, children, and sibling tasks with their statuses. Downstream and sibling entries include enriched fields: outputSummary, completedAt, errorMessage, executionStep, and pendingInput.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_subtask_summary',
+    description:
+      'Get the full output summary of a child task you dispatched. Only accessible by the direct parent task. Returns status, output summary, error message, execution step, description snippet, and session message count.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The child task ID to retrieve the summary for',
+        },
+      },
+      required: ['taskId'],
       additionalProperties: false,
     },
   },

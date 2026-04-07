@@ -304,13 +304,14 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_project_agents');
       expect(toolNames).toContain('get_peer_agent_output');
       expect(toolNames).toContain('get_task_dependencies');
+      expect(toolNames).toContain('get_subtask_summary');
       expect(toolNames).toContain('get_ci_status');
       expect(toolNames).toContain('get_deployment_status');
       expect(toolNames).toContain('get_workspace_diff_summary');
       expect(toolNames).toContain('report_environment_issue');
       // Onboarding tools
       expect(toolNames).toContain('get_repo_setup_guide');
-      expect(body.result.tools).toHaveLength(37);
+      expect(body.result.tools).toHaveLength(38);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
