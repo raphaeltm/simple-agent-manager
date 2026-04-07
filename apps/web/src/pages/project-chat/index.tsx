@@ -117,7 +117,7 @@ export function ProjectChat() {
 
           {/* Session list — scrollable */}
           {state.hasSessions ? (
-            <nav className="flex-1 overflow-y-auto min-h-0">
+            <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
               <SessionList
                 sessions={state.filteredRecent}
                 selectedSessionId={state.sessionId ?? null}

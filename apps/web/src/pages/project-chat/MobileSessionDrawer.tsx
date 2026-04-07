@@ -157,7 +157,7 @@ export function MobileSessionDrawer({
         )}
 
         {/* Session list */}
-        <nav className="flex-1 overflow-y-auto min-h-0">
+        <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
           <SessionList
             sessions={filteredR}
             selectedSessionId={selectedSessionId}

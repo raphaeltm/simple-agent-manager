@@ -49,7 +49,7 @@ export function SessionItem({
 
   // Font sizing: parent 13px/500, child 12px/400, default unchanged
   const titleStyle: React.CSSProperties = isChild
-    ? { fontSize: 12, fontWeight: 400, color: 'var(--sam-color-fg-secondary, #c4d8d0)' }
+    ? { fontSize: 12, fontWeight: 400, color: 'var(--sam-color-fg-muted, #9fb7ae)' }
     : variant === 'group-parent'
       ? { fontSize: 13, fontWeight: 500 }
       : {};
@@ -76,7 +76,7 @@ export function SessionItem({
       <button
         type="button"
         onClick={() => onSelect(session.id)}
-        className="block w-full text-left bg-transparent border-none cursor-pointer p-0"
+        className="block w-full text-left bg-transparent border-none cursor-pointer p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sam-color-focus-ring)]"
       >
         {/* Idea tag — only for default/parent variants */}
         {ideaTitle && !isChild && (

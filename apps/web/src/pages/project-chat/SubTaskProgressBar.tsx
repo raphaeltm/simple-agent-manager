@@ -15,6 +15,11 @@ export function SubTaskProgressBar({
   return (
     <div className="flex items-center gap-1.5" style={{ marginTop: 4 }}>
       <div
+        role="progressbar"
+        aria-valuenow={completed}
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-label={`${completed} of ${total} sub-tasks completed`}
         className="flex-1 overflow-hidden"
         style={{
           height: 3,
