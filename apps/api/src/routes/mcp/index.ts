@@ -26,11 +26,6 @@ import {
 import { handleGetDeploymentCredentials } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
 import {
-  handleAddDependency,
-  handleRemovePendingSubtask,
-  handleRetrySubtask,
-} from './orchestration-tools';
-import {
   handleCreateIdea,
   handleFindRelatedIdeas,
   handleGetIdea,
@@ -44,6 +39,11 @@ import {
 import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-tools';
+import {
+  handleAddDependency,
+  handleRemovePendingSubtask,
+  handleRetrySubtask,
+} from './orchestration-tools';
 import {
   handleGetSessionMessages,
   handleListSessions,
