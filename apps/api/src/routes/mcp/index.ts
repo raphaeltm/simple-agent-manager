@@ -26,6 +26,11 @@ import {
 import { handleGetDeploymentCredentials } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
 import {
+  handleAddDependency,
+  handleRemovePendingSubtask,
+  handleRetrySubtask,
+} from './orchestration-tools';
+import {
   handleCreateIdea,
   handleFindRelatedIdeas,
   handleGetIdea,
@@ -235,6 +240,13 @@ mcpRoutes.post('/', async (c) => {
         case 'get_repo_setup_guide':
           // Synchronous — no async I/O needed for static content
           return c.json(handleGetRepoSetupGuide(requestId));
+        // ─── Orchestration tools (agent-to-agent control) ─────────────
+        case 'retry_subtask':
+          return c.json(await handleRetrySubtask(requestId, toolArgs, tokenData, c.env));
+        case 'add_dependency':
+          return c.json(await handleAddDependency(requestId, toolArgs, tokenData, c.env));
+        case 'remove_pending_subtask':
+          return c.json(await handleRemovePendingSubtask(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }

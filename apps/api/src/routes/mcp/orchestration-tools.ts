@@ -1,19 +1,22 @@
 /**
- * MCP orchestration tools — parent-to-child agent communication.
- *
- * - send_message_to_subtask: Send a message to a child task's session inbox
- * - stop_subtask: Gracefully stop a child task (cancel → warning → hard stop)
+ * MCP orchestration tools — retry, dependency management, and task removal
+ * for agent-to-agent communication.
  */
-import type { ProjectData } from '../../durable-objects/project-data';
+import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../../db/schema';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
-import { parsePositiveInt } from '../../lib/route-helpers';
-import { cancelAgentSessionOnNode, sendPromptToAgentOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
+import { ulid } from '../../lib/ulid';
+import { generateBranchName } from '../../services/branch-name';
+import * as projectDataService from '../../services/project-data';
+import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import {
   ACTIVE_STATUSES,
-  DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS,
-  DEFAULT_ORCHESTRATOR_CANCEL_TIMEOUT_MS,
-  DEFAULT_ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS,
   getMcpLimits,
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -21,251 +24,543 @@ import {
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
-  sanitizeUserInput,
 } from './_helpers';
 
-function getCancelSettleMs(env: Env): number {
-  return parsePositiveInt(
-    env.ORCHESTRATOR_CANCEL_SETTLE_MS,
-    DEFAULT_ORCHESTRATOR_CANCEL_SETTLE_MS,
-  );
-}
+// ─── retry_subtask ──────────────────────────────────────────────────────────
 
-function getCancelTimeoutMs(env: Env): number {
-  return parsePositiveInt(
-    env.ORCHESTRATOR_CANCEL_TIMEOUT_MS,
-    DEFAULT_ORCHESTRATOR_CANCEL_TIMEOUT_MS,
-  );
-}
-
-function getCancelWarningSettleMs(env: Env): number {
-  return parsePositiveInt(
-    env.ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS,
-    DEFAULT_ORCHESTRATOR_CANCEL_WARNING_SETTLE_MS,
-  );
-}
-
-// ─── send_message_to_subtask ────────────────────────────────────────────────
-
-export async function handleSendMessageToSubtask(
+export async function handleRetrySubtask(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
-  const taskId = params.taskId;
-  if (typeof taskId !== 'string' || !taskId.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required and must be a non-empty string');
-  }
-
-  const message = params.message;
-  if (typeof message !== 'string' || !message.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'message is required and must be a non-empty string');
-  }
-
-  const priority = params.priority === 'urgent' ? 'urgent' as const : 'normal' as const;
-
-  const sanitizedMessage = sanitizeUserInput(message.trim());
-
-  // Single query: verify ownership + resolve workspace/session context
-  const childRow = await env.DATABASE.prepare(`
-    SELECT t.project_id, t.user_id, t.parent_task_id, t.status,
-           w.id as workspace_id, w.chat_session_id, w.node_id
-    FROM tasks t
-    LEFT JOIN workspaces w ON w.id = t.workspace_id
-    WHERE t.id = ?
-  `).bind(taskId.trim()).first<{
-    project_id: string;
-    user_id: string;
-    parent_task_id: string | null;
-    status: string;
-    workspace_id: string | null;
-    chat_session_id: string | null;
-    node_id: string | null;
-  }>();
-
-  if (!childRow) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Child task not found');
-  }
-
-  if (childRow.project_id !== tokenData.projectId || childRow.user_id !== tokenData.userId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Child task does not belong to this project or user');
-  }
-
-  if (childRow.parent_task_id !== tokenData.taskId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'You are not the parent of this task');
-  }
-
-  if (!(ACTIVE_STATUSES as readonly string[]).includes(childRow.status)) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Child task is not active (status: ${childRow.status})`);
-  }
-
-  if (!childRow.workspace_id || !childRow.chat_session_id || !childRow.node_id) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Child task has no active workspace or session');
-  }
-
-  // Enqueue message to child's session inbox
   const limits = getMcpLimits(env);
-  const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
-  const doStub = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
+  const db = drizzle(env.DATABASE, { schema });
 
-  await doStub.enqueueInboxMessage(
-    {
-      targetSessionId: childRow.chat_session_id,
-      sourceTaskId: tokenData.taskId,
-      messageType: 'parent_message',
-      content: sanitizedMessage,
-      priority,
-    },
-    limits.inboxMaxSize,
-    limits.inboxMessageMaxLength,
-  );
+  // Validate taskId param
+  const childTaskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
+  if (!childTaskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
+  }
 
-  log.info('mcp.send_message_to_subtask', {
+  const newDescription = typeof params.newDescription === 'string'
+    ? params.newDescription.trim()
+    : undefined;
+
+  // Fetch the child task
+  const [childTask] = await db
+    .select()
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.id, childTaskId),
+        eq(schema.tasks.projectId, tokenData.projectId),
+      ),
+    )
+    .limit(1);
+
+  if (!childTask) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found in this project');
+  }
+
+  // Authorization: caller must be direct parent
+  if (childTask.parentTaskId !== tokenData.taskId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Only the direct parent task can retry a subtask',
+    );
+  }
+
+  // Check retry limit — count existing sibling tasks (same parent) that look like retries
+  // This is a simple count: how many children does the parent have for the original description
+  const [retryCountResult] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.parentTaskId, tokenData.taskId),
+        eq(schema.tasks.projectId, tokenData.projectId),
+      ),
+    );
+
+  const siblingCount = retryCountResult?.count ?? 0;
+  if (siblingCount >= limits.orchestratorMaxRetriesPerTask + 1) {
+    // +1 because the original task counts as one
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Retry limit reached (${siblingCount - 1}/${limits.orchestratorMaxRetriesPerTask} retries). ` +
+      'Consider adjusting the task description or seeking human input.',
+    );
+  }
+
+  // If child is still running, stop it
+  let stoppedStatus = childTask.status;
+  if (ACTIVE_STATUSES.includes(childTask.status)) {
+    const now = new Date().toISOString();
+    await db.update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: 'Stopped by parent for retry',
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(schema.tasks.id, childTaskId));
+
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId: childTaskId,
+      fromStatus: childTask.status,
+      toStatus: 'failed',
+      actorType: 'agent',
+      actorId: tokenData.workspaceId,
+      reason: 'Stopped by parent for retry',
+      createdAt: now,
+    });
+
+    stoppedStatus = 'failed';
+
+    // Stop the session if one exists — find workspace via the task's workspaceId
+    if (childTask.workspaceId) {
+      try {
+        const [workspace] = await db
+          .select({ chatSessionId: schema.workspaces.chatSessionId })
+          .from(schema.workspaces)
+          .where(eq(schema.workspaces.id, childTask.workspaceId))
+          .limit(1);
+        if (workspace?.chatSessionId) {
+          await projectDataService.stopSession(env, tokenData.projectId, workspace.chatSessionId)
+            .catch((e) => log.warn('orchestration.retry_stop_session_failed', { error: String(e) }));
+        }
+      } catch {
+        // Best-effort session stop
+      }
+    }
+  }
+
+  // Build replacement task description
+  const originalDescription = childTask.description ?? '';
+  const replacementDescription = newDescription
+    ?? `${originalDescription}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
+      childTask.errorMessage ? ` Error: ${childTask.errorMessage}` : ''
+    }${childTask.outputBranch ? ` Branch with partial work: ${childTask.outputBranch}` : ''}`;
+
+  // Dispatch replacement task — reuse logic from dispatch-tool
+  const taskId = ulid();
+  const now = new Date().toISOString();
+
+  // Fetch project for defaults
+  const [project] = await db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.id, tokenData.projectId))
+    .limit(1);
+
+  if (!project) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
+  }
+
+  const titleConfig = getTaskTitleConfig(env);
+  const taskTitle = await generateTaskTitle(env.AI, replacementDescription, titleConfig);
+
+  const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
+  const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
+  const branchName = generateBranchName(replacementDescription, taskId, {
+    prefix: branchPrefix,
+    maxLength: branchMaxLength,
+  });
+
+  // Inherit dispatch depth from original child
+  const resolvedVmSize: VMSize = (childTask.executionStep as VMSize | null)
+    ?? (project.defaultVmSize as VMSize | null)
+    ?? DEFAULT_VM_SIZE;
+  const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
+  const resolvedVmLocation: VMLocation = (project.defaultLocation as VMLocation | null)
+    ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
+    ?? DEFAULT_VM_LOCATION;
+  const resolvedWorkspaceProfile: WorkspaceProfile = (project.defaultWorkspaceProfile as WorkspaceProfile | null)
+    ?? DEFAULT_WORKSPACE_PROFILE;
+
+  const checkoutBranch = project.defaultBranch;
+
+  // Insert replacement task
+  await db.insert(schema.tasks).values({
+    id: taskId,
+    projectId: tokenData.projectId,
+    userId: tokenData.userId,
     parentTaskId: tokenData.taskId,
-    childTaskId: taskId.trim(),
-    priority,
-    sessionId: childRow.chat_session_id,
+    title: taskTitle,
+    description: replacementDescription,
+    status: 'queued',
+    executionStep: 'node_selection',
+    priority: childTask.priority,
+    dispatchDepth: childTask.dispatchDepth,
+    outputBranch: branchName,
+    createdBy: tokenData.userId,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  // Record status event
+  await db.insert(schema.taskStatusEvents).values({
+    id: ulid(),
+    taskId,
+    fromStatus: null,
+    toStatus: 'queued',
+    actorType: 'agent',
+    actorId: tokenData.workspaceId,
+    reason: `Retry of failed task ${childTaskId}`,
+    createdAt: now,
+  });
+
+  // Create chat session
+  let sessionId: string;
+  try {
+    sessionId = await projectDataService.createSession(
+      env,
+      tokenData.projectId,
+      null,
+      taskTitle,
+      taskId,
+    );
+
+    await projectDataService.persistMessage(
+      env,
+      tokenData.projectId,
+      sessionId,
+      'user',
+      replacementDescription,
+      null,
+    );
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const failedAt = new Date().toISOString();
+    await db.update(schema.tasks)
+      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
+      .where(eq(schema.tasks.id, taskId));
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
+  }
+
+  // Start TaskRunner DO
+  const [userRow] = await db
+    .select({ name: schema.users.name, email: schema.users.email, githubId: schema.users.githubId })
+    .from(schema.users)
+    .where(eq(schema.users.id, tokenData.userId))
+    .limit(1);
+
+  try {
+    await startTaskRunnerDO(env, {
+      taskId,
+      projectId: tokenData.projectId,
+      userId: tokenData.userId,
+      vmSize: resolvedVmSize,
+      vmLocation: resolvedVmLocation,
+      branch: checkoutBranch,
+      userName: userRow?.name ?? null,
+      userEmail: userRow?.email ?? null,
+      githubId: userRow?.githubId ?? null,
+      taskTitle,
+      taskDescription: replacementDescription,
+      repository: project.repository,
+      installationId: project.installationId,
+      outputBranch: branchName,
+      projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+      chatSessionId: sessionId,
+      agentType: project.defaultAgentType ?? null,
+      workspaceProfile: resolvedWorkspaceProfile,
+      cloudProvider: resolvedProvider,
+      model: null,
+      permissionMode: null,
+      projectScaling: {
+        taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
+        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
+        nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
+        nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+        warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
+      },
+    });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const failedAt = new Date().toISOString();
+    await db.update(schema.tasks)
+      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
+      .where(eq(schema.tasks.id, taskId));
+    log.error('orchestration.retry.do_startup_failed', { taskId, error: errorMsg });
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
+  }
+
+  log.info('orchestration.retry_subtask.success', {
+    stoppedTaskId: childTaskId,
+    newTaskId: taskId,
+    sessionId,
+    branchName,
+    parentTaskId: tokenData.taskId,
   });
 
   return jsonRpcSuccess(requestId, {
     content: [{
       type: 'text',
-      text: `Message enqueued to sub-task ${taskId.trim()} (priority: ${priority}). The sub-task agent will receive it when it next goes idle${priority === 'urgent' ? ' or via interrupt if busy' : ''}.`,
+      text: JSON.stringify({
+        stoppedTaskId: childTaskId,
+        newTaskId: taskId,
+        newSessionId: sessionId,
+        newBranch: branchName,
+        message: `Task ${childTaskId} stopped and replacement task ${taskId} dispatched.`,
+      }, null, 2),
     }],
   });
 }
 
-// ─── stop_subtask ───────────────────────────────────────────────────────────
+// ─── add_dependency ─────────────────────────────────────────────────────────
 
-export async function handleStopSubtask(
+export async function handleAddDependency(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
-  const taskId = params.taskId;
-  if (typeof taskId !== 'string' || !taskId.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required and must be a non-empty string');
+  const limits = getMcpLimits(env);
+  const db = drizzle(env.DATABASE, { schema });
+
+  // Validate params
+  const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
+  const dependsOnTaskId = typeof params.dependsOnTaskId === 'string' ? params.dependsOnTaskId.trim() : '';
+
+  if (!taskId || !dependsOnTaskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'taskId and dependsOnTaskId are required');
   }
 
-  const reason = typeof params.reason === 'string' ? params.reason.trim() : 'Stopped by parent task';
-
-  // Single query: verify ownership + resolve workspace/session context
-  const childRow = await env.DATABASE.prepare(`
-    SELECT t.project_id, t.user_id, t.parent_task_id, t.status,
-           w.id as workspace_id, w.chat_session_id, w.node_id
-    FROM tasks t
-    LEFT JOIN workspaces w ON w.id = t.workspace_id
-    WHERE t.id = ?
-  `).bind(taskId.trim()).first<{
-    project_id: string;
-    user_id: string;
-    parent_task_id: string | null;
-    status: string;
-    workspace_id: string | null;
-    chat_session_id: string | null;
-    node_id: string | null;
-  }>();
-
-  if (!childRow) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Child task not found');
+  if (taskId === dependsOnTaskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'A task cannot depend on itself');
   }
 
-  if (childRow.project_id !== tokenData.projectId || childRow.user_id !== tokenData.userId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Child task does not belong to this project or user');
-  }
-
-  if (childRow.parent_task_id !== tokenData.taskId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'You are not the parent of this task');
-  }
-
-  if (!(ACTIVE_STATUSES as readonly string[]).includes(childRow.status)) {
-    return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: `Sub-task ${taskId.trim()} is already in terminal state: ${childRow.status}` }],
-    });
-  }
-
-  if (!childRow.workspace_id || !childRow.chat_session_id || !childRow.node_id) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Child task has no active workspace or session');
-  }
-
-  const cancelSettleMs = getCancelSettleMs(env);
-  const steps: string[] = [];
-
-  try {
-    // Step 1: Cancel any running prompt
-    const cancelResult = await cancelAgentSessionOnNode(
-      childRow.node_id,
-      childRow.workspace_id,
-      childRow.chat_session_id,
-      env,
-      tokenData.userId,
+  // Verify both tasks belong to the same project
+  const tasks = await db
+    .select({
+      id: schema.tasks.id,
+      projectId: schema.tasks.projectId,
+      parentTaskId: schema.tasks.parentTaskId,
+    })
+    .from(schema.tasks)
+    .where(
+      and(
+        inArray(schema.tasks.id, [taskId, dependsOnTaskId]),
+        eq(schema.tasks.projectId, tokenData.projectId),
+      ),
     );
 
-    if (cancelResult.success) {
-      steps.push('Cancelled running prompt');
-      // Wait for the cancel to settle
-      await new Promise((resolve) => setTimeout(resolve, cancelSettleMs));
-    } else if (cancelResult.status === 409) {
-      steps.push('No prompt in flight (agent was idle)');
-    } else {
-      steps.push(`Cancel returned status ${cancelResult.status}`);
-    }
+  if (tasks.length !== 2) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'One or both tasks not found in this project');
+  }
 
-    // Step 2: Try to send a warning message
-    try {
-      const warningMsg = `[System] You are being stopped by your parent task. Reason: ${sanitizeUserInput(reason)}. Save your work and finish up.`;
-      await sendPromptToAgentOnNode(
-        childRow.node_id,
-        childRow.workspace_id,
-        childRow.chat_session_id,
-        warningMsg,
-        env,
-        tokenData.userId,
+  // Authorization: caller must be parent of both tasks, or both tasks are siblings under same parent
+  const taskA = tasks.find((t) => t.id === taskId)!;
+  const taskB = tasks.find((t) => t.id === dependsOnTaskId)!;
+
+  const callerIsParentOfBoth =
+    taskA.parentTaskId === tokenData.taskId &&
+    taskB.parentTaskId === tokenData.taskId;
+
+  const bothAreSiblings =
+    taskA.parentTaskId != null &&
+    taskA.parentTaskId === taskB.parentTaskId &&
+    taskA.parentTaskId === tokenData.taskId;
+
+  // callerIsParentOfBoth already covers the sibling case when caller is parent.
+  // Also allow if caller IS one of the tasks and both share same parent.
+  const callerIsSibling =
+    (tokenData.taskId === taskId || tokenData.taskId === dependsOnTaskId) &&
+    taskA.parentTaskId != null &&
+    taskA.parentTaskId === taskB.parentTaskId;
+
+  if (!callerIsParentOfBoth && !bothAreSiblings && !callerIsSibling) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Caller must be the parent of both tasks, or both tasks must be siblings under the caller',
+    );
+  }
+
+  // Check max edges for the project — use raw SQL for cross-table join
+  const projectEdgeCount = await env.DATABASE.prepare(
+    `SELECT count(*) as count FROM task_dependencies td
+     JOIN tasks t ON td.task_id = t.id
+     WHERE t.project_id = ?`,
+  ).bind(tokenData.projectId).first<{ count: number }>();
+
+  if ((projectEdgeCount?.count ?? 0) >= limits.orchestratorDependencyMaxEdges) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Dependency edge limit reached (${projectEdgeCount?.count}/${limits.orchestratorDependencyMaxEdges}). ` +
+      'Cannot add more dependency edges to this project.',
+    );
+  }
+
+  // Cycle detection: BFS from dependsOnTaskId through existing edges
+  // If we can reach taskId by following edges from dependsOnTaskId, adding this edge would create a cycle
+  const visited = new Set<string>();
+  const queue = [dependsOnTaskId];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current === taskId) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'Adding this dependency would create a cycle in the task graph',
       );
-      steps.push('Warning message sent');
-
-      // Give the agent a moment to process the warning
-      const timeoutMs = getCancelTimeoutMs(env);
-      const warningSettleMs = getCancelWarningSettleMs(env);
-      await new Promise((resolve) => setTimeout(resolve, Math.min(timeoutMs, warningSettleMs)));
-    } catch {
-      steps.push('Warning message delivery failed (agent may be busy)');
     }
+    if (visited.has(current)) continue;
+    visited.add(current);
 
-    // Step 3: Hard stop the session
-    try {
-      await stopAgentSessionOnNode(
-        childRow.node_id,
-        childRow.workspace_id,
-        childRow.chat_session_id,
-        env,
-        tokenData.userId,
-      );
-      steps.push('Session stopped');
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      steps.push(`Session stop failed: ${errMsg}`);
+    // Find tasks that `current` depends on
+    const deps = await db
+      .select({ dependsOn: schema.taskDependencies.dependsOnTaskId })
+      .from(schema.taskDependencies)
+      .where(eq(schema.taskDependencies.taskId, current));
+
+    for (const dep of deps) {
+      if (!visited.has(dep.dependsOn)) {
+        queue.push(dep.dependsOn);
+      }
     }
+  }
 
-    log.info('mcp.stop_subtask', {
-      parentTaskId: tokenData.taskId,
-      childTaskId: taskId.trim(),
-      steps,
-    });
-
-    return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: `Sub-task ${taskId.trim()} stop sequence completed:\n${steps.map((s) => `- ${s}`).join('\n')}` }],
+  // Insert the dependency edge
+  try {
+    await db.insert(schema.taskDependencies).values({
+      taskId,
+      dependsOnTaskId,
+      createdBy: tokenData.userId,
+      createdAt: new Date().toISOString(),
     });
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    log.error('mcp.stop_subtask.error', {
-      parentTaskId: tokenData.taskId,
-      childTaskId: taskId.trim(),
-      error: errMsg,
-      steps,
-    });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Stop sub-task failed: ${errMsg}`);
+    // Primary key violation means the edge already exists
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    if (errorMsg.includes('UNIQUE') || errorMsg.includes('PRIMARY KEY')) {
+      return jsonRpcSuccess(requestId, {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ added: true, message: 'Dependency already exists (idempotent)' }),
+        }],
+      });
+    }
+    throw err;
   }
+
+  log.info('orchestration.add_dependency.success', {
+    taskId,
+    dependsOnTaskId,
+    projectId: tokenData.projectId,
+    addedBy: tokenData.taskId,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ added: true }),
+    }],
+  });
+}
+
+// ─── remove_pending_subtask ─────────────────────────────────────────────────
+
+export async function handleRemovePendingSubtask(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const db = drizzle(env.DATABASE, { schema });
+
+  // Validate taskId param
+  const childTaskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
+  if (!childTaskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
+  }
+
+  // Fetch the child task
+  const [childTask] = await db
+    .select({
+      id: schema.tasks.id,
+      parentTaskId: schema.tasks.parentTaskId,
+      status: schema.tasks.status,
+      projectId: schema.tasks.projectId,
+    })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.id, childTaskId),
+        eq(schema.tasks.projectId, tokenData.projectId),
+      ),
+    )
+    .limit(1);
+
+  if (!childTask) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found in this project');
+  }
+
+  // Authorization: caller must be direct parent
+  if (childTask.parentTaskId !== tokenData.taskId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Only the direct parent task can remove a pending subtask',
+    );
+  }
+
+  // Only queued tasks can be removed — running tasks must use stop_subtask
+  if (childTask.status !== 'queued') {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Cannot remove task in '${childTask.status}' status. Only 'queued' tasks can be removed. ` +
+      (ACTIVE_STATUSES.includes(childTask.status)
+        ? 'Use stop_subtask to stop running tasks.'
+        : 'Task has already completed.'),
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  // Cancel the task
+  await db.update(schema.tasks)
+    .set({
+      status: 'cancelled',
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(schema.tasks.id, childTaskId));
+
+  // Record status event
+  await db.insert(schema.taskStatusEvents).values({
+    id: ulid(),
+    taskId: childTaskId,
+    fromStatus: 'queued',
+    toStatus: 'cancelled',
+    actorType: 'agent',
+    actorId: tokenData.workspaceId,
+    reason: `Removed by parent task ${tokenData.taskId}`,
+    createdAt: now,
+  });
+
+  // Clean up dependency edges
+  await env.DATABASE.prepare(
+    'DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?',
+  ).bind(childTaskId, childTaskId).run();
+
+  log.info('orchestration.remove_pending_subtask.success', {
+    taskId: childTaskId,
+    parentTaskId: tokenData.taskId,
+    projectId: tokenData.projectId,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ removed: true, taskId: childTaskId }),
+    }],
+  });
 }

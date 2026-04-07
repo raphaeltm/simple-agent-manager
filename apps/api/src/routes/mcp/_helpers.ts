@@ -96,6 +96,10 @@ const DEFAULT_MCP_IDEA_SEARCH_MAX = 20;
 const DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH = 200;
 /** Max length for session topic. Override via MCP_SESSION_TOPIC_MAX_LENGTH env var. */
 const DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH = 200;
+/** Max retry attempts for a single task via retry_subtask. Override via ORCHESTRATOR_MAX_RETRIES_PER_TASK env var. */
+const DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK = 3;
+/** Max dependency edges per project via add_dependency. Override via ORCHESTRATOR_DEPENDENCY_MAX_EDGES env var. */
+const DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES = 50;
 
 /** Default max pending messages per session inbox. Override via ORCHESTRATOR_INBOX_MAX_SIZE env var. */
 export const DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE = 100;
@@ -143,9 +147,8 @@ export function getMcpLimits(env: Env) {
     ideaSearchMax: parsePositiveInt(env.MCP_IDEA_SEARCH_MAX, DEFAULT_MCP_IDEA_SEARCH_MAX),
     ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH, DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH),
     sessionTopicMaxLength: parsePositiveInt(env.MCP_SESSION_TOPIC_MAX_LENGTH, DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH),
-    inboxMaxSize: parsePositiveInt(env.ORCHESTRATOR_INBOX_MAX_SIZE, DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE),
-    inboxDrainBatchSize: parsePositiveInt(env.ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE, DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE),
-    inboxMessageMaxLength: parsePositiveInt(env.ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH),
+    orchestratorMaxRetriesPerTask: parsePositiveInt(env.ORCHESTRATOR_MAX_RETRIES_PER_TASK, DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK),
+    orchestratorDependencyMaxEdges: parsePositiveInt(env.ORCHESTRATOR_DEPENDENCY_MAX_EDGES, DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES),
   };
 }
 
