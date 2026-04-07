@@ -8,6 +8,8 @@
 import type { ProjectData } from '../durable-objects/project-data';
 import type { Env } from '../index';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE } from '../routes/mcp/_helpers';
 import { sendPromptToAgentOnNode } from './node-agent';
 
 interface DrainResult {
@@ -73,7 +75,7 @@ export async function drainSessionInbox(
     const projectData = env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
 
     // Get pending messages
-    const batchSize = parseInt(env.ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE || '10', 10);
+    const batchSize = parsePositiveInt(env.ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE, DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE);
     const messages = await projectData.getPendingInboxMessages(sessionId, batchSize);
 
     if (messages.length === 0) {

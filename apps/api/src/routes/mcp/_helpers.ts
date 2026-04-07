@@ -98,11 +98,11 @@ const DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH = 200;
 const DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH = 200;
 
 /** Default max pending messages per session inbox. Override via ORCHESTRATOR_INBOX_MAX_SIZE env var. */
-const DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE = 100;
+export const DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE = 100;
 /** Default max messages to deliver in one drain cycle. Override via ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE env var. */
-const DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE = 10;
+export const DEFAULT_ORCHESTRATOR_INBOX_DRAIN_BATCH_SIZE = 10;
 /** Default max content length per inbox message. Override via ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH env var. */
-const DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH = 8192;
+export const DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH = 8192;
 
 export function getMcpLimits(env: Env) {
   return {

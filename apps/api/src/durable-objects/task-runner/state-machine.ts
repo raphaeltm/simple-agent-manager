@@ -282,8 +282,9 @@ export async function failTask(
       const parentCtx = await resolveParentSessionContext(rc.env.DATABASE, parentRow.parent_task_id);
       if (parentCtx) {
         const { parsePositiveInt } = await import('../../lib/route-helpers');
-        const maxSize = parsePositiveInt(rc.env.ORCHESTRATOR_INBOX_MAX_SIZE, 100);
-        const maxLen = parsePositiveInt(rc.env.ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH, 8192);
+        const { DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH } = await import('../../routes/mcp/_helpers');
+        const maxSize = parsePositiveInt(rc.env.ORCHESTRATOR_INBOX_MAX_SIZE, DEFAULT_ORCHESTRATOR_INBOX_MAX_SIZE);
+        const maxLen = parsePositiveInt(rc.env.ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH, DEFAULT_ORCHESTRATOR_INBOX_MESSAGE_MAX_LENGTH);
         const doId = rc.env.PROJECT_DATA.idFromName(parentCtx.parentProjectId);
         const doStub = rc.env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectData>;
         doStub.enqueueInboxMessage(
