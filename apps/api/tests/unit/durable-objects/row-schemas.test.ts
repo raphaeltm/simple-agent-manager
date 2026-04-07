@@ -18,6 +18,7 @@ import {
   parseAcpSessionRow,
   parseAcpSessionStale,
   parseActivityEventRow,
+  parseInboxMessageRow,
   parseCachedCommandRow,
   parseChatMessageRow,
   parseChatSessionListRow,
@@ -628,5 +629,53 @@ describe('parseMigrationName', () => {
 describe('parseMetaValue', () => {
   it('extracts value string', () => {
     expect(parseMetaValue({ value: 'project-123' }, 'test')).toBe('project-123');
+  });
+});
+
+// =============================================================================
+// Inbox message row
+// =============================================================================
+
+describe('parseInboxMessageRow', () => {
+  const validRow = {
+    id: 'msg-1',
+    target_session_id: 'session-1',
+    source_task_id: 'task-1',
+    message_type: 'child_completed',
+    content: 'Task done',
+    priority: 'normal',
+    created_at: 1700000000000,
+    delivered_at: null,
+  };
+
+  it('parses valid row with snake_case to camelCase mapping', () => {
+    const result = parseInboxMessageRow(validRow);
+    expect(result.id).toBe('msg-1');
+    expect(result.targetSessionId).toBe('session-1');
+    expect(result.sourceTaskId).toBe('task-1');
+    expect(result.messageType).toBe('child_completed');
+    expect(result.content).toBe('Task done');
+    expect(result.priority).toBe('normal');
+    expect(result.createdAt).toBe(1700000000000);
+    expect(result.deliveredAt).toBeNull();
+  });
+
+  it('handles null source_task_id', () => {
+    const result = parseInboxMessageRow({ ...validRow, source_task_id: null });
+    expect(result.sourceTaskId).toBeNull();
+  });
+
+  it('handles non-null delivered_at', () => {
+    const result = parseInboxMessageRow({ ...validRow, delivered_at: 1700000001000 });
+    expect(result.deliveredAt).toBe(1700000001000);
+  });
+
+  it('throws on missing required field', () => {
+    const { id: _, ...missing } = validRow;
+    expect(() => parseInboxMessageRow(missing)).toThrow(/Row validation failed/);
+  });
+
+  it('throws on wrong type for content', () => {
+    expect(() => parseInboxMessageRow({ ...validRow, content: 123 })).toThrow(/Row validation failed/);
   });
 });

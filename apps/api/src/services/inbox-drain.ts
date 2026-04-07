@@ -153,7 +153,7 @@ export async function drainSessionInbox(
 /**
  * Format inbox messages into a single prompt for delivery to the parent agent.
  */
-function formatInboxPrompt(
+export function formatInboxPrompt(
   messages: Array<{ messageType: string; sourceTaskId: string | null; content: string; priority: string }>,
 ): string {
   if (messages.length === 1 && messages[0]) {
@@ -169,7 +169,7 @@ function formatInboxPrompt(
   return `[Orchestrator: ${messages.length} pending notifications]\n\n${parts.join('\n\n')}`;
 }
 
-function formatMessageType(type: string): string {
+export function formatMessageType(type: string): string {
   switch (type) {
     case 'child_completed': return 'Child Task Completed';
     case 'child_failed': return 'Child Task Failed';
