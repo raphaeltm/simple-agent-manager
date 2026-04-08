@@ -51,8 +51,8 @@ agentsCatalogRoutes.get('/', async (c) => {
 
   const agents: AgentInfo[] = AGENT_CATALOG.map((agent) => {
     const hasDedicatedKey = configuredAgents.has(agent.id);
-    // OpenCode can use Scaleway cloud credential as fallback
-    const usesScalewayFallback = agent.id === 'opencode' && !hasDedicatedKey && hasScalewayCloud;
+    // Agents with a fallbackCloudProvider can use the cloud credential when no dedicated key exists
+    const usesScalewayFallback = !!agent.fallbackCloudProvider && !hasDedicatedKey && hasScalewayCloud;
     return {
       id: agent.id,
       name: agent.name,

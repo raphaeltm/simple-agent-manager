@@ -1,4 +1,4 @@
-import { type BootstrapTokenData,isValidAgentType } from '@simple-agent-manager/shared';
+import { type BootstrapTokenData, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -53,16 +53,18 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     encryptionKey
   );
 
-  // OpenCode fallback: if no dedicated agent key, use Scaleway cloud provider credential.
-  // The same SCW_SECRET_KEY that provisions Scaleway VMs also works for Generative APIs.
-  if (!credentialData && body.agentType === 'opencode') {
-    const scalewayToken = await getDecryptedCredential(db, workspace.userId, 'scaleway', encryptionKey);
+  // Cloud provider credential fallback: if no dedicated agent key, check if the agent
+  // definition specifies a cloud provider whose credential can be used instead.
+  // Currently applies to OpenCode, which shares SCW_SECRET_KEY with Scaleway cloud.
+  const agentDef = isValidAgentType(body.agentType) ? getAgentDefinition(body.agentType) : undefined;
+  if (!credentialData && agentDef?.fallbackCloudProvider) {
+    const scalewayToken = await getDecryptedCredential(db, workspace.userId, agentDef.fallbackCloudProvider, encryptionKey);
     if (scalewayToken) {
       const secretKey = extractScalewaySecretKey(scalewayToken);
       if (secretKey) {
         credentialData = { credential: secretKey, credentialKind: 'api-key' };
       } else {
-        log.warn('agent_key.scaleway_credential_missing_secret_key', { workspaceId, agentType: body.agentType });
+        log.warn('agent_key.scaleway_credential_missing_secret_key', { workspaceId, userId: workspace.userId, agentType: body.agentType });
       }
     }
   }
