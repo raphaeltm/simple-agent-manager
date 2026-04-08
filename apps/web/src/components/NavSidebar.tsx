@@ -93,7 +93,7 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
         {/* Sliding container — holds both panels side by side */}
         <div
           className="flex transition-transform duration-200 ease-out motion-reduce:transition-none"
-          style={{ transform: showGlobalNav ? 'translateX(-50%)' : 'translateX(0)' }}
+          style={{ transform: showGlobalNav ? 'translateX(-100%)' : 'translateX(0)' }}
         >
           {/* Panel 1: Project nav */}
           <nav
