@@ -962,6 +962,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 				"scaleway": map[string]interface{}{
 					"options": map[string]interface{}{
 						"baseURL": "https://api.scaleway.ai/v1",
+						"apiKey":  "{env:SCW_SECRET_KEY}",
 					},
 				},
 			},
