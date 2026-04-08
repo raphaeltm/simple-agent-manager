@@ -203,7 +203,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [{
           id: 'agent-session-001',
@@ -243,7 +243,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [{
           id: 'agent-session-001',
@@ -279,7 +279,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [{
           id: 'agent-session-001',
@@ -312,7 +312,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [],
       ]);
@@ -340,7 +340,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [{
           id: 'agent-session-001',
@@ -405,7 +405,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [{
           id: 'agent-session-001',
@@ -449,7 +449,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [{
           id: 'agent-session-001',
@@ -497,7 +497,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [{
           id: 'agent-session-001',
@@ -534,7 +534,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [{
           id: 'agent-session-001',
@@ -589,7 +589,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
-          status: 'active',
+          status: 'running',
         }],
         [{
           id: 'agent-session-001',
@@ -631,7 +631,7 @@ describe('MCP Orchestration Communication Tools', () => {
       );
 
       expect(result.error).toBeDefined();
-      expect(result.error?.message).toContain('no longer running');
+      expect(result.error?.message).toContain('not running');
     });
   });
 });
