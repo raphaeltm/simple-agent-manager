@@ -160,7 +160,7 @@ export function MobileNavDrawer({
         >
           <div
             className="flex transition-transform duration-200 ease-out motion-reduce:transition-none h-full"
-            style={{ transform: canToggle && showGlobalNav ? 'translateX(-50%)' : 'translateX(0)' }}
+            style={{ transform: canToggle && showGlobalNav ? 'translateX(-100%)' : 'translateX(0)' }}
           >
             {/* Panel 1: Project / default nav items */}
             <div
