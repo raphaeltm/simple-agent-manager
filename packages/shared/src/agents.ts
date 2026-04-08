@@ -34,6 +34,8 @@ export interface AgentDefinition {
   credentialHelpUrl: string;
   /** npm global install command */
   installCommand: string;
+  /** Cloud provider whose credential can be used as a fallback when no dedicated agent key exists */
+  fallbackCloudProvider?: string;
   /** OAuth-specific metadata */
   oauthSupport?: {
     /** Environment variable name for OAuth token */
@@ -120,6 +122,7 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     acpArgs: ['acp'],
     supportsAcp: true,
     credentialHelpUrl: 'https://console.scaleway.com/iam/api-keys',
+    fallbackCloudProvider: 'scaleway',
     installCommand: 'npm install -g opencode-ai@1.4.0',
   },
 ] as const;
@@ -146,6 +149,8 @@ export interface AgentInfo {
   supportsAcp: boolean;
   configured: boolean;
   credentialHelpUrl: string;
+  /** When configured via a cloud provider credential rather than a dedicated agent key */
+  fallbackCredentialSource: 'scaleway-cloud' | null;
 }
 
 /** Credential kinds supported by agents */

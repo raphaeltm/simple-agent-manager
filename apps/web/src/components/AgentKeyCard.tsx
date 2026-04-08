@@ -28,6 +28,9 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
   const activeCredential = credentials?.find(c => c.isActive);
   const hasAnyCredential = (credentials?.length ?? 0) > 0;
 
+  // OpenCode can use Scaleway cloud credential as fallback
+  const usesScalewayFallback = agent.fallbackCredentialSource === 'scaleway-cloud';
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -75,14 +78,39 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
           <p className="text-xs text-fg-muted">{agent.description}</p>
         </div>
         <StatusBadge
-          status={hasAnyCredential ? 'connected' : 'disconnected'}
+          status={hasAnyCredential || usesScalewayFallback ? 'connected' : 'disconnected'}
           label={
             hasAnyCredential
               ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
-              : 'Not Configured'
+              : usesScalewayFallback
+                ? 'Using Scaleway Cloud Key'
+                : 'Not Configured'
           }
         />
       </div>
+
+      {usesScalewayFallback && !hasAnyCredential && !showForm && (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-fg-muted">Scaleway Cloud Provider Credential</span>
+              <span className="text-sm text-fg-primary">
+                Your Scaleway cloud credential is being used for inference. No separate key needed.
+              </span>
+            </div>
+          </div>
+          <p className="text-xs text-fg-muted">
+            To use a different key for inference, you can save a dedicated credential below.{' '}
+            <button
+              type="button"
+              onClick={() => setShowForm(true)}
+              className="text-xs bg-transparent border-none cursor-pointer p-0 text-accent underline"
+            >
+              Add dedicated key
+            </button>
+          </p>
+        </div>
+      )}
 
       {activeCredential && !showForm && (
         <div className="flex flex-col gap-3">
@@ -113,7 +141,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
         </div>
       )}
 
-      {(!hasAnyCredential || showForm) && (
+      {((!hasAnyCredential && !usesScalewayFallback) || showForm) && (
         <form onSubmit={handleSave} className="flex flex-col gap-3">
           {supportsOAuth && (
             <div className="flex gap-2 mb-2">

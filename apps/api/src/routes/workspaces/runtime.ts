@@ -1,4 +1,4 @@
-import { type BootstrapTokenData,isValidAgentType } from '@simple-agent-manager/shared';
+import { type BootstrapTokenData, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -17,7 +17,8 @@ import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken } from '../../services/github-app';
 import { persistError } from '../../services/observability';
 import * as projectDataService from '../../services/project-data';
-import { getDecryptedAgentKey } from '../credentials';
+import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
+import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import {
   getWorkspaceRuntimeAssets,
   safeParseJson,
@@ -44,12 +45,29 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     throw errors.notFound('Workspace');
   }
 
-  const credentialData = await getDecryptedAgentKey(
+  const encryptionKey = getCredentialEncryptionKey(c.env);
+  let credentialData = await getDecryptedAgentKey(
     db,
     workspace.userId,
     body.agentType,
-    getCredentialEncryptionKey(c.env)
+    encryptionKey
   );
+
+  // Cloud provider credential fallback: if no dedicated agent key, check if the agent
+  // definition specifies a cloud provider whose credential can be used instead.
+  // Currently applies to OpenCode, which shares SCW_SECRET_KEY with Scaleway cloud.
+  const agentDef = isValidAgentType(body.agentType) ? getAgentDefinition(body.agentType) : undefined;
+  if (!credentialData && agentDef?.fallbackCloudProvider) {
+    const scalewayToken = await getDecryptedCredential(db, workspace.userId, agentDef.fallbackCloudProvider, encryptionKey);
+    if (scalewayToken) {
+      const secretKey = extractScalewaySecretKey(scalewayToken);
+      if (secretKey) {
+        credentialData = { credential: secretKey, credentialKind: 'api-key' };
+      } else {
+        log.warn('agent_key.scaleway_credential_missing_secret_key', { workspaceId, userId: workspace.userId, agentType: body.agentType });
+      }
+    }
+  }
 
   if (!credentialData) {
     throw errors.notFound('Agent credential');

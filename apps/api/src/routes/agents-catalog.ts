@@ -20,31 +20,49 @@ agentsCatalogRoutes.get('/', async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  // Fetch the user's agent API key credentials
-  const agentCredentials = await db
-    .select({
-      agentType: schema.credentials.agentType,
-    })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'agent-api-key')
+  // Fetch agent credentials and Scaleway cloud credential in parallel
+  const [agentCredentials, scalewayCloudCreds] = await Promise.all([
+    db
+      .select({ agentType: schema.credentials.agentType })
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.credentialType, 'agent-api-key')
+        )
+      ),
+    db
+      .select({ id: schema.credentials.id })
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.credentialType, 'cloud-provider'),
+          eq(schema.credentials.provider, 'scaleway')
+        )
       )
-    );
+      .limit(1),
+  ]);
 
   const configuredAgents = new Set(
     agentCredentials.map((c) => c.agentType).filter(Boolean)
   );
+  const hasScalewayCloud = scalewayCloudCreds.length > 0;
 
-  const agents: AgentInfo[] = AGENT_CATALOG.map((agent) => ({
-    id: agent.id,
-    name: agent.name,
-    description: agent.description,
-    supportsAcp: agent.supportsAcp,
-    configured: configuredAgents.has(agent.id),
-    credentialHelpUrl: agent.credentialHelpUrl,
-  }));
+  const agents: AgentInfo[] = AGENT_CATALOG.map((agent) => {
+    const hasDedicatedKey = configuredAgents.has(agent.id);
+    // Agents with a fallbackCloudProvider can use the cloud credential when no dedicated key exists
+    const usesScalewayFallback = !!agent.fallbackCloudProvider && !hasDedicatedKey && hasScalewayCloud;
+    return {
+      id: agent.id,
+      name: agent.name,
+      description: agent.description,
+      supportsAcp: agent.supportsAcp,
+      configured: hasDedicatedKey || usesScalewayFallback,
+      credentialHelpUrl: agent.credentialHelpUrl,
+      fallbackCredentialSource: usesScalewayFallback ? 'scaleway-cloud' as const : null,
+    };
+  });
 
   return c.json({ agents });
 });
