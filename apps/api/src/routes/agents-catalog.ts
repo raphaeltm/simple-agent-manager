@@ -37,14 +37,34 @@ agentsCatalogRoutes.get('/', async (c) => {
     agentCredentials.map((c) => c.agentType).filter(Boolean)
   );
 
-  const agents: AgentInfo[] = AGENT_CATALOG.map((agent) => ({
-    id: agent.id,
-    name: agent.name,
-    description: agent.description,
-    supportsAcp: agent.supportsAcp,
-    configured: configuredAgents.has(agent.id),
-    credentialHelpUrl: agent.credentialHelpUrl,
-  }));
+  // Check if user has a Scaleway cloud provider credential (used as fallback for OpenCode)
+  const scalewayCloudCreds = await db
+    .select({ id: schema.credentials.id })
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+        eq(schema.credentials.provider, 'scaleway')
+      )
+    )
+    .limit(1);
+  const hasScalewayCloud = scalewayCloudCreds.length > 0;
+
+  const agents: AgentInfo[] = AGENT_CATALOG.map((agent) => {
+    const hasDedicatedKey = configuredAgents.has(agent.id);
+    // OpenCode can use Scaleway cloud credential as fallback
+    const usesScalewayFallback = agent.id === 'opencode' && !hasDedicatedKey && hasScalewayCloud;
+    return {
+      id: agent.id,
+      name: agent.name,
+      description: agent.description,
+      supportsAcp: agent.supportsAcp,
+      configured: hasDedicatedKey || usesScalewayFallback,
+      credentialHelpUrl: agent.credentialHelpUrl,
+      fallbackCredentialSource: usesScalewayFallback ? 'scaleway-cloud' as const : null,
+    };
+  });
 
   return c.json({ agents });
 });

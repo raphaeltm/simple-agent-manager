@@ -17,7 +17,7 @@ import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken } from '../../services/github-app';
 import { persistError } from '../../services/observability';
 import * as projectDataService from '../../services/project-data';
-import { getDecryptedAgentKey } from '../credentials';
+import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import {
   getWorkspaceRuntimeAssets,
   safeParseJson,
@@ -44,12 +44,29 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     throw errors.notFound('Workspace');
   }
 
-  const credentialData = await getDecryptedAgentKey(
+  const encryptionKey = getCredentialEncryptionKey(c.env);
+  let credentialData = await getDecryptedAgentKey(
     db,
     workspace.userId,
     body.agentType,
-    getCredentialEncryptionKey(c.env)
+    encryptionKey
   );
+
+  // OpenCode fallback: if no dedicated agent key, use Scaleway cloud provider credential.
+  // The same SCW_SECRET_KEY that provisions Scaleway VMs also works for Generative APIs.
+  if (!credentialData && body.agentType === 'opencode') {
+    const scalewayToken = await getDecryptedCredential(db, workspace.userId, 'scaleway', encryptionKey);
+    if (scalewayToken) {
+      try {
+        const parsed = JSON.parse(scalewayToken) as { secretKey?: string };
+        if (parsed.secretKey) {
+          credentialData = { credential: parsed.secretKey, credentialKind: 'api-key' };
+        }
+      } catch {
+        log.warn('agent_key.scaleway_credential_parse_failed', { workspaceId, agentType: body.agentType });
+      }
+    }
+  }
 
   if (!credentialData) {
     throw errors.notFound('Agent credential');
