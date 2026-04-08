@@ -164,7 +164,9 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
                 placeholder={
                   credentialKind === 'oauth-token'
                     ? 'Paste your OAuth token from "claude setup-token"'
-                    : `Enter your ${agent.name} API key`
+                    : agent.id === 'opencode'
+                      ? 'Enter your Scaleway Secret Key'
+                      : `Enter your ${agent.name} API key`
                 }
                 required
               />
@@ -175,6 +177,13 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
                   {agentDef.oauthSupport.setupInstructions}{' '}
                   <a href={agentDef.oauthSupport.subscriptionUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
                     View subscription
+                  </a>
+                </>
+              ) : agent.id === 'opencode' ? (
+                <>
+                  Create a Scaleway API key with <strong>GenerativeApisModelAccess</strong> permission at{' '}
+                  <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
+                    Scaleway IAM Console
                   </a>
                 </>
               ) : (

@@ -754,6 +754,16 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", true, "", ""}
 	case "mistral-vibe":
 		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`, false, "", ""}
+	case "opencode":
+		return agentCommandInfo{
+			command:       "opencode",
+			args:          []string{"acp"},
+			envVarName:    "SCW_SECRET_KEY",
+			installCmd:    "npm install -g opencode-ai@1.3.16",
+			isNpmBased:    true,
+			injectionMode: "",
+			authFilePath:  "",
+		}
 	default:
 		return agentCommandInfo{agentType, nil, "API_KEY", "", false, "", ""}
 	}
@@ -775,6 +785,9 @@ func getModelEnvVar(agentType string) string {
 		// bypassing the generic getModelEnvVar path. This entry is retained
 		// for completeness and potential external callers.
 		return "VIBE_ACTIVE_MODEL"
+	case "opencode":
+		// Model is set via OPENCODE_CONFIG_CONTENT env var, not a standalone model env var.
+		return ""
 	default:
 		return ""
 	}

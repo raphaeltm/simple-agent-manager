@@ -3,10 +3,10 @@
 // =============================================================================
 
 /** Supported agent identifiers */
-export type AgentType = 'claude-code' | 'openai-codex' | 'google-gemini' | 'mistral-vibe';
+export type AgentType = 'claude-code' | 'openai-codex' | 'google-gemini' | 'mistral-vibe' | 'opencode';
 
 /** API key provider identifiers */
-export type AgentProvider = 'anthropic' | 'openai' | 'google' | 'mistral';
+export type AgentProvider = 'anthropic' | 'openai' | 'google' | 'mistral' | 'opencode';
 
 // =============================================================================
 // Agent Definition (Configuration Registry)
@@ -109,6 +109,18 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     credentialHelpUrl: 'https://console.mistral.ai/api-keys',
     installCommand:
       'curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet',
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    description: 'Open-source AI coding agent by SST. Uses Scaleway Generative APIs for inference.',
+    provider: 'opencode',
+    envVarName: 'SCW_SECRET_KEY',
+    acpCommand: 'opencode',
+    acpArgs: ['acp'],
+    supportsAcp: true,
+    credentialHelpUrl: 'https://console.scaleway.com/iam/api-keys',
+    installCommand: 'npm install -g opencode-ai@1.3.16',
   },
 ] as const;
 

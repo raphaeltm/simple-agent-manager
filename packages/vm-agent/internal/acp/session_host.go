@@ -925,6 +925,35 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		}
 	}
 
+	// For OpenCode: build OPENCODE_CONFIG_CONTENT JSON for Scaleway inference.
+	// Uses the env var (highest priority config source) to inject provider and model
+	// settings without overwriting any repo-level .opencode.json.
+	if agentType == "opencode" {
+		model := "scaleway/qwen3-coder-30b-a3b-instruct" // default
+		if settings != nil && settings.Model != "" {
+			model = settings.Model
+		}
+
+		opencodeConfig := map[string]interface{}{
+			"provider": map[string]interface{}{
+				"scaleway": map[string]interface{}{
+					"options": map[string]interface{}{
+						"baseURL": "https://api.scaleway.ai/v1",
+					},
+				},
+			},
+			"model": model,
+		}
+
+		configJSON, err := json.Marshal(opencodeConfig)
+		if err != nil {
+			slog.Error("opencode: failed to marshal config", "error", err)
+		} else {
+			envVars = append(envVars, "OPENCODE_CONFIG_CONTENT="+string(configJSON))
+			slog.Info("OpenCode config injected", "model", model)
+		}
+	}
+
 	// For Mistral Vibe: write ~/.vibe/config.toml with model aliases so the
 	// user can select models beyond the built-in devstral-2 default.
 	// The config sets the active model based on user settings or defaults
