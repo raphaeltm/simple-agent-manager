@@ -12,6 +12,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -394,7 +395,13 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 		// Cancel the in-flight prompt context. Also forward to agent stdin
 		// so the agent process itself can react to the cancellation signal.
 		g.host.CancelPrompt()
-		g.host.ForwardToAgent(data)
+		// OpenCode v1.4.0 does not implement session/cancel RPC. Send SIGTERM
+		// to the process instead so it shuts down cleanly.
+		if g.host.AgentType() == "opencode" {
+			g.host.SignalProcess(syscall.SIGTERM)
+		} else {
+			g.host.ForwardToAgent(data)
+		}
 	default:
 		g.host.ForwardToAgent(data)
 	}
@@ -759,7 +766,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "SCW_SECRET_KEY",
-			installCmd:    "npm install -g opencode-ai@1.3.16",
+			installCmd:    "npm install -g opencode-ai@1.4.0",
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",
