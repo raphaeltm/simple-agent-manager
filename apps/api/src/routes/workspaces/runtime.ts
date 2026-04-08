@@ -17,8 +17,8 @@ import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken } from '../../services/github-app';
 import { persistError } from '../../services/observability';
 import * as projectDataService from '../../services/project-data';
-import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
+import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import {
   getWorkspaceRuntimeAssets,
   safeParseJson,
