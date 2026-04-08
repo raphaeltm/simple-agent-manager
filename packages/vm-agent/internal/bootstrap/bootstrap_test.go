@@ -2074,8 +2074,8 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat failed: %v", err)
 	}
-	if info.Mode().Perm() != 0o700 {
-		t.Fatalf("expected permissions 0700, got %o", info.Mode().Perm())
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("expected permissions 0755, got %o", info.Mode().Perm())
 	}
 
 	// Verify content is a valid script.
@@ -2148,7 +2148,7 @@ func TestRemoveCredentialHelperFromHost(t *testing.T) {
 	// Create a temp file to simulate a credential helper.
 	workspaceID := fmt.Sprintf("test-rm-%d", time.Now().UnixNano())
 	hostPath := credentialHelperHostPath(workspaceID)
-	if err := os.WriteFile(hostPath, []byte("test"), 0o700); err != nil {
+	if err := os.WriteFile(hostPath, []byte("test"), 0o755); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
 
