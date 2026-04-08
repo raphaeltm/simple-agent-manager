@@ -20,35 +20,33 @@ agentsCatalogRoutes.get('/', async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  // Fetch the user's agent API key credentials
-  const agentCredentials = await db
-    .select({
-      agentType: schema.credentials.agentType,
-    })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'agent-api-key')
+  // Fetch agent credentials and Scaleway cloud credential in parallel
+  const [agentCredentials, scalewayCloudCreds] = await Promise.all([
+    db
+      .select({ agentType: schema.credentials.agentType })
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.credentialType, 'agent-api-key')
+        )
+      ),
+    db
+      .select({ id: schema.credentials.id })
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.credentialType, 'cloud-provider'),
+          eq(schema.credentials.provider, 'scaleway')
+        )
       )
-    );
+      .limit(1),
+  ]);
 
   const configuredAgents = new Set(
     agentCredentials.map((c) => c.agentType).filter(Boolean)
   );
-
-  // Check if user has a Scaleway cloud provider credential (used as fallback for OpenCode)
-  const scalewayCloudCreds = await db
-    .select({ id: schema.credentials.id })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'cloud-provider'),
-        eq(schema.credentials.provider, 'scaleway')
-      )
-    )
-    .limit(1);
   const hasScalewayCloud = scalewayCloudCreds.length > 0;
 
   const agents: AgentInfo[] = AGENT_CATALOG.map((agent) => {

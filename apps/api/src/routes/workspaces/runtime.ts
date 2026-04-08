@@ -18,6 +18,7 @@ import { getInstallationToken } from '../../services/github-app';
 import { persistError } from '../../services/observability';
 import * as projectDataService from '../../services/project-data';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
+import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import {
   getWorkspaceRuntimeAssets,
   safeParseJson,
@@ -57,13 +58,11 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   if (!credentialData && body.agentType === 'opencode') {
     const scalewayToken = await getDecryptedCredential(db, workspace.userId, 'scaleway', encryptionKey);
     if (scalewayToken) {
-      try {
-        const parsed = JSON.parse(scalewayToken) as { secretKey?: string };
-        if (parsed.secretKey) {
-          credentialData = { credential: parsed.secretKey, credentialKind: 'api-key' };
-        }
-      } catch {
-        log.warn('agent_key.scaleway_credential_parse_failed', { workspaceId, agentType: body.agentType });
+      const secretKey = extractScalewaySecretKey(scalewayToken);
+      if (secretKey) {
+        credentialData = { credential: secretKey, credentialKind: 'api-key' };
+      } else {
+        log.warn('agent_key.scaleway_credential_missing_secret_key', { workspaceId, agentType: body.agentType });
       }
     }
   }

@@ -147,7 +147,7 @@ export interface AgentInfo {
   configured: boolean;
   credentialHelpUrl: string;
   /** When configured via a cloud provider credential rather than a dedicated agent key */
-  fallbackCredentialSource?: 'scaleway-cloud' | null;
+  fallbackCredentialSource: 'scaleway-cloud' | null;
 }
 
 /** Credential kinds supported by agents */
