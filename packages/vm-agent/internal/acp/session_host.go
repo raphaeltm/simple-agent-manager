@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -705,6 +706,11 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		"duration":   time.Since(promptStart).String(),
 	})
 
+	// Check stderr for silent API errors. Some agents (e.g., OpenCode with
+	// Scaleway) swallow API errors and return a normal end_turn response
+	// instead of an error. Detect this by inspecting stderr for error patterns.
+	h.checkStderrForSilentErrors(resp.StopReason)
+
 	// Broadcast the prompt response to all viewers
 	result, _ := json.Marshal(resp)
 	response := map[string]interface{}{
@@ -768,6 +774,23 @@ func (h *SessionHost) ForwardToAgent(message []byte) {
 	if _, err := process.Stdin().Write(data); err != nil {
 		slog.Error("Failed to write to agent stdin", "error", err)
 	}
+}
+
+// SignalProcess sends a signal to the agent process. This is used for agents
+// that don't implement session/cancel (e.g., opencode) — SIGTERM is sent
+// directly to the process instead of forwarding the cancel RPC.
+func (h *SessionHost) SignalProcess(sig syscall.Signal) {
+	h.mu.RLock()
+	process := h.process
+	h.mu.RUnlock()
+
+	if process == nil {
+		slog.Warn("SignalProcess: no agent process running")
+		return
+	}
+
+	process.killContainerProcesses(sig)
+	slog.Info("SignalProcess: sent signal to agent process", "signal", sig, "agentType", h.AgentType())
 }
 
 // Stop kills the agent process, disconnects all viewers, and marks the session
@@ -922,6 +945,35 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		} else {
 			envVars = append(envVars, codexMcpEnvVars...)
 			slog.Info("Wrote Codex config.toml", "mcpServers", len(h.config.McpServers))
+		}
+	}
+
+	// For OpenCode: build OPENCODE_CONFIG_CONTENT JSON for Scaleway inference.
+	// Uses the env var (highest priority config source) to inject provider and model
+	// settings without overwriting any repo-level .opencode.json.
+	if agentType == "opencode" {
+		model := "scaleway/qwen3-coder-30b-a3b-instruct" // default
+		if settings != nil && settings.Model != "" {
+			model = settings.Model
+		}
+
+		opencodeConfig := map[string]interface{}{
+			"provider": map[string]interface{}{
+				"scaleway": map[string]interface{}{
+					"options": map[string]interface{}{
+						"baseURL": "https://api.scaleway.ai/v1",
+					},
+				},
+			},
+			"model": model,
+		}
+
+		configJSON, err := json.Marshal(opencodeConfig)
+		if err != nil {
+			slog.Error("opencode: failed to marshal config", "error", err)
+		} else {
+			envVars = append(envVars, "OPENCODE_CONFIG_CONTENT="+string(configJSON))
+			slog.Info("OpenCode config injected", "model", model)
 		}
 	}
 
@@ -1210,6 +1262,58 @@ func (h *SessionHost) getAndClearStderr() string {
 	s := h.stderrBuf.String()
 	h.stderrBuf.Reset()
 	return s
+}
+
+// silentErrorPatterns are stderr substrings that indicate an API-level error
+// the agent may have swallowed (returning a normal end_turn instead of an error).
+var silentErrorPatterns = []string{
+	"AI_APICallError",
+	"Unauthorized",
+	"401",
+	"403",
+	"invalid_api_key",
+	"authentication_error",
+}
+
+// checkStderrForSilentErrors peeks at the accumulated stderr buffer for known
+// API error patterns. Some agents (notably OpenCode with Scaleway) silently
+// swallow API errors and return {stopReason: "end_turn"} instead of an error.
+// When detected, we log a warning and report a lifecycle event so the UI can
+// surface the issue. The stderr buffer is NOT cleared — it remains available
+// for crash reporting in monitorProcessExit.
+func (h *SessionHost) checkStderrForSilentErrors(stopReason acpsdk.StopReason) {
+	h.stderrMu.Lock()
+	stderr := h.stderrBuf.String()
+	h.stderrMu.Unlock()
+
+	if stderr == "" {
+		return
+	}
+
+	for _, pattern := range silentErrorPatterns {
+		if strings.Contains(stderr, pattern) {
+			slog.Warn("ACP: possible silent API error detected in stderr after prompt completion",
+				"stopReason", string(stopReason),
+				"pattern", pattern,
+				"stderrSnippet", truncateString(stderr, 512),
+				"agentType", h.AgentType(),
+			)
+			h.reportLifecycle("warn", "Possible silent API error — check agent credentials", map[string]interface{}{
+				"stopReason":    string(stopReason),
+				"errorPattern":  pattern,
+				"stderrSnippet": truncateString(stderr, 256),
+			})
+			return // report once per prompt, not per pattern
+		}
+	}
+}
+
+// truncateString returns s truncated to maxLen with "..." appended if needed.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // monitorProcessExit detects agent crashes and attempts restart.

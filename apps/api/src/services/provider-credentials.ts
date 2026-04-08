@@ -37,6 +37,23 @@ export function serializeCredentialToken(
 }
 
 /**
+ * Extract the Scaleway secret key from a decrypted Scaleway cloud credential token.
+ * Returns null if the token is not valid JSON or does not contain a secretKey field.
+ * Used by both the provider system and the OpenCode agent key fallback.
+ */
+export function extractScalewaySecretKey(decryptedToken: string): string | null {
+  try {
+    const parsed = JSON.parse(decryptedToken) as Record<string, unknown>;
+    if (typeof parsed?.secretKey === 'string' && parsed.secretKey) {
+      return parsed.secretKey;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Build a ProviderConfig from a provider name and decrypted credential token.
  * Handles both raw token strings (Hetzner) and JSON blobs (Scaleway).
  */

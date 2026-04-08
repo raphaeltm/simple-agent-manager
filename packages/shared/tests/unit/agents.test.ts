@@ -25,6 +25,29 @@ describe('AGENT_CATALOG', () => {
     );
   });
 
+  it('includes opencode as a supported agent', () => {
+    const opencode = AGENT_CATALOG.find((a) => a.id === 'opencode');
+    expect(opencode).toBeDefined();
+    expect(opencode!.name).toBe('OpenCode');
+    expect(opencode!.description).toBe(
+      'Open-source AI coding agent by SST. Uses Scaleway Generative APIs for inference.'
+    );
+    expect(opencode!.provider).toBe('opencode');
+    expect(opencode!.envVarName).toBe('SCW_SECRET_KEY');
+    expect(opencode!.acpCommand).toBe('opencode');
+    expect(opencode!.acpArgs).toEqual(['acp']);
+    expect(opencode!.supportsAcp).toBe(true);
+    expect(opencode!.credentialHelpUrl).toBe(
+      'https://console.scaleway.com/iam/api-keys'
+    );
+    expect(opencode!.installCommand).toBe('npm install -g opencode-ai@1.4.0');
+  });
+
+  it('opencode has no OAuth support', () => {
+    const opencode = AGENT_CATALOG.find((a) => a.id === 'opencode');
+    expect(opencode!.oauthSupport).toBeUndefined();
+  });
+
   it('mistral-vibe has no OAuth support', () => {
     const mistral = AGENT_CATALOG.find((a) => a.id === 'mistral-vibe');
     expect(mistral!.oauthSupport).toBeUndefined();
@@ -43,6 +66,13 @@ describe('getAgentDefinition', () => {
     expect(def!.id).toBe('mistral-vibe');
   });
 
+  it('returns opencode definition', () => {
+    const def = getAgentDefinition('opencode');
+    expect(def).toBeDefined();
+    expect(def!.id).toBe('opencode');
+    expect(def!.provider).toBe('opencode');
+  });
+
   it('returns undefined for unknown agent', () => {
     const def = getAgentDefinition('unknown' as never);
     expect(def).toBeUndefined();
@@ -59,6 +89,7 @@ describe('isValidAgentType', () => {
     expect(isValidAgentType('openai-codex')).toBe(true);
     expect(isValidAgentType('google-gemini')).toBe(true);
     expect(isValidAgentType('mistral-vibe')).toBe(true);
+    expect(isValidAgentType('opencode')).toBe(true);
   });
 
   it('rejects unknown agents', () => {

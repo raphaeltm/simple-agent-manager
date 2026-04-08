@@ -3,10 +3,10 @@
 // =============================================================================
 
 /** Supported agent identifiers */
-export type AgentType = 'claude-code' | 'openai-codex' | 'google-gemini' | 'mistral-vibe';
+export type AgentType = 'claude-code' | 'openai-codex' | 'google-gemini' | 'mistral-vibe' | 'opencode';
 
 /** API key provider identifiers */
-export type AgentProvider = 'anthropic' | 'openai' | 'google' | 'mistral';
+export type AgentProvider = 'anthropic' | 'openai' | 'google' | 'mistral' | 'opencode';
 
 // =============================================================================
 // Agent Definition (Configuration Registry)
@@ -34,6 +34,8 @@ export interface AgentDefinition {
   credentialHelpUrl: string;
   /** npm global install command */
   installCommand: string;
+  /** Cloud provider whose credential can be used as a fallback when no dedicated agent key exists */
+  fallbackCloudProvider?: string;
   /** OAuth-specific metadata */
   oauthSupport?: {
     /** Environment variable name for OAuth token */
@@ -110,6 +112,19 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     installCommand:
       'curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet',
   },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    description: 'Open-source AI coding agent by SST. Uses Scaleway Generative APIs for inference.',
+    provider: 'opencode',
+    envVarName: 'SCW_SECRET_KEY',
+    acpCommand: 'opencode',
+    acpArgs: ['acp'],
+    supportsAcp: true,
+    credentialHelpUrl: 'https://console.scaleway.com/iam/api-keys',
+    fallbackCloudProvider: 'scaleway',
+    installCommand: 'npm install -g opencode-ai@1.4.0',
+  },
 ] as const;
 
 /** Look up an agent definition by ID */
@@ -134,6 +149,8 @@ export interface AgentInfo {
   supportsAcp: boolean;
   configured: boolean;
   credentialHelpUrl: string;
+  /** When configured via a cloud provider credential rather than a dedicated agent key */
+  fallbackCredentialSource: 'scaleway-cloud' | null;
 }
 
 /** Credential kinds supported by agents */

@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { decrypt } from '../../../src/services/encryption';
-import { buildProviderConfig, getUserCloudProviderConfig,serializeCredentialToken } from '../../../src/services/provider-credentials';
+import { buildProviderConfig, extractScalewaySecretKey, getUserCloudProviderConfig,serializeCredentialToken } from '../../../src/services/provider-credentials';
 
 vi.mock('../../../src/services/encryption', () => ({
   decrypt: vi.fn(),
@@ -271,5 +271,37 @@ describe('getUserCloudProviderConfig', () => {
     const result = await getUserCloudProviderConfig(db, 'user-1', 'enc-key');
     expect(result).not.toBeNull();
     expect(result!.provider).toBe('hetzner');
+  });
+});
+
+// ============================================================================
+// extractScalewaySecretKey
+// ============================================================================
+
+describe('extractScalewaySecretKey', () => {
+  it('extracts secretKey from valid Scaleway credential JSON', () => {
+    const token = JSON.stringify({ secretKey: 'scw-key-123', projectId: 'proj-1' });
+    expect(extractScalewaySecretKey(token)).toBe('scw-key-123');
+  });
+
+  it('returns null for malformed JSON', () => {
+    expect(extractScalewaySecretKey('not-json')).toBeNull();
+  });
+
+  it('returns null when secretKey is missing', () => {
+    expect(extractScalewaySecretKey(JSON.stringify({ projectId: 'proj-1' }))).toBeNull();
+  });
+
+  it('returns null when secretKey is empty string', () => {
+    expect(extractScalewaySecretKey(JSON.stringify({ secretKey: '', projectId: 'proj-1' }))).toBeNull();
+  });
+
+  it('returns null when secretKey is not a string', () => {
+    expect(extractScalewaySecretKey(JSON.stringify({ secretKey: 42, projectId: 'proj-1' }))).toBeNull();
+  });
+
+  it('round-trips with serializeCredentialToken', () => {
+    const serialized = serializeCredentialToken('scaleway', { secretKey: 'my-key', projectId: 'my-proj' });
+    expect(extractScalewaySecretKey(serialized)).toBe('my-key');
   });
 });

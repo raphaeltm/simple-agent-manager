@@ -95,8 +95,10 @@ var secretEnvNames = map[string]bool{
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	"OPENAI_API_KEY":          true,
 	"GH_TOKEN":                true,
-	"GEMINI_API_KEY":          true,
-	"MISTRAL_API_KEY":         true,
+	"GEMINI_API_KEY":           true,
+	"MISTRAL_API_KEY":          true,
+	"SCW_SECRET_KEY":           true,
+	"OPENCODE_CONFIG_CONTENT":  true,
 }
 
 // secretEnvSubstrings are substrings in env var names that indicate a secret.
