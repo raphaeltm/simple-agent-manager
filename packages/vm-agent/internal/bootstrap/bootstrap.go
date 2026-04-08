@@ -1671,7 +1671,7 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to finalize temporary credential helper script: %w", err)
 	}
 
-	if err := os.Chmod(tempPath, 0o700); err != nil {
+	if err := os.Chmod(tempPath, 0o755); err != nil {
 		return fmt.Errorf("failed to chmod temporary credential helper script: %w", err)
 	}
 
@@ -1682,7 +1682,7 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 
 	// Use -u root because the container's default user (e.g. "node") may not have
 	// write permissions to /usr/local/bin/.
-	cmd = exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "chmod", "0700", installPath)
+	cmd = exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "chmod", "0755", installPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to chmod credential helper in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -1881,7 +1881,11 @@ func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
 
 	// Use O_EXCL to fail if the file already exists, preventing TOCTOU races
 	// in the world-writable /tmp directory (e.g., symlink attacks).
-	f, err := os.OpenFile(hostPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	// 0o755 (not 0o700): the devcontainer user (e.g., uid 1000 "vscode") must be
+	// able to execute this file via the bind-mount. The VM is single-tenant; world
+	// read/execute on this host path is acceptable. The callback token embedded in
+	// the script is already exposed via GIT_CONFIG_VALUE_0 env var.
+	f, err := os.OpenFile(hostPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
 	if err != nil {
 		return "", fmt.Errorf("failed to create credential helper on host: %w", err)
 	}
