@@ -78,6 +78,8 @@ function AgentSettingsCard({
         return 'e.g. gpt-5-codex, o3';
       case 'google-gemini':
         return 'e.g. gemini-2.5-pro';
+      case 'opencode':
+        return 'e.g. scaleway/qwen3-coder-30b-a3b-instruct, scaleway/devstral-2-123b-instruct-2512';
       default:
         return 'Model identifier';
     }
