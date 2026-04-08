@@ -114,9 +114,9 @@
   to { opacity: 1; }
 }
 
-/* ProjectChat MobileSessionDrawer — slide-in from left + backdrop fade */
+/* ProjectChat MobileSessionDrawer — slide-in from right + backdrop fade */
 @keyframes sam-session-drawer-slide-in {
-  from { transform: translateX(-100%); }
+  from { transform: translateX(100%); }
   to { transform: translateX(0); }
 }
 @keyframes sam-session-drawer-fade-in {

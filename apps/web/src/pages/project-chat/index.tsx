@@ -173,6 +173,17 @@ export function ProjectChat() {
         {/* Mobile header bar */}
         {isMobile && (
           <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border-default bg-surface">
+            <button
+              type="button"
+              onClick={() => state.setSettingsOpen(!state.settingsOpen)}
+              aria-label="Project settings"
+              className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted"
+            >
+              <Settings size={16} />
+            </button>
+            <span className="text-sm font-semibold text-fg-primary truncate flex-1">
+              {state.project?.name || 'Project'}
+            </span>
             {state.hasSessions && (
               <button
                 type="button"
@@ -183,17 +194,6 @@ export function ProjectChat() {
                 <List size={18} />
               </button>
             )}
-            <span className="text-sm font-semibold text-fg-primary truncate flex-1">
-              {state.project?.name || 'Project'}
-            </span>
-            <button
-              type="button"
-              onClick={() => state.setSettingsOpen(!state.settingsOpen)}
-              aria-label="Project settings"
-              className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted"
-            >
-              <Settings size={16} />
-            </button>
           </div>
         )}
 
