@@ -131,12 +131,19 @@ async function resolveChildAgent(
     return jsonRpcError(requestId, INVALID_PARAMS, 'Child workspace or node not found');
   }
 
-  // Verify node is reachable
-  if (workspace.nodeStatus !== 'active' && workspace.nodeStatus !== 'warm') {
+  // Verify node is reachable — D1 nodes.status uses 'running' for healthy nodes
+  // (not 'active'/'warm', which are NodeLifecycle DO states, not D1 column values)
+  if (workspace.nodeStatus !== 'running') {
+    log.warn('mcp.orchestration.node_not_running', {
+      childTaskId,
+      workspaceId: childTask.workspaceId,
+      nodeId: workspace.nodeId,
+      nodeStatus: workspace.nodeStatus,
+    });
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Child workspace node is no longer running',
+      `Child workspace node is not running (status: ${workspace.nodeStatus ?? 'unknown'})`,
     );
   }
 

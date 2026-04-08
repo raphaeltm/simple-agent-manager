@@ -284,8 +284,8 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
 
   // Verify the node is still reachable — prevents requests to destroyed VMs
   // whose DNS records no longer exist (would loop back via wildcard DNS).
-  // Allow 'active' (in use) and 'warm' (idle but still running) nodes.
-  if (workspace.nodeStatus !== 'active' && workspace.nodeStatus !== 'warm') {
+  // D1 nodes.status uses 'running' for healthy nodes (not 'active'/'warm', which are DO states).
+  if (workspace.nodeStatus !== 'running') {
     throw errors.conflict(
       'The workspace node is no longer running. Start a new chat to create a fresh workspace.'
     );
