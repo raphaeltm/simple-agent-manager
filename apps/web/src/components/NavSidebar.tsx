@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   FolderKanban,
+  FolderOpen,
   Home,
   Lightbulb,
   Map,
@@ -38,6 +39,7 @@ export const GLOBAL_NAV_ITEMS: NavItem[] = [
 /** Project sub-nav items — paths are relative to /projects/:id/ */
 export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
+  { label: 'Library', path: 'library', icon: <FolderOpen size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
   { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
   { label: 'Notifications', path: 'notifications', icon: <Bell size={18} /> },

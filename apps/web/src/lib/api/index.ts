@@ -90,6 +90,16 @@ export {
   uploadSessionFiles,
 } from './files';
 export { getGitHubInstallUrl, listBranches, listGitHubInstallations, listRepositories } from './github';
+export type { UploadLibraryFileOptions } from './library';
+export {
+  deleteLibraryFile,
+  downloadLibraryFile,
+  getLibraryFile,
+  listLibraryFiles,
+  replaceLibraryFile,
+  updateFileTags,
+  uploadLibraryFile,
+} from './library';
 export type {
   BrowserSidecarStatusResponse,
   CachedCommandResponse,
