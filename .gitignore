@@ -54,3 +54,6 @@ pnpm-debug.log*
 
 # /do workflow state (ephemeral, per-session)
 .do-state.md
+
+# /workflow orchestrator state (ephemeral, per-session)
+.workflow-state.md

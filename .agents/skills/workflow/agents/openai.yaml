@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workflow Orchestrator"
+  short_description: "Multi-step workflow orchestration with foreground polling"
+  default_prompt: "Use $workflow to orchestrate multi-step work: decompose, dispatch subtasks, and monitor with foreground polling to prevent session timeouts."
