@@ -17,6 +17,7 @@ import { requireOwnedProject } from '../middleware/project-auth';
 import {
   deleteFile,
   downloadFile,
+  getDownloadTimeoutMs,
   getFile,
   getUploadMaxBytes,
   listFiles,
@@ -210,7 +211,13 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
   await requireOwnedProject(db, projectId, userId);
 
   const encryptionKey = getEncryptionKey(c.env);
-  const { data, file } = await downloadFile(db, c.env.R2, encryptionKey, projectId, fileId);
+  const timeoutMs = getDownloadTimeoutMs(c.env);
+  const { data, file } = await Promise.race([
+    downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(errors.internal('Download timed out')), timeoutMs)
+    ),
+  ]);
 
   // Sanitize filename for Content-Disposition
   const safeFilename = file.filename.replace(/[^\x20-\x7E]/g, '_');

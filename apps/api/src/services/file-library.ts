@@ -63,6 +63,10 @@ export function getMaxTagLength(env: Env): number {
   return parseIntOrDefault(env.LIBRARY_MAX_TAG_LENGTH, LIBRARY_DEFAULTS.MAX_TAG_LENGTH);
 }
 
+export function getDownloadTimeoutMs(env: Env): number {
+  return parseIntOrDefault(env.LIBRARY_DOWNLOAD_TIMEOUT_MS, LIBRARY_DEFAULTS.DOWNLOAD_TIMEOUT_MS);
+}
+
 function getListDefaultPageSize(env: Env): number {
   return parseIntOrDefault(env.LIBRARY_LIST_DEFAULT_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_DEFAULT_PAGE_SIZE);
 }
