@@ -6,6 +6,7 @@ import {
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
+  DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../index';
@@ -29,7 +30,8 @@ export async function handleCreateTrigger(
   env: Env,
 ): Promise<JsonRpcResponse> {
   // --- Validate required fields ---
-  const name = typeof params.name === 'string' ? sanitizeUserInput(params.name.trim()).slice(0, 100) : '';
+  const maxNameLength = parsePositiveInt(env.TRIGGER_NAME_MAX_LENGTH, DEFAULT_TRIGGER_NAME_MAX_LENGTH);
+  const name = typeof params.name === 'string' ? sanitizeUserInput(params.name.trim()).slice(0, maxNameLength) : '';
   if (!name) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'name is required and must be a non-empty string');
   }

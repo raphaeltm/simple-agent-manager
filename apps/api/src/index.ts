@@ -446,6 +446,7 @@ export interface Env {
   CRON_TEMPLATE_MAX_FIELD_LENGTH?: string;          // Max per-field interpolated value length (default: 2000)
   TRIGGER_AUTO_PAUSE_AFTER_FAILURES?: string;       // Auto-pause after N consecutive failures (default: 3)
   CRON_SWEEP_ENABLED?: string;                      // Kill switch: "false" to disable cron sweep (default: enabled)
+  TRIGGER_NAME_MAX_LENGTH?: string;                 // Max trigger name length (default: 100)
 }
 
 const app = new Hono<{ Bindings: Env }>();
