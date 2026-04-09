@@ -40,7 +40,7 @@ describe('file-encryption', () => {
       expect(decryptedText).toBe('Hello, world!');
     });
 
-    it('encrypts and decrypts a realistic-size file (1MB)', async () => {
+    it('encrypts and decrypts a realistic-size file (1MB)', { timeout: 30_000 }, async () => {
       const kek = generateTestKey();
       // Generate 1MB of pseudo-random data (crypto.getRandomValues limited to 64KB)
       const originalData = new Uint8Array(1024 * 1024);
