@@ -251,6 +251,13 @@ export class ProjectData extends DurableObject<Env> {
   async getAcpSessionLineage(sessionId: string) { return acpSessions.getAcpSessionLineage(this.sql, sessionId); }
   async listAcpSessionsByNode(nodeId: string, statuses: AcpSessionStatus[]) { return acpSessions.listAcpSessionsByNode(this.sql, nodeId, statuses); }
 
+  /** Update heartbeats for all active ACP sessions on a node. Called from node heartbeat handler. */
+  async updateNodeHeartbeats(nodeId: string): Promise<number> {
+    const updated = acpSessions.updateNodeHeartbeats(this.sql, nodeId, this.getProjectId());
+    if (updated > 0) await this.scheduleHeartbeatAlarm();
+    return updated;
+  }
+
   // --- Summary ---
 
   async getSummary(): Promise<SummaryData> {
@@ -264,9 +271,39 @@ export class ProjectData extends DurableObject<Env> {
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
-    await acpSessions.checkHeartbeatTimeouts(this.sql, this.env, async (sessionId, toStatus, opts) => {
+    const timedOut = await acpSessions.checkHeartbeatTimeouts(this.sql, this.env, async (sessionId, toStatus, opts) => {
       await this.transitionAcpSession(sessionId, toStatus, opts);
     });
+
+    // For conversation-mode sessions, couple agent death to workspace death.
+    // Stop workspaces whose ACP sessions timed out to prevent zombie state.
+    for (const entry of timedOut) {
+      if (entry.workspaceId) {
+        try {
+          // Check if this workspace's task is conversation-mode by querying D1
+          const taskRow = this.env.DATABASE
+            ? await this.env.DATABASE.prepare(
+                `SELECT task_mode FROM tasks WHERE workspace_id = ? AND status IN ('in_progress', 'delegated') LIMIT 1`
+              ).bind(entry.workspaceId).first<{ task_mode: string | null }>()
+            : null;
+
+          if (taskRow?.task_mode === 'conversation') {
+            await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, entry.workspaceId);
+            log.info('acp_session.conversation_workspace_stopped', {
+              sessionId: entry.sessionId,
+              workspaceId: entry.workspaceId,
+              reason: 'heartbeat_timeout_coupled_stop',
+            });
+          }
+        } catch (err) {
+          log.error('acp_session.conversation_workspace_stop_failed', {
+            sessionId: entry.sessionId,
+            workspaceId: entry.workspaceId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
     await idleCleanup.checkWorkspaceIdleTimeouts(this.sql, this.env, this.getProjectId(),
       (workspaceId) => idleCleanup.deleteWorkspaceInD1(this.env.DATABASE, workspaceId),
       (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());

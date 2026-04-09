@@ -13,6 +13,7 @@ import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import { CreateNodeSchema, jsonValidator, NodeErrorBatchSchema,NodeHeartbeatSchema } from '../schemas';
+import * as projectDataService from '../services/project-data';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import { shouldRefreshCallbackToken, signCallbackToken, signNodeCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
 import { getRuntimeLimits } from '../services/limits';
@@ -614,6 +615,47 @@ nodesRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c)
     .update(schema.nodes)
     .set(updatePayload)
     .where(eq(schema.nodes.id, nodeId));
+
+  // Update ACP session heartbeats for all running workspaces on this node.
+  // This keeps ACP sessions alive as long as the VM agent is reporting.
+  c.executionCtx.waitUntil(
+    (async () => {
+      try {
+        const workspaces = await db
+          .select({ id: schema.workspaces.id, projectId: schema.workspaces.projectId })
+          .from(schema.workspaces)
+          .where(
+            and(
+              eq(schema.workspaces.nodeId, nodeId),
+              eq(schema.workspaces.status, 'running'),
+            )
+          );
+
+        // Group workspaces by project to minimize DO calls
+        const projectWorkspaces = new Map<string, string[]>();
+        for (const ws of workspaces) {
+          if (ws.projectId) {
+            const existing = projectWorkspaces.get(ws.projectId) ?? [];
+            existing.push(ws.id);
+            projectWorkspaces.set(ws.projectId, existing);
+          }
+        }
+
+        // Update ACP session heartbeats per project
+        await Promise.all(
+          Array.from(projectWorkspaces.entries()).map(async ([projectId]) => {
+            try {
+              await projectDataService.updateNodeHeartbeats(c.env, projectId, nodeId);
+            } catch (err) {
+              log.warn('heartbeat.acp_session_update_failed', { nodeId, projectId, error: String(err) });
+            }
+          })
+        );
+      } catch (err) {
+        log.warn('heartbeat.acp_heartbeat_sweep_failed', { nodeId, error: String(err) });
+      }
+    })()
+  );
 
   const response: Record<string, unknown> = {
     status: node.status,

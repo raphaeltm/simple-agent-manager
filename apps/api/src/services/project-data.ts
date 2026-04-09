@@ -417,6 +417,19 @@ export async function updateAcpSessionHeartbeat(
   return stub.updateHeartbeat(sessionId, nodeId);
 }
 
+/**
+ * Update heartbeats for all active ACP sessions on a node within a project.
+ * Called from the node heartbeat handler to keep ACP sessions alive.
+ */
+export async function updateNodeHeartbeats(
+  env: Env,
+  projectId: string,
+  nodeId: string
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.updateNodeHeartbeats(nodeId);
+}
+
 export async function forkAcpSession(
   env: Env,
   projectId: string,
