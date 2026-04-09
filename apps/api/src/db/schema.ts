@@ -362,6 +362,12 @@ export const tasks = sqliteTable(
     autoProvisionedNodeId: text('auto_provisioned_node_id').references(() => nodes.id, {
       onDelete: 'set null',
     }),
+    /** Source that created this task. 'user' = manual, 'cron'/'webhook'/'mcp' = automated. */
+    triggeredBy: text('triggered_by').notNull().default('user'),
+    /** FK to the trigger that created this task (null for user-created tasks). */
+    triggerId: text('trigger_id'),
+    /** FK to the specific trigger execution that created this task. */
+    triggerExecutionId: text('trigger_execution_id'),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -964,3 +970,89 @@ export const projectFileTags = sqliteTable(
 
 export type ProjectFileTagRow = typeof projectFileTags.$inferSelect;
 export type NewProjectFileTag = typeof projectFileTags.$inferInsert;
+
+// =============================================================================
+// Triggers (Event-Driven Agent Triggers — Phase 0: Cron)
+// =============================================================================
+export const triggers = sqliteTable(
+  'triggers',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    status: text('status').notNull().default('active'),
+    sourceType: text('source_type').notNull(),
+    cronExpression: text('cron_expression'),
+    cronTimezone: text('cron_timezone').default('UTC'),
+    skipIfRunning: integer('skip_if_running', { mode: 'boolean' }).notNull().default(true),
+    promptTemplate: text('prompt_template').notNull(),
+    agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
+      onDelete: 'set null',
+    }),
+    taskMode: text('task_mode').default('task'),
+    vmSizeOverride: text('vm_size_override'),
+    maxConcurrent: integer('max_concurrent').notNull().default(1),
+    lastTriggeredAt: text('last_triggered_at'),
+    triggerCount: integer('trigger_count').notNull().default(0),
+    nextFireAt: text('next_fire_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectNameUnique: uniqueIndex('idx_triggers_project_name').on(table.projectId, table.name),
+    cronSweepIdx: index('idx_triggers_cron_sweep')
+      .on(table.sourceType, table.status, table.nextFireAt)
+      .where(sql`source_type = 'cron' AND status = 'active'`),
+    userIdIdx: index('idx_triggers_user_id').on(table.userId),
+    projectIdIdx: index('idx_triggers_project_id').on(table.projectId),
+  })
+);
+
+export type TriggerRow = typeof triggers.$inferSelect;
+export type NewTriggerRow = typeof triggers.$inferInsert;
+
+// =============================================================================
+// Trigger Executions (audit log of every trigger firing attempt)
+// =============================================================================
+export const triggerExecutions = sqliteTable(
+  'trigger_executions',
+  {
+    id: text('id').primaryKey(),
+    triggerId: text('trigger_id')
+      .notNull()
+      .references(() => triggers.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').notNull(),
+    status: text('status').notNull(),
+    skipReason: text('skip_reason'),
+    taskId: text('task_id'),
+    eventType: text('event_type'),
+    renderedPrompt: text('rendered_prompt'),
+    errorMessage: text('error_message'),
+    scheduledAt: text('scheduled_at'),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+    sequenceNumber: integer('sequence_number'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    activeIdx: index('idx_trigger_executions_active')
+      .on(table.triggerId, table.status)
+      .where(sql`status IN ('queued', 'running')`),
+    triggerIdIdx: index('idx_trigger_executions_trigger_id').on(table.triggerId),
+  })
+);
+
+export type TriggerExecutionRow = typeof triggerExecutions.$inferSelect;
+export type NewTriggerExecutionRow = typeof triggerExecutions.$inferInsert;
