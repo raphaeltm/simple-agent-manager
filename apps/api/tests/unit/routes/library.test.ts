@@ -126,6 +126,48 @@ describe('library routes', () => {
     });
   });
 
+  describe('PUT /:fileId/replace', () => {
+    it('returns 200 on successful replace', async () => {
+      mockReplaceFile.mockResolvedValue({
+        id: 'file-123',
+        filename: 'updated.pdf',
+        mimeType: 'application/pdf',
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const formData = new FormData();
+      formData.append('file', new File(['updated content'], 'updated.pdf', { type: 'application/pdf' }));
+
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/replace`, {
+          method: 'PUT',
+          body: formData,
+        }),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json() as Record<string, unknown>;
+      expect(json['filename']).toBe('updated.pdf');
+    });
+
+    it('returns 400 when file field is missing', async () => {
+      const { app, env } = makeApp(makeEnv());
+      const formData = new FormData();
+      formData.append('description', 'no file');
+
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/replace`, {
+          method: 'PUT',
+          body: formData,
+        }),
+        env
+      );
+
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe('GET /', () => {
     it('returns 200 with file list', async () => {
       mockListFiles.mockResolvedValue({
@@ -207,7 +249,27 @@ describe('library routes', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('application/pdf');
       expect(res.headers.get('Content-Disposition')).toContain('report.pdf');
+      expect(res.headers.get('Content-Length')).toBe(String(new TextEncoder().encode('file content').length));
       expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+    });
+  });
+
+  describe('missing encryption key', () => {
+    it('returns 500 when no encryption key is configured', async () => {
+      const { app, env } = makeApp(makeEnv({ ENCRYPTION_KEY: undefined } as unknown as Partial<Env>));
+      const formData = new FormData();
+      formData.append('file', new File(['data'], 'test.txt', { type: 'text/plain' }));
+      mockGetUploadMaxBytes.mockReturnValue(50 * 1024 * 1024);
+
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
+          method: 'POST',
+          body: formData,
+        }),
+        env
+      );
+
+      expect(res.status).toBe(500);
     });
   });
 
