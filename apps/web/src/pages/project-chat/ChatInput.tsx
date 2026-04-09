@@ -314,7 +314,11 @@ export function ChatInput({
               <span className="text-fg-muted shrink-0">
                 {att.status === 'uploading' ? `${att.progress}%` : formatFileSize(att.file.size)}
               </span>
-              {att.status === 'error' && <span className="text-danger shrink-0" title={att.error}>!</span>}
+              {att.status === 'error' && (
+                <span className="text-danger shrink-0 truncate max-w-[120px]">
+                  {att.error ? att.error : 'Failed'}
+                </span>
+              )}
               {onRemoveAttachment && (
                 <button
                   type="button"
