@@ -366,6 +366,7 @@ describe('MCP Library Tools', () => {
         expect.any(ArrayBuffer),
         expect.objectContaining({
           uploadSource: 'agent',
+          uploadSessionId: 'task-001',
           uploadTaskId: 'task-001',
           tagSource: 'agent',
           tags: ['notes', 'draft'],

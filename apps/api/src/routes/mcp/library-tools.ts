@@ -141,14 +141,16 @@ async function uploadToWorkspace(
   targetPath: string,
 ): Promise<void> {
   const { token } = await signTerminalToken(userId, workspaceId, env);
-  const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload?token=${encodeURIComponent(token)}`;
+  const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload`;
 
   const formData = new FormData();
   formData.append('destination', targetPath);
   formData.append('files', new Blob([data]), filename);
 
+  // Use Authorization header for server-to-server calls (not query param)
   const res = await fetch(url, {
     method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
     body: formData,
     signal: AbortSignal.timeout(getTransferTimeout(env)),
   });
@@ -171,10 +173,12 @@ async function downloadFromWorkspace(
   filePath: string,
 ): Promise<{ data: ArrayBuffer; contentType: string }> {
   const { token } = await signTerminalToken(userId, workspaceId, env);
-  const params = new URLSearchParams({ path: filePath, token });
+  const params = new URLSearchParams({ path: filePath });
   const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`;
 
+  // Use Authorization header for server-to-server calls (not query param)
   const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(getTransferTimeout(env)),
   });
 
