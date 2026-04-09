@@ -198,6 +198,16 @@ export {
   uploadAttachmentToR2,
 } from './tasks';
 export {
+  createTrigger,
+  deleteTrigger,
+  getTrigger,
+  listTriggerExecutions,
+  listTriggers,
+  runTrigger,
+  testTrigger,
+  updateTrigger,
+} from './triggers';
+export {
   createAgentSession,
   createWorkspace,
   deleteWorkspace,
