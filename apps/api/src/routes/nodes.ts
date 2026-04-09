@@ -618,6 +618,8 @@ nodesRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c)
 
   // Update ACP session heartbeats for all running workspaces on this node.
   // This keeps ACP sessions alive as long as the VM agent is reporting.
+  // Uses per-call timeout to stay within waitUntil's 30s CPU budget.
+  const acpSweepTimeoutMs = parseInt(c.env.HEARTBEAT_ACP_SWEEP_TIMEOUT_MS || '8000', 10);
   c.executionCtx.waitUntil(
     (async () => {
       try {
@@ -631,21 +633,19 @@ nodesRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c)
             )
           );
 
-        // Group workspaces by project to minimize DO calls
-        const projectWorkspaces = new Map<string, string[]>();
-        for (const ws of workspaces) {
-          if (ws.projectId) {
-            const existing = projectWorkspaces.get(ws.projectId) ?? [];
-            existing.push(ws.id);
-            projectWorkspaces.set(ws.projectId, existing);
-          }
-        }
+        // Deduplicate projects to minimize DO calls
+        const projectIds = [...new Set(workspaces.map((w) => w.projectId).filter(Boolean))] as string[];
 
-        // Update ACP session heartbeats per project
+        // Update ACP session heartbeats per project with per-call timeout
         await Promise.all(
-          Array.from(projectWorkspaces.entries()).map(async ([projectId]) => {
+          projectIds.map(async (projectId) => {
             try {
-              await projectDataService.updateNodeHeartbeats(c.env, projectId, nodeId);
+              await Promise.race([
+                projectDataService.updateNodeHeartbeats(c.env, projectId, nodeId),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error('acp_sweep_timeout')), acpSweepTimeoutMs)
+                ),
+              ]);
             } catch (err) {
               log.warn('heartbeat.acp_session_update_failed', { nodeId, projectId, error: String(err) });
             }

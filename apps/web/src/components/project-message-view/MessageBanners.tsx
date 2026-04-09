@@ -53,7 +53,7 @@ export function AgentErrorBanner({ session }: { session: AcpSessionHandle }) {
         <button
           type="button"
           onClick={() => session.reconnect()}
-          className="px-3 py-1 min-h-[44px] bg-warning text-white text-xs rounded hover:opacity-80 shrink-0"
+          className="px-3 py-1 min-h-[44px] bg-warning text-white text-xs rounded hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)] shrink-0"
           aria-label="Reconnect to agent"
         >
           Reconnect
