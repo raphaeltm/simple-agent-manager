@@ -25,12 +25,11 @@ import {
 import { and, asc, desc, eq, inArray, like, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
+import type { Env } from '../index';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { AppDb } from '../middleware/project-auth';
-import type { Env } from '../index';
-
 import {
   decryptFile,
   encryptFile,
@@ -373,7 +372,7 @@ export async function listFiles(
   const orderFn = sortDir === 'asc' ? asc : desc;
 
   // Query files
-  let filesQuery = db
+  const filesQuery = db
     .select()
     .from(schema.projectFiles)
     .where(and(...conditions))

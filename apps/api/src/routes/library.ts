@@ -10,10 +10,10 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
+import type { Env } from '../index';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
-import type { Env } from '../index';
 import {
   deleteFile,
   downloadFile,
