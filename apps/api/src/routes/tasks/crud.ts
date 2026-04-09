@@ -25,7 +25,6 @@ import type { Env } from '../../index';
 import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { toDependencyResponse,toTaskResponse } from '../../lib/mappers';
-import { cronToHumanReadable } from '../../services/cron-utils';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
@@ -39,6 +38,7 @@ import {
   UpdateTaskSchema,
   UpdateTaskStatusSchema,
 } from '../../schemas';
+import { cronToHumanReadable } from '../../services/cron-utils';
 import { verifyCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import * as notificationService from '../../services/notification';
@@ -266,8 +266,8 @@ crudRoutes.get('/:taskId', async (c) => {
     if (execRow) {
       triggerExecution = {
         id: execRow.id,
-        sequenceNumber: execRow.sequenceNumber,
-        scheduledAt: execRow.scheduledAt,
+        sequenceNumber: execRow.sequenceNumber ?? 0,
+        scheduledAt: execRow.scheduledAt ?? '',
       };
     }
   }

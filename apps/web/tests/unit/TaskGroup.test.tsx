@@ -33,6 +33,7 @@ function makeTaskInfo(overrides: Partial<TaskInfo> = {}): TaskInfo {
     parentTaskId: null,
     status: 'in_progress',
     blocked: false,
+    triggeredBy: 'user',
     ...overrides,
   };
 }

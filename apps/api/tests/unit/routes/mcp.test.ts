@@ -313,7 +313,9 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('report_environment_issue');
       // Onboarding tools
       expect(toolNames).toContain('get_repo_setup_guide');
-      expect(body.result.tools).toHaveLength(42);
+      // Trigger tools
+      expect(toolNames).toContain('create_trigger');
+      expect(body.result.tools).toHaveLength(43);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

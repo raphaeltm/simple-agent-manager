@@ -7,7 +7,7 @@
  *
  * See: specs/022-simplified-chat-ux/tasks.md (T038-T040)
  */
-import type { ProjectRuntimeConfigResponse, TriggerResponse, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { ProjectRuntimeConfigResponse, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';

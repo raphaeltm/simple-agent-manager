@@ -70,6 +70,9 @@ function makeTask(overrides: Partial<Task> & { id: string; title: string }): Tas
     outputBranch: null,
     outputPrUrl: null,
     finalizedAt: null,
+    triggeredBy: 'user',
+    triggerId: null,
+    triggerExecutionId: null,
     createdAt: '2026-03-19T00:00:00Z',
     updatedAt: '2026-03-19T00:00:00Z',
     ...overrides,
@@ -256,6 +259,31 @@ describe('IdeasPage', () => {
     renderIdeasPage();
     const card = await screen.findByRole('button', { name: /View idea: Timed idea/i });
     expect(card).toHaveTextContent('just now');
+  });
+
+  it('shows AUTO badge on trigger-created ideas', async () => {
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [
+        makeTask({ id: '1', title: 'Manual idea', status: 'draft', triggeredBy: 'user' }),
+        makeTask({ id: '2', title: 'Auto idea', status: 'draft', triggeredBy: 'cron' }),
+      ],
+      nextCursor: null,
+    });
+
+    renderIdeasPage();
+    await screen.findByText('Manual idea');
+
+    // The AUTO badge should appear for cron-triggered ideas
+    const autoBadges = screen.getAllByText('AUTO');
+    expect(autoBadges).toHaveLength(1);
+
+    // The auto badge should be near the 'Auto idea' card
+    const autoCard = screen.getByRole('button', { name: /View idea: Auto idea/i });
+    expect(autoCard).toHaveTextContent('AUTO');
+
+    // Manual idea should NOT have the badge
+    const manualCard = screen.getByRole('button', { name: /View idea: Manual idea/i });
+    expect(manualCard).not.toHaveTextContent('AUTO');
   });
 
   it('shows timeline accent border for status groups', async () => {
