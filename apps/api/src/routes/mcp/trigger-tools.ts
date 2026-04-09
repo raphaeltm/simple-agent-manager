@@ -73,6 +73,16 @@ export async function handleCreateTrigger(
     ? (params.vmSizeOverride as string)
     : null;
 
+  // --- Validate agentProfileId belongs to the project ---
+  if (agentProfileId) {
+    const profileResult = await env.DATABASE.prepare(
+      'SELECT id FROM agent_profiles WHERE id = ? AND project_id = ? LIMIT 1',
+    ).bind(agentProfileId, tokenData.projectId).first<{ id: string }>();
+    if (!profileResult) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'agentProfileId not found in this project');
+    }
+  }
+
   // --- Check name uniqueness ---
   const existingResult = await env.DATABASE.prepare(
     'SELECT id FROM triggers WHERE project_id = ? AND name = ? LIMIT 1',
