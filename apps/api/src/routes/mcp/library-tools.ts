@@ -58,6 +58,20 @@ function getEncryptionKey(env: Env): string {
   return key;
 }
 
+/**
+ * Validate that a path is relative and does not contain traversal segments.
+ * Returns null if valid, or an error message if invalid.
+ */
+function validateRelativePath(path: string): string | null {
+  if (path.startsWith('/')) {
+    return 'Path must be relative (cannot start with /)';
+  }
+  if (path.split('/').includes('..')) {
+    return 'Path cannot contain ".." segments';
+  }
+  return null;
+}
+
 function requireWorkspaceId(
   requestId: string | number | null,
   tokenData: McpTokenData,
@@ -199,11 +213,17 @@ export async function handleListLibraryFiles(
   try {
     const db = drizzle(env.DATABASE, { schema });
 
-    // Parse optional filters
-    const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string') : undefined;
+    // Parse optional filters (bound arrays to prevent unbounded iteration)
+    const DEFAULT_MAX_TAGS_INPUT = 50;
+    const tags = Array.isArray(params.tags)
+      ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, DEFAULT_MAX_TAGS_INPUT)
+      : undefined;
     const fileType = typeof params.fileType === 'string' ? params.fileType : undefined;
     const source = params.source === 'user' || params.source === 'agent' ? params.source : undefined;
-    const sortBy = params.sortBy as 'createdAt' | 'filename' | 'sizeBytes' | undefined;
+    const VALID_SORT_FIELDS = ['createdAt', 'filename', 'sizeBytes'] as const;
+    const sortBy = typeof params.sortBy === 'string' && (VALID_SORT_FIELDS as readonly string[]).includes(params.sortBy)
+      ? (params.sortBy as typeof VALID_SORT_FIELDS[number])
+      : undefined;
     const limit = typeof params.limit === 'number' && params.limit > 0
       ? Math.min(Math.floor(params.limit), 200)
       : undefined;
@@ -233,7 +253,7 @@ export async function handleListLibraryFiles(
     });
   } catch (err) {
     log.error('mcp.list_library_files.error', { projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to list library files: ${(err as Error).message}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to list library files');
   }
 }
 
@@ -268,10 +288,15 @@ export async function handleDownloadLibraryFile(
     // Download and decrypt from R2
     const { data, file } = await downloadFile(db, env.R2, encryptionKey, tokenData.projectId, fileId);
 
-    // Determine target path
+    // Determine and validate target path
     const targetDir = typeof params.targetPath === 'string' && params.targetPath.trim()
       ? params.targetPath.trim()
       : getDownloadDir(env);
+
+    const pathErr = validateRelativePath(targetDir);
+    if (pathErr) {
+      return jsonRpcError(requestId, INVALID_PARAMS, pathErr);
+    }
 
     // Upload to workspace
     await uploadToWorkspace(
@@ -303,7 +328,7 @@ export async function handleDownloadLibraryFile(
     if (message.includes('not found') || message.includes('Not Found')) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'File not found in library');
     }
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to download library file: ${message}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to download library file');
   }
 }
 
@@ -327,7 +352,7 @@ export async function handleUploadToLibrary(
   }
 
   const description = typeof params.description === 'string' ? params.description : undefined;
-  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string') : undefined;
+  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, 50) : undefined;
 
   try {
     const db = drizzle(env.DATABASE, { schema });
@@ -424,9 +449,9 @@ export async function handleUploadToLibrary(
     });
 
     if (message.includes('not found') || message.includes('Not Found')) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `File not found in workspace: ${filePath}`);
+      return jsonRpcError(requestId, INVALID_PARAMS, 'File not found in workspace');
     }
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to upload to library: ${message}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to upload to library');
   }
 }
 
@@ -455,7 +480,7 @@ export async function handleReplaceLibraryFile(
   }
 
   const description = typeof params.description === 'string' ? params.description : undefined;
-  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string') : undefined;
+  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, 50) : undefined;
 
   try {
     const db = drizzle(env.DATABASE, { schema });
@@ -527,6 +552,6 @@ export async function handleReplaceLibraryFile(
       filePath,
       error: String(err),
     });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to replace library file: ${(err as Error).message}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to replace library file');
   }
 }

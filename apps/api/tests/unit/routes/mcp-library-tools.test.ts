@@ -274,6 +274,40 @@ describe('MCP Library Tools', () => {
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Failed to download library file');
     });
+
+    it('rejects targetPath with path traversal segments', async () => {
+      mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
+      mockDownloadFile.mockResolvedValueOnce({
+        data: new ArrayBuffer(10),
+        file: { filename: 'test.txt', sizeBytes: 10 },
+        metadata: {},
+      });
+
+      const result = await handleDownloadLibraryFile(1, {
+        fileId: 'file-001',
+        targetPath: '../../etc',
+      }, tokenData, mockEnv as Env);
+
+      expect(result.error).toBeDefined();
+      expect(result.error!.message).toContain('..');
+    });
+
+    it('rejects absolute targetPath', async () => {
+      mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
+      mockDownloadFile.mockResolvedValueOnce({
+        data: new ArrayBuffer(10),
+        file: { filename: 'test.txt', sizeBytes: 10 },
+        metadata: {},
+      });
+
+      const result = await handleDownloadLibraryFile(1, {
+        fileId: 'file-001',
+        targetPath: '/root/.ssh',
+      }, tokenData, mockEnv as Env);
+
+      expect(result.error).toBeDefined();
+      expect(result.error!.message).toContain('relative');
+    });
   });
 
   // ─── upload_to_library ──────────────────────────────────────────────────
