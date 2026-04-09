@@ -212,12 +212,13 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
 
   const encryptionKey = getEncryptionKey(c.env);
   const timeoutMs = getDownloadTimeoutMs(c.env);
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const { data, file } = await Promise.race([
     downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(errors.internal('Download timed out')), timeoutMs)
-    ),
-  ]);
+    new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(errors.internal('Download timed out')), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timeoutHandle));
 
   // Sanitize filename for Content-Disposition (strip non-printable + header-unsafe chars)
   const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');

@@ -364,11 +364,18 @@ export async function listFiles(
     conditions.push(like(schema.projectFiles.filename, `%${escaped}%`));
   }
   if (filters.cursor) {
-    // Cursor-based pagination: files after the cursor ID (by createdAt/id)
+    // Cursor pagination only works correctly with ID/createdAt ordering (ULIDs are time-sorted)
+    if (filters.sortBy && filters.sortBy !== 'createdAt') {
+      throw errors.badRequest('Cursor pagination is only supported with sortBy=createdAt or default sort');
+    }
     conditions.push(sql`${schema.projectFiles.id} > ${filters.cursor}`);
   }
 
-  // Determine sort
+  // Validate and determine sort
+  const VALID_SORT_FIELDS = ['filename', 'createdAt', 'updatedAt', 'sizeBytes'] as const;
+  if (filters.sortBy && !VALID_SORT_FIELDS.includes(filters.sortBy as (typeof VALID_SORT_FIELDS)[number])) {
+    throw errors.badRequest(`Invalid sortBy value: ${filters.sortBy}`);
+  }
   const sortField = filters.sortBy ?? 'createdAt';
   const sortDir = filters.sortOrder ?? 'desc';
   const sortColumn = {
@@ -379,48 +386,29 @@ export async function listFiles(
   }[sortField];
   const orderFn = sortDir === 'asc' ? asc : desc;
 
+  // Push tag filter into SQL for correct pagination
+  if (filters.tags && filters.tags.length > 0) {
+    conditions.push(
+      sql`${schema.projectFiles.id} IN (
+        SELECT ${schema.projectFileTags.fileId} FROM ${schema.projectFileTags}
+        WHERE ${schema.projectFileTags.tag} IN (${sql.join(filters.tags.map((t) => sql`${t}`), sql`, `)})
+        GROUP BY ${schema.projectFileTags.fileId}
+        HAVING COUNT(DISTINCT ${schema.projectFileTags.tag}) = ${filters.tags.length}
+      )`
+    );
+  }
+
   // Query files
-  const filesQuery = db
+  const files = await db
     .select()
     .from(schema.projectFiles)
     .where(and(...conditions))
     .orderBy(orderFn(sortColumn))
     .limit(pageSize + 1); // +1 to detect next page
 
-  const files = await filesQuery;
-
-  // Check for tag filter — post-filter if tags specified
-  let filteredFiles = files;
-  if (filters.tags && filters.tags.length > 0) {
-    const fileIds = files.map((f) => f.id);
-    if (fileIds.length > 0) {
-      const tagMatches = await db
-        .select()
-        .from(schema.projectFileTags)
-        .where(
-          and(
-            inArray(schema.projectFileTags.fileId, fileIds),
-            inArray(schema.projectFileTags.tag, filters.tags)
-          )
-        );
-      // Group by fileId, count distinct matching tags
-      const tagCountByFile = new Map<string, Set<string>>();
-      for (const row of tagMatches) {
-        const set = tagCountByFile.get(row.fileId) ?? new Set();
-        set.add(row.tag);
-        tagCountByFile.set(row.fileId, set);
-      }
-      // Keep only files that have ALL requested tags
-      filteredFiles = files.filter((f) => {
-        const matchedTags = tagCountByFile.get(f.id);
-        return matchedTags && matchedTags.size >= filters.tags!.length;
-      });
-    }
-  }
-
   // Determine pagination
-  const hasMore = filteredFiles.length > pageSize;
-  const resultFiles = hasMore ? filteredFiles.slice(0, pageSize) : filteredFiles;
+  const hasMore = files.length > pageSize;
+  const resultFiles = hasMore ? files.slice(0, pageSize) : files;
   const nextCursor = hasMore ? resultFiles[resultFiles.length - 1]?.id ?? null : null;
 
   // Fetch tags for result files
@@ -440,11 +428,29 @@ export async function listFiles(
     tagsByFile.set(tag.fileId, list);
   }
 
-  // Total count (without pagination)
+  // Total count — same filters as main query but without cursor condition
+  const countConds = [eq(schema.projectFiles.projectId, projectId)];
+  if (filters.status) countConds.push(eq(schema.projectFiles.status, filters.status));
+  if (filters.uploadSource) countConds.push(eq(schema.projectFiles.uploadSource, filters.uploadSource));
+  if (filters.mimeType) countConds.push(like(schema.projectFiles.mimeType, `${filters.mimeType}%`));
+  if (filters.search) {
+    const escaped = filters.search.replace(/[%_]/g, '\\$&');
+    countConds.push(like(schema.projectFiles.filename, `%${escaped}%`));
+  }
+  if (filters.tags && filters.tags.length > 0) {
+    countConds.push(
+      sql`${schema.projectFiles.id} IN (
+        SELECT ${schema.projectFileTags.fileId} FROM ${schema.projectFileTags}
+        WHERE ${schema.projectFileTags.tag} IN (${sql.join(filters.tags.map((t) => sql`${t}`), sql`, `)})
+        GROUP BY ${schema.projectFileTags.fileId}
+        HAVING COUNT(DISTINCT ${schema.projectFileTags.tag}) = ${filters.tags.length}
+      )`
+    );
+  }
   const totalResult = await db
     .select({ count: sql<number>`count(*)` })
     .from(schema.projectFiles)
-    .where(eq(schema.projectFiles.projectId, projectId));
+    .where(and(...countConds));
   const total = totalResult[0]?.count ?? 0;
 
   return {
@@ -551,11 +557,13 @@ export async function deleteFile(
     throw errors.notFound('File');
   }
 
-  // Delete R2 object
-  await r2.delete(rows[0].r2Key);
-
-  // Tags are cascade-deleted by FK
+  // Delete D1 first (safer order — orphaned R2 objects are benign, orphaned D1 rows are errors)
+  // Explicitly delete tags since D1 may not have PRAGMA foreign_keys = ON
+  await db.delete(schema.projectFileTags).where(eq(schema.projectFileTags.fileId, fileId));
   await db.delete(schema.projectFiles).where(eq(schema.projectFiles.id, fileId));
+
+  // Then delete R2 object (best-effort)
+  await r2.delete(rows[0].r2Key);
 
   log.info('file_library_delete', { projectId, fileId, filename: rows[0].filename });
 }
