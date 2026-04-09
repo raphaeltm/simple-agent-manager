@@ -3,6 +3,7 @@ import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
 import { Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, Globe, Loader2, MapPin, Monitor, Server } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
 
 import { useBrowserSidecar } from '../../hooks/useBrowserSidecar';
 import type { ChatSessionResponse } from '../../lib/api';
@@ -296,20 +297,18 @@ export function SessionHeader({
                   </div>
                 )}
                 <div className="flex items-center gap-2 mt-1">
-                  <a
-                    href={`/projects/${projectId}/triggers/${triggerDetail.trigger.id}`}
+                  <Link
+                    to={`/projects/${projectId}/triggers/${triggerDetail.trigger.id}`}
                     className="text-accent-primary no-underline hover:underline"
-                    onClick={(e) => { e.preventDefault(); window.location.href = `/projects/${projectId}/triggers/${triggerDetail.trigger!.id}`; }}
                   >
                     View Trigger
-                  </a>
-                  <a
-                    href={`/projects/${projectId}/triggers/${triggerDetail.trigger.id}`}
+                  </Link>
+                  <Link
+                    to={`/projects/${projectId}/triggers/${triggerDetail.trigger.id}`}
                     className="text-fg-muted no-underline hover:underline"
-                    onClick={(e) => { e.preventDefault(); window.location.href = `/projects/${projectId}/triggers/${triggerDetail.trigger!.id}`; }}
                   >
                     All Runs
-                  </a>
+                  </Link>
                 </div>
               </div>
             </div>
