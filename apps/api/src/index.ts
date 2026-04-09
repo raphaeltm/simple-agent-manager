@@ -47,10 +47,12 @@ import { smokeTestTokenRoutes } from './routes/smoke-test-tokens';
 import { tasksRoutes } from './routes/tasks';
 import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
+import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
 import { workspacesRoutes } from './routes/workspaces';
 import { runAnalyticsForwardJob } from './scheduled/analytics-forward';
+import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
@@ -436,6 +438,14 @@ export interface Env {
   ATTACHMENT_PRESIGN_EXPIRY_SECONDS?: string;
   // Timeout for transferring attachments from R2 to workspace VM (default: 60000ms)
   ATTACHMENT_TRANSFER_TIMEOUT_MS?: string;
+  // Event-driven triggers (cron) configuration
+  MAX_TRIGGERS_PER_PROJECT?: string;                 // Max triggers per project (default: 10)
+  CRON_MIN_INTERVAL_MINUTES?: string;               // Min cron interval in minutes (default: 15)
+  CRON_MAX_FIRE_PER_SWEEP?: string;                 // Max triggers to fire per 5-min sweep (default: 5)
+  CRON_TEMPLATE_MAX_LENGTH?: string;                // Max prompt template length (default: 8000)
+  CRON_TEMPLATE_MAX_FIELD_LENGTH?: string;          // Max per-field interpolated value length (default: 2000)
+  TRIGGER_AUTO_PAUSE_AFTER_FAILURES?: string;       // Auto-pause after N consecutive failures (default: 3)
+  CRON_SWEEP_ENABLED?: string;                      // Kill switch: "false" to disable cron sweep (default: enabled)
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -779,6 +789,7 @@ app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
+app.route('/api/projects/:projectId/triggers', triggersRoutes);
 app.route('/api/projects', projectDeploymentRoutes);
 app.route('/api/deployment', gcpDeployCallbackRoute);
 app.route('/api/admin', adminRoutes);
@@ -872,6 +883,9 @@ export default {
     // Purge expired observability errors (retention + row count limits)
     const observabilityPurge = await runObservabilityPurge(env);
 
+    // Fire due cron triggers
+    const cronTriggers = await runCronTriggerSweep(env);
+
     log.info('cron.completed', {
       cron: controller.cron,
       type: 'sweep',
@@ -891,6 +905,10 @@ export default {
       stuckTaskDoHealthChecked: stuckTasks.doHealthChecked,
       observabilityPurgedByAge: observabilityPurge.deletedByAge,
       observabilityPurgedByCount: observabilityPurge.deletedByCount,
+      cronTriggersChecked: cronTriggers.checked,
+      cronTriggersFired: cronTriggers.fired,
+      cronTriggersSkipped: cronTriggers.skipped,
+      cronTriggersFailed: cronTriggers.failed,
     });
   },
 };
