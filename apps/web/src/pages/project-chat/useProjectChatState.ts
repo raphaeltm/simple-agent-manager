@@ -76,7 +76,9 @@ export function useProjectChatState() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
 
   // Slash command cache for pre-session autocomplete
-  const { commands: slashCommands } = useAvailableCommands(projectId);
+  // Pass sessionId as refreshKey so cached commands are re-fetched when switching sessions
+  // (ensures commands persisted during session N are available in session N+1)
+  const { commands: slashCommands } = useAvailableCommands(projectId, undefined, sessionId);
 
   // File attachments (extracted hook)
   const attachments = useAttachments(projectId, setSubmitError);

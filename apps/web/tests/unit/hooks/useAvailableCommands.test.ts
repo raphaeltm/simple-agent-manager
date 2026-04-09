@@ -131,19 +131,75 @@ describe('useAvailableCommands', () => {
     ]);
   });
 
-  it('does not re-fetch for same projectId', async () => {
+  it('does not re-fetch for same projectId and refreshKey', async () => {
     const { result, rerender } = renderHook(
-      ({ pid }) => useAvailableCommands(pid),
-      { initialProps: { pid: 'proj-1' } },
+      ({ pid, rk }) => useAvailableCommands(pid, undefined, rk),
+      { initialProps: { pid: 'proj-1', rk: 'session-1' } },
     );
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    rerender({ pid: 'proj-1' });
+    rerender({ pid: 'proj-1', rk: 'session-1' });
 
     // Should only have been called once
     expect(mockGetCachedCommands).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-fetches when refreshKey changes (new session)', async () => {
+    mockGetCachedCommands.mockResolvedValue({ commands: [] });
+
+    const { result, rerender } = renderHook(
+      ({ pid, rk }) => useAvailableCommands(pid, undefined, rk),
+      { initialProps: { pid: 'proj-1', rk: 'session-1' } },
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(mockGetCachedCommands).toHaveBeenCalledTimes(1);
+
+    // Simulate navigating to a new session — should re-fetch cached commands
+    mockGetCachedCommands.mockResolvedValue({
+      commands: [{ name: 'do', description: 'Execute task' }],
+    });
+
+    rerender({ pid: 'proj-1', rk: 'session-2' });
+
+    await waitFor(() => {
+      expect(mockGetCachedCommands).toHaveBeenCalledTimes(2);
+    });
+
+    // New cached command should appear
+    expect(result.current.commands.find((c) => c.name === 'do')).toBeDefined();
+  });
+
+  it('refetch() imperatively re-fetches cached commands', async () => {
+    mockGetCachedCommands.mockResolvedValue({ commands: [] });
+
+    const { result } = renderHook(() => useAvailableCommands('proj-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(mockGetCachedCommands).toHaveBeenCalledTimes(1);
+
+    // Simulate commands being persisted externally, then refetch
+    mockGetCachedCommands.mockResolvedValue({
+      commands: [{ name: 'workflow', description: 'Run workflow' }],
+    });
+
+    await act(async () => {
+      result.current.refetch();
+    });
+
+    await waitFor(() => {
+      expect(mockGetCachedCommands).toHaveBeenCalledTimes(2);
+    });
+
+    expect(result.current.commands.find((c) => c.name === 'workflow')).toBeDefined();
   });
 });

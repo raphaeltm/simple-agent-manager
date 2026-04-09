@@ -1,6 +1,6 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import { CLIENT_COMMANDS,getAllStaticCommands } from '@simple-agent-manager/acp-client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getCachedCommands } from '../lib/api';
 
@@ -12,25 +12,23 @@ import { getCachedCommands } from '../lib/api';
  * 4. Live ACP commands (when a session is active, passed in)
  *
  * Deduplicates by command name with priority: live > cached > static > client.
+ *
+ * Pass `refreshKey` (e.g. sessionId) to re-fetch cached commands whenever the
+ * key changes — ensures newly-persisted commands are picked up by subsequent sessions.
  */
 export function useAvailableCommands(
   projectId: string,
   liveCommands?: SlashCommand[],
-): { commands: SlashCommand[]; isLoading: boolean; persistCommands: (agentType: string, cmds: SlashCommand[]) => void } {
+  refreshKey?: string | null,
+): { commands: SlashCommand[]; isLoading: boolean; refetch: () => void; persistCommands: (agentType: string, cmds: SlashCommand[]) => void } {
   const [cachedCommands, setCachedCommands] = useState<SlashCommand[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const fetchedRef = useRef<string | null>(null);
 
-  // Fetch cached commands from the API on mount / projectId change
-  useEffect(() => {
-    if (fetchedRef.current === projectId) return;
-    fetchedRef.current = projectId;
-
-    let cancelled = false;
+  const fetchCachedCommands = useCallback((signal?: { cancelled: boolean }) => {
     setIsLoading(true);
     getCachedCommands(projectId)
       .then((result) => {
-        if (cancelled) return;
+        if (signal?.cancelled) return;
         setCachedCommands(
           result.commands.map((cmd) => ({
             name: cmd.name,
@@ -43,11 +41,19 @@ export function useAvailableCommands(
         // Non-fatal — static commands are still available
       })
       .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        if (!signal?.cancelled) setIsLoading(false);
       });
-
-    return () => { cancelled = true; };
   }, [projectId]);
+
+  // Fetch cached commands on mount, when projectId changes, or when refreshKey changes
+  useEffect(() => {
+    const signal = { cancelled: false };
+    fetchCachedCommands(signal);
+    return () => { signal.cancelled = true; };
+  }, [fetchCachedCommands, refreshKey]);
+
+  // Imperative refetch for callers (e.g. after persisting new commands)
+  const refetch = useCallback(() => fetchCachedCommands(), [fetchCachedCommands]);
 
   // Allow callers to trigger a cache persist (fire-and-forget)
   const persistCommands = useCallback(
@@ -78,5 +84,5 @@ export function useAvailableCommands(
     return Array.from(seen.values());
   }, [cachedCommands, liveCommands]);
 
-  return { commands, isLoading, persistCommands };
+  return { commands, isLoading, refetch, persistCommands };
 }
