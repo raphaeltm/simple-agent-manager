@@ -5,9 +5,8 @@
  * Downloads fetch decrypted content from R2 and push it to the workspace via VM agent.
  * Uploads fetch file content from the workspace via VM agent and encrypt+store in R2.
  */
-import type { DrizzleD1Database } from 'drizzle-orm/d1';
-
 import { and, eq } from 'drizzle-orm';
+import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
