@@ -1,9 +1,11 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, LayoutGrid, List, Search, Settings, X } from 'lucide-react';
+import { useState } from 'react';
 
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ForkDialog } from '../../components/project/ForkDialog';
 import { ProjectMessageView } from '../../components/project-message-view';
+import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { ChatInput } from './ChatInput';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
@@ -15,6 +17,7 @@ import { useProjectChatState } from './useProjectChatState';
 export function ProjectChat() {
   const isMobile = useIsMobile();
   const state = useProjectChatState();
+  const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
 
   // Loading state
   if (state.loading && state.sessions.length === 0) {
@@ -62,6 +65,11 @@ export function ProjectChat() {
             >
               <LayoutGrid size={15} />
             </button>
+            <TriggerDropdown
+              projectId={state.projectId}
+              open={triggerDropdownOpen}
+              onToggle={() => setTriggerDropdownOpen((prev) => !prev)}
+            />
             <button
               type="button"
               onClick={() => state.setSettingsOpen(!state.settingsOpen)}

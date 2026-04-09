@@ -84,6 +84,12 @@ export interface Task {
   dispatchDepth: number;
   agentProfileHint: string | null;
   blocked?: boolean;
+  /** What created this task: 'user' (manual), 'cron' (scheduled trigger), 'webhook', 'mcp'. */
+  triggeredBy: string;
+  /** ID of the trigger that created this task, if any. */
+  triggerId: string | null;
+  /** ID of the specific trigger execution, if any. */
+  triggerExecutionId: string | null;
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;
@@ -112,9 +118,29 @@ export interface TaskStatusEvent {
   createdAt: string;
 }
 
+/** Trigger info embedded in task detail response when task was trigger-spawned. */
+export interface TaskTriggerInfo {
+  id: string;
+  name: string;
+  cronExpression: string | null;
+  cronTimezone: string;
+  cronHumanReadable?: string;
+}
+
+/** Trigger execution info embedded in task detail response. */
+export interface TaskTriggerExecutionInfo {
+  id: string;
+  sequenceNumber: number;
+  scheduledAt: string;
+}
+
 export interface TaskDetailResponse extends Task {
   dependencies: TaskDependency[];
   blocked: boolean;
+  /** Trigger that created this task (populated when triggerId is set). */
+  trigger?: TaskTriggerInfo;
+  /** Specific trigger execution (populated when triggerExecutionId is set). */
+  triggerExecution?: TaskTriggerExecutionInfo;
 }
 
 export interface CreateTaskRequest {

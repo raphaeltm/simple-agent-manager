@@ -21,6 +21,7 @@ import {
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
 } from '../../lib/api';
+import { listTriggers } from '../../lib/api/triggers';
 import { useProjectContext } from '../../pages/ProjectContext';
 import { DeploymentSettings } from '../DeploymentSettings';
 
@@ -63,6 +64,9 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   const [runtimeConfig, setRuntimeConfig] = useState<ProjectRuntimeConfigResponse>({ envVars: [], files: [] });
   const [runtimeConfigLoading, setRuntimeConfigLoading] = useState(true);
   const [savingRuntimeConfig, setSavingRuntimeConfig] = useState(false);
+
+  // Automation / triggers summary
+  const [triggerSummary, setTriggerSummary] = useState<{ active: number; paused: number }>({ active: 0, paused: 0 });
 
   // Env var form
   const [envKeyInput, setEnvKeyInput] = useState('');
@@ -109,8 +113,14 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
     if (open) {
       void loadRuntimeConfig();
       setIsDirty(false);
+      // Load trigger counts (best-effort, don't block drawer)
+      void listTriggers(projectId).then((res) => {
+        const active = res.triggers.filter((t) => t.status === 'active').length;
+        const paused = res.triggers.filter((t) => t.status === 'paused').length;
+        setTriggerSummary({ active, paused });
+      }).catch(() => { /* ignore */ });
     }
-  }, [open, loadRuntimeConfig]);
+  }, [open, loadRuntimeConfig, projectId]);
 
   // Close with unsaved changes confirmation (T040)
   const handleClose = useCallback(() => {
@@ -541,6 +551,35 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
 
             {/* Deploy to Cloud */}
             <DeploymentSettings projectId={projectId} compact />
+
+            {/* Automation — trigger count + link */}
+            <section className="grid gap-3">
+              <div>
+                <h3 className="sam-type-card-title m-0 text-fg-primary">
+                  Automation
+                </h3>
+                <p className="m-0 mt-1 text-xs text-fg-muted">
+                  {triggerSummary.active > 0 || triggerSummary.paused > 0
+                    ? `${triggerSummary.active} active${triggerSummary.paused > 0 ? `, ${triggerSummary.paused} paused` : ''}`
+                    : 'No triggers configured'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { onClose(); navigate(`/projects/${projectId}/triggers`); }}
+                className="sam-hover-surface flex items-center justify-between gap-2 w-full py-2 px-3 bg-transparent border border-border-default rounded-sm cursor-pointer text-fg-primary text-left"
+              >
+                <div>
+                  <div className="text-[0.8125rem] font-medium">Manage Triggers</div>
+                  <div className="text-xs text-fg-muted">
+                    Cron schedules and automation rules
+                  </div>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-fg-muted">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </section>
 
             {/* Quick Links — navigation to related settings and project views */}
             <section className="grid gap-3">

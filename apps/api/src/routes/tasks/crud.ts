@@ -5,6 +5,8 @@ import {
   type TaskActorType,
   type TaskDetailResponse,
   type TaskStatus,
+  type TaskTriggerExecutionInfo,
+  type TaskTriggerInfo,
 } from '@simple-agent-manager/shared';
 import type { SQL } from 'drizzle-orm';
 import {
@@ -36,6 +38,7 @@ import {
   UpdateTaskSchema,
   UpdateTaskStatusSchema,
 } from '../../schemas';
+import { cronToHumanReadable } from '../../services/cron-utils';
 import { verifyCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import * as notificationService from '../../services/notification';
@@ -220,10 +223,61 @@ crudRoutes.get('/:taskId', async (c) => {
   const dependencies = await getTaskDependencies(db, task.id);
   const blocked = await computeBlockedForTask(db, task.id);
 
+  // Enrich with trigger info when task was trigger-spawned
+  let trigger: TaskTriggerInfo | undefined;
+  let triggerExecution: TaskTriggerExecutionInfo | undefined;
+
+  if (task.triggerId) {
+    const [triggerRow] = await db
+      .select({
+        id: schema.triggers.id,
+        name: schema.triggers.name,
+        cronExpression: schema.triggers.cronExpression,
+        cronTimezone: schema.triggers.cronTimezone,
+      })
+      .from(schema.triggers)
+      .where(eq(schema.triggers.id, task.triggerId))
+      .limit(1);
+
+    if (triggerRow) {
+      trigger = {
+        id: triggerRow.id,
+        name: triggerRow.name,
+        cronExpression: triggerRow.cronExpression,
+        cronTimezone: triggerRow.cronTimezone ?? 'UTC',
+        cronHumanReadable: triggerRow.cronExpression
+          ? cronToHumanReadable(triggerRow.cronExpression, triggerRow.cronTimezone ?? 'UTC')
+          : undefined,
+      };
+    }
+  }
+
+  if (task.triggerExecutionId) {
+    const [execRow] = await db
+      .select({
+        id: schema.triggerExecutions.id,
+        sequenceNumber: schema.triggerExecutions.sequenceNumber,
+        scheduledAt: schema.triggerExecutions.scheduledAt,
+      })
+      .from(schema.triggerExecutions)
+      .where(eq(schema.triggerExecutions.id, task.triggerExecutionId))
+      .limit(1);
+
+    if (execRow) {
+      triggerExecution = {
+        id: execRow.id,
+        sequenceNumber: execRow.sequenceNumber ?? 0,
+        scheduledAt: execRow.scheduledAt ?? '',
+      };
+    }
+  }
+
   const response: TaskDetailResponse = {
     ...toTaskResponse(task, blocked),
     dependencies: dependencies.map(toDependencyResponse),
     blocked,
+    trigger,
+    triggerExecution,
   };
 
   return c.json(response);

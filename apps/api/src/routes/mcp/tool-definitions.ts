@@ -9,6 +9,7 @@
  *   - tool-definitions-workspace-tools.ts     (workspace info, env, CI, cost, onboarding)
  *   - tool-definitions-library-tools.ts       (project file library)
  *   - tool-definitions-orchestration-tools.ts (agent-to-agent communication & control)
+ *   - tool-definitions-trigger-tools.ts       (trigger management — cron automation)
  */
 
 export { LIBRARY_TOOLS } from './tool-definitions-library-tools';
@@ -16,6 +17,7 @@ export { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 export { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
 export { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
 export { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
+export { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
 import { LIBRARY_TOOLS } from './tool-definitions-library-tools';
@@ -23,6 +25,7 @@ import { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 import { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
 import { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
 import { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
+import { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 import { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
 export const MCP_TOOLS = [
@@ -32,4 +35,5 @@ export const MCP_TOOLS = [
   ...WORKSPACE_TOOLS,
   ...LIBRARY_TOOLS,
   ...ORCHESTRATION_TOOLS,
+  ...TRIGGER_TOOLS,
 ];

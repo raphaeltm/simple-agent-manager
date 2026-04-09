@@ -129,6 +129,8 @@ export type {
   TaskSortOrder,
   TaskStatus,
   TaskStatusEvent,
+  TaskTriggerExecutionInfo,
+  TaskTriggerInfo,
   UpdateTaskRequest,
   UpdateTaskStatusRequest,
 } from './task';
