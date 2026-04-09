@@ -37,6 +37,7 @@ import { dashboardRoutes } from './routes/dashboard';
 import { gcpRoutes } from './routes/gcp';
 import { githubRoutes } from './routes/github';
 import { googleAuthRoutes } from './routes/google-auth';
+import { libraryRoutes } from './routes/library';
 import { mcpRoutes } from './routes/mcp';
 import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
@@ -436,6 +437,17 @@ export interface Env {
   ATTACHMENT_PRESIGN_EXPIRY_SECONDS?: string;
   // Timeout for transferring attachments from R2 to workspace VM (default: 60000ms)
   ATTACHMENT_TRANSFER_TIMEOUT_MS?: string;
+  // Project file library (all configurable per constitution Principle XI)
+  LIBRARY_ENCRYPTION_KEY?: string;               // Purpose-specific KEK for file library (falls back to ENCRYPTION_KEY)
+  LIBRARY_UPLOAD_MAX_BYTES?: string;             // Max file size per upload (default: 50MB)
+  LIBRARY_MAX_FILES_PER_PROJECT?: string;        // Max files per project (default: 500)
+  LIBRARY_MAX_TAGS_PER_FILE?: string;            // Max tags per file (default: 20)
+  LIBRARY_MAX_TAG_LENGTH?: string;               // Max tag length in chars (default: 50)
+  LIBRARY_MAX_FILENAME_LENGTH?: string;           // Max filename length in chars (default: 255)
+  LIBRARY_DOWNLOAD_TIMEOUT_MS?: string;          // Download timeout (default: 60000)
+  LIBRARY_LIST_DEFAULT_PAGE_SIZE?: string;       // Default page size for list (default: 50)
+  LIBRARY_LIST_MAX_PAGE_SIZE?: string;           // Max page size for list (default: 200)
+  LIBRARY_KEY_VERSION?: string;                  // KEK version stamped on new encryptions (default: 1)
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -778,6 +790,7 @@ app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
+app.route('/api/projects/:projectId/library', libraryRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/projects', projectDeploymentRoutes);
 app.route('/api/deployment', gcpDeployCallbackRoute);
