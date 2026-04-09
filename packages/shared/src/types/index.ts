@@ -129,6 +129,8 @@ export type {
   TaskSortOrder,
   TaskStatus,
   TaskStatusEvent,
+  TaskTriggerExecutionInfo,
+  TaskTriggerInfo,
   UpdateTaskRequest,
   UpdateTaskStatusRequest,
 } from './task';
@@ -273,6 +275,32 @@ export {
   LIBRARY_FILENAME_PATTERN,
   LIBRARY_TAG_PATTERN,
 } from './library';
+
+// Triggers (Event-Driven Agent Triggers)
+export type {
+  CreateTriggerRequest,
+  CronTemplateContext,
+  CronValidationResult,
+  ListTriggerExecutionsResponse,
+  ListTriggersResponse,
+  Trigger,
+  TriggeredBy,
+  TriggerExecution,
+  TriggerExecutionResponse,
+  TriggerExecutionStatus,
+  TriggerResponse,
+  TriggerSkipReason,
+  TriggerSourceType,
+  TriggerStatus,
+  UpdateTriggerRequest,
+} from './trigger';
+export {
+  TRIGGER_EXECUTION_STATUSES,
+  TRIGGER_SKIP_REASONS,
+  TRIGGER_SOURCE_TYPES,
+  TRIGGER_STATUSES,
+  TRIGGERED_BY_VALUES,
+} from './trigger';
 
 // API Error
 export type { ApiError } from './api-error';

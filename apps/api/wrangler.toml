@@ -32,6 +32,11 @@ VM_AGENT_PORT = "8443"
 NEKO_IMAGE = "ghcr.io/m1k1o/neko/google-chrome:latest"
 NEKO_PRE_PULL = "true"
 TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS = "30000"
+# Triggers (Event-Driven Agent Triggers)
+MAX_TRIGGERS_PER_PROJECT = "10"
+CRON_MIN_INTERVAL_MINUTES = "15"
+CRON_TEMPLATE_MAX_LENGTH = "8000"
+TRIGGER_NAME_MAX_LENGTH = "100"
 
 # D1 Database
 [[d1_databases]]

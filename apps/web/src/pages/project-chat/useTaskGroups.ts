@@ -12,6 +12,8 @@ export interface TaskInfo {
   parentTaskId: string | null;
   status: TaskStatus;
   blocked: boolean;
+  /** What created this task (user, cron, webhook, mcp). */
+  triggeredBy: string;
 }
 
 /**
@@ -47,6 +49,7 @@ export function buildTaskInfoMap(tasks: Task[]): Map<string, TaskInfo> {
       parentTaskId: t.parentTaskId,
       status: t.status,
       blocked: t.blocked ?? false,
+      triggeredBy: t.triggeredBy ?? 'user',
     });
   }
   return map;
