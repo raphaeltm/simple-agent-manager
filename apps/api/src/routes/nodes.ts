@@ -13,7 +13,6 @@ import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import { CreateNodeSchema, jsonValidator, NodeErrorBatchSchema,NodeHeartbeatSchema } from '../schemas';
-import * as projectDataService from '../services/project-data';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import { shouldRefreshCallbackToken, signCallbackToken, signNodeCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
 import { getRuntimeLimits } from '../services/limits';
@@ -26,6 +25,7 @@ import {
 } from '../services/node-agent';
 import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
+import * as projectDataService from '../services/project-data';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 
 const nodesRoutes = new Hono<{ Bindings: Env }>();
