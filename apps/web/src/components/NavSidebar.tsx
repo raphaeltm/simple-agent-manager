@@ -5,6 +5,7 @@ import {
   Bell,
   ChevronDown,
   ChevronRight,
+  Clock,
   FolderKanban,
   FolderOpen,
   Home,
@@ -43,6 +44,7 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
   { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
   { label: 'Notifications', path: 'notifications', icon: <Bell size={18} /> },
+  { label: 'Triggers', path: 'triggers', icon: <Clock size={18} /> },
   { label: 'Settings', path: 'settings', icon: <Settings size={18} /> },
 ];
 
