@@ -5,6 +5,8 @@
  * Downloads fetch decrypted content from R2 and push it to the workspace via VM agent.
  * Uploads fetch file content from the workspace via VM agent and encrypt+store in R2.
  */
+import type { DrizzleD1Database } from 'drizzle-orm/d1';
+
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -29,6 +31,8 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+
+type AppDb = DrizzleD1Database<typeof schema>;
 
 // ─── Configurable defaults (Constitution Principle XI) ──────────────────────
 
@@ -69,11 +73,11 @@ function requireWorkspaceId(
  * Returns null and a JSON-RPC error if the workspace is not found or not running.
  */
 async function resolveWorkspaceVmUrl(
+  db: AppDb,
   env: Env,
   workspaceId: string,
   projectId: string,
 ): Promise<{ vmBaseUrl: string; nodeId: string } | { error: string }> {
-  const db = drizzle(env.DATABASE, { schema });
   const [workspace] = await db
     .select({
       id: schema.workspaces.id,
@@ -99,9 +103,14 @@ async function resolveWorkspaceVmUrl(
     return { error: 'Workspace has no assigned node' };
   }
 
+  const nodeIdLower = workspace.nodeId.toLowerCase();
+  if (!/^[a-z0-9-]+$/.test(nodeIdLower)) {
+    return { error: 'Invalid node ID format' };
+  }
+
   const protocol = env.VM_AGENT_PROTOCOL || 'https';
   const port = env.VM_AGENT_PORT || '8443';
-  const vmBaseUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
+  const vmBaseUrl = `${protocol}://${nodeIdLower}.vm.${env.BASE_DOMAIN}:${port}`;
   return { vmBaseUrl, nodeId: workspace.nodeId };
 }
 
@@ -163,6 +172,14 @@ async function downloadFromWorkspace(
     throw new Error(`VM agent download failed: ${res.status} ${text}`);
   }
 
+  // Guard against oversized responses to avoid OOM in Workers (128 MB heap)
+  const contentLength = parseInt(res.headers.get('Content-Length') ?? '0', 10);
+  const DEFAULT_LIBRARY_UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+  const maxBytes = parsePositiveInt(env.LIBRARY_UPLOAD_MAX_BYTES, DEFAULT_LIBRARY_UPLOAD_MAX_BYTES);
+  if (contentLength > maxBytes) {
+    throw new Error(`File too large: ${contentLength} bytes exceeds maximum ${maxBytes}`);
+  }
+
   const data = await res.arrayBuffer();
   const contentType = res.headers.get('Content-Type') || 'application/octet-stream';
   return { data, contentType };
@@ -187,7 +204,9 @@ export async function handleListLibraryFiles(
     const fileType = typeof params.fileType === 'string' ? params.fileType : undefined;
     const source = params.source === 'user' || params.source === 'agent' ? params.source : undefined;
     const sortBy = params.sortBy as 'createdAt' | 'filename' | 'sizeBytes' | undefined;
-    const limit = typeof params.limit === 'number' ? params.limit : undefined;
+    const limit = typeof params.limit === 'number' && params.limit > 0
+      ? Math.min(Math.floor(params.limit), 200)
+      : undefined;
 
     const result = await listFiles(db, env, tokenData.projectId, {
       tags,
@@ -240,14 +259,14 @@ export async function handleDownloadLibraryFile(
     const db = drizzle(env.DATABASE, { schema });
     const encryptionKey = getEncryptionKey(env);
 
-    // Download and decrypt from R2
-    const { data, file } = await downloadFile(db, env.R2, encryptionKey, tokenData.projectId, fileId);
-
-    // Resolve workspace VM URL
-    const vmResult = await resolveWorkspaceVmUrl(env, tokenData.workspaceId, tokenData.projectId);
+    // Check workspace is reachable first (cheap D1 query) before expensive R2 decrypt
+    const vmResult = await resolveWorkspaceVmUrl(db, env, tokenData.workspaceId, tokenData.projectId);
     if ('error' in vmResult) {
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }
+
+    // Download and decrypt from R2
+    const { data, file } = await downloadFile(db, env.R2, encryptionKey, tokenData.projectId, fileId);
 
     // Determine target path
     const targetDir = typeof params.targetPath === 'string' && params.targetPath.trim()
@@ -311,8 +330,11 @@ export async function handleUploadToLibrary(
   const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string') : undefined;
 
   try {
+    const db = drizzle(env.DATABASE, { schema });
+    const encryptionKey = getEncryptionKey(env);
+
     // Resolve workspace VM URL
-    const vmResult = await resolveWorkspaceVmUrl(env, tokenData.workspaceId, tokenData.projectId);
+    const vmResult = await resolveWorkspaceVmUrl(db, env, tokenData.workspaceId, tokenData.projectId);
     if ('error' in vmResult) {
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }
@@ -330,9 +352,6 @@ export async function handleUploadToLibrary(
     const filename = filePath.trim().split('/').pop() || 'unknown';
 
     const mimeType = contentType;
-
-    const db = drizzle(env.DATABASE, { schema });
-    const encryptionKey = getEncryptionKey(env);
 
     // Upload to library (will throw 409 on duplicate filename)
     const result = await uploadFile(db, env.R2, encryptionKey, env, tokenData.projectId, tokenData.userId, filename, mimeType, data, {
@@ -357,11 +376,11 @@ export async function handleUploadToLibrary(
     // Handle duplicate filename — return structured FILE_EXISTS error
     if (message.includes('already exists')) {
       try {
-        const db = drizzle(env.DATABASE, { schema });
+        const lookupDb = drizzle(env.DATABASE, { schema });
         const filename = filePath.trim().split('/').pop() || 'unknown';
 
         // Look up existing file to return metadata
-        const [existing] = await db
+        const [existing] = await lookupDb
           .select()
           .from(schema.projectFiles)
           .where(
@@ -387,7 +406,12 @@ export async function handleUploadToLibrary(
             }, null, 2) }],
           });
         }
-      } catch {
+      } catch (lookupErr) {
+        log.error('mcp.upload_to_library.exists_lookup_failed', {
+          projectId: tokenData.projectId,
+          filename: filePath.trim().split('/').pop(),
+          error: String(lookupErr),
+        });
         // Fall through to generic error if lookup fails
       }
       return jsonRpcError(requestId, INVALID_PARAMS, message);
@@ -450,7 +474,7 @@ export async function handleReplaceLibraryFile(
     const previousSizeBytes = existingFile.file.sizeBytes;
 
     // Resolve workspace VM URL
-    const vmResult = await resolveWorkspaceVmUrl(env, tokenData.workspaceId, tokenData.projectId);
+    const vmResult = await resolveWorkspaceVmUrl(db, env, tokenData.workspaceId, tokenData.projectId);
     if ('error' in vmResult) {
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }

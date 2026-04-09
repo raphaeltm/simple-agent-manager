@@ -693,8 +693,8 @@ export const MCP_TOOLS = [
   {
     name: 'download_library_file',
     description:
-      'Download a file from the project library into the workspace. The file is decrypted and placed in the .library/ directory ' +
-      '(or a custom path). Use list_library_files first to find the file ID.',
+      'Download a file from the project library into the workspace. The file is decrypted and placed in the configured library directory ' +
+      '(default: .library/, configurable via LIBRARY_MCP_DOWNLOAD_DIR). Use list_library_files first to find the file ID.',
     inputSchema: {
       type: 'object' as const,
       properties: {
