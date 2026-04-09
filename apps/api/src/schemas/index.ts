@@ -79,6 +79,12 @@ export {
   AnalyticsForwardSchema,
 } from './admin';
 
+// Trigger schemas
+export {
+  CreateTriggerSchema,
+  UpdateTriggerSchema,
+} from './triggers';
+
 // Miscellaneous schemas
 export {
   AdminLogQuerySchema,
