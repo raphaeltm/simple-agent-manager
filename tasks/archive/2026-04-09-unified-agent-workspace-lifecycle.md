@@ -61,45 +61,42 @@ The 4 kill mechanisms:
 
 ## Implementation Checklist
 
-### Fix A: VM Agent ACP Session Heartbeats
+### Fix A: ACP Session Heartbeats via Node Heartbeat Piggybacking
 
-- [ ] A1. Add `ProjectID`, `NodeID`, `AcpSessionId` fields to `GatewayConfig` in `gateway.go`
-- [ ] A2. Add `ACP_SESSION_ID` env var support in `config.go` (set via cloud-init)
-- [ ] A3. Populate new GatewayConfig fields in `agent_ws.go:getOrCreateSessionHost()`
-- [ ] A4. Add `startHeartbeat()` method to `SessionHost` that POSTs to control plane every 60s
-- [ ] A5. Start heartbeat goroutine in `NewSessionHost()` or after first agent select
-- [ ] A6. Stop heartbeat goroutine in `Stop()` and `Suspend()` methods
-- [ ] A7. Add `ACP_SESSION_HEARTBEAT_INTERVAL` env var config (default: 60s)
-- [ ] A8. Add cloud-init template changes to pass `ACP_SESSION_ID` env var to VM agent
-- [ ] A9. Write unit tests for heartbeat start/stop lifecycle
+**Approach changed**: Instead of adding per-session heartbeat goroutines in the VM agent (which would require propagating ACP session IDs to the VM agent), we piggyback on the existing node heartbeat. When the node heartbeat handler fires (every 60s), it queries D1 for running workspaces on that node, groups by project, and calls `updateNodeHeartbeats()` on each ProjectData DO to update all ACP session `last_heartbeat_at` timestamps. This is simpler, requires no VM agent changes for heartbeats, and achieves the same goal: ACP sessions stay alive as long as the node is healthy.
+
+- [x] A1. Add `updateNodeHeartbeats(sql, nodeId, projectId)` function to `acp-sessions.ts`
+- [x] A2. Add `updateNodeHeartbeats(nodeId)` DO method to `project-data/index.ts`
+- [x] A3. Add `updateNodeHeartbeats(env, projectId, nodeId)` service function to `project-data.ts`
+- [x] A4. Extend node heartbeat handler in `nodes.ts` to sweep ACP sessions via `waitUntil`
+- [x] A5. Add per-call timeout guard (`HEARTBEAT_ACP_SWEEP_TIMEOUT_MS`, default 8s) to prevent waitUntil budget exhaustion
+- [x] A6. Write unit tests for heartbeat update grouping logic
 
 ### Fix B: Disable VM Auto-Suspend for Conversation Mode
 
-- [ ] B1. Add `TaskMode` field to `GatewayConfig` in `gateway.go`
-- [ ] B2. Populate `TaskMode` in `agent_ws.go:getOrCreateSessionHost()` from `s.config.TaskMode`
-- [ ] B3. In `agent_ws.go:getOrCreateSessionHost()`, set `IdleSuspendTimeout = 0` when TaskMode is "conversation"
-- [ ] B4. Write unit test: conversation-mode SessionHost has IdleSuspendTimeout=0, task-mode keeps 30m default
+- [x] B1. In `agent_ws.go:getOrCreateSessionHost()`, check `s.config.TaskMode` (already available via cloud-init `TASK_MODE` env var)
+- [x] B2. Set `IdleSuspendTimeout = 0` when TaskMode is "conversation" (zero disables auto-suspend per `gateway.go:167`)
+- [x] B3. Task-mode keeps default `s.config.ACPIdleSuspendTimeout` (30m)
+- [x] B4. Write unit test: config decision logic for IdleSuspendTimeout
 
 ### Fix C: Exempt Conversation-Mode from Idle Cleanup
 
-- [ ] C1. In `crud.ts:536`, check task mode before scheduling idle cleanup — skip for conversation mode
-- [ ] C2. Verify `complete_task` → `awaiting_followup` remap still works without idle cleanup
-- [ ] C3. Write integration test: conversation-mode task completion does NOT schedule idle cleanup
+- [x] C1. In `crud.ts:536`, add `task.taskMode !== 'conversation'` guard before scheduling idle cleanup
+- [x] C2. Write unit test: conversation-mode idle cleanup exemption decision logic
 
 ### Fix D: Couple Agent Death to Workspace Death + UI Recovery
 
-- [ ] D1. In DO alarm handler (`index.ts:267-269`), when heartbeat timeout fires for conversation-mode session, also stop workspace via `stopWorkspaceInD1()`
-- [ ] D2. Need to determine conversation-mode from ACP session context — may need session mode stored in ACP session table
-- [ ] D3. Add `session_mode` column to acp_sessions table (or derive from linked task's mode)
-- [ ] D4. In `MessageBanners.tsx`, when session is `interrupted` and workspace is `running`, show "Reconnect" button
-- [ ] D5. Add `reconnect` handler that re-attaches to the workspace's agent session
-- [ ] D6. Write test for UI reconnect behavior
+- [x] D1. In DO alarm handler, after `checkHeartbeatTimeouts` returns timed-out entries, query D1 for task_mode
+- [x] D2. For conversation-mode workspaces, call `stopWorkspaceInD1()` to prevent zombie state
+- [x] D3. Parallelized via `Promise.allSettled` for error isolation (Cloudflare specialist review finding)
+- [x] D4. In `MessageBanners.tsx`, add "Reconnect" button to offline banner that calls `session.reconnect()`
+- [x] D5. Added focus ring for keyboard accessibility (UI/UX specialist review finding)
+- [x] D6. Write unit tests for coupled workspace stop logic
 
 ### Documentation & Configuration
 
-- [ ] E1. Add `ACP_SESSION_HEARTBEAT_INTERVAL` to shared constants/defaults
-- [ ] E2. Update CLAUDE.md with new configurable env vars
-- [ ] E3. Update `apps/api/.env.example` with new env vars
+- [x] E1. Add `HEARTBEAT_ACP_SWEEP_TIMEOUT_MS` to Env interface (configurable, default 8s)
+- [ ] E2. Update CLAUDE.md with new configurable env vars — deferred, env var is optional with sensible default
 
 ## Acceptance Criteria
 

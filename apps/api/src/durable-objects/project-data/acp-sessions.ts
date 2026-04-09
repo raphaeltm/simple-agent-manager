@@ -378,6 +378,12 @@ export function listAcpSessionsByNode(
   return rows.map((row) => parseAcpSessionRow(row));
 }
 
+/**
+ * Check for stale ACP sessions whose heartbeats have expired and transition
+ * them to 'interrupted'. Returns the list of workspace IDs that were affected
+ * so the caller can take additional action (e.g. stopping workspaces for
+ * conversation-mode sessions).
+ */
 export function checkHeartbeatTimeouts(
   sql: SqlStorage,
   env: Env,
@@ -387,7 +393,7 @@ export function checkHeartbeatTimeouts(
     errorMessage?: string;
     metadata?: Record<string, unknown> | null;
   }) => Promise<void>
-): Promise<void> {
+): Promise<Array<{ sessionId: string; workspaceId: string | null }>> {
   const detectionWindow = parseInt(
     env.ACP_SESSION_DETECTION_WINDOW_MS || String(ACP_SESSION_DEFAULTS.DETECTION_WINDOW_MS),
     10
@@ -406,6 +412,7 @@ export function checkHeartbeatTimeouts(
     .map((row) => parseAcpSessionStale(row));
 
   const failures: Array<{ sessionId: string; error: string }> = [];
+  const timedOut: Array<{ sessionId: string; workspaceId: string | null }> = [];
   const promises = staleSessions.map(async (session) => {
     try {
       await transitionFn(session.id, 'interrupted', {
@@ -413,6 +420,7 @@ export function checkHeartbeatTimeouts(
         errorMessage: `Heartbeat timeout: last heartbeat at ${session.lastHeartbeatAt}, cutoff was ${cutoff}`,
         metadata: { detectionWindowMs: detectionWindow, lastHeartbeatAt: session.lastHeartbeatAt, cutoff },
       });
+      timedOut.push({ sessionId: session.id, workspaceId: session.workspaceId });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       log.error('acp_session.heartbeat_timeout_transition_failed', { sessionId: session.id, error: errorMsg });
@@ -423,6 +431,7 @@ export function checkHeartbeatTimeouts(
     if (failures.length > 0) {
       log.error('acp_session.heartbeat_timeout_batch_failures', { failureCount: failures.length, totalStale: staleSessions.length, failures });
     }
+    return timedOut;
   });
 }
 
@@ -464,6 +473,35 @@ export function computeHeartbeatAlarmTime(sql: SqlStorage, env: Env): number | n
   if (earliestHeartbeat === null) return null;
 
   return earliestHeartbeat + detectionWindow;
+}
+
+/**
+ * Update heartbeats for all active ACP sessions assigned to a given node.
+ * Called during node heartbeat processing to keep sessions alive.
+ * Returns the number of sessions updated.
+ */
+export function updateNodeHeartbeats(
+  sql: SqlStorage,
+  nodeId: string,
+  projectId: string | null
+): number {
+  const now = Date.now();
+  const result = sql.exec(
+    `UPDATE acp_sessions SET last_heartbeat_at = ?, updated_at = ?
+     WHERE node_id = ? AND status IN ('assigned', 'running')`,
+    now,
+    now,
+    nodeId
+  );
+  const updated = result.rowsWritten;
+  if (updated > 0) {
+    log.info('acp_session.node_heartbeats_updated', {
+      nodeId,
+      projectId,
+      sessionsUpdated: updated,
+    });
+  }
+  return updated;
 }
 
 export function hasActiveAcpSessions(sql: SqlStorage): boolean {

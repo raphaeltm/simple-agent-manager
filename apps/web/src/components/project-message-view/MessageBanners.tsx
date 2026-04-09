@@ -46,10 +46,18 @@ export function AgentErrorBanner({ session }: { session: AcpSessionHandle }) {
   const isError = session.state === 'error';
 
   if (!isError) {
-    // Not an error state — show generic offline warning
+    // Not an error state — show offline warning with reconnect option
     return (
-      <div role="alert" className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-warning-tint text-warning text-xs">
+      <div role="alert" className="flex items-center justify-center gap-2 px-4 py-1.5 border-b border-border-default bg-warning-tint text-warning text-xs">
         <span>Agent offline — messages will be saved but not processed until the agent reconnects.</span>
+        <button
+          type="button"
+          onClick={() => session.reconnect()}
+          className="px-3 py-1 min-h-[44px] bg-warning text-white text-xs rounded hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)] shrink-0"
+          aria-label="Reconnect to agent"
+        >
+          Reconnect
+        </button>
       </div>
     );
   }

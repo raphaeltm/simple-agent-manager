@@ -532,8 +532,10 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
       ).catch((e) => { log.warn('task.execution_step_activity_failed', { taskId, error: String(e) }); })
     );
 
-    // T034: When agent signals awaiting_followup, start idle cleanup timer
-    if (body.executionStep === 'awaiting_followup' && task.workspaceId) {
+    // T034: When agent signals awaiting_followup, start idle cleanup timer.
+    // Conversation-mode sessions are exempt — the 2-hour workspace idle timeout
+    // is the only kill mechanism for conversation mode (no 15-min idle cleanup).
+    if (body.executionStep === 'awaiting_followup' && task.workspaceId && task.taskMode !== 'conversation') {
       c.executionCtx.waitUntil(
         (async () => {
           // Look up the chat session linked to this workspace

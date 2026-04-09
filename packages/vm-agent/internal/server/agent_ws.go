@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // serverEventAppender adapts the Server's appendNodeEvent method to the
@@ -251,7 +252,14 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.SessionLastPromptManager = s.agentSessions
 	cfg.EventAppender = &serverEventAppender{server: s}
 	cfg.CredentialSyncer = s
-	cfg.IdleSuspendTimeout = s.config.ACPIdleSuspendTimeout
+	// Conversation-mode sessions should NOT be auto-suspended when the viewer
+	// disconnects. The 2-hour workspace idle timeout is the only kill mechanism.
+	// Task-mode sessions keep the default 30-min auto-suspend.
+	if s.config.TaskMode == config.TaskModeConversation {
+		cfg.IdleSuspendTimeout = 0
+	} else {
+		cfg.IdleSuspendTimeout = s.config.ACPIdleSuspendTimeout
+	}
 	cfg.OnSuspend = func(wsID, sessID string) {
 		s.handleAutoSuspend(wsID, sessID)
 	}
