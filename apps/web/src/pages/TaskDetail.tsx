@@ -6,6 +6,7 @@ import type {
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import { Clock } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
@@ -368,6 +369,44 @@ export function TaskDetail() {
                 </p>
               )}
             </section>
+
+            {/* Trigger info — shown when task was created by an automation trigger */}
+            {task.trigger && (
+              <section
+                className="rounded-md p-3 grid gap-1.5"
+                style={{ background: 'color-mix(in srgb, var(--sam-color-info, #3b82f6) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--sam-color-info, #3b82f6) 20%, transparent)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <Clock size={14} style={{ color: 'var(--sam-color-info, #3b82f6)' }} />
+                  <h2 className="sam-type-card-title m-0 text-fg-primary">Triggered by: {task.trigger.name}</h2>
+                </div>
+                {task.trigger.cronHumanReadable && (
+                  <p className="sam-type-secondary m-0 text-fg-muted">
+                    Schedule: {task.trigger.cronHumanReadable}
+                  </p>
+                )}
+                {task.triggerExecution && (
+                  <p className="sam-type-secondary m-0 text-fg-muted">
+                    Run #{task.triggerExecution.sequenceNumber}
+                  </p>
+                )}
+                <div className="flex items-center gap-3 mt-1">
+                  <Link
+                    to={`/projects/${task.projectId}/triggers/${task.trigger.id}`}
+                    className="text-xs font-medium no-underline hover:underline"
+                    style={{ color: 'var(--sam-color-accent-primary)' }}
+                  >
+                    View Trigger
+                  </Link>
+                  <Link
+                    to={`/projects/${task.projectId}/triggers/${task.trigger.id}`}
+                    className="text-xs text-fg-muted no-underline hover:underline"
+                  >
+                    View All Runs
+                  </Link>
+                </div>
+              </section>
+            )}
 
             {/* Output (with audio playback for summaries) */}
             <TaskOutputSection task={task} />

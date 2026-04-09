@@ -92,9 +92,23 @@ function IdeaCard({ idea, sessionCount, onClick }: IdeaCardProps) {
     >
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <h3 className="text-sm font-medium text-fg-primary m-0 line-clamp-1">
-          {idea.title}
-        </h3>
+        <div className="flex items-center gap-1.5">
+          <h3 className="text-sm font-medium text-fg-primary m-0 line-clamp-1 flex-1 min-w-0">
+            {idea.title}
+          </h3>
+          {idea.triggeredBy && idea.triggeredBy !== 'user' && (
+            <span
+              className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0 rounded-full whitespace-nowrap shrink-0"
+              style={{
+                color: 'var(--sam-color-info, #3b82f6)',
+                background: 'color-mix(in srgb, var(--sam-color-info, #3b82f6) 12%, transparent)',
+              }}
+              title="Created by automation trigger"
+            >
+              <Clock size={8} /> AUTO
+            </span>
+          )}
+        </div>
         {idea.description && (
           <p className="text-xs text-fg-muted m-0 mt-0.5 line-clamp-1">
             {idea.description}
