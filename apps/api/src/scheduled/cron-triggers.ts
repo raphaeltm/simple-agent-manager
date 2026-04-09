@@ -15,7 +15,7 @@ import {
   DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
 } from '@simple-agent-manager/shared';
-import { and, count, desc, eq, lte } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, lte } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -52,6 +52,7 @@ export async function runCronTriggerSweep(env: Env): Promise<CronSweepStats> {
   const autoPauseThreshold = parsePositiveInt(env.TRIGGER_AUTO_PAUSE_AFTER_FAILURES, DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES);
 
   // Query all active cron triggers where nextFireAt <= now
+  // Guard: isNotNull prevents NULL nextFireAt rows from being silently excluded by lte()
   const dueTriggers = await db
     .select()
     .from(schema.triggers)
@@ -59,6 +60,7 @@ export async function runCronTriggerSweep(env: Env): Promise<CronSweepStats> {
       and(
         eq(schema.triggers.sourceType, 'cron'),
         eq(schema.triggers.status, 'active'),
+        isNotNull(schema.triggers.nextFireAt),
         lte(schema.triggers.nextFireAt, nowIso)
       )
     )
@@ -106,7 +108,7 @@ async function processTrigger(
   const projectId = trigger.projectId;
 
   // Check consecutive failures — auto-pause if threshold reached
-  const consecutiveFailures = await getConsecutiveFailureCount(db, triggerId);
+  const consecutiveFailures = await getConsecutiveFailureCount(db, triggerId, autoPauseThreshold);
   if (consecutiveFailures >= autoPauseThreshold) {
     log.warn('cron_sweep.auto_pause', { triggerId, projectId, consecutiveFailures, threshold: autoPauseThreshold });
     await db
@@ -271,14 +273,15 @@ async function processTrigger(
  */
 async function getConsecutiveFailureCount(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  triggerId: string
+  triggerId: string,
+  autoPauseThreshold: number
 ): Promise<number> {
   const recentExecs = await db
     .select({ status: schema.triggerExecutions.status })
     .from(schema.triggerExecutions)
     .where(eq(schema.triggerExecutions.triggerId, triggerId))
     .orderBy(desc(schema.triggerExecutions.createdAt))
-    .limit(10);
+    .limit(autoPauseThreshold);
 
   let failures = 0;
   for (const exec of recentExecs) {

@@ -7,7 +7,12 @@ import type {
   TriggerResponse,
   UpdateTriggerRequest,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_CRON_TEMPLATE_MAX_LENGTH } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
+  DEFAULT_TRIGGER_DESCRIPTION_MAX_LENGTH,
+  DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
+  DEFAULT_TRIGGER_NAME_MAX_LENGTH,
+} from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
@@ -235,7 +240,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
               onChange={(e) => setName(e.target.value)}
               placeholder="Daily code review"
               className={`w-full px-3 py-2 rounded-md border border-border-default bg-surface text-fg-primary text-sm ${FOCUS_RING}`}
-              maxLength={100}
+              maxLength={DEFAULT_TRIGGER_NAME_MAX_LENGTH}
             />
           </div>
 
@@ -251,7 +256,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Runs a daily code review on the main branch"
               className={`w-full px-3 py-2 rounded-md border border-border-default bg-surface text-fg-primary text-sm ${FOCUS_RING}`}
-              maxLength={500}
+              maxLength={DEFAULT_TRIGGER_DESCRIPTION_MAX_LENGTH}
             />
           </div>
 
@@ -344,9 +349,9 @@ export const TriggerForm: FC<TriggerFormProps> = ({
                     id="max-concurrent"
                     type="number"
                     min={1}
-                    max={5}
+                    max={DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT}
                     value={maxConcurrent}
-                    onChange={(e) => setMaxConcurrent(Math.min(5, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                    onChange={(e) => setMaxConcurrent(Math.min(DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT, Math.max(1, parseInt(e.target.value, 10) || 1)))}
                     className={`w-20 px-2 py-1.5 rounded-md border border-border-default bg-surface text-fg-primary text-sm ${FOCUS_RING}`}
                   />
                 </div>

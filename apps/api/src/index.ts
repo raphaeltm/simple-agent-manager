@@ -461,6 +461,7 @@ export interface Env {
   TRIGGER_AUTO_PAUSE_AFTER_FAILURES?: string;       // Auto-pause after N consecutive failures (default: 3)
   CRON_SWEEP_ENABLED?: string;                      // Kill switch: "false" to disable cron sweep (default: enabled)
   TRIGGER_NAME_MAX_LENGTH?: string;                 // Max trigger name length (default: 100)
+  TRIGGER_MAX_CONCURRENT_LIMIT?: string;            // Upper bound for maxConcurrent per trigger (default: 10)
 }
 
 const app = new Hono<{ Bindings: Env }>();

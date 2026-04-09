@@ -19,6 +19,8 @@ import {
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
+  DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
+  DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -169,9 +171,10 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   }
 
   // Validate maxConcurrent
+  const maxConcurrentLimit = parsePositiveInt(c.env.TRIGGER_MAX_CONCURRENT_LIMIT, DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT);
   const maxConcurrent = body.maxConcurrent ?? DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT;
-  if (maxConcurrent < 1 || maxConcurrent > 10) {
-    throw errors.badRequest('maxConcurrent must be between 1 and 10');
+  if (maxConcurrent < 1 || maxConcurrent > maxConcurrentLimit) {
+    throw errors.badRequest(`maxConcurrent must be between 1 and ${maxConcurrentLimit}`);
   }
 
   // Compute initial nextFireAt
@@ -369,6 +372,10 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     if (!name) {
       throw errors.badRequest('name cannot be empty');
     }
+    const maxNameLength = parsePositiveInt(c.env.TRIGGER_NAME_MAX_LENGTH, DEFAULT_TRIGGER_NAME_MAX_LENGTH);
+    if (name.length > maxNameLength) {
+      throw errors.badRequest(`name must be ${maxNameLength} characters or less`);
+    }
     if (name !== trigger.name) {
       const [existingName] = await db
         .select({ id: schema.triggers.id })
@@ -387,15 +394,16 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     updates.name = name;
   }
 
-  if (body.description !== undefined) updates.description = body.description;
+  if (body.description !== undefined) updates.description = body.description?.trim() ?? null;
   if (body.skipIfRunning !== undefined) updates.skipIfRunning = body.skipIfRunning;
   if (body.agentProfileId !== undefined) updates.agentProfileId = body.agentProfileId;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
   if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
 
   if (body.maxConcurrent !== undefined) {
-    if (body.maxConcurrent < 1 || body.maxConcurrent > 10) {
-      throw errors.badRequest('maxConcurrent must be between 1 and 10');
+    const maxConcurrentLimit = parsePositiveInt(c.env.TRIGGER_MAX_CONCURRENT_LIMIT, DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT);
+    if (body.maxConcurrent < 1 || body.maxConcurrent > maxConcurrentLimit) {
+      throw errors.badRequest(`maxConcurrent must be between 1 and ${maxConcurrentLimit}`);
     }
     updates.maxConcurrent = body.maxConcurrent;
   }
