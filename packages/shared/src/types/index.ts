@@ -252,5 +252,31 @@ export type {
   RetrySubtaskResponse,
 } from './orchestration';
 
+// Triggers (Event-Driven Agent Triggers)
+export type {
+  CreateTriggerRequest,
+  CronTemplateContext,
+  CronValidationResult,
+  ListTriggerExecutionsResponse,
+  ListTriggersResponse,
+  Trigger,
+  TriggeredBy,
+  TriggerExecution,
+  TriggerExecutionResponse,
+  TriggerExecutionStatus,
+  TriggerResponse,
+  TriggerSkipReason,
+  TriggerSourceType,
+  TriggerStatus,
+  UpdateTriggerRequest,
+} from './trigger';
+export {
+  TRIGGER_EXECUTION_STATUSES,
+  TRIGGER_SKIP_REASONS,
+  TRIGGER_SOURCE_TYPES,
+  TRIGGER_STATUSES,
+  TRIGGERED_BY_VALUES,
+} from './trigger';
+
 // API Error
 export type { ApiError } from './api-error';
