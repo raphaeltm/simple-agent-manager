@@ -132,6 +132,19 @@ describe('MCP create_trigger tool', () => {
     expect(result.error?.message).toContain('promptTemplate is required');
   });
 
+  it('rejects prompt template exceeding max length', async () => {
+    const longTemplate = 'x'.repeat(8001); // Default max is 8000
+    const result = await handleCreateTrigger(
+      'req-1',
+      { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: longTemplate },
+      tokenData,
+      env as Env,
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('characters or less');
+  });
+
   it('rejects invalid cron expression', async () => {
     mockValidateCron.mockReturnValueOnce({ valid: false, error: 'bad expression' });
 
@@ -156,6 +169,26 @@ describe('MCP create_trigger tool', () => {
 
     expect(result.error).toBeDefined();
     expect(result.error?.message).toContain('Invalid timezone');
+  });
+
+  it('rejects agentProfileId not in project', async () => {
+    // agentProfileId lookup: not found
+    mockD1._stmt.first.mockResolvedValueOnce(null);
+
+    const result = await handleCreateTrigger(
+      'req-1',
+      {
+        name: 'Test',
+        cronExpression: '0 9 * * *',
+        promptTemplate: 'Do stuff',
+        agentProfileId: 'nonexistent-profile',
+      },
+      tokenData,
+      env as Env,
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('agentProfileId not found');
   });
 
   it('rejects duplicate trigger name', async () => {
@@ -208,7 +241,11 @@ describe('MCP create_trigger tool', () => {
   });
 
   it('accepts optional fields (agentProfileId, taskMode, vmSizeOverride)', async () => {
+    // agentProfileId lookup: found
+    mockD1._stmt.first.mockResolvedValueOnce({ id: 'profile-1' });
+    // Name uniqueness: no conflict
     mockD1._stmt.first.mockResolvedValueOnce(null);
+    // Count check: below limit
     mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
 
     const result = await handleCreateTrigger(
