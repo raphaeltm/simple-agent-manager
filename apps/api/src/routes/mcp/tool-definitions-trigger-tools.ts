@@ -1,9 +1,8 @@
 /**
  * MCP tool definitions — trigger management tools.
  */
-import type { McpToolDefinition } from './_helpers';
 
-export const TRIGGER_TOOLS: McpToolDefinition[] = [
+export const TRIGGER_TOOLS = [
   {
     name: 'create_trigger',
     description:
