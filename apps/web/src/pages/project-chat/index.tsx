@@ -4,8 +4,8 @@ import { useState } from 'react';
 
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ForkDialog } from '../../components/project/ForkDialog';
-import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { ProjectMessageView } from '../../components/project-message-view';
+import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { ChatInput } from './ChatInput';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
