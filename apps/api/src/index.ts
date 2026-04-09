@@ -22,6 +22,7 @@ import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
 import { adminAnalyticsRoutes } from './routes/admin-analytics';
 import { agentRoutes } from './routes/agent';
+import { libraryRoutes } from './routes/library';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
@@ -436,6 +437,14 @@ export interface Env {
   ATTACHMENT_PRESIGN_EXPIRY_SECONDS?: string;
   // Timeout for transferring attachments from R2 to workspace VM (default: 60000ms)
   ATTACHMENT_TRANSFER_TIMEOUT_MS?: string;
+  // Project file library limits (all configurable per constitution Principle XI)
+  LIBRARY_UPLOAD_MAX_BYTES?: string;             // Max file size per upload (default: 50MB)
+  LIBRARY_MAX_FILES_PER_PROJECT?: string;        // Max files per project (default: 500)
+  LIBRARY_MAX_TAGS_PER_FILE?: string;            // Max tags per file (default: 20)
+  LIBRARY_MAX_TAG_LENGTH?: string;               // Max tag length in chars (default: 50)
+  LIBRARY_DOWNLOAD_TIMEOUT_MS?: string;          // Download timeout (default: 60000)
+  LIBRARY_LIST_DEFAULT_PAGE_SIZE?: string;       // Default page size for list (default: 50)
+  LIBRARY_LIST_MAX_PAGE_SIZE?: string;           // Max page size for list (default: 200)
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -778,6 +787,7 @@ app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
+app.route('/api/projects/:projectId/library', libraryRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/projects', projectDeploymentRoutes);
 app.route('/api/deployment', gcpDeployCallbackRoute);

@@ -910,3 +910,57 @@ export const smokeTestTokens = sqliteTable(
 
 export type SmokeTestToken = typeof smokeTestTokens.$inferSelect;
 export type NewSmokeTestToken = typeof smokeTestTokens.$inferInsert;
+
+// =============================================================================
+// Project File Library (per-project encrypted file storage)
+// =============================================================================
+export const projectFiles = sqliteTable(
+  'project_files',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    filename: text('filename').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    description: text('description'),
+    uploadedBy: text('uploaded_by').notNull(),
+    uploadSource: text('upload_source').notNull().default('user'),
+    uploadSessionId: text('upload_session_id'),
+    uploadTaskId: text('upload_task_id'),
+    replacedAt: text('replaced_at'),
+    replacedBy: text('replaced_by'),
+    status: text('status').notNull().default('ready'),
+    r2Key: text('r2_key').notNull(),
+    extractedTextPreview: text('extracted_text_preview'),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    projectIdx: index('idx_project_files_project_id').on(table.projectId),
+    projectStatusIdx: index('idx_project_files_project_status').on(table.projectId, table.status),
+    projectSourceIdx: index('idx_project_files_project_source').on(table.projectId, table.uploadSource),
+    projectMimeIdx: index('idx_project_files_project_mime').on(table.projectId, table.mimeType),
+    projectFilenameUniq: uniqueIndex('idx_project_files_project_filename').on(table.projectId, table.filename),
+  })
+);
+
+export type ProjectFileRow = typeof projectFiles.$inferSelect;
+export type NewProjectFile = typeof projectFiles.$inferInsert;
+
+export const projectFileTags = sqliteTable(
+  'project_file_tags',
+  {
+    fileId: text('file_id')
+      .notNull()
+      .references(() => projectFiles.id, { onDelete: 'cascade' }),
+    tag: text('tag').notNull(),
+    tagSource: text('tag_source').notNull().default('user'),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.fileId, table.tag] }),
+    tagIdx: index('idx_project_file_tags_tag').on(table.tag),
+  })
+);
+
+export type ProjectFileTagRow = typeof projectFileTags.$inferSelect;
+export type NewProjectFileTag = typeof projectFileTags.$inferInsert;
