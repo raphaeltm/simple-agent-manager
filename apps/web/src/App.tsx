@@ -27,6 +27,7 @@ import { Project } from './pages/Project';
 import { ProjectChat } from './pages/project-chat';
 import { ProjectActivity } from './pages/ProjectActivity';
 import { ProjectCreate } from './pages/ProjectCreate';
+import { ProjectLibrary } from './pages/ProjectLibrary';
 import { ProjectNotifications } from './pages/ProjectNotifications';
 import { Projects } from './pages/Projects';
 import { ProjectSettings } from './pages/ProjectSettings';
@@ -76,6 +77,7 @@ export default function App() {
               <Route index element={<Navigate to="chat" replace />} />
               <Route path="chat" element={<ProjectChat />} />
               <Route path="chat/:sessionId" element={<ProjectChat />} />
+              <Route path="library" element={<ProjectLibrary />} />
               <Route path="ideas" element={<IdeasPage />} />
               <Route path="ideas/:taskId" element={<IdeaDetailPage />} />
               <Route path="tasks" element={<Navigate to="../ideas" replace />} />

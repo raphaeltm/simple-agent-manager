@@ -252,5 +252,27 @@ export type {
   RetrySubtaskResponse,
 } from './orchestration';
 
+// Project File Library
+export type {
+  CreateFileRequest,
+  FileEncryptionMetadata,
+  FileMetadataResponse,
+  FileStatus,
+  FileTagSource,
+  FileUploadSource,
+  ListFilesRequest,
+  ListFilesResponse,
+  ProjectFile,
+  ProjectFileTag,
+  ReplaceFileRequest,
+  UpdateTagsRequest,
+} from './library';
+export {
+  buildLibraryR2Key,
+  LIBRARY_DEFAULTS,
+  LIBRARY_FILENAME_PATTERN,
+  LIBRARY_TAG_PATTERN,
+} from './library';
+
 // API Error
 export type { ApiError } from './api-error';

@@ -37,6 +37,12 @@ import {
   handleUpdateIdea,
 } from './idea-tools';
 import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
+import {
+  handleDownloadLibraryFile,
+  handleListLibraryFiles,
+  handleReplaceLibraryFile,
+  handleUploadToLibrary,
+} from './library-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
@@ -242,6 +248,15 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleGetWorkspaceDiffSummary(requestId, tokenData, c.env));
         case 'report_environment_issue':
           return c.json(await handleReportEnvironmentIssue(requestId, toolArgs, tokenData, c.env));
+        // ─── Project file library tools ─────────────────────────────────
+        case 'list_library_files':
+          return c.json(await handleListLibraryFiles(requestId, toolArgs, tokenData, c.env));
+        case 'download_library_file':
+          return c.json(await handleDownloadLibraryFile(requestId, toolArgs, tokenData, c.env));
+        case 'upload_to_library':
+          return c.json(await handleUploadToLibrary(requestId, toolArgs, tokenData, c.env));
+        case 'replace_library_file':
+          return c.json(await handleReplaceLibraryFile(requestId, toolArgs, tokenData, c.env));
         // ─── Onboarding tools ─────────────────────────────────────────
         case 'get_repo_setup_guide':
           // Synchronous — no async I/O needed for static content
