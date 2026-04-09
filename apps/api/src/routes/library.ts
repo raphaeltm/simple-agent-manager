@@ -80,7 +80,7 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
   }
 
   const filename = (formData['filename'] as string) || file.name || 'unnamed';
-  validateFilename(filename);
+  validateFilename(filename, c.env);
 
   const mimeType = (formData['mimeType'] as string) || file.type || 'application/octet-stream';
   const description = formData['description'] as string | undefined;
@@ -134,7 +134,7 @@ libraryRoutes.put('/:fileId/replace', requireAuth(), requireApproved(), async (c
   }
 
   const filename = (formData['filename'] as string) || file.name || 'unnamed';
-  validateFilename(filename);
+  validateFilename(filename, c.env);
 
   const mimeType = (formData['mimeType'] as string) || file.type || 'application/octet-stream';
   const description = formData['description'] as string | undefined;

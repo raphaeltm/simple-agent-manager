@@ -54,7 +54,7 @@ async function importKek(keyBase64: string, usages: string[]): Promise<CryptoKey
 // Public API
 // ---------------------------------------------------------------------------
 
-const KEY_VERSION = '1';
+const DEFAULT_KEY_VERSION = '1';
 
 /**
  * Encrypt file data using envelope encryption.
@@ -63,10 +63,13 @@ const KEY_VERSION = '1';
  * 2. Encrypt file data with DEK (AES-256-GCM)
  * 3. Wrap (encrypt) the DEK with the platform KEK
  * 4. Return ciphertext + metadata needed for decryption
+ *
+ * @param keyVersion — KEK version identifier (configurable via LIBRARY_KEY_VERSION env var)
  */
 export async function encryptFile(
   data: ArrayBuffer,
-  kekBase64: string
+  kekBase64: string,
+  keyVersion: string = DEFAULT_KEY_VERSION
 ): Promise<{ ciphertext: ArrayBuffer; metadata: FileEncryptionMetadata }> {
   // 1. Generate random DEK
   const dek = (await crypto.subtle.generateKey(
@@ -100,7 +103,7 @@ export async function encryptFile(
       dekIv: bufferToBase64(dekIv.buffer),
       dataIv: bufferToBase64(dataIv.buffer),
       algo: 'AES-256-GCM',
-      keyVersion: KEY_VERSION,
+      keyVersion,
     },
   };
 }

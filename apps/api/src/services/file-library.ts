@@ -63,8 +63,16 @@ export function getMaxTagLength(env: Env): number {
   return parseIntOrDefault(env.LIBRARY_MAX_TAG_LENGTH, LIBRARY_DEFAULTS.MAX_TAG_LENGTH);
 }
 
+export function getMaxFilenameLength(env: Env): number {
+  return parseIntOrDefault(env.LIBRARY_MAX_FILENAME_LENGTH, LIBRARY_DEFAULTS.MAX_FILENAME_LENGTH);
+}
+
 export function getDownloadTimeoutMs(env: Env): number {
   return parseIntOrDefault(env.LIBRARY_DOWNLOAD_TIMEOUT_MS, LIBRARY_DEFAULTS.DOWNLOAD_TIMEOUT_MS);
+}
+
+export function getKeyVersion(env: Env): string {
+  return env.LIBRARY_KEY_VERSION ?? '1';
 }
 
 function getListDefaultPageSize(env: Env): number {
@@ -89,9 +97,10 @@ export function validateTag(tag: string, env: Env): void {
   }
 }
 
-export function validateFilename(filename: string): void {
-  if (!filename || filename.length > 255) {
-    throw errors.badRequest('Filename must be 1-255 characters');
+export function validateFilename(filename: string, env: Env): void {
+  const maxLen = getMaxFilenameLength(env);
+  if (!filename || filename.length > maxLen) {
+    throw errors.badRequest(`Filename must be 1-${maxLen} characters`);
   }
   if (!LIBRARY_FILENAME_PATTERN.test(filename)) {
     throw errors.badRequest('Filename contains invalid characters');
@@ -157,7 +166,7 @@ export async function uploadFile(
   data: ArrayBuffer,
   options: UploadFileOptions = {}
 ): Promise<ProjectFile & { tags: ProjectFileTag[] }> {
-  validateFilename(filename);
+  validateFilename(filename, env);
 
   // Check file size limit
   const maxBytes = getUploadMaxBytes(env);
@@ -202,7 +211,7 @@ export async function uploadFile(
   }
 
   // Encrypt file data
-  const { ciphertext, metadata } = await encryptFile(data, encryptionKey);
+  const { ciphertext, metadata } = await encryptFile(data, encryptionKey, getKeyVersion(env));
 
   const fileId = ulid();
   const r2Key = buildLibraryR2Key(projectId, fileId, filename);
@@ -286,7 +295,7 @@ export async function replaceFile(
   }
 
   // Encrypt new content
-  const { ciphertext, metadata } = await encryptFile(data, encryptionKey);
+  const { ciphertext, metadata } = await encryptFile(data, encryptionKey, getKeyVersion(env));
 
   const oldR2Key = existing[0].r2Key;
   const newR2Key = buildLibraryR2Key(projectId, fileId, filename);

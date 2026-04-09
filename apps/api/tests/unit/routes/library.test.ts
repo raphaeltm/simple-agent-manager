@@ -11,6 +11,7 @@ const mockDownloadFile = vi.hoisted(() => vi.fn());
 const mockDeleteFile = vi.hoisted(() => vi.fn());
 const mockUpdateTags = vi.hoisted(() => vi.fn());
 const mockGetUploadMaxBytes = vi.hoisted(() => vi.fn());
+const mockGetDownloadTimeoutMs = vi.hoisted(() => vi.fn().mockReturnValue(60000));
 const mockValidateFilename = vi.hoisted(() => vi.fn());
 
 // Mock auth middleware
@@ -41,6 +42,7 @@ vi.mock('../../../src/services/file-library', () => ({
   deleteFile: mockDeleteFile,
   updateTags: mockUpdateTags,
   getUploadMaxBytes: mockGetUploadMaxBytes,
+  getDownloadTimeoutMs: mockGetDownloadTimeoutMs,
   validateFilename: mockValidateFilename,
 }));
 
