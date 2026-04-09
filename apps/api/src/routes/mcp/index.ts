@@ -57,6 +57,7 @@ import {
   handleSearchTasks,
   handleUpdateTaskStatus,
 } from './task-tools';
+import { handleCreateTrigger } from './trigger-tools';
 import {
   handleCheckCostEstimate,
   handleExposePort,
@@ -242,6 +243,9 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleGetWorkspaceDiffSummary(requestId, tokenData, c.env));
         case 'report_environment_issue':
           return c.json(await handleReportEnvironmentIssue(requestId, toolArgs, tokenData, c.env));
+        // ─── Trigger management tools ────────────────────────────────
+        case 'create_trigger':
+          return c.json(await handleCreateTrigger(requestId, toolArgs, tokenData, c.env));
         // ─── Onboarding tools ─────────────────────────────────────────
         case 'get_repo_setup_guide':
           // Synchronous — no async I/O needed for static content
