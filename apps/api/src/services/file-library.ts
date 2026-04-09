@@ -126,7 +126,6 @@ function rowToProjectFile(row: schema.ProjectFileRow): ProjectFile {
     replacedAt: row.replacedAt,
     replacedBy: row.replacedBy,
     status: row.status as FileStatus,
-    r2Key: row.r2Key,
     extractedTextPreview: row.extractedTextPreview,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -214,7 +213,7 @@ export async function uploadFile(
   const { ciphertext, metadata } = await encryptFile(data, encryptionKey, getKeyVersion(env));
 
   const fileId = ulid();
-  const r2Key = buildLibraryR2Key(projectId, fileId, filename);
+  const r2Key = buildLibraryR2Key(projectId, fileId);
   const now = new Date().toISOString();
 
   // Store encrypted data in R2 with encryption metadata
@@ -297,20 +296,14 @@ export async function replaceFile(
   // Encrypt new content
   const { ciphertext, metadata } = await encryptFile(data, encryptionKey, getKeyVersion(env));
 
-  const oldR2Key = existing[0].r2Key;
-  const newR2Key = buildLibraryR2Key(projectId, fileId, filename);
+  const r2Key = buildLibraryR2Key(projectId, fileId);
   const now = new Date().toISOString();
 
-  // Upload new encrypted data to R2
-  await r2.put(newR2Key, ciphertext, {
+  // Upload new encrypted data to R2 (overwrites existing object — key is stable)
+  await r2.put(r2Key, ciphertext, {
     customMetadata: metadataToR2CustomMetadata(metadata),
     httpMetadata: { contentType: 'application/octet-stream' },
   });
-
-  // Delete old R2 object if key changed (filename change)
-  if (oldR2Key !== newR2Key) {
-    await r2.delete(oldR2Key);
-  }
 
   // Update D1
   await db
@@ -322,7 +315,7 @@ export async function replaceFile(
       description: options.description !== undefined ? options.description : existing[0].description,
       replacedAt: now,
       replacedBy: userId,
-      r2Key: newR2Key,
+      r2Key: r2Key,
       updatedAt: now,
     })
     .where(eq(schema.projectFiles.id, fileId));
@@ -366,7 +359,9 @@ export async function listFiles(
     conditions.push(like(schema.projectFiles.mimeType, `${filters.mimeType}%`));
   }
   if (filters.search) {
-    conditions.push(like(schema.projectFiles.filename, `%${filters.search}%`));
+    // Escape LIKE wildcards to prevent pattern abuse
+    const escaped = filters.search.replace(/[%_]/g, '\\$&');
+    conditions.push(like(schema.projectFiles.filename, `%${escaped}%`));
   }
   if (filters.cursor) {
     // Cursor-based pagination: files after the cursor ID (by createdAt/id)

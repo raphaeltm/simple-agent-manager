@@ -34,7 +34,7 @@ const libraryRoutes = new Hono<{ Bindings: Env }>();
 // ---------------------------------------------------------------------------
 
 function getEncryptionKey(env: Env): string {
-  const key = env.CREDENTIAL_ENCRYPTION_KEY ?? env.ENCRYPTION_KEY;
+  const key = env.LIBRARY_ENCRYPTION_KEY ?? env.ENCRYPTION_KEY;
   if (!key) {
     throw errors.internal('Encryption key not configured');
   }
@@ -219,16 +219,23 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
     ),
   ]);
 
-  // Sanitize filename for Content-Disposition
-  const safeFilename = file.filename.replace(/[^\x20-\x7E]/g, '_');
+  // Sanitize filename for Content-Disposition (strip non-printable + header-unsafe chars)
+  const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
+
+  // Force safe Content-Type for MIME types that can execute scripts in browsers
+  const DANGEROUS_MIMES = ['text/html', 'application/javascript', 'application/xhtml+xml', 'image/svg+xml', 'text/xml'];
+  const contentType = DANGEROUS_MIMES.includes(file.mimeType.toLowerCase())
+    ? 'application/octet-stream'
+    : file.mimeType;
 
   return new Response(data, {
     status: 200,
     headers: {
-      'Content-Type': file.mimeType,
+      'Content-Type': contentType,
       'Content-Length': String(data.byteLength),
       'Content-Disposition': `attachment; filename="${safeFilename}"`,
       'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
     },
   });
 });

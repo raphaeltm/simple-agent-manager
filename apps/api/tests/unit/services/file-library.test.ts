@@ -6,23 +6,24 @@ import { validateFilename, validateTag } from '../../../src/services/file-librar
 
 describe('file-library contracts', () => {
   describe('buildLibraryR2Key', () => {
-    it('constructs the correct R2 key pattern', () => {
-      const key = buildLibraryR2Key('proj-123', 'file-456', 'report.pdf');
-      expect(key).toBe('library/proj-123/file-456/report.pdf');
-    });
-
-    it('handles filenames with spaces', () => {
-      const key = buildLibraryR2Key('p1', 'f1', 'my document.txt');
-      expect(key).toBe('library/p1/f1/my document.txt');
+    it('constructs the correct R2 key pattern without filename', () => {
+      const key = buildLibraryR2Key('proj-123', 'file-456');
+      expect(key).toBe('library/proj-123/file-456');
     });
 
     it('preserves exact projectId and fileId in path', () => {
       const projectId = '01HXYZ123456';
       const fileId = '01HABCDEFGH';
-      const key = buildLibraryR2Key(projectId, fileId, 'test.txt');
+      const key = buildLibraryR2Key(projectId, fileId);
       expect(key).toContain(projectId);
       expect(key).toContain(fileId);
       expect(key.startsWith('library/')).toBe(true);
+    });
+
+    it('produces stable keys regardless of filename changes', () => {
+      const key1 = buildLibraryR2Key('proj-1', 'file-1');
+      const key2 = buildLibraryR2Key('proj-1', 'file-1');
+      expect(key1).toBe(key2);
     });
   });
 

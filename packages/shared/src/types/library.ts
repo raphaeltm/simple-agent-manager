@@ -29,7 +29,6 @@ export interface ProjectFile {
   replacedAt: string | null;
   replacedBy: string | null;
   status: FileStatus;
-  r2Key: string;
   extractedTextPreview: string | null;
   createdAt: string;
   updatedAt: string;
@@ -125,6 +124,8 @@ export const LIBRARY_DEFAULTS = {
   MAX_TAGS_PER_FILE: 20,
   /** Maximum tag length in characters (default: 50). Env: LIBRARY_MAX_TAG_LENGTH */
   MAX_TAG_LENGTH: 50,
+  /** Maximum filename length in characters (default: 255). Env: LIBRARY_MAX_FILENAME_LENGTH */
+  MAX_FILENAME_LENGTH: 255,
   /** Download timeout in milliseconds (default: 60000). Env: LIBRARY_DOWNLOAD_TIMEOUT_MS */
   DOWNLOAD_TIMEOUT_MS: 60_000,
   /** Default page size for list queries (default: 50). Env: LIBRARY_LIST_DEFAULT_PAGE_SIZE */
@@ -148,6 +149,6 @@ export const LIBRARY_FILENAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._\- ]*$/;
 /**
  * Build the R2 object key for a library file.
  */
-export function buildLibraryR2Key(projectId: string, fileId: string, filename: string): string {
-  return `library/${projectId}/${fileId}/${filename}`;
+export function buildLibraryR2Key(projectId: string, fileId: string): string {
+  return `library/${projectId}/${fileId}`;
 }
