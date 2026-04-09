@@ -36,31 +36,31 @@ Agents running in SAM workspaces need programmatic access to the project file li
 
 ## Implementation Checklist
 
-- [ ] 1. Create `apps/api/src/routes/mcp/library-tools.ts` with 4 tool handlers
-- [ ] 2. Add tool definitions to `tool-definitions.ts` (list_library_files, download_library_file, upload_to_library, replace_library_file)
-- [ ] 3. Register handlers in `index.ts` dispatcher switch
-- [ ] 4. Implement `handleListLibraryFiles` — validate params, call `listFiles`, return metadata
-- [ ] 5. Implement `handleDownloadLibraryFile` — decrypt from R2, upload to workspace via VM agent
-- [ ] 6. Implement `handleUploadToLibrary` — download from workspace via VM agent, encrypt and store via service
-- [ ] 7. Implement `handleReplaceLibraryFile` — download from workspace, replace via service, merge tags
-- [ ] 8. Add `LIBRARY_MCP_DOWNLOAD_DIR` configurable constant (default: `.library/`)
-- [ ] 9. Add helper to resolve workspace node for VM agent calls
-- [ ] 10. Write unit tests for all 4 handlers
-- [ ] 11. Test upload collision → replace flow
-- [ ] 12. Test tag merging on replace
+- [x] 1. Create `apps/api/src/routes/mcp/library-tools.ts` with 4 tool handlers
+- [x] 2. Add tool definitions to `tool-definitions.ts` (list_library_files, download_library_file, upload_to_library, replace_library_file)
+- [x] 3. Register handlers in `index.ts` dispatcher switch
+- [x] 4. Implement `handleListLibraryFiles` — validate params, call `listFiles`, return metadata
+- [x] 5. Implement `handleDownloadLibraryFile` — decrypt from R2, upload to workspace via VM agent
+- [x] 6. Implement `handleUploadToLibrary` — download from workspace via VM agent, encrypt and store via service
+- [x] 7. Implement `handleReplaceLibraryFile` — download from workspace, replace via service, merge tags
+- [x] 8. Add `LIBRARY_MCP_DOWNLOAD_DIR` configurable constant (default: `.library/`)
+- [x] 9. Add helper to resolve workspace node for VM agent calls
+- [x] 10. Write unit tests for all 4 handlers
+- [x] 11. Test upload collision → replace flow
+- [x] 12. Test tag merging on replace
 - [ ] 13. Update CLAUDE.md Recent Changes section
 
 ## Acceptance Criteria
 
-- [ ] `list_library_files` returns filtered file metadata with tags
-- [ ] `download_library_file` decrypts file and transfers to workspace `.library/` directory
-- [ ] `upload_to_library` reads file from workspace, encrypts, stores in library with agent source
-- [ ] `upload_to_library` returns FILE_EXISTS error with existing file metadata on duplicate filename
-- [ ] `replace_library_file` replaces file content, merges tags, preserves original provenance
-- [ ] `replace_library_file` returns FILE_NOT_FOUND error for invalid fileId
-- [ ] All limits configurable via env vars (no hardcoded values)
-- [ ] Unit tests cover all 4 tools including collision and tag merge flows
-- [ ] Session and task IDs auto-attached from MCP context on upload
+- [x] `list_library_files` returns filtered file metadata with tags
+- [x] `download_library_file` decrypts file and transfers to workspace `.library/` directory
+- [x] `upload_to_library` reads file from workspace, encrypts, stores in library with agent source
+- [x] `upload_to_library` returns FILE_EXISTS error with existing file metadata on duplicate filename
+- [x] `replace_library_file` replaces file content, merges tags, preserves original provenance
+- [x] `replace_library_file` returns FILE_NOT_FOUND error for invalid fileId
+- [x] All limits configurable via env vars (no hardcoded values)
+- [x] Unit tests cover all 4 tools including collision and tag merge flows
+- [x] Session and task IDs auto-attached from MCP context on upload
 
 ## References
 

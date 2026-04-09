@@ -311,9 +311,14 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_deployment_status');
       expect(toolNames).toContain('get_workspace_diff_summary');
       expect(toolNames).toContain('report_environment_issue');
+      // Project file library tools
+      expect(toolNames).toContain('list_library_files');
+      expect(toolNames).toContain('download_library_file');
+      expect(toolNames).toContain('upload_to_library');
+      expect(toolNames).toContain('replace_library_file');
       // Onboarding tools
       expect(toolNames).toContain('get_repo_setup_guide');
-      expect(body.result.tools).toHaveLength(42);
+      expect(body.result.tools).toHaveLength(46);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
