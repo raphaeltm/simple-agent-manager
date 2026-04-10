@@ -1,7 +1,6 @@
+import { Spinner } from '@simple-agent-manager/ui';
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Outlet,Route, Routes } from 'react-router';
-
-import { Spinner } from '@simple-agent-manager/ui';
 
 import { AppShell } from './components/AppShell';
 import { AuthProvider } from './components/AuthProvider';
@@ -11,7 +10,6 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 import { ToastProvider } from './hooks/useToast';
-
 // Eager imports — frequently visited routes for perceived performance
 import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';

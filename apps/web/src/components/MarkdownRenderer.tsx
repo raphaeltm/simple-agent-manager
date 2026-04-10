@@ -1,6 +1,4 @@
 import DOMPurify from 'dompurify';
-
-import { RouteErrorBoundary } from './RouteErrorBoundary';
 import mermaid from 'mermaid';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
@@ -14,6 +12,8 @@ import {
 } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+import { RouteErrorBoundary } from './RouteErrorBoundary';
 
 // ---------- Mermaid Initialization ----------
 

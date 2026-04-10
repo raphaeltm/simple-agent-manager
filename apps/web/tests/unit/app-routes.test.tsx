@@ -101,18 +101,19 @@ function renderAt(path: string) {
 }
 
 describe('App routes', () => {
-  it('routes /projects to the Projects page', () => {
+  it('routes /projects to the Projects page', async () => {
     renderAt('/projects');
 
-    expect(screen.getByTestId('projects-page')).toBeInTheDocument();
+    // Projects is an eager import, renders immediately
+    expect(await screen.findByTestId('projects-page')).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-page')).not.toBeInTheDocument();
   });
 
-  it('routes /projects/:id/tasks/:taskId to the task detail page nested inside project', () => {
+  it('routes /projects/:id/tasks/:taskId to the task detail page nested inside project', async () => {
     renderAt('/projects/proj-1/tasks/task-1');
 
-    // TaskDetail is now a child route of Project, so both should be present
-    expect(screen.getByTestId('project-detail-page')).toBeInTheDocument();
-    expect(screen.getByTestId('task-detail-page')).toBeInTheDocument();
+    // Project is eager, TaskDetail is lazy — wait for both to render
+    expect(await screen.findByTestId('project-detail-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('task-detail-page')).toBeInTheDocument();
   });
 });
