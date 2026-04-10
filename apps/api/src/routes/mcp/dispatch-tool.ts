@@ -374,7 +374,7 @@ export async function handleDispatchTask(
     taskId, tokenData.projectId, tokenData.userId, tokenData.taskId,
     taskTitle, fullDescription, priority, newDepth, branchName,
     tokenData.userId,
-    resolvedTaskMode, agentProfileId ?? null,
+    resolvedTaskMode, resolvedProfile?.profileId ?? null,
     now, now,
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,
