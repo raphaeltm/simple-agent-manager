@@ -1048,6 +1048,7 @@ describe('MCP Routes', () => {
       defaultWorkspaceProfile: null,
       defaultProvider: null,
       defaultAgentType: null,
+      defaultLocation: null,
     };
 
     function setupHappyPathMocks() {
@@ -1504,6 +1505,8 @@ describe('MCP Routes', () => {
           taskMode: 'task',
           workspaceProfile: 'lightweight',
           agentType: 'claude-code',
+          provider: 'hetzner',
+          vmLocation: 'fsn1',
         },
       }));
 
@@ -1516,6 +1519,8 @@ describe('MCP Routes', () => {
       expect(startInput.config.taskMode).toBe('task');
       expect(startInput.config.workspaceProfile).toBe('lightweight');
       expect(startInput.config.agentType).toBe('claude-code');
+      expect(startInput.config.cloudProvider).toBe('hetzner');
+      expect(startInput.config.vmLocation).toBe('fsn1');
     });
 
     it('should dispatch with minimal args (backward compatibility)', async () => {
@@ -1541,6 +1546,100 @@ describe('MCP Routes', () => {
       expect(startInput.config.model).toBeNull();
       expect(startInput.config.permissionMode).toBeNull();
       expect(startInput.config.systemPromptAppend).toBeNull();
+      expect(startInput.config.cloudProvider).toBeNull();
+    });
+
+    it('should reject provider/location mismatch', async () => {
+      // Full happy-path mocks — the cross-validation happens after project load
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Deploy to scaleway',
+          provider: 'scaleway',
+          vmLocation: 'nbg1', // Hetzner-only location
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain("not valid for provider 'scaleway'");
+    });
+
+    it('should infer taskMode=conversation when workspaceProfile=lightweight and no explicit taskMode', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Quick lightweight task',
+          workspaceProfile: 'lightweight',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
+      expect(startInput.config.taskMode).toBe('conversation');
+      expect(startInput.config.workspaceProfile).toBe('lightweight');
+    });
+
+    it('should pass provider and vmLocation to TaskRunner DO', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Deploy in Falkenstein',
+          provider: 'hetzner',
+          vmLocation: 'fsn1',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
+      expect(startInput.config.cloudProvider).toBe('hetzner');
+      expect(startInput.config.vmLocation).toBe('fsn1');
+    });
+
+    it('should use explicit vmSize over project default', async () => {
+      // Set up with a project that has defaultVmSize='small'
+      const projectWithDefaults = { ...mockProject, defaultVmSize: 'small' };
+      mockD1._stmt.all.mockResolvedValue({ results: [projectWithDefaults] });
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
+        .mockResolvedValueOnce([[0]])  // child count
+        .mockResolvedValueOnce([[0]])  // active dispatched count
+        .mockResolvedValueOnce([['cred-1']])  // credential
+        .mockResolvedValueOnce([Object.values(projectWithDefaults)]) // project (if raw)
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
+      mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Need a big VM',
+          vmSize: 'large',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      // Explicit 'large' should override project default 'small'
+      const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
+      expect(startInput.config.vmSize).toBe('large');
     });
   });
 
