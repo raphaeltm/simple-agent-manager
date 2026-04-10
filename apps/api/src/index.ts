@@ -59,7 +59,6 @@ import { runObservabilityPurge } from './scheduled/observability-purge';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken } from './services/jwt';
-import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';

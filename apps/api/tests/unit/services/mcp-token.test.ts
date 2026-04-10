@@ -13,12 +13,11 @@ describe('MCP Token Service', () => {
   });
 
   describe('generateMcpToken', () => {
-    it('should generate a valid UUID format token', async () => {
+    it('should generate a valid base64url token (256-bit entropy)', async () => {
       const { generateMcpToken } = await import('../../../src/services/mcp-token');
       const token = generateMcpToken();
-      expect(token).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-      );
+      // 32 bytes → 43 base64url chars without padding
+      expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     });
 
     it('should generate unique tokens', async () => {
