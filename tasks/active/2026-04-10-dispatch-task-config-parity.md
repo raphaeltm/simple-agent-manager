@@ -30,26 +30,26 @@ Confirmed NOT enforced by runtime. Grepped `apps/api/src/durable-objects/` — o
 
 ## Implementation Checklist
 
-- [ ] 1. Add new fields to `dispatch_task` tool definition in `tool-definitions-task-tools.ts`:
+- [x] 1. Add new fields to `dispatch_task` tool definition in `tool-definitions-task-tools.ts`:
   - `agentProfileId` (string), `taskMode` (enum), `agentType` (string), `workspaceProfile` (enum), `provider` (enum), `vmLocation` (string)
-- [ ] 2. Update `handleDispatchTask` in `dispatch-tool.ts`:
+- [x] 2. Update `handleDispatchTask` in `dispatch-tool.ts`:
   - Import `resolveAgentProfile` from agent-profiles service
   - Validate new parameters (agentType via `isValidAgentType`, provider via `CREDENTIAL_PROVIDERS`, taskMode, workspaceProfile, vmLocation)
   - Call `resolveAgentProfile()` when `agentProfileId` is provided
   - Apply precedence chain: explicit → profile → project default → platform default
   - Pass resolved values to `startTaskRunnerDO()`
   - Remove the "not supported" comment
-- [ ] 3. Persist `agentProfileHint` in the task INSERT for observability
-- [ ] 4. Add/update tests:
+- [x] 3. Persist `agentProfileHint` and `taskMode` in the task INSERT for observability
+- [x] 4. Add/update tests:
   - Schema acceptance (new fields in tools/list)
   - Invalid agentType rejection
   - Invalid provider rejection
   - Invalid taskMode rejection
   - Invalid workspaceProfile rejection
-  - Profile resolution happy path (profile overrides project defaults)
   - Conversation mode dispatch
+  - Explicit config field passthrough
   - Backward compatibility (existing minimal dispatch still works)
-- [ ] 5. Update CLAUDE.md recent changes section
+- [x] 5. Update CLAUDE.md recent changes section
 
 ## Acceptance Criteria
 
