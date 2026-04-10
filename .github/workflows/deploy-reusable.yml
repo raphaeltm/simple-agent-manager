@@ -18,7 +18,7 @@ on:
 
 env:
   NODE_VERSION: '22'
-  GO_VERSION: '1.22'
+  GO_VERSION: '1.24'
 
 jobs:
   validate:
@@ -30,43 +30,56 @@ jobs:
     steps:
       - name: Check Required Configuration
         id: check
+        env:
+          HAS_BASE_DOMAIN: ${{ vars.BASE_DOMAIN != '' }}
+          HAS_CF_API_TOKEN: ${{ secrets.CF_API_TOKEN != '' }}
+          HAS_CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID != '' }}
+          HAS_CF_ZONE_ID: ${{ secrets.CF_ZONE_ID != '' }}
+          HAS_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID != '' }}
+          HAS_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY != '' }}
+          HAS_PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE != '' }}
+          HAS_GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID != '' }}
+          HAS_GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET != '' }}
+          HAS_GH_APP_ID: ${{ secrets.GH_APP_ID != '' }}
+          HAS_GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY != '' }}
+          HAS_GH_APP_SLUG: ${{ secrets.GH_APP_SLUG != '' }}
         run: |
           MISSING=""
 
-          if [ -z "${{ vars.BASE_DOMAIN }}" ]; then
+          if [ "$HAS_BASE_DOMAIN" != "true" ]; then
             MISSING="$MISSING\n  - vars.BASE_DOMAIN"
           fi
-          if [ -z "${{ secrets.CF_API_TOKEN }}" ]; then
+          if [ "$HAS_CF_API_TOKEN" != "true" ]; then
             MISSING="$MISSING\n  - secrets.CF_API_TOKEN"
           fi
-          if [ -z "${{ secrets.CF_ACCOUNT_ID }}" ]; then
+          if [ "$HAS_CF_ACCOUNT_ID" != "true" ]; then
             MISSING="$MISSING\n  - secrets.CF_ACCOUNT_ID"
           fi
-          if [ -z "${{ secrets.CF_ZONE_ID }}" ]; then
+          if [ "$HAS_CF_ZONE_ID" != "true" ]; then
             MISSING="$MISSING\n  - secrets.CF_ZONE_ID"
           fi
-          if [ -z "${{ secrets.R2_ACCESS_KEY_ID }}" ]; then
+          if [ "$HAS_R2_ACCESS_KEY_ID" != "true" ]; then
             MISSING="$MISSING\n  - secrets.R2_ACCESS_KEY_ID"
           fi
-          if [ -z "${{ secrets.R2_SECRET_ACCESS_KEY }}" ]; then
+          if [ "$HAS_R2_SECRET_ACCESS_KEY" != "true" ]; then
             MISSING="$MISSING\n  - secrets.R2_SECRET_ACCESS_KEY"
           fi
-          if [ -z "${{ secrets.PULUMI_CONFIG_PASSPHRASE }}" ]; then
+          if [ "$HAS_PULUMI_CONFIG_PASSPHRASE" != "true" ]; then
             MISSING="$MISSING\n  - secrets.PULUMI_CONFIG_PASSPHRASE"
           fi
-          if [ -z "${{ secrets.GH_CLIENT_ID }}" ]; then
+          if [ "$HAS_GH_CLIENT_ID" != "true" ]; then
             MISSING="$MISSING\n  - secrets.GH_CLIENT_ID"
           fi
-          if [ -z "${{ secrets.GH_CLIENT_SECRET }}" ]; then
+          if [ "$HAS_GH_CLIENT_SECRET" != "true" ]; then
             MISSING="$MISSING\n  - secrets.GH_CLIENT_SECRET"
           fi
-          if [ -z "${{ secrets.GH_APP_ID }}" ]; then
+          if [ "$HAS_GH_APP_ID" != "true" ]; then
             MISSING="$MISSING\n  - secrets.GH_APP_ID"
           fi
-          if [ -z "${{ secrets.GH_APP_PRIVATE_KEY }}" ]; then
+          if [ "$HAS_GH_APP_PRIVATE_KEY" != "true" ]; then
             MISSING="$MISSING\n  - secrets.GH_APP_PRIVATE_KEY"
           fi
-          if [ -z "${{ secrets.GH_APP_SLUG }}" ]; then
+          if [ "$HAS_GH_APP_SLUG" != "true" ]; then
             MISSING="$MISSING\n  - secrets.GH_APP_SLUG"
           fi
 
@@ -250,10 +263,12 @@ jobs:
         run: |
           echo "Reading encryption key..."
           ENCRYPTION_KEY=$(pulumi stack output encryptionKey --show-secrets 2>/dev/null || echo "")
+          if [ -n "$ENCRYPTION_KEY" ]; then echo "::add-mask::$ENCRYPTION_KEY"; fi
           echo "encryption_key=$ENCRYPTION_KEY" >> $GITHUB_OUTPUT
 
           echo "Reading JWT private key..."
           JWT_PRIVATE_KEY=$(pulumi stack output jwtPrivateKey --show-secrets 2>/dev/null || echo "")
+          if [ -n "$JWT_PRIVATE_KEY" ]; then echo "::add-mask::$JWT_PRIVATE_KEY"; fi
           DELIMITER="EOF_PRIVATE_$(date +%s)"
           echo "jwt_private_key<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$JWT_PRIVATE_KEY" >> $GITHUB_OUTPUT
@@ -261,6 +276,7 @@ jobs:
 
           echo "Reading JWT public key..."
           JWT_PUBLIC_KEY=$(pulumi stack output jwtPublicKey --show-secrets 2>/dev/null || echo "")
+          if [ -n "$JWT_PUBLIC_KEY" ]; then echo "::add-mask::$JWT_PUBLIC_KEY"; fi
           DELIMITER="EOF_PUBLIC_$(date +%s)"
           echo "jwt_public_key<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$JWT_PUBLIC_KEY" >> $GITHUB_OUTPUT
@@ -268,6 +284,7 @@ jobs:
 
           echo "Reading Origin CA certificate..."
           ORIGIN_CA_CERT=$(pulumi stack output originCaCertPem --show-secrets 2>/dev/null || echo "")
+          if [ -n "$ORIGIN_CA_CERT" ]; then echo "::add-mask::$ORIGIN_CA_CERT"; fi
           DELIMITER="EOF_CERT_$(date +%s)"
           echo "origin_ca_cert<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$ORIGIN_CA_CERT" >> $GITHUB_OUTPUT
@@ -275,6 +292,7 @@ jobs:
 
           echo "Reading Origin CA key..."
           ORIGIN_CA_KEY=$(pulumi stack output originCaKeyPem --show-secrets 2>/dev/null || echo "")
+          if [ -n "$ORIGIN_CA_KEY" ]; then echo "::add-mask::$ORIGIN_CA_KEY"; fi
           DELIMITER="EOF_CAKEY_$(date +%s)"
           echo "origin_ca_key<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$ORIGIN_CA_KEY" >> $GITHUB_OUTPUT
@@ -588,11 +606,13 @@ jobs:
 
       - name: Security Keys Status
         if: ${{ inputs.dry_run != true }}
+        env:
+          HAS_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY != '' }}
         run: |
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Security Keys" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -n "${{ secrets.ENCRYPTION_KEY }}" ]; then
+          if [ "$HAS_ENCRYPTION_KEY" = "true" ]; then
             echo "Using keys from **GitHub Secrets** (backwards compatibility mode)." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "To migrate to automatic persistence via Pulumi state:" >> $GITHUB_STEP_SUMMARY

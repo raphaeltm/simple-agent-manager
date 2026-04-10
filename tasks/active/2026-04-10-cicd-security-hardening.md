@@ -33,13 +33,13 @@ Multiple security issues in GitHub Actions workflows:
 
 ## Implementation Checklist
 
-- [ ] 1. Mask secrets in deploy-reusable.yml before writing to GITHUB_OUTPUT (5 secrets)
-- [ ] 2. Fix shell expansion of secrets in deploy-reusable.yml (validate step lines 36-71, security keys status line 595)
-- [ ] 3. Add `permissions: { contents: read }` to ci.yml, deploy.yml, teardown.yml, e2e-smoke.yml
-- [ ] 4. Add concurrency group to ci.yml
-- [ ] 5. Add npm and github-actions ecosystems to .github/dependabot.yml
-- [ ] 6. Remove `id-token: write` from claude.yml
-- [ ] 7. Update Go version to 1.24 in ci.yml and deploy-reusable.yml
+- [x] 1. Mask secrets in deploy-reusable.yml before writing to GITHUB_OUTPUT (5 secrets)
+- [x] 2. Fix shell expansion of secrets in deploy-reusable.yml (validate step lines 36-71, security keys status line 595)
+- [x] 3. Add `permissions: { contents: read }` to ci.yml, deploy.yml, teardown.yml, e2e-smoke.yml
+- [x] 4. Add concurrency group to ci.yml
+- [x] 5. Add npm and github-actions ecosystems to .github/dependabot.yml
+- [x] 6. Remove `id-token: write` from claude.yml
+- [x] 7. Update Go version to 1.24 in ci.yml and deploy-reusable.yml
 
 ## Acceptance Criteria
 
