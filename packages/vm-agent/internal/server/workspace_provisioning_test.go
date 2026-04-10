@@ -93,7 +93,6 @@ func TestRecoverWorkspaceRuntimeUsesRuntimeConfig(t *testing.T) {
 			ControlPlaneURL: controlPlane.URL,
 		},
 		workspaces: map[string]*WorkspaceRuntime{runtime.ID: runtime},
-		httpClient: &http.Client{},
 	}
 
 	if err := s.recoverWorkspaceRuntime(context.Background(), runtime); err != nil {
@@ -207,7 +206,6 @@ func TestProvisionWorkspaceRuntimeAppliesDetectedContainerUser(t *testing.T) {
 		},
 		workspaces:      map[string]*WorkspaceRuntime{runtime.ID: runtime},
 		workspaceEvents: map[string][]EventRecord{},
-		httpClient:      &http.Client{},
 	}
 
 	if _, err := s.provisionWorkspaceRuntime(context.Background(), runtime); err != nil {
@@ -277,7 +275,6 @@ func TestRecoverWorkspaceRuntimeHydratesMetadataAndAdoptsLegacyLayout(t *testing
 			PTYOutputBufferSize: 1024,
 		},
 		workspaces: map[string]*WorkspaceRuntime{runtime.ID: runtime},
-		httpClient: &http.Client{},
 	}
 
 	if err := s.recoverWorkspaceRuntime(context.Background(), runtime); err != nil {
@@ -357,7 +354,6 @@ func TestRecoverWorkspaceRuntimeAdoptsLegacyLayoutFromBaseWorkspaceDir(t *testin
 			PTYOutputBufferSize: 1024,
 		},
 		workspaces: map[string]*WorkspaceRuntime{runtime.ID: runtime},
-		httpClient: &http.Client{},
 	}
 
 	if err := s.recoverWorkspaceRuntime(context.Background(), runtime); err != nil {
@@ -484,7 +480,6 @@ func TestRecoverWorkspaceRuntimePropagatesFallbackFlag(t *testing.T) {
 			ControlPlaneURL: controlPlane.URL,
 		},
 		workspaces: map[string]*WorkspaceRuntime{runtime.ID: runtime},
-		httpClient: &http.Client{},
 	}
 
 	// recoverWorkspaceRuntime uses the mock variable prepareWorkspaceForRuntime

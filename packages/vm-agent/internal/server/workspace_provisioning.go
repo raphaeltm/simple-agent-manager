@@ -246,7 +246,7 @@ func (s *Server) fetchWorkspaceRuntimeMetadata(
 	}
 	req.Header.Set("Authorization", "Bearer "+effectiveToken)
 
-	res, err := s.httpClient.Do(req)
+	res, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("runtime metadata request failed: %w", err)
 	}

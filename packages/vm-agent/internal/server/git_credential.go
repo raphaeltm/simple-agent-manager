@@ -74,7 +74,7 @@ func (s *Server) fetchGitTokenForWorkspace(ctx context.Context, workspaceID, cal
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+effectiveToken)
 
-	res, err := s.httpClient.Do(req)
+	res, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("git-token request failed: %w", err)
 	}

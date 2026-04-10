@@ -76,7 +76,7 @@ func (s *Server) sendNodeReady() {
 	}
 	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
 		slog.Error("Node ready callback failed", "error", err)
 		return
@@ -131,7 +131,7 @@ func (s *Server) sendNodeHeartbeat() {
 	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
 		slog.Error("Node heartbeat failed", "error", err)
 		return
@@ -202,7 +202,7 @@ func (s *Server) retryPendingReadyCallbacks() {
 		req.Header.Set("Authorization", "Bearer "+p.CallbackToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := (&http.Client{Timeout: s.config.WorkspaceReadyCallbackTimeout}).Do(req)
+		resp, err := s.controlPlaneHTTPClient(s.config.WorkspaceReadyCallbackTimeout).Do(req)
 		if err != nil {
 			slog.Warn("Workspace-ready retry failed (will try again on next heartbeat)",
 				"workspace", p.WorkspaceID, "error", err)

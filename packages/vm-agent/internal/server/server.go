@@ -85,6 +85,20 @@ type cachedWorktreeList struct {
 	expiresAt time.Time
 }
 
+func (s *Server) controlPlaneHTTPClient(timeout time.Duration) *http.Client {
+	if timeout <= 0 && s.config != nil {
+		timeout = s.config.HTTPCallbackTimeout
+	}
+
+	if s.httpClient != nil {
+		if timeout <= 0 || s.httpClient.Timeout == timeout {
+			return s.httpClient
+		}
+	}
+
+	return &http.Client{Timeout: timeout}
+}
+
 type WorkspaceRuntime struct {
 	ID                  string
 	Repository          string
@@ -1088,7 +1102,7 @@ func (s *Server) postTaskCallback(callbackURL, taskID string, body map[string]in
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
 		slog.Error("Task callback: request failed", "error", err, "url", callbackURL)
 		return
