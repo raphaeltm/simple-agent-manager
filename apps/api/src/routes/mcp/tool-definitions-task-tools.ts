@@ -74,6 +74,32 @@ export const TASK_LIFECYCLE_TOOLS = [
           type: 'string',
           description: 'Git branch for the new workspace to check out. Defaults to the project\'s default branch (usually main). Only set this if you have already pushed the branch to the remote.',
         },
+        agentProfileId: {
+          type: 'string',
+          description: 'Agent profile ID or name to use. Profile settings (model, permissionMode, agentType, vmSize, etc.) override project defaults but are overridden by explicit task-level fields.',
+        },
+        taskMode: {
+          type: 'string',
+          description: 'Task execution mode. "task" (default): agent pushes, creates PR, calls complete_task. "conversation": agent responds conversationally, human controls lifecycle.',
+          enum: ['task', 'conversation'],
+        },
+        agentType: {
+          type: 'string',
+          description: 'Agent type to use (e.g., "claude-code", "openai-codex"). Defaults to profile or project default.',
+        },
+        workspaceProfile: {
+          type: 'string',
+          description: 'Workspace provisioning profile. "default" includes full devcontainer build. "lightweight" skips it for faster startup.',
+          enum: ['default', 'lightweight'],
+        },
+        provider: {
+          type: 'string',
+          description: 'Cloud provider for auto-provisioned nodes (e.g., "hetzner", "scaleway", "gcp"). Defaults to profile or project default.',
+        },
+        vmLocation: {
+          type: 'string',
+          description: 'VM location/datacenter. Must be valid for the selected provider. Defaults to profile or project default.',
+        },
       },
       required: ['description'],
       additionalProperties: false,
