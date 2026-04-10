@@ -1,7 +1,7 @@
 // Constants barrel — named re-exports only (no `export *`)
 
 // VM Sizes
-export { VM_SIZE_CONFIG,VM_SIZE_LABELS } from './vm-sizes';
+export { VM_SIZE_LABELS } from './vm-sizes';
 
 // Providers & Locations
 export type { LocationMeta,ProviderHelpMeta } from './providers';

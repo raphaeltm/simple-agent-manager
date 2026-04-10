@@ -35,7 +35,7 @@ export interface TerminalSession {
   websocket?: WebSocket;
 
   /** Associated xterm.js instance reference */
-  terminalInstance?: any; // Will be Terminal type from xterm
+  terminalInstance?: import('@xterm/xterm').Terminal;
 
   /** Server-assigned session ID for reconnection matching */
   serverSessionId?: string;

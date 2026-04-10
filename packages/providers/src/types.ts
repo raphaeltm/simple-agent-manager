@@ -129,7 +129,7 @@ export interface Provider {
  * Provider configuration — discriminated union per provider type.
  * Accepts explicit credentials; MUST NOT access process.env.
  */
-export type ProviderConfig = HetznerProviderConfig | UpCloudProviderConfig | ScalewayProviderConfig | GcpProviderConfig;
+export type ProviderConfig = HetznerProviderConfig | ScalewayProviderConfig | GcpProviderConfig;
 
 export interface HetznerProviderConfig {
   provider: 'hetzner';
@@ -139,12 +139,6 @@ export interface HetznerProviderConfig {
   placementRetryDelayMs?: number;
   /** Whether to try other locations after primary fails (default: true) */
   placementFallbackEnabled?: boolean;
-}
-
-export interface UpCloudProviderConfig {
-  provider: 'upcloud';
-  username: string;
-  password: string;
 }
 
 export interface ScalewayProviderConfig {

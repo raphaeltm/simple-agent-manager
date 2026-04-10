@@ -1,3 +1,5 @@
+import type { AgentPermissionMode } from '../types';
+
 // =============================================================================
 // Agent Settings
 // =============================================================================
@@ -7,7 +9,7 @@
 export const VALID_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'] as const;
 
 /** Human-readable labels for permission modes */
-export const AGENT_PERMISSION_MODE_LABELS: Record<string, string> = {
+export const AGENT_PERMISSION_MODE_LABELS: Record<AgentPermissionMode, string> = {
   default: 'Default',
   acceptEdits: 'Accept Edits',
   plan: 'Plan Mode',
@@ -16,7 +18,7 @@ export const AGENT_PERMISSION_MODE_LABELS: Record<string, string> = {
 };
 
 /** Human-readable descriptions for permission modes */
-export const AGENT_PERMISSION_MODE_DESCRIPTIONS: Record<string, string> = {
+export const AGENT_PERMISSION_MODE_DESCRIPTIONS: Record<AgentPermissionMode, string> = {
   default: 'Standard behavior, prompts for dangerous operations',
   acceptEdits: 'Auto-accept file edit operations',
   plan: 'Planning mode, no actual tool execution',

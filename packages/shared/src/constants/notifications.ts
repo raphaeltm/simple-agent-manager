@@ -1,3 +1,5 @@
+import type { NotificationType, NotificationUrgency } from '../types';
+
 // =============================================================================
 // Notification Defaults (Constitution Principle XI — all configurable)
 // =============================================================================
@@ -15,7 +17,7 @@ export const DEFAULT_NOTIFICATION_PAGE_SIZE = 50;
 export const MAX_NOTIFICATION_PAGE_SIZE = 100;
 
 /** Default urgency mapping for each notification type */
-export const NOTIFICATION_TYPE_URGENCY: Record<string, 'high' | 'medium' | 'low'> = {
+export const NOTIFICATION_TYPE_URGENCY: Record<NotificationType, NotificationUrgency> = {
   task_complete: 'medium',
   needs_input: 'high',
   error: 'high',

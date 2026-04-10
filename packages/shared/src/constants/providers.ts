@@ -1,9 +1,11 @@
+import type { CredentialProvider } from '../types';
+
 // =============================================================================
 // Provider Display Labels
 // =============================================================================
 
 /** Human-readable display labels for credential providers. */
-export const PROVIDER_LABELS: Record<string, string> = {
+export const PROVIDER_LABELS: Record<CredentialProvider, string> = {
   hetzner: 'Hetzner',
   scaleway: 'Scaleway',
   gcp: 'Google Cloud',
@@ -16,7 +18,7 @@ export interface ProviderHelpMeta {
   helpText: string;
 }
 
-export const PROVIDER_HELP: Record<string, ProviderHelpMeta> = {
+export const PROVIDER_HELP: Record<CredentialProvider, ProviderHelpMeta> = {
   hetzner: {
     description: 'European cloud, great value',
     helpUrl: 'https://console.hetzner.cloud/projects',
@@ -26,6 +28,11 @@ export const PROVIDER_HELP: Record<string, ProviderHelpMeta> = {
     description: 'European cloud, GPU options',
     helpUrl: 'https://console.scaleway.com/iam/api-keys',
     helpText: 'Go to IAM \u2192 API Keys \u2192 Generate an API Key',
+  },
+  gcp: {
+    description: 'Google Cloud Platform',
+    helpUrl: 'https://console.cloud.google.com/iam-admin/serviceaccounts',
+    helpText: 'Set up Workload Identity Federation or create a service account key',
   },
 };
 
@@ -41,7 +48,7 @@ export interface LocationMeta {
 }
 
 /** Provider-keyed location registry. Source of truth for valid provider–location pairs. */
-export const PROVIDER_LOCATIONS: Record<string, LocationMeta[]> = {
+export const PROVIDER_LOCATIONS: Record<CredentialProvider, LocationMeta[]> = {
   hetzner: [
     { id: 'nbg1', name: 'Nuremberg', country: 'DE' },
     { id: 'fsn1', name: 'Falkenstein', country: 'DE' },
@@ -72,7 +79,7 @@ export const PROVIDER_LOCATIONS: Record<string, LocationMeta[]> = {
 };
 
 /** Default location per provider. */
-export const PROVIDER_DEFAULT_LOCATIONS: Record<string, string> = {
+export const PROVIDER_DEFAULT_LOCATIONS: Record<CredentialProvider, string> = {
   hetzner: 'fsn1',
   scaleway: 'fr-par-1',
   gcp: 'us-central1-a',
@@ -87,16 +94,16 @@ export const VM_LOCATIONS: Record<string, { name: string; country: string }> = O
 
 /** Get valid locations for a provider. Returns empty array for unknown providers. */
 export function getLocationsForProvider(provider: string): LocationMeta[] {
-  return PROVIDER_LOCATIONS[provider] ?? [];
+  return (PROVIDER_LOCATIONS as Record<string, LocationMeta[]>)[provider] ?? [];
 }
 
 /** Get the default location for a provider. Returns undefined for unknown providers. */
 export function getDefaultLocationForProvider(provider: string): string | undefined {
-  return PROVIDER_DEFAULT_LOCATIONS[provider];
+  return (PROVIDER_DEFAULT_LOCATIONS as Record<string, string>)[provider];
 }
 
 /** Check if a location is valid for the given provider. */
 export function isValidLocationForProvider(provider: string, location: string): boolean {
-  const locations = PROVIDER_LOCATIONS[provider];
-  return locations != null && locations.some((loc) => loc.id === location);
+  const locations = (PROVIDER_LOCATIONS as Record<string, LocationMeta[]>)[provider];
+  return locations != null && locations.some((loc: LocationMeta) => loc.id === location);
 }
