@@ -263,12 +263,12 @@ describe('library routes', () => {
     it('returns inline headers with CSP for previewable image', async () => {
       const content = new TextEncoder().encode('fake png data');
       mockGetFile.mockResolvedValue({
-        file: { filename: 'photo.png', mimeType: 'image/png' },
+        file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: 1024 },
         tags: [],
       });
       mockDownloadFile.mockResolvedValue({
         data: content.buffer,
-        file: { filename: 'photo.png', mimeType: 'image/png' },
+        file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: 1024 },
         metadata: {},
       });
 
@@ -290,12 +290,12 @@ describe('library routes', () => {
     it('returns inline headers for PDF', async () => {
       const content = new TextEncoder().encode('fake pdf data');
       mockGetFile.mockResolvedValue({
-        file: { filename: 'report.pdf', mimeType: 'application/pdf' },
+        file: { filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 2048 },
         tags: [],
       });
       mockDownloadFile.mockResolvedValue({
         data: content.buffer,
-        file: { filename: 'report.pdf', mimeType: 'application/pdf' },
+        file: { filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 2048 },
         metadata: {},
       });
 
@@ -325,6 +325,22 @@ describe('library routes', () => {
 
       expect(res.status).toBe(400);
       // downloadFile should NOT have been called — MIME check happens first
+      expect(mockDownloadFile).not.toHaveBeenCalled();
+    });
+
+    it('rejects files exceeding preview size limit', async () => {
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'huge.png', mimeType: 'image/png', sizeBytes: 100 * 1024 * 1024 },
+        tags: [],
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
       expect(mockDownloadFile).not.toHaveBeenCalled();
     });
 

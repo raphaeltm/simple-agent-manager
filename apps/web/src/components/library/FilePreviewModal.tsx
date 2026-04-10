@@ -125,6 +125,7 @@ export function FilePreviewModal({
                 <iframe
                   src={previewUrl}
                   title={`Preview of ${file.filename}`}
+                  sandbox="allow-scripts allow-same-origin"
                   className="w-full h-full border-none"
                   style={{ minHeight: '60vh' }}
                   onLoad={() => setPdfLoading(false)}

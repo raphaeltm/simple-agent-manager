@@ -245,7 +245,8 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
 // GET /:fileId/preview — decrypt + serve inline for previewable types
 // ---------------------------------------------------------------------------
 
-/** MIME types safe to render inline in a browser (images + PDF). */
+/** MIME types safe to render inline in a browser (images + PDF).
+ *  Keep in sync with PREVIEWABLE_IMAGE_MIMES + PREVIEWABLE_MIMES in apps/web/src/lib/file-utils.ts */
 const PREVIEWABLE_MIMES = new Set([
   'image/png',
   'image/jpeg',
@@ -268,9 +269,13 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   const { file } = await getFile(db, projectId, fileId);
   const mimeTypeLower = file.mimeType.toLowerCase();
   if (!PREVIEWABLE_MIMES.has(mimeTypeLower)) {
-    throw errors.badRequest(
-      `File type "${file.mimeType}" is not supported for inline preview`,
-    );
+    throw errors.badRequest('File type is not supported for inline preview');
+  }
+
+  // Enforce size limit before decrypting (reuse the configurable load-max from file-utils)
+  const previewMaxBytes = parseInt(c.env.FILE_PREVIEW_MAX_BYTES ?? '52428800', 10); // 50 MB default
+  if (file.sizeBytes > previewMaxBytes) {
+    throw errors.badRequest('File is too large for inline preview');
   }
 
   const encryptionKey = getEncryptionKey(c.env);
