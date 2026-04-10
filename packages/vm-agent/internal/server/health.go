@@ -76,7 +76,7 @@ func (s *Server) sendNodeReady() {
 	}
 	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		slog.Error("Node ready callback failed", "error", err)
 		return
@@ -131,7 +131,7 @@ func (s *Server) sendNodeHeartbeat() {
 	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		slog.Error("Node heartbeat failed", "error", err)
 		return
