@@ -3,6 +3,17 @@ const IMAGE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'avif', 'ico', 'bmp',
 ]);
 
+/** MIME types that support inline preview (images + PDF). SVG excluded — script risk in iframe. */
+const PREVIEWABLE_IMAGE_MIMES = new Set([
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
+  'image/bmp', 'image/x-icon',
+]);
+
+const PREVIEWABLE_MIMES = new Set([
+  ...PREVIEWABLE_IMAGE_MIMES,
+  'application/pdf',
+]);
+
 /** Check if a file path is a renderable image based on extension. */
 export function isImageFile(filePath: string): boolean {
   const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
@@ -12,6 +23,21 @@ export function isImageFile(filePath: string): boolean {
 /** Check if a file path is an SVG file. */
 export function isSvgFile(filePath: string): boolean {
   return filePath.toLowerCase().endsWith('.svg');
+}
+
+/** Check if a file's MIME type supports inline preview (images + PDF). */
+export function isPreviewableMime(mimeType: string): boolean {
+  return PREVIEWABLE_MIMES.has(mimeType.toLowerCase());
+}
+
+/** Check if a MIME type is a previewable image (not SVG, not PDF). */
+export function isPreviewableImageMime(mimeType: string): boolean {
+  return PREVIEWABLE_IMAGE_MIMES.has(mimeType.toLowerCase());
+}
+
+/** Check if a MIME type is PDF. */
+export function isPdfMime(mimeType: string): boolean {
+  return mimeType.toLowerCase() === 'application/pdf';
 }
 
 /** Default threshold for inline rendering (0–10 MB). Override via VITE_FILE_PREVIEW_INLINE_MAX_BYTES. */

@@ -242,6 +242,62 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
 });
 
 // ---------------------------------------------------------------------------
+// GET /:fileId/preview — decrypt + serve inline for previewable types
+// ---------------------------------------------------------------------------
+
+/** MIME types safe to render inline in a browser (images + PDF). */
+const PREVIEWABLE_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'image/bmp',
+  'image/x-icon',
+  'application/pdf',
+]);
+
+libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c) => {
+  const auth = getAuth(c);
+  const userId = auth.user.id;
+  const projectId = requireParam(c.req.param('projectId'), 'projectId');
+  const fileId = requireParam(c.req.param('fileId'), 'fileId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const encryptionKey = getEncryptionKey(c.env);
+  const timeoutMs = getDownloadTimeoutMs(c.env);
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const { data, file } = await Promise.race([
+    downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
+    new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(errors.internal('Preview timed out')), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timeoutHandle));
+
+  const mimeTypeLower = file.mimeType.toLowerCase();
+  if (!PREVIEWABLE_MIMES.has(mimeTypeLower)) {
+    throw errors.badRequest(
+      `File type "${file.mimeType}" is not supported for inline preview`,
+    );
+  }
+
+  const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
+
+  return new Response(data, {
+    status: 200,
+    headers: {
+      'Content-Type': file.mimeType,
+      'Content-Length': String(data.byteLength),
+      'Content-Disposition': `inline; filename="${safeFilename}"`,
+      'Cache-Control': 'private, max-age=300',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DELETE /:fileId — delete file
 // ---------------------------------------------------------------------------
 

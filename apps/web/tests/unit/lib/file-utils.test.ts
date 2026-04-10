@@ -1,6 +1,15 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { FILE_PREVIEW_INLINE_MAX_BYTES, FILE_PREVIEW_LOAD_MAX_BYTES,formatFileSize, isImageFile, isSvgFile } from '../../../src/lib/file-utils';
+import {
+  FILE_PREVIEW_INLINE_MAX_BYTES,
+  FILE_PREVIEW_LOAD_MAX_BYTES,
+  formatFileSize,
+  isImageFile,
+  isPdfMime,
+  isPreviewableImageMime,
+  isPreviewableMime,
+  isSvgFile,
+} from '../../../src/lib/file-utils';
 
 describe('isImageFile', () => {
   it('returns true for common image extensions', () => {
@@ -65,6 +74,66 @@ describe('formatFileSize', () => {
     expect(formatFileSize(1048576)).toBe('1.0 MB');
     expect(formatFileSize(5242880)).toBe('5.0 MB');
     expect(formatFileSize(1073741824)).toBe('1.0 GB');
+  });
+});
+
+describe('isPreviewableMime', () => {
+  it('returns true for previewable image MIME types', () => {
+    expect(isPreviewableMime('image/png')).toBe(true);
+    expect(isPreviewableMime('image/jpeg')).toBe(true);
+    expect(isPreviewableMime('image/gif')).toBe(true);
+    expect(isPreviewableMime('image/webp')).toBe(true);
+    expect(isPreviewableMime('image/avif')).toBe(true);
+    expect(isPreviewableMime('image/bmp')).toBe(true);
+    expect(isPreviewableMime('image/x-icon')).toBe(true);
+  });
+
+  it('returns true for PDF', () => {
+    expect(isPreviewableMime('application/pdf')).toBe(true);
+  });
+
+  it('returns false for SVG (script risk in iframe)', () => {
+    expect(isPreviewableMime('image/svg+xml')).toBe(false);
+  });
+
+  it('returns false for non-previewable types', () => {
+    expect(isPreviewableMime('text/plain')).toBe(false);
+    expect(isPreviewableMime('text/html')).toBe(false);
+    expect(isPreviewableMime('application/json')).toBe(false);
+    expect(isPreviewableMime('application/javascript')).toBe(false);
+    expect(isPreviewableMime('application/zip')).toBe(false);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isPreviewableMime('IMAGE/PNG')).toBe(true);
+    expect(isPreviewableMime('Application/PDF')).toBe(true);
+  });
+});
+
+describe('isPreviewableImageMime', () => {
+  it('returns true for image types only', () => {
+    expect(isPreviewableImageMime('image/png')).toBe(true);
+    expect(isPreviewableImageMime('image/jpeg')).toBe(true);
+  });
+
+  it('returns false for PDF', () => {
+    expect(isPreviewableImageMime('application/pdf')).toBe(false);
+  });
+
+  it('returns false for SVG', () => {
+    expect(isPreviewableImageMime('image/svg+xml')).toBe(false);
+  });
+});
+
+describe('isPdfMime', () => {
+  it('returns true for PDF', () => {
+    expect(isPdfMime('application/pdf')).toBe(true);
+    expect(isPdfMime('Application/PDF')).toBe(true);
+  });
+
+  it('returns false for non-PDF', () => {
+    expect(isPdfMime('image/png')).toBe(false);
+    expect(isPdfMime('text/plain')).toBe(false);
   });
 });
 

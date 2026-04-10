@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { FileGridCard } from '../components/library/FileGridCard';
 import { FileListItem } from '../components/library/FileListItem';
+import { FilePreviewModal } from '../components/library/FilePreviewModal';
 import { TagEditor } from '../components/library/TagEditor';
 import type { FileWithTags, SortOption, UploadItem, ViewMode } from '../components/library/types';
 import { FOCUS_RING } from '../components/library/types';
@@ -13,6 +14,8 @@ import { UploadProgressChips } from '../components/library/UploadProgressChips';
 import { UploadZone } from '../components/library/UploadZone';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
+  downloadLibraryFile,
+  getLibraryFilePreviewUrl,
   listLibraryFiles,
   uploadLibraryFile,
 } from '../lib/api';
@@ -47,6 +50,9 @@ export function ProjectLibrary() {
 
   // Tag editor
   const [editingTagsFile, setEditingTagsFile] = useState<FileWithTags | null>(null);
+
+  // Preview
+  const [previewFile, setPreviewFile] = useState<FileWithTags | null>(null);
 
   // Active filter count for badge
   const activeFilterCount =
@@ -362,6 +368,7 @@ export function ProjectLibrary() {
               onDeleted={() => loadFiles({ background: true })}
               onEditTags={setEditingTagsFile}
               onTagClick={handleTagClick}
+              onPreview={setPreviewFile}
             />
           ))}
         </div>
@@ -377,6 +384,7 @@ export function ProjectLibrary() {
               onDeleted={() => loadFiles({ background: true })}
               onEditTags={setEditingTagsFile}
               onTagClick={handleTagClick}
+              onPreview={setPreviewFile}
             />
           ))}
         </div>
@@ -387,6 +395,16 @@ export function ProjectLibrary() {
         <p className="text-xs text-fg-muted text-center m-0">
           Showing {files.length} of {total} file{total !== 1 ? 's' : ''}
         </p>
+      )}
+
+      {/* Preview modal */}
+      {previewFile && (
+        <FilePreviewModal
+          file={previewFile}
+          previewUrl={getLibraryFilePreviewUrl(projectId, previewFile.id)}
+          onClose={() => setPreviewFile(null)}
+          onDownload={() => downloadLibraryFile(projectId, previewFile.id)}
+        />
       )}
     </div>
   );

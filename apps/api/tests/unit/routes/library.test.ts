@@ -254,6 +254,82 @@ describe('library routes', () => {
     });
   });
 
+  describe('GET /:fileId/preview', () => {
+    it('returns inline headers for previewable image', async () => {
+      const content = new TextEncoder().encode('fake png data');
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'photo.png', mimeType: 'image/png' },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('image/png');
+      expect(res.headers.get('Content-Disposition')).toContain('inline');
+      expect(res.headers.get('Content-Disposition')).toContain('photo.png');
+      expect(res.headers.get('Cache-Control')).toBe('private, max-age=300');
+    });
+
+    it('returns inline headers for PDF', async () => {
+      const content = new TextEncoder().encode('fake pdf data');
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'report.pdf', mimeType: 'application/pdf' },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('application/pdf');
+      expect(res.headers.get('Content-Disposition')).toContain('inline');
+    });
+
+    it('rejects non-previewable MIME types with 400', async () => {
+      const content = new TextEncoder().encode('plain text');
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'readme.txt', mimeType: 'text/plain' },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects SVG (script risk in iframe)', async () => {
+      const content = new TextEncoder().encode('<svg></svg>');
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'icon.svg', mimeType: 'image/svg+xml' },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe('missing encryption key', () => {
     it('returns 500 when no encryption key is configured', async () => {
       const { app, env } = makeApp(makeEnv({ ENCRYPTION_KEY: undefined } as unknown as Partial<Env>));
