@@ -145,27 +145,24 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
 	}
 
 	maxEntries := s.config.FileFindMaxEntries
-	// Exclude common noise directories and files
-	findCmd := fmt.Sprintf(
-		`find . -type f `+
-			`-not -path '*/node_modules/*' `+
-			`-not -path '*/.git/*' `+
-			`-not -path '*/dist/*' `+
-			`-not -path '*/.next/*' `+
-			`-not -path '*/coverage/*' `+
-			`-not -path '*/__pycache__/*' `+
-			`-not -path '*/.DS_Store' `+
-			`-not -path '*/vendor/*' `+
-			`-not -name '*.pyc' `+
-			`2>/dev/null | head -n %d`,
-		maxEntries,
-	)
 
 	timeout := s.config.FileFindTimeout
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	output, _, err := s.execInContainer(ctx, containerID, user, workDir, "sh", "-c", findCmd)
+	// Use direct args to avoid shell injection — no sh -c.
+	output, _, err := s.execInContainer(ctx, containerID, user, workDir,
+		"find", ".", "-type", "f",
+		"-not", "-path", "*/node_modules/*",
+		"-not", "-path", "*/.git/*",
+		"-not", "-path", "*/dist/*",
+		"-not", "-path", "*/.next/*",
+		"-not", "-path", "*/coverage/*",
+		"-not", "-path", "*/__pycache__/*",
+		"-not", "-path", "*/.DS_Store",
+		"-not", "-path", "*/vendor/*",
+		"-not", "-name", "*.pyc",
+	)
 	if err != nil {
 		slog.Error("Error finding files", "workspace", workspaceID, "error", err)
 		http.Error(w, `{"error":"failed to find files"}`, http.StatusInternalServerError)
@@ -173,6 +170,10 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
 	}
 
 	files := parseFileFindOutput(output)
+	// Limit entries in Go instead of piping through head in a shell.
+	if len(files) > maxEntries {
+		files = files[:maxEntries]
+	}
 
 	resp := FileFindResponse{Files: files}
 	w.Header().Set("Content-Type", "application/json")

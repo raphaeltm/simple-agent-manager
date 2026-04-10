@@ -199,7 +199,7 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		if workDir != "" {
 			writeArgs = append(writeArgs, "-w", workDir)
 		}
-		writeArgs = append(writeArgs, containerID, "tee", destPath)
+		writeArgs = append(writeArgs, containerID, "tee", "--", destPath)
 
 		writeCmd := exec.CommandContext(ctx, "docker", writeArgs...)
 		writeCmd.Stdin = bytes.NewReader(fileData)
