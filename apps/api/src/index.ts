@@ -542,7 +542,7 @@ app.use('*', async (c, next) => {
     return;
   }
   if ('error' in parsed) {
-    console.info('ws_proxy_invalid_subdomain', { hostname, reason: parsed.error });
+    log.info('ws_proxy_invalid_subdomain', { hostname, reason: parsed.error });
     return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
   }
   const { workspaceId, targetPort, sidecar } = parsed;
