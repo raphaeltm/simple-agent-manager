@@ -90,10 +90,10 @@ func (s *Server) sendNodeReady() {
 
 // heartbeatResponse is the expected JSON response from the heartbeat endpoint.
 type heartbeatResponse struct {
-	Status         string `json:"status"`
+	Status          string `json:"status"`
 	LastHeartbeatAt string `json:"lastHeartbeatAt"`
-	HealthStatus   string `json:"healthStatus"`
-	RefreshedToken string `json:"refreshedToken,omitempty"`
+	HealthStatus    string `json:"healthStatus"`
+	RefreshedToken  string `json:"refreshedToken,omitempty"`
 }
 
 func (s *Server) sendNodeHeartbeat() {
