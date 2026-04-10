@@ -59,7 +59,6 @@ import { runObservabilityPurge } from './scheduled/observability-purge';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken } from './services/jwt';
-import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
@@ -484,11 +483,10 @@ app.onError((err, c) => {
     return c.json({ error: 'GCP_UPSTREAM_ERROR', message: safe }, 502);
   }
 
-  const message = err instanceof Error ? err.message : 'Unknown error';
   return c.json(
     {
       error: 'INTERNAL_ERROR',
-      message,
+      message: 'Internal server error',
     },
     500
   );
@@ -544,7 +542,8 @@ app.use('*', async (c, next) => {
     return;
   }
   if ('error' in parsed) {
-    return c.json({ error: 'INVALID_WORKSPACE', message: parsed.error }, 400);
+    log.info('ws_proxy_invalid_subdomain', { hostname, reason: parsed.error });
+    return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
   }
   const { workspaceId, targetPort, sidecar } = parsed;
 
@@ -714,43 +713,21 @@ app.use('*', cors({
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
 
-// Health check
+// Health check — public endpoint returns minimal info only
 app.get('/health', (c) => {
-  const limits = getRuntimeLimits(c.env);
-
-  // Verify critical bindings are available (catches wrangler.toml misconfiguration)
-  const bindings: Record<string, boolean> = {
-    DATABASE: !!c.env.DATABASE,
-    KV: !!c.env.KV,
-    PROJECT_DATA: !!c.env.PROJECT_DATA,
-    NODE_LIFECYCLE: !!c.env.NODE_LIFECYCLE,
-    TASK_RUNNER: !!c.env.TASK_RUNNER,
-    ADMIN_LOGS: !!c.env.ADMIN_LOGS,
-    NOTIFICATION: !!c.env.NOTIFICATION,
-  };
-
-  const missingBindings = Object.entries(bindings)
-    .filter(([, available]) => !available)
-    .map(([name]) => name);
-
-  if (missingBindings.length > 0) {
-    return c.json({
-      status: 'degraded',
-      version: c.env.VERSION,
-      timestamp: new Date().toISOString(),
-      limits,
-      bindings,
-      missingBindings,
-    }, 503);
-  }
+  // Check critical bindings to determine status, but don't expose details
+  const hasCriticalBindings = !!(
+    c.env.DATABASE &&
+    c.env.KV &&
+    c.env.PROJECT_DATA &&
+    c.env.NODE_LIFECYCLE &&
+    c.env.TASK_RUNNER
+  );
 
   return c.json({
-    status: 'healthy',
-    version: c.env.VERSION,
+    status: hasCriticalBindings ? 'healthy' : 'degraded',
     timestamp: new Date().toISOString(),
-    limits,
-    bindings,
-  });
+  }, hasCriticalBindings ? 200 : 503);
 });
 
 // JWKS endpoint (must be at root level)

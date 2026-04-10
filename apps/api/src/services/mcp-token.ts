@@ -33,10 +33,15 @@ export function getMcpTokenTTL(env?: { MCP_TOKEN_TTL_SECONDS?: string }): number
 }
 
 /**
- * Generate a cryptographically secure MCP token.
+ * Generate a cryptographically secure MCP token (256-bit entropy, base64url encoded).
  */
 export function generateMcpToken(): string {
-  return crypto.randomUUID();
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  // base64url encode without padding (explicit loop matches smoke-test-tokens.ts pattern)
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /**
