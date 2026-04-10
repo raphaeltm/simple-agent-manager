@@ -60,6 +60,7 @@ func TestCallbackTokenRefresh(t *testing.T) {
 		workspaces:    make(map[string]*WorkspaceRuntime),
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
+		httpClient:    &http.Client{},
 	}
 
 	if got := s.getCallbackToken(); got != "original-token" {
@@ -122,6 +123,7 @@ func TestCallbackTokenRefreshUsesNewTokenForSubsequentRequests(t *testing.T) {
 		workspaces:    make(map[string]*WorkspaceRuntime),
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
+		httpClient:    &http.Client{},
 	}
 
 	s.sendNodeHeartbeat()
@@ -160,6 +162,7 @@ func TestHeartbeatNoRefreshOnServerError(t *testing.T) {
 		workspaces:    make(map[string]*WorkspaceRuntime),
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
+		httpClient:    &http.Client{},
 	}
 
 	s.sendNodeHeartbeat()
@@ -230,6 +233,7 @@ func TestHeartbeatRetriesPendingReadyCallback(t *testing.T) {
 		},
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
+		httpClient:    &http.Client{},
 	}
 
 	// Heartbeat should trigger the pending callback retry (runs in background goroutine)
@@ -287,6 +291,7 @@ func TestHeartbeatRetrySkipsWhenNoPending(t *testing.T) {
 		},
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
+		httpClient:    &http.Client{},
 	}
 
 	s.sendNodeHeartbeat()
@@ -340,6 +345,7 @@ func TestHeartbeatRetryPermanentErrorClearsPending(t *testing.T) {
 		},
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
+		httpClient:    &http.Client{},
 	}
 
 	s.sendNodeHeartbeat()
@@ -399,6 +405,7 @@ func TestHeartbeatRetryTransientErrorKeepsPending(t *testing.T) {
 		},
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
+		httpClient:    &http.Client{},
 	}
 
 	s.sendNodeHeartbeat()
@@ -460,6 +467,7 @@ func TestHeartbeatRetryUsesNodeTokenWhenWorkspaceHasNone(t *testing.T) {
 		},
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
+		httpClient:    &http.Client{},
 	}
 
 	s.sendNodeHeartbeat()
@@ -497,6 +505,7 @@ func TestHeartbeatNoRefreshWhenFieldEmpty(t *testing.T) {
 		workspaces:    make(map[string]*WorkspaceRuntime),
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
+		httpClient:    &http.Client{},
 	}
 
 	s.sendNodeHeartbeat()
