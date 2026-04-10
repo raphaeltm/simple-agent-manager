@@ -1,4 +1,4 @@
-import { formatFileSize } from '../../lib/file-utils';
+import { formatFileSize, isPreviewableMime } from '../../lib/file-utils';
 import { FileActionsMenu } from './FileActionsMenu';
 import { type FileWithTags, FOCUS_RING, getFileIcon, timeAgo } from './types';
 
@@ -8,6 +8,7 @@ export interface FileGridCardProps {
   onDeleted: () => void;
   onEditTags: (file: FileWithTags) => void;
   onTagClick: (tag: string) => void;
+  onPreview?: (file: FileWithTags) => void;
 }
 
 export function FileGridCard({
@@ -16,23 +17,47 @@ export function FileGridCard({
   onDeleted,
   onEditTags,
   onTagClick,
+  onPreview,
 }: FileGridCardProps) {
+  const canPreview = onPreview && isPreviewableMime(file.mimeType);
   return (
     <div className="flex flex-col rounded-lg border border-border-default bg-surface hover:border-accent/40 transition-colors overflow-hidden">
       {/* Thumbnail area */}
-      <div className="flex items-center justify-center h-24 bg-surface-inset">
-        {getFileIcon(file.mimeType)}
-      </div>
+      {canPreview ? (
+        <button
+          type="button"
+          onClick={() => onPreview(file)}
+          className={`flex items-center justify-center h-24 bg-surface-inset w-full border-none cursor-pointer hover:bg-surface-hover transition-colors ${FOCUS_RING}`}
+          aria-label={`Preview ${file.filename}`}
+        >
+          {getFileIcon(file.mimeType)}
+        </button>
+      ) : (
+        <div className="flex items-center justify-center h-24 bg-surface-inset">
+          {getFileIcon(file.mimeType)}
+        </div>
+      )}
 
       {/* Info */}
       <div className="flex flex-col gap-1.5 p-3">
         <div className="flex items-center justify-between gap-1">
-          <span className="text-sm font-medium text-fg-primary truncate">{file.filename}</span>
+          {canPreview ? (
+            <button
+              type="button"
+              onClick={() => onPreview(file)}
+              className={`text-sm font-medium text-fg-primary truncate bg-transparent border-none cursor-pointer p-0 text-left hover:text-accent ${FOCUS_RING}`}
+            >
+              {file.filename}
+            </button>
+          ) : (
+            <span className="text-sm font-medium text-fg-primary truncate">{file.filename}</span>
+          )}
           <FileActionsMenu
             file={file}
             projectId={projectId}
             onDeleted={onDeleted}
             onEditTags={onEditTags}
+            onPreview={onPreview}
           />
         </div>
         <div className="flex items-center gap-2 text-xs text-fg-muted">

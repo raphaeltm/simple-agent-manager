@@ -1,7 +1,7 @@
 /**
  * Tests for project file library routes.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockUploadFile = vi.hoisted(() => vi.fn());
 const mockReplaceFile = vi.hoisted(() => vi.fn());
@@ -76,6 +76,11 @@ function makeApp(env: Env) {
 }
 
 describe('library routes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetDownloadTimeoutMs.mockReturnValue(60000);
+  });
+
   describe('POST /upload', () => {
     it('returns 201 on successful upload', async () => {
       const mockFile = {
@@ -251,6 +256,110 @@ describe('library routes', () => {
       expect(res.headers.get('Content-Disposition')).toContain('report.pdf');
       expect(res.headers.get('Content-Length')).toBe(String(new TextEncoder().encode('file content').length));
       expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+    });
+  });
+
+  describe('GET /:fileId/preview', () => {
+    it('returns inline headers with CSP for previewable image', async () => {
+      const content = new TextEncoder().encode('fake png data');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: 1024 },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: 1024 },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('image/png');
+      expect(res.headers.get('Content-Disposition')).toContain('inline');
+      expect(res.headers.get('Content-Disposition')).toContain('photo.png');
+      expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+    });
+
+    it('returns inline headers for PDF', async () => {
+      const content = new TextEncoder().encode('fake pdf data');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 2048 },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 2048 },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('application/pdf');
+      expect(res.headers.get('Content-Disposition')).toContain('inline');
+      // PDF gets a more permissive CSP for browser-native rendering
+      expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'self'");
+      expect(res.headers.get('Content-Security-Policy')).toContain("script-src 'unsafe-inline'");
+    });
+
+    it('rejects non-previewable MIME types with 400 without decrypting', async () => {
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'readme.txt', mimeType: 'text/plain' },
+        tags: [],
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      // downloadFile should NOT have been called — MIME check happens first
+      expect(mockDownloadFile).not.toHaveBeenCalled();
+    });
+
+    it('rejects files exceeding preview size limit', async () => {
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'huge.png', mimeType: 'image/png', sizeBytes: 100 * 1024 * 1024 },
+        tags: [],
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockDownloadFile).not.toHaveBeenCalled();
+    });
+
+    it('rejects SVG (script risk in iframe)', async () => {
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'icon.svg', mimeType: 'image/svg+xml' },
+        tags: [],
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockDownloadFile).not.toHaveBeenCalled();
     });
   });
 

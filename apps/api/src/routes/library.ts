@@ -242,6 +242,71 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
 });
 
 // ---------------------------------------------------------------------------
+// GET /:fileId/preview — decrypt + serve inline for previewable types
+// ---------------------------------------------------------------------------
+
+/** MIME types safe to render inline in a browser (images + PDF).
+ *  Keep in sync with PREVIEWABLE_IMAGE_MIMES + PREVIEWABLE_MIMES in apps/web/src/lib/file-utils.ts */
+const PREVIEWABLE_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'application/pdf',
+]);
+
+libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c) => {
+  const auth = getAuth(c);
+  const userId = auth.user.id;
+  const projectId = requireParam(c.req.param('projectId'), 'projectId');
+  const fileId = requireParam(c.req.param('fileId'), 'fileId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  // Check MIME type BEFORE decrypting to avoid wasting CPU on unsupported types
+  const { file } = await getFile(db, projectId, fileId);
+  const mimeTypeLower = file.mimeType.toLowerCase();
+  if (!PREVIEWABLE_MIMES.has(mimeTypeLower)) {
+    throw errors.badRequest('File type is not supported for inline preview');
+  }
+
+  // Enforce size limit before decrypting (reuse the configurable load-max from file-utils)
+  const previewMaxBytes = parseInt(c.env.FILE_PREVIEW_MAX_BYTES ?? '52428800', 10); // 50 MB default
+  if (file.sizeBytes > previewMaxBytes) {
+    throw errors.badRequest('File is too large for inline preview');
+  }
+
+  const encryptionKey = getEncryptionKey(c.env);
+  const timeoutMs = getDownloadTimeoutMs(c.env);
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const { data } = await Promise.race([
+    downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
+    new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(errors.internal('Preview timed out')), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timeoutHandle));
+
+  const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
+
+  return new Response(data, {
+    status: 200,
+    headers: {
+      'Content-Type': mimeTypeLower,
+      'Content-Length': String(data.byteLength),
+      'Content-Disposition': `inline; filename="${safeFilename}"`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      // PDF viewers need script-src for browser-native rendering; images get strict CSP
+      'Content-Security-Policy': mimeTypeLower === 'application/pdf'
+        ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'self'"
+        : "default-src 'none'; style-src 'unsafe-inline'",
+    },
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DELETE /:fileId — delete file
 // ---------------------------------------------------------------------------
 

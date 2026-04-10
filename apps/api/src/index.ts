@@ -443,6 +443,7 @@ export interface Env {
   // Project file library (all configurable per constitution Principle XI)
   LIBRARY_ENCRYPTION_KEY?: string;               // Purpose-specific KEK for file library (falls back to ENCRYPTION_KEY)
   LIBRARY_UPLOAD_MAX_BYTES?: string;             // Max file size per upload (default: 50MB)
+  FILE_PREVIEW_MAX_BYTES?: string;               // Max file size for inline preview (default: 50MB)
   LIBRARY_MAX_FILES_PER_PROJECT?: string;        // Max files per project (default: 500)
   LIBRARY_MAX_TAGS_PER_FILE?: string;            // Max tags per file (default: 20)
   LIBRARY_MAX_TAG_LENGTH?: string;               // Max tag length in chars (default: 50)

@@ -1,14 +1,16 @@
-import { Download, MoreVertical, Tag, Trash2 } from 'lucide-react';
+import { Download, Eye, MoreVertical, Tag, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { deleteLibraryFile, downloadLibraryFile } from '../../lib/api';
-import { type FileWithTags,FOCUS_RING } from './types';
+import { isPreviewableMime } from '../../lib/file-utils';
+import { type FileWithTags, FOCUS_RING } from './types';
 
 export interface FileActionsMenuProps {
   file: FileWithTags;
   projectId: string;
   onDeleted: () => void;
   onEditTags: (file: FileWithTags) => void;
+  onPreview?: (file: FileWithTags) => void;
 }
 
 export function FileActionsMenu({
@@ -16,6 +18,7 @@ export function FileActionsMenu({
   projectId,
   onDeleted,
   onEditTags,
+  onPreview,
 }: FileActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -60,6 +63,18 @@ export function FileActionsMenu({
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-20 min-w-[160px] rounded-lg border border-border-default bg-surface shadow-lg py-1">
+          {onPreview && isPreviewableMime(file.mimeType) && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onPreview(file);
+              }}
+              className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left ${FOCUS_RING}`}
+            >
+              <Eye size={14} /> Preview
+            </button>
+          )}
           <button
             onClick={handleDownload}
             className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"

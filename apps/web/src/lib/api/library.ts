@@ -155,12 +155,17 @@ export function replaceLibraryFile(
 
 export function downloadLibraryFile(projectId: string, fileId: string): void {
   const url = `${API_URL}/api/projects/${projectId}/library/${fileId}/download`;
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '';
-  // Credentials are cookie-based so we need a form/fetch approach for auth
-  // Use a hidden iframe or window.open for cookie-based auth downloads
+  // Credentials are cookie-based — window.open carries cookies
   window.open(url, '_blank');
+}
+
+// =============================================================================
+// Preview URL (inline rendering)
+// =============================================================================
+
+/** Returns the URL for inline file preview (images, PDFs). */
+export function getLibraryFilePreviewUrl(projectId: string, fileId: string): string {
+  return `${API_URL}/api/projects/${projectId}/library/${fileId}/preview`;
 }
 
 // =============================================================================

@@ -1,4 +1,4 @@
-import { formatFileSize } from '../../lib/file-utils';
+import { formatFileSize, isPreviewableMime } from '../../lib/file-utils';
 import { FileActionsMenu } from './FileActionsMenu';
 import { type FileWithTags, FOCUS_RING, getFileIcon, timeAgo } from './types';
 
@@ -8,6 +8,7 @@ export interface FileListItemProps {
   onDeleted: () => void;
   onEditTags: (file: FileWithTags) => void;
   onTagClick: (tag: string) => void;
+  onPreview?: (file: FileWithTags) => void;
 }
 
 export function FileListItem({
@@ -16,6 +17,7 @@ export function FileListItem({
   onDeleted,
   onEditTags,
   onTagClick,
+  onPreview,
 }: FileListItemProps) {
   const maxVisibleTags = 3;
   const visibleTags = file.tags.slice(0, maxVisibleTags);
@@ -29,7 +31,17 @@ export function FileListItem({
       {/* File info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-fg-primary truncate">{file.filename}</span>
+          {onPreview && isPreviewableMime(file.mimeType) ? (
+            <button
+              type="button"
+              onClick={() => onPreview(file)}
+              className={`text-sm font-medium text-fg-primary truncate bg-transparent border-none cursor-pointer p-0 hover:text-accent hover:underline text-left ${FOCUS_RING}`}
+            >
+              {file.filename}
+            </button>
+          ) : (
+            <span className="text-sm font-medium text-fg-primary truncate">{file.filename}</span>
+          )}
           {file.uploadSource === 'agent' && (
             <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase bg-accent/10 text-accent shrink-0">
               agent
@@ -67,6 +79,7 @@ export function FileListItem({
         projectId={projectId}
         onDeleted={onDeleted}
         onEditTags={onEditTags}
+        onPreview={onPreview}
       />
     </div>
   );

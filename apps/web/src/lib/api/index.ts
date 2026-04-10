@@ -95,6 +95,7 @@ export {
   deleteLibraryFile,
   downloadLibraryFile,
   getLibraryFile,
+  getLibraryFilePreviewUrl,
   listLibraryFiles,
   replaceLibraryFile,
   updateFileTags,
