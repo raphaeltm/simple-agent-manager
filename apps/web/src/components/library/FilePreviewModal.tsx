@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 
 import {
   formatFileSize,
-  isPreviewableImageMime,
   isPdfMime,
+  isPreviewableImageMime,
 } from '../../lib/file-utils';
 import { ImageViewer } from '../shared-file-viewer/ImageViewer';
 import { type FileWithTags, FOCUS_RING } from './types';
