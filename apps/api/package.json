@@ -26,7 +26,7 @@
     "@simple-agent-manager/providers": "workspace:*",
     "@simple-agent-manager/shared": "workspace:*",
     "@simple-agent-manager/cloud-init": "workspace:*",
-    "ai": "6.0.111",
+    "ai": "6.0.156",
     "better-auth": "catalog:",
     "better-auth-cloudflare": "0.2.9",
     "drizzle-orm": "0.34.1",

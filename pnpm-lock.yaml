@@ -181,8 +181,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       ai:
-        specifier: 6.0.111
-        version: 6.0.111(zod@4.3.6)
+        specifier: 6.0.156
+        version: 6.0.156(zod@4.3.6)
       better-auth:
         specifier: 'catalog:'
         version: 1.4.17(drizzle-kit@0.26.2)(drizzle-orm@0.34.1(@cloudflare/workers-types@4.20260401.1)(@opentelemetry/api@1.9.0)(@types/react@19.1.6)(kysely@0.28.10)(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@24.1.3)(vite@6.4.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.3)))
@@ -206,7 +206,7 @@ importers:
         version: 1.3.1(typescript@5.9.3)
       workers-ai-provider:
         specifier: 3.1.2
-        version: 3.1.2(@ai-sdk/provider@3.0.8)(ai@6.0.111(zod@4.3.6))
+        version: 3.1.2(@ai-sdk/provider@3.0.8)(ai@6.0.156(zod@4.3.6))
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: 0.14.0
@@ -694,8 +694,8 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  '@ai-sdk/gateway@3.0.63':
-    resolution: {integrity: sha512-0jwdkN3elC4Q9aT2ALxjXtGGVoye15zYgof6GfvuH1a9QKx9Rj4Wi2vy6SyyLvtSA/lB786dTZgC+cGwe6vzmA==}
+  '@ai-sdk/gateway@3.0.95':
+    resolution: {integrity: sha512-ZmUNNbZl3V42xwQzPaNUi+s8eqR2lnrxf0bvB6YbLXpLjHYv0k2Y78t12cNOfY0bxGeuVVTLyk856uLuQIuXEQ==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -718,8 +718,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/provider-utils@4.0.17':
-    resolution: {integrity: sha512-oyCeFINTYK0B8ZGUBiQc05G5vytPlKSmTTtm19xfJuUgoi8zkvvRcoPQci4mSnyfpPn2XSFFDfsALG8uGcapfg==}
+  '@ai-sdk/provider-utils@4.0.23':
+    resolution: {integrity: sha512-z8GlDaCmRSDlqkMF2f4/RFgWxdarvIbyuk+m6WXT1LYgsnGiXRJGTD2Z1+SDl3LqtFuRtGX1aghYvQLoHL/9pg==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -3870,8 +3870,8 @@ packages:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
 
-  ai@6.0.111:
-    resolution: {integrity: sha512-K5aikNm4JGfJkzwIr3yA/qhOYIOIvOqjCxSQjQQ7bWWqm0uuPO2/qgdXL23gYJdTLPPYfvi2TTS+bg2Yp+r2Lw==}
+  ai@6.0.156:
+    resolution: {integrity: sha512-uyi/5LYbugHQxZsR2PeAFOZEL4WqKkzZw4pv0nQvvdgxgVOsM7snOmGrYkp5fShxH/vnd08SXvHCVTX7oUW7xQ==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -8804,10 +8804,10 @@ snapshots:
     dependencies:
       zod: 4.3.6
 
-  '@ai-sdk/gateway@3.0.63(zod@4.3.6)':
+  '@ai-sdk/gateway@3.0.95(zod@4.3.6)':
     dependencies:
       '@ai-sdk/provider': 3.0.8
-      '@ai-sdk/provider-utils': 4.0.17(zod@4.3.6)
+      '@ai-sdk/provider-utils': 4.0.23(zod@4.3.6)
       '@vercel/oidc': 3.1.0
       zod: 4.3.6
 
@@ -8832,7 +8832,7 @@ snapshots:
       eventsource-parser: 3.0.6
       zod: 4.3.6
 
-  '@ai-sdk/provider-utils@4.0.17(zod@4.3.6)':
+  '@ai-sdk/provider-utils@4.0.23(zod@4.3.6)':
     dependencies:
       '@ai-sdk/provider': 3.0.8
       '@standard-schema/spec': 1.1.0
@@ -12230,11 +12230,11 @@ snapshots:
 
   agent-base@7.1.4: {}
 
-  ai@6.0.111(zod@4.3.6):
+  ai@6.0.156(zod@4.3.6):
     dependencies:
-      '@ai-sdk/gateway': 3.0.63(zod@4.3.6)
+      '@ai-sdk/gateway': 3.0.95(zod@4.3.6)
       '@ai-sdk/provider': 3.0.8
-      '@ai-sdk/provider-utils': 4.0.17(zod@4.3.6)
+      '@ai-sdk/provider-utils': 4.0.23(zod@4.3.6)
       '@opentelemetry/api': 1.9.0
       zod: 4.3.6
 
@@ -17889,10 +17889,10 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20260329.1
       '@cloudflare/workerd-windows-64': 1.20260329.1
 
-  workers-ai-provider@3.1.2(@ai-sdk/provider@3.0.8)(ai@6.0.111(zod@4.3.6)):
+  workers-ai-provider@3.1.2(@ai-sdk/provider@3.0.8)(ai@6.0.156(zod@4.3.6)):
     dependencies:
       '@ai-sdk/provider': 3.0.8
-      ai: 6.0.111(zod@4.3.6)
+      ai: 6.0.156(zod@4.3.6)
 
   wrangler@3.114.17(@cloudflare/workers-types@4.20260401.1):
     dependencies:
