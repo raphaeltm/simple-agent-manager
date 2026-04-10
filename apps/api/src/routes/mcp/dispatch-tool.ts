@@ -1,15 +1,21 @@
 /**
  * MCP dispatch_task tool — spawns a new task in the current project.
+ *
+ * Supports full task execution configuration parity with the normal submit path:
+ * agentProfileId, taskMode, agentType, workspaceProfile, provider, vmLocation.
+ *
+ * Config precedence: explicit field → profile value → project default → platform default.
  */
-import type { CredentialProvider,VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
-import { and, eq, inArray,sql } from 'drizzle-orm';
+import type { CredentialProvider, TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider } from '@simple-agent-manager/shared';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import { resolveAgentProfile } from '../../services/agent-profiles';
 import { generateBranchName } from '../../services/branch-name';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
@@ -24,6 +30,11 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+
+/** Valid task modes for dispatch */
+const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
+/** Valid workspace profiles for dispatch */
+const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
 
 export async function handleDispatchTask(
   requestId: string | number | null,
@@ -75,6 +86,59 @@ export async function handleDispatchTask(
     explicitBranch = params.branch.trim();
   }
 
+  // ── Validate new config parameters ──────────────────────────────────────
+
+  // agentProfileId — validated later via resolveAgentProfile
+  const agentProfileId = typeof params.agentProfileId === 'string' ? params.agentProfileId.trim() : undefined;
+  if (params.agentProfileId !== undefined && !agentProfileId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'agentProfileId must be a non-empty string');
+  }
+
+  // taskMode
+  let explicitTaskMode: TaskMode | undefined;
+  if (params.taskMode !== undefined) {
+    if (typeof params.taskMode !== 'string' || !VALID_TASK_MODES.includes(params.taskMode as TaskMode)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `taskMode must be one of: ${VALID_TASK_MODES.join(', ')}`);
+    }
+    explicitTaskMode = params.taskMode as TaskMode;
+  }
+
+  // agentType
+  let explicitAgentType: string | undefined;
+  if (params.agentType !== undefined) {
+    if (typeof params.agentType !== 'string' || !isValidAgentType(params.agentType)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `agentType is not a recognized agent type`);
+    }
+    explicitAgentType = params.agentType;
+  }
+
+  // workspaceProfile
+  let explicitWorkspaceProfile: WorkspaceProfile | undefined;
+  if (params.workspaceProfile !== undefined) {
+    if (typeof params.workspaceProfile !== 'string' || !VALID_WORKSPACE_PROFILES.includes(params.workspaceProfile as WorkspaceProfile)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `workspaceProfile must be one of: ${VALID_WORKSPACE_PROFILES.join(', ')}`);
+    }
+    explicitWorkspaceProfile = params.workspaceProfile as WorkspaceProfile;
+  }
+
+  // provider
+  let explicitProvider: CredentialProvider | undefined;
+  if (params.provider !== undefined) {
+    if (typeof params.provider !== 'string' || !CREDENTIAL_PROVIDERS.includes(params.provider as CredentialProvider)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
+    }
+    explicitProvider = params.provider as CredentialProvider;
+  }
+
+  // vmLocation — validated against provider after resolution
+  let explicitVmLocation: string | undefined;
+  if (params.vmLocation !== undefined) {
+    if (typeof params.vmLocation !== 'string' || params.vmLocation.trim().length === 0) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'vmLocation must be a non-empty string');
+    }
+    explicitVmLocation = params.vmLocation.trim();
+  }
+
   // ── Look up current task to get dispatch depth ──────────────────────────
   const [currentTask] = await db
     .select({
@@ -107,11 +171,6 @@ export async function handleDispatchTask(
   const newDepth = currentTask.dispatchDepth + 1;
 
   // ── Parallel: pre-flight checks, credential check, project fetch, and AI title ─
-  // These queries are independent of each other (only depend on currentTask for depth,
-  // which was already checked above). Running them in parallel saves 4 sequential D1
-  // round-trips + 1 Workers AI call.
-  // The COUNT queries here are advisory (fast-fail). Atomic enforcement happens later
-  // via D1 batch (COUNT + INSERT in implicit transaction) to prevent TOCTOU races.
   const titleConfig = getTaskTitleConfig(env);
   const [
     [childCountResult],
@@ -215,6 +274,13 @@ export async function handleDispatchTask(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
   }
 
+  // ── Resolve agent profile ───────────────────────────────────────────────
+  // Same pattern as submit.ts — resolveAgentProfile handles ID/name lookup
+  // with built-in profile seeding.
+  const resolvedProfile = agentProfileId
+    ? await resolveAgentProfile(db, tokenData.projectId, agentProfileId, tokenData.userId, env)
+    : null;
+
   // ── Build the task description with references ──────────────────────────
   let fullDescription = description;
   if (references.length > 0) {
@@ -237,37 +303,62 @@ export async function handleDispatchTask(
     maxLength: branchMaxLength,
   });
 
-  // Determine VM config (explicit > project default > platform default)
+  // ── Resolve config (explicit → profile → project default → platform default) ──
   const resolvedVmSize: VMSize = vmSize
+    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
-  const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
-  const resolvedVmLocation: VMLocation = (project.defaultLocation as VMLocation | null)
+
+  const resolvedProvider: CredentialProvider | null = explicitProvider
+    ?? (resolvedProfile?.provider as CredentialProvider | null)
+    ?? (project.defaultProvider as CredentialProvider | null)
+    ?? null;
+
+  const resolvedVmLocation: VMLocation = (explicitVmLocation as VMLocation)
+    ?? (resolvedProfile?.vmLocation as VMLocation | null)
+    ?? (project.defaultLocation as VMLocation | null)
     ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
     ?? DEFAULT_VM_LOCATION;
-  const resolvedWorkspaceProfile: WorkspaceProfile = (project.defaultWorkspaceProfile as WorkspaceProfile | null)
+
+  const resolvedWorkspaceProfile: WorkspaceProfile = explicitWorkspaceProfile
+    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
+    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
 
+  // Validate location against resolved provider
+  if (resolvedProvider !== null && !isValidLocationForProvider(resolvedProvider, resolvedVmLocation)) {
+    const validLocations = getLocationsForProvider(resolvedProvider).map((l) => l.id);
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Location '${resolvedVmLocation}' is not valid for provider '${resolvedProvider}'. Valid locations: ${validLocations.join(', ')}`,
+    );
+  }
+
+  // Task mode: explicit → profile → inferred from workspace profile → default 'task'
+  const resolvedTaskMode: TaskMode = explicitTaskMode
+    ?? (resolvedProfile?.taskMode as TaskMode | null)
+    ?? (resolvedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
+
+  // Agent type: explicit → profile → project default → platform default
+  const resolvedAgentType: string | null = explicitAgentType
+    ?? resolvedProfile?.agentType
+    ?? project.defaultAgentType
+    ?? null;
+
   // Explicit branch > project default branch.
-  // We intentionally do NOT fall back to the parent task's outputBranch because
-  // that branch may never have been pushed to the remote (it's generated at task
-  // creation time, not on push). If an agent wants a child task on its branch,
-  // it must pass `branch` explicitly — which implies it has already pushed.
   const checkoutBranch = explicitBranch || project.defaultBranch;
 
   // ── Atomic conditional INSERT (prevents TOCTOU race) ─────────────────
-  // Uses INSERT ... SELECT ... WHERE to embed the rate-limit check as a
-  // subquery within a single SQL statement. SQLite evaluates the WHERE
-  // clause atomically — if a concurrent request inserts a task between
-  // our advisory pre-check and this statement, the subquery count will
-  // reflect it and the INSERT will produce zero rows. No phantom rows,
-  // no compensating cancellation needed.
   const statusPlaceholders = ACTIVE_STATUSES.map(() => '?').join(', ');
   const conditionalInsertResult = await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
+     task_mode, agent_profile_hint,
      created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?, ?, ?
+     SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
+     ?, ?,
+     ?, ?
      WHERE (
        SELECT count(*) FROM tasks
        WHERE parent_task_id = ? AND project_id = ?
@@ -282,7 +373,9 @@ export async function handleDispatchTask(
     // INSERT values
     taskId, tokenData.projectId, tokenData.userId, tokenData.taskId,
     taskTitle, fullDescription, priority, newDepth, branchName,
-    tokenData.userId, now, now,
+    tokenData.userId,
+    resolvedTaskMode, resolvedProfile?.profileId ?? null,
+    now, now,
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,
     ...ACTIVE_STATUSES,
@@ -294,8 +387,6 @@ export async function handleDispatchTask(
   ).run();
 
   if (!conditionalInsertResult.meta.changes || conditionalInsertResult.meta.changes === 0) {
-    // The conditional INSERT produced zero rows — a concurrent dispatch
-    // pushed the count over the limit between our advisory check and now.
     log.warn('mcp.dispatch_task.atomic_limit_breach', {
       taskId,
       projectId: tokenData.projectId,
@@ -388,14 +479,13 @@ export async function handleDispatchTask(
       outputBranch: branchName,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
-      agentType: project.defaultAgentType ?? null,
+      agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
       cloudProvider: resolvedProvider,
-      // Agent profile resolution is not supported on the MCP dispatch path — tasks
-      // use project defaults. Profile support (model, permissionMode,
-      // systemPromptAppend) deferred to a future PR.
-      model: null,
-      permissionMode: null,
+      taskMode: resolvedTaskMode,
+      model: resolvedProfile?.model ?? null,
+      permissionMode: resolvedProfile?.permissionMode ?? null,
+      systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
         maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
@@ -445,6 +535,8 @@ export async function handleDispatchTask(
           dispatchDepth: newDepth,
           title: taskTitle,
           branchName,
+          agentProfileId: agentProfileId ?? undefined,
+          taskMode: resolvedTaskMode,
         },
       }),
     }));
@@ -463,6 +555,10 @@ export async function handleDispatchTask(
     projectId: tokenData.projectId,
     dispatchDepth: newDepth,
     vmSize: resolvedVmSize,
+    vmLocation: resolvedVmLocation,
+    taskMode: resolvedTaskMode,
+    agentType: resolvedAgentType,
+    agentProfileId: agentProfileId ?? null,
   });
 
   const appDomain = `app.${env.BASE_DOMAIN}`;
