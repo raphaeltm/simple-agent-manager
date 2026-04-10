@@ -18,29 +18,30 @@ Six concurrency, security, and correctness issues in the Go VM agent (`packages/
 - `requireWorkspaceRequestAuth` and `requireNodeManagementAuth` both write error responses directly. The events endpoint chains them incorrectly.
 - `http.DefaultClient` appears in many files, but the task scope covers only `workspace_callbacks.go` and `git_credential.go` (the server package files).
 - `postTaskCallback` already creates a local `http.Client{Timeout: 30s}` — the shared client should use the same pattern.
+- Also fixed `project_runtime_assets.go` and `workspace_provisioning.go` for consistency.
 
 ## Implementation Checklist
 
-- [ ] 1. Fix CallbackToken race: replace `s.acpConfig.CallbackToken` with `s.getCallbackToken()` in `postTaskCallback()`
-- [ ] 2. Fix bootstrapComplete race: change `bootstrapComplete bool` to `bootstrapComplete atomic.Bool`, update all reads to `.Load()` and writes to `.Store(true)`
-- [ ] 3. Eliminate shell injection in file listing: replace `sh -c` + `find ... | head` with direct `find` args, parse and limit results in Go
-- [ ] 4. Add `--` separator in file download: change `cat filePath` to `cat -- filePath` in `handleFileDownload()`
-- [ ] 5. Fix double-auth write in events: extract non-writing auth check helpers, call `writeError` only once
-- [ ] 6. Add shared HTTP client to Server struct, replace `http.DefaultClient.Do` in `workspace_callbacks.go` and `git_credential.go`
-- [ ] 7. Add test for bootstrapComplete atomic access
-- [ ] 8. Add test for handleFileDownload with path starting with `-`
-- [ ] 9. Run `go vet ./...` and `go test ./...` to verify
+- [x] 1. Fix CallbackToken race: replace `s.acpConfig.CallbackToken` with `s.getCallbackToken()` in `postTaskCallback()`
+- [x] 2. Fix bootstrapComplete race: change `bootstrapComplete bool` to `bootstrapComplete atomic.Bool`, update all reads to `.Load()` and writes to `.Store(true)`
+- [x] 3. Eliminate shell injection in file listing: replace `sh -c` + `find ... | head` with direct `find` args, parse and limit results in Go
+- [x] 4. Add `--` separator in file download: change `cat filePath` to `cat -- filePath` in `handleFileDownload()`
+- [x] 5. Fix double-auth write in events: add `checkWorkspaceRequestAuth` (non-writing variant), call `writeError` only once
+- [x] 6. Add shared HTTP client to Server struct (configurable via `HTTP_CALLBACK_TIMEOUT`), replace `http.DefaultClient.Do` in server package
+- [x] 7. Add test for bootstrapComplete atomic access (sequential + concurrent)
+- [x] 8. Add test for handleFileDownload with path starting with `-`
+- [x] 9. Run `go vet ./...` and `go test ./...` — all pass
 
 ## Acceptance Criteria
 
-- [ ] No data race on `CallbackToken` — uses synchronized accessor
-- [ ] No data race on `bootstrapComplete` — uses `atomic.Bool`
-- [ ] File listing does not use shell interpolation — direct exec args only
-- [ ] File download handles paths starting with `-` safely
-- [ ] Events endpoint does not produce garbled responses on auth failure
-- [ ] No `http.DefaultClient` usage in server package callback/credential files
-- [ ] All existing tests pass, new tests added for atomic and flag-path cases
-- [ ] No external API contract changes
+- [x] No data race on `CallbackToken` — uses synchronized accessor
+- [x] No data race on `bootstrapComplete` — uses `atomic.Bool`
+- [x] File listing does not use shell interpolation — direct exec args only
+- [x] File download handles paths starting with `-` safely
+- [x] Events endpoint does not produce garbled responses on auth failure
+- [x] No `http.DefaultClient` usage in server package callback/credential files
+- [x] All existing tests pass, new tests added for atomic and flag-path cases
+- [x] No external API contract changes
 
 ## References
 
@@ -51,3 +52,4 @@ Six concurrency, security, and correctness issues in the Go VM agent (`packages/
 - `packages/vm-agent/internal/server/workspace_callbacks.go`
 - `packages/vm-agent/internal/server/git_credential.go`
 - `packages/vm-agent/internal/server/health.go`
+- `packages/vm-agent/internal/server/workspace_routing.go`

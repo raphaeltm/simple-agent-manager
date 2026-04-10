@@ -71,17 +71,17 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	// Use find with -maxdepth 1 to list directory contents.
 	// Output format: type\tsize\tmtime_epoch\tname (tab-separated)
 	// -not -name '.' excludes the directory itself from output.
+	// Args are passed directly (no shell) to prevent shell injection.
 	maxEntries := s.config.FileListMaxEntries
-	findCmd := fmt.Sprintf(
-		`find %q -maxdepth 1 -not -name '.' -printf '%%y\t%%s\t%%T@\t%%f\n' 2>/dev/null | head -n %d`,
-		dirPath, maxEntries,
-	)
 
 	timeout := s.config.FileListTimeout
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	output, _, err := s.execInContainer(ctx, containerID, user, workDir, "sh", "-c", findCmd)
+	output, _, err := s.execInContainer(ctx, containerID, user, workDir,
+		"find", dirPath, "-maxdepth", "1", "-not", "-name", ".",
+		"-printf", `%y\t%s\t%T@\t%f\n`,
+	)
 	if err != nil {
 		slog.Error("Error listing directory", "path", dirPath, "workspace", workspaceID, "error", err)
 		http.Error(w, `{"error":"failed to list directory"}`, http.StatusInternalServerError)
@@ -89,6 +89,11 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entries := parseFileListOutput(output)
+
+	// Limit entries in Go instead of piping through head -n.
+	if len(entries) > maxEntries {
+		entries = entries[:maxEntries]
+	}
 
 	// Sort: dirs first, then alphabetically by name
 	sort.Slice(entries, func(i, j int) bool {
@@ -140,27 +145,24 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
 	}
 
 	maxEntries := s.config.FileFindMaxEntries
-	// Exclude common noise directories and files
-	findCmd := fmt.Sprintf(
-		`find . -type f `+
-			`-not -path '*/node_modules/*' `+
-			`-not -path '*/.git/*' `+
-			`-not -path '*/dist/*' `+
-			`-not -path '*/.next/*' `+
-			`-not -path '*/coverage/*' `+
-			`-not -path '*/__pycache__/*' `+
-			`-not -path '*/.DS_Store' `+
-			`-not -path '*/vendor/*' `+
-			`-not -name '*.pyc' `+
-			`2>/dev/null | head -n %d`,
-		maxEntries,
-	)
 
 	timeout := s.config.FileFindTimeout
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	output, _, err := s.execInContainer(ctx, containerID, user, workDir, "sh", "-c", findCmd)
+	// Use direct args to avoid shell injection — no sh -c.
+	output, _, err := s.execInContainer(ctx, containerID, user, workDir,
+		"find", ".", "-type", "f",
+		"-not", "-path", "*/node_modules/*",
+		"-not", "-path", "*/.git/*",
+		"-not", "-path", "*/dist/*",
+		"-not", "-path", "*/.next/*",
+		"-not", "-path", "*/coverage/*",
+		"-not", "-path", "*/__pycache__/*",
+		"-not", "-path", "*/.DS_Store",
+		"-not", "-path", "*/vendor/*",
+		"-not", "-name", "*.pyc",
+	)
 	if err != nil {
 		slog.Error("Error finding files", "workspace", workspaceID, "error", err)
 		http.Error(w, `{"error":"failed to find files"}`, http.StatusInternalServerError)
@@ -168,6 +170,10 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
 	}
 
 	files := parseFileFindOutput(output)
+	// Limit entries in Go instead of piping through head in a shell.
+	if len(files) > maxEntries {
+		files = files[:maxEntries]
+	}
 
 	resp := FileFindResponse{Files: files}
 	w.Header().Set("Content-Type", "application/json")

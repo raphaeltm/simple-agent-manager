@@ -106,6 +106,41 @@ func (s *Server) requireWorkspaceRequestAuth(w http.ResponseWriter, r *http.Requ
 	return true
 }
 
+// checkWorkspaceRequestAuth is a non-writing variant of requireWorkspaceRequestAuth.
+// It returns true if the request is authenticated for the given workspace, but does
+// NOT write any HTTP error response on failure. This allows callers to try multiple
+// auth methods without producing garbled double-write responses.
+func (s *Server) checkWorkspaceRequestAuth(r *http.Request, workspaceID string) bool {
+	routedWorkspace := s.routedWorkspaceID(r)
+	if routedWorkspace != "" && routedWorkspace != workspaceID {
+		return false
+	}
+
+	// Try workspace-scoped cookie first, then fall back to legacy cookie.
+	session := s.sessionManager.GetSessionForWorkspace(r, workspaceID)
+	if session != nil {
+		if session.Claims != nil &&
+			(session.Claims.Workspace == "" || session.Claims.Workspace == workspaceID) {
+			return true
+		}
+	}
+
+	// Try Authorization: Bearer header first, then fall back to ?token= query param.
+	token := ""
+	if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+		token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	}
+	if token == "" {
+		token = strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+	if token == "" {
+		return false
+	}
+
+	_, err := s.jwtValidator.ValidateWorkspaceToken(token, workspaceID)
+	return err == nil
+}
+
 func (s *Server) getWorkspaceRuntime(workspaceID string) (*WorkspaceRuntime, bool) {
 	s.workspaceMu.RLock()
 	defer s.workspaceMu.RUnlock()

@@ -76,7 +76,7 @@ func (s *Server) sendNodeReady() {
 	}
 	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
 		slog.Error("Node ready callback failed", "error", err)
 		return
@@ -90,10 +90,10 @@ func (s *Server) sendNodeReady() {
 
 // heartbeatResponse is the expected JSON response from the heartbeat endpoint.
 type heartbeatResponse struct {
-	Status         string `json:"status"`
+	Status          string `json:"status"`
 	LastHeartbeatAt string `json:"lastHeartbeatAt"`
-	HealthStatus   string `json:"healthStatus"`
-	RefreshedToken string `json:"refreshedToken,omitempty"`
+	HealthStatus    string `json:"healthStatus"`
+	RefreshedToken  string `json:"refreshedToken,omitempty"`
 }
 
 func (s *Server) sendNodeHeartbeat() {
@@ -131,7 +131,7 @@ func (s *Server) sendNodeHeartbeat() {
 	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
 		slog.Error("Node heartbeat failed", "error", err)
 		return
@@ -202,7 +202,7 @@ func (s *Server) retryPendingReadyCallbacks() {
 		req.Header.Set("Authorization", "Bearer "+p.CallbackToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := (&http.Client{Timeout: s.config.WorkspaceReadyCallbackTimeout}).Do(req)
+		resp, err := s.controlPlaneHTTPClient(s.config.WorkspaceReadyCallbackTimeout).Do(req)
 		if err != nil {
 			slog.Warn("Workspace-ready retry failed (will try again on next heartbeat)",
 				"workspace", p.WorkspaceID, "error", err)

@@ -66,7 +66,7 @@ func (s *Server) SyncCredential(
 		req.Header.Set("Authorization", "Bearer "+callbackToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := s.controlPlaneHTTPClient(0).Do(req)
 		if err != nil {
 			return fmt.Errorf("send credential-sync request: %w", err)
 		}
@@ -140,7 +140,7 @@ func (s *Server) notifyWorkspaceProvisioningFailed(
 		req.Header.Set("Authorization", "Bearer "+trimmedCallbackToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := s.controlPlaneHTTPClient(0).Do(req)
 		if err != nil {
 			return fmt.Errorf("send provisioning-failed request: %w", err)
 		}

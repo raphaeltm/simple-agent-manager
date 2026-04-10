@@ -37,7 +37,9 @@ func (s *Server) handleListWorkspaceEvents(w http.ResponseWriter, r *http.Reques
 
 	// Accept both workspace session auth (browser direct call with ?token= or cookie)
 	// and management auth (control-plane proxy), matching handleListTabs pattern.
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+	// Check workspace auth first without writing an error response, then try
+	// management auth. Only write a single error if both fail.
+	if !s.checkWorkspaceRequestAuth(r, workspaceID) {
 		if !s.requireNodeManagementAuth(w, r, workspaceID) {
 			return
 		}
