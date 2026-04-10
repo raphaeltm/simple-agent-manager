@@ -726,7 +726,6 @@ app.get('/health', (c) => {
 
   return c.json({
     status: hasCriticalBindings ? 'healthy' : 'degraded',
-    version: c.env.VERSION,
     timestamp: new Date().toISOString(),
   }, hasCriticalBindings ? 200 : 503);
 });

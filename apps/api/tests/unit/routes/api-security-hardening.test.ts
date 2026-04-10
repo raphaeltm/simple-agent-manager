@@ -107,6 +107,21 @@ describe('Workspace subdomain — ULID validation', () => {
     const result = parseWorkspaceSubdomain('ws-01ARZ3NDEK/SV4RRFFQ69G5FA.example.com', baseDomain);
     expect(result).toEqual({ error: 'Invalid workspace ID format' });
   });
+
+  it('rejects workspace ID with Crockford-excluded chars (I, L, O, U)', () => {
+    // Crockford Base32 excludes I, L, O, U — these are not valid ULID characters
+    const withI = parseWorkspaceSubdomain('ws-01ARZ3NDEKTSV4RRFFQI9G5FAV.example.com', baseDomain);
+    expect(withI).toEqual({ error: 'Invalid workspace ID format' });
+
+    const withL = parseWorkspaceSubdomain('ws-01ARZ3NDEKTSV4RRFFQL9G5FAV.example.com', baseDomain);
+    expect(withL).toEqual({ error: 'Invalid workspace ID format' });
+
+    const withO = parseWorkspaceSubdomain('ws-01ARZ3NDEKTSV4RRFFQO9G5FAV.example.com', baseDomain);
+    expect(withO).toEqual({ error: 'Invalid workspace ID format' });
+
+    const withU = parseWorkspaceSubdomain('ws-01ARZ3NDEKTSV4RRFFQU9G5FAV.example.com', baseDomain);
+    expect(withU).toEqual({ error: 'Invalid workspace ID format' });
+  });
 });
 
 // ---------------------------------------------------------------------------
