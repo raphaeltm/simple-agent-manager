@@ -1,6 +1,6 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import { Download, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Download, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   formatFileSize,
@@ -17,6 +17,9 @@ export interface FilePreviewModalProps {
   onDownload: () => void;
 }
 
+/** Timeout for PDF iframe loading before showing error state (ms). */
+const PDF_LOAD_TIMEOUT_MS = 15_000;
+
 export function FilePreviewModal({
   file,
   previewUrl,
@@ -25,6 +28,7 @@ export function FilePreviewModal({
 }: FilePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [pdfLoading, setPdfLoading] = useState(true);
+  const [pdfError, setPdfError] = useState(false);
 
   const isImage = isPreviewableImageMime(file.mimeType);
   const isPdf = isPdfMime(file.mimeType);
@@ -48,10 +52,58 @@ export function FilePreviewModal({
     };
   }, []);
 
-  // Focus trap
+  // Focus trap: cycle Tab between focusable elements within the dialog
+  const handleTabTrap = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+
+      const focusable = dialog.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0] as HTMLElement | undefined;
+      const last = focusable[focusable.length - 1] as HTMLElement | undefined;
+      if (!first || !last) return;
+
+      if (e.shiftKey) {
+        if (document.activeElement === first || document.activeElement === dialog) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleTabTrap);
+    return () => document.removeEventListener('keydown', handleTabTrap);
+  }, [handleTabTrap]);
+
+  // Focus dialog on mount
   useEffect(() => {
     dialogRef.current?.focus();
   }, []);
+
+  // PDF loading timeout
+  useEffect(() => {
+    if (!isPdf || !pdfLoading) return;
+    const timer = setTimeout(() => {
+      if (pdfLoading) {
+        setPdfLoading(false);
+        setPdfError(true);
+      }
+    }, PDF_LOAD_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [isPdf, pdfLoading]);
 
   return (
     <div
@@ -117,19 +169,39 @@ export function FilePreviewModal({
 
             {isPdf && (
               <div className="relative h-full">
-                {pdfLoading && (
+                {pdfLoading && !pdfError && (
                   <div className="absolute inset-0 flex items-center justify-center">
                     <Spinner size="md" />
                   </div>
                 )}
-                <iframe
-                  src={previewUrl}
-                  title={`Preview of ${file.filename}`}
-                  sandbox="allow-scripts allow-same-origin"
-                  className="w-full h-full border-none"
-                  style={{ minHeight: '60vh' }}
-                  onLoad={() => setPdfLoading(false)}
-                />
+                {pdfError ? (
+                  <div className="flex flex-col items-center justify-center gap-3 p-8 text-center min-h-[60vh]">
+                    <AlertTriangle size={32} className="text-warning" />
+                    <p className="text-sm text-fg-muted">
+                      Unable to load PDF preview. Try downloading the file instead.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={onDownload}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
+                    >
+                      <Download size={14} />
+                      Download
+                    </button>
+                  </div>
+                ) : (
+                  <iframe
+                    src={previewUrl}
+                    title={`Preview of ${file.filename}`}
+                    sandbox="allow-scripts allow-same-origin"
+                    className="w-full h-full border-none min-h-[60vh]"
+                    onLoad={() => setPdfLoading(false)}
+                    onError={() => {
+                      setPdfLoading(false);
+                      setPdfError(true);
+                    }}
+                  />
+                )}
               </div>
             )}
           </div>

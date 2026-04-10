@@ -308,7 +308,9 @@ describe('library routes', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('application/pdf');
       expect(res.headers.get('Content-Disposition')).toContain('inline');
-      expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+      // PDF gets a more permissive CSP for browser-native rendering
+      expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'self'");
+      expect(res.headers.get('Content-Security-Policy')).toContain("script-src 'unsafe-inline'");
     });
 
     it('rejects non-previewable MIME types with 400 without decrypting', async () => {

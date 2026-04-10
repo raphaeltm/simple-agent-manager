@@ -298,7 +298,10 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
       'Content-Disposition': `inline; filename="${safeFilename}"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+      // PDF viewers need script-src for browser-native rendering; images get strict CSP
+      'Content-Security-Policy': mimeTypeLower === 'application/pdf'
+        ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'self'"
+        : "default-src 'none'; style-src 'unsafe-inline'",
     },
   });
 });

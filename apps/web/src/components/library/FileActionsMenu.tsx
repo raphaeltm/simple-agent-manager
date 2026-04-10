@@ -65,11 +65,12 @@ export function FileActionsMenu({
         <div className="absolute right-0 top-full mt-1 z-20 min-w-[160px] rounded-lg border border-border-default bg-surface shadow-lg py-1">
           {onPreview && isPreviewableMime(file.mimeType) && (
             <button
+              type="button"
               onClick={() => {
                 setOpen(false);
                 onPreview(file);
               }}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
+              className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left ${FOCUS_RING}`}
             >
               <Eye size={14} /> Preview
             </button>

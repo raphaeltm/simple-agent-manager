@@ -41,7 +41,17 @@ export function FileGridCard({
       {/* Info */}
       <div className="flex flex-col gap-1.5 p-3">
         <div className="flex items-center justify-between gap-1">
-          <span className="text-sm font-medium text-fg-primary truncate">{file.filename}</span>
+          {canPreview ? (
+            <button
+              type="button"
+              onClick={() => onPreview(file)}
+              className={`text-sm font-medium text-fg-primary truncate bg-transparent border-none cursor-pointer p-0 text-left hover:text-accent ${FOCUS_RING}`}
+            >
+              {file.filename}
+            </button>
+          ) : (
+            <span className="text-sm font-medium text-fg-primary truncate">{file.filename}</span>
+          )}
           <FileActionsMenu
             file={file}
             projectId={projectId}
