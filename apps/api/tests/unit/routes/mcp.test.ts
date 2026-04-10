@@ -1338,6 +1338,210 @@ describe('MCP Routes', () => {
       expect(startInput.userId).toBe('user-789');
       expect(startInput.config.vmSize).toBe('large');
     });
+
+    // ─── New config parity tests ────────────────────────────────────────
+
+    it('should include new config fields in tools/list schema', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
+
+      const body = await res.json();
+      const dispatchTool = body.result.tools.find(
+        (t: { name: string }) => t.name === 'dispatch_task',
+      );
+      expect(dispatchTool).toBeDefined();
+      const props = dispatchTool.inputSchema.properties;
+      expect(props.agentProfileId).toBeDefined();
+      expect(props.agentProfileId.type).toBe('string');
+      expect(props.taskMode).toBeDefined();
+      expect(props.taskMode.enum).toEqual(['task', 'conversation']);
+      expect(props.agentType).toBeDefined();
+      expect(props.agentType.type).toBe('string');
+      expect(props.workspaceProfile).toBeDefined();
+      expect(props.workspaceProfile.enum).toEqual(['default', 'lightweight']);
+      expect(props.provider).toBeDefined();
+      expect(props.provider.type).toBe('string');
+      expect(props.vmLocation).toBeDefined();
+      expect(props.vmLocation.type).toBe('string');
+    });
+
+    it('should reject invalid taskMode', async () => {
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 0,
+        status: 'in_progress',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Some task', taskMode: 'invalid' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('taskMode must be one of');
+    });
+
+    it('should reject invalid agentType', async () => {
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 0,
+        status: 'in_progress',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Some task', agentType: 'not-a-real-agent' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('agentType');
+    });
+
+    it('should reject invalid workspaceProfile', async () => {
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 0,
+        status: 'in_progress',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Some task', workspaceProfile: 'ultra' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('workspaceProfile must be one of');
+    });
+
+    it('should reject invalid provider', async () => {
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 0,
+        status: 'in_progress',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Some task', provider: 'aws' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('provider must be one of');
+    });
+
+    it('should reject empty agentProfileId', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Some task', agentProfileId: '  ' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('agentProfileId must be a non-empty string');
+    });
+
+    it('should reject empty vmLocation', async () => {
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 0,
+        status: 'in_progress',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Some task', vmLocation: '' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('vmLocation must be a non-empty string');
+    });
+
+    it('should dispatch with explicit taskMode=conversation', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Chat with the user about their code',
+          taskMode: 'conversation',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
+
+      // Verify TaskRunner DO receives conversation mode
+      const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
+      expect(startInput.config.taskMode).toBe('conversation');
+    });
+
+    it('should pass explicit config fields to TaskRunner DO', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Deploy the feature',
+          vmSize: 'large',
+          taskMode: 'task',
+          workspaceProfile: 'lightweight',
+          agentType: 'claude-code',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
+      expect(startInput.config.vmSize).toBe('large');
+      expect(startInput.config.taskMode).toBe('task');
+      expect(startInput.config.workspaceProfile).toBe('lightweight');
+      expect(startInput.config.agentType).toBe('claude-code');
+    });
+
+    it('should dispatch with minimal args (backward compatibility)', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Simple task' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.taskId).toBeDefined();
+      expect(data.status).toBe('queued');
+
+      // Verify defaults are used when no config specified
+      const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
+      expect(startInput.config.taskMode).toBe('task');
+      expect(startInput.config.model).toBeNull();
+      expect(startInput.config.permissionMode).toBeNull();
+      expect(startInput.config.systemPromptAppend).toBeNull();
+    });
   });
 
   // ─── HTTP rate limiting ──────────────────────────────────────────────
