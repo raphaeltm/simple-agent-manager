@@ -9,6 +9,19 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+read_pulumi_secret() {
+  local output_name="$1"
+  if [ -z "${PULUMI_STACK:-}" ]; then
+    return 0
+  fi
+
+  (
+    cd infra
+    pulumi stack select "$PULUMI_STACK" >/dev/null 2>&1
+    pulumi stack output "$output_name" --show-secrets 2>/dev/null
+  ) || true
+}
+
 # Function to set a secret with proper error handling
 set_worker_secret() {
   local secret_name="$1"
@@ -56,6 +69,13 @@ PULUMI_JWT_PUBLIC_KEY="${PULUMI_JWT_PUBLIC_KEY:-}"
 SECRET_ENCRYPTION_KEY="${SECRET_ENCRYPTION_KEY:-}"
 SECRET_JWT_PRIVATE_KEY="${SECRET_JWT_PRIVATE_KEY:-}"
 SECRET_JWT_PUBLIC_KEY="${SECRET_JWT_PUBLIC_KEY:-}"
+
+if [ -z "$PULUMI_ENCRYPTION_KEY" ] && [ -n "${PULUMI_STACK:-}" ]; then
+  echo "Reading Pulumi-managed security keys from stack: $PULUMI_STACK"
+  PULUMI_ENCRYPTION_KEY="$(read_pulumi_secret encryptionKey)"
+  PULUMI_JWT_PRIVATE_KEY="$(read_pulumi_secret jwtPrivateKey)"
+  PULUMI_JWT_PUBLIC_KEY="$(read_pulumi_secret jwtPublicKey)"
+fi
 
 echo "Configuring secrets for environment: $ENVIRONMENT"
 echo ""
@@ -111,6 +131,10 @@ set_worker_secret "GITHUB_APP_SLUG" "${GH_APP_SLUG:-}" "$ENVIRONMENT" "true" || 
 # Configure Origin CA certificate/key (required for TLS between CF edge and VM agents)
 PULUMI_ORIGIN_CA_CERT="${PULUMI_ORIGIN_CA_CERT:-}"
 PULUMI_ORIGIN_CA_KEY="${PULUMI_ORIGIN_CA_KEY:-}"
+if [ -z "$PULUMI_ORIGIN_CA_CERT" ] && [ -n "${PULUMI_STACK:-}" ]; then
+  PULUMI_ORIGIN_CA_CERT="$(read_pulumi_secret originCaCertPem)"
+  PULUMI_ORIGIN_CA_KEY="$(read_pulumi_secret originCaKeyPem)"
+fi
 set_worker_secret "ORIGIN_CA_CERT" "$PULUMI_ORIGIN_CA_CERT" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "ORIGIN_CA_KEY" "$PULUMI_ORIGIN_CA_KEY" "$ENVIRONMENT" "true" || FAILED=true
 

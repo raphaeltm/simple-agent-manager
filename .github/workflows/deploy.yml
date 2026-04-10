@@ -18,6 +18,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 # Only one production deployment at a time, queue subsequent ones
 concurrency:
   group: deploy-production
