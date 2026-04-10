@@ -252,8 +252,6 @@ const PREVIEWABLE_MIMES = new Set([
   'image/gif',
   'image/webp',
   'image/avif',
-  'image/bmp',
-  'image/x-icon',
   'application/pdf',
 ]);
 
@@ -266,16 +264,8 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
 
   await requireOwnedProject(db, projectId, userId);
 
-  const encryptionKey = getEncryptionKey(c.env);
-  const timeoutMs = getDownloadTimeoutMs(c.env);
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const { data, file } = await Promise.race([
-    downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
-    new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => reject(errors.internal('Preview timed out')), timeoutMs);
-    }),
-  ]).finally(() => clearTimeout(timeoutHandle));
-
+  // Check MIME type BEFORE decrypting to avoid wasting CPU on unsupported types
+  const { file } = await getFile(db, projectId, fileId);
   const mimeTypeLower = file.mimeType.toLowerCase();
   if (!PREVIEWABLE_MIMES.has(mimeTypeLower)) {
     throw errors.badRequest(
@@ -283,16 +273,27 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
     );
   }
 
+  const encryptionKey = getEncryptionKey(c.env);
+  const timeoutMs = getDownloadTimeoutMs(c.env);
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const { data } = await Promise.race([
+    downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
+    new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(errors.internal('Preview timed out')), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timeoutHandle));
+
   const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
 
   return new Response(data, {
     status: 200,
     headers: {
-      'Content-Type': file.mimeType,
+      'Content-Type': mimeTypeLower,
       'Content-Length': String(data.byteLength),
       'Content-Disposition': `inline; filename="${safeFilename}"`,
-      'Cache-Control': 'private, max-age=300',
+      'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
     },
   });
 });

@@ -84,8 +84,6 @@ describe('isPreviewableMime', () => {
     expect(isPreviewableMime('image/gif')).toBe(true);
     expect(isPreviewableMime('image/webp')).toBe(true);
     expect(isPreviewableMime('image/avif')).toBe(true);
-    expect(isPreviewableMime('image/bmp')).toBe(true);
-    expect(isPreviewableMime('image/x-icon')).toBe(true);
   });
 
   it('returns true for PDF', () => {
@@ -102,6 +100,8 @@ describe('isPreviewableMime', () => {
     expect(isPreviewableMime('application/json')).toBe(false);
     expect(isPreviewableMime('application/javascript')).toBe(false);
     expect(isPreviewableMime('application/zip')).toBe(false);
+    expect(isPreviewableMime('image/bmp')).toBe(false);
+    expect(isPreviewableMime('image/x-icon')).toBe(false);
   });
 
   it('is case-insensitive', () => {

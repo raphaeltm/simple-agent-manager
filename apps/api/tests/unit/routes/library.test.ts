@@ -1,7 +1,7 @@
 /**
  * Tests for project file library routes.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockUploadFile = vi.hoisted(() => vi.fn());
 const mockReplaceFile = vi.hoisted(() => vi.fn());
@@ -76,6 +76,11 @@ function makeApp(env: Env) {
 }
 
 describe('library routes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetDownloadTimeoutMs.mockReturnValue(60000);
+  });
+
   describe('POST /upload', () => {
     it('returns 201 on successful upload', async () => {
       const mockFile = {
@@ -255,8 +260,12 @@ describe('library routes', () => {
   });
 
   describe('GET /:fileId/preview', () => {
-    it('returns inline headers for previewable image', async () => {
+    it('returns inline headers with CSP for previewable image', async () => {
       const content = new TextEncoder().encode('fake png data');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'photo.png', mimeType: 'image/png' },
+        tags: [],
+      });
       mockDownloadFile.mockResolvedValue({
         data: content.buffer,
         file: { filename: 'photo.png', mimeType: 'image/png' },
@@ -273,11 +282,17 @@ describe('library routes', () => {
       expect(res.headers.get('Content-Type')).toBe('image/png');
       expect(res.headers.get('Content-Disposition')).toContain('inline');
       expect(res.headers.get('Content-Disposition')).toContain('photo.png');
-      expect(res.headers.get('Cache-Control')).toBe('private, max-age=300');
+      expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
     });
 
     it('returns inline headers for PDF', async () => {
       const content = new TextEncoder().encode('fake pdf data');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'report.pdf', mimeType: 'application/pdf' },
+        tags: [],
+      });
       mockDownloadFile.mockResolvedValue({
         data: content.buffer,
         file: { filename: 'report.pdf', mimeType: 'application/pdf' },
@@ -293,14 +308,13 @@ describe('library routes', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('application/pdf');
       expect(res.headers.get('Content-Disposition')).toContain('inline');
+      expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
     });
 
-    it('rejects non-previewable MIME types with 400', async () => {
-      const content = new TextEncoder().encode('plain text');
-      mockDownloadFile.mockResolvedValue({
-        data: content.buffer,
+    it('rejects non-previewable MIME types with 400 without decrypting', async () => {
+      mockGetFile.mockResolvedValue({
         file: { filename: 'readme.txt', mimeType: 'text/plain' },
-        metadata: {},
+        tags: [],
       });
 
       const { app, env } = makeApp(makeEnv());
@@ -310,14 +324,14 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(400);
+      // downloadFile should NOT have been called — MIME check happens first
+      expect(mockDownloadFile).not.toHaveBeenCalled();
     });
 
     it('rejects SVG (script risk in iframe)', async () => {
-      const content = new TextEncoder().encode('<svg></svg>');
-      mockDownloadFile.mockResolvedValue({
-        data: content.buffer,
+      mockGetFile.mockResolvedValue({
         file: { filename: 'icon.svg', mimeType: 'image/svg+xml' },
-        metadata: {},
+        tags: [],
       });
 
       const { app, env } = makeApp(makeEnv());
@@ -327,6 +341,7 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(400);
+      expect(mockDownloadFile).not.toHaveBeenCalled();
     });
   });
 

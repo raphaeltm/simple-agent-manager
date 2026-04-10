@@ -6,7 +6,6 @@ const IMAGE_EXTENSIONS = new Set([
 /** MIME types that support inline preview (images + PDF). SVG excluded — script risk in iframe. */
 const PREVIEWABLE_IMAGE_MIMES = new Set([
   'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
-  'image/bmp', 'image/x-icon',
 ]);
 
 const PREVIEWABLE_MIMES = new Set([
