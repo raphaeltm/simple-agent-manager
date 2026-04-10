@@ -260,62 +260,6 @@ jobs:
             echo "is_first=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Read Security Keys from Pulumi State
-        id: pulumi_keys
-        if: ${{ inputs.dry_run != true }}
-        working-directory: infra
-        run: |
-          echo "Reading encryption key..."
-          ENCRYPTION_KEY=$(pulumi stack output encryptionKey --show-secrets 2>/dev/null || echo "")
-          if [ -n "$ENCRYPTION_KEY" ]; then echo "::add-mask::$ENCRYPTION_KEY"; fi
-          echo "encryption_key=$ENCRYPTION_KEY" >> $GITHUB_OUTPUT
-
-          echo "Reading JWT private key..."
-          JWT_PRIVATE_KEY=$(pulumi stack output jwtPrivateKey --show-secrets 2>/dev/null || echo "")
-          if [ -n "$JWT_PRIVATE_KEY" ]; then
-            while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done <<< "$JWT_PRIVATE_KEY"
-          fi
-          DELIMITER="EOF_PRIVATE_$(date +%s)"
-          echo "jwt_private_key<<$DELIMITER" >> $GITHUB_OUTPUT
-          echo "$JWT_PRIVATE_KEY" >> $GITHUB_OUTPUT
-          echo "$DELIMITER" >> $GITHUB_OUTPUT
-
-          echo "Reading JWT public key..."
-          JWT_PUBLIC_KEY=$(pulumi stack output jwtPublicKey --show-secrets 2>/dev/null || echo "")
-          if [ -n "$JWT_PUBLIC_KEY" ]; then
-            while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done <<< "$JWT_PUBLIC_KEY"
-          fi
-          DELIMITER="EOF_PUBLIC_$(date +%s)"
-          echo "jwt_public_key<<$DELIMITER" >> $GITHUB_OUTPUT
-          echo "$JWT_PUBLIC_KEY" >> $GITHUB_OUTPUT
-          echo "$DELIMITER" >> $GITHUB_OUTPUT
-
-          echo "Reading Origin CA certificate..."
-          ORIGIN_CA_CERT=$(pulumi stack output originCaCertPem --show-secrets 2>/dev/null || echo "")
-          if [ -n "$ORIGIN_CA_CERT" ]; then
-            while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done <<< "$ORIGIN_CA_CERT"
-          fi
-          DELIMITER="EOF_CERT_$(date +%s)"
-          echo "origin_ca_cert<<$DELIMITER" >> $GITHUB_OUTPUT
-          echo "$ORIGIN_CA_CERT" >> $GITHUB_OUTPUT
-          echo "$DELIMITER" >> $GITHUB_OUTPUT
-
-          echo "Reading Origin CA key..."
-          ORIGIN_CA_KEY=$(pulumi stack output originCaKeyPem --show-secrets 2>/dev/null || echo "")
-          if [ -n "$ORIGIN_CA_KEY" ]; then
-            while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done <<< "$ORIGIN_CA_KEY"
-          fi
-          DELIMITER="EOF_CAKEY_$(date +%s)"
-          echo "origin_ca_key<<$DELIMITER" >> $GITHUB_OUTPUT
-          echo "$ORIGIN_CA_KEY" >> $GITHUB_OUTPUT
-          echo "$DELIMITER" >> $GITHUB_OUTPUT
-
-          echo "Security keys read from Pulumi state"
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-
       - name: Ensure workers.dev Subdomain
         if: ${{ inputs.dry_run != true }}
         env:
@@ -457,11 +401,10 @@ jobs:
           GH_APP_ID: ${{ secrets.GH_APP_ID }}
           GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
           GH_APP_SLUG: ${{ secrets.GH_APP_SLUG }}
-          PULUMI_ENCRYPTION_KEY: ${{ steps.pulumi_keys.outputs.encryption_key }}
-          PULUMI_JWT_PRIVATE_KEY: ${{ steps.pulumi_keys.outputs.jwt_private_key }}
-          PULUMI_JWT_PUBLIC_KEY: ${{ steps.pulumi_keys.outputs.jwt_public_key }}
-          PULUMI_ORIGIN_CA_CERT: ${{ steps.pulumi_keys.outputs.origin_ca_cert }}
-          PULUMI_ORIGIN_CA_KEY: ${{ steps.pulumi_keys.outputs.origin_ca_key }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
           SECRET_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           SECRET_JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
           SECRET_JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
