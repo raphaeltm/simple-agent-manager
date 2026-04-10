@@ -49,7 +49,7 @@ export class RouteErrorBoundary extends Component<Props, State> {
     }
 
     return (
-      <div className="flex flex-col items-center justify-center p-8 text-center min-h-[200px]">
+      <div role="alert" className="flex flex-col items-center justify-center p-8 text-center min-h-[200px]">
         <p className="text-lg font-semibold text-fg-primary mb-2">
           Something went wrong
         </p>
@@ -64,7 +64,7 @@ export class RouteErrorBoundary extends Component<Props, State> {
         <button
           type="button"
           onClick={this.handleReset}
-          className="px-4 py-2 bg-accent text-fg-on-accent border-none rounded-lg text-sm font-semibold cursor-pointer"
+          className="px-4 py-2 min-h-[44px] bg-accent text-fg-on-accent border-none rounded-lg text-sm font-semibold cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           Try again
         </button>

@@ -14,6 +14,17 @@ vi.mock('../../../src/lib/ui-governance', () => ({
   upsertUiStandard: mocks.upsertUiStandard,
 }));
 
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({
+    user: { id: 'test-user', email: 'test@example.com', name: 'Test', role: 'superadmin', status: 'active' },
+    isLoading: false,
+    isAuthenticated: true,
+    isSuperadmin: true,
+    isApproved: true,
+    isRefetching: false,
+  }),
+}));
+
 import { UiStandards } from '../../../src/pages/UiStandards';
 
 describe('UiStandards page', () => {

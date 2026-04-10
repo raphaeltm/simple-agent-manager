@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RouteErrorBoundary } from '../../../src/components/RouteErrorBoundary';
 
@@ -31,6 +31,10 @@ describe('RouteErrorBoundary', () => {
     console.error = originalError;
   });
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('renders children when no error occurs', () => {
     render(
       <RouteErrorBoundary>
@@ -46,7 +50,9 @@ describe('RouteErrorBoundary', () => {
         <ThrowingComponent message="Test crash" />
       </RouteErrorBoundary>,
     );
+    expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.getByText('An error occurred while rendering this section.')).toBeInTheDocument();
     expect(screen.getByText('Test crash')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
