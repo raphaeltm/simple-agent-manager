@@ -131,7 +131,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Pulumi CLI
-        uses: pulumi/actions@cd99a7f8865434dd3532b586a26f9ebea596894f # v5
+        uses: pulumi/actions@8582a9e8cc630786854029b4e09281acd6794b58 # v6.6.1
 
       - name: Determine Stack Name
         id: stack
