@@ -9,6 +9,7 @@ import { getUserId,requireApproved, requireAuth, requireSuperadmin } from '../mi
 import { errors } from '../middleware/error';
 import { rateLimit } from '../middleware/rate-limit';
 import { AdminLogQuerySchema,AdminUserActionSchema, AdminUserRoleSchema, jsonValidator } from '../schemas';
+import { getRuntimeLimits } from '../services/limits';
 import { CfApiError,getErrorTrends, getHealthSummary, getLogQueryRateLimit, queryCloudflareLogs, queryErrors } from '../services/observability';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
@@ -57,7 +58,13 @@ adminRoutes.get('/users', async (c) => {
 adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const { userId } = c.req.param();
+  const currentUserId = getUserId(c);
   const body = c.req.valid('json');
+
+  // Prevent self-suspension (mirrors self-role-change protection)
+  if (userId === currentUserId) {
+    throw errors.badRequest('Cannot modify your own account');
+  }
 
   const target = await db
     .select({ id: schema.users.id, role: schema.users.role })
@@ -404,6 +411,37 @@ adminRoutes.post('/observability/logs/ingest', async (c) => {
   }));
 
   return new Response(response.body, { status: response.status });
+});
+
+/**
+ * GET /api/admin/health/details - Detailed health info (superadmin only)
+ * Returns binding availability, runtime limits, and missing bindings.
+ */
+adminRoutes.get('/health/details', (c) => {
+  const limits = getRuntimeLimits(c.env);
+
+  const bindings: Record<string, boolean> = {
+    DATABASE: !!c.env.DATABASE,
+    KV: !!c.env.KV,
+    PROJECT_DATA: !!c.env.PROJECT_DATA,
+    NODE_LIFECYCLE: !!c.env.NODE_LIFECYCLE,
+    TASK_RUNNER: !!c.env.TASK_RUNNER,
+    ADMIN_LOGS: !!c.env.ADMIN_LOGS,
+    NOTIFICATION: !!c.env.NOTIFICATION,
+  };
+
+  const missingBindings = Object.entries(bindings)
+    .filter(([, available]) => !available)
+    .map(([name]) => name);
+
+  return c.json({
+    status: missingBindings.length > 0 ? 'degraded' : 'healthy',
+    version: c.env.VERSION,
+    timestamp: new Date().toISOString(),
+    limits,
+    bindings,
+    ...(missingBindings.length > 0 && { missingBindings }),
+  });
 });
 
 export { adminRoutes };

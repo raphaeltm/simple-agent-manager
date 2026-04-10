@@ -58,5 +58,10 @@ export function parseWorkspaceSubdomain(
     return { error: 'Invalid workspace subdomain' };
   }
 
+  // Validate workspaceId matches ULID format (26 uppercase alphanumeric characters)
+  if (!/^[0-9A-Z]{26}$/.test(workspaceId)) {
+    return { error: 'Invalid workspace ID format' };
+  }
+
   return { workspaceId, targetPort, sidecar };
 }
