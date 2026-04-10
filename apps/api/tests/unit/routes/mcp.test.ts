@@ -1358,7 +1358,7 @@ describe('MCP Routes', () => {
       expect(props.agentType).toBeDefined();
       expect(props.agentType.type).toBe('string');
       expect(props.workspaceProfile).toBeDefined();
-      expect(props.workspaceProfile.enum).toEqual(['default', 'lightweight']);
+      expect(props.workspaceProfile.enum).toEqual(['full', 'lightweight']);
       expect(props.provider).toBeDefined();
       expect(props.provider.type).toBe('string');
       expect(props.vmLocation).toBeDefined();

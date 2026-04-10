@@ -34,7 +34,7 @@ import {
 /** Valid task modes for dispatch */
 const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
 /** Valid workspace profiles for dispatch */
-const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['default', 'lightweight'];
+const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
 
 export async function handleDispatchTask(
   requestId: string | number | null,

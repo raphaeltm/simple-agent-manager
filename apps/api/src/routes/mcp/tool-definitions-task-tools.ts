@@ -89,8 +89,8 @@ export const TASK_LIFECYCLE_TOOLS = [
         },
         workspaceProfile: {
           type: 'string',
-          description: 'Workspace provisioning profile. "default" includes full devcontainer build. "lightweight" skips it for faster startup.',
-          enum: ['default', 'lightweight'],
+          description: 'Workspace provisioning profile. "full" includes full devcontainer build. "lightweight" skips it for faster startup.',
+          enum: ['full', 'lightweight'],
         },
         provider: {
           type: 'string',
