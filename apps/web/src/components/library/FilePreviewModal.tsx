@@ -88,9 +88,14 @@ export function FilePreviewModal({
     return () => document.removeEventListener('keydown', handleTabTrap);
   }, [handleTabTrap]);
 
-  // Focus dialog on mount
+  // Focus dialog on mount and return focus on close
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
+    return () => {
+      previousFocusRef.current?.focus();
+    };
   }, []);
 
   // PDF loading timeout
@@ -106,12 +111,7 @@ export function FilePreviewModal({
   }, [isPdf, pdfLoading]);
 
   return (
-    <div
-      className="fixed inset-0 z-dialog-backdrop overflow-hidden"
-      aria-labelledby="preview-modal-title"
-      role="dialog"
-      aria-modal="true"
-    >
+    <div className="fixed inset-0 z-dialog-backdrop overflow-hidden">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-overlay transition-opacity duration-150"
@@ -123,7 +123,10 @@ export function FilePreviewModal({
         <div
           ref={dialogRef}
           tabIndex={-1}
-          className="relative bg-surface rounded-lg shadow-overlay border border-border-default w-full max-w-4xl max-h-[90vh] flex flex-col outline-none"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="preview-modal-title"
+          className="relative z-dialog bg-surface rounded-lg shadow-overlay border border-border-default w-full max-w-4xl max-h-[90vh] flex flex-col outline-none"
         >
           {/* Header */}
           <div className="flex items-center gap-3 px-4 py-3 border-b border-border-default shrink-0">
@@ -131,6 +134,7 @@ export function FilePreviewModal({
               <h3
                 id="preview-modal-title"
                 className="text-sm font-semibold text-fg-primary truncate"
+                title={file.filename}
               >
                 {file.filename}
               </h3>
@@ -141,7 +145,7 @@ export function FilePreviewModal({
             <button
               type="button"
               onClick={onDownload}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
+              className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover min-h-[44px] ${FOCUS_RING}`}
               aria-label={`Download ${file.filename}`}
             >
               <Download size={14} />
@@ -150,7 +154,7 @@ export function FilePreviewModal({
             <button
               type="button"
               onClick={onClose}
-              className={`p-1.5 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary rounded ${FOCUS_RING}`}
+              className={`p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary rounded min-w-[44px] min-h-[44px] flex items-center justify-center ${FOCUS_RING}`}
               aria-label="Close preview"
             >
               <X size={18} />
@@ -168,7 +172,7 @@ export function FilePreviewModal({
             )}
 
             {isPdf && (
-              <div className="relative h-full">
+              <div className="relative h-full min-h-[60vh]">
                 {pdfLoading && !pdfError && (
                   <div className="absolute inset-0 flex items-center justify-center">
                     <Spinner size="md" />
@@ -193,7 +197,7 @@ export function FilePreviewModal({
                   <iframe
                     src={previewUrl}
                     title={`Preview of ${file.filename}`}
-                    sandbox="allow-scripts allow-same-origin"
+                    sandbox="allow-same-origin"
                     className="w-full h-full border-none min-h-[60vh]"
                     onLoad={() => setPdfLoading(false)}
                     onError={() => {
