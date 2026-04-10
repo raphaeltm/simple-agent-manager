@@ -36,8 +36,10 @@ func TestEventsHandlersAcceptBrowserAuth(t *testing.T) {
 	}
 	content := string(contentBytes)
 
-	// Workspace events should accept browser workspace auth (same pattern as tabs)
-	if !strings.Contains(content, "requireWorkspaceRequestAuth") {
+	// Workspace events should accept browser workspace auth (same pattern as tabs).
+	// Uses checkWorkspaceRequestAuth (non-writing variant) to avoid double-write
+	// when falling through to management auth.
+	if !strings.Contains(content, "checkWorkspaceRequestAuth") {
 		t.Fatal("workspace events handler must accept workspace request auth for browser direct access")
 	}
 

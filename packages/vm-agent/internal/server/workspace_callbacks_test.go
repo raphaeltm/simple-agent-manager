@@ -57,6 +57,7 @@ func TestSyncCredential(t *testing.T) {
 			workspaces: map[string]*WorkspaceRuntime{
 				"ws-codex": {ID: "ws-codex", CallbackToken: "ws-callback-token"},
 			},
+			httpClient: &http.Client{Timeout: 5 * time.Second},
 		}
 
 		err := s.SyncCredential(
@@ -94,6 +95,7 @@ func TestSyncCredential(t *testing.T) {
 				HTTPReadTimeout: 5 * time.Second,
 				CallbackToken:   "node-token",
 			},
+			httpClient: &http.Client{Timeout: 5 * time.Second},
 		}
 
 		err := s.SyncCredential(
@@ -149,6 +151,7 @@ func TestSyncCredential(t *testing.T) {
 				HTTPReadTimeout: 5 * time.Second,
 				CallbackToken:   "token",
 			},
+			httpClient: &http.Client{Timeout: 5 * time.Second},
 		}
 
 		err := s.SyncCredential(context.Background(), "ws-123", "openai-codex", "oauth-token", "cred")
@@ -198,6 +201,7 @@ func TestNotifyWorkspaceProvisioningFailed(t *testing.T) {
 				ControlPlaneURL: controlPlane.URL,
 				HTTPReadTimeout: 5 * time.Second,
 			},
+			httpClient: &http.Client{Timeout: 5 * time.Second},
 		}
 
 		err := s.notifyWorkspaceProvisioningFailed(
@@ -228,6 +232,7 @@ func TestNotifyWorkspaceProvisioningFailed(t *testing.T) {
 				ControlPlaneURL: controlPlane.URL,
 				HTTPReadTimeout: 5 * time.Second,
 			},
+			httpClient: &http.Client{Timeout: 5 * time.Second},
 		}
 
 		// Use a short-lived context to limit retry duration in tests

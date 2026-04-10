@@ -308,7 +308,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	if workDir != "" {
 		dockerArgs = append(dockerArgs, "-w", workDir)
 	}
-	dockerArgs = append(dockerArgs, containerID, "cat", filePath)
+	dockerArgs = append(dockerArgs, containerID, "cat", "--", filePath)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	var stdoutBuf bytes.Buffer

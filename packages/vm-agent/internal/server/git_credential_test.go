@@ -53,6 +53,7 @@ func TestHandleGitCredentialSuccess(t *testing.T) {
 			WorkspaceID:     "ws-123",
 			CallbackToken:   "callback-token",
 		},
+		httpClient: &http.Client{},
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/git-credential", nil)
@@ -87,6 +88,7 @@ func TestHandleGitCredentialControlPlaneFailure(t *testing.T) {
 			WorkspaceID:     "ws-123",
 			CallbackToken:   "callback-token",
 		},
+		httpClient: &http.Client{},
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/git-credential", nil)
@@ -139,6 +141,7 @@ func TestPerSessionGitTokenFetcherUsesCorrectWorkspaceID(t *testing.T) {
 				CallbackToken: "session-callback-token",
 			},
 		},
+		httpClient: &http.Client{},
 	}
 
 	// Build the same per-session closure that getOrCreateSessionHost creates.
@@ -205,6 +208,7 @@ func TestTwoWorkspaceGitTokenIsolation(t *testing.T) {
 			"ws-alpha": {ID: "ws-alpha", CallbackToken: "alpha-callback"},
 			"ws-beta":  {ID: "ws-beta", CallbackToken: "beta-callback"},
 		},
+		httpClient: &http.Client{},
 	}
 
 	// Build per-session closures the same way getOrCreateSessionHost does.
@@ -276,6 +280,7 @@ func TestHandleGitCredentialUsesWorkspaceScopedTokenAndWorkspaceID(t *testing.T)
 				CallbackToken: "workspace-callback-token",
 			},
 		},
+		httpClient: &http.Client{},
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-abc", nil)

@@ -2,6 +2,7 @@ package server
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/workspace/vm-agent/internal/acp"
@@ -188,5 +189,58 @@ func TestBootstrapLifecycle_WorkspaceRuntimesUseDetectedUser(t *testing.T) {
 	runtime := srv.upsertWorkspaceRuntime("ws-test", "https://github.com/test/repo", "main", "running", "")
 	if runtime.ContainerUser != "node" {
 		t.Errorf("workspace runtime ContainerUser = %q, want %q", runtime.ContainerUser, "node")
+	}
+}
+
+// TestUpdateAfterBootstrap_SetsBootstrapComplete verifies that
+// UpdateAfterBootstrap sets the bootstrapComplete atomic flag.
+// The flag uses sync/atomic.Bool to prevent data races when read
+// from concurrent goroutines.
+func TestUpdateAfterBootstrap_SetsBootstrapComplete(t *testing.T) {
+	srv := newTestServerPreBootstrap(t, nil)
+
+	if srv.bootstrapComplete.Load() {
+		t.Fatal("bootstrapComplete should be false before UpdateAfterBootstrap")
+	}
+
+	srv.UpdateAfterBootstrap(&config.Config{
+		CallbackToken: "test-token",
+	})
+
+	if !srv.bootstrapComplete.Load() {
+		t.Fatal("bootstrapComplete should be true after UpdateAfterBootstrap")
+	}
+}
+
+// TestUpdateAfterBootstrap_BootstrapCompleteConcurrentAccess verifies the
+// atomic.Bool does not race when read and written concurrently.
+// Run with -race to detect data races.
+func TestUpdateAfterBootstrap_BootstrapCompleteConcurrentAccess(t *testing.T) {
+	srv := newTestServerPreBootstrap(t, nil)
+
+	var wg sync.WaitGroup
+
+	// Writer goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		srv.UpdateAfterBootstrap(&config.Config{
+			CallbackToken: "test-token",
+		})
+	}()
+
+	// Concurrent readers
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = srv.bootstrapComplete.Load()
+		}()
+	}
+
+	wg.Wait()
+
+	if !srv.bootstrapComplete.Load() {
+		t.Fatal("bootstrapComplete should be true after concurrent access")
 	}
 }

@@ -30,6 +30,7 @@ func TestFetchProjectRuntimeAssetsForWorkspace(t *testing.T) {
 			WorkspaceID:     workspaceID,
 			CallbackToken:   callbackToken,
 		},
+		httpClient: &http.Client{},
 	}
 
 	assets, err := s.fetchProjectRuntimeAssetsForWorkspace(context.Background(), workspaceID, callbackToken)
@@ -66,6 +67,7 @@ func TestFetchProjectRuntimeAssetsForWorkspaceHTTPError(t *testing.T) {
 			WorkspaceID:     workspaceID,
 			CallbackToken:   callbackToken,
 		},
+		httpClient: &http.Client{},
 	}
 
 	_, err := s.fetchProjectRuntimeAssetsForWorkspace(context.Background(), workspaceID, callbackToken)

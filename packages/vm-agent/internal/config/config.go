@@ -75,9 +75,10 @@ type Config struct {
 	HeartbeatInterval time.Duration
 
 	// HTTP server timeouts
-	HTTPReadTimeout  time.Duration
-	HTTPWriteTimeout time.Duration
-	HTTPIdleTimeout  time.Duration
+	HTTPReadTimeout      time.Duration
+	HTTPWriteTimeout     time.Duration
+	HTTPIdleTimeout      time.Duration
+	HTTPCallbackTimeout  time.Duration // timeout for outbound HTTP callbacks to the control plane
 
 	// WebSocket settings
 	WSReadBufferSize  int
@@ -283,9 +284,10 @@ func Load() (*Config, error) {
 		HeartbeatInterval: getEnvDuration("HEARTBEAT_INTERVAL", 60*time.Second),
 
 		// HTTP server timeouts - configurable per constitution
-		HTTPReadTimeout:  getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second),
-		HTTPWriteTimeout: getEnvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second),
-		HTTPIdleTimeout:  getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
+		HTTPReadTimeout:     getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second),
+		HTTPWriteTimeout:    getEnvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second),
+		HTTPIdleTimeout:     getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
+		HTTPCallbackTimeout: getEnvDuration("HTTP_CALLBACK_TIMEOUT", 30*time.Second),
 
 		// WebSocket buffer sizes - configurable per constitution
 		WSReadBufferSize:  getEnvInt("WS_READ_BUFFER_SIZE", 1024),

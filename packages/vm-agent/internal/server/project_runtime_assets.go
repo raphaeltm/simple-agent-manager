@@ -66,7 +66,7 @@ func (s *Server) fetchProjectRuntimeAssetsForWorkspace(
 	}
 	req.Header.Set("Authorization", "Bearer "+effectiveToken)
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := s.httpClient.Do(req)
 	if err != nil {
 		return projectRuntimeAssets{}, fmt.Errorf("runtime-assets request failed: %w", err)
 	}

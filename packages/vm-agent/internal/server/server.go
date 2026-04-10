@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/acp"
@@ -72,9 +73,10 @@ type Server struct {
 	portScanners        map[string]*ports.Scanner
 	portDiscoveries     map[string]*container.Discovery // per-workspace container discovery
 	browserManager      *browser.Manager                // Neko browser sidecar manager
-	bootstrapComplete   bool
+	bootstrapComplete   atomic.Bool
 	callbackTokenMu     sync.RWMutex
 	callbackToken       string
+	httpClient          *http.Client // shared HTTP client with timeout for control-plane callbacks
 	done                chan struct{}
 }
 
@@ -369,6 +371,7 @@ func New(cfg *config.Config) (*Server, error) {
 		portDiscoveries:     make(map[string]*container.Discovery),
 		browserManager:      browser.NewManager(cfg, browser.NewCLIDockerExecutor()),
 		callbackToken:       cfg.CallbackToken,
+		httpClient:          &http.Client{Timeout: cfg.HTTPCallbackTimeout},
 		done:                make(chan struct{}),
 	}
 
@@ -492,7 +495,7 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 	}
 	s.workspaceMu.Unlock()
 
-	s.bootstrapComplete = true
+	s.bootstrapComplete.Store(true)
 
 	// Start port scanner for the boot-time workspace now that the container is available.
 	if cfg.WorkspaceID != "" {
@@ -1071,7 +1074,7 @@ func (s *Server) postTaskCallback(callbackURL, taskID string, body map[string]in
 		return
 	}
 
-	token := s.acpConfig.CallbackToken
+	token := s.getCallbackToken()
 	if token == "" {
 		slog.Warn("Task callback: no callback token available, skipping")
 		return
@@ -1085,8 +1088,7 @@ func (s *Server) postTaskCallback(callbackURL, taskID string, body map[string]in
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		slog.Error("Task callback: request failed", "error", err, "url", callbackURL)
 		return

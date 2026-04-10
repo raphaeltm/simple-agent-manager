@@ -522,6 +522,7 @@ func TestProvisioningFailedCallbackContract(t *testing.T) {
 			ControlPlaneURL: controlPlane.URL,
 			HTTPReadTimeout: 5 * time.Second,
 		},
+		httpClient: &http.Client{Timeout: 5 * time.Second},
 	}
 
 	err := s.notifyWorkspaceProvisioningFailed(
@@ -560,6 +561,7 @@ func TestProvisioningFailedDefaultErrorMessage(t *testing.T) {
 			ControlPlaneURL: controlPlane.URL,
 			HTTPReadTimeout: 5 * time.Second,
 		},
+		httpClient: &http.Client{Timeout: 5 * time.Second},
 	}
 
 	err := s.notifyWorkspaceProvisioningFailed(
