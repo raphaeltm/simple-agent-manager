@@ -185,14 +185,18 @@ jobs:
       - name: Set Pulumi Configuration
         working-directory: infra
         run: |
-          pulumi config set cloudflareAccountId ${{ secrets.CF_ACCOUNT_ID }}
-          pulumi config set cloudflareZoneId ${{ secrets.CF_ZONE_ID }}
-          pulumi config set baseDomain ${{ vars.BASE_DOMAIN }}
-          pulumi config set resourcePrefix ${{ vars.RESOURCE_PREFIX || 'sam' }}
+          pulumi config set cloudflareAccountId "$CF_ACCOUNT_ID"
+          pulumi config set cloudflareZoneId "$CF_ZONE_ID"
+          pulumi config set baseDomain "$BASE_DOMAIN"
+          pulumi config set resourcePrefix "$RESOURCE_PREFIX"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX || 'sam' }}
 
       - name: Pulumi Preview
         if: ${{ inputs.dry_run == true }}
@@ -268,7 +272,9 @@ jobs:
 
           echo "Reading JWT private key..."
           JWT_PRIVATE_KEY=$(pulumi stack output jwtPrivateKey --show-secrets 2>/dev/null || echo "")
-          if [ -n "$JWT_PRIVATE_KEY" ]; then echo "::add-mask::$JWT_PRIVATE_KEY"; fi
+          if [ -n "$JWT_PRIVATE_KEY" ]; then
+            while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done <<< "$JWT_PRIVATE_KEY"
+          fi
           DELIMITER="EOF_PRIVATE_$(date +%s)"
           echo "jwt_private_key<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$JWT_PRIVATE_KEY" >> $GITHUB_OUTPUT
@@ -276,7 +282,9 @@ jobs:
 
           echo "Reading JWT public key..."
           JWT_PUBLIC_KEY=$(pulumi stack output jwtPublicKey --show-secrets 2>/dev/null || echo "")
-          if [ -n "$JWT_PUBLIC_KEY" ]; then echo "::add-mask::$JWT_PUBLIC_KEY"; fi
+          if [ -n "$JWT_PUBLIC_KEY" ]; then
+            while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done <<< "$JWT_PUBLIC_KEY"
+          fi
           DELIMITER="EOF_PUBLIC_$(date +%s)"
           echo "jwt_public_key<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$JWT_PUBLIC_KEY" >> $GITHUB_OUTPUT
@@ -284,7 +292,9 @@ jobs:
 
           echo "Reading Origin CA certificate..."
           ORIGIN_CA_CERT=$(pulumi stack output originCaCertPem --show-secrets 2>/dev/null || echo "")
-          if [ -n "$ORIGIN_CA_CERT" ]; then echo "::add-mask::$ORIGIN_CA_CERT"; fi
+          if [ -n "$ORIGIN_CA_CERT" ]; then
+            while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done <<< "$ORIGIN_CA_CERT"
+          fi
           DELIMITER="EOF_CERT_$(date +%s)"
           echo "origin_ca_cert<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$ORIGIN_CA_CERT" >> $GITHUB_OUTPUT
@@ -292,7 +302,9 @@ jobs:
 
           echo "Reading Origin CA key..."
           ORIGIN_CA_KEY=$(pulumi stack output originCaKeyPem --show-secrets 2>/dev/null || echo "")
-          if [ -n "$ORIGIN_CA_KEY" ]; then echo "::add-mask::$ORIGIN_CA_KEY"; fi
+          if [ -n "$ORIGIN_CA_KEY" ]; then
+            while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done <<< "$ORIGIN_CA_KEY"
+          fi
           DELIMITER="EOF_CAKEY_$(date +%s)"
           echo "origin_ca_key<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$ORIGIN_CA_KEY" >> $GITHUB_OUTPUT
@@ -306,13 +318,17 @@ jobs:
 
       - name: Ensure workers.dev Subdomain
         if: ${{ inputs.dry_run != true }}
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX || 'sam' }}
         run: |
-          SUBDOMAIN="${{ vars.RESOURCE_PREFIX || 'sam' }}"
+          SUBDOMAIN="$RESOURCE_PREFIX"
           echo "Ensuring workers.dev subdomain is initialized: ${SUBDOMAIN}.workers.dev"
 
           RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
-            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/workers/subdomain" \
-            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/subdomain" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{\"subdomain\": \"${SUBDOMAIN}\"}")
 

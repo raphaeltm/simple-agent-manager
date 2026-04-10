@@ -18,3 +18,7 @@ updates:
    directory: "/"
    schedule:
      interval: weekly
+ - package-ecosystem: "gomod"
+   directory: "/packages/vm-agent"
+   schedule:
+     interval: weekly
