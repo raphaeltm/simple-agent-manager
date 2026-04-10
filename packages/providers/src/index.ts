@@ -13,7 +13,6 @@ export type {
   ProviderConfig,
   ScalewayProviderConfig,
   SizeConfig,
-  UpCloudProviderConfig,
   VMConfig,
   VMInstance,
   VMStatus,

@@ -136,7 +136,7 @@ export function encodeTerminalWsRenameSession(sessionId: string, name: string): 
 export function isMessageForSession(msg: TerminalWsServerMessage, sessionId: string): boolean {
   // Check if this message type supports sessionId
   if ('sessionId' in msg) {
-    return (msg as any).sessionId === sessionId;
+    return msg.sessionId === sessionId;
   }
   // Messages without sessionId are not session-specific
   return false;

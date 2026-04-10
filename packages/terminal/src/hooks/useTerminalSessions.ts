@@ -45,7 +45,7 @@ export function useTerminalSessions(
       const persisted: PersistedState = {
         sessions: Array.from(sessionsMap.values())
           .sort((a, b) => a.order - b.order)
-          .map((s) => ({ name: s.name, order: s.order, serverSessionId: (s as any).serverSessionId })),
+          .map((s) => ({ name: s.name, order: s.order, serverSessionId: s.serverSessionId })),
         counter: sessionCounter.current,
       };
       sessionStorage.setItem(persistenceKey, JSON.stringify(persisted));
@@ -321,7 +321,7 @@ export function useTerminalSessions(
         const updated = new Map(prev);
         const session = updated.get(sessionId);
         if (session) {
-          (session as any).serverSessionId = serverSessionId;
+          session.serverSessionId = serverSessionId;
         }
         persistSessions(updated);
         return updated;

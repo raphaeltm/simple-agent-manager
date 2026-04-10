@@ -1,5 +1,5 @@
 import type { NodeResponse, NodeSystemInfo } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_CONFIG } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { StatusBadge } from '@simple-agent-manager/ui';
 import { Server } from 'lucide-react';
 import type { FC } from 'react';
@@ -31,10 +31,10 @@ function formatRelativeTime(iso: string | null): string {
 }
 
 export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, systemInfo }) => {
-  const sizeConfig = VM_SIZE_CONFIG[node.vmSize];
+  const sizeInfo = VM_SIZE_LABELS[node.vmSize];
   const locationConfig = VM_LOCATIONS[node.vmLocation];
-  const sizeLabel = sizeConfig
-    ? `${node.vmSize} (${sizeConfig.cpus} CPU, ${sizeConfig.ram})`
+  const sizeLabel = sizeInfo
+    ? `${sizeInfo.label} (${sizeInfo.shortDescription})`
     : node.vmSize;
   const locationLabel = locationConfig
     ? `${locationConfig.name}, ${locationConfig.country}`

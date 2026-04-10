@@ -101,7 +101,7 @@ export async function handleUpdateTaskStatus(
       ]);
       const trimmedMessage = message.trim();
       const maxFullBodyLength = parseInt(env.NOTIFICATION_FULL_BODY_LENGTH || '') || DEFAULT_NOTIFICATION_FULL_BODY_LENGTH;
-      await notificationService.notifyProgress(env as any, tokenData.userId, {
+      await notificationService.notifyProgress(env, tokenData.userId, {
         projectId: tokenData.projectId,
         projectName,
         taskId: tokenData.taskId,
@@ -214,7 +214,7 @@ export async function handleCompleteTask(
           notificationService.getProjectName(env, tokenData.projectId),
           notificationService.getChatSessionId(env, tokenData.workspaceId),
         ]);
-        await notificationService.notifySessionEnded(env as any, tokenData.userId, {
+        await notificationService.notifySessionEnded(env, tokenData.userId, {
           projectId: tokenData.projectId,
           projectName,
           sessionId,
@@ -295,7 +295,7 @@ export async function handleCompleteTask(
         notificationService.getProjectName(env, tokenData.projectId),
         notificationService.getChatSessionId(env, tokenData.workspaceId),
       ]);
-      await notificationService.notifyTaskComplete(env as any, taskRow.user_id, {
+      await notificationService.notifyTaskComplete(env, taskRow.user_id, {
         projectId: tokenData.projectId,
         projectName,
         taskId: tokenData.taskId,
