@@ -74,6 +74,7 @@ export function FollowUpInput({
             }
           }}
           placeholder={placeholder}
+          aria-label="Follow-up message"
           disabled={sending}
           rows={1}
           className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px]"

@@ -89,6 +89,7 @@ function SessionRow({ session, onClick }: SessionRowProps) {
 
   return (
     <button
+      type="button"
       onClick={onClick}
       className="flex items-start gap-3 px-3 py-3 rounded-lg border border-border-default bg-surface hover:border-accent/40 transition-colors cursor-pointer text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       aria-label={`Open conversation: ${session.topic || 'Untitled conversation'}`}
@@ -166,6 +167,7 @@ function ConversationsPanel({ sessions, onSessionClick, searchQuery, onSearchCha
         />
         {searchQuery && (
           <button
+            type="button"
             onClick={() => onSearchChange('')}
             className="absolute right-1 top-1/2 -translate-y-1/2 p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer"
             aria-label="Clear search"
@@ -255,6 +257,7 @@ function MobileConversationsModal({
             Conversations {sessions.length > 0 && `(${sessions.length})`}
           </h2>
           <button
+            type="button"
             ref={closeButtonRef}
             onClick={onClose}
             className="p-2 text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center"
@@ -354,6 +357,7 @@ export function IdeaDetailPage() {
     return (
       <div className={`flex flex-col gap-4 ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}>
         <button
+          type="button"
           onClick={handleBack}
           className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer py-3 pr-3 pl-0 -ml-1 self-start min-h-[44px]"
         >
@@ -366,6 +370,7 @@ export function IdeaDetailPage() {
           </p>
           {error && (
             <button
+              type="button"
               onClick={loadData}
               className="inline-flex items-center gap-1.5 text-sm text-fg-primary border border-border-default rounded-lg px-3 py-2 min-h-[44px] bg-surface hover:border-accent/40 transition-colors cursor-pointer"
             >
@@ -389,6 +394,7 @@ export function IdeaDetailPage() {
     <>
       {/* Back link */}
       <button
+        type="button"
         onClick={handleBack}
         className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer py-3 pr-3 pl-0 -ml-1 self-start min-h-[44px]"
       >
@@ -403,6 +409,7 @@ export function IdeaDetailPage() {
         </h1>
         {ideaStatus !== 'done' && ideaStatus !== 'parked' && (
           <button
+            type="button"
             onClick={handleExecute}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer shrink-0 min-h-[44px] transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             style={{
@@ -485,6 +492,7 @@ export function IdeaDetailPage() {
 
       {/* FAB for conversations — z-[5] keeps it below main nav (z-sticky = 10) */}
       <button
+        type="button"
         onClick={() => setShowMobileConversations(true)}
         className="fixed bottom-5 right-5 z-[5] flex items-center justify-center w-14 h-14 rounded-full shadow-lg hover:opacity-90 transition-opacity cursor-pointer border-none"
         style={{ backgroundColor: 'var(--sam-color-accent-primary)', color: 'white' }}

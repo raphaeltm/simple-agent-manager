@@ -548,6 +548,7 @@ export function ProjectSettings() {
                         <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
                       )}
                       <button
+                        type="button"
                         onClick={() => void handleDeleteEnvVar(item.key)}
                         disabled={savingRuntimeConfig}
                         className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"
@@ -632,6 +633,7 @@ export function ProjectSettings() {
                         <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
                       )}
                       <button
+                        type="button"
                         onClick={() => void handleDeleteFile(item.path)}
                         disabled={savingRuntimeConfig}
                         className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex items-center justify-center shrink-0 transition-colors hover:text-danger"

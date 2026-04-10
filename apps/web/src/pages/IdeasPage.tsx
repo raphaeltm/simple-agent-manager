@@ -86,6 +86,7 @@ interface IdeaCardProps {
 function IdeaCard({ idea, sessionCount, onClick }: IdeaCardProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className="flex items-start gap-3 px-3 py-2.5 min-h-[56px] rounded-lg border border-border-default bg-surface hover:border-accent/40 transition-colors cursor-pointer text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       aria-label={`View idea: ${idea.title}`}
@@ -309,6 +310,7 @@ export function IdeasPage() {
               <section key={status} aria-labelledby={`group-header-${status}`} className="flex flex-col gap-1.5">
                 {/* Group header with timeline accent */}
                 <button
+                  type="button"
                   onClick={() => toggleGroup(status)}
                   aria-expanded={!collapsed}
                   aria-controls={`group-list-${status}`}

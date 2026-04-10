@@ -29,6 +29,7 @@ export function WorkspaceCreateMenu({
   return (
     <div ref={createMenuRef} className="relative shrink-0">
       <button
+        type="button"
         onClick={() => setCreateMenuOpen((prev: boolean) => !prev)}
         disabled={sessionsLoading}
         style={{
@@ -69,6 +70,7 @@ export function WorkspaceCreateMenu({
           }}
         >
           <button
+            type="button"
             onClick={onCreateTerminalTab}
             disabled={sessionsLoading}
             style={{
@@ -88,6 +90,7 @@ export function WorkspaceCreateMenu({
 
           {configuredAgents.length <= 1 ? (
             <button
+              type="button"
               onClick={() => onCreateSession(defaultAgentId ?? undefined)}
               disabled={configuredAgents.length === 0 || sessionsLoading}
               style={{
@@ -111,6 +114,7 @@ export function WorkspaceCreateMenu({
           ) : (
             configuredAgents.map((agent) => (
               <button
+                type="button"
                 key={agent.id}
                 onClick={() => onCreateSession(agent.id)}
                 disabled={sessionsLoading}

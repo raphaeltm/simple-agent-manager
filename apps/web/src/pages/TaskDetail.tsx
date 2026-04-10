@@ -316,6 +316,7 @@ export function TaskDetail() {
                 </div>
               ) : (
                 <button
+                  type="button"
                   className="text-left bg-transparent border-none p-0 cursor-text text-base font-semibold text-fg-primary hover:underline hover:decoration-dotted"
                   onClick={() => { setTitleDraft(task.title); setEditingTitle(true); }}
                   title="Click to edit title"

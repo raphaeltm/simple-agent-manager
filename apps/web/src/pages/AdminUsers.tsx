@@ -89,6 +89,7 @@ export function AdminUsers() {
       <div className="flex gap-2 mb-4 items-center">
         {filters.map((f) => (
           <button
+            type="button"
             key={f.value}
             onClick={() => setFilter(f.value)}
             className={`px-3 py-2 rounded-sm border-none cursor-pointer text-sm font-medium transition-all duration-150 ${

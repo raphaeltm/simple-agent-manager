@@ -72,6 +72,7 @@ export function WorkspaceHeader({
     >
       {/* Back */}
       <button
+        type="button"
         onClick={onBack}
         style={{
           background: 'none',
@@ -139,6 +140,7 @@ export function WorkspaceHeader({
             }}
           />
           <button
+            type="button"
             onClick={() => onBack()}
             style={{
               background: 'none',
@@ -196,6 +198,7 @@ export function WorkspaceHeader({
         <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-danger-fg)', whiteSpace: 'nowrap' }}>
           {error}
           <button
+            type="button"
             onClick={onClearError}
             style={{
               background: 'none',
@@ -243,6 +246,7 @@ export function WorkspaceHeader({
       {/* Mobile sidebar menu button */}
       {isMobile && (
         <button
+          type="button"
           onClick={onOpenMobileMenu}
           aria-label="Open workspace menu"
           style={{

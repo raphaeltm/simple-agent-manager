@@ -147,6 +147,7 @@ export function ProjectNotifications() {
       <div className="flex flex-wrap gap-2">
         {TYPE_FILTER_OPTIONS.map((opt) => (
           <button
+            type="button"
             key={opt.value}
             onClick={() => handleTypeFilterChange(opt.value)}
             className={`px-3 py-2 min-h-[44px] text-xs rounded-full border cursor-pointer transition-colors flex items-center ${
@@ -225,6 +226,7 @@ export function ProjectNotifications() {
                     )}
                     {isLong && (
                       <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); toggleExpand(notification.id); }}
                         className="text-xs text-accent mt-1 bg-transparent border-none cursor-pointer hover:underline p-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                       >
@@ -246,6 +248,7 @@ export function ProjectNotifications() {
                   <div className="flex-shrink-0 flex flex-col gap-1 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                     {isUnread && (
                       <button
+                        type="button"
                         onClick={() => void handleMarkRead(notification.id)}
                         className="p-1 min-w-[44px] min-h-[44px] sm:p-0.5 sm:min-w-0 sm:min-h-0 bg-transparent border-none text-fg-muted cursor-pointer hover:text-fg-primary flex items-center justify-center"
                         aria-label="Mark as read"
@@ -255,6 +258,7 @@ export function ProjectNotifications() {
                       </button>
                     )}
                     <button
+                      type="button"
                       onClick={() => void handleDismiss(notification.id)}
                       className="p-1 min-w-[44px] min-h-[44px] sm:p-0.5 sm:min-w-0 sm:min-h-0 bg-transparent border-none text-fg-muted cursor-pointer hover:text-danger-fg flex items-center justify-center"
                       aria-label="Dismiss"
@@ -271,6 +275,7 @@ export function ProjectNotifications() {
             {hasMore && (
               <div className="flex justify-center py-3">
                 <button
+                  type="button"
                   onClick={() => void loadNotifications(true)}
                   disabled={isRefreshing}
                   className="text-sm text-accent bg-transparent border-none cursor-pointer hover:underline disabled:opacity-50 min-h-[44px]"

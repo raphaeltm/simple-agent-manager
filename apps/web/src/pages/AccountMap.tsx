@@ -49,6 +49,7 @@ export function AccountMap() {
       <div className="flex flex-col items-center justify-center h-full gap-3 px-6">
         <p className="sam-type-body text-danger">{error}</p>
         <button
+          type="button"
           onClick={() => void refresh()}
           className="px-3 py-1.5 text-sm bg-accent text-fg-on-accent rounded-md border-none cursor-pointer hover:opacity-90 transition-opacity"
         >

@@ -61,6 +61,7 @@ export function Chats() {
 
             return (
               <button
+                type="button"
                 key={session.id}
                 role="listitem"
                 onClick={() =>

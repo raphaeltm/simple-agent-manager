@@ -1,4 +1,6 @@
 import DOMPurify from 'dompurify';
+
+import { RouteErrorBoundary } from './RouteErrorBoundary';
 import mermaid from 'mermaid';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
@@ -155,6 +157,7 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
 
 export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inline?: boolean }> = ({ content, style, inline }) => {
   return (
+    <RouteErrorBoundary label="markdown">
     <div
       className={inline
         ? 'text-fg-primary leading-relaxed text-base overflow-x-hidden min-w-0 w-full'
@@ -253,5 +256,6 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
         {content}
       </ReactMarkdown>
     </div>
+    </RouteErrorBoundary>
   );
 };

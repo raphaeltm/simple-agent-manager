@@ -99,6 +99,7 @@ export function ProjectTriggers() {
       <div className="text-center py-16">
         <p className="text-danger mb-4">{error}</p>
         <button
+          type="button"
           onClick={() => { setLoading(true); void loadTriggers(); }}
           className={`px-4 py-2 text-sm font-medium text-accent bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
         >
@@ -119,6 +120,7 @@ export function ProjectTriggers() {
           </p>
         </div>
         <button
+          type="button"
           onClick={handleNewTrigger}
           className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-accent text-white rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
         >
@@ -170,6 +172,7 @@ function EmptyState({ onCreateTrigger }: { onCreateTrigger: () => void }) {
         Triggers use cron expressions to define when they fire.
       </p>
       <button
+        type="button"
         onClick={onCreateTrigger}
         className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-accent text-white rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
       >

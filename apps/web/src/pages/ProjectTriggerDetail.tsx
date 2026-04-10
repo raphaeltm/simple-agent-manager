@@ -192,6 +192,7 @@ export function ProjectTriggerDetail() {
       <div className="text-center py-16">
         <p className="text-danger mb-4">{error ?? 'Trigger not found'}</p>
         <button
+          type="button"
           onClick={() => navigate(`/projects/${projectId}/triggers`)}
           className={`px-4 py-2 text-sm font-medium text-accent bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
         >
@@ -207,6 +208,7 @@ export function ProjectTriggerDetail() {
     <div className="max-w-3xl mx-auto px-4 py-6">
       {/* Back link */}
       <button
+        type="button"
         onClick={() => navigate(`/projects/${projectId}/triggers`)}
         className={`inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary mb-4 bg-transparent border-none cursor-pointer p-0 ${FOCUS_RING}`}
       >
@@ -238,6 +240,7 @@ export function ProjectTriggerDetail() {
         {/* Actions */}
         <div className="flex items-center gap-2 shrink-0">
           <button
+            type="button"
             onClick={handleRunNow}
             disabled={trigger.status === 'disabled'}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
@@ -247,6 +250,7 @@ export function ProjectTriggerDetail() {
             <span className="hidden sm:inline">Run Now</span>
           </button>
           <button
+            type="button"
             onClick={handleTogglePause}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
             aria-label={trigger.status === 'paused' ? 'Resume' : 'Pause'}
@@ -255,6 +259,7 @@ export function ProjectTriggerDetail() {
             <span className="hidden sm:inline">{trigger.status === 'paused' ? 'Resume' : 'Pause'}</span>
           </button>
           <button
+            type="button"
             onClick={() => setFormOpen(true)}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
             aria-label="Edit trigger"
@@ -263,6 +268,7 @@ export function ProjectTriggerDetail() {
             <span className="hidden sm:inline">Edit</span>
           </button>
           <button
+            type="button"
             onClick={() => setConfirmDelete(true)}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-danger/30 text-danger hover:bg-danger/10 cursor-pointer ${FOCUS_RING}`}
             aria-label="Delete trigger"
@@ -381,12 +387,14 @@ export function ProjectTriggerDetail() {
             </p>
             <div className="flex justify-end gap-3">
               <button
+                type="button"
                 onClick={() => setConfirmDelete(false)}
                 className={`px-4 py-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={() => { setConfirmDelete(false); void handleDelete(); }}
                 className={`px-4 py-2 text-sm font-medium text-white bg-danger hover:bg-danger/90 border-none rounded-md cursor-pointer ${FOCUS_RING}`}
               >

@@ -23,14 +23,7 @@ interface AuthContextValue {
   isRefetching: boolean;
 }
 
-const AuthContext = createContext<AuthContextValue>({
-  user: null,
-  isLoading: true,
-  isAuthenticated: false,
-  isSuperadmin: false,
-  isApproved: false,
-  isRefetching: false,
-});
+const AuthContext = createContext<AuthContextValue | null>(null);
 
 interface AuthProviderProps {
   children: ReactNode;

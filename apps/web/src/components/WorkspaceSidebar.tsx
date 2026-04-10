@@ -240,6 +240,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               if (event.key === 'Enter') onRename();
             }}
             placeholder="Workspace name"
+            aria-label="Workspace name"
             className="flex-1 rounded-sm border border-border-default bg-canvas text-fg-primary min-w-0"
             style={{
               padding: '5px 8px',

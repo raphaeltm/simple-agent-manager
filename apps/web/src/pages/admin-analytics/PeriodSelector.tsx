@@ -11,6 +11,7 @@ export const PeriodSelector: FC<{ value: string; onChange: (v: string) => void }
   <div className="flex gap-1" role="group" aria-label="Time period">
     {PERIODS.map((p) => (
       <button
+        type="button"
         key={p.value}
         onClick={() => onChange(p.value)}
         aria-pressed={value === p.value}

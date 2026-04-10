@@ -65,12 +65,14 @@ export class ErrorBoundary extends Component<Props, State> {
 
           <div className="flex gap-3 justify-center flex-wrap">
             <button
+              type="button"
               onClick={this.handleReload}
               className="min-h-12 px-6 bg-accent text-fg-on-accent border-none rounded-lg text-base font-semibold cursor-pointer"
             >
               Reload Page
             </button>
             <button
+              type="button"
               onClick={this.handleGoHome}
               className="min-h-12 px-6 bg-surface text-fg-primary border border-border-default rounded-lg text-base font-semibold cursor-pointer"
             >

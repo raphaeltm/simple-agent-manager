@@ -190,6 +190,7 @@ export function Node() {
       {/* Breadcrumb navigation */}
       <nav className="flex items-center gap-2 mb-4 text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
         <button
+          type="button"
           onClick={() => navigate('/dashboard')}
           className="bg-transparent border-none text-accent cursor-pointer p-0"
           style={{ fontSize: 'inherit' }}
@@ -198,6 +199,7 @@ export function Node() {
         </button>
         <span>/</span>
         <button
+          type="button"
           onClick={() => navigate('/nodes')}
           className="bg-transparent border-none text-accent cursor-pointer p-0"
           style={{ fontSize: 'inherit' }}

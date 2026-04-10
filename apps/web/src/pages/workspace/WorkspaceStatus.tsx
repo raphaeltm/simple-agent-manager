@@ -7,6 +7,7 @@ export function MinimalToolbar({ onBack }: { onBack: () => void }) {
   return (
     <header className="flex items-center px-3 h-10 bg-surface border-b border-border-default gap-2.5 shrink-0">
       <button
+        type="button"
         onClick={onBack}
         className="bg-transparent border-none cursor-pointer text-fg-muted p-1 flex"
       >

@@ -140,6 +140,7 @@ export function SettingsNotifications() {
                       <div className="text-xs text-fg-muted">{config.description}</div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => handleToggle(type)}
                       disabled={isSaving}
                       className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer border-none ${

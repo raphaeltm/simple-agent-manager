@@ -192,6 +192,7 @@ export function ProjectLibrary() {
         {/* View toggle */}
         <div className="flex rounded-lg border border-border-default overflow-hidden shrink-0">
           <button
+            type="button"
             onClick={() => setViewMode('list')}
             aria-label="List view"
             aria-pressed={viewMode === 'list'}
@@ -204,6 +205,7 @@ export function ProjectLibrary() {
             <List size={16} />
           </button>
           <button
+            type="button"
             onClick={() => setViewMode('grid')}
             aria-label="Grid view"
             aria-pressed={viewMode === 'grid'}
@@ -231,6 +233,7 @@ export function ProjectLibrary() {
 
         {/* Filter toggle */}
         <button
+          type="button"
           onClick={() => setShowFilters(!showFilters)}
           aria-label="Toggle filters"
           aria-pressed={showFilters}
@@ -250,6 +253,7 @@ export function ProjectLibrary() {
 
         {/* Upload button */}
         <button
+          type="button"
           onClick={() => setShowUpload(!showUpload)}
           aria-label="Upload files"
           className={`flex items-center gap-2 px-3 py-2 rounded-lg border-none cursor-pointer bg-accent text-white font-medium text-sm hover:bg-accent/90 ${FOCUS_RING} shrink-0`}
@@ -284,6 +288,7 @@ export function ProjectLibrary() {
                 const isActive = activeTags.includes(tag);
                 return (
                   <button
+                    type="button"
                     key={tag}
                     onClick={() => handleTagClick(tag)}
                     className={`px-2.5 py-1 rounded-full text-xs border-none cursor-pointer transition-colors ${FOCUS_RING} ${
@@ -303,6 +308,7 @@ export function ProjectLibrary() {
           <div className="flex items-center gap-1">
             {(['all', 'user', 'agent'] as const).map((src) => (
               <button
+                type="button"
                 key={src}
                 onClick={() => setSourceFilter(src)}
                 className={`px-3 py-1.5 rounded-lg text-xs border-none cursor-pointer transition-colors ${FOCUS_RING} ${
@@ -345,6 +351,7 @@ export function ProjectLibrary() {
           </p>
           {activeFilterCount === 0 && (
             <button
+              type="button"
               onClick={() => setShowUpload(true)}
               className={`mt-4 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent text-white text-sm font-medium border-none cursor-pointer hover:bg-accent/90 ${FOCUS_RING}`}
             >
