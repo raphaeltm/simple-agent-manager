@@ -909,7 +909,7 @@ export default {
     const triggerCleanup = await runTriggerExecutionCleanup(env);
 
     // Close orphaned compute_usage records
-    await runComputeUsageCleanup(env);
+    const computeUsageClosed = await runComputeUsageCleanup(env);
 
     log.info('cron.completed', {
       cron: controller.cron,
@@ -937,6 +937,7 @@ export default {
       triggerExecStaleRecovered: triggerCleanup.staleRecovered,
       triggerExecRetentionPurged: triggerCleanup.retentionPurged,
       triggerExecCleanupErrors: triggerCleanup.errors,
+      computeUsageOrphansClosed: computeUsageClosed,
     });
   },
 };

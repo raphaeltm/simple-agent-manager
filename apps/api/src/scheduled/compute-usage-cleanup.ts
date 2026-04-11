@@ -12,16 +12,18 @@ import type { Env } from '../index';
 import { log } from '../lib/logger';
 import { closeOrphanedComputeUsage } from '../services/compute-usage';
 
-export async function runComputeUsageCleanup(env: Env): Promise<void> {
+export async function runComputeUsageCleanup(env: Env): Promise<number> {
   try {
     const db = drizzle(env.DATABASE, { schema });
     const closed = await closeOrphanedComputeUsage(db);
     if (closed > 0) {
       log.info('scheduled.compute_usage_cleanup', { closedRecords: closed });
     }
+    return closed;
   } catch (err) {
     log.error('scheduled.compute_usage_cleanup_failed', {
       error: err instanceof Error ? err.message : String(err),
     });
+    return 0;
   }
 }
