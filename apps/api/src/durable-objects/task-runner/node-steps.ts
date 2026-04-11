@@ -127,6 +127,33 @@ export async function handleNodeProvisioning(
     );
   }
 
+  // Re-check quota before provisioning (hard gate for platform compute)
+  const quotaEnforcementEnabled = rc.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+  if (quotaEnforcementEnabled) {
+    // Check if user has own cloud credentials — only enforce quota for platform compute
+    const hasOwnCreds = await rc.env.DATABASE.prepare(
+      `SELECT id FROM credentials WHERE user_id = ? AND credential_type = 'cloud-provider' LIMIT 1`
+    ).bind(state.userId).first<{ id: string }>();
+
+    if (!hasOwnCreds) {
+      const { drizzle } = await import('drizzle-orm/d1');
+      const drizzleSchema = await import('../../db/schema');
+      const db = drizzle(rc.env.DATABASE, { schema: drizzleSchema });
+      const { checkQuotaForUser } = await import('../../services/compute-quotas');
+      const quotaCheck = await checkQuotaForUser(db, state.userId);
+
+      if (!quotaCheck.allowed) {
+        throw Object.assign(
+          new Error(
+            `Monthly compute quota exceeded: ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours used. ` +
+            'Add your own cloud provider credentials or contact your admin.'
+          ),
+          { permanent: true },
+        );
+      }
+    }
+  }
+
   // Import and call node creation services
   // We import dynamically to avoid circular dependency issues and
   // to keep the DO module lighter

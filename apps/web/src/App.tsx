@@ -10,9 +10,12 @@ import { ToastProvider } from './hooks/useToast';
 import { AccountMap } from './pages/AccountMap';
 import { Admin } from './pages/Admin';
 import { AdminAnalytics } from './pages/AdminAnalytics';
+import { AdminComputeQuotas } from './pages/AdminComputeQuotas';
+import { AdminComputeUsage } from './pages/AdminComputeUsage';
 import { AdminErrors } from './pages/AdminErrors';
 import { AdminLogs } from './pages/AdminLogs';
 import { AdminOverview } from './pages/AdminOverview';
+import { AdminPlatformCredentials } from './pages/AdminPlatformCredentials';
 import { AdminStream } from './pages/AdminStream';
 import { AdminUsers } from './pages/AdminUsers';
 import { Chats } from './pages/Chats';
@@ -37,6 +40,7 @@ import { Settings } from './pages/Settings';
 import { SettingsAgentConfig } from './pages/SettingsAgentConfig';
 import { SettingsAgentKeys } from './pages/SettingsAgentKeys';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
+import { SettingsComputeUsage } from './pages/SettingsComputeUsage';
 import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
 import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
@@ -102,6 +106,7 @@ export default function App() {
               <Route path="agent-keys" element={<SettingsAgentKeys />} />
               <Route path="agent-config" element={<SettingsAgentConfig />} />
               <Route path="notifications" element={<SettingsNotifications />} />
+              <Route path="usage" element={<SettingsComputeUsage />} />
               <Route path="smoke-test-tokens" element={<SettingsSmokeTestTokens />} />
             </Route>
             <Route path="/account-map" element={<AccountMap />} />
@@ -109,6 +114,9 @@ export default function App() {
             <Route path="/admin" element={<Admin />}>
               <Route index element={<Navigate to="users" replace />} />
               <Route path="users" element={<AdminUsers />} />
+              <Route path="credentials" element={<AdminPlatformCredentials />} />
+              <Route path="usage" element={<AdminComputeUsage />} />
+              <Route path="quotas" element={<AdminComputeQuotas />} />
               <Route path="errors" element={<AdminErrors />} />
               <Route path="overview" element={<AdminOverview />} />
               <Route path="logs" element={<AdminLogs />} />

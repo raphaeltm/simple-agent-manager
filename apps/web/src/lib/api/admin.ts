@@ -1,9 +1,13 @@
 import type {
   AdminUsersResponse,
+  CreatePlatformCredentialRequest,
   ErrorListResponse,
   ErrorTrendResponse,
   HealthSummary,
+  ListPlatformCredentialsResponse,
   LogQueryResponse,
+  PlatformCredentialResponse,
+  UpdatePlatformCredentialRequest,
   UserRole,
   UserStatus,
 } from '@simple-agent-manager/shared';
@@ -220,4 +224,107 @@ export interface AnalyticsForwardStatusResponse {
 
 export async function fetchAnalyticsForwardStatus(): Promise<AnalyticsForwardStatusResponse> {
   return request<AnalyticsForwardStatusResponse>('/api/admin/analytics/forward-status');
+}
+
+// =============================================================================
+// Admin Platform Credentials
+// =============================================================================
+
+export async function listPlatformCredentials(): Promise<ListPlatformCredentialsResponse> {
+  return request<ListPlatformCredentialsResponse>('/api/admin/platform-credentials');
+}
+
+export async function createPlatformCredential(
+  data: CreatePlatformCredentialRequest,
+): Promise<PlatformCredentialResponse> {
+  return request<PlatformCredentialResponse>('/api/admin/platform-credentials', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updatePlatformCredential(
+  id: string,
+  data: UpdatePlatformCredentialRequest,
+): Promise<PlatformCredentialResponse> {
+  return request<PlatformCredentialResponse>(`/api/admin/platform-credentials/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePlatformCredential(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/admin/platform-credentials/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// =============================================================================
+// Admin Compute Usage
+// =============================================================================
+
+export type { AdminComputeUsageResponse, AdminUserDetailedUsage } from '@simple-agent-manager/shared';
+
+export async function fetchAdminComputeUsage(): Promise<
+  import('@simple-agent-manager/shared').AdminComputeUsageResponse
+> {
+  return request('/api/admin/usage/compute');
+}
+
+export async function fetchAdminUserComputeUsage(
+  userId: string,
+): Promise<import('@simple-agent-manager/shared').AdminUserDetailedUsage> {
+  return request(`/api/admin/usage/compute/${userId}`);
+}
+
+// =============================================================================
+// Admin Compute Quotas
+// =============================================================================
+
+export type {
+  AdminDefaultQuotaResponse,
+  AdminUserQuotasListResponse,
+  AdminUserQuotaSummary,
+  AdminUserResolvedQuota,
+} from '@simple-agent-manager/shared';
+
+export async function fetchAdminDefaultQuota(): Promise<
+  import('@simple-agent-manager/shared').AdminDefaultQuotaResponse
+> {
+  return request('/api/admin/quotas/default');
+}
+
+export async function updateAdminDefaultQuota(
+  monthlyVcpuHoursLimit: number | null,
+): Promise<import('@simple-agent-manager/shared').AdminDefaultQuotaResponse> {
+  return request('/api/admin/quotas/default', {
+    method: 'PUT',
+    body: JSON.stringify({ monthlyVcpuHoursLimit }),
+  });
+}
+
+export async function fetchAdminUserQuotas(): Promise<
+  import('@simple-agent-manager/shared').AdminUserQuotasListResponse
+> {
+  return request('/api/admin/quotas/users');
+}
+
+export async function fetchAdminUserQuota(
+  userId: string,
+): Promise<import('@simple-agent-manager/shared').AdminUserResolvedQuota> {
+  return request(`/api/admin/quotas/users/${userId}`);
+}
+
+export async function updateAdminUserQuota(
+  userId: string,
+  monthlyVcpuHoursLimit: number | null,
+): Promise<{ userId: string; monthlyVcpuHoursLimit: number | null; source: string; currentUsage: number; remaining: number | null }> {
+  return request(`/api/admin/quotas/users/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ monthlyVcpuHoursLimit }),
+  });
+}
+
+export async function removeAdminUserQuota(userId: string): Promise<{ success: boolean }> {
+  return request(`/api/admin/quotas/users/${userId}`, { method: 'DELETE' });
 }

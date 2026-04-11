@@ -98,6 +98,29 @@ export async function handleWorkspaceCreation(
     state.stepResults.workspaceId = workspaceId;
     await rc.ctx.storage.put('state', state);
 
+    // Start compute usage metering (best-effort)
+    try {
+      const { startComputeTracking } = await import('../../services/compute-usage');
+      const nodeRow = await rc.env.DATABASE.prepare(
+        `SELECT cloud_provider, credential_source FROM nodes WHERE id = ?`
+      ).bind(state.stepResults.nodeId).first<{ cloud_provider: string | null; credential_source: string | null }>();
+
+      await startComputeTracking(db, {
+        userId: state.userId,
+        workspaceId,
+        nodeId: state.stepResults.nodeId,
+        vmSize: state.config.vmSize,
+        cloudProvider: nodeRow?.cloud_provider,
+        credentialSource: (nodeRow?.credential_source as 'user' | 'platform') ?? 'user',
+      });
+    } catch (err) {
+      log.error('task_runner_do.compute_tracking_start_failed', {
+        taskId: state.taskId,
+        workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     // TDF-6: Link existing chat session to workspace (session created at submit time).
     // No new session creation here — one session per task. Uses shared helper
     // so crash recovery path also gets session linking (MEDIUM #1 fix).

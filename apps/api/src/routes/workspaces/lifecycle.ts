@@ -5,10 +5,11 @@ import { Hono } from 'hono';
 import * as schema from '../../db/schema';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
-import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { parseOptionalBody, WorkspaceErrorSchema,WorkspaceStatusUpdateSchema } from '../../schemas';
 import { writeBootLogs } from '../../services/boot-log';
+import { stopComputeTracking } from '../../services/compute-usage';
 import {
   rebuildWorkspaceOnNode,
   restartWorkspaceOnNode,
@@ -62,6 +63,11 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
             updatedAt: new Date().toISOString(),
           })
           .where(eq(schema.workspaces.id, workspace.id));
+
+        // Stop compute usage metering (best-effort)
+        await stopComputeTracking(innerDb, workspace.id).catch((e) => {
+          log.warn('workspace.compute_tracking_stop_failed', { workspaceId: workspace.id, error: String(e) });
+        });
       } catch (err) {
         await innerDb
           .update(schema.workspaces)
@@ -291,6 +297,11 @@ lifecycleRoutes.post('/:id/provisioning-failed', async (c) => {
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.workspaces.id, workspaceId));
+
+    // Stop compute metering on provisioning failure (best-effort)
+    await stopComputeTracking(db, workspaceId).catch((e) => {
+      log.warn('workspace.compute_tracking_stop_failed', { workspaceId, error: String(e) });
+    });
   } else if (workspace.status !== 'error') {
     return c.json({ success: false, reason: 'workspace_not_creating' });
   }

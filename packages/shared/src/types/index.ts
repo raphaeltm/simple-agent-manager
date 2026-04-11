@@ -7,13 +7,20 @@ export type {
   AdminUserRoleRequest,
   AdminUsersResponse,
   CreateCredentialRequest,
+  CreatePlatformCredentialRequest,
   Credential,
   CredentialProvider,
   CredentialResponse,
+  CredentialSource,
   GcpOidcCredential,
+  ListPlatformCredentialsResponse,
+  PlatformCredential,
+  PlatformCredentialResponse,
+  PlatformCredentialType,
   ProjectDeploymentCredential,
   ProjectDeploymentCredentialResponse,
   SetupProjectDeploymentRequest,
+  UpdatePlatformCredentialRequest,
   User,
   UserRole,
   UserStatus,
@@ -306,6 +313,27 @@ export {
   TRIGGER_STATUSES,
   TRIGGERED_BY_VALUES,
 } from './trigger';
+
+// Compute Usage
+export type {
+  ActiveComputeSession,
+  AdminComputeUsageResponse,
+  AdminUserDetailedUsage,
+  AdminUserUsageSummary,
+  ComputeUsagePeriod,
+  ComputeUsageRecord,
+  ComputeUsageResponse,
+} from './compute-usage';
+
+// Compute Quotas
+export type {
+  AdminDefaultQuotaResponse,
+  AdminUserQuotasListResponse,
+  AdminUserQuotaSummary,
+  AdminUserResolvedQuota,
+  QuotaSource,
+  UserQuotaStatusResponse,
+} from './compute-quotas';
 
 // API Error
 export type { ApiError } from './api-error';

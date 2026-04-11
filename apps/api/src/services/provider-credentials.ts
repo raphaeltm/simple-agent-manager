@@ -1,11 +1,12 @@
 import type { Provider, ProviderConfig } from '@simple-agent-manager/providers';
 import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
-import type { CredentialProvider, GcpOidcCredential } from '@simple-agent-manager/shared';
+import type { CredentialProvider, CredentialSource, GcpOidcCredential } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { decrypt } from './encryption';
+import { getPlatformCloudCredential } from './platform-credentials';
 
 /**
  * Serialize provider-specific credential fields into a single string for encryption.
@@ -171,6 +172,7 @@ export async function getUserCloudProviderConfig(
 
 /**
  * Create a Provider instance for a user, handling all provider types including GCP.
+ * Falls back to platform credentials when no user credential is found.
  * For GCP, injects the STS token exchange as the token provider.
  */
 export async function createProviderForUser(
@@ -179,7 +181,8 @@ export async function createProviderForUser(
   encryptionKey: string,
   env: { KV: KVNamespace; BASE_DOMAIN: string; JWT_PRIVATE_KEY: string; JWT_PUBLIC_KEY: string; GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string; GCP_TOKEN_CACHE_TTL_SECONDS?: string; GCP_API_TIMEOUT_MS?: string; GCP_OPERATION_POLL_TIMEOUT_MS?: string },
   targetProvider?: CredentialProvider,
-): Promise<{ provider: Provider; providerName: CredentialProvider } | null> {
+): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
+  // 1. Try user's own credential first
   const conditions = [
     eq(schema.credentials.userId, userId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
@@ -195,27 +198,49 @@ export async function createProviderForUser(
     .limit(1);
 
   const cred = creds[0];
-  if (!cred) {
+  if (cred) {
+    const providerName = cred.provider as CredentialProvider;
+    const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
+
+    if (providerName === 'gcp') {
+      const gcpCred = parseGcpCredential(decryptedToken);
+      const { getGcpAccessToken } = await import('./gcp-sts');
+      const tokenProvider = () => getGcpAccessToken(userId, gcpCred.gcpProjectId, gcpCred, env as any);
+
+      const provider = new GcpProvider(
+        gcpCred.gcpProjectId,
+        tokenProvider,
+        gcpCred.defaultZone,
+      );
+      return { provider, providerName, credentialSource: 'user' };
+    }
+
+    const config = buildProviderConfig(providerName, decryptedToken);
+    return { provider: createProvider(config), providerName, credentialSource: 'user' };
+  }
+
+  // 2. Fall back to platform credential
+  const platformCred = await getPlatformCloudCredential(db, encryptionKey, targetProvider);
+  if (!platformCred) {
     return null;
   }
 
-  const providerName = cred.provider as CredentialProvider;
-  const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
+  const { decryptedToken, provider: platformProvider } = platformCred;
 
-  if (providerName === 'gcp') {
+  if (platformProvider === 'gcp') {
     const gcpCred = parseGcpCredential(decryptedToken);
-    // Lazy-import to avoid circular dependency
     const { getGcpAccessToken } = await import('./gcp-sts');
-    const tokenProvider = () => getGcpAccessToken(userId, gcpCred.gcpProjectId, gcpCred, env as any);
+    // Use a synthetic user ID for platform credentials in token cache
+    const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, gcpCred.gcpProjectId, gcpCred, env as any);
 
     const provider = new GcpProvider(
       gcpCred.gcpProjectId,
       tokenProvider,
       gcpCred.defaultZone,
     );
-    return { provider, providerName };
+    return { provider, providerName: platformProvider, credentialSource: 'platform' };
   }
 
-  const config = buildProviderConfig(providerName, decryptedToken);
-  return { provider: createProvider(config), providerName };
+  const config = buildProviderConfig(platformProvider, decryptedToken);
+  return { provider: createProvider(config), providerName: platformProvider, credentialSource: 'platform' };
 }

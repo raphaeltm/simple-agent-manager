@@ -11,12 +11,26 @@ export type {
   WebsiteTrafficHost,
   WebsiteTrafficSection,
 } from './admin';
+export type { AdminComputeUsageResponse, AdminUserDetailedUsage } from './admin';
+export type {
+  AdminDefaultQuotaResponse,
+  AdminUserQuotasListResponse,
+  AdminUserQuotaSummary,
+  AdminUserResolvedQuota,
+} from './admin';
 export {
   approveOrSuspendUser,
   changeUserRole,
+  createPlatformCredential,
+  deletePlatformCredential,
+  fetchAdminComputeUsage,
+  fetchAdminDefaultQuota,
   fetchAdminErrors,
   fetchAdminErrorTrends,
   fetchAdminHealth,
+  fetchAdminUserComputeUsage,
+  fetchAdminUserQuota,
+  fetchAdminUserQuotas,
   fetchAnalyticsDau,
   fetchAnalyticsEvents,
   fetchAnalyticsFeatureAdoption,
@@ -27,7 +41,12 @@ export {
   fetchAnalyticsWebsiteTraffic,
   getAdminLogStreamUrl,
   listAdminUsers,
+  listPlatformCredentials,
   queryAdminLogs,
+  removeAdminUserQuota,
+  updateAdminDefaultQuota,
+  updateAdminUserQuota,
+  updatePlatformCredential,
 } from './admin';
 export {
   createAgentProfile,
@@ -220,6 +239,7 @@ export {
   testTrigger,
   updateTrigger,
 } from './triggers';
+export { fetchComputeUsage, fetchUserQuotaStatus } from './usage';
 export {
   createAgentSession,
   createWorkspace,

@@ -103,6 +103,10 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         return [];
       }
       if (queryCount === 3) {
+        // platform credential → not found
+        return [];
+      }
+      if (queryCount === 4) {
         // cloud-provider for 'scaleway' → found
         return [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }];
       }
@@ -184,10 +188,13 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         return [{ userId: 'user-1' }];
       }
       if (queryCount === 2) {
-        return []; // no dedicated key
+        return []; // no dedicated user agent key
       }
       if (queryCount === 3) {
-        return [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }];
+        return []; // no platform credential
+      }
+      if (queryCount === 4) {
+        return [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }]; // scaleway cloud provider
       }
       return [];
     });

@@ -116,6 +116,14 @@ export async function provisionNode(
       );
     }
 
+    // Track credential source on the node record
+    if (providerResult.credentialSource === 'platform') {
+      await db
+        .update(schema.nodes)
+        .set({ credentialSource: 'platform' })
+        .where(eq(schema.nodes.id, node.id));
+    }
+
     const callbackToken = await signNodeCallbackToken(node.id, env);
 
     const cloudInit = generateCloudInit({
