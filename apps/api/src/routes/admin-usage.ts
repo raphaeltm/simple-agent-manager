@@ -38,7 +38,8 @@ adminUsageRoutes.get('/compute/:userId', async (c) => {
     throw errors.notFound('User');
   }
 
-  const result = await getUserDetailedUsage(db, userId);
+  const recentLimit = parseInt(c.env.COMPUTE_USAGE_RECENT_RECORDS_LIMIT ?? '50', 10);
+  const result = await getUserDetailedUsage(db, userId, recentLimit);
   return c.json(result);
 });
 

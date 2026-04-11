@@ -462,6 +462,8 @@ export interface Env {
   LIBRARY_MAX_DIRECTORY_DEPTH?: string;          // Max directory nesting depth (default: 10)
   LIBRARY_MAX_DIRECTORY_PATH_LENGTH?: string;    // Max directory path length in chars (default: 500)
   LIBRARY_MAX_DIRECTORIES_PER_PROJECT?: string;  // Max directories per project (default: 500)
+  // Compute usage metering
+  COMPUTE_USAGE_RECENT_RECORDS_LIMIT?: string;  // Max recent records in admin user detail (default: 50)
   // Event-driven triggers (cron) configuration
   MAX_TRIGGERS_PER_PROJECT?: string;                 // Max triggers per project (default: 10)
   CRON_MIN_INTERVAL_MINUTES?: string;               // Min cron interval in minutes (default: 15)
