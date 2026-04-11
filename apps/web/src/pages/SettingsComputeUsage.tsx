@@ -1,9 +1,9 @@
-import type { ComputeUsageResponse } from '@simple-agent-manager/shared';
+import type { ComputeUsageResponse, UserQuotaStatusResponse } from '@simple-agent-manager/shared';
 import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
-import { Clock, Cpu, Key, Server } from 'lucide-react';
+import { Clock, Cpu, Gauge, Key, Server } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { fetchComputeUsage } from '../lib/api';
+import { fetchComputeUsage, fetchUserQuotaStatus } from '../lib/api';
 
 function formatVcpuHours(hours: number): string {
   if (hours < 0.01) return '< 0.01';
@@ -18,16 +18,95 @@ function formatDuration(startedAt: string): string {
   return `${hours.toFixed(1)}h`;
 }
 
+function QuotaProgressBar({ quota }: { quota: UserQuotaStatusResponse }) {
+  // BYOC users are exempt from quotas
+  if (quota.byocExempt) {
+    return (
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Key className="w-4 h-4 text-fg-muted" aria-hidden="true" />
+          <span className="sam-type-body font-medium">BYOC — No Quota</span>
+        </div>
+        <Body className="text-fg-muted text-sm">
+          You&apos;re using your own cloud provider credentials. Compute quotas don&apos;t apply.
+        </Body>
+      </Card>
+    );
+  }
+
+  // No quota configured
+  if (quota.monthlyVcpuHoursLimit === null) {
+    return (
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Gauge className="w-4 h-4 text-fg-muted" aria-hidden="true" />
+          <span className="sam-type-body font-medium">Unlimited</span>
+        </div>
+        <Body className="text-fg-muted text-sm">
+          No compute quota is configured for your account.
+        </Body>
+      </Card>
+    );
+  }
+
+  const limit = quota.monthlyVcpuHoursLimit;
+  const used = quota.currentUsage;
+  const pct = Math.min(100, limit > 0 ? (used / limit) * 100 : 0);
+  const exceeded = pct >= 100;
+  const barColor = exceeded ? 'bg-error' : pct >= 90 ? 'bg-error' : pct >= 75 ? 'bg-warning' : 'bg-success';
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Gauge className="w-4 h-4 text-fg-muted" aria-hidden="true" />
+          <span className="sam-type-body font-medium">Monthly Quota</span>
+        </div>
+        <span className="sam-type-body tabular-nums font-medium">
+          {used.toFixed(2)} / {limit.toFixed(0)} vCPU-hrs
+        </span>
+      </div>
+      <div className="w-full h-3 bg-surface rounded-full overflow-hidden border border-border-default">
+        <div
+          className={`h-full ${barColor} rounded-full transition-all`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="flex justify-between mt-1">
+        <span className="sam-type-caption text-fg-muted">
+          {quota.remaining !== null ? `${quota.remaining.toFixed(2)} hrs remaining` : ''}
+        </span>
+        <span className="sam-type-caption text-fg-muted tabular-nums">{Math.round(pct)}%</span>
+      </div>
+      {exceeded && (
+        <div className="mt-3 p-3 bg-error/10 rounded-md border border-error/20">
+          <Body className="text-error text-sm font-medium">Quota Exceeded</Body>
+          <Body className="text-fg-muted text-sm mt-1">
+            You&apos;ve used all your allocated compute for this month. New tasks using platform
+            compute will be rejected. To continue, add your own cloud provider credentials in
+            Settings or contact your admin.
+          </Body>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function SettingsComputeUsage() {
   const [data, setData] = useState<ComputeUsageResponse | null>(null);
+  const [quota, setQuota] = useState<UserQuotaStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadUsage = useCallback(async () => {
     try {
       setError(null);
-      const res = await fetchComputeUsage();
-      setData(res);
+      const [usageRes, quotaRes] = await Promise.all([
+        fetchComputeUsage(),
+        fetchUserQuotaStatus(),
+      ]);
+      setData(usageRes);
+      setQuota(quotaRes);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load usage data');
     } finally {
@@ -69,6 +148,8 @@ export function SettingsComputeUsage() {
           Current billing period: {periodStart} &ndash; {periodEnd}
         </Body>
       </div>
+
+      {quota && <QuotaProgressBar quota={quota} />}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="p-3 text-center">

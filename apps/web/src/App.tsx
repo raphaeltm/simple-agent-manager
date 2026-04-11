@@ -10,6 +10,7 @@ import { ToastProvider } from './hooks/useToast';
 import { AccountMap } from './pages/AccountMap';
 import { Admin } from './pages/Admin';
 import { AdminAnalytics } from './pages/AdminAnalytics';
+import { AdminComputeQuotas } from './pages/AdminComputeQuotas';
 import { AdminComputeUsage } from './pages/AdminComputeUsage';
 import { AdminErrors } from './pages/AdminErrors';
 import { AdminLogs } from './pages/AdminLogs';
@@ -115,6 +116,7 @@ export default function App() {
               <Route path="users" element={<AdminUsers />} />
               <Route path="credentials" element={<AdminPlatformCredentials />} />
               <Route path="usage" element={<AdminComputeUsage />} />
+              <Route path="quotas" element={<AdminComputeQuotas />} />
               <Route path="errors" element={<AdminErrors />} />
               <Route path="overview" element={<AdminOverview />} />
               <Route path="logs" element={<AdminLogs />} />

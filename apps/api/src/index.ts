@@ -22,6 +22,7 @@ import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
 import { adminAnalyticsRoutes } from './routes/admin-analytics';
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
+import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
 import { agentProfileRoutes } from './routes/agent-profiles';
@@ -464,6 +465,8 @@ export interface Env {
   LIBRARY_MAX_DIRECTORIES_PER_PROJECT?: string;  // Max directories per project (default: 500)
   // Compute usage metering
   COMPUTE_USAGE_RECENT_RECORDS_LIMIT?: string;  // Max recent records in admin user detail (default: 50)
+  // Compute quota enforcement
+  COMPUTE_QUOTA_ENFORCEMENT_ENABLED?: string;    // Kill switch for quota checks (default: true)
   // Event-driven triggers (cron) configuration
   MAX_TRIGGERS_PER_PROJECT?: string;                 // Max triggers per project (default: 10)
   CRON_MIN_INTERVAL_MINUTES?: string;               // Min cron interval in minutes (default: 15)
@@ -807,6 +810,7 @@ app.route('/api/deployment', gcpDeployCallbackRoute);
 app.route('/api/admin', adminRoutes);
 app.route('/api/admin/analytics', adminAnalyticsRoutes);
 app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
+app.route('/api/admin/quotas', adminQuotaRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/usage', usageRoutes);
 app.route('/api/account-map', accountMapRoutes);

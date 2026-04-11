@@ -12,6 +12,12 @@ export type {
   WebsiteTrafficSection,
 } from './admin';
 export type { AdminComputeUsageResponse, AdminUserDetailedUsage } from './admin';
+export type {
+  AdminDefaultQuotaResponse,
+  AdminUserQuotasListResponse,
+  AdminUserQuotaSummary,
+  AdminUserResolvedQuota,
+} from './admin';
 export {
   approveOrSuspendUser,
   changeUserRole,
@@ -34,6 +40,12 @@ export {
   listAdminUsers,
   listPlatformCredentials,
   queryAdminLogs,
+  fetchAdminDefaultQuota,
+  fetchAdminUserQuota,
+  fetchAdminUserQuotas,
+  removeAdminUserQuota,
+  updateAdminDefaultQuota,
+  updateAdminUserQuota,
   updatePlatformCredential,
 } from './admin';
 export {
@@ -227,7 +239,7 @@ export {
   testTrigger,
   updateTrigger,
 } from './triggers';
-export { fetchComputeUsage } from './usage';
+export { fetchComputeUsage, fetchUserQuotaStatus } from './usage';
 export {
   createAgentSession,
   createWorkspace,

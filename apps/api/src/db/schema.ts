@@ -1,6 +1,6 @@
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey,sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // =============================================================================
 // Users (BetterAuth compatible + custom fields)
@@ -1131,3 +1131,35 @@ export const computeUsage = sqliteTable(
 
 export type ComputeUsageRow = typeof computeUsage.$inferSelect;
 export type NewComputeUsageRow = typeof computeUsage.$inferInsert;
+
+// =============================================================================
+// Compute Quotas
+// =============================================================================
+
+/** Platform-wide default quota (singleton row). */
+export const defaultQuotas = sqliteTable('default_quotas', {
+  id: text('id').primaryKey(),
+  monthlyVcpuHoursLimit: real('monthly_vcpu_hours_limit'),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  updatedBy: text('updated_by')
+    .notNull()
+    .references(() => users.id),
+});
+
+export type DefaultQuotaRow = typeof defaultQuotas.$inferSelect;
+
+/** Per-user quota overrides set by admin. */
+export const userQuotas = sqliteTable('user_quotas', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  monthlyVcpuHoursLimit: real('monthly_vcpu_hours_limit'),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  updatedBy: text('updated_by')
+    .notNull()
+    .references(() => users.id),
+});
+
+export type UserQuotaRow = typeof userQuotas.$inferSelect;

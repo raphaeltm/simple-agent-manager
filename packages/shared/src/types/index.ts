@@ -325,5 +325,15 @@ export type {
   ComputeUsageResponse,
 } from './compute-usage';
 
+// Compute Quotas
+export type {
+  AdminDefaultQuotaResponse,
+  AdminUserQuotasListResponse,
+  AdminUserQuotaSummary,
+  AdminUserResolvedQuota,
+  QuotaSource,
+  UserQuotaStatusResponse,
+} from './compute-quotas';
+
 // API Error
 export type { ApiError } from './api-error';
