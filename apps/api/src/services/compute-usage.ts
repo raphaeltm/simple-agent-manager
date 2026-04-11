@@ -74,12 +74,9 @@ export async function stopComputeTracking(
       )
     );
 
-  // D1 doesn't expose rowsAffected reliably through Drizzle, log workspace ID
-  const updated = 1;
-  if (updated > 0) {
-    log.info('compute-usage: stopped tracking', { workspaceId, rowsClosed: updated });
-  }
-  return updated;
+  // D1 does not expose rows_affected via Drizzle; log unconditionally on attempt.
+  log.info('compute-usage: stopped tracking', { workspaceId });
+  return 0;
 }
 
 // =============================================================================

@@ -12,7 +12,7 @@ import { getAuth, getUserId, requireApproved,requireAuth } from '../../middlewar
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspaceSchema } from '../../schemas';
-import { startComputeTracking } from '../../services/compute-usage';
+import { startComputeTracking, stopComputeTracking } from '../../services/compute-usage';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   deleteWorkspaceOnNode,
@@ -411,6 +411,13 @@ crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
       projectDataService.cleanupWorkspaceActivity(c.env, workspace.projectId, workspace.id)
         .catch((e) => { log.warn('workspace.delete_cleanup_activity_failed', { workspaceId: workspace.id, error: String(e) }); })
     );
+  }
+
+  // Close compute metering before deleting the workspace row (best-effort)
+  try {
+    await stopComputeTracking(db, workspace.id);
+  } catch (e) {
+    log.warn('workspace.compute_tracking_stop_failed', { workspaceId: workspace.id, error: String(e) });
   }
 
   await db.delete(schema.agentSessions).where(eq(schema.agentSessions.workspaceId, workspace.id));
