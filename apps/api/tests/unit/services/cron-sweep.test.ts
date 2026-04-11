@@ -77,6 +77,7 @@ vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args: unknown[]) => ['and', ...args]),
   count: vi.fn(() => 'count'),
   desc: vi.fn((col: unknown) => col),
+  inArray: vi.fn((_col: unknown, vals: unknown) => ['inArray', vals]),
   isNotNull: vi.fn((_col: unknown) => ['isNotNull']),
   lte: vi.fn((_col: unknown, val: unknown) => ['lte', val]),
   sql: Object.assign((s: unknown) => s, { raw: (s: unknown) => s }),
