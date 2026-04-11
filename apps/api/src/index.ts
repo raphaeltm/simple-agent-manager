@@ -458,6 +458,8 @@ export interface Env {
   LIBRARY_KEY_VERSION?: string;                  // KEK version stamped on new encryptions (default: 1)
   LIBRARY_MCP_DOWNLOAD_DIR?: string;             // Workspace directory for library downloads (default: .library)
   LIBRARY_MCP_TRANSFER_TIMEOUT_MS?: string;      // Timeout for VM agent file transfers (default: 60000)
+  // Compute usage metering
+  COMPUTE_USAGE_RECENT_RECORDS_LIMIT?: string;  // Max recent records in admin user detail (default: 50)
   // Event-driven triggers (cron) configuration
   MAX_TRIGGERS_PER_PROJECT?: string;                 // Max triggers per project (default: 10)
   CRON_MIN_INTERVAL_MINUTES?: string;               // Min cron interval in minutes (default: 15)

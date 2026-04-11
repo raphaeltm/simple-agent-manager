@@ -203,6 +203,10 @@ describe('compute usage metering pipeline', () => {
       expect(adminUsageRoute).toContain('getUserDetailedUsage');
     });
 
+    it('admin usage route passes configurable recent records limit', () => {
+      expect(adminUsageRoute).toContain('COMPUTE_USAGE_RECENT_RECORDS_LIMIT');
+    });
+
     it('admin usage route has per-user endpoint with userId param', () => {
       expect(adminUsageRoute).toContain(':userId');
     });

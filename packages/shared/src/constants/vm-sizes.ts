@@ -31,14 +31,17 @@ export const DEFAULT_VM_SIZE_VCPUS: Record<VMSize, number> = {
   large: 8,
 };
 
+/** Fallback vCPU count when both provider map and default size map miss. */
+const VCPU_COUNT_UNKNOWN_FALLBACK = 2;
+
 /** Resolve the vCPU count for a given VM size and optional cloud provider. */
 export function getVcpuCount(vmSize: string, cloudProvider?: string | null): number {
   const size = vmSize as VMSize;
   if (cloudProvider) {
     const providerMap = PROVIDER_VM_SIZE_VCPUS[cloudProvider];
     if (providerMap) {
-      return providerMap[size] ?? DEFAULT_VM_SIZE_VCPUS[size] ?? 2;
+      return providerMap[size] ?? DEFAULT_VM_SIZE_VCPUS[size] ?? VCPU_COUNT_UNKNOWN_FALLBACK;
     }
   }
-  return DEFAULT_VM_SIZE_VCPUS[size] ?? 2;
+  return DEFAULT_VM_SIZE_VCPUS[size] ?? VCPU_COUNT_UNKNOWN_FALLBACK;
 }

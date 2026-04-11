@@ -304,10 +304,13 @@ export async function getAllUsersUsageSummary(
   return { period: { start, end }, users: summaries };
 }
 
+const DEFAULT_RECENT_RECORDS_LIMIT = 50;
+
 /** Get detailed usage for a specific user (admin view). */
 export async function getUserDetailedUsage(
   db: DrizzleD1Database<typeof schema>,
-  userId: string
+  userId: string,
+  recentLimit = DEFAULT_RECENT_RECORDS_LIMIT
 ): Promise<{
   currentPeriod: ComputeUsagePeriod;
   activeSessions: ActiveComputeSession[];
@@ -315,13 +318,12 @@ export async function getUserDetailedUsage(
 }> {
   const summary = await getUserUsageSummary(db, userId);
 
-  // Get recent records (last 50)
   const recent = await db
     .select()
     .from(schema.computeUsage)
     .where(eq(schema.computeUsage.userId, userId))
     .orderBy(sql`${schema.computeUsage.startedAt} DESC`)
-    .limit(50);
+    .limit(recentLimit);
 
   const recentRecords: ComputeUsageRecord[] = recent.map((r) => ({
     id: r.id,
