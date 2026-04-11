@@ -33,6 +33,7 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { persistError } from '../services/observability';
 import { cleanupTaskRun } from '../services/task-runner';
+import { syncTriggerExecutionStatus } from '../services/trigger-execution-sync';
 
 function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -423,6 +424,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         reason,
         createdAt: nowIso,
       });
+
+      // Sync trigger execution status (best-effort) — without this, cron triggers
+      // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
+      await syncTriggerExecutionStatus(env.DATABASE, task.id, 'failed', reason);
 
       // Best-effort cleanup: stop workspace and mark auto-provisioned node as warm.
       // cleanupTaskRun reads the task's workspaceId and autoProvisionedNodeId from DB.

@@ -7,6 +7,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import { recordActivityEventInternal } from './activity';
 import { materializeSession } from './materialization';
 import { persistSystemMessage } from './messages';
@@ -326,6 +327,10 @@ export async function completeTaskInD1(db: D1Database, taskId: string): Promise<
     log.error('d1_task_completion_failed', { taskId, ...serializeError(err) });
     throw err;
   }
+
+  // Sync trigger execution status (best-effort) — without this, cron triggers
+  // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
+  await syncTriggerExecutionStatus(db, taskId, 'completed');
 }
 
 export async function stopWorkspaceInD1(db: D1Database, workspaceId: string): Promise<void> {

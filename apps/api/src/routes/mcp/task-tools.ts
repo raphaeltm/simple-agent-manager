@@ -13,6 +13,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import * as notificationService from '../../services/notification';
+import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
   getMcpLimits,
@@ -256,6 +257,10 @@ export async function handleCompleteTask(
       'Task cannot be completed — it may not exist or is not in a completable status',
     );
   }
+
+  // Sync trigger execution status (best-effort) — without this, cron triggers
+  // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
+  await syncTriggerExecutionStatus(env.DATABASE, tokenData.taskId, 'completed');
 
   // Record completion activity event
   try {
