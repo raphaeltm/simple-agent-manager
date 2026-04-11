@@ -10,9 +10,13 @@ const mockGetFile = vi.hoisted(() => vi.fn());
 const mockDownloadFile = vi.hoisted(() => vi.fn());
 const mockDeleteFile = vi.hoisted(() => vi.fn());
 const mockUpdateTags = vi.hoisted(() => vi.fn());
+const mockListDirectories = vi.hoisted(() => vi.fn());
+const mockMoveFile = vi.hoisted(() => vi.fn());
 const mockGetUploadMaxBytes = vi.hoisted(() => vi.fn());
 const mockGetDownloadTimeoutMs = vi.hoisted(() => vi.fn().mockReturnValue(60000));
+const mockGetListMaxPageSize = vi.hoisted(() => vi.fn().mockReturnValue(200));
 const mockValidateFilename = vi.hoisted(() => vi.fn());
+const mockValidateDirectory = vi.hoisted(() => vi.fn((dir: string) => dir));
 
 // Mock auth middleware
 vi.mock('../../../src/middleware/auth', () => ({
@@ -41,9 +45,13 @@ vi.mock('../../../src/services/file-library', () => ({
   downloadFile: mockDownloadFile,
   deleteFile: mockDeleteFile,
   updateTags: mockUpdateTags,
+  listDirectories: mockListDirectories,
+  moveFile: mockMoveFile,
   getUploadMaxBytes: mockGetUploadMaxBytes,
   getDownloadTimeoutMs: mockGetDownloadTimeoutMs,
+  getListMaxPageSize: mockGetListMaxPageSize,
   validateFilename: mockValidateFilename,
+  validateDirectory: mockValidateDirectory,
 }));
 
 import { Hono } from 'hono';
@@ -435,6 +443,121 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('GET /directories', () => {
+    it('returns 200 with directory list', async () => {
+      mockListDirectories.mockResolvedValue([
+        { path: '/docs/', name: 'docs', fileCount: 3 },
+        { path: '/assets/', name: 'assets', fileCount: 5 },
+      ]);
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/directories`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json() as Record<string, unknown>;
+      expect(json['directories']).toHaveLength(2);
+    });
+
+    it('passes parentDirectory query parameter', async () => {
+      mockListDirectories.mockResolvedValue([]);
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/directories?parentDirectory=/docs/`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockValidateDirectory).toHaveBeenCalledWith('/docs/', env);
+      expect(mockListDirectories).toHaveBeenCalledWith(
+        expect.anything(),
+        'test-project-id',
+        '/docs/',
+        env
+      );
+    });
+
+    it('defaults to root directory when no parentDirectory given', async () => {
+      mockListDirectories.mockResolvedValue([]);
+
+      const { app, env } = makeApp(makeEnv());
+      await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/directories`),
+        env
+      );
+
+      expect(mockValidateDirectory).toHaveBeenCalledWith('/', env);
+    });
+  });
+
+  describe('PATCH /:fileId/move', () => {
+    it('returns 200 on successful move', async () => {
+      mockMoveFile.mockResolvedValue({
+        id: 'file-123',
+        filename: 'report.pdf',
+        directory: '/docs/',
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/move`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ directory: '/docs/' }),
+        }),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json() as Record<string, unknown>;
+      expect(json['directory']).toBe('/docs/');
+    });
+
+    it('returns 400 when neither directory nor filename provided', async () => {
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/move`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }),
+        env
+      );
+
+      expect(res.status).toBe(400);
+    });
+
+    it('accepts filename-only move', async () => {
+      mockMoveFile.mockResolvedValue({
+        id: 'file-123',
+        filename: 'renamed.pdf',
+        directory: '/',
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/move`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: 'renamed.pdf' }),
+        }),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockMoveFile).toHaveBeenCalledWith(
+        expect.anything(),
+        env,
+        'test-project-id',
+        'file-123',
+        { filename: 'renamed.pdf' }
+      );
     });
   });
 });
