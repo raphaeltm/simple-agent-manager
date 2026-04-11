@@ -5,6 +5,7 @@
  * cleanup on failure, and D1 execution step updates.
  */
 import { log } from '../../lib/logger';
+import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 // =========================================================================
@@ -195,6 +196,10 @@ export async function failTask(
   await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?`
   ).bind(errorMessage, now, now, state.taskId).run();
+
+  // Sync trigger execution status (best-effort) — without this, cron triggers
+  // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
+  await syncTriggerExecutionStatus(rc.env.DATABASE, state.taskId, 'failed', errorMessage);
 
   const { ulid } = await import('../../lib/ulid');
   await rc.env.DATABASE.prepare(
