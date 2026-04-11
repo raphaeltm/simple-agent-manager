@@ -20,7 +20,7 @@ export const DirectoryBreadcrumb: FC<DirectoryBreadcrumbProps> = ({ directory, o
     >
       <button
         onClick={() => onNavigate('/')}
-        className={`flex items-center gap-1 px-1.5 py-1 rounded text-fg-muted hover:text-fg-primary hover:bg-surface-inset border-none bg-transparent cursor-pointer shrink-0 ${FOCUS_RING}`}
+        className={`flex items-center gap-1 px-2 py-2 min-h-[44px] rounded text-fg-muted hover:text-fg-primary hover:bg-surface-inset border-none bg-transparent cursor-pointer shrink-0 ${FOCUS_RING}`}
         aria-label="Root directory"
       >
         <Home size={14} />
@@ -30,13 +30,15 @@ export const DirectoryBreadcrumb: FC<DirectoryBreadcrumbProps> = ({ directory, o
         const isLast = i === segments.length - 1;
         return (
           <span key={path} className="flex items-center gap-1 min-w-0">
-            <ChevronRight size={12} className="text-fg-muted shrink-0" />
+            <ChevronRight size={12} className="text-fg-muted shrink-0" aria-hidden="true" />
             {isLast ? (
-              <span className="font-medium text-fg-primary truncate">{seg}</span>
+              <span className="font-medium text-fg-primary truncate px-2 py-2" aria-current="page">
+                {seg}
+              </span>
             ) : (
               <button
                 onClick={() => onNavigate(path)}
-                className={`px-1.5 py-1 rounded text-fg-muted hover:text-fg-primary hover:bg-surface-inset border-none bg-transparent cursor-pointer truncate ${FOCUS_RING}`}
+                className={`px-2 py-2 min-h-[44px] rounded text-fg-muted hover:text-fg-primary hover:bg-surface-inset border-none bg-transparent cursor-pointer truncate ${FOCUS_RING}`}
               >
                 {seg}
               </button>

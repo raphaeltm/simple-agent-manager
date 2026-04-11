@@ -152,16 +152,26 @@ export function ProjectLibrary() {
     (newFiles: File[]) => {
       for (const file of newFiles) {
         if (file.size > LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES) {
-          window.alert(
-            `"${file.name}" exceeds the ${formatFileSize(LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES)} limit.`,
-          );
+          // Skip oversized files and show them as errors in the upload chip list
+          const id = `upload-${++uploadIdCounter}`;
+          setUploads((prev) => [
+            ...prev,
+            {
+              id,
+              file,
+              progress: 0,
+              status: 'error' as const,
+              error: `Exceeds ${formatFileSize(LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES)} limit`,
+            },
+          ]);
           continue;
         }
 
-        // Check for filename collision in current directory
+        // Check for filename collision in current directory — allow anyway (server handles conflicts)
         const existing = files.find((f) => f.filename === file.name && f.directory === currentDirectory);
         if (existing) {
-          if (!window.confirm(`"${file.name}" already exists in this directory. Upload as a new file?`)) continue;
+          // Skip duplicates — the server will return FILE_EXISTS
+          continue;
         }
 
         const id = `upload-${++uploadIdCounter}`;
@@ -231,51 +241,55 @@ export function ProjectLibrary() {
       className={`flex flex-col gap-4 overflow-x-hidden w-full max-w-full min-w-0 ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}
     >
       {/* Header bar */}
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex flex-wrap items-center gap-2 min-w-0">
         <h1 className="text-xl font-semibold text-fg-primary m-0 shrink-0">Library</h1>
         {refreshing && <Spinner size="sm" />}
 
-        <div className="flex-1" />
+        <div className="flex-1 min-w-[20px]" />
 
         {/* View toggle */}
-        <div className="flex rounded-lg border border-border-default overflow-hidden shrink-0">
-          <button
-            onClick={() => setViewMode('list')}
-            aria-label="List view"
-            aria-pressed={viewMode === 'list'}
-            className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
-              viewMode === 'list'
-                ? 'bg-accent/10 text-accent'
-                : 'bg-surface text-fg-muted hover:text-fg-primary'
-            }`}
-          >
-            <List size={16} />
-          </button>
-          <button
-            onClick={() => setViewMode('grid')}
-            aria-label="Grid view"
-            aria-pressed={viewMode === 'grid'}
-            className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
-              viewMode === 'grid'
-                ? 'bg-accent/10 text-accent'
-                : 'bg-surface text-fg-muted hover:text-fg-primary'
-            }`}
-          >
-            <Grid3X3 size={16} />
-          </button>
-        </div>
+        {!isMobile && (
+          <div className="flex rounded-lg border border-border-default overflow-hidden shrink-0">
+            <button
+              onClick={() => setViewMode('list')}
+              aria-label="List view"
+              aria-pressed={viewMode === 'list'}
+              className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
+                viewMode === 'list'
+                  ? 'bg-accent/10 text-accent'
+                  : 'bg-surface text-fg-muted hover:text-fg-primary'
+              }`}
+            >
+              <List size={16} />
+            </button>
+            <button
+              onClick={() => setViewMode('grid')}
+              aria-label="Grid view"
+              aria-pressed={viewMode === 'grid'}
+              className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
+                viewMode === 'grid'
+                  ? 'bg-accent/10 text-accent'
+                  : 'bg-surface text-fg-muted hover:text-fg-primary'
+              }`}
+            >
+              <Grid3X3 size={16} />
+            </button>
+          </div>
+        )}
 
-        {/* Sort dropdown */}
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as SortOption)}
-          aria-label="Sort by"
-          className="px-2.5 py-2 text-sm rounded-lg border border-border-default bg-surface-inset text-fg-primary focus:outline-none focus:border-accent cursor-pointer shrink-0"
-        >
-          <option value="createdAt">Newest</option>
-          <option value="filename">Name</option>
-          <option value="sizeBytes">Size</option>
-        </select>
+        {/* Sort dropdown — hidden on mobile, available in filter panel */}
+        {!isMobile && (
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortOption)}
+            aria-label="Sort by"
+            className="px-2.5 py-2 text-sm rounded-lg border border-border-default bg-surface-inset text-fg-primary focus:outline-none focus:border-accent cursor-pointer shrink-0"
+          >
+            <option value="createdAt">Newest</option>
+            <option value="filename">Name</option>
+            <option value="sizeBytes">Size</option>
+          </select>
+        )}
 
         {/* Filter toggle */}
         <button
@@ -322,6 +336,20 @@ export function ProjectLibrary() {
       {/* Filter bar (collapsible) */}
       {showFilters && (
         <div className="flex flex-col gap-3 p-3 rounded-lg border border-border-default bg-surface-inset">
+          {/* Sort (mobile only — hidden on desktop where it's in the header) */}
+          {isMobile && (
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              aria-label="Sort by"
+              className="w-full px-2.5 py-2 text-sm rounded-lg border border-border-default bg-surface text-fg-primary focus:outline-none focus:border-accent cursor-pointer"
+            >
+              <option value="createdAt">Newest</option>
+              <option value="filename">Name</option>
+              <option value="sizeBytes">Size</option>
+            </select>
+          )}
+
           {/* Search input */}
           <div className="relative">
             <Search
@@ -430,9 +458,10 @@ export function ProjectLibrary() {
             <button
               key={dir.path}
               onClick={() => navigateToDirectory(dir.path)}
+              aria-label={`Folder: ${dir.name}, ${dir.fileCount} file${dir.fileCount !== 1 ? 's' : ''}`}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border-default bg-surface hover:bg-surface-inset cursor-pointer text-left w-full ${FOCUS_RING}`}
             >
-              <Folder size={18} className="text-accent shrink-0" />
+              <Folder size={18} className="text-accent shrink-0" aria-hidden="true" />
               <span className="text-sm font-medium text-fg-primary truncate">{dir.name}</span>
               <span className="text-xs text-fg-muted ml-auto shrink-0">
                 {dir.fileCount} file{dir.fileCount !== 1 ? 's' : ''}
@@ -461,9 +490,10 @@ export function ProjectLibrary() {
             <button
               key={dir.path}
               onClick={() => navigateToDirectory(dir.path)}
+              aria-label={`Folder: ${dir.name}, ${dir.fileCount} file${dir.fileCount !== 1 ? 's' : ''}`}
               className={`flex flex-col items-center justify-center gap-2 p-4 rounded-lg border border-border-default bg-surface hover:bg-surface-inset cursor-pointer min-h-[120px] ${FOCUS_RING}`}
             >
-              <Folder size={32} className="text-accent" />
+              <Folder size={32} className="text-accent" aria-hidden="true" />
               <span className="text-sm font-medium text-fg-primary truncate max-w-full">{dir.name}</span>
               <span className="text-xs text-fg-muted">
                 {dir.fileCount} file{dir.fileCount !== 1 ? 's' : ''}

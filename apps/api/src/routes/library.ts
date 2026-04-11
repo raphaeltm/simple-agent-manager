@@ -203,7 +203,7 @@ libraryRoutes.get('/directories', requireAuth(), requireApproved(), async (c) =>
 
   const rawParent = c.req.query('parentDirectory') || '/';
   const parentDirectory = validateDirectory(rawParent, c.env);
-  const directories = await listDirectories(db, projectId, parentDirectory);
+  const directories = await listDirectories(db, projectId, parentDirectory, c.env);
 
   return c.json({ directories }, 200);
 });

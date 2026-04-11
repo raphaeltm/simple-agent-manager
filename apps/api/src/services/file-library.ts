@@ -790,10 +790,12 @@ export async function moveFile(
 export async function listDirectories(
   db: AppDb,
   projectId: string,
-  parentDirectory: string = '/'
+  parentDirectory: string = '/',
+  env?: Env,
 ): Promise<DirectoryEntry[]> {
   // Query all distinct directories that start with the parent path
   const escapedParent = parentDirectory.replace(/[%_]/g, '\\$&');
+  const maxDirs = env ? getMaxDirectoriesPerProject(env) : LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT;
   const allDirs = await db
     .select({
       directory: schema.projectFiles.directory,
@@ -806,7 +808,8 @@ export async function listDirectories(
         like(schema.projectFiles.directory, `${escapedParent}%`)
       )
     )
-    .groupBy(schema.projectFiles.directory);
+    .groupBy(schema.projectFiles.directory)
+    .limit(maxDirs + 1);
 
   // Extract immediate children of parentDirectory
   const childDirs = new Map<string, number>();
