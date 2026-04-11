@@ -15,6 +15,7 @@ import { generateBranchName } from '../../services/branch-name';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
+import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
   getMcpLimits,
@@ -564,6 +565,10 @@ export async function handleRemovePendingSubtask(
       updatedAt: now,
     })
     .where(eq(schema.tasks.id, childTaskId));
+
+  // Sync trigger execution status (best-effort) — without this, cron triggers
+  // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
+  await syncTriggerExecutionStatus(env.DATABASE, childTaskId, 'cancelled');
 
   // Record status event
   await db.insert(schema.taskStatusEvents).values({

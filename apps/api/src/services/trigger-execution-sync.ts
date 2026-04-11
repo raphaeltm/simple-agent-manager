@@ -41,8 +41,10 @@ export async function syncTriggerExecutionStatus(
     const execStatus = toStatus === 'completed' ? 'completed' : 'failed';
     const now = new Date().toISOString();
 
-    await db
+    const result = await db
       .prepare(
+        // The `AND status = 'running'` guard provides idempotency: if the execution
+        // was already synced (e.g., by a concurrent code path), the UPDATE is a no-op.
         `UPDATE trigger_executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ? AND status = 'running'`,
       )
       .bind(
@@ -53,11 +55,13 @@ export async function syncTriggerExecutionStatus(
       )
       .run();
 
-    log.info('trigger_execution_synced', {
-      taskId,
-      triggerExecutionId: task.trigger_execution_id,
-      execStatus,
-    });
+    if (result.meta.changes && result.meta.changes > 0) {
+      log.info('trigger_execution_synced', {
+        taskId,
+        triggerExecutionId: task.trigger_execution_id,
+        execStatus,
+      });
+    }
   } catch (err) {
     // Best-effort — never fail the parent operation
     log.error('trigger_execution_sync_failed', {
