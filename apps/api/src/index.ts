@@ -454,6 +454,9 @@ export interface Env {
   LIBRARY_KEY_VERSION?: string;                  // KEK version stamped on new encryptions (default: 1)
   LIBRARY_MCP_DOWNLOAD_DIR?: string;             // Workspace directory for library downloads (default: .library)
   LIBRARY_MCP_TRANSFER_TIMEOUT_MS?: string;      // Timeout for VM agent file transfers (default: 60000)
+  LIBRARY_MAX_DIRECTORY_DEPTH?: string;          // Max directory nesting depth (default: 10)
+  LIBRARY_MAX_DIRECTORY_PATH_LENGTH?: string;    // Max directory path length in chars (default: 500)
+  LIBRARY_MAX_DIRECTORIES_PER_PROJECT?: string;  // Max directories per project (default: 500)
   // Event-driven triggers (cron) configuration
   MAX_TRIGGERS_PER_PROJECT?: string;                 // Max triggers per project (default: 10)
   CRON_MIN_INTERVAL_MINUTES?: string;               // Min cron interval in minutes (default: 15)

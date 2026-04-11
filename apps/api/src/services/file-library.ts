@@ -6,6 +6,7 @@
  */
 
 import type {
+  DirectoryEntry,
   FileEncryptionMetadata,
   FileStatus,
   FileTagSource,
@@ -21,6 +22,7 @@ import {
   LIBRARY_DEFAULTS,
   LIBRARY_FILENAME_PATTERN,
   LIBRARY_TAG_PATTERN,
+  validateDirectoryPath,
 } from '@simple-agent-manager/shared';
 import { and, asc, desc, eq, inArray, like, sql } from 'drizzle-orm';
 
@@ -83,6 +85,23 @@ function getListMaxPageSize(env: Env): number {
   return parseIntOrDefault(env.LIBRARY_LIST_MAX_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE);
 }
 
+export function getMaxDirectoryDepth(env: Env): number {
+  return parseIntOrDefault(env.LIBRARY_MAX_DIRECTORY_DEPTH, LIBRARY_DEFAULTS.MAX_DIRECTORY_DEPTH);
+}
+
+export function getMaxDirectoryPathLength(env: Env): number {
+  return parseIntOrDefault(env.LIBRARY_MAX_DIRECTORY_PATH_LENGTH, LIBRARY_DEFAULTS.MAX_DIRECTORY_PATH_LENGTH);
+}
+
+export function getMaxDirectoriesPerProject(env: Env): number {
+  return parseIntOrDefault(env.LIBRARY_MAX_DIRECTORIES_PER_PROJECT, LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT);
+}
+
+/** Validate a directory path using configurable env limits. Throws on invalid. Returns normalized path. */
+export function validateDirectory(directory: string, env: Env): string {
+  return validateDirectoryPath(directory, getMaxDirectoryDepth(env), getMaxDirectoryPathLength(env));
+}
+
 // ---------------------------------------------------------------------------
 // Tag validation
 // ---------------------------------------------------------------------------
@@ -116,6 +135,7 @@ function rowToProjectFile(row: schema.ProjectFileRow): ProjectFile {
     id: row.id,
     projectId: row.projectId,
     filename: row.filename,
+    directory: row.directory,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
     description: row.description,
@@ -151,6 +171,8 @@ export interface UploadFileOptions {
   uploadSessionId?: string;
   uploadTaskId?: string;
   tagSource?: FileTagSource;
+  /** Directory to upload into (default: '/'). Will be validated and normalized. */
+  directory?: string;
 }
 
 export async function uploadFile(
@@ -166,6 +188,9 @@ export async function uploadFile(
   options: UploadFileOptions = {}
 ): Promise<ProjectFile & { tags: ProjectFileTag[] }> {
   validateFilename(filename, env);
+
+  // Validate and normalize directory
+  const directory = options.directory ? validateDirectory(options.directory, env) : '/';
 
   // Check file size limit
   const maxBytes = getUploadMaxBytes(env);
@@ -184,19 +209,20 @@ export async function uploadFile(
     throw errors.badRequest(`Project has reached the maximum of ${maxFiles} files`);
   }
 
-  // Check for duplicate filename
+  // Check for duplicate filename in the same directory
   const existing = await db
     .select({ id: schema.projectFiles.id })
     .from(schema.projectFiles)
     .where(
       and(
         eq(schema.projectFiles.projectId, projectId),
+        eq(schema.projectFiles.directory, directory),
         eq(schema.projectFiles.filename, filename)
       )
     )
     .limit(1);
   if (existing.length > 0) {
-    throw errors.conflict(`File "${filename}" already exists in this project. Use replace to update it.`);
+    throw errors.conflict(`File "${filename}" already exists in directory "${directory}". Use replace to update it.`);
   }
 
   // Validate tags
@@ -227,6 +253,7 @@ export async function uploadFile(
     id: fileId,
     projectId,
     filename,
+    directory,
     mimeType,
     sizeBytes: data.byteLength,
     description: options.description ?? null,
@@ -349,6 +376,21 @@ export async function listFiles(
   // Build conditions
   const conditions = [eq(schema.projectFiles.projectId, projectId)];
 
+  // Directory filtering
+  if (filters.directory) {
+    if (filters.recursive) {
+      // Include files in this directory and all subdirectories
+      const escapedDir = filters.directory.replace(/[%_]/g, '\\$&');
+      conditions.push(like(schema.projectFiles.directory, `${escapedDir}%`));
+    } else {
+      // Only files directly in this directory
+      conditions.push(eq(schema.projectFiles.directory, filters.directory));
+    }
+  } else if (!filters.recursive && !filters.search) {
+    // Default: show only root-level files (unless searching or recursive)
+    conditions.push(eq(schema.projectFiles.directory, '/'));
+  }
+
   if (filters.status) {
     conditions.push(eq(schema.projectFiles.status, filters.status));
   }
@@ -430,6 +472,17 @@ export async function listFiles(
 
   // Total count — same filters as main query but without cursor condition
   const countConds = [eq(schema.projectFiles.projectId, projectId)];
+  // Mirror directory filtering for count
+  if (filters.directory) {
+    if (filters.recursive) {
+      const escapedDir = filters.directory.replace(/[%_]/g, '\\$&');
+      countConds.push(like(schema.projectFiles.directory, `${escapedDir}%`));
+    } else {
+      countConds.push(eq(schema.projectFiles.directory, filters.directory));
+    }
+  } else if (!filters.recursive && !filters.search) {
+    countConds.push(eq(schema.projectFiles.directory, '/'));
+  }
   if (filters.status) countConds.push(eq(schema.projectFiles.status, filters.status));
   if (filters.uploadSource) countConds.push(eq(schema.projectFiles.uploadSource, filters.uploadSource));
   if (filters.mimeType) countConds.push(like(schema.projectFiles.mimeType, `${filters.mimeType}%`));
@@ -637,4 +690,139 @@ export async function updateTags(
     .where(eq(schema.projectFileTags.fileId, fileId));
 
   return updatedTags.map(rowToTag);
+}
+
+// ---------------------------------------------------------------------------
+// Move file (change directory and/or filename)
+// ---------------------------------------------------------------------------
+
+export async function moveFile(
+  db: AppDb,
+  env: Env,
+  projectId: string,
+  fileId: string,
+  move: { directory?: string; filename?: string }
+): Promise<ProjectFile> {
+  // Fetch existing
+  const rows = await db
+    .select()
+    .from(schema.projectFiles)
+    .where(and(eq(schema.projectFiles.id, fileId), eq(schema.projectFiles.projectId, projectId)))
+    .limit(1);
+  if (!rows[0]) {
+    throw errors.notFound('File');
+  }
+
+  const existing = rows[0];
+  const newDirectory = move.directory ? validateDirectory(move.directory, env) : existing.directory;
+  const newFilename = move.filename ?? existing.filename;
+
+  if (move.filename) {
+    validateFilename(newFilename, env);
+  }
+
+  // Check no change
+  if (newDirectory === existing.directory && newFilename === existing.filename) {
+    return rowToProjectFile(existing);
+  }
+
+  // Check for collision at destination
+  const collision = await db
+    .select({ id: schema.projectFiles.id })
+    .from(schema.projectFiles)
+    .where(
+      and(
+        eq(schema.projectFiles.projectId, projectId),
+        eq(schema.projectFiles.directory, newDirectory),
+        eq(schema.projectFiles.filename, newFilename)
+      )
+    )
+    .limit(1);
+  if (collision.length > 0 && collision[0]!.id !== fileId) {
+    throw errors.conflict(`File "${newFilename}" already exists in directory "${newDirectory}"`);
+  }
+
+  const now = new Date().toISOString();
+  await db
+    .update(schema.projectFiles)
+    .set({ directory: newDirectory, filename: newFilename, updatedAt: now })
+    .where(eq(schema.projectFiles.id, fileId));
+
+  log.info('file_library_move', {
+    projectId,
+    fileId,
+    fromDir: existing.directory,
+    toDir: newDirectory,
+    fromFilename: existing.filename,
+    toFilename: newFilename,
+  });
+
+  const updated = await db
+    .select()
+    .from(schema.projectFiles)
+    .where(eq(schema.projectFiles.id, fileId))
+    .limit(1);
+  return rowToProjectFile(updated[0]!);
+}
+
+// ---------------------------------------------------------------------------
+// List directories
+// ---------------------------------------------------------------------------
+
+export async function listDirectories(
+  db: AppDb,
+  projectId: string,
+  parentDirectory: string = '/'
+): Promise<DirectoryEntry[]> {
+  // Query all distinct directories that start with the parent path
+  const escapedParent = parentDirectory.replace(/[%_]/g, '\\$&');
+  const allDirs = await db
+    .select({
+      directory: schema.projectFiles.directory,
+      count: sql<number>`count(*)`,
+    })
+    .from(schema.projectFiles)
+    .where(
+      and(
+        eq(schema.projectFiles.projectId, projectId),
+        like(schema.projectFiles.directory, `${escapedParent}%`)
+      )
+    )
+    .groupBy(schema.projectFiles.directory);
+
+  // Extract immediate children of parentDirectory
+  const childDirs = new Map<string, number>();
+  const parentDepth = parentDirectory === '/' ? 0 : parentDirectory.split('/').filter(Boolean).length;
+
+  for (const row of allDirs) {
+    const segments = row.directory.split('/').filter(Boolean);
+    // Only consider directories that are deeper than parent
+    if (segments.length <= parentDepth) continue;
+
+    // Build the immediate child path
+    const childSegments = segments.slice(0, parentDepth + 1);
+    const childPath = '/' + childSegments.join('/') + '/';
+
+    const current = childDirs.get(childPath) ?? 0;
+    // Only count files directly in this directory (not subdirectories)
+    if (row.directory === childPath) {
+      childDirs.set(childPath, current + row.count);
+    } else {
+      // Ensure the entry exists even if no files are directly in it
+      if (!childDirs.has(childPath)) {
+        childDirs.set(childPath, 0);
+      }
+    }
+  }
+
+  return Array.from(childDirs.entries())
+    .map(([path, fileCount]) => {
+      const segments = path.split('/').filter(Boolean);
+      return {
+        path,
+        name: segments[segments.length - 1]!,
+        fileCount,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

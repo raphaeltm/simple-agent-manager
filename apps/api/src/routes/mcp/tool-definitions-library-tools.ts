@@ -31,6 +31,14 @@ export const LIBRARY_TOOLS = [
           description: 'Sort field (default: createdAt)',
           enum: ['createdAt', 'filename', 'sizeBytes'],
         },
+        directory: {
+          type: 'string',
+          description: 'Filter to a specific directory path (e.g., "/marketing/brand/"). Default: "/" (root). Use "/" as prefix with recursive=true to list all files.',
+        },
+        recursive: {
+          type: 'boolean',
+          description: 'If true, include files in subdirectories of the specified directory. Default: false.',
+        },
         limit: {
           type: 'number',
           description: 'Max files to return (default: 50, max: 200)',
@@ -64,13 +72,17 @@ export const LIBRARY_TOOLS = [
     name: 'upload_to_library',
     description:
       'Upload a file from the workspace to the project library. The file is encrypted and stored permanently. ' +
-      'Fails with FILE_EXISTS error if a file with the same filename already exists — use replace_library_file to update it.',
+      'Fails with FILE_EXISTS error if a file with the same filename already exists in the same directory — use replace_library_file to update it.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         filePath: {
           type: 'string',
           description: 'Path to the file in the workspace to upload',
+        },
+        directory: {
+          type: 'string',
+          description: 'Library directory to upload into (e.g., "/marketing/brand/"). Default: "/" (root). Directories are created implicitly.',
         },
         description: {
           type: 'string',

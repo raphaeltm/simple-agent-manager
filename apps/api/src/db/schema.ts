@@ -938,6 +938,7 @@ export const projectFiles = sqliteTable(
     status: text('status').notNull().default('ready'),
     r2Key: text('r2_key').notNull(),
     extractedTextPreview: text('extracted_text_preview'),
+    directory: text('directory').notNull().default('/'),
     createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
     updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
   },
@@ -946,7 +947,8 @@ export const projectFiles = sqliteTable(
     projectStatusIdx: index('idx_project_files_project_status').on(table.projectId, table.status),
     projectSourceIdx: index('idx_project_files_project_source').on(table.projectId, table.uploadSource),
     projectMimeIdx: index('idx_project_files_project_mime').on(table.projectId, table.mimeType),
-    projectFilenameUniq: uniqueIndex('idx_project_files_project_filename').on(table.projectId, table.filename),
+    projectDirFilenameUniq: uniqueIndex('idx_project_files_project_dir_filename').on(table.projectId, table.directory, table.filename),
+    projectDirIdx: index('idx_project_files_project_dir').on(table.projectId, table.directory),
   })
 );
 

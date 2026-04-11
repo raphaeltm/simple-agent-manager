@@ -1,7 +1,10 @@
 import type {
+  DirectoryEntry,
   FileMetadataResponse,
   ListFilesRequest,
   ListFilesResponse,
+  MoveFileRequest,
+  ProjectFile,
   ProjectFileTag,
   UpdateTagsRequest,
 } from '@simple-agent-manager/shared';
@@ -22,6 +25,8 @@ export async function listLibraryFiles(
   if (filters?.uploadSource) params.set('uploadSource', filters.uploadSource);
   if (filters?.status) params.set('status', filters.status);
   if (filters?.search) params.set('search', filters.search);
+  if (filters?.directory) params.set('directory', filters.directory);
+  if (filters?.recursive) params.set('recursive', 'true');
   if (filters?.sortBy) params.set('sortBy', filters.sortBy);
   if (filters?.sortOrder) params.set('sortOrder', filters.sortOrder);
   if (filters?.cursor) params.set('cursor', filters.cursor);
@@ -50,6 +55,8 @@ export async function getLibraryFile(
 export interface UploadLibraryFileOptions {
   description?: string;
   tags?: string[];
+  /** Directory to upload into (default: '/') */
+  directory?: string;
   onProgress?: (loaded: number, total: number) => void;
 }
 
@@ -65,6 +72,7 @@ export function uploadLibraryFile(
     formData.append('mimeType', file.type || 'application/octet-stream');
     if (options?.description) formData.append('description', options.description);
     if (options?.tags?.length) formData.append('tags', options.tags.join(','));
+    if (options?.directory) formData.append('directory', options.directory);
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_URL}/api/projects/${projectId}/library/upload`);
@@ -179,6 +187,44 @@ export async function deleteLibraryFile(
   return request<{ success: boolean }>(`/api/projects/${projectId}/library/${fileId}`, {
     method: 'DELETE',
   });
+}
+
+// =============================================================================
+// Update tags
+// =============================================================================
+
+// =============================================================================
+// List directories
+// =============================================================================
+
+export async function listLibraryDirectories(
+  projectId: string,
+  parentDirectory: string = '/',
+): Promise<{ directories: DirectoryEntry[] }> {
+  const params = new URLSearchParams();
+  if (parentDirectory !== '/') params.set('parentDirectory', parentDirectory);
+  const qs = params.toString();
+  return request<{ directories: DirectoryEntry[] }>(
+    `/api/projects/${projectId}/library/directories${qs ? `?${qs}` : ''}`,
+  );
+}
+
+// =============================================================================
+// Move file
+// =============================================================================
+
+export async function moveLibraryFile(
+  projectId: string,
+  fileId: string,
+  move: MoveFileRequest,
+): Promise<ProjectFile> {
+  return request<ProjectFile>(
+    `/api/projects/${projectId}/library/${fileId}/move`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(move),
+    },
+  );
 }
 
 // =============================================================================

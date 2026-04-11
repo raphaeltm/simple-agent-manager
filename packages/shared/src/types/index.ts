@@ -262,8 +262,11 @@ export type {
   FileStatus,
   FileTagSource,
   FileUploadSource,
+  DirectoryEntry,
+  ListDirectoriesRequest,
   ListFilesRequest,
   ListFilesResponse,
+  MoveFileRequest,
   ProjectFile,
   ProjectFileTag,
   ReplaceFileRequest,
@@ -272,8 +275,10 @@ export type {
 export {
   buildLibraryR2Key,
   LIBRARY_DEFAULTS,
+  LIBRARY_DIRECTORY_SEGMENT_PATTERN,
   LIBRARY_FILENAME_PATTERN,
   LIBRARY_TAG_PATTERN,
+  validateDirectoryPath,
 } from './library';
 
 // Triggers (Event-Driven Agent Triggers)

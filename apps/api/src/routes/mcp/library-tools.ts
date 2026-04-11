@@ -230,11 +230,15 @@ export async function handleListLibraryFiles(
     const limit = typeof params.limit === 'number' && params.limit > 0
       ? Math.min(Math.floor(params.limit), 200)
       : undefined;
+    const directory = typeof params.directory === 'string' ? params.directory : undefined;
+    const recursive = typeof params.recursive === 'boolean' ? params.recursive : undefined;
 
     const result = await listFiles(db, env, tokenData.projectId, {
       tags,
       mimeType: fileType,
       uploadSource: source,
+      directory,
+      recursive,
       sortBy: sortBy ?? 'createdAt',
       sortOrder: 'desc',
       limit,
@@ -243,6 +247,7 @@ export async function handleListLibraryFiles(
     const files = result.files.map((f) => ({
       id: f.id,
       filename: f.filename,
+      directory: f.directory,
       mimeType: f.mimeType,
       sizeBytes: f.sizeBytes,
       tags: f.tags.map((t) => t.tag),
@@ -356,6 +361,7 @@ export async function handleUploadToLibrary(
 
   const description = typeof params.description === 'string' ? params.description : undefined;
   const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, 50) : undefined;
+  const directory = typeof params.directory === 'string' ? params.directory : undefined;
 
   try {
     const db = drizzle(env.DATABASE, { schema });
@@ -381,7 +387,7 @@ export async function handleUploadToLibrary(
 
     const mimeType = contentType;
 
-    // Upload to library (will throw 409 on duplicate filename)
+    // Upload to library (will throw 409 on duplicate filename in same directory)
     const result = await uploadFile(db, env.R2, encryptionKey, env, tokenData.projectId, tokenData.userId, filename, mimeType, data, {
       description,
       tags,
@@ -389,6 +395,7 @@ export async function handleUploadToLibrary(
       uploadSessionId: tokenData.taskId, // task context doubles as session context for agents
       uploadTaskId: tokenData.taskId,
       tagSource: 'agent',
+      directory,
     });
 
     return jsonRpcSuccess(requestId, {
@@ -406,14 +413,16 @@ export async function handleUploadToLibrary(
       try {
         const lookupDb = drizzle(env.DATABASE, { schema });
         const filename = filePath.trim().split('/').pop() || 'unknown';
+        const lookupDir = directory ?? '/';
 
-        // Look up existing file to return metadata
+        // Look up existing file to return metadata (scoped to directory)
         const [existing] = await lookupDb
           .select()
           .from(schema.projectFiles)
           .where(
             and(
               eq(schema.projectFiles.projectId, tokenData.projectId),
+              eq(schema.projectFiles.directory, lookupDir),
               eq(schema.projectFiles.filename, filename),
             ),
           )
