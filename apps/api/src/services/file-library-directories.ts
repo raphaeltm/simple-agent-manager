@@ -2,11 +2,10 @@
  * File Library directory operations — move files and list directories.
  */
 
-import type { DirectoryEntry, ProjectFile } from '@simple-agent-manager/shared';
+import type { DirectoryEntry, FileStatus, FileUploadSource, ProjectFile } from '@simple-agent-manager/shared';
 import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
 import { and, eq, like, sql } from 'drizzle-orm';
 
-import type { FileUploadSource, FileStatus } from '@simple-agent-manager/shared';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { log } from '../lib/logger';
