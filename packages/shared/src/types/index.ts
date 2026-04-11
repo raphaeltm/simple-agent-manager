@@ -257,12 +257,12 @@ export type {
 // Project File Library
 export type {
   CreateFileRequest,
+  DirectoryEntry,
   FileEncryptionMetadata,
   FileMetadataResponse,
   FileStatus,
   FileTagSource,
   FileUploadSource,
-  DirectoryEntry,
   ListDirectoriesRequest,
   ListFilesRequest,
   ListFilesResponse,

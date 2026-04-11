@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   listLibraryFiles: vi.fn(),
+  listLibraryDirectories: vi.fn(),
   uploadLibraryFile: vi.fn(),
   deleteLibraryFile: vi.fn(),
   downloadLibraryFile: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listLibraryFiles: mocks.listLibraryFiles,
+  listLibraryDirectories: mocks.listLibraryDirectories,
   uploadLibraryFile: mocks.uploadLibraryFile,
   deleteLibraryFile: mocks.deleteLibraryFile,
   downloadLibraryFile: mocks.downloadLibraryFile,
@@ -62,6 +64,7 @@ function makeFile(overrides: Partial<ProjectFile> & { id: string; filename: stri
     replacedBy: null,
     status: 'ready',
     extractedTextPreview: null,
+    directory: '/',
     createdAt: '2026-04-01T00:00:00Z',
     updatedAt: '2026-04-01T00:00:00Z',
     tags: [],
@@ -88,6 +91,8 @@ function renderLibrary() {
 describe('ProjectLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no directories
+    mocks.listLibraryDirectories.mockResolvedValue({ directories: [] });
   });
 
   it('renders file list with files', async () => {
@@ -183,7 +188,7 @@ describe('ProjectLibrary', () => {
     const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
     await userEvent.click(filterBtn);
 
-    expect(screen.getByPlaceholderText('Search files...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search files across all directories...')).toBeInTheDocument();
   });
 
   it('switches between list and grid view', async () => {
@@ -263,7 +268,7 @@ describe('ProjectLibrary', () => {
 
     // Mock all subsequent calls (one per keystroke triggers a new API call)
     mocks.listLibraryFiles.mockResolvedValue(makeResponse([]));
-    const searchInput = screen.getByPlaceholderText('Search files...');
+    const searchInput = screen.getByPlaceholderText('Search files across all directories...');
     await userEvent.type(searchInput, 'x');
 
     // Verify at least one call includes a search param

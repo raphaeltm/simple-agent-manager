@@ -1,6 +1,6 @@
 import { LIBRARY_DIRECTORY_SEGMENT_PATTERN } from '@simple-agent-manager/shared';
-import { useState } from 'react';
 import type { FC } from 'react';
+import { useState } from 'react';
 
 import { FOCUS_RING } from './types';
 
