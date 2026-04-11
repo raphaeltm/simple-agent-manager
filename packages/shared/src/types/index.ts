@@ -309,5 +309,16 @@ export {
   TRIGGERED_BY_VALUES,
 } from './trigger';
 
+// Compute Usage
+export type {
+  ActiveComputeSession,
+  AdminComputeUsageResponse,
+  AdminUserDetailedUsage,
+  AdminUserUsageSummary,
+  ComputeUsagePeriod,
+  ComputeUsageRecord,
+  ComputeUsageResponse,
+} from './compute-usage';
+
 // API Error
 export type { ApiError } from './api-error';

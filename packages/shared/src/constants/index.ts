@@ -1,7 +1,12 @@
 // Constants barrel — named re-exports only (no `export *`)
 
 // VM Sizes
-export { VM_SIZE_LABELS } from './vm-sizes';
+export {
+  DEFAULT_VM_SIZE_VCPUS,
+  getVcpuCount,
+  PROVIDER_VM_SIZE_VCPUS,
+  VM_SIZE_LABELS,
+} from './vm-sizes';
 
 // Providers & Locations
 export type { LocationMeta,ProviderHelpMeta } from './providers';

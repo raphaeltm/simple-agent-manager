@@ -315,6 +315,21 @@ export async function cleanupOnFailure(
     await rc.env.DATABASE.prepare(
       `UPDATE workspaces SET status = 'stopped', updated_at = ? WHERE id = ?`
     ).bind(now, state.stepResults.workspaceId).run();
+
+    // Stop compute usage metering (best-effort)
+    try {
+      const { drizzle } = await import('drizzle-orm/d1');
+      const dbSchema = await import('../../db/schema');
+      const { stopComputeTracking } = await import('../../services/compute-usage');
+      const db = drizzle(rc.env.DATABASE, { schema: dbSchema });
+      await stopComputeTracking(db, state.stepResults.workspaceId);
+    } catch (err) {
+      log.error('task_runner_do.cleanup.compute_tracking_stop_failed', {
+        taskId: state.taskId,
+        workspaceId: state.stepResults.workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // Clean up auto-provisioned node. If a workspace exists, cleanupTaskRun
