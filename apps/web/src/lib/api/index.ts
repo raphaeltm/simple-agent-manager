@@ -14,6 +14,8 @@ export type {
 export {
   approveOrSuspendUser,
   changeUserRole,
+  createPlatformCredential,
+  deletePlatformCredential,
   fetchAdminErrors,
   fetchAdminErrorTrends,
   fetchAdminHealth,
@@ -27,7 +29,9 @@ export {
   fetchAnalyticsWebsiteTraffic,
   getAdminLogStreamUrl,
   listAdminUsers,
+  listPlatformCredentials,
   queryAdminLogs,
+  updatePlatformCredential,
 } from './admin';
 export {
   createAgentProfile,

@@ -122,3 +122,53 @@ export interface SetupProjectDeploymentRequest {
   oauthHandle: string;
   gcpProjectId: string;
 }
+
+// =============================================================================
+// Platform Credentials (admin-managed fallback keys)
+// =============================================================================
+
+export type PlatformCredentialType = 'cloud-provider' | 'agent-api-key';
+export type CredentialSource = 'user' | 'platform';
+
+export interface PlatformCredential {
+  id: string;
+  credentialType: PlatformCredentialType;
+  provider: CredentialProvider | null;
+  agentType: string | null;
+  credentialKind: 'api-key' | 'oauth-token';
+  label: string;
+  isEnabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlatformCredentialResponse {
+  id: string;
+  credentialType: PlatformCredentialType;
+  provider: CredentialProvider | null;
+  agentType: string | null;
+  credentialKind: 'api-key' | 'oauth-token';
+  label: string;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePlatformCredentialRequest {
+  credentialType: PlatformCredentialType;
+  provider?: CredentialProvider;
+  agentType?: string;
+  credentialKind?: 'api-key' | 'oauth-token';
+  label: string;
+  credential: string;
+}
+
+export interface UpdatePlatformCredentialRequest {
+  label?: string;
+  isEnabled?: boolean;
+}
+
+export interface ListPlatformCredentialsResponse {
+  credentials: PlatformCredentialResponse[];
+}

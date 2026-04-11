@@ -77,6 +77,8 @@ export {
   AdminUserActionSchema,
   AdminUserRoleSchema,
   AnalyticsForwardSchema,
+  CreatePlatformCredentialSchema,
+  UpdatePlatformCredentialSchema,
 } from './admin';
 
 // Trigger schemas
