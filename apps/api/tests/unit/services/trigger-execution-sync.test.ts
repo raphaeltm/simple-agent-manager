@@ -58,9 +58,9 @@ describe('syncTriggerExecutionStatus', () => {
       'SELECT trigger_execution_id FROM tasks WHERE id = ?',
     );
 
-    // Should have updated trigger_executions
+    // Should have updated trigger_executions with idempotent guard
     expect(db.prepare).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE trigger_executions SET status = ?'),
+      expect.stringContaining("AND status = 'running'"),
     );
   });
 
@@ -76,13 +76,14 @@ describe('syncTriggerExecutionStatus', () => {
     expect(updateCall[3]).toBe('exec-456');
   });
 
-  it('maps cancelled to failed exec status', async () => {
+  it('maps cancelled to failed exec status with null error message', async () => {
     const db = createMockDb({ triggerExecutionId: 'exec-789' });
 
     await syncTriggerExecutionStatus(db, 'task-3', 'cancelled');
 
     const updateCall = db._internal.bindFn.mock.calls[1];
     expect(updateCall[0]).toBe('failed'); // cancelled maps to 'failed'
+    expect(updateCall[2]).toBeNull(); // no error message for cancelled
   });
 
   it('does nothing when task has no trigger execution', async () => {

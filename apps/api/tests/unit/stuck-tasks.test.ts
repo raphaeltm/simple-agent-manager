@@ -21,6 +21,14 @@ vi.mock('../../src/services/observability', () => ({
   persistError: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock trigger execution sync
+const { syncTriggerExecutionMock } = vi.hoisted(() => ({
+  syncTriggerExecutionMock: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../src/services/trigger-execution-sync', () => ({
+  syncTriggerExecutionStatus: syncTriggerExecutionMock,
+}));
+
 // Mock logger
 vi.mock('../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -175,6 +183,14 @@ describe('recoverStuckTasks', () => {
 
       expect(result.failedInProgress).toBe(1);
       expect(result.heartbeatSkipped).toBe(0);
+
+      // Verify trigger execution sync was called for the failed task
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-1',
+        'failed',
+        expect.stringContaining('max execution time'),
+      );
     });
 
     it('fails in_progress tasks with no node (no heartbeat to check)', async () => {
