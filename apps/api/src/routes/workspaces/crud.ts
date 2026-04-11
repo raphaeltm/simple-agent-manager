@@ -17,6 +17,7 @@ import {
   deleteWorkspaceOnNode,
   waitForNodeAgentReady,
 } from '../../services/node-agent';
+import { startComputeTracking } from '../../services/compute-usage';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
@@ -286,6 +287,31 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
     },
     c.env
   );
+
+  // Start compute usage metering (best-effort — failure should not block workspace creation)
+  try {
+    const [nodeRow] = await db
+      .select({
+        cloudProvider: schema.nodes.cloudProvider,
+        credentialSource: schema.nodes.credentialSource,
+      })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, targetNodeId))
+      .limit(1);
+    await startComputeTracking(db, {
+      userId,
+      workspaceId,
+      nodeId: targetNodeId,
+      vmSize,
+      cloudProvider: nodeRow?.cloudProvider,
+      credentialSource: (nodeRow?.credentialSource as 'user' | 'platform') ?? 'user',
+    });
+  } catch (err) {
+    log.error('workspace.compute_tracking_start_failed', {
+      workspaceId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   c.executionCtx.waitUntil(
     (async () => {

@@ -1099,3 +1099,35 @@ export const platformCredentials = sqliteTable(
 
 export type PlatformCredentialRow = typeof platformCredentials.$inferSelect;
 export type NewPlatformCredentialRow = typeof platformCredentials.$inferInsert;
+
+// =============================================================================
+// Compute Usage
+// =============================================================================
+
+export const computeUsage = sqliteTable(
+  'compute_usage',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').notNull(),
+    nodeId: text('node_id').notNull(),
+    serverType: text('server_type').notNull(),
+    vcpuCount: integer('vcpu_count').notNull(),
+    credentialSource: text('credential_source').notNull().default('user'),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    userPeriodIdx: index('idx_compute_usage_user_period').on(
+      table.userId,
+      table.startedAt
+    ),
+    workspaceIdx: index('idx_compute_usage_workspace').on(table.workspaceId),
+  })
+);
+
+export type ComputeUsageRow = typeof computeUsage.$inferSelect;
+export type NewComputeUsageRow = typeof computeUsage.$inferInsert;
