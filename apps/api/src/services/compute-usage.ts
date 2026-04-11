@@ -309,7 +309,7 @@ export async function getUserDetailedUsage(
   db: DrizzleD1Database<typeof schema>,
   userId: string
 ): Promise<{
-  period: ComputeUsagePeriod;
+  currentPeriod: ComputeUsagePeriod;
   activeSessions: ActiveComputeSession[];
   recentRecords: ComputeUsageRecord[];
 }> {
@@ -337,7 +337,7 @@ export async function getUserDetailedUsage(
   }));
 
   return {
-    period: summary.period,
+    currentPeriod: summary.period,
     activeSessions: summary.activeSessions,
     recentRecords,
   };

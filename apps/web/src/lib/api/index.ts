@@ -32,7 +32,10 @@ export {
   listPlatformCredentials,
   queryAdminLogs,
   updatePlatformCredential,
+  fetchAdminComputeUsage,
+  fetchAdminUserComputeUsage,
 } from './admin';
+export type { AdminComputeUsageResponse, AdminUserDetailedUsage } from './admin';
 export {
   createAgentProfile,
   deleteAgentCredential,
@@ -245,3 +248,4 @@ export {
   suspendAgentSession,
   updateWorkspace,
 } from './workspaces';
+export { fetchComputeUsage } from './usage';
