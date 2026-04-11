@@ -12,6 +12,7 @@ import { getAuth, getUserId, requireApproved,requireAuth } from '../../middlewar
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspaceSchema } from '../../schemas';
+import { startComputeTracking, stopComputeTracking } from '../../services/compute-usage';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   deleteWorkspaceOnNode,
@@ -287,6 +288,31 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
     c.env
   );
 
+  // Start compute usage metering (best-effort — failure should not block workspace creation)
+  try {
+    const [nodeRow] = await db
+      .select({
+        cloudProvider: schema.nodes.cloudProvider,
+        credentialSource: schema.nodes.credentialSource,
+      })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, targetNodeId))
+      .limit(1);
+    await startComputeTracking(db, {
+      userId,
+      workspaceId,
+      nodeId: targetNodeId,
+      vmSize,
+      cloudProvider: nodeRow?.cloudProvider,
+      credentialSource: (nodeRow?.credentialSource as 'user' | 'platform') ?? 'user',
+    });
+  } catch (err) {
+    log.error('workspace.compute_tracking_start_failed', {
+      workspaceId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   c.executionCtx.waitUntil(
     (async () => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
@@ -385,6 +411,13 @@ crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
       projectDataService.cleanupWorkspaceActivity(c.env, workspace.projectId, workspace.id)
         .catch((e) => { log.warn('workspace.delete_cleanup_activity_failed', { workspaceId: workspace.id, error: String(e) }); })
     );
+  }
+
+  // Close compute metering before deleting the workspace row (best-effort)
+  try {
+    await stopComputeTracking(db, workspace.id);
+  } catch (e) {
+    log.warn('workspace.compute_tracking_stop_failed', { workspaceId: workspace.id, error: String(e) });
   }
 
   await db.delete(schema.agentSessions).where(eq(schema.agentSessions.workspaceId, workspace.id));

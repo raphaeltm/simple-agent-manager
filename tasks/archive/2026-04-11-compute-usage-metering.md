@@ -55,73 +55,73 @@ Decision: Store `server_type` as vmSize value. Derive `vcpu_count` from vmSize u
 ## Implementation Checklist
 
 ### 1. Shared Constants
-- [ ] Add `VM_SIZE_VCPUS` mapping and `getVcpuCount()` to `packages/shared/src/constants/vm-sizes.ts`
-- [ ] Add compute usage types to `packages/shared/src/types/`
-- [ ] Export new types and constants from shared package index
+- [x] Add `VM_SIZE_VCPUS` mapping and `getVcpuCount()` to `packages/shared/src/constants/vm-sizes.ts`
+- [x] Add compute usage types to `packages/shared/src/types/`
+- [x] Export new types and constants from shared package index
 
 ### 2. D1 Migration (0038)
-- [ ] Create `apps/api/src/db/migrations/0038_compute_usage.sql` with `compute_usage` table
-- [ ] Add indexes: `idx_compute_usage_user_period`, `idx_compute_usage_workspace`
+- [x] Create `apps/api/src/db/migrations/0038_compute_usage.sql` with `compute_usage` table
+- [x] Add indexes: `idx_compute_usage_user_period`, `idx_compute_usage_workspace`
 
 ### 3. Drizzle Schema
-- [ ] Add `computeUsage` table definition to `apps/api/src/db/schema.ts`
+- [x] Add `computeUsage` table definition to `apps/api/src/db/schema.ts`
 
 ### 4. Compute Usage Service
-- [ ] Create `apps/api/src/services/compute-usage.ts`
-- [ ] Implement `startComputeTracking(db, params)` — insert compute_usage row
-- [ ] Implement `stopComputeTracking(db, workspaceId)` — set ended_at
-- [ ] Implement `calculateVcpuHoursForPeriod(db, userId, start, end, credentialSource?)` — aggregate usage
-- [ ] Implement `getUserUsageSummary(db, userId)` — current period summary
-- [ ] Implement `getAllUsersUsageSummary(db)` — admin overview
-- [ ] Implement `getUserDetailedUsage(db, userId)` — admin per-user detail
-- [ ] Implement `closeOrphanedComputeUsage(db)` — crash safety cleanup
+- [x] Create `apps/api/src/services/compute-usage.ts`
+- [x] Implement `startComputeTracking(db, params)` — insert compute_usage row
+- [x] Implement `stopComputeTracking(db, workspaceId)` — set ended_at
+- [x] Implement `calculateVcpuHoursForPeriod(db, userId, start, end, credentialSource?)` — aggregate usage
+- [x] Implement `getUserUsageSummary(db, userId)` — current period summary
+- [x] Implement `getAllUsersUsageSummary(db)` — admin overview
+- [x] Implement `getUserDetailedUsage(db, userId)` — admin per-user detail
+- [x] Implement `closeOrphanedComputeUsage(db)` — crash safety cleanup
 
 ### 5. Metering Hooks
-- [ ] Hook `startComputeTracking` into workspace creation in `crud.ts` (user-initiated)
-- [ ] Hook `startComputeTracking` into workspace creation in `workspace-steps.ts` (task-runner)
-- [ ] Hook `stopComputeTracking` into workspace stop in `lifecycle.ts`
-- [ ] Hook `stopComputeTracking` into workspace delete in `lifecycle.ts`
-- [ ] Hook `stopComputeTracking` into task-runner workspace cleanup (state-machine.ts)
+- [x] Hook `startComputeTracking` into workspace creation in `crud.ts` (user-initiated)
+- [x] Hook `startComputeTracking` into workspace creation in `workspace-steps.ts` (task-runner)
+- [x] Hook `stopComputeTracking` into workspace stop in `lifecycle.ts`
+- [x] Hook `stopComputeTracking` into workspace delete in `crud.ts`
+- [x] Hook `stopComputeTracking` into task-runner workspace cleanup (state-machine.ts)
 
 ### 6. Orphan Cleanup Cron
-- [ ] Create `apps/api/src/scheduled/compute-usage-cleanup.ts`
-- [ ] Register in cron handler in `index.ts` (run with existing sweep)
+- [x] Create `apps/api/src/scheduled/compute-usage-cleanup.ts`
+- [x] Register in cron handler in `index.ts` (run with existing sweep)
 
 ### 7. API Routes
-- [ ] Create `apps/api/src/routes/usage.ts` with user endpoint: `GET /api/usage/compute`
-- [ ] Add admin endpoints to existing admin routes or new file: `GET /api/admin/usage/compute`, `GET /api/admin/usage/compute/:userId`
-- [ ] Mount routes in `index.ts`
+- [x] Create `apps/api/src/routes/usage.ts` with user endpoint: `GET /api/usage/compute`
+- [x] Add admin endpoints to existing admin routes or new file: `GET /api/admin/usage/compute`, `GET /api/admin/usage/compute/:userId`
+- [x] Mount routes in `index.ts`
 
 ### 8. Admin UI
-- [ ] Add 'usage' tab to `ADMIN_TABS` in `Admin.tsx`
-- [ ] Create `apps/web/src/pages/AdminComputeUsage.tsx` — usage overview table
-- [ ] Add API client functions in `apps/web/src/lib/api/admin.ts`
-- [ ] Add route in `App.tsx`
+- [x] Add 'usage' tab to `ADMIN_TABS` in `Admin.tsx`
+- [x] Create `apps/web/src/pages/AdminComputeUsage.tsx` — usage overview table
+- [x] Add API client functions in `apps/web/src/lib/api/admin.ts`
+- [x] Add route in `App.tsx`
 
 ### 9. User Settings UI
-- [ ] Add 'usage' tab to Settings tabs
-- [ ] Create `apps/web/src/pages/SettingsComputeUsage.tsx` — usage card
-- [ ] Add API client function for user usage
-- [ ] Add route in `App.tsx`
+- [x] Add 'usage' tab to Settings tabs
+- [x] Create `apps/web/src/pages/SettingsComputeUsage.tsx` — usage card
+- [x] Add API client function for user usage
+- [x] Add route in `App.tsx`
 
 ### 10. Tests
-- [ ] Unit tests for `getVcpuCount()` mapping
-- [ ] Unit tests for `calculateVcpuHoursForPeriod()` (completed, running, cross-period, credential filter)
-- [ ] Integration tests for metering hooks (start/stop tracking)
-- [ ] Integration tests for API endpoints (user + admin)
-- [ ] Unit test for orphan cleanup logic
+- [x] Unit tests for `getVcpuCount()` mapping
+- [x] Unit tests for `calculateVcpuHoursForPeriod()` (completed, running, cross-period, credential filter)
+- [x] Integration tests for metering hooks (start/stop tracking)
+- [x] Integration tests for API endpoints (user + admin)
+- [x] Unit test for orphan cleanup logic
 
 ## Acceptance Criteria
 
-- [ ] Workspace creation inserts a compute_usage row with correct vcpu_count and credential_source
-- [ ] Workspace stop/delete sets ended_at on the compute_usage row
-- [ ] Orphan cleanup cron closes compute_usage rows for stopped/deleted/missing workspaces
-- [ ] `GET /api/usage/compute` returns current period summary for authenticated user
-- [ ] `GET /api/admin/usage/compute` returns all users' summary (superadmin only)
-- [ ] `GET /api/admin/usage/compute/:userId` returns detailed usage (superadmin only)
-- [ ] Admin dashboard shows compute usage table sorted by usage
-- [ ] User settings shows compute usage card with period breakdown
-- [ ] All configurable values use env vars with defaults (Constitution Principle XI)
+- [x] Workspace creation inserts a compute_usage row with correct vcpu_count and credential_source
+- [x] Workspace stop/delete sets ended_at on the compute_usage row
+- [x] Orphan cleanup cron closes compute_usage rows for stopped/deleted/missing workspaces
+- [x] `GET /api/usage/compute` returns current period summary for authenticated user
+- [x] `GET /api/admin/usage/compute` returns all users' summary (superadmin only)
+- [x] `GET /api/admin/usage/compute/:userId` returns detailed usage (superadmin only)
+- [x] Admin dashboard shows compute usage table sorted by usage
+- [x] User settings shows compute usage card with period breakdown
+- [x] All configurable values use env vars with defaults (Constitution Principle XI)
 
 ## References
 

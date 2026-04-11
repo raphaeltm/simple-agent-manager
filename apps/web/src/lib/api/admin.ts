@@ -258,3 +258,21 @@ export async function deletePlatformCredential(id: string): Promise<{ success: b
     method: 'DELETE',
   });
 }
+
+// =============================================================================
+// Admin Compute Usage
+// =============================================================================
+
+export type { AdminComputeUsageResponse, AdminUserDetailedUsage } from '@simple-agent-manager/shared';
+
+export async function fetchAdminComputeUsage(): Promise<
+  import('@simple-agent-manager/shared').AdminComputeUsageResponse
+> {
+  return request('/api/admin/usage/compute');
+}
+
+export async function fetchAdminUserComputeUsage(
+  userId: string,
+): Promise<import('@simple-agent-manager/shared').AdminUserDetailedUsage> {
+  return request(`/api/admin/usage/compute/${userId}`);
+}

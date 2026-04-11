@@ -22,6 +22,7 @@ import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
 import { adminAnalyticsRoutes } from './routes/admin-analytics';
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
+import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
@@ -52,8 +53,10 @@ import { transcribeRoutes } from './routes/transcribe';
 import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
+import { usageRoutes } from './routes/usage';
 import { workspacesRoutes } from './routes/workspaces';
 import { runAnalyticsForwardJob } from './scheduled/analytics-forward';
+import { runComputeUsageCleanup } from './scheduled/compute-usage-cleanup';
 import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
@@ -455,6 +458,8 @@ export interface Env {
   LIBRARY_KEY_VERSION?: string;                  // KEK version stamped on new encryptions (default: 1)
   LIBRARY_MCP_DOWNLOAD_DIR?: string;             // Workspace directory for library downloads (default: .library)
   LIBRARY_MCP_TRANSFER_TIMEOUT_MS?: string;      // Timeout for VM agent file transfers (default: 60000)
+  // Compute usage metering
+  COMPUTE_USAGE_RECENT_RECORDS_LIMIT?: string;  // Max recent records in admin user detail (default: 50)
   // Event-driven triggers (cron) configuration
   MAX_TRIGGERS_PER_PROJECT?: string;                 // Max triggers per project (default: 10)
   CRON_MIN_INTERVAL_MINUTES?: string;               // Min cron interval in minutes (default: 15)
@@ -793,6 +798,8 @@ app.route('/api/deployment', gcpDeployCallbackRoute);
 app.route('/api/admin', adminRoutes);
 app.route('/api/admin/analytics', adminAnalyticsRoutes);
 app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
+app.route('/api/admin/usage', adminUsageRoutes);
+app.route('/api/usage', usageRoutes);
 app.route('/api/account-map', accountMapRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/notifications', notificationRoutes);
@@ -884,6 +891,9 @@ export default {
 
     // Fire due cron triggers
     const cronTriggers = await runCronTriggerSweep(env);
+
+    // Close orphaned compute_usage records
+    await runComputeUsageCleanup(env);
 
     log.info('cron.completed', {
       cron: controller.cron,
