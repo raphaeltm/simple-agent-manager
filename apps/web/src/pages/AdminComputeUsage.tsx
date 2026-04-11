@@ -1,6 +1,6 @@
 import type { AdminComputeUsageResponse, AdminUserDetailedUsage, AdminUserUsageSummary } from '@simple-agent-manager/shared';
 import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
-import { ArrowLeft, Clock, Cpu, Server } from 'lucide-react';
+import { ArrowLeft, Clock, Cpu, Key, Server } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchAdminComputeUsage, fetchAdminUserComputeUsage } from '../lib/api';
@@ -23,42 +23,55 @@ function UserRow({ user, onSelect }: { user: AdminUserUsageSummary; onSelect: ()
     <button
       type="button"
       onClick={onSelect}
-      className="w-full text-left px-4 py-3 hover:bg-[var(--sam-bg-secondary)] transition-colors border-b border-[var(--sam-border-primary)] flex items-center gap-4"
+      className="w-full text-left px-4 py-3 hover:bg-surface-hover transition-colors border-b border-border-default flex items-start gap-3 sm:items-center sm:gap-4"
     >
       {user.avatarUrl ? (
-        <img src={user.avatarUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0" />
+        <img src={user.avatarUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0 mt-0.5 sm:mt-0" />
       ) : (
-        <div className="w-8 h-8 rounded-full bg-[var(--sam-bg-tertiary)] flex items-center justify-center flex-shrink-0">
-          <Body className="text-[var(--sam-text-secondary)] text-xs">
+        <div className="w-8 h-8 rounded-full bg-surface flex items-center justify-center flex-shrink-0 mt-0.5 sm:mt-0 border border-border-default">
+          <span className="text-fg-muted text-xs font-medium">
             {(user.name ?? user.email ?? '?')[0]?.toUpperCase()}
-          </Body>
+          </span>
         </div>
       )}
 
       <div className="flex-1 min-w-0">
-        <Body className="font-medium truncate">{user.name ?? user.email ?? user.userId}</Body>
+        <p className="sam-type-body font-medium truncate m-0">{user.name ?? user.email ?? user.userId}</p>
         {user.name && user.email && (
-          <Body className="text-[var(--sam-text-secondary)] text-xs truncate">{user.email}</Body>
+          <p className="sam-type-caption text-fg-muted truncate m-0">{user.email}</p>
         )}
+        {/* Stats shown inline on mobile below the name */}
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 sm:hidden">
+          <span className="sam-type-caption text-fg-primary tabular-nums font-medium">
+            {formatVcpuHours(user.totalVcpuHours)} vCPU-hrs
+          </span>
+          {user.activeWorkspaces > 0 && (
+            <span className="sam-type-caption flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-success inline-block" aria-hidden="true" />
+              <span className="text-fg-muted">{user.activeWorkspaces} active</span>
+            </span>
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center gap-6 flex-shrink-0 text-right">
+      {/* Stats shown to the right on sm+ only */}
+      <div className="hidden sm:flex items-center gap-6 flex-shrink-0 text-right">
         <div>
-          <Body className="font-medium tabular-nums">{formatVcpuHours(user.totalVcpuHours)}</Body>
-          <Body className="text-[var(--sam-text-secondary)] text-xs">vCPU-hrs</Body>
+          <p className="sam-type-body font-medium tabular-nums m-0">{formatVcpuHours(user.totalVcpuHours)}</p>
+          <p className="sam-type-caption text-fg-muted m-0">vCPU-hrs</p>
         </div>
-        <div>
-          <Body className="text-[var(--sam-text-secondary)] tabular-nums text-sm">
+        <div className="text-right">
+          <p className="sam-type-caption text-fg-muted tabular-nums m-0">
             {formatVcpuHours(user.platformVcpuHours)} platform
-          </Body>
-          <Body className="text-[var(--sam-text-secondary)] tabular-nums text-sm">
+          </p>
+          <p className="sam-type-caption text-fg-muted tabular-nums m-0">
             {formatVcpuHours(user.userVcpuHours)} BYOC
-          </Body>
+          </p>
         </div>
         {user.activeWorkspaces > 0 && (
           <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <Body className="text-xs">{user.activeWorkspaces}</Body>
+            <span className="w-2 h-2 rounded-full bg-success" aria-hidden="true" />
+            <span className="sam-type-caption text-fg-muted">{user.activeWorkspaces}</span>
           </div>
         )}
       </div>
@@ -80,54 +93,60 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
   }, [userId]);
 
   if (loading) return <div className="flex justify-center py-12"><Spinner /></div>;
-  if (error) return <Body className="text-[var(--sam-text-error)] py-4">{error}</Body>;
+  if (error) return <p className="sam-type-body text-danger-fg py-4 m-0">{error}</p>;
   if (!data) return null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0 overflow-hidden">
       <button
         type="button"
         onClick={onBack}
-        className="flex items-center gap-1 text-sm text-[var(--sam-text-secondary)] hover:text-[var(--sam-text-primary)] transition-colors"
+        aria-label="Back to all users"
+        className="flex items-center gap-1.5 sam-type-secondary text-fg-muted hover:text-fg-primary transition-colors min-h-[44px] sm:min-h-0"
       >
-        <ArrowLeft className="w-4 h-4" /> Back to all users
+        <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+        <span>Back to all users</span>
       </button>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="p-3 text-center">
-          <Cpu className="w-5 h-5 mx-auto mb-1 text-[var(--sam-text-secondary)]" />
-          <Body className="font-semibold text-lg tabular-nums">{formatVcpuHours(data.currentPeriod.totalVcpuHours)}</Body>
-          <Body className="text-xs text-[var(--sam-text-secondary)]">Total vCPU-hrs</Body>
+          <Cpu className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatVcpuHours(data.currentPeriod.totalVcpuHours)}</p>
+          <p className="sam-type-caption text-fg-muted m-0">Total vCPU-hrs</p>
         </Card>
         <Card className="p-3 text-center">
-          <Server className="w-5 h-5 mx-auto mb-1 text-[var(--sam-text-secondary)]" />
-          <Body className="font-semibold text-lg tabular-nums">{formatVcpuHours(data.currentPeriod.platformVcpuHours)}</Body>
-          <Body className="text-xs text-[var(--sam-text-secondary)]">Platform</Body>
+          <Server className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatVcpuHours(data.currentPeriod.platformVcpuHours)}</p>
+          <p className="sam-type-caption text-fg-muted m-0">Platform</p>
         </Card>
         <Card className="p-3 text-center">
-          <Body className="font-semibold text-lg tabular-nums">{formatVcpuHours(data.currentPeriod.userVcpuHours)}</Body>
-          <Body className="text-xs text-[var(--sam-text-secondary)]">BYOC</Body>
+          <Key className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatVcpuHours(data.currentPeriod.userVcpuHours)}</p>
+          <p className="sam-type-caption text-fg-muted m-0">BYOC</p>
         </Card>
         <Card className="p-3 text-center">
-          <Body className="font-semibold text-lg tabular-nums">{data.currentPeriod.activeWorkspaces}</Body>
-          <Body className="text-xs text-[var(--sam-text-secondary)]">Active</Body>
+          <span className="block w-5 h-5 mx-auto mb-1" aria-hidden="true">
+            <span className="w-2 h-2 rounded-full bg-success block mx-auto mt-1.5" />
+          </span>
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{data.currentPeriod.activeWorkspaces}</p>
+          <p className="sam-type-caption text-fg-muted m-0">Active</p>
         </Card>
       </div>
 
       {data.activeSessions.length > 0 && (
-        <Card className="p-4">
-          <CardTitle className="mb-2">Active Sessions</CardTitle>
-          <div className="space-y-2">
+        <Card className="p-4 overflow-hidden w-full min-w-0">
+          <CardTitle className="mb-3">Active Sessions</CardTitle>
+          <div className="space-y-3">
             {data.activeSessions.map((s) => (
-              <div key={s.workspaceId} className="flex items-center justify-between text-sm">
-                <Body className="font-mono text-xs truncate max-w-[200px]">{s.workspaceId}</Body>
-                <div className="flex items-center gap-3">
-                  <Body className="text-[var(--sam-text-secondary)]">{s.serverType} ({s.vcpuCount} vCPU)</Body>
-                  <Body className="text-[var(--sam-text-secondary)]">{s.credentialSource}</Body>
-                  <div className="flex items-center gap-1 text-[var(--sam-text-secondary)]">
-                    <Clock className="w-3 h-3" />
-                    <Body className="text-xs">{formatDuration(s.startedAt, null)}</Body>
-                  </div>
+              <div key={s.workspaceId} className="flex flex-col gap-1 min-w-0 sm:flex-row sm:items-center sm:justify-between sm:gap-3 border-b border-border-default pb-3 last:border-0 last:pb-0">
+                <span className="font-mono sam-type-caption text-fg-primary truncate min-w-0 sm:w-auto sm:max-w-[50%] sm:flex-shrink-0">{s.workspaceId}</span>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="sam-type-caption text-fg-muted">{s.serverType} ({s.vcpuCount} vCPU)</span>
+                  <span className="sam-type-caption text-fg-muted capitalize">{s.credentialSource}</span>
+                  <span className="flex items-center gap-1 sam-type-caption text-fg-muted">
+                    <Clock className="w-3 h-3" aria-hidden="true" />
+                    <span className="tabular-nums">{formatDuration(s.startedAt, null)}</span>
+                  </span>
                 </div>
               </div>
             ))}
@@ -136,36 +155,36 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
       )}
 
       <Card className="p-4">
-        <CardTitle className="mb-2">Recent Records</CardTitle>
+        <CardTitle className="mb-3">Recent Records</CardTitle>
         {data.recentRecords.length === 0 ? (
-          <Body className="text-[var(--sam-text-secondary)]">No usage records.</Body>
+          <p className="sam-type-body text-fg-muted m-0">No usage records.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-4 px-4">
+            <table className="w-full text-sm min-w-[480px]">
               <thead>
-                <tr className="text-left text-[var(--sam-text-secondary)] border-b border-[var(--sam-border-primary)]">
-                  <th className="py-2 pr-3 font-medium">Workspace</th>
-                  <th className="py-2 pr-3 font-medium">Size</th>
-                  <th className="py-2 pr-3 font-medium">vCPU</th>
-                  <th className="py-2 pr-3 font-medium">Source</th>
-                  <th className="py-2 pr-3 font-medium">Duration</th>
-                  <th className="py-2 font-medium">Status</th>
+                <tr className="text-left text-fg-muted border-b border-border-default">
+                  <th className="py-2 pr-3 font-medium sam-type-caption">Workspace</th>
+                  <th className="py-2 pr-3 font-medium sam-type-caption">Size</th>
+                  <th className="py-2 pr-3 font-medium sam-type-caption">vCPU</th>
+                  <th className="py-2 pr-3 font-medium sam-type-caption">Source</th>
+                  <th className="py-2 pr-3 font-medium sam-type-caption">Duration</th>
+                  <th className="py-2 font-medium sam-type-caption">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {data.recentRecords.map((r) => (
-                  <tr key={r.id} className="border-b border-[var(--sam-border-primary)]">
-                    <td className="py-2 pr-3 font-mono text-xs truncate max-w-[150px]">{r.workspaceId.slice(0, 12)}...</td>
-                    <td className="py-2 pr-3">{r.serverType}</td>
-                    <td className="py-2 pr-3 tabular-nums">{r.vcpuCount}</td>
-                    <td className="py-2 pr-3">{r.credentialSource}</td>
-                    <td className="py-2 pr-3 tabular-nums">{formatDuration(r.startedAt, r.endedAt)}</td>
+                  <tr key={r.id} className="border-b border-border-default last:border-0">
+                    <td className="py-2 pr-3 font-mono sam-type-caption text-fg-primary">{r.workspaceId.slice(0, 12)}&hellip;</td>
+                    <td className="py-2 pr-3 sam-type-caption">{r.serverType}</td>
+                    <td className="py-2 pr-3 tabular-nums sam-type-caption">{r.vcpuCount}</td>
+                    <td className="py-2 pr-3 sam-type-caption capitalize">{r.credentialSource}</td>
+                    <td className="py-2 pr-3 tabular-nums sam-type-caption">{formatDuration(r.startedAt, r.endedAt)}</td>
                     <td className="py-2">
                       {r.endedAt ? (
-                        <span className="text-[var(--sam-text-secondary)]">Ended</span>
+                        <span className="sam-type-caption text-fg-muted">Ended</span>
                       ) : (
-                        <span className="flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-green-500" />
+                        <span className="flex items-center gap-1.5 sam-type-caption">
+                          <span className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0" aria-hidden="true" />
                           Running
                         </span>
                       )}
@@ -218,7 +237,7 @@ export function AdminComputeUsage() {
   }
 
   if (error) {
-    return <Body className="text-[var(--sam-text-error)] py-4">{error}</Body>;
+    return <p className="sam-type-body text-danger-fg py-4 m-0">{error}</p>;
   }
 
   if (!data) return null;
@@ -227,24 +246,24 @@ export function AdminComputeUsage() {
   const periodEnd = new Date(data.period.end).toLocaleDateString();
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0 overflow-hidden">
       <div>
         <SectionHeading>Compute Usage</SectionHeading>
-        <Body className="text-[var(--sam-text-secondary)] text-sm">
+        <Body className="text-fg-muted text-sm">
           Period: {periodStart} &ndash; {periodEnd}
         </Body>
       </div>
 
       {data.users.length === 0 ? (
         <Card className="p-6 text-center">
-          <Cpu className="w-8 h-8 mx-auto mb-2 text-[var(--sam-text-tertiary)]" />
-          <Body className="text-[var(--sam-text-secondary)]">No compute usage this period.</Body>
+          <Cpu className="w-8 h-8 mx-auto mb-2 text-fg-muted" aria-hidden="true" />
+          <Body className="text-fg-muted">No compute usage this period.</Body>
         </Card>
       ) : (
         <Card className="overflow-hidden">
-          <div className="px-4 py-3 border-b border-[var(--sam-border-primary)] flex items-center justify-between text-sm text-[var(--sam-text-secondary)]">
+          <div className="px-4 py-3 border-b border-border-default flex items-center justify-between sam-type-caption text-fg-muted">
             <span>User</span>
-            <span>Usage</span>
+            <span className="hidden sm:block">Usage</span>
           </div>
           {data.users.map((user) => (
             <UserRow key={user.userId} user={user} onSelect={() => setSelectedUser(user.userId)} />

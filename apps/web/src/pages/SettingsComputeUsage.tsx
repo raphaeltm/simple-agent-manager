@@ -1,6 +1,6 @@
 import type { ComputeUsageResponse } from '@simple-agent-manager/shared';
 import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
-import { Clock, Cpu, Server } from 'lucide-react';
+import { Clock, Cpu, Key, Server } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { fetchComputeUsage } from '../lib/api';
@@ -50,7 +50,7 @@ export function SettingsComputeUsage() {
   if (error) {
     return (
       <Card className="p-4">
-        <Body className="text-[var(--sam-text-error)]">{error}</Body>
+        <p className="sam-type-body text-danger-fg m-0">{error}</p>
       </Card>
     );
   }
@@ -62,67 +62,69 @@ export function SettingsComputeUsage() {
   const periodEnd = new Date(period.end).toLocaleDateString();
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0 overflow-hidden">
       <div>
         <SectionHeading>Compute Usage</SectionHeading>
-        <Body className="text-[var(--sam-text-secondary)] text-sm">
+        <Body className="text-fg-muted text-sm">
           Current billing period: {periodStart} &ndash; {periodEnd}
         </Body>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="p-3 text-center">
-          <Cpu className="w-5 h-5 mx-auto mb-1 text-[var(--sam-text-secondary)]" />
-          <Body className="font-semibold text-lg tabular-nums">{formatVcpuHours(period.totalVcpuHours)}</Body>
-          <Body className="text-xs text-[var(--sam-text-secondary)]">Total vCPU-hrs</Body>
+          <Cpu className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatVcpuHours(period.totalVcpuHours)}</p>
+          <p className="sam-type-caption text-fg-muted m-0">Total vCPU-hrs</p>
         </Card>
         <Card className="p-3 text-center">
-          <Server className="w-5 h-5 mx-auto mb-1 text-[var(--sam-text-secondary)]" />
-          <Body className="font-semibold text-lg tabular-nums">{formatVcpuHours(period.platformVcpuHours)}</Body>
-          <Body className="text-xs text-[var(--sam-text-secondary)]">Platform</Body>
+          <Server className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatVcpuHours(period.platformVcpuHours)}</p>
+          <p className="sam-type-caption text-fg-muted m-0">Platform</p>
         </Card>
         <Card className="p-3 text-center">
-          <Body className="font-semibold text-lg tabular-nums">{formatVcpuHours(period.userVcpuHours)}</Body>
-          <Body className="text-xs text-[var(--sam-text-secondary)]">Your Keys (BYOC)</Body>
+          <Key className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatVcpuHours(period.userVcpuHours)}</p>
+          <p className="sam-type-caption text-fg-muted m-0">Your Keys (BYOC)</p>
         </Card>
         <Card className="p-3 text-center">
-          <Body className="font-semibold text-lg tabular-nums">{period.activeWorkspaces}</Body>
-          <Body className="text-xs text-[var(--sam-text-secondary)]">Active Now</Body>
+          <span className="block w-5 h-5 mx-auto mb-1" aria-hidden="true">
+            <span className="w-2 h-2 rounded-full bg-success block mx-auto mt-1.5" />
+          </span>
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{period.activeWorkspaces}</p>
+          <p className="sam-type-caption text-fg-muted m-0">Active Now</p>
         </Card>
       </div>
 
-      {data.activeSessions.length > 0 && (
-        <Card className="p-4">
+      {data.activeSessions.length > 0 ? (
+        <Card className="p-4 overflow-hidden w-full min-w-0">
           <CardTitle className="mb-3">Active Workspaces</CardTitle>
-          <div className="space-y-2">
+          <div className="space-y-0">
             {data.activeSessions.map((session) => (
               <div
                 key={session.workspaceId}
-                className="flex items-center justify-between py-2 border-b border-[var(--sam-border-primary)] last:border-0"
+                className="flex flex-col gap-1 py-3 border-b border-border-default last:border-0 min-w-0 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
               >
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
-                  <Body className="font-mono text-xs truncate max-w-[180px]">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2 h-2 rounded-full bg-success flex-shrink-0" aria-label="Running" />
+                  <span className="font-mono sam-type-caption text-fg-primary truncate min-w-0 flex-1">
                     {session.workspaceId}
-                  </Body>
+                  </span>
                 </div>
-                <div className="flex items-center gap-4 text-sm text-[var(--sam-text-secondary)]">
-                  <Body>{session.serverType} ({session.vcpuCount} vCPU)</Body>
-                  <Body className="capitalize">{session.credentialSource}</Body>
-                  <div className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    <Body className="text-xs tabular-nums">{formatDuration(session.startedAt)}</Body>
-                  </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-4 sm:pl-0">
+                  <span className="sam-type-caption text-fg-muted">{session.serverType} ({session.vcpuCount} vCPU)</span>
+                  <span className="sam-type-caption text-fg-muted capitalize">{session.credentialSource}</span>
+                  <span className="flex items-center gap-1 sam-type-caption text-fg-muted">
+                    <Clock className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+                    <span className="tabular-nums">{formatDuration(session.startedAt)}</span>
+                  </span>
                 </div>
               </div>
             ))}
           </div>
         </Card>
-      )}
-
-      {data.activeSessions.length === 0 && (
+      ) : (
         <Card className="p-6 text-center">
-          <Body className="text-[var(--sam-text-secondary)]">No active workspaces right now.</Body>
+          <Body className="text-fg-muted">No active workspaces right now.</Body>
         </Card>
       )}
     </div>
