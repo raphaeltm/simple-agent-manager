@@ -1,6 +1,6 @@
 import { createProvider } from '@simple-agent-manager/providers';
-import type { AgentCredentialInfo, AgentType, CredentialKind, CredentialProvider,CredentialResponse } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS,getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import type { AgentCredentialInfo, AgentType, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource } from '@simple-agent-manager/shared';
+import { CREDENTIAL_PROVIDERS, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and,eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -13,8 +13,9 @@ import { ulid } from '../lib/ulid';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { CreateCredentialSchema, CredentialKindBodySchema,jsonValidator, SaveAgentCredentialSchema } from '../schemas';
-import { decrypt,encrypt } from '../services/encryption';
-import { buildProviderConfig,serializeCredentialToken } from '../services/provider-credentials';
+import { decrypt, encrypt } from '../services/encryption';
+import { getPlatformAgentCredential } from '../services/platform-credentials';
+import { buildProviderConfig, serializeCredentialToken } from '../services/provider-credentials';
 import { CredentialValidator } from '../services/validation';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
@@ -540,13 +541,15 @@ credentialsRoutes.delete('/agent/:agentType', async (c) => {
 /**
  * Helper function to get a decrypted agent credential for internal use.
  * Returns the active credential (API key or OAuth token) and its type.
+ * Falls back to platform credentials when no user credential is found.
  */
 export async function getDecryptedAgentKey(
   db: ReturnType<typeof drizzle>,
   userId: string,
   agentType: string,
   encryptionKey: string
-): Promise<{ credential: string; credentialKind: CredentialKind } | null> {
+): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null> {
+  // 1. Try user's own credential first
   const creds = await db
     .select()
     .from(schema.credentials)
@@ -561,15 +564,26 @@ export async function getDecryptedAgentKey(
     .limit(1);
 
   const foundCred = creds[0];
-  if (!foundCred) {
-    return null;
+  if (foundCred) {
+    const credential = await decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
+    return {
+      credential,
+      credentialKind: foundCred.credentialKind as CredentialKind,
+      credentialSource: 'user',
+    };
   }
 
-  const credential = await decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
-  return {
-    credential,
-    credentialKind: foundCred.credentialKind as CredentialKind,
-  };
+  // 2. Fall back to platform credential
+  const platformCred = await getPlatformAgentCredential(db, agentType, encryptionKey);
+  if (platformCred) {
+    return {
+      credential: platformCred.credential,
+      credentialKind: platformCred.credentialKind as CredentialKind,
+      credentialSource: 'platform',
+    };
+  }
+
+  return null;
 }
 
 /**

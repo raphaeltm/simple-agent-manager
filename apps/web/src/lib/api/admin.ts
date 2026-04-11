@@ -1,9 +1,13 @@
 import type {
   AdminUsersResponse,
+  CreatePlatformCredentialRequest,
   ErrorListResponse,
   ErrorTrendResponse,
   HealthSummary,
+  ListPlatformCredentialsResponse,
   LogQueryResponse,
+  PlatformCredentialResponse,
+  UpdatePlatformCredentialRequest,
   UserRole,
   UserStatus,
 } from '@simple-agent-manager/shared';
@@ -220,4 +224,37 @@ export interface AnalyticsForwardStatusResponse {
 
 export async function fetchAnalyticsForwardStatus(): Promise<AnalyticsForwardStatusResponse> {
   return request<AnalyticsForwardStatusResponse>('/api/admin/analytics/forward-status');
+}
+
+// =============================================================================
+// Admin Platform Credentials
+// =============================================================================
+
+export async function listPlatformCredentials(): Promise<ListPlatformCredentialsResponse> {
+  return request<ListPlatformCredentialsResponse>('/api/admin/platform-credentials');
+}
+
+export async function createPlatformCredential(
+  data: CreatePlatformCredentialRequest,
+): Promise<PlatformCredentialResponse> {
+  return request<PlatformCredentialResponse>('/api/admin/platform-credentials', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updatePlatformCredential(
+  id: string,
+  data: UpdatePlatformCredentialRequest,
+): Promise<PlatformCredentialResponse> {
+  return request<PlatformCredentialResponse>(`/api/admin/platform-credentials/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePlatformCredential(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/admin/platform-credentials/${id}`, {
+    method: 'DELETE',
+  });
 }

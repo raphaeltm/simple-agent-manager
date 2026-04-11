@@ -7,6 +7,7 @@ import { UserMenu } from '../components/UserMenu';
 
 const ADMIN_TABS: Tab[] = [
   { id: 'users', label: 'Users', path: 'users' },
+  { id: 'credentials', label: 'Credentials', path: 'credentials' },
   { id: 'errors', label: 'Errors', path: 'errors' },
   { id: 'overview', label: 'Overview', path: 'overview' },
   { id: 'logs', label: 'Logs', path: 'logs' },

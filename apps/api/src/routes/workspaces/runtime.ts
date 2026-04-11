@@ -62,7 +62,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     if (scalewayToken) {
       const secretKey = extractScalewaySecretKey(scalewayToken);
       if (secretKey) {
-        credentialData = { credential: secretKey, credentialKind: 'api-key' };
+        credentialData = { credential: secretKey, credentialKind: 'api-key', credentialSource: 'user' };
       } else {
         log.warn('agent_key.scaleway_credential_missing_secret_key', { workspaceId, userId: workspace.userId, agentType: body.agentType });
       }
@@ -71,6 +71,22 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
   if (!credentialData) {
     throw errors.notFound('Agent credential');
+  }
+
+  // Track credential source on associated task if applicable
+  if (credentialData.credentialSource === 'platform') {
+    const taskRows = await db
+      .select({ id: schema.tasks.id })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.workspaceId, workspaceId))
+      .limit(1);
+    const task = taskRows[0];
+    if (task) {
+      await db
+        .update(schema.tasks)
+        .set({ agentCredentialSource: 'platform' })
+        .where(eq(schema.tasks.id, task.id));
+    }
   }
 
   return c.json({

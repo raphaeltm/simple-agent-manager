@@ -368,6 +368,8 @@ export const tasks = sqliteTable(
     triggerId: text('trigger_id'),
     /** FK to the specific trigger execution that created this task. */
     triggerExecutionId: text('trigger_execution_id'),
+    /** Whether the agent credential came from the user or the platform. */
+    agentCredentialSource: text('agent_credential_source').default('user'), // 'user' | 'platform'
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -459,6 +461,7 @@ export const nodes = sqliteTable(
     heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
     lastMetrics: text('last_metrics'),
     warmSince: text('warm_since'),
+    credentialSource: text('credential_source').default('user'), // 'user' | 'platform'
     errorMessage: text('error_message'),
     createdAt: text('created_at')
       .notNull()
@@ -1058,3 +1061,41 @@ export const triggerExecutions = sqliteTable(
 
 export type TriggerExecutionRow = typeof triggerExecutions.$inferSelect;
 export type NewTriggerExecutionRow = typeof triggerExecutions.$inferInsert;
+
+// =============================================================================
+// Platform Credentials (admin-managed fallback keys)
+// =============================================================================
+export const platformCredentials = sqliteTable(
+  'platform_credentials',
+  {
+    id: text('id').primaryKey(),
+    credentialType: text('credential_type').notNull(), // 'cloud-provider' | 'agent-api-key'
+    provider: text('provider'), // 'hetzner' | 'scaleway' | 'gcp' (for cloud-provider)
+    agentType: text('agent_type'), // 'claude-code' | 'openai-codex' (for agent-api-key)
+    credentialKind: text('credential_kind').notNull().default('api-key'), // 'api-key' | 'oauth-token'
+    label: text('label').notNull(),
+    encryptedToken: text('encrypted_token').notNull(),
+    iv: text('iv').notNull(),
+    isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    typeProviderIdx: index('idx_platform_credentials_type_provider')
+      .on(table.credentialType, table.provider)
+      .where(sql`credential_type = 'cloud-provider'`),
+    typeAgentIdx: index('idx_platform_credentials_type_agent')
+      .on(table.credentialType, table.agentType)
+      .where(sql`credential_type = 'agent-api-key'`),
+  })
+);
+
+export type PlatformCredentialRow = typeof platformCredentials.$inferSelect;
+export type NewPlatformCredentialRow = typeof platformCredentials.$inferInsert;
