@@ -3,6 +3,9 @@
  *
  * Files are encrypted with envelope encryption (DEK per file) and stored in R2.
  * Metadata (filename, tags, ownership) is stored in D1.
+ *
+ * Config/validation helpers: ./file-library-config.ts
+ * Directory operations (move, listDirectories): ./file-library-directories.ts
  */
 
 import type {
@@ -16,12 +19,7 @@ import type {
   ProjectFileTag,
   UpdateTagsRequest,
 } from '@simple-agent-manager/shared';
-import {
-  buildLibraryR2Key,
-  LIBRARY_DEFAULTS,
-  LIBRARY_FILENAME_PATTERN,
-  LIBRARY_TAG_PATTERN,
-} from '@simple-agent-manager/shared';
+import { buildLibraryR2Key } from '@simple-agent-manager/shared';
 import { and, asc, desc, eq, inArray, like, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
@@ -36,76 +34,37 @@ import {
   metadataToR2CustomMetadata,
   r2CustomMetadataToMetadata,
 } from './file-encryption';
+import {
+  getKeyVersion,
+  getListMaxPageSize,
+  getMaxDirectoriesPerProject,
+  getMaxFilesPerProject,
+  getMaxTagsPerFile,
+  getUploadMaxBytes,
+  validateDirectory,
+  validateFilename,
+  validateTag,
+} from './file-library-config';
 
-// ---------------------------------------------------------------------------
-// Config helpers (all limits configurable per constitution Principle XI)
-// ---------------------------------------------------------------------------
-
-function parseIntOrDefault(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = parseInt(value, 10);
-  return isNaN(parsed) || parsed <= 0 ? fallback : parsed;
-}
-
-export function getUploadMaxBytes(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_UPLOAD_MAX_BYTES, LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES);
-}
-
-export function getMaxFilesPerProject(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_FILES_PER_PROJECT, LIBRARY_DEFAULTS.MAX_FILES_PER_PROJECT);
-}
-
-export function getMaxTagsPerFile(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_TAGS_PER_FILE, LIBRARY_DEFAULTS.MAX_TAGS_PER_FILE);
-}
-
-export function getMaxTagLength(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_TAG_LENGTH, LIBRARY_DEFAULTS.MAX_TAG_LENGTH);
-}
-
-export function getMaxFilenameLength(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_FILENAME_LENGTH, LIBRARY_DEFAULTS.MAX_FILENAME_LENGTH);
-}
-
-export function getDownloadTimeoutMs(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_DOWNLOAD_TIMEOUT_MS, LIBRARY_DEFAULTS.DOWNLOAD_TIMEOUT_MS);
-}
-
-export function getKeyVersion(env: Env): string {
-  return env.LIBRARY_KEY_VERSION ?? '1';
-}
-
-function getListDefaultPageSize(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_LIST_DEFAULT_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_DEFAULT_PAGE_SIZE);
-}
-
-function getListMaxPageSize(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_LIST_MAX_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE);
-}
-
-// ---------------------------------------------------------------------------
-// Tag validation
-// ---------------------------------------------------------------------------
-
-export function validateTag(tag: string, env: Env): void {
-  const maxLen = getMaxTagLength(env);
-  if (tag.length === 0 || tag.length > maxLen) {
-    throw errors.badRequest(`Tag must be 1-${maxLen} characters`);
-  }
-  if (!LIBRARY_TAG_PATTERN.test(tag)) {
-    throw errors.badRequest(`Tag "${tag}" must be lowercase alphanumeric with hyphens`);
-  }
-}
-
-export function validateFilename(filename: string, env: Env): void {
-  const maxLen = getMaxFilenameLength(env);
-  if (!filename || filename.length > maxLen) {
-    throw errors.badRequest(`Filename must be 1-${maxLen} characters`);
-  }
-  if (!LIBRARY_FILENAME_PATTERN.test(filename)) {
-    throw errors.badRequest('Filename contains invalid characters');
-  }
-}
+// Re-export config, validation, and directory functions for consumers
+export {
+  getDownloadTimeoutMs,
+  getKeyVersion,
+  getListMaxPageSize,
+  getMaxDirectoriesPerProject,
+  getMaxDirectoryDepth,
+  getMaxDirectoryPathLength,
+  getMaxFilenameLength,
+  getMaxFilesPerProject,
+  getMaxTagLength,
+  getMaxTagsPerFile,
+  getUploadMaxBytes,
+  resolvePageSize,
+  validateDirectory,
+  validateFilename,
+  validateTag,
+} from './file-library-config';
+export { listDirectories, moveFile } from './file-library-directories';
 
 // ---------------------------------------------------------------------------
 // Row → API type mapping
@@ -116,6 +75,7 @@ function rowToProjectFile(row: schema.ProjectFileRow): ProjectFile {
     id: row.id,
     projectId: row.projectId,
     filename: row.filename,
+    directory: row.directory,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
     description: row.description,
@@ -151,6 +111,8 @@ export interface UploadFileOptions {
   uploadSessionId?: string;
   uploadTaskId?: string;
   tagSource?: FileTagSource;
+  /** Directory to upload into (default: '/'). Will be validated and normalized. */
+  directory?: string;
 }
 
 export async function uploadFile(
@@ -166,6 +128,9 @@ export async function uploadFile(
   options: UploadFileOptions = {}
 ): Promise<ProjectFile & { tags: ProjectFileTag[] }> {
   validateFilename(filename, env);
+
+  // Validate and normalize directory
+  const directory = options.directory ? validateDirectory(options.directory, env) : '/';
 
   // Check file size limit
   const maxBytes = getUploadMaxBytes(env);
@@ -184,19 +149,34 @@ export async function uploadFile(
     throw errors.badRequest(`Project has reached the maximum of ${maxFiles} files`);
   }
 
-  // Check for duplicate filename
+  // Check directory count limit (only when uploading to a new directory)
+  if (directory !== '/') {
+    const maxDirs = getMaxDirectoriesPerProject(env);
+    const existingDirs = await db
+      .select({ directory: schema.projectFiles.directory })
+      .from(schema.projectFiles)
+      .where(eq(schema.projectFiles.projectId, projectId))
+      .groupBy(schema.projectFiles.directory);
+    const isNewDirectory = !existingDirs.some((d) => d.directory === directory);
+    if (isNewDirectory && existingDirs.length >= maxDirs) {
+      throw errors.badRequest(`Project has reached the maximum of ${maxDirs} directories`);
+    }
+  }
+
+  // Check for duplicate filename in the same directory
   const existing = await db
     .select({ id: schema.projectFiles.id })
     .from(schema.projectFiles)
     .where(
       and(
         eq(schema.projectFiles.projectId, projectId),
+        eq(schema.projectFiles.directory, directory),
         eq(schema.projectFiles.filename, filename)
       )
     )
     .limit(1);
   if (existing.length > 0) {
-    throw errors.conflict(`File "${filename}" already exists in this project. Use replace to update it.`);
+    throw errors.conflict(`File "${filename}" already exists in directory "${directory}". Use replace to update it.`);
   }
 
   // Validate tags
@@ -227,6 +207,7 @@ export async function uploadFile(
     id: fileId,
     projectId,
     filename,
+    directory,
     mimeType,
     sizeBytes: data.byteLength,
     description: options.description ?? null,
@@ -335,6 +316,13 @@ export async function replaceFile(
 // List
 // ---------------------------------------------------------------------------
 
+function getListDefaultPageSize(env: Env): number {
+  const val = env.LIBRARY_LIST_DEFAULT_PAGE_SIZE;
+  if (!val) return 50;
+  const parsed = parseInt(val, 10);
+  return isNaN(parsed) || parsed <= 0 ? 50 : parsed;
+}
+
 export async function listFiles(
   db: AppDb,
   env: Env,
@@ -349,6 +337,21 @@ export async function listFiles(
   // Build conditions
   const conditions = [eq(schema.projectFiles.projectId, projectId)];
 
+  // Directory filtering
+  if (filters.directory) {
+    if (filters.recursive) {
+      // Include files in this directory and all subdirectories
+      const escapedDir = filters.directory.replace(/[%_]/g, '\\$&');
+      conditions.push(like(schema.projectFiles.directory, `${escapedDir}%`));
+    } else {
+      // Only files directly in this directory
+      conditions.push(eq(schema.projectFiles.directory, filters.directory));
+    }
+  } else if (!filters.recursive && !filters.search) {
+    // Default: show only root-level files (unless searching or recursive)
+    conditions.push(eq(schema.projectFiles.directory, '/'));
+  }
+
   if (filters.status) {
     conditions.push(eq(schema.projectFiles.status, filters.status));
   }
@@ -356,7 +359,8 @@ export async function listFiles(
     conditions.push(eq(schema.projectFiles.uploadSource, filters.uploadSource));
   }
   if (filters.mimeType) {
-    conditions.push(like(schema.projectFiles.mimeType, `${filters.mimeType}%`));
+    const escapedMime = filters.mimeType.replace(/[%_]/g, '\\$&');
+    conditions.push(like(schema.projectFiles.mimeType, `${escapedMime}%`));
   }
   if (filters.search) {
     // Escape LIKE wildcards to prevent pattern abuse
@@ -430,9 +434,23 @@ export async function listFiles(
 
   // Total count — same filters as main query but without cursor condition
   const countConds = [eq(schema.projectFiles.projectId, projectId)];
+  // Mirror directory filtering for count
+  if (filters.directory) {
+    if (filters.recursive) {
+      const escapedDir = filters.directory.replace(/[%_]/g, '\\$&');
+      countConds.push(like(schema.projectFiles.directory, `${escapedDir}%`));
+    } else {
+      countConds.push(eq(schema.projectFiles.directory, filters.directory));
+    }
+  } else if (!filters.recursive && !filters.search) {
+    countConds.push(eq(schema.projectFiles.directory, '/'));
+  }
   if (filters.status) countConds.push(eq(schema.projectFiles.status, filters.status));
   if (filters.uploadSource) countConds.push(eq(schema.projectFiles.uploadSource, filters.uploadSource));
-  if (filters.mimeType) countConds.push(like(schema.projectFiles.mimeType, `${filters.mimeType}%`));
+  if (filters.mimeType) {
+    const escapedMime = filters.mimeType.replace(/[%_]/g, '\\$&');
+    countConds.push(like(schema.projectFiles.mimeType, `${escapedMime}%`));
+  }
   if (filters.search) {
     const escaped = filters.search.replace(/[%_]/g, '\\$&');
     countConds.push(like(schema.projectFiles.filename, `%${escaped}%`));

@@ -5,7 +5,8 @@
  * Mounted at /api/projects/:projectId/library
  */
 
-import type { ListFilesRequest, UpdateTagsRequest } from '@simple-agent-manager/shared';
+import type { ListFilesRequest, MoveFileRequest, UpdateTagsRequest } from '@simple-agent-manager/shared';
+import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -20,10 +21,13 @@ import {
   getDownloadTimeoutMs,
   getFile,
   getUploadMaxBytes,
+  listDirectories,
   listFiles,
+  moveFile,
   replaceFile,
   updateTags,
   uploadFile,
+  validateDirectory,
   validateFilename,
 } from '../services/file-library';
 
@@ -89,6 +93,7 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
   const uploadSource = (formData['uploadSource'] as string) || 'user';
   const uploadSessionId = formData['uploadSessionId'] as string | undefined;
   const uploadTaskId = formData['uploadTaskId'] as string | undefined;
+  const directory = formData['directory'] as string | undefined;
 
   const data = await file.arrayBuffer();
   const encryptionKey = getEncryptionKey(c.env);
@@ -102,6 +107,7 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
       uploadSource: uploadSource === 'agent' ? 'agent' : 'user',
       uploadSessionId,
       uploadTaskId,
+      directory,
     }
   );
 
@@ -170,6 +176,8 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
     uploadSource: query['uploadSource'] as ListFilesRequest['uploadSource'],
     status: query['status'] as ListFilesRequest['status'],
     search: query['search'] || undefined,
+    directory: query['directory'] ? validateDirectory(query['directory'], c.env) : undefined,
+    recursive: query['recursive'] === 'true',
     sortBy: query['sortBy'] as ListFilesRequest['sortBy'],
     sortOrder: query['sortOrder'] as ListFilesRequest['sortOrder'],
     cursor: query['cursor'] || undefined,
@@ -178,6 +186,26 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
 
   const result = await listFiles(db, c.env, projectId, filters);
   return c.json(result, 200);
+});
+
+// ---------------------------------------------------------------------------
+// GET /directories — list subdirectories
+// NOTE: Must be registered BEFORE /:fileId to avoid being shadowed
+// ---------------------------------------------------------------------------
+
+libraryRoutes.get('/directories', requireAuth(), requireApproved(), async (c) => {
+  const auth = getAuth(c);
+  const userId = auth.user.id;
+  const projectId = requireParam(c.req.param('projectId'), 'projectId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const rawParent = c.req.query('parentDirectory') || '/';
+  const parentDirectory = validateDirectory(rawParent, c.env);
+  const directories = await listDirectories(db, projectId, parentDirectory, c.env);
+
+  return c.json({ directories }, 200);
 });
 
 // ---------------------------------------------------------------------------
@@ -273,7 +301,10 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   }
 
   // Enforce size limit before decrypting (reuse the configurable load-max from file-utils)
-  const previewMaxBytes = parseInt(c.env.FILE_PREVIEW_MAX_BYTES ?? '52428800', 10); // 50 MB default
+  const previewMaxBytes = parseInt(
+    c.env.FILE_PREVIEW_MAX_BYTES ?? String(LIBRARY_DEFAULTS.FILE_PREVIEW_MAX_BYTES),
+    10,
+  );
   if (file.sizeBytes > previewMaxBytes) {
     throw errors.badRequest('File is too large for inline preview');
   }
@@ -322,6 +353,30 @@ libraryRoutes.delete('/:fileId', requireAuth(), requireApproved(), async (c) => 
   await deleteFile(db, c.env.R2, projectId, fileId);
 
   return c.json({ success: true }, 200);
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /:fileId/move — move file to a different directory/filename
+// ---------------------------------------------------------------------------
+
+libraryRoutes.patch('/:fileId/move', requireAuth(), requireApproved(), async (c) => {
+  const auth = getAuth(c);
+  const userId = auth.user.id;
+  const projectId = requireParam(c.req.param('projectId'), 'projectId');
+  const fileId = requireParam(c.req.param('fileId'), 'fileId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const body = await c.req.json<MoveFileRequest>();
+
+  if (!body.directory && !body.filename) {
+    throw errors.badRequest('Must provide "directory" or "filename" (or both)');
+  }
+
+  const result = await moveFile(db, c.env, projectId, fileId, body);
+
+  return c.json(result, 200);
 });
 
 // ---------------------------------------------------------------------------

@@ -1,9 +1,11 @@
-import type { FileUploadSource, ListFilesRequest } from '@simple-agent-manager/shared';
+import type { DirectoryEntry, FileUploadSource, ListFilesRequest } from '@simple-agent-manager/shared';
 import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
-import { Filter, FolderOpen, Grid3X3, List, Search, Upload } from 'lucide-react';
+import { Filter, Folder, FolderOpen, FolderPlus, Grid3X3, List, Search, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { CreateDirectoryDialog } from '../components/library/CreateDirectoryDialog';
+import { DirectoryBreadcrumb } from '../components/library/DirectoryBreadcrumb';
 import { FileGridCard } from '../components/library/FileGridCard';
 import { FileListItem } from '../components/library/FileListItem';
 import { FilePreviewModal } from '../components/library/FilePreviewModal';
@@ -16,6 +18,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import {
   downloadLibraryFile,
   getLibraryFilePreviewUrl,
+  listLibraryDirectories,
   listLibraryFiles,
   uploadLibraryFile,
 } from '../lib/api';
@@ -30,15 +33,20 @@ export function ProjectLibrary() {
 
   // Data state
   const [files, setFiles] = useState<FileWithTags[]>([]);
+  const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Directory navigation
+  const [currentDirectory, setCurrentDirectory] = useState('/');
 
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [sortBy, setSortBy] = useState<SortOption>('createdAt');
   const [showFilters, setShowFilters] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [showCreateDir, setShowCreateDir] = useState(false);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,6 +65,9 @@ export function ProjectLibrary() {
   // Active filter count for badge
   const activeFilterCount =
     (searchQuery ? 1 : 0) + activeTags.length + (sourceFilter !== 'all' ? 1 : 0);
+
+  // Searching spans all directories
+  const isSearching = !!searchQuery;
 
   // All unique tags from loaded files
   const allTags = useMemo(() => {
@@ -83,13 +94,24 @@ export function ProjectLibrary() {
           search: searchQuery || undefined,
           tags: activeTags.length > 0 ? activeTags : undefined,
           uploadSource: sourceFilter !== 'all' ? sourceFilter : undefined,
+          directory: currentDirectory,
+          recursive: isSearching ? true : undefined,
           sortBy,
           sortOrder: sortBy === 'filename' ? 'asc' : 'desc',
           limit: LIBRARY_DEFAULTS.LIST_DEFAULT_PAGE_SIZE,
         };
-        const result = await listLibraryFiles(projectId, filters);
-        setFiles(result.files);
-        setTotal(result.total);
+
+        const [filesResult, dirsResult] = await Promise.all([
+          listLibraryFiles(projectId, filters),
+          // Only load directories when not searching
+          isSearching
+            ? Promise.resolve({ directories: [] })
+            : listLibraryDirectories(projectId, currentDirectory),
+        ]);
+
+        setFiles(filesResult.files);
+        setTotal(filesResult.total);
+        setDirectories(dirsResult.directories);
       } catch (err) {
         console.error('Failed to load library files:', err);
       } finally {
@@ -97,12 +119,30 @@ export function ProjectLibrary() {
         setRefreshing(false);
       }
     },
-    [projectId, searchQuery, activeTags, sourceFilter, sortBy],
+    [projectId, searchQuery, activeTags, sourceFilter, sortBy, currentDirectory, isSearching],
   );
 
   useEffect(() => {
     loadFiles();
   }, [loadFiles]);
+
+  // ---------------------------------------------------------------------------
+  // Directory navigation
+  // ---------------------------------------------------------------------------
+
+  const navigateToDirectory = useCallback((dir: string) => {
+    setCurrentDirectory(dir);
+  }, []);
+
+  const handleCreateDirectory = useCallback(
+    (dirPath: string) => {
+      setShowCreateDir(false);
+      // Navigate into the newly created directory
+      // (it will appear in listings once files are added)
+      navigateToDirectory(dirPath);
+    },
+    [navigateToDirectory],
+  );
 
   // ---------------------------------------------------------------------------
   // Upload handling
@@ -112,16 +152,26 @@ export function ProjectLibrary() {
     (newFiles: File[]) => {
       for (const file of newFiles) {
         if (file.size > LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES) {
-          window.alert(
-            `"${file.name}" exceeds the ${formatFileSize(LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES)} limit.`,
-          );
+          // Skip oversized files and show them as errors in the upload chip list
+          const id = `upload-${++uploadIdCounter}`;
+          setUploads((prev) => [
+            ...prev,
+            {
+              id,
+              file,
+              progress: 0,
+              status: 'error' as const,
+              error: `Exceeds ${formatFileSize(LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES)} limit`,
+            },
+          ]);
           continue;
         }
 
-        // Check for filename collision
-        const existing = files.find((f) => f.filename === file.name);
+        // Check for filename collision in current directory — allow anyway (server handles conflicts)
+        const existing = files.find((f) => f.filename === file.name && f.directory === currentDirectory);
         if (existing) {
-          if (!window.confirm(`"${file.name}" already exists. Upload as a new file?`)) continue;
+          // Skip duplicates — the server will return FILE_EXISTS
+          continue;
         }
 
         const id = `upload-${++uploadIdCounter}`;
@@ -130,8 +180,9 @@ export function ProjectLibrary() {
         setUploads((prev) => [...prev, item]);
 
         uploadLibraryFile(projectId, file, {
-          onProgress: (loaded, total) => {
-            const pct = Math.round((loaded / total) * 100);
+          directory: currentDirectory,
+          onProgress: (loaded, uploadTotal) => {
+            const pct = Math.round((loaded / uploadTotal) * 100);
             setUploads((prev) =>
               prev.map((u) => (u.id === id ? { ...u, progress: pct } : u)),
             );
@@ -143,7 +194,6 @@ export function ProjectLibrary() {
                 u.id === id ? { ...u, status: 'done' as const, progress: 100 } : u,
               ),
             );
-            // Refresh file list in background
             loadFiles({ background: true });
           })
           .catch((err: Error) => {
@@ -155,7 +205,7 @@ export function ProjectLibrary() {
           });
       }
     },
-    [projectId, files, loadFiles],
+    [projectId, files, loadFiles, currentDirectory],
   );
 
   const dismissUpload = useCallback((id: string) => {
@@ -184,56 +234,62 @@ export function ProjectLibrary() {
     );
   }
 
+  const hasContent = files.length > 0 || directories.length > 0;
+
   return (
     <div
       className={`flex flex-col gap-4 overflow-x-hidden w-full max-w-full min-w-0 ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}
     >
       {/* Header bar */}
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex flex-wrap items-center gap-2 min-w-0">
         <h1 className="text-xl font-semibold text-fg-primary m-0 shrink-0">Library</h1>
         {refreshing && <Spinner size="sm" />}
 
-        <div className="flex-1" />
+        <div className="flex-1 min-w-[20px]" />
 
         {/* View toggle */}
-        <div className="flex rounded-lg border border-border-default overflow-hidden shrink-0">
-          <button
-            onClick={() => setViewMode('list')}
-            aria-label="List view"
-            aria-pressed={viewMode === 'list'}
-            className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
-              viewMode === 'list'
-                ? 'bg-accent/10 text-accent'
-                : 'bg-surface text-fg-muted hover:text-fg-primary'
-            }`}
-          >
-            <List size={16} />
-          </button>
-          <button
-            onClick={() => setViewMode('grid')}
-            aria-label="Grid view"
-            aria-pressed={viewMode === 'grid'}
-            className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
-              viewMode === 'grid'
-                ? 'bg-accent/10 text-accent'
-                : 'bg-surface text-fg-muted hover:text-fg-primary'
-            }`}
-          >
-            <Grid3X3 size={16} />
-          </button>
-        </div>
+        {!isMobile && (
+          <div className="flex rounded-lg border border-border-default overflow-hidden shrink-0">
+            <button
+              onClick={() => setViewMode('list')}
+              aria-label="List view"
+              aria-pressed={viewMode === 'list'}
+              className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
+                viewMode === 'list'
+                  ? 'bg-accent/10 text-accent'
+                  : 'bg-surface text-fg-muted hover:text-fg-primary'
+              }`}
+            >
+              <List size={16} />
+            </button>
+            <button
+              onClick={() => setViewMode('grid')}
+              aria-label="Grid view"
+              aria-pressed={viewMode === 'grid'}
+              className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
+                viewMode === 'grid'
+                  ? 'bg-accent/10 text-accent'
+                  : 'bg-surface text-fg-muted hover:text-fg-primary'
+              }`}
+            >
+              <Grid3X3 size={16} />
+            </button>
+          </div>
+        )}
 
-        {/* Sort dropdown */}
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as SortOption)}
-          aria-label="Sort by"
-          className="px-2.5 py-2 text-sm rounded-lg border border-border-default bg-surface-inset text-fg-primary focus:outline-none focus:border-accent cursor-pointer shrink-0"
-        >
-          <option value="createdAt">Newest</option>
-          <option value="filename">Name</option>
-          <option value="sizeBytes">Size</option>
-        </select>
+        {/* Sort dropdown — hidden on mobile, available in filter panel */}
+        {!isMobile && (
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortOption)}
+            aria-label="Sort by"
+            className="px-2.5 py-2 text-sm rounded-lg border border-border-default bg-surface-inset text-fg-primary focus:outline-none focus:border-accent cursor-pointer shrink-0"
+          >
+            <option value="createdAt">Newest</option>
+            <option value="filename">Name</option>
+            <option value="sizeBytes">Size</option>
+          </select>
+        )}
 
         {/* Filter toggle */}
         <button
@@ -254,6 +310,15 @@ export function ProjectLibrary() {
           )}
         </button>
 
+        {/* New folder button */}
+        <button
+          onClick={() => setShowCreateDir(true)}
+          aria-label="New folder"
+          className={`p-2 rounded-lg border border-border-default cursor-pointer bg-surface text-fg-muted hover:text-fg-primary ${FOCUS_RING} shrink-0`}
+        >
+          <FolderPlus size={16} />
+        </button>
+
         {/* Upload button */}
         <button
           onClick={() => setShowUpload(!showUpload)}
@@ -265,9 +330,26 @@ export function ProjectLibrary() {
         </button>
       </div>
 
+      {/* Directory breadcrumb */}
+      <DirectoryBreadcrumb directory={currentDirectory} onNavigate={navigateToDirectory} />
+
       {/* Filter bar (collapsible) */}
       {showFilters && (
         <div className="flex flex-col gap-3 p-3 rounded-lg border border-border-default bg-surface-inset">
+          {/* Sort (mobile only — hidden on desktop where it's in the header) */}
+          {isMobile && (
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              aria-label="Sort by"
+              className="w-full px-2.5 py-2 text-sm rounded-lg border border-border-default bg-surface text-fg-primary focus:outline-none focus:border-accent cursor-pointer"
+            >
+              <option value="createdAt">Newest</option>
+              <option value="filename">Name</option>
+              <option value="sizeBytes">Size</option>
+            </select>
+          )}
+
           {/* Search input */}
           <div className="relative">
             <Search
@@ -278,7 +360,7 @@ export function ProjectLibrary() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search files..."
+              placeholder="Search files across all directories..."
               className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border-default bg-surface text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent"
             />
           </div>
@@ -340,14 +422,25 @@ export function ProjectLibrary() {
         />
       )}
 
-      {/* File display */}
-      {files.length === 0 ? (
+      {/* Create directory dialog */}
+      {showCreateDir && (
+        <CreateDirectoryDialog
+          currentDirectory={currentDirectory}
+          onCreated={handleCreateDirectory}
+          onClose={() => setShowCreateDir(false)}
+        />
+      )}
+
+      {/* Content: directories then files */}
+      {!hasContent ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <FolderOpen size={40} className="text-fg-muted mb-3 opacity-30" />
           <p className="text-sm text-fg-muted m-0 max-w-xs">
             {activeFilterCount > 0
               ? 'No files match your filters.'
-              : 'No files yet. Upload files to share with your agents.'}
+              : currentDirectory !== '/'
+                ? 'This folder is empty.'
+                : 'No files yet. Upload files to share with your agents.'}
           </p>
           {activeFilterCount === 0 && (
             <button
@@ -360,6 +453,22 @@ export function ProjectLibrary() {
         </div>
       ) : viewMode === 'list' ? (
         <div className="flex flex-col gap-1.5">
+          {/* Directories first */}
+          {directories.map((dir) => (
+            <button
+              key={dir.path}
+              onClick={() => navigateToDirectory(dir.path)}
+              aria-label={`Folder: ${dir.name}, ${dir.fileCount} file${dir.fileCount !== 1 ? 's' : ''}`}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border-default bg-surface hover:bg-surface-inset cursor-pointer text-left w-full ${FOCUS_RING}`}
+            >
+              <Folder size={18} className="text-accent shrink-0" aria-hidden="true" />
+              <span className="text-sm font-medium text-fg-primary truncate">{dir.name}</span>
+              <span className="text-xs text-fg-muted ml-auto shrink-0">
+                {dir.fileCount} file{dir.fileCount !== 1 ? 's' : ''}
+              </span>
+            </button>
+          ))}
+          {/* Then files */}
           {files.map((file) => (
             <FileListItem
               key={file.id}
@@ -376,6 +485,22 @@ export function ProjectLibrary() {
         <div
           className={`grid gap-3 ${isMobile ? 'grid-cols-2' : 'grid-cols-[repeat(auto-fill,minmax(200px,1fr))]'}`}
         >
+          {/* Directories first */}
+          {directories.map((dir) => (
+            <button
+              key={dir.path}
+              onClick={() => navigateToDirectory(dir.path)}
+              aria-label={`Folder: ${dir.name}, ${dir.fileCount} file${dir.fileCount !== 1 ? 's' : ''}`}
+              className={`flex flex-col items-center justify-center gap-2 p-4 rounded-lg border border-border-default bg-surface hover:bg-surface-inset cursor-pointer min-h-[120px] ${FOCUS_RING}`}
+            >
+              <Folder size={32} className="text-accent" aria-hidden="true" />
+              <span className="text-sm font-medium text-fg-primary truncate max-w-full">{dir.name}</span>
+              <span className="text-xs text-fg-muted">
+                {dir.fileCount} file{dir.fileCount !== 1 ? 's' : ''}
+              </span>
+            </button>
+          ))}
+          {/* Then files */}
           {files.map((file) => (
             <FileGridCard
               key={file.id}
@@ -394,6 +519,9 @@ export function ProjectLibrary() {
       {files.length > 0 && (
         <p className="text-xs text-fg-muted text-center m-0">
           Showing {files.length} of {total} file{total !== 1 ? 's' : ''}
+          {currentDirectory !== '/' && !isSearching && (
+            <span> in {currentDirectory}</span>
+          )}
         </p>
       )}
 

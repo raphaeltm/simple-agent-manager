@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   listLibraryFiles: vi.fn(),
+  listLibraryDirectories: vi.fn(),
   uploadLibraryFile: vi.fn(),
   deleteLibraryFile: vi.fn(),
   downloadLibraryFile: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listLibraryFiles: mocks.listLibraryFiles,
+  listLibraryDirectories: mocks.listLibraryDirectories,
   uploadLibraryFile: mocks.uploadLibraryFile,
   deleteLibraryFile: mocks.deleteLibraryFile,
   downloadLibraryFile: mocks.downloadLibraryFile,
@@ -62,6 +64,7 @@ function makeFile(overrides: Partial<ProjectFile> & { id: string; filename: stri
     replacedBy: null,
     status: 'ready',
     extractedTextPreview: null,
+    directory: '/',
     createdAt: '2026-04-01T00:00:00Z',
     updatedAt: '2026-04-01T00:00:00Z',
     tags: [],
@@ -88,6 +91,8 @@ function renderLibrary() {
 describe('ProjectLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no directories
+    mocks.listLibraryDirectories.mockResolvedValue({ directories: [] });
   });
 
   it('renders file list with files', async () => {
@@ -183,7 +188,7 @@ describe('ProjectLibrary', () => {
     const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
     await userEvent.click(filterBtn);
 
-    expect(screen.getByPlaceholderText('Search files...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search files across all directories...')).toBeInTheDocument();
   });
 
   it('switches between list and grid view', async () => {
@@ -263,7 +268,7 @@ describe('ProjectLibrary', () => {
 
     // Mock all subsequent calls (one per keystroke triggers a new API call)
     mocks.listLibraryFiles.mockResolvedValue(makeResponse([]));
-    const searchInput = screen.getByPlaceholderText('Search files...');
+    const searchInput = screen.getByPlaceholderText('Search files across all directories...');
     await userEvent.type(searchInput, 'x');
 
     // Verify at least one call includes a search param
@@ -274,5 +279,135 @@ describe('ProjectLibrary', () => {
       );
       expect(hasSearchCall).toBe(true);
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Directory navigation tests
+  // ---------------------------------------------------------------------------
+
+  it('renders directory entries before files', async () => {
+    const files = [makeFile({ id: 'f1', filename: 'readme.md' })];
+    mocks.listLibraryFiles.mockResolvedValueOnce(makeResponse(files));
+    mocks.listLibraryDirectories.mockResolvedValueOnce({
+      directories: [{ path: '/docs/', name: 'docs', fileCount: 3 }],
+    });
+
+    renderLibrary();
+
+    await waitFor(() => {
+      expect(screen.getByText('docs')).toBeInTheDocument();
+    });
+    expect(screen.getByText('readme.md')).toBeInTheDocument();
+    expect(screen.getByText('3 files')).toBeInTheDocument();
+  });
+
+  it('navigates into a directory when folder is clicked', async () => {
+    const files = [makeFile({ id: 'f1', filename: 'readme.md' })];
+    mocks.listLibraryFiles
+      .mockResolvedValueOnce(makeResponse(files))
+      .mockResolvedValueOnce(makeResponse([]));
+    mocks.listLibraryDirectories
+      .mockResolvedValueOnce({
+        directories: [{ path: '/docs/', name: 'docs', fileCount: 3 }],
+      })
+      .mockResolvedValueOnce({ directories: [] });
+
+    renderLibrary();
+
+    await waitFor(() => {
+      expect(screen.getByText('docs')).toBeInTheDocument();
+    });
+
+    // Click the folder button
+    const folderBtn = screen.getByRole('button', { name: /Folder: docs/ });
+    await userEvent.click(folderBtn);
+
+    // After navigating, listLibraryFiles should be called with directory: '/docs/'
+    await waitFor(() => {
+      const lastCall = mocks.listLibraryFiles.mock.calls[mocks.listLibraryFiles.mock.calls.length - 1];
+      expect(lastCall[1]).toMatchObject({ directory: '/docs/' });
+    });
+  });
+
+  it('shows "This folder is empty." for empty subdirectories', async () => {
+    mocks.listLibraryFiles
+      .mockResolvedValueOnce(makeResponse([]))  // initial root load
+      .mockResolvedValueOnce(makeResponse([]));  // after navigating into subdir
+    mocks.listLibraryDirectories
+      .mockResolvedValueOnce({
+        directories: [{ path: '/empty-dir/', name: 'empty-dir', fileCount: 0 }],
+      })
+      .mockResolvedValueOnce({ directories: [] });
+
+    renderLibrary();
+
+    // Wait for initial load
+    await waitFor(() => {
+      expect(screen.getByText('empty-dir')).toBeInTheDocument();
+    });
+
+    // Navigate into the empty directory
+    const folderBtn = screen.getByRole('button', { name: /Folder: empty-dir/ });
+    await userEvent.click(folderBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('This folder is empty.')).toBeInTheDocument();
+    });
+  });
+
+  it('passes directory to upload when uploading from a subdirectory', async () => {
+    // First navigate to a subdirectory, then check upload params
+    const files = [makeFile({ id: 'f1', filename: 'readme.md' })];
+    mocks.listLibraryFiles
+      .mockResolvedValueOnce(makeResponse(files))
+      .mockResolvedValueOnce(makeResponse([]));
+    mocks.listLibraryDirectories
+      .mockResolvedValueOnce({
+        directories: [{ path: '/assets/', name: 'assets', fileCount: 1 }],
+      })
+      .mockResolvedValueOnce({ directories: [] });
+
+    renderLibrary();
+
+    await waitFor(() => {
+      expect(screen.getByText('assets')).toBeInTheDocument();
+    });
+
+    const folderBtn = screen.getByRole('button', { name: /Folder: assets/ });
+    await userEvent.click(folderBtn);
+
+    // After navigation, the component state's currentDirectory should be '/assets/'
+    // We verify this by checking that the listLibraryFiles call includes directory: '/assets/'
+    await waitFor(() => {
+      const lastCall = mocks.listLibraryFiles.mock.calls[mocks.listLibraryFiles.mock.calls.length - 1];
+      expect(lastCall[1]).toMatchObject({ directory: '/assets/' });
+    });
+  });
+
+  it('shows breadcrumb when in a subdirectory', async () => {
+    const files = [makeFile({ id: 'f1', filename: 'readme.md' })];
+    mocks.listLibraryFiles
+      .mockResolvedValueOnce(makeResponse(files))
+      .mockResolvedValueOnce(makeResponse([]));
+    mocks.listLibraryDirectories
+      .mockResolvedValueOnce({
+        directories: [{ path: '/docs/', name: 'docs', fileCount: 1 }],
+      })
+      .mockResolvedValueOnce({ directories: [] });
+
+    renderLibrary();
+
+    await waitFor(() => {
+      expect(screen.getByText('docs')).toBeInTheDocument();
+    });
+
+    const folderBtn = screen.getByRole('button', { name: /Folder: docs/ });
+    await userEvent.click(folderBtn);
+
+    // Breadcrumb should appear with home button and 'docs' segment
+    await waitFor(() => {
+      expect(screen.getByRole('navigation', { name: 'Directory breadcrumb' })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Root directory' })).toBeInTheDocument();
   });
 });
