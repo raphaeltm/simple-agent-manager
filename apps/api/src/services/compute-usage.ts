@@ -6,7 +6,7 @@ import type {
   CredentialSource,
 } from '@simple-agent-manager/shared';
 import { getVcpuCount } from '@simple-agent-manager/shared';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -279,7 +279,7 @@ export async function getAllUsersUsageSummary(
       avatarUrl: schema.users.avatarUrl,
     })
     .from(schema.users)
-    .where(sql`${schema.users.id} IN (${sql.join(userIds.map((id) => sql`${id}`), sql`, `)})`);
+    .where(inArray(schema.users.id, userIds));
 
   const userLookup = new Map(users.map((u) => [u.id, u]));
   const msToHours = 1 / (1000 * 60 * 60);
