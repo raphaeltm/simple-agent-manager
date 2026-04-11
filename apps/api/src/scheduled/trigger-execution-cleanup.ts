@@ -9,6 +9,9 @@
  *
  * 2. **Retention purge**: Deletes old completed/failed/skipped execution records
  *    past the configurable retention period, preventing unbounded table growth.
+ *    Uses `created_at` intentionally — a record created 90+ days ago should be
+ *    purged regardless of when it was completed (including stale records just
+ *    recovered by the sweep above).
  *
  * Called from the cron handler alongside node cleanup and stuck-task recovery.
  */
@@ -22,14 +25,10 @@ import { createModuleLogger } from '../lib/logger';
 
 const log = createModuleLogger('trigger-execution-cleanup');
 
-function parseMs(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return parsed;
-}
+/** Default batch size for stale execution recovery per sweep. */
+const DEFAULT_TRIGGER_STALE_RECOVERY_BATCH_SIZE = 100;
 
-function parseDays(value: string | undefined, fallback: number): number {
+function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -62,23 +61,42 @@ interface TaskRow {
 const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
 /**
+ * Build the reason string for why a stale execution is being recovered.
+ */
+function buildRecoveryReason(
+  exec: StaleExecution,
+  taskMap: Map<string, TaskRow>,
+): string {
+  if (!exec.task_id) {
+    return 'Task was never created (submission failed)';
+  }
+
+  const task = taskMap.get(exec.task_id);
+  if (!task) {
+    return `Linked task ${exec.task_id} was deleted`;
+  }
+  if (TERMINAL_TASK_STATUSES.has(task.status)) {
+    return `Linked task ${exec.task_id} is ${task.status} (sync missed)`;
+  }
+  return `Linked task ${exec.task_id} stuck in '${task.status}' past stale threshold`;
+}
+
+/**
  * Recover trigger executions stuck in 'running' past the stale threshold.
  *
- * For each stale execution, checks the linked task's status:
- * - Task deleted: marks execution as failed ("Linked task was deleted")
- * - Task in terminal state: marks as failed ("Linked task is <status> (sync missed)")
- * - Task in non-terminal state: marks as failed ("Linked task stuck in '<status>' past stale threshold")
- * - No task linked: marks as failed ("Task was never created (submission failed)")
+ * Uses batched queries to avoid N+1 round-trips:
+ * 1. Single SELECT with LIMIT to fetch stale executions
+ * 2. Single SELECT with IN(...) to batch-fetch all linked task statuses
+ * 3. Single db.batch() to issue all UPDATE statements together
  */
 async function recoverStaleTriggerExecutions(
   db: D1Database,
   staleThresholdMs: number,
+  batchSize: number,
 ): Promise<{ recovered: number; errors: number }> {
   const cutoff = new Date(Date.now() - staleThresholdMs).toISOString();
-  let recovered = 0;
-  let errors = 0;
 
-  // Find all running executions older than the stale threshold.
+  // Step 1: Find stale running executions (bounded by LIMIT).
   // Use COALESCE to handle cases where started_at was never set (submission failure).
   let staleRows: { results: StaleExecution[] };
   try {
@@ -87,9 +105,10 @@ async function recoverStaleTriggerExecutions(
         `SELECT id, trigger_id, task_id, started_at, created_at
          FROM trigger_executions
          WHERE status = 'running'
-           AND COALESCE(started_at, created_at) <= ?`,
+           AND COALESCE(started_at, created_at) <= ?
+         LIMIT ?`,
       )
-      .bind(cutoff)
+      .bind(cutoff, batchSize)
       .all<StaleExecution>();
   } catch (err) {
     log.error('stale_execution_query_failed', {
@@ -104,39 +123,63 @@ async function recoverStaleTriggerExecutions(
 
   log.info('stale_executions_found', { count: staleRows.results.length });
 
-  for (const exec of staleRows.results) {
+  // Step 2: Batch-fetch all linked task statuses in a single query.
+  const taskIds = [
+    ...new Set(
+      staleRows.results
+        .map((e) => e.task_id)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
+
+  const taskMap = new Map<string, TaskRow>();
+  if (taskIds.length > 0) {
     try {
-      let reason: string;
-
-      if (!exec.task_id) {
-        // No task was ever linked — submission failed before task creation
-        reason = 'Task was never created (submission failed)';
-      } else {
-        // Check if the linked task still exists
-        const task = await db
-          .prepare('SELECT id, status FROM tasks WHERE id = ?')
-          .bind(exec.task_id)
-          .first<TaskRow>();
-
-        if (!task) {
-          reason = `Linked task ${exec.task_id} was deleted`;
-        } else if (TERMINAL_TASK_STATUSES.has(task.status)) {
-          reason = `Linked task ${exec.task_id} is ${task.status} (sync missed)`;
-        } else {
-          reason = `Linked task ${exec.task_id} stuck in '${task.status}' past stale threshold`;
-        }
+      const placeholders = taskIds.map(() => '?').join(', ');
+      const taskRows = await db
+        .prepare(`SELECT id, status FROM tasks WHERE id IN (${placeholders})`)
+        .bind(...taskIds)
+        .all<TaskRow>();
+      for (const row of taskRows.results) {
+        taskMap.set(row.id, row);
       }
+    } catch (err) {
+      log.error('task_batch_lookup_failed', {
+        taskIds,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Fall through — missing tasks will be treated as "deleted"
+    }
+  }
 
-      const now = new Date().toISOString();
-      const result = await db
+  // Step 3: Build UPDATE statements and execute as a batch.
+  const now = new Date().toISOString();
+  let recovered = 0;
+  let errors = 0;
+
+  const updateStatements: D1PreparedStatement[] = [];
+  const execReasons: { exec: StaleExecution; reason: string }[] = [];
+
+  for (const exec of staleRows.results) {
+    const reason = buildRecoveryReason(exec, taskMap);
+    execReasons.push({ exec, reason });
+    updateStatements.push(
+      db
         .prepare(
           `UPDATE trigger_executions
            SET status = 'failed', error_message = ?, completed_at = ?
            WHERE id = ? AND status = 'running'`,
         )
-        .bind(reason, now, exec.id)
-        .run();
+        .bind(reason, now, exec.id),
+    );
+  }
 
+  try {
+    const results = await db.batch<Record<string, unknown>>(updateStatements);
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      const { exec, reason } = execReasons[i];
       if (result.meta.changes && result.meta.changes > 0) {
         recovered++;
         log.info('stale_execution_recovered', {
@@ -146,14 +189,13 @@ async function recoverStaleTriggerExecutions(
           reason,
         });
       }
-    } catch (err) {
-      errors++;
-      log.error('stale_execution_recovery_failed', {
-        executionId: exec.id,
-        triggerId: exec.trigger_id,
-        error: err instanceof Error ? err.message : String(err),
-      });
     }
+  } catch (err) {
+    errors = staleRows.results.length;
+    log.error('stale_execution_batch_update_failed', {
+      count: staleRows.results.length,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   return { recovered, errors };
@@ -162,6 +204,11 @@ async function recoverStaleTriggerExecutions(
 /**
  * Purge old trigger execution logs past the retention period.
  * Only deletes executions in terminal states (completed, failed, skipped).
+ *
+ * Uses `created_at` intentionally: a record created 90+ days ago should be
+ * purged regardless of when it reached a terminal state. This keeps the
+ * purge logic simple and predictable — records are always purged after
+ * a fixed window from creation.
  */
 async function purgeOldTriggerExecutions(
   db: D1Database,
@@ -208,18 +255,23 @@ export async function runTriggerExecutionCleanup(
     return { staleRecovered: 0, retentionPurged: 0, errors: 0 };
   }
 
-  const staleThresholdMs = parseMs(
+  const staleThresholdMs = parsePositiveInt(
     env.TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
     DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
   );
-  const retentionDays = parseDays(
+  const retentionDays = parsePositiveInt(
     env.TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
     DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
+  );
+  const batchSize = parsePositiveInt(
+    env.TRIGGER_STALE_RECOVERY_BATCH_SIZE,
+    DEFAULT_TRIGGER_STALE_RECOVERY_BATCH_SIZE,
   );
 
   const stale = await recoverStaleTriggerExecutions(
     env.DATABASE,
     staleThresholdMs,
+    batchSize,
   );
   const retention = await purgeOldTriggerExecutions(
     env.DATABASE,

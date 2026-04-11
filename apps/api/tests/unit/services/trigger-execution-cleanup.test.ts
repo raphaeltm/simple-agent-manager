@@ -36,87 +36,106 @@ interface TaskRow {
 }
 
 /**
- * Creates a mock D1 database that can handle the cleanup module's queries.
- * Routes prepare() calls based on the SQL content.
+ * Creates a mock D1 database that handles the cleanup module's batched queries.
+ *
+ * Query routing:
+ * - SELECT ... FROM trigger_executions WHERE status = 'running' → stale query
+ * - SELECT ... FROM tasks WHERE id IN (...) → batch task lookup
+ * - UPDATE trigger_executions → prepared for db.batch()
+ * - DELETE FROM trigger_executions → retention purge
  */
 function createMockDb(options: {
   staleExecutions?: StaleRow[];
   taskLookups?: Record<string, TaskRow | null>;
-  updateChanges?: number;
+  batchResults?: { meta: { changes: number } }[];
   purgeChanges?: number;
   staleQueryError?: Error;
-  updateError?: Error;
+  batchError?: Error;
   purgeError?: Error;
 } = {}) {
   const {
     staleExecutions = [],
     taskLookups = {},
-    updateChanges = 1,
     purgeChanges = 0,
   } = options;
 
   const calls: { sql: string; bindings: unknown[] }[] = [];
+  const preparedStatements: { sql: string; bindings: unknown[] }[] = [];
 
   const db = {
     prepare: vi.fn((sql: string) => ({
       bind: vi.fn((...args: unknown[]) => {
         calls.push({ sql, bindings: args });
 
+        const stmt = { sql, bindings: args } as unknown as D1PreparedStatement;
+
         // SELECT stale running executions
         if (sql.includes('FROM trigger_executions') && sql.includes("status = 'running'") && !sql.includes('UPDATE')) {
           if (options.staleQueryError) {
-            return {
+            return Object.assign(stmt, {
               all: vi.fn().mockRejectedValue(options.staleQueryError),
-            };
+            });
           }
-          return {
+          return Object.assign(stmt, {
             all: vi.fn().mockResolvedValue({ results: staleExecutions }),
-          };
+          });
         }
 
-        // SELECT task by ID
-        if (sql.includes('FROM tasks WHERE id')) {
-          const taskId = args[0] as string;
-          const task = taskLookups[taskId] ?? null;
-          return {
-            first: vi.fn().mockResolvedValue(task),
-          };
+        // SELECT tasks WHERE id IN (...)
+        if (sql.includes('FROM tasks WHERE id IN')) {
+          const taskResults = args
+            .map((id) => taskLookups[id as string])
+            .filter((t): t is TaskRow => t !== null && t !== undefined);
+          return Object.assign(stmt, {
+            all: vi.fn().mockResolvedValue({ results: taskResults }),
+          });
         }
 
-        // UPDATE trigger_executions (stale recovery)
+        // UPDATE trigger_executions (prepared for batch)
         if (sql.includes('UPDATE trigger_executions')) {
-          if (options.updateError) {
-            return {
-              run: vi.fn().mockRejectedValue(options.updateError),
-            };
-          }
-          return {
-            run: vi.fn().mockResolvedValue({ meta: { changes: updateChanges } }),
-          };
+          preparedStatements.push({ sql, bindings: args });
+          return stmt;
         }
 
         // DELETE old execution logs (retention purge)
         if (sql.includes('DELETE FROM trigger_executions')) {
           if (options.purgeError) {
-            return {
+            return Object.assign(stmt, {
               run: vi.fn().mockRejectedValue(options.purgeError),
-            };
+            });
           }
-          return {
+          return Object.assign(stmt, {
             run: vi.fn().mockResolvedValue({ meta: { changes: purgeChanges } }),
-          };
+          });
         }
 
         // Default fallback
-        return {
+        return Object.assign(stmt, {
           all: vi.fn().mockResolvedValue({ results: [] }),
           first: vi.fn().mockResolvedValue(null),
           run: vi.fn().mockResolvedValue({ meta: { changes: 0 } }),
-        };
+        });
       }),
     })),
+
+    batch: vi.fn(async () => {
+      if (options.batchError) {
+        throw options.batchError;
+      }
+      // Return results for each prepared UPDATE statement
+      if (options.batchResults) {
+        return options.batchResults;
+      }
+      // Default: each update changes 1 row
+      return preparedStatements.map(() => ({ meta: { changes: 1 } }));
+    }),
+
     _calls: calls,
-  } as unknown as D1Database & { _calls: typeof calls };
+    _preparedStatements: preparedStatements,
+  } as unknown as D1Database & {
+    _calls: typeof calls;
+    _preparedStatements: typeof preparedStatements;
+  };
 
   return db;
 }
@@ -191,7 +210,7 @@ describe('runTriggerExecutionCleanup', () => {
       const exec = makeStaleExec({ id: 'exec-deleted', task_id: 'task-deleted' });
       const db = createMockDb({
         staleExecutions: [exec],
-        taskLookups: { 'task-deleted': null }, // task doesn't exist
+        taskLookups: { 'task-deleted': null }, // task doesn't exist — not in IN() results
       });
       const env = createMockEnv({ DATABASE: db });
 
@@ -200,7 +219,7 @@ describe('runTriggerExecutionCleanup', () => {
       expect(stats.staleRecovered).toBe(1);
       expect(stats.errors).toBe(0);
 
-      // Verify the UPDATE was called with correct reason
+      // Verify the UPDATE was prepared with correct reason
       const updateCall = db._calls.find(c => c.sql.includes('UPDATE trigger_executions'));
       expect(updateCall).toBeDefined();
       expect(updateCall!.bindings[0]).toBe('Linked task task-deleted was deleted');
@@ -300,6 +319,9 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.staleRecovered).toBe(3);
       expect(stats.errors).toBe(0);
+
+      // Verify batch was called with all 3 updates
+      expect(db.batch).toHaveBeenCalledTimes(1);
     });
 
     it('returns zero recovered when no stale executions exist', async () => {
@@ -310,28 +332,33 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.staleRecovered).toBe(0);
       expect(stats.errors).toBe(0);
+
+      // batch should not be called when there are no stale executions
+      expect(db.batch).not.toHaveBeenCalled();
     });
 
-    it('counts errors for individual execution recovery failures', async () => {
-      const exec = makeStaleExec({ id: 'exec-err', task_id: 'task-err' });
+    it('counts all stale executions as errors when batch update fails', async () => {
+      const execs = [
+        makeStaleExec({ id: 'exec-a', task_id: null }),
+        makeStaleExec({ id: 'exec-b', task_id: null }),
+      ];
       const db = createMockDb({
-        staleExecutions: [exec],
-        taskLookups: { 'task-err': null },
-        updateError: new Error('D1 write failed'),
+        staleExecutions: execs,
+        batchError: new Error('D1 batch failed'),
       });
       const env = createMockEnv({ DATABASE: db });
 
       const stats = await runTriggerExecutionCleanup(env);
 
       expect(stats.staleRecovered).toBe(0);
-      expect(stats.errors).toBe(1);
+      expect(stats.errors).toBe(2); // one error per stale execution
     });
 
     it('does not count recovered when UPDATE matched zero rows (already transitioned)', async () => {
       const exec = makeStaleExec({ id: 'exec-race', task_id: null });
       const db = createMockDb({
         staleExecutions: [exec],
-        updateChanges: 0, // another sweep already transitioned this row
+        batchResults: [{ meta: { changes: 0 } }], // another sweep already transitioned
       });
       const env = createMockEnv({ DATABASE: db });
 
@@ -351,6 +378,71 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.staleRecovered).toBe(0);
       expect(stats.errors).toBe(1);
+    });
+
+    it('uses LIMIT in stale query', async () => {
+      const db = createMockDb({ staleExecutions: [] });
+      const env = createMockEnv({ DATABASE: db });
+
+      await runTriggerExecutionCleanup(env);
+
+      const staleQuery = db._calls.find(
+        c => c.sql.includes('FROM trigger_executions') && c.sql.includes("status = 'running'"),
+      );
+      expect(staleQuery).toBeDefined();
+      expect(staleQuery!.sql).toContain('LIMIT');
+    });
+
+    it('uses COALESCE(started_at, created_at) in stale query', async () => {
+      const db = createMockDb({ staleExecutions: [] });
+      const env = createMockEnv({ DATABASE: db });
+
+      await runTriggerExecutionCleanup(env);
+
+      const staleQuery = db._calls.find(
+        c => c.sql.includes('FROM trigger_executions') && c.sql.includes("status = 'running'"),
+      );
+      expect(staleQuery).toBeDefined();
+      expect(staleQuery!.sql).toContain('COALESCE(started_at, created_at)');
+    });
+
+    it('batches task lookups into a single IN(...) query', async () => {
+      const execs = [
+        makeStaleExec({ id: 'exec-a', task_id: 'task-1' }),
+        makeStaleExec({ id: 'exec-b', task_id: 'task-2' }),
+        makeStaleExec({ id: 'exec-c', task_id: 'task-1' }), // duplicate task_id
+      ];
+      const db = createMockDb({
+        staleExecutions: execs,
+        taskLookups: {
+          'task-1': { id: 'task-1', status: 'completed' },
+          'task-2': { id: 'task-2', status: 'failed' },
+        },
+      });
+      const env = createMockEnv({ DATABASE: db });
+
+      await runTriggerExecutionCleanup(env);
+
+      // Should have exactly one IN(...) query for task lookups
+      const taskQuery = db._calls.find(c => c.sql.includes('FROM tasks WHERE id IN'));
+      expect(taskQuery).toBeDefined();
+      // Should deduplicate task IDs
+      expect(taskQuery!.bindings).toHaveLength(2); // task-1 and task-2 (deduplicated)
+    });
+
+    it('skips batch task lookup when all executions have null task_id', async () => {
+      const execs = [
+        makeStaleExec({ id: 'exec-a', task_id: null }),
+        makeStaleExec({ id: 'exec-b', task_id: null }),
+      ];
+      const db = createMockDb({ staleExecutions: execs });
+      const env = createMockEnv({ DATABASE: db });
+
+      await runTriggerExecutionCleanup(env);
+
+      // Should NOT have a task lookup query
+      const taskQuery = db._calls.find(c => c.sql.includes('FROM tasks WHERE id IN'));
+      expect(taskQuery).toBeUndefined();
     });
   });
 
@@ -387,7 +479,6 @@ describe('runTriggerExecutionCleanup', () => {
       const cutoffDate = new Date(deleteCall!.bindings[0] as string);
       const expectedCutoff = new Date('2026-04-11T12:00:00Z');
       expectedCutoff.setDate(expectedCutoff.getDate() - 30);
-      // Allow 1 second tolerance for execution time
       expect(Math.abs(cutoffDate.getTime() - expectedCutoff.getTime())).toBeLessThan(1000);
     });
 
@@ -431,7 +522,6 @@ describe('runTriggerExecutionCleanup', () => {
 
       await runTriggerExecutionCleanup(env);
 
-      // Verify the cutoff passed to the stale query is 10 minutes ago
       const staleQuery = db._calls.find(
         c => c.sql.includes('FROM trigger_executions') && c.sql.includes("status = 'running'") && !c.sql.includes('UPDATE'),
       );

@@ -472,6 +472,7 @@ export interface Env {
   TRIGGER_STALE_EXECUTION_TIMEOUT_MS?: string;      // Timeout before running executions are considered stale (default: 1800000 = 30 min)
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string;    // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string;       // Kill switch: "false" to disable cleanup sweep (default: enabled)
+  TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string;       // Max stale executions to recover per sweep (default: 100)
 }
 
 const app = new Hono<{ Bindings: Env }>();
