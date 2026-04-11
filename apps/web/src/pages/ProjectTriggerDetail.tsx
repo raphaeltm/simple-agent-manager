@@ -333,6 +333,8 @@ export function ProjectTriggerDetail() {
           hasMore={hasMore}
           onLoadMore={() => void loadExecutions(executions.length)}
           projectId={projectId}
+          triggerId={triggerId!}
+          onMutated={() => void loadExecutions(0)}
         />
       </div>
 

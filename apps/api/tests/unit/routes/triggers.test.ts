@@ -443,4 +443,129 @@ describe('Trigger Routes', () => {
       expect(res.status).toBe(404);
     });
   });
+
+  // =============================================================================
+  // DELETE /:triggerId/executions/:executionId — Delete single execution
+  // =============================================================================
+  describe('DELETE /:triggerId/executions/:executionId — Delete execution', () => {
+    it('returns 404 when execution does not exist', async () => {
+      // Queue: execution lookup (empty — no trigger lookup since requireOwnedProject is mocked)
+      queryResults = [[]];
+
+      const res = await app.request(
+        `${REQUEST_PATH}/trigger-1/executions/exec-missing`,
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 409 when execution is running', async () => {
+      // Queue: execution lookup (running)
+      queryResults = [
+        [{ id: 'exec-1', status: 'running', triggerId: 'trigger-1', projectId: 'test-project-id' }],
+      ];
+
+      const res = await app.request(
+        `${REQUEST_PATH}/trigger-1/executions/exec-1`,
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.message).toContain('running');
+    });
+
+    it('deletes a completed execution successfully', async () => {
+      // Queue: execution lookup (completed)
+      queryResults = [
+        [{ id: 'exec-1', status: 'completed', triggerId: 'trigger-1', projectId: 'test-project-id' }],
+      ];
+
+      const res = await app.request(
+        `${REQUEST_PATH}/trigger-1/executions/exec-1`,
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+    });
+
+    it('deletes a queued execution successfully', async () => {
+      // Queue: execution lookup (queued)
+      queryResults = [
+        [{ id: 'exec-2', status: 'queued', triggerId: 'trigger-1', projectId: 'test-project-id' }],
+      ];
+
+      const res = await app.request(
+        `${REQUEST_PATH}/trigger-1/executions/exec-2`,
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+    });
+  });
+
+  // =============================================================================
+  // POST /:triggerId/executions/cleanup — Force-fail stuck queued executions
+  // =============================================================================
+  describe('POST /:triggerId/executions/cleanup — Cleanup stuck executions', () => {
+    it('returns 404 when trigger does not exist', async () => {
+      queryResults = [[]];
+
+      const res = await app.request(
+        `${REQUEST_PATH}/nonexistent/executions/cleanup`,
+        { method: 'POST' },
+        env
+      );
+
+      expect(res.status).toBe(404);
+    });
+
+    it('returns cleaned: 0 when no stuck executions exist', async () => {
+      // Queue: trigger lookup, stuck execution query (empty)
+      queryResults = [
+        [{ id: 'trigger-1', projectId: 'test-project-id' }],
+        [],
+      ];
+
+      const res = await app.request(
+        `${REQUEST_PATH}/trigger-1/executions/cleanup`,
+        { method: 'POST' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.cleaned).toBe(0);
+    });
+
+    it('cleans up queued executions and returns count', async () => {
+      // Queue: trigger lookup, stuck execution query (2 queued)
+      queryResults = [
+        [{ id: 'trigger-1', projectId: 'test-project-id' }],
+        [
+          { id: 'exec-1', status: 'queued' },
+          { id: 'exec-2', status: 'queued' },
+        ],
+      ];
+
+      const res = await app.request(
+        `${REQUEST_PATH}/trigger-1/executions/cleanup`,
+        { method: 'POST' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.cleaned).toBe(2);
+    });
+  });
 });

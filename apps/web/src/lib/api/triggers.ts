@@ -108,3 +108,28 @@ export async function listTriggerExecutions(
     `/api/projects/${projectId}/triggers/${triggerId}/executions${qs ? `?${qs}` : ''}`
   );
 }
+
+export async function deleteExecution(
+  projectId: string,
+  triggerId: string,
+  executionId: string
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `/api/projects/${projectId}/triggers/${triggerId}/executions/${executionId}`,
+    {
+      method: 'DELETE',
+    }
+  );
+}
+
+export async function cleanupStuckExecutions(
+  projectId: string,
+  triggerId: string
+): Promise<{ cleaned: number }> {
+  return request<{ cleaned: number }>(
+    `/api/projects/${projectId}/triggers/${triggerId}/executions/cleanup`,
+    {
+      method: 'POST',
+    }
+  );
+}

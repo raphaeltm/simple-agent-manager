@@ -1,13 +1,18 @@
 /**
  * Trigger Execution Cleanup — recovers stale executions and purges old logs.
  *
- * Two responsibilities:
- * 1. **Stale recovery**: Finds `trigger_executions` stuck in 'running' past a
+ * Three responsibilities:
+ * 1. **Stale running recovery**: Finds `trigger_executions` stuck in 'running' past a
  *    configurable timeout and transitions them to 'failed' with a descriptive reason.
  *    Handles: task deleted, task in terminal state (sync missed), task stuck in
  *    non-terminal state, and no task linked (submission failure).
  *
- * 2. **Retention purge**: Deletes old completed/failed/skipped execution records
+ * 2. **Stale queued recovery**: Finds `trigger_executions` stuck in 'queued' past a
+ *    configurable timeout (default: 5 min) and transitions them to 'failed'. A queued
+ *    execution should transition to 'running' within seconds — if it's still queued
+ *    after 5 minutes, the request that created it failed mid-flight.
+ *
+ * 3. **Retention purge**: Deletes old completed/failed/skipped execution records
  *    past the configurable retention period, preventing unbounded table growth.
  *    Uses `created_at` intentionally — a record created 90+ days ago should be
  *    purged regardless of when it was completed (including stale records just
@@ -18,6 +23,7 @@
 import {
   DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
   DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
+  DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../index';
@@ -38,6 +44,8 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 export interface TriggerExecutionCleanupStats {
   /** Number of stale running executions recovered to 'failed' */
   staleRecovered: number;
+  /** Number of stale queued executions recovered to 'failed' */
+  staleQueuedRecovered: number;
   /** Number of old execution logs purged */
   retentionPurged: number;
   /** Number of errors encountered */
@@ -82,21 +90,22 @@ function buildRecoveryReason(
 }
 
 /**
- * Recover trigger executions stuck in 'running' past the stale threshold.
+ * Recover trigger executions stuck in a given status past the stale threshold.
  *
  * Uses batched queries to avoid N+1 round-trips:
  * 1. Single SELECT with LIMIT to fetch stale executions
  * 2. Single SELECT with IN(...) to batch-fetch all linked task statuses
  * 3. Single db.batch() to issue all UPDATE statements together
  */
-async function recoverStaleTriggerExecutions(
+async function recoverStaleExecutionsByStatus(
   db: D1Database,
+  status: 'running' | 'queued',
   staleThresholdMs: number,
   batchSize: number,
 ): Promise<{ recovered: number; errors: number }> {
   const cutoff = new Date(Date.now() - staleThresholdMs).toISOString();
 
-  // Step 1: Find stale running executions (bounded by LIMIT).
+  // Step 1: Find stale executions (bounded by LIMIT).
   // Use COALESCE to handle cases where started_at was never set (submission failure).
   let staleRows: { results: StaleExecution[] };
   try {
@@ -104,14 +113,15 @@ async function recoverStaleTriggerExecutions(
       .prepare(
         `SELECT id, trigger_id, task_id, started_at, created_at
          FROM trigger_executions
-         WHERE status = 'running'
+         WHERE status = ?
            AND COALESCE(started_at, created_at) <= ?
          LIMIT ?`,
       )
-      .bind(cutoff, batchSize)
+      .bind(status, cutoff, batchSize)
       .all<StaleExecution>();
   } catch (err) {
     log.error('stale_execution_query_failed', {
+      status,
       error: err instanceof Error ? err.message : String(err),
     });
     return { recovered: 0, errors: 1 };
@@ -121,7 +131,7 @@ async function recoverStaleTriggerExecutions(
     return { recovered: 0, errors: 0 };
   }
 
-  log.info('stale_executions_found', { count: staleRows.results.length });
+  log.info('stale_executions_found', { status, count: staleRows.results.length });
 
   // Step 2: Batch-fetch all linked task statuses in a single query.
   const taskIds = [
@@ -161,16 +171,21 @@ async function recoverStaleTriggerExecutions(
   const execReasons: { exec: StaleExecution; reason: string }[] = [];
 
   for (const exec of staleRows.results) {
-    const reason = buildRecoveryReason(exec, taskMap);
+    const reason =
+      status === 'queued' && !exec.task_id
+        ? 'Queued execution never started (submission failed or timed out)'
+        : status === 'queued'
+          ? `Queued execution stale — task ${exec.task_id} never transitioned to running`
+          : buildRecoveryReason(exec, taskMap);
     execReasons.push({ exec, reason });
     updateStatements.push(
       db
         .prepare(
           `UPDATE trigger_executions
            SET status = 'failed', error_message = ?, completed_at = ?
-           WHERE id = ? AND status = 'running'`,
+           WHERE id = ? AND status = ?`,
         )
-        .bind(reason, now, exec.id),
+        .bind(reason, now, exec.id, status),
     );
   }
 
@@ -187,6 +202,7 @@ async function recoverStaleTriggerExecutions(
           executionId: entry.exec.id,
           triggerId: entry.exec.trigger_id,
           taskId: entry.exec.task_id,
+          originalStatus: status,
           reason: entry.reason,
         });
       }
@@ -194,6 +210,7 @@ async function recoverStaleTriggerExecutions(
   } catch (err) {
     errors = staleRows.results.length;
     log.error('stale_execution_batch_update_failed', {
+      status,
       count: staleRows.results.length,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -253,12 +270,16 @@ export async function runTriggerExecutionCleanup(
 ): Promise<TriggerExecutionCleanupStats> {
   // Kill switch
   if (env.TRIGGER_EXECUTION_CLEANUP_ENABLED === 'false') {
-    return { staleRecovered: 0, retentionPurged: 0, errors: 0 };
+    return { staleRecovered: 0, staleQueuedRecovered: 0, retentionPurged: 0, errors: 0 };
   }
 
-  const staleThresholdMs = parsePositiveInt(
+  const staleRunningThresholdMs = parsePositiveInt(
     env.TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
     DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
+  );
+  const staleQueuedThresholdMs = parsePositiveInt(
+    env.TRIGGER_STALE_QUEUED_TIMEOUT_MS,
+    DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS,
   );
   const retentionDays = parsePositiveInt(
     env.TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
@@ -269,9 +290,16 @@ export async function runTriggerExecutionCleanup(
     DEFAULT_TRIGGER_STALE_RECOVERY_BATCH_SIZE,
   );
 
-  const stale = await recoverStaleTriggerExecutions(
+  const staleRunning = await recoverStaleExecutionsByStatus(
     env.DATABASE,
-    staleThresholdMs,
+    'running',
+    staleRunningThresholdMs,
+    batchSize,
+  );
+  const staleQueued = await recoverStaleExecutionsByStatus(
+    env.DATABASE,
+    'queued',
+    staleQueuedThresholdMs,
     batchSize,
   );
   const retention = await purgeOldTriggerExecutions(
@@ -280,8 +308,9 @@ export async function runTriggerExecutionCleanup(
   );
 
   return {
-    staleRecovered: stale.recovered,
+    staleRecovered: staleRunning.recovered,
+    staleQueuedRecovered: staleQueued.recovered,
     retentionPurged: retention.purged,
-    errors: stale.errors + retention.errors,
+    errors: staleRunning.errors + staleQueued.errors + retention.errors,
   };
 }
