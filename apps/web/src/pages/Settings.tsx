@@ -13,6 +13,7 @@ const BASE_TABS = [
   { id: 'agent-keys', label: 'Agent Keys', path: 'agent-keys' },
   { id: 'agent-config', label: 'Agent Config', path: 'agent-config' },
   { id: 'notifications', label: 'Notifications', path: 'notifications' },
+  { id: 'usage', label: 'Usage', path: 'usage' },
 ];
 
 const SMOKE_TEST_TAB = { id: 'smoke-test-tokens', label: 'Test Tokens', path: 'smoke-test-tokens' };

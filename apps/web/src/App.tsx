@@ -13,6 +13,7 @@ import { AdminAnalytics } from './pages/AdminAnalytics';
 import { AdminErrors } from './pages/AdminErrors';
 import { AdminLogs } from './pages/AdminLogs';
 import { AdminOverview } from './pages/AdminOverview';
+import { AdminComputeUsage } from './pages/AdminComputeUsage';
 import { AdminPlatformCredentials } from './pages/AdminPlatformCredentials';
 import { AdminStream } from './pages/AdminStream';
 import { AdminUsers } from './pages/AdminUsers';
@@ -40,6 +41,7 @@ import { SettingsAgentKeys } from './pages/SettingsAgentKeys';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
 import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
+import { SettingsComputeUsage } from './pages/SettingsComputeUsage';
 import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { TaskDetail } from './pages/TaskDetail';
 import { UiStandards } from './pages/UiStandards';
@@ -103,6 +105,7 @@ export default function App() {
               <Route path="agent-keys" element={<SettingsAgentKeys />} />
               <Route path="agent-config" element={<SettingsAgentConfig />} />
               <Route path="notifications" element={<SettingsNotifications />} />
+              <Route path="usage" element={<SettingsComputeUsage />} />
               <Route path="smoke-test-tokens" element={<SettingsSmokeTestTokens />} />
             </Route>
             <Route path="/account-map" element={<AccountMap />} />
@@ -111,6 +114,7 @@ export default function App() {
               <Route index element={<Navigate to="users" replace />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="credentials" element={<AdminPlatformCredentials />} />
+              <Route path="usage" element={<AdminComputeUsage />} />
               <Route path="errors" element={<AdminErrors />} />
               <Route path="overview" element={<AdminOverview />} />
               <Route path="logs" element={<AdminLogs />} />
