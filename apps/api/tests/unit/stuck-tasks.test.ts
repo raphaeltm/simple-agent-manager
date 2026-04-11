@@ -24,6 +24,7 @@ vi.mock('../../src/services/observability', () => ({
 // Mock logger
 vi.mock('../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 // Mock ulid
