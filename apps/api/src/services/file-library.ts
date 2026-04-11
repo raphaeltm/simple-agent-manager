@@ -81,7 +81,7 @@ function getListDefaultPageSize(env: Env): number {
   return parseIntOrDefault(env.LIBRARY_LIST_DEFAULT_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_DEFAULT_PAGE_SIZE);
 }
 
-function getListMaxPageSize(env: Env): number {
+export function getListMaxPageSize(env: Env): number {
   return parseIntOrDefault(env.LIBRARY_LIST_MAX_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE);
 }
 
@@ -207,6 +207,20 @@ export async function uploadFile(
   const currentCount = countResult[0]?.count ?? 0;
   if (currentCount >= maxFiles) {
     throw errors.badRequest(`Project has reached the maximum of ${maxFiles} files`);
+  }
+
+  // Check directory count limit (only when uploading to a new directory)
+  if (directory !== '/') {
+    const maxDirs = getMaxDirectoriesPerProject(env);
+    const existingDirs = await db
+      .select({ directory: schema.projectFiles.directory })
+      .from(schema.projectFiles)
+      .where(eq(schema.projectFiles.projectId, projectId))
+      .groupBy(schema.projectFiles.directory);
+    const isNewDirectory = !existingDirs.some((d) => d.directory === directory);
+    if (isNewDirectory && existingDirs.length >= maxDirs) {
+      throw errors.badRequest(`Project has reached the maximum of ${maxDirs} directories`);
+    }
   }
 
   // Check for duplicate filename in the same directory
@@ -398,7 +412,8 @@ export async function listFiles(
     conditions.push(eq(schema.projectFiles.uploadSource, filters.uploadSource));
   }
   if (filters.mimeType) {
-    conditions.push(like(schema.projectFiles.mimeType, `${filters.mimeType}%`));
+    const escapedMime = filters.mimeType.replace(/[%_]/g, '\\$&');
+    conditions.push(like(schema.projectFiles.mimeType, `${escapedMime}%`));
   }
   if (filters.search) {
     // Escape LIKE wildcards to prevent pattern abuse
@@ -485,7 +500,10 @@ export async function listFiles(
   }
   if (filters.status) countConds.push(eq(schema.projectFiles.status, filters.status));
   if (filters.uploadSource) countConds.push(eq(schema.projectFiles.uploadSource, filters.uploadSource));
-  if (filters.mimeType) countConds.push(like(schema.projectFiles.mimeType, `${filters.mimeType}%`));
+  if (filters.mimeType) {
+    const escapedMime = filters.mimeType.replace(/[%_]/g, '\\$&');
+    countConds.push(like(schema.projectFiles.mimeType, `${escapedMime}%`));
+  }
   if (filters.search) {
     const escaped = filters.search.replace(/[%_]/g, '\\$&');
     countConds.push(like(schema.projectFiles.filename, `%${escaped}%`));

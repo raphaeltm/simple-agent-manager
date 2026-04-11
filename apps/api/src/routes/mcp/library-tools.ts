@@ -16,10 +16,13 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import {
   downloadFile,
   getFile,
+  getListMaxPageSize,
+  getMaxTagsPerFile,
   listFiles,
   replaceFile,
   updateTags,
   uploadFile,
+  validateDirectory,
 } from '../../services/file-library';
 import { signTerminalToken } from '../../services/jwt';
 import {
@@ -65,8 +68,12 @@ function validateRelativePath(path: string): string | null {
   if (path.startsWith('/')) {
     return 'Path must be relative (cannot start with /)';
   }
-  if (path.split('/').includes('..')) {
+  const segments = path.split('/');
+  if (segments.includes('..')) {
     return 'Path cannot contain ".." segments';
+  }
+  if (segments.includes('.')) {
+    return 'Path cannot contain "." segments';
   }
   return null;
 }
@@ -217,9 +224,9 @@ export async function handleListLibraryFiles(
     const db = drizzle(env.DATABASE, { schema });
 
     // Parse optional filters (bound arrays to prevent unbounded iteration)
-    const DEFAULT_MAX_TAGS_INPUT = 50;
+    const maxTags = getMaxTagsPerFile(env);
     const tags = Array.isArray(params.tags)
-      ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, DEFAULT_MAX_TAGS_INPUT)
+      ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, maxTags)
       : undefined;
     const fileType = typeof params.fileType === 'string' ? params.fileType : undefined;
     const source = params.source === 'user' || params.source === 'agent' ? params.source : undefined;
@@ -227,10 +234,19 @@ export async function handleListLibraryFiles(
     const sortBy = typeof params.sortBy === 'string' && (VALID_SORT_FIELDS as readonly string[]).includes(params.sortBy)
       ? (params.sortBy as typeof VALID_SORT_FIELDS[number])
       : undefined;
+    const maxPageSize = getListMaxPageSize(env);
     const limit = typeof params.limit === 'number' && params.limit > 0
-      ? Math.min(Math.floor(params.limit), 200)
+      ? Math.min(Math.floor(params.limit), maxPageSize)
       : undefined;
-    const directory = typeof params.directory === 'string' ? params.directory : undefined;
+    const rawDirectory = typeof params.directory === 'string' ? params.directory : undefined;
+    let directory: string | undefined;
+    if (rawDirectory) {
+      try {
+        directory = validateDirectory(rawDirectory, env);
+      } catch {
+        return jsonRpcError(requestId, INVALID_PARAMS, 'Invalid directory path');
+      }
+    }
     const recursive = typeof params.recursive === 'boolean' ? params.recursive : undefined;
 
     const result = await listFiles(db, env, tokenData.projectId, {
@@ -360,7 +376,7 @@ export async function handleUploadToLibrary(
   }
 
   const description = typeof params.description === 'string' ? params.description : undefined;
-  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, 50) : undefined;
+  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, getMaxTagsPerFile(env)) : undefined;
   const directory = typeof params.directory === 'string' ? params.directory : undefined;
 
   try {
@@ -492,7 +508,7 @@ export async function handleReplaceLibraryFile(
   }
 
   const description = typeof params.description === 'string' ? params.description : undefined;
-  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, 50) : undefined;
+  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, getMaxTagsPerFile(env)) : undefined;
 
   try {
     const db = drizzle(env.DATABASE, { schema });

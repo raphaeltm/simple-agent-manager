@@ -6,6 +6,7 @@
  */
 
 import type { ListFilesRequest, MoveFileRequest, UpdateTagsRequest } from '@simple-agent-manager/shared';
+import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -26,6 +27,7 @@ import {
   replaceFile,
   updateTags,
   uploadFile,
+  validateDirectory,
   validateFilename,
 } from '../services/file-library';
 
@@ -174,7 +176,7 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
     uploadSource: query['uploadSource'] as ListFilesRequest['uploadSource'],
     status: query['status'] as ListFilesRequest['status'],
     search: query['search'] || undefined,
-    directory: query['directory'] || undefined,
+    directory: query['directory'] ? validateDirectory(query['directory'], c.env) : undefined,
     recursive: query['recursive'] === 'true',
     sortBy: query['sortBy'] as ListFilesRequest['sortBy'],
     sortOrder: query['sortOrder'] as ListFilesRequest['sortOrder'],
@@ -184,6 +186,26 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
 
   const result = await listFiles(db, c.env, projectId, filters);
   return c.json(result, 200);
+});
+
+// ---------------------------------------------------------------------------
+// GET /directories — list subdirectories
+// NOTE: Must be registered BEFORE /:fileId to avoid being shadowed
+// ---------------------------------------------------------------------------
+
+libraryRoutes.get('/directories', requireAuth(), requireApproved(), async (c) => {
+  const auth = getAuth(c);
+  const userId = auth.user.id;
+  const projectId = requireParam(c.req.param('projectId'), 'projectId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const rawParent = c.req.query('parentDirectory') || '/';
+  const parentDirectory = validateDirectory(rawParent, c.env);
+  const directories = await listDirectories(db, projectId, parentDirectory);
+
+  return c.json({ directories }, 200);
 });
 
 // ---------------------------------------------------------------------------
@@ -279,7 +301,10 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   }
 
   // Enforce size limit before decrypting (reuse the configurable load-max from file-utils)
-  const previewMaxBytes = parseInt(c.env.FILE_PREVIEW_MAX_BYTES ?? '52428800', 10); // 50 MB default
+  const previewMaxBytes = parseInt(
+    c.env.FILE_PREVIEW_MAX_BYTES ?? String(LIBRARY_DEFAULTS.FILE_PREVIEW_MAX_BYTES),
+    10,
+  );
   if (file.sizeBytes > previewMaxBytes) {
     throw errors.badRequest('File is too large for inline preview');
   }
@@ -328,24 +353,6 @@ libraryRoutes.delete('/:fileId', requireAuth(), requireApproved(), async (c) => 
   await deleteFile(db, c.env.R2, projectId, fileId);
 
   return c.json({ success: true }, 200);
-});
-
-// ---------------------------------------------------------------------------
-// GET /directories — list subdirectories
-// ---------------------------------------------------------------------------
-
-libraryRoutes.get('/directories', requireAuth(), requireApproved(), async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
-  const projectId = requireParam(c.req.param('projectId'), 'projectId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireOwnedProject(db, projectId, userId);
-
-  const parentDirectory = c.req.query('parentDirectory') || '/';
-  const directories = await listDirectories(db, projectId, parentDirectory);
-
-  return c.json({ directories }, 200);
 });
 
 // ---------------------------------------------------------------------------

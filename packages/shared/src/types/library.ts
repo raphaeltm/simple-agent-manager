@@ -165,6 +165,8 @@ export const LIBRARY_DEFAULTS = {
   MAX_DIRECTORY_PATH_LENGTH: 500,
   /** Maximum directories per project (default: 500). Env: LIBRARY_MAX_DIRECTORIES_PER_PROJECT */
   MAX_DIRECTORIES_PER_PROJECT: 500,
+  /** Maximum file size for inline browser preview in bytes (default: 50MB). Env: FILE_PREVIEW_MAX_BYTES */
+  FILE_PREVIEW_MAX_BYTES: 50 * 1024 * 1024,
 } as const;
 
 /**
