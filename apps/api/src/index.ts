@@ -57,6 +57,7 @@ import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
+import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken } from './services/jwt';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -467,6 +468,10 @@ export interface Env {
   CRON_SWEEP_ENABLED?: string;                      // Kill switch: "false" to disable cron sweep (default: enabled)
   TRIGGER_NAME_MAX_LENGTH?: string;                 // Max trigger name length (default: 100)
   TRIGGER_MAX_CONCURRENT_LIMIT?: string;            // Upper bound for maxConcurrent per trigger (default: 10)
+  // Trigger execution cleanup
+  TRIGGER_STALE_EXECUTION_TIMEOUT_MS?: string;      // Timeout before running executions are considered stale (default: 1800000 = 30 min)
+  TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string;    // Days to retain completed/failed/skipped execution logs (default: 90)
+  TRIGGER_EXECUTION_CLEANUP_ENABLED?: string;       // Kill switch: "false" to disable cleanup sweep (default: enabled)
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -886,6 +891,9 @@ export default {
     // Fire due cron triggers
     const cronTriggers = await runCronTriggerSweep(env);
 
+    // Recover stale trigger executions and purge old logs
+    const triggerCleanup = await runTriggerExecutionCleanup(env);
+
     log.info('cron.completed', {
       cron: controller.cron,
       type: 'sweep',
@@ -909,6 +917,9 @@ export default {
       cronTriggersFired: cronTriggers.fired,
       cronTriggersSkipped: cronTriggers.skipped,
       cronTriggersFailed: cronTriggers.failed,
+      triggerExecStaleRecovered: triggerCleanup.staleRecovered,
+      triggerExecRetentionPurged: triggerCleanup.retentionPurged,
+      triggerExecCleanupErrors: triggerCleanup.errors,
     });
   },
 };
