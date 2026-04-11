@@ -86,8 +86,8 @@ const SKIP_REASON_LABELS: Record<string, string> = {
   paused: 'Trigger paused',
 };
 
-/** Statuses that indicate a stuck execution (eligible for cleanup). */
-const STUCK_STATUSES = new Set(['queued', 'running']);
+/** Statuses that indicate a stuck execution (eligible for manual cleanup). */
+const STUCK_STATUSES = new Set(['queued']);
 
 /** Statuses where individual deletion is allowed (non-running). */
 const DELETABLE_STATUSES = new Set(['queued', 'failed', 'skipped', 'completed']);
@@ -300,7 +300,7 @@ const CleanupButton: FC<{ loading: boolean; onClick: () => void }> = ({ loading,
     className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-warning hover:text-warning/80 bg-transparent border border-warning/30 rounded-md cursor-pointer disabled:opacity-50 ${FOCUS_RING}`}
   >
     {loading ? <Spinner size="sm" /> : <Zap size={12} />}
-    {loading ? 'Cleaning up...' : 'Clear stuck executions'}
+    {loading ? 'Cleaning up...' : 'Clear stuck queued'}
   </button>
 );
 

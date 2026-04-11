@@ -176,5 +176,12 @@ describe('runCronTriggerSweep', () => {
       projectId: 'project-1',
       triggeredBy: 'cron',
     });
+
+    // Verify concurrent limit checks use inArray(['queued', 'running']), not just eq('running')
+    const { inArray } = await import('drizzle-orm');
+    expect(inArray).toHaveBeenCalledWith(
+      expect.anything(),
+      ['queued', 'running']
+    );
   });
 });

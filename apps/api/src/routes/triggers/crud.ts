@@ -765,7 +765,7 @@ crudRoutes.delete('/:triggerId/executions/:executionId', async (c) => {
 
 // =============================================================================
 // POST /api/projects/:projectId/triggers/:triggerId/executions/cleanup
-// Force-fail all stuck executions ('queued' or 'running' with no active task)
+// Force-fail all stuck queued executions
 // =============================================================================
 crudRoutes.post('/:triggerId/executions/cleanup', async (c) => {
   const auth = getAuth(c);
@@ -796,7 +796,7 @@ crudRoutes.post('/:triggerId/executions/cleanup', async (c) => {
     throw errors.notFound('Trigger');
   }
 
-  // Find all stuck executions (queued or running)
+  // Find all stuck queued executions (running executions may have active tasks — use cron sweep for those)
   const stuckExecutions = await db
     .select({ id: schema.triggerExecutions.id, status: schema.triggerExecutions.status })
     .from(schema.triggerExecutions)
@@ -804,7 +804,7 @@ crudRoutes.post('/:triggerId/executions/cleanup', async (c) => {
       and(
         eq(schema.triggerExecutions.triggerId, triggerId),
         eq(schema.triggerExecutions.projectId, projectId),
-        inArray(schema.triggerExecutions.status, ['queued', 'running'])
+        eq(schema.triggerExecutions.status, 'queued')
       )
     );
 

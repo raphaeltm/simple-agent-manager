@@ -360,8 +360,8 @@ describe('runTriggerExecutionCleanup', () => {
       const stats = await runTriggerExecutionCleanup(env);
 
       expect(stats.staleRecovered).toBe(0);
-      // Error count includes both running and queued passes — running pass has 2 errors from batch failure
-      expect(stats.errors).toBeGreaterThanOrEqual(2);
+      // Running pass has 2 stale executions that fail in batch → 2 errors. Queued pass has no data → 0 errors.
+      expect(stats.errors).toBe(2);
     });
 
     it('does not count recovered when UPDATE matched zero rows (already transitioned)', async () => {
