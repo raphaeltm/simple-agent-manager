@@ -11,14 +11,17 @@ export type {
   WebsiteTrafficHost,
   WebsiteTrafficSection,
 } from './admin';
+export type { AdminComputeUsageResponse, AdminUserDetailedUsage } from './admin';
 export {
   approveOrSuspendUser,
   changeUserRole,
   createPlatformCredential,
   deletePlatformCredential,
+  fetchAdminComputeUsage,
   fetchAdminErrors,
   fetchAdminErrorTrends,
   fetchAdminHealth,
+  fetchAdminUserComputeUsage,
   fetchAnalyticsDau,
   fetchAnalyticsEvents,
   fetchAnalyticsFeatureAdoption,
@@ -32,10 +35,7 @@ export {
   listPlatformCredentials,
   queryAdminLogs,
   updatePlatformCredential,
-  fetchAdminComputeUsage,
-  fetchAdminUserComputeUsage,
 } from './admin';
-export type { AdminComputeUsageResponse, AdminUserDetailedUsage } from './admin';
 export {
   createAgentProfile,
   deleteAgentCredential,
@@ -225,6 +225,7 @@ export {
   testTrigger,
   updateTrigger,
 } from './triggers';
+export { fetchComputeUsage } from './usage';
 export {
   createAgentSession,
   createWorkspace,
@@ -246,4 +247,3 @@ export {
   suspendAgentSession,
   updateWorkspace,
 } from './workspaces';
-export { fetchComputeUsage } from './usage';

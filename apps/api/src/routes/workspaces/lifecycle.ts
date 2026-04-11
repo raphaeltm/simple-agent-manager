@@ -7,9 +7,9 @@ import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { stopComputeTracking } from '../../services/compute-usage';
 import { parseOptionalBody, WorkspaceErrorSchema,WorkspaceStatusUpdateSchema } from '../../schemas';
 import { writeBootLogs } from '../../services/boot-log';
+import { stopComputeTracking } from '../../services/compute-usage';
 import {
   rebuildWorkspaceOnNode,
   restartWorkspaceOnNode,
