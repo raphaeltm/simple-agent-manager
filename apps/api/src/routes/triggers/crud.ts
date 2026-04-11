@@ -714,4 +714,129 @@ crudRoutes.post('/:triggerId/run', async (c) => {
   }
 });
 
+// =============================================================================
+// DELETE /api/projects/:projectId/triggers/:triggerId/executions/:executionId
+// Delete a single execution record (only non-running executions)
+// =============================================================================
+crudRoutes.delete('/:triggerId/executions/:executionId', async (c) => {
+  const auth = getAuth(c);
+  const userId = auth.user.id;
+  const projectId = c.req.param('projectId');
+  const triggerId = c.req.param('triggerId');
+  const executionId = c.req.param('executionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  if (!projectId || !triggerId || !executionId) {
+    throw errors.badRequest('projectId, triggerId, and executionId are required');
+  }
+
+  await requireOwnedProject(db, projectId, userId);
+
+  // Verify the execution belongs to this trigger and project
+  const [execution] = await db
+    .select()
+    .from(schema.triggerExecutions)
+    .where(
+      and(
+        eq(schema.triggerExecutions.id, executionId),
+        eq(schema.triggerExecutions.triggerId, triggerId),
+        eq(schema.triggerExecutions.projectId, projectId)
+      )
+    )
+    .limit(1);
+
+  if (!execution) {
+    throw errors.notFound('Trigger execution');
+  }
+
+  // Prevent deleting actively running executions
+  if (execution.status === 'running') {
+    throw errors.conflict('Cannot delete an actively running execution');
+  }
+
+  await db
+    .delete(schema.triggerExecutions)
+    .where(eq(schema.triggerExecutions.id, executionId));
+
+  log.info('trigger.execution_deleted', { triggerId, executionId, projectId });
+
+  return c.json({ success: true });
+});
+
+// =============================================================================
+// POST /api/projects/:projectId/triggers/:triggerId/executions/cleanup
+// Force-fail all stuck executions ('queued' or 'running' with no active task)
+// =============================================================================
+crudRoutes.post('/:triggerId/executions/cleanup', async (c) => {
+  const auth = getAuth(c);
+  const userId = auth.user.id;
+  const projectId = c.req.param('projectId');
+  const triggerId = c.req.param('triggerId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  if (!projectId || !triggerId) {
+    throw errors.badRequest('projectId and triggerId are required');
+  }
+
+  await requireOwnedProject(db, projectId, userId);
+
+  // Verify the trigger exists
+  const [trigger] = await db
+    .select()
+    .from(schema.triggers)
+    .where(
+      and(
+        eq(schema.triggers.id, triggerId),
+        eq(schema.triggers.projectId, projectId)
+      )
+    )
+    .limit(1);
+
+  if (!trigger) {
+    throw errors.notFound('Trigger');
+  }
+
+  // Find all stuck executions (queued or running)
+  const stuckExecutions = await db
+    .select({ id: schema.triggerExecutions.id, status: schema.triggerExecutions.status })
+    .from(schema.triggerExecutions)
+    .where(
+      and(
+        eq(schema.triggerExecutions.triggerId, triggerId),
+        eq(schema.triggerExecutions.projectId, projectId),
+        inArray(schema.triggerExecutions.status, ['queued', 'running'])
+      )
+    );
+
+  if (stuckExecutions.length === 0) {
+    return c.json({ cleaned: 0 });
+  }
+
+  const now = new Date().toISOString();
+  const stuckIds = stuckExecutions.map((e) => e.id);
+
+  await db
+    .update(schema.triggerExecutions)
+    .set({
+      status: 'failed',
+      errorMessage: 'Manually cleaned up by user',
+      completedAt: now,
+    })
+    .where(
+      and(
+        inArray(schema.triggerExecutions.id, stuckIds),
+        eq(schema.triggerExecutions.triggerId, triggerId)
+      )
+    );
+
+  log.info('trigger.executions_cleaned', {
+    triggerId,
+    projectId,
+    cleaned: stuckExecutions.length,
+    statuses: stuckExecutions.map((e) => e.status),
+  });
+
+  return c.json({ cleaned: stuckExecutions.length });
+});
+
 export { crudRoutes };

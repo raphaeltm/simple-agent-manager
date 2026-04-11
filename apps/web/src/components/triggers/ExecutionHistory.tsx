@@ -6,18 +6,21 @@ import {
   Clock,
   ExternalLink,
   SkipForward,
+  Trash2,
   XCircle,
+  Zap,
 } from 'lucide-react';
-import type { FC } from 'react';
+import { type FC, useCallback, useState } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { cleanupStuckExecutions, deleteExecution } from '../../lib/api/triggers';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function formatDuration(startedAt: string | null, completedAt: string | null): string {
-  if (!startedAt || !completedAt) return '—';
+  if (!startedAt || !completedAt) return '\u2014';
   const durationMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
   if (durationMs < 1000) return '<1s';
   const seconds = Math.floor(durationMs / 1000);
@@ -83,6 +86,12 @@ const SKIP_REASON_LABELS: Record<string, string> = {
   paused: 'Trigger paused',
 };
 
+/** Statuses that indicate a stuck execution (eligible for cleanup). */
+const STUCK_STATUSES = new Set(['queued', 'running']);
+
+/** Statuses where individual deletion is allowed (non-running). */
+const DELETABLE_STATUSES = new Set(['queued', 'failed', 'skipped', 'completed']);
+
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
@@ -96,6 +105,8 @@ interface ExecutionHistoryProps {
   hasMore: boolean;
   onLoadMore: () => void;
   projectId: string;
+  triggerId: string;
+  onMutated?: () => void;
 }
 
 export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
@@ -104,8 +115,34 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
   hasMore,
   onLoadMore,
   projectId,
+  triggerId,
+  onMutated,
 }) => {
   const isMobile = useIsMobile();
+  const [cleaningUp, setCleaningUp] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const hasStuckExecutions = executions.some((e) => STUCK_STATUSES.has(e.status));
+
+  const handleCleanup = useCallback(async () => {
+    setCleaningUp(true);
+    try {
+      await cleanupStuckExecutions(projectId, triggerId);
+      onMutated?.();
+    } finally {
+      setCleaningUp(false);
+    }
+  }, [projectId, triggerId, onMutated]);
+
+  const handleDelete = useCallback(async (executionId: string) => {
+    setDeletingId(executionId);
+    try {
+      await deleteExecution(projectId, triggerId, executionId);
+      onMutated?.();
+    } finally {
+      setDeletingId(null);
+    }
+  }, [projectId, triggerId, onMutated]);
 
   if (loading && executions.length === 0) {
     return (
@@ -128,8 +165,17 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
   if (isMobile) {
     return (
       <div className="space-y-3">
+        {hasStuckExecutions && (
+          <CleanupButton loading={cleaningUp} onClick={handleCleanup} />
+        )}
         {executions.map((exec) => (
-          <ExecutionCard key={exec.id} execution={exec} projectId={projectId} />
+          <ExecutionCard
+            key={exec.id}
+            execution={exec}
+            projectId={projectId}
+            onDelete={handleDelete}
+            deletingId={deletingId}
+          />
         ))}
         {hasMore && (
           <button
@@ -146,6 +192,11 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
 
   return (
     <div>
+      {hasStuckExecutions && (
+        <div className="mb-3">
+          <CleanupButton loading={cleaningUp} onClick={handleCleanup} />
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-fg-muted border-b border-border-default">
@@ -153,11 +204,13 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
             <th className="pb-2 font-medium">Status</th>
             <th className="pb-2 font-medium">Duration</th>
             <th className="pb-2 font-medium">Task</th>
+            <th className="pb-2 font-medium w-10"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           {executions.map((exec) => {
             const statusCfg = EXECUTION_STATUS_CONFIG[exec.status] ?? DEFAULT_EXEC_STATUS;
+            const canDelete = DELETABLE_STATUSES.has(exec.status);
             return (
               <tr key={exec.id} className="border-b border-border-default last:border-b-0">
                 <td className="py-2.5 text-fg-primary">
@@ -196,7 +249,24 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
                       <ExternalLink size={12} aria-hidden="true" />
                     </a>
                   ) : (
-                    <span className="text-fg-muted">—</span>
+                    <span className="text-fg-muted">{'\u2014'}</span>
+                  )}
+                </td>
+                <td className="py-2.5">
+                  {canDelete && (
+                    <button
+                      onClick={() => handleDelete(exec.id)}
+                      disabled={deletingId === exec.id}
+                      className={`p-1 text-fg-muted hover:text-danger bg-transparent border-none cursor-pointer disabled:opacity-50 ${FOCUS_RING}`}
+                      title="Delete execution"
+                      aria-label={`Delete execution from ${formatDateTime(exec.scheduledAt)}`}
+                    >
+                      {deletingId === exec.id ? (
+                        <Spinner size="sm" />
+                      ) : (
+                        <Trash2 size={14} />
+                      )}
+                    </button>
                   )}
                 </td>
               </tr>
@@ -220,14 +290,32 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
 };
 
 // ---------------------------------------------------------------------------
+// Cleanup button
+// ---------------------------------------------------------------------------
+
+const CleanupButton: FC<{ loading: boolean; onClick: () => void }> = ({ loading, onClick }) => (
+  <button
+    onClick={onClick}
+    disabled={loading}
+    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-warning hover:text-warning/80 bg-transparent border border-warning/30 rounded-md cursor-pointer disabled:opacity-50 ${FOCUS_RING}`}
+  >
+    {loading ? <Spinner size="sm" /> : <Zap size={12} />}
+    {loading ? 'Cleaning up...' : 'Clear stuck executions'}
+  </button>
+);
+
+// ---------------------------------------------------------------------------
 // Mobile card variant
 // ---------------------------------------------------------------------------
 
-const ExecutionCard: FC<{ execution: TriggerExecutionResponse; projectId: string }> = ({
-  execution,
-  projectId,
-}) => {
+const ExecutionCard: FC<{
+  execution: TriggerExecutionResponse;
+  projectId: string;
+  onDelete: (id: string) => void;
+  deletingId: string | null;
+}> = ({ execution, projectId, onDelete, deletingId }) => {
   const statusCfg = EXECUTION_STATUS_CONFIG[execution.status] ?? DEFAULT_EXEC_STATUS;
+  const canDelete = DELETABLE_STATUSES.has(execution.status);
 
   return (
     <div className="border border-border-default rounded-md p-3">
@@ -235,13 +323,30 @@ const ExecutionCard: FC<{ execution: TriggerExecutionResponse; projectId: string
         <span className="text-sm text-fg-primary">
           {formatDateTime(execution.scheduledAt)}
         </span>
-        <span
-          className="inline-flex items-center gap-1.5 text-sm"
-          style={{ color: statusCfg.color }}
-        >
-          {statusCfg.icon}
-          {statusCfg.label}
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-flex items-center gap-1.5 text-sm"
+            style={{ color: statusCfg.color }}
+          >
+            {statusCfg.icon}
+            {statusCfg.label}
+          </span>
+          {canDelete && (
+            <button
+              onClick={() => onDelete(execution.id)}
+              disabled={deletingId === execution.id}
+              className={`p-1 text-fg-muted hover:text-danger bg-transparent border-none cursor-pointer disabled:opacity-50 ${FOCUS_RING}`}
+              title="Delete execution"
+              aria-label={`Delete execution from ${formatDateTime(execution.scheduledAt)}`}
+            >
+              {deletingId === execution.id ? (
+                <Spinner size="sm" />
+              ) : (
+                <Trash2 size={14} />
+              )}
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex items-center justify-between mt-2 text-xs text-fg-muted">
         <span>Duration: {formatDuration(execution.startedAt, execution.completedAt)}</span>

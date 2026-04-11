@@ -15,7 +15,7 @@ import {
   DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
 } from '@simple-agent-manager/shared';
-import { and, count, desc, eq, isNotNull, lte } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, lte } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -122,18 +122,18 @@ async function processTrigger(
     return 'skipped';
   }
 
-  // Check skipIfRunning
+  // Check skipIfRunning — count both 'queued' and 'running' as active
   if (trigger.skipIfRunning) {
-    const [runningCount] = await db
+    const [activeCount] = await db
       .select({ count: count() })
       .from(schema.triggerExecutions)
       .where(
         and(
           eq(schema.triggerExecutions.triggerId, triggerId),
-          eq(schema.triggerExecutions.status, 'running')
+          inArray(schema.triggerExecutions.status, ['queued', 'running'])
         )
       );
-    if ((runningCount?.count ?? 0) > 0) {
+    if ((activeCount?.count ?? 0) > 0) {
       log.info('cron_sweep.skip_running', { triggerId, projectId });
       await createSkippedExecution(db, trigger, now, 'still_running');
       await advanceNextFireAt(db, trigger);
@@ -141,7 +141,7 @@ async function processTrigger(
     }
   }
 
-  // Check maxConcurrent
+  // Check maxConcurrent — count both 'queued' and 'running' as active
   const maxConcurrent = trigger.maxConcurrent ?? DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT;
   const [activeCount] = await db
     .select({ count: count() })
@@ -149,7 +149,7 @@ async function processTrigger(
     .where(
       and(
         eq(schema.triggerExecutions.triggerId, triggerId),
-        eq(schema.triggerExecutions.status, 'running')
+        inArray(schema.triggerExecutions.status, ['queued', 'running'])
       )
     );
   if ((activeCount?.count ?? 0) >= maxConcurrent) {
