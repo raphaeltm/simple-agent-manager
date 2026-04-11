@@ -179,14 +179,15 @@ async function recoverStaleTriggerExecutions(
 
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
-      const { exec, reason } = execReasons[i];
+      const entry = execReasons[i];
+      if (!result || !entry) continue;
       if (result.meta.changes && result.meta.changes > 0) {
         recovered++;
         log.info('stale_execution_recovered', {
-          executionId: exec.id,
-          triggerId: exec.trigger_id,
-          taskId: exec.task_id,
-          reason,
+          executionId: entry.exec.id,
+          triggerId: entry.exec.trigger_id,
+          taskId: entry.exec.task_id,
+          reason: entry.reason,
         });
       }
     }
