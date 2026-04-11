@@ -4,7 +4,7 @@
  * Verifies stale execution recovery (task deleted, task terminal, task stuck,
  * no task linked) and retention purge of old execution logs.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/lib/logger', () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -318,6 +318,32 @@ describe('runTriggerExecutionCleanup', () => {
         staleExecutions: [exec],
         taskLookups: { 'task-err': null },
         updateError: new Error('D1 write failed'),
+      });
+      const env = createMockEnv({ DATABASE: db });
+
+      const stats = await runTriggerExecutionCleanup(env);
+
+      expect(stats.staleRecovered).toBe(0);
+      expect(stats.errors).toBe(1);
+    });
+
+    it('does not count recovered when UPDATE matched zero rows (already transitioned)', async () => {
+      const exec = makeStaleExec({ id: 'exec-race', task_id: null });
+      const db = createMockDb({
+        staleExecutions: [exec],
+        updateChanges: 0, // another sweep already transitioned this row
+      });
+      const env = createMockEnv({ DATABASE: db });
+
+      const stats = await runTriggerExecutionCleanup(env);
+
+      expect(stats.staleRecovered).toBe(0);
+      expect(stats.errors).toBe(0);
+    });
+
+    it('returns error when stale query itself fails', async () => {
+      const db = createMockDb({
+        staleQueryError: new Error('D1 unavailable'),
       });
       const env = createMockEnv({ DATABASE: db });
 

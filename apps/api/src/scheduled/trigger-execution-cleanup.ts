@@ -80,15 +80,23 @@ async function recoverStaleTriggerExecutions(
 
   // Find all running executions older than the stale threshold.
   // Use COALESCE to handle cases where started_at was never set (submission failure).
-  const staleRows = await db
-    .prepare(
-      `SELECT id, trigger_id, task_id, started_at, created_at
-       FROM trigger_executions
-       WHERE status = 'running'
-         AND COALESCE(started_at, created_at) <= ?`,
-    )
-    .bind(cutoff)
-    .all<StaleExecution>();
+  let staleRows: { results: StaleExecution[] };
+  try {
+    staleRows = await db
+      .prepare(
+        `SELECT id, trigger_id, task_id, started_at, created_at
+         FROM trigger_executions
+         WHERE status = 'running'
+           AND COALESCE(started_at, created_at) <= ?`,
+      )
+      .bind(cutoff)
+      .all<StaleExecution>();
+  } catch (err) {
+    log.error('stale_execution_query_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { recovered: 0, errors: 1 };
+  }
 
   if (!staleRows.results.length) {
     return { recovered: 0, errors: 0 };
