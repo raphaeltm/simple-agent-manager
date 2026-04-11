@@ -3,10 +3,12 @@
  *
  * Files are encrypted with envelope encryption (DEK per file) and stored in R2.
  * Metadata (filename, tags, ownership) is stored in D1.
+ *
+ * Config/validation helpers: ./file-library-config.ts
+ * Directory operations (move, listDirectories): ./file-library-directories.ts
  */
 
 import type {
-  DirectoryEntry,
   FileEncryptionMetadata,
   FileStatus,
   FileTagSource,
@@ -17,13 +19,7 @@ import type {
   ProjectFileTag,
   UpdateTagsRequest,
 } from '@simple-agent-manager/shared';
-import {
-  buildLibraryR2Key,
-  LIBRARY_DEFAULTS,
-  LIBRARY_FILENAME_PATTERN,
-  LIBRARY_TAG_PATTERN,
-  validateDirectoryPath,
-} from '@simple-agent-manager/shared';
+import { buildLibraryR2Key } from '@simple-agent-manager/shared';
 import { and, asc, desc, eq, inArray, like, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
@@ -38,93 +34,37 @@ import {
   metadataToR2CustomMetadata,
   r2CustomMetadataToMetadata,
 } from './file-encryption';
+import {
+  getKeyVersion,
+  getListMaxPageSize,
+  getMaxDirectoriesPerProject,
+  getMaxFilesPerProject,
+  getMaxTagsPerFile,
+  getUploadMaxBytes,
+  validateDirectory,
+  validateFilename,
+  validateTag,
+} from './file-library-config';
 
-// ---------------------------------------------------------------------------
-// Config helpers (all limits configurable per constitution Principle XI)
-// ---------------------------------------------------------------------------
-
-function parseIntOrDefault(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = parseInt(value, 10);
-  return isNaN(parsed) || parsed <= 0 ? fallback : parsed;
-}
-
-export function getUploadMaxBytes(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_UPLOAD_MAX_BYTES, LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES);
-}
-
-export function getMaxFilesPerProject(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_FILES_PER_PROJECT, LIBRARY_DEFAULTS.MAX_FILES_PER_PROJECT);
-}
-
-export function getMaxTagsPerFile(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_TAGS_PER_FILE, LIBRARY_DEFAULTS.MAX_TAGS_PER_FILE);
-}
-
-export function getMaxTagLength(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_TAG_LENGTH, LIBRARY_DEFAULTS.MAX_TAG_LENGTH);
-}
-
-export function getMaxFilenameLength(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_FILENAME_LENGTH, LIBRARY_DEFAULTS.MAX_FILENAME_LENGTH);
-}
-
-export function getDownloadTimeoutMs(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_DOWNLOAD_TIMEOUT_MS, LIBRARY_DEFAULTS.DOWNLOAD_TIMEOUT_MS);
-}
-
-export function getKeyVersion(env: Env): string {
-  return env.LIBRARY_KEY_VERSION ?? '1';
-}
-
-function getListDefaultPageSize(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_LIST_DEFAULT_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_DEFAULT_PAGE_SIZE);
-}
-
-export function getListMaxPageSize(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_LIST_MAX_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE);
-}
-
-export function getMaxDirectoryDepth(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_DIRECTORY_DEPTH, LIBRARY_DEFAULTS.MAX_DIRECTORY_DEPTH);
-}
-
-export function getMaxDirectoryPathLength(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_DIRECTORY_PATH_LENGTH, LIBRARY_DEFAULTS.MAX_DIRECTORY_PATH_LENGTH);
-}
-
-export function getMaxDirectoriesPerProject(env: Env): number {
-  return parseIntOrDefault(env.LIBRARY_MAX_DIRECTORIES_PER_PROJECT, LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT);
-}
-
-/** Validate a directory path using configurable env limits. Throws on invalid. Returns normalized path. */
-export function validateDirectory(directory: string, env: Env): string {
-  return validateDirectoryPath(directory, getMaxDirectoryDepth(env), getMaxDirectoryPathLength(env));
-}
-
-// ---------------------------------------------------------------------------
-// Tag validation
-// ---------------------------------------------------------------------------
-
-export function validateTag(tag: string, env: Env): void {
-  const maxLen = getMaxTagLength(env);
-  if (tag.length === 0 || tag.length > maxLen) {
-    throw errors.badRequest(`Tag must be 1-${maxLen} characters`);
-  }
-  if (!LIBRARY_TAG_PATTERN.test(tag)) {
-    throw errors.badRequest(`Tag "${tag}" must be lowercase alphanumeric with hyphens`);
-  }
-}
-
-export function validateFilename(filename: string, env: Env): void {
-  const maxLen = getMaxFilenameLength(env);
-  if (!filename || filename.length > maxLen) {
-    throw errors.badRequest(`Filename must be 1-${maxLen} characters`);
-  }
-  if (!LIBRARY_FILENAME_PATTERN.test(filename)) {
-    throw errors.badRequest('Filename contains invalid characters');
-  }
-}
+// Re-export config, validation, and directory functions for consumers
+export {
+  getDownloadTimeoutMs,
+  getKeyVersion,
+  getListMaxPageSize,
+  getMaxDirectoryDepth,
+  getMaxDirectoriesPerProject,
+  getMaxDirectoryPathLength,
+  getMaxFilenameLength,
+  getMaxFilesPerProject,
+  getMaxTagLength,
+  getMaxTagsPerFile,
+  getUploadMaxBytes,
+  resolvePageSize,
+  validateDirectory,
+  validateFilename,
+  validateTag,
+} from './file-library-config';
+export { listDirectories, moveFile } from './file-library-directories';
 
 // ---------------------------------------------------------------------------
 // Row → API type mapping
@@ -375,6 +315,13 @@ export async function replaceFile(
 // ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
+
+function getListDefaultPageSize(env: Env): number {
+  const val = env.LIBRARY_LIST_DEFAULT_PAGE_SIZE;
+  if (!val) return 50;
+  const parsed = parseInt(val, 10);
+  return isNaN(parsed) || parsed <= 0 ? 50 : parsed;
+}
 
 export async function listFiles(
   db: AppDb,
@@ -708,142 +655,4 @@ export async function updateTags(
     .where(eq(schema.projectFileTags.fileId, fileId));
 
   return updatedTags.map(rowToTag);
-}
-
-// ---------------------------------------------------------------------------
-// Move file (change directory and/or filename)
-// ---------------------------------------------------------------------------
-
-export async function moveFile(
-  db: AppDb,
-  env: Env,
-  projectId: string,
-  fileId: string,
-  move: { directory?: string; filename?: string }
-): Promise<ProjectFile> {
-  // Fetch existing
-  const rows = await db
-    .select()
-    .from(schema.projectFiles)
-    .where(and(eq(schema.projectFiles.id, fileId), eq(schema.projectFiles.projectId, projectId)))
-    .limit(1);
-  if (!rows[0]) {
-    throw errors.notFound('File');
-  }
-
-  const existing = rows[0];
-  const newDirectory = move.directory ? validateDirectory(move.directory, env) : existing.directory;
-  const newFilename = move.filename ?? existing.filename;
-
-  if (move.filename) {
-    validateFilename(newFilename, env);
-  }
-
-  // Check no change
-  if (newDirectory === existing.directory && newFilename === existing.filename) {
-    return rowToProjectFile(existing);
-  }
-
-  // Check for collision at destination
-  const collision = await db
-    .select({ id: schema.projectFiles.id })
-    .from(schema.projectFiles)
-    .where(
-      and(
-        eq(schema.projectFiles.projectId, projectId),
-        eq(schema.projectFiles.directory, newDirectory),
-        eq(schema.projectFiles.filename, newFilename)
-      )
-    )
-    .limit(1);
-  if (collision.length > 0 && collision[0]!.id !== fileId) {
-    throw errors.conflict(`File "${newFilename}" already exists in directory "${newDirectory}"`);
-  }
-
-  const now = new Date().toISOString();
-  await db
-    .update(schema.projectFiles)
-    .set({ directory: newDirectory, filename: newFilename, updatedAt: now })
-    .where(eq(schema.projectFiles.id, fileId));
-
-  log.info('file_library_move', {
-    projectId,
-    fileId,
-    fromDir: existing.directory,
-    toDir: newDirectory,
-    fromFilename: existing.filename,
-    toFilename: newFilename,
-  });
-
-  const updated = await db
-    .select()
-    .from(schema.projectFiles)
-    .where(eq(schema.projectFiles.id, fileId))
-    .limit(1);
-  return rowToProjectFile(updated[0]!);
-}
-
-// ---------------------------------------------------------------------------
-// List directories
-// ---------------------------------------------------------------------------
-
-export async function listDirectories(
-  db: AppDb,
-  projectId: string,
-  parentDirectory: string = '/',
-  env?: Env,
-): Promise<DirectoryEntry[]> {
-  // Query all distinct directories that start with the parent path
-  const escapedParent = parentDirectory.replace(/[%_]/g, '\\$&');
-  const maxDirs = env ? getMaxDirectoriesPerProject(env) : LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT;
-  const allDirs = await db
-    .select({
-      directory: schema.projectFiles.directory,
-      count: sql<number>`count(*)`,
-    })
-    .from(schema.projectFiles)
-    .where(
-      and(
-        eq(schema.projectFiles.projectId, projectId),
-        like(schema.projectFiles.directory, `${escapedParent}%`)
-      )
-    )
-    .groupBy(schema.projectFiles.directory)
-    .limit(maxDirs + 1);
-
-  // Extract immediate children of parentDirectory
-  const childDirs = new Map<string, number>();
-  const parentDepth = parentDirectory === '/' ? 0 : parentDirectory.split('/').filter(Boolean).length;
-
-  for (const row of allDirs) {
-    const segments = row.directory.split('/').filter(Boolean);
-    // Only consider directories that are deeper than parent
-    if (segments.length <= parentDepth) continue;
-
-    // Build the immediate child path
-    const childSegments = segments.slice(0, parentDepth + 1);
-    const childPath = '/' + childSegments.join('/') + '/';
-
-    const current = childDirs.get(childPath) ?? 0;
-    // Only count files directly in this directory (not subdirectories)
-    if (row.directory === childPath) {
-      childDirs.set(childPath, current + row.count);
-    } else {
-      // Ensure the entry exists even if no files are directly in it
-      if (!childDirs.has(childPath)) {
-        childDirs.set(childPath, 0);
-      }
-    }
-  }
-
-  return Array.from(childDirs.entries())
-    .map(([path, fileCount]) => {
-      const segments = path.split('/').filter(Boolean);
-      return {
-        path,
-        name: segments[segments.length - 1]!,
-        fileCount,
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
 }

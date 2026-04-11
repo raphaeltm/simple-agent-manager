@@ -11,6 +11,9 @@ const mockUploadFile = vi.fn();
 const mockReplaceFile = vi.fn();
 const mockGetFile = vi.fn();
 const mockUpdateTags = vi.fn();
+const mockListDirectories = vi.fn();
+const mockMoveFile = vi.fn();
+const mockValidateDirectory = vi.fn().mockImplementation((dir: string) => dir);
 
 vi.mock('../../../src/services/file-library', () => ({
   listFiles: (...args: unknown[]) => mockListFiles(...args),
@@ -19,6 +22,21 @@ vi.mock('../../../src/services/file-library', () => ({
   replaceFile: (...args: unknown[]) => mockReplaceFile(...args),
   getFile: (...args: unknown[]) => mockGetFile(...args),
   updateTags: (...args: unknown[]) => mockUpdateTags(...args),
+  listDirectories: (...args: unknown[]) => mockListDirectories(...args),
+  moveFile: (...args: unknown[]) => mockMoveFile(...args),
+  validateDirectory: (...args: unknown[]) => mockValidateDirectory(...args),
+  getMaxTagsPerFile: () => 20,
+  getMaxTagLength: () => 50,
+  getUploadMaxBytes: () => 52428800,
+  getMaxFilesPerProject: () => 500,
+  getMaxFilenameLength: () => 255,
+  getDownloadTimeoutMs: () => 60000,
+  getListMaxPageSize: () => 200,
+  getMaxDirectoryDepth: () => 10,
+  getMaxDirectoriesPerProject: () => 500,
+  getMaxDirectoryPathLength: () => 500,
+  validateFilename: vi.fn(),
+  validateTag: vi.fn(),
 }));
 
 // Mock JWT service
