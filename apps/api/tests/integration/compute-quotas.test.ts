@@ -228,6 +228,14 @@ describe('compute quota pipeline', () => {
       expect(usageRoute).toContain('periodStart');
       expect(usageRoute).toContain('periodEnd');
     });
+
+    it('byocExempt check intentionally omits targetProvider (any-provider display)', () => {
+      // The informational byocExempt flag checks for ANY cloud credential (by design).
+      // This is different from enforcement points which pass targetProvider.
+      expect(usageRoute).toContain('userHasOwnCloudCredentials(db, userId)');
+      // Does NOT pass a third argument — intentional asymmetry:
+      expect(usageRoute).not.toMatch(/userHasOwnCloudCredentials\(db, userId, /);
+    });
   });
 
   // ===========================================================================

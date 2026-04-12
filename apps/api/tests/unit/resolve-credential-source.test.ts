@@ -227,6 +227,13 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(submitSource).toContain('Cloud provider credentials required');
       expect(nodesSource).toContain('Cloud provider credentials required');
     });
+
+    it('node-steps.ts intentionally does NOT reject when credResult is null (silent skip)', () => {
+      // node-steps.ts uses optional chaining (credResult?.credentialSource); it silently
+      // skips quota check when no credential exists. This is intentional — the DO context
+      // handles credential absence differently from the HTTP request handlers.
+      expect(nodeStepsSource).not.toContain('Cloud provider credentials required');
+    });
   });
 
   // =========================================================================
