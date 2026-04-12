@@ -1,3 +1,48 @@
+// FILE SIZE EXCEPTION: Database schema — splitting creates import complexity. See .claude/rules/18-file-size-limits.md
+//
+// =============================================================================
+// SCHEMA DOCUMENTATION
+// =============================================================================
+//
+// Timestamp conventions:
+//   - BetterAuth tables (users, sessions, accounts, verifications, agentSettings,
+//     smokeTestTokens) use `integer('...', { mode: 'timestamp_ms' })` which stores
+//     millisecond-epoch integers. Drizzle auto-converts JS Date objects.
+//   - All other tables use `text('...')` with `DEFAULT CURRENT_TIMESTAMP` or
+//     `DEFAULT (datetime('now'))`, storing ISO-8601 strings (e.g. "2026-04-12 14:30:00").
+//     These are compared as strings in SQL and parsed with `new Date()` in TypeScript.
+//
+// Encryption model:
+//   - Fields named `encryptedToken` / `storedValue` / `storedContent` hold
+//     AES-256-GCM ciphertext (base64-encoded).
+//   - Fields named `iv` / `valueIv` / `contentIv` hold the initialization vector
+//     (base64-encoded, 12 bytes random per encryption via Web Crypto API).
+//   - Key management: ENCRYPTION_KEY env var (base64-encoded 256-bit key), with
+//     optional purpose-specific overrides (PLATFORM_CREDENTIAL_ENCRYPTION_KEY, etc.).
+//   - Encrypt/decrypt logic: `apps/api/src/services/encryption.ts`
+//   - File-specific encryption: `apps/api/src/services/file-encryption.ts`
+//
+// onDelete policy rationale:
+//   - 'cascade': Used when child rows are meaningless without the parent
+//     (e.g. sessions without a user, tasks without a project).
+//   - 'set null': Used when the child row has independent value and should
+//     survive parent deletion (e.g. workspaces survive node deletion,
+//     compliance runs survive exception request deletion, tasks survive
+//     node deletion via autoProvisionedNodeId).
+//   - No FK constraint: Used for cross-table soft references where the
+//     referenced entity may not exist in D1 (e.g. chatSessionId references
+//     a session in the ProjectData Durable Object, not a D1 table).
+//
+// Credential tables:
+//   - `credentials`: Per-user credentials (BYOC model). Users provide their own
+//     cloud provider tokens and agent API keys. Encrypted per-user, cascade on
+//     user delete.
+//   - `platformCredentials`: Admin-managed fallback credentials shared across
+//     users. Used when a user lacks their own credential. No cascade on creator
+//     delete (uses bare reference) since the credential serves all users.
+//
+// =============================================================================
+
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { sql } from 'drizzle-orm';
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
@@ -107,7 +152,13 @@ export const verifications = sqliteTable(
 );
 
 // =============================================================================
-// Credentials (encrypted cloud provider tokens and agent API keys)
+// Credentials (per-user encrypted cloud provider tokens and agent API keys)
+//
+// BYOC (Bring-Your-Own-Cloud) model: users supply their own Hetzner/Scaleway
+// tokens and agent API keys. Tokens are NEVER stored as env vars — they are
+// encrypted per-user with AES-256-GCM and stored here.
+//
+// See also: `platformCredentials` table below for admin-managed fallback keys.
 // =============================================================================
 export const credentials = sqliteTable(
   'credentials',
@@ -115,18 +166,21 @@ export const credentials = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'cascade' }), // User deletion removes all their credentials
     provider: text('provider').notNull(),
     credentialType: text('credential_type').notNull().default('cloud-provider'),
+    /** Null for cloud-provider credentials; set to 'claude-code' | 'openai-codex' for agent keys. */
     agentType: text('agent_type'),
     credentialKind: text('credential_kind').notNull().default('api-key'), // 'api-key' | 'oauth-token'
     isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    /** AES-256-GCM ciphertext (base64). Decrypt via `services/encryption.ts:decrypt()`. */
     encryptedToken: text('encrypted_token').notNull(),
+    /** AES-256-GCM initialization vector (base64, 12 bytes random per encryption). */
     iv: text('iv').notNull(),
-    createdAt: text('created_at')
+    createdAt: text('created_at') // ISO-8601 text timestamp
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
-    updatedAt: text('updated_at')
+    updatedAt: text('updated_at') // ISO-8601 text timestamp
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
   },
@@ -188,6 +242,8 @@ export const projects = sqliteTable(
     defaultBranch: text('default_branch').notNull().default('main'),
     githubRepoId: integer('github_repo_id'),
     githubRepoNodeId: text('github_repo_node_id'),
+    // Per-project defaults (null = use platform defaults from env vars).
+    // Resolved via `resolveProjectScalingConfig()` in task-runner and node services.
     defaultVmSize: text('default_vm_size'),
     defaultAgentType: text('default_agent_type'),
     defaultWorkspaceProfile: text('default_workspace_profile'),
@@ -195,7 +251,8 @@ export const projects = sqliteTable(
     defaultLocation: text('default_location'),
     workspaceIdleTimeoutMs: integer('workspace_idle_timeout_ms'),
     nodeIdleTimeoutMs: integer('node_idle_timeout_ms'),
-    // Per-project scaling parameters (null = use platform default)
+    // Per-project scaling parameters (null = use platform default from env).
+    // See SCALING_PARAMS registry in shared constants for metadata.
     taskExecutionTimeoutMs: integer('task_execution_timeout_ms'),
     maxConcurrentTasks: integer('max_concurrent_tasks'),
     maxDispatchDepth: integer('max_dispatch_depth'),
@@ -235,6 +292,8 @@ export const projects = sqliteTable(
   })
 );
 
+/** Per-project runtime environment variables injected into workspaces.
+ *  Secret values are AES-256-GCM encrypted; non-secret values are stored in plaintext. */
 export const projectRuntimeEnvVars = sqliteTable(
   'project_runtime_env_vars',
   {
@@ -246,7 +305,9 @@ export const projectRuntimeEnvVars = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     envKey: text('env_key').notNull(),
+    /** When isSecret=true: AES-256-GCM ciphertext (base64). When isSecret=false: plaintext value. */
     storedValue: text('stored_value').notNull(),
+    /** AES-256-GCM IV (base64). Null when isSecret=false (value stored in plaintext). */
     valueIv: text('value_iv'),
     isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
     createdAt: text('created_at')
@@ -262,6 +323,8 @@ export const projectRuntimeEnvVars = sqliteTable(
   })
 );
 
+/** Per-project runtime files injected into workspaces (e.g. .env, config files).
+ *  Secret files are AES-256-GCM encrypted; non-secret files are stored in plaintext. */
 export const projectRuntimeFiles = sqliteTable(
   'project_runtime_files',
   {
@@ -273,7 +336,9 @@ export const projectRuntimeFiles = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     filePath: text('file_path').notNull(),
+    /** When isSecret=true: AES-256-GCM ciphertext (base64). When isSecret=false: plaintext content. */
     storedContent: text('stored_content').notNull(),
+    /** AES-256-GCM IV (base64). Null when isSecret=false (content stored in plaintext). */
     contentIv: text('content_iv'),
     isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
     createdAt: text('created_at')
@@ -294,6 +359,9 @@ export const projectRuntimeFiles = sqliteTable(
 
 // =============================================================================
 // Project Deployment Credentials (GCP OIDC for Defang deployments)
+// Note: This table stores GCP WIF configuration (project IDs, service account
+// emails, pool IDs) — NOT encrypted tokens. The actual OIDC token exchange
+// happens at deployment time using these references.
 // =============================================================================
 export const projectDeploymentCredentials = sqliteTable(
   'project_deployment_credentials',
@@ -340,7 +408,9 @@ export const tasks = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** Null for top-level tasks; set for agent-dispatched sub-tasks (dispatch depth > 0). No FK — parent may be in another project's scope. */
     parentTaskId: text('parent_task_id'),
+    /** Null until a workspace is assigned during task execution. Set by TaskRunner DO. */
     workspaceId: text('workspace_id'),
     title: text('title').notNull(),
     description: text('description'),
@@ -359,14 +429,15 @@ export const tasks = sqliteTable(
     taskMode: text('task_mode').notNull().default('task'),
     /** Dispatch depth for agent-spawned tasks. 0 = user-created, N = Nth generation agent dispatch. */
     dispatchDepth: integer('dispatch_depth').notNull().default(0),
+    /** Node auto-provisioned for this task. set null on node delete so the task record survives cleanup. */
     autoProvisionedNodeId: text('auto_provisioned_node_id').references(() => nodes.id, {
       onDelete: 'set null',
     }),
     /** Source that created this task. 'user' = manual, 'cron'/'webhook'/'mcp' = automated. */
     triggeredBy: text('triggered_by').notNull().default('user'),
-    /** FK to the trigger that created this task (null for user-created tasks). */
+    /** Soft FK to triggers table (null for user-created tasks). No DB constraint — trigger may be deleted independently. */
     triggerId: text('trigger_id'),
-    /** FK to the specific trigger execution that created this task. */
+    /** Soft FK to trigger_executions table. No DB constraint — execution record may be cleaned up independently. */
     triggerExecutionId: text('trigger_execution_id'),
     /** Whether the agent credential came from the user or the platform. */
     agentCredentialSource: text('agent_credential_source').default('user'), // 'user' | 'platform'
@@ -460,8 +531,10 @@ export const nodes = sqliteTable(
     healthStatus: text('health_status').notNull().default('unhealthy'),
     heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
     lastMetrics: text('last_metrics'),
+    /** ISO-8601 timestamp when node entered warm pool. Null if node is not warm. Used by NodeLifecycle DO for timeout. */
     warmSince: text('warm_since'),
-    credentialSource: text('credential_source').default('user'), // 'user' | 'platform'
+    /** 'user' = provisioned with user's own credential; 'platform' = provisioned with platform credential. */
+    credentialSource: text('credential_source').default('user'),
     errorMessage: text('error_message'),
     createdAt: text('created_at')
       .notNull()
@@ -482,11 +555,14 @@ export const workspaces = sqliteTable(
   'workspaces',
   {
     id: text('id').primaryKey(),
+    /** Null when node is destroyed; workspace record preserved for history. set null on node delete. */
     nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    /** Null for legacy workspaces created before project-first architecture. set null on project delete. */
     projectId: text('project_id').references(() => projects.id, { onDelete: 'set null' }),
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** Null for workspaces not linked to a GitHub installation. No onDelete — installation removal doesn't affect workspaces. */
     installationId: text('installation_id').references(() => githubInstallations.id),
     displayName: text('display_name'),
     normalizedDisplayName: text('normalized_display_name'),
@@ -501,6 +577,7 @@ export const workspaces = sqliteTable(
     vmIp: text('vm_ip'),
     dnsRecordId: text('dns_record_id'),
     lastActivityAt: text('last_activity_at'),
+    /** Soft FK to ProjectData DO session (not a D1 table). Null until a chat session binds to this workspace. */
     chatSessionId: text('chat_session_id'),
     errorMessage: text('error_message'),
     createdAt: text('created_at')
@@ -604,12 +681,20 @@ export const agentSettings = sqliteTable(
 );
 
 // =============================================================================
-// Agent Profiles (per-project role definitions)
+// Agent Profiles (per-project or global role definitions)
+//
+// Partial index note: The SQL migration (0028_agent_profiles.sql) defines two
+// partial unique indexes that Drizzle ORM cannot express:
+//   - idx_agent_profiles_project_name: UNIQUE(project_id, name) WHERE project_id IS NOT NULL
+//   - idx_agent_profiles_global_name:  UNIQUE(user_id, name) WHERE project_id IS NULL
+// The Drizzle-side index below only covers the project-scoped case. Global
+// (per-user) profile name uniqueness is enforced by the raw SQL migration only.
 // =============================================================================
 export const agentProfiles = sqliteTable(
   'agent_profiles',
   {
     id: text('id').primaryKey(),
+    /** Null for global (user-scoped) profiles; set for project-specific profiles. Cascade on project delete. */
     projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
@@ -810,6 +895,7 @@ export const complianceRuns = sqliteTable(
     status: text('status').notNull(),
     findingsJson: text('findings_json'),
     reviewedBy: text('reviewed_by'),
+    /** Null when no exception was granted. set null on exception delete — run record preserved for audit. */
     exceptionRequestId: text('exception_request_id').references(() => exceptionRequests.id, {
       onDelete: 'set null',
     }),
@@ -921,12 +1007,19 @@ export type SmokeTestToken = typeof smokeTestTokens.$inferSelect;
 export type NewSmokeTestToken = typeof smokeTestTokens.$inferInsert;
 
 // =============================================================================
-// Project File Library (per-project encrypted file storage)
+// Project File Library (per-project encrypted file storage in R2)
+//
+// File content is AES-256-GCM encrypted and stored in R2 (not in D1). This
+// table holds metadata only. The `r2Key` field points to the encrypted blob.
+// Encrypt/decrypt logic: `services/file-encryption.ts`.
+// projectId is NOT a FK — the project_files table was designed for soft
+// references to avoid cascade complications with R2 cleanup.
 // =============================================================================
 export const projectFiles = sqliteTable(
   'project_files',
   {
     id: text('id').primaryKey(),
+    /** Soft reference to projects table. No FK constraint — R2 cleanup handled separately. */
     projectId: text('project_id').notNull(),
     filename: text('filename').notNull(),
     mimeType: text('mime_type').notNull(),
@@ -997,6 +1090,7 @@ export const triggers = sqliteTable(
     cronTimezone: text('cron_timezone').default('UTC'),
     skipIfRunning: integer('skip_if_running', { mode: 'boolean' }).notNull().default(true),
     promptTemplate: text('prompt_template').notNull(),
+    /** Optional agent profile for triggered tasks. set null on profile delete — trigger continues with defaults. */
     agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
       onDelete: 'set null',
     }),
@@ -1039,6 +1133,7 @@ export const triggerExecutions = sqliteTable(
     projectId: text('project_id').notNull(),
     status: text('status').notNull(),
     skipReason: text('skip_reason'),
+    /** Soft FK to tasks table. Null when execution was skipped or failed before task creation. */
     taskId: text('task_id'),
     eventType: text('event_type'),
     renderedPrompt: text('rendered_prompt'),
@@ -1064,19 +1159,32 @@ export type NewTriggerExecutionRow = typeof triggerExecutions.$inferInsert;
 
 // =============================================================================
 // Platform Credentials (admin-managed fallback keys)
+//
+// Unlike user `credentials`, these are shared across all users and managed by
+// admins. They serve as fallbacks when a user doesn't have their own credential
+// for a given provider or agent type. Encrypted with PLATFORM_CREDENTIAL_ENCRYPTION_KEY
+// (falls back to ENCRYPTION_KEY if not set).
+//
+// createdBy uses a bare FK reference (no onDelete) because deleting the admin
+// who created the credential should NOT remove a credential that serves all users.
 // =============================================================================
 export const platformCredentials = sqliteTable(
   'platform_credentials',
   {
     id: text('id').primaryKey(),
     credentialType: text('credential_type').notNull(), // 'cloud-provider' | 'agent-api-key'
-    provider: text('provider'), // 'hetzner' | 'scaleway' | 'gcp' (for cloud-provider)
-    agentType: text('agent_type'), // 'claude-code' | 'openai-codex' (for agent-api-key)
+    /** Null for agent-api-key type. Set to 'hetzner' | 'scaleway' | 'gcp' for cloud-provider type. */
+    provider: text('provider'),
+    /** Null for cloud-provider type. Set to 'claude-code' | 'openai-codex' for agent-api-key type. */
+    agentType: text('agent_type'),
     credentialKind: text('credential_kind').notNull().default('api-key'), // 'api-key' | 'oauth-token'
     label: text('label').notNull(),
+    /** AES-256-GCM ciphertext (base64). Decrypt via `services/encryption.ts:decrypt()`. */
     encryptedToken: text('encrypted_token').notNull(),
+    /** AES-256-GCM initialization vector (base64, 12 bytes random per encryption). */
     iv: text('iv').notNull(),
     isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
+    /** Admin user who created this credential. Bare FK — no onDelete to preserve shared credentials. */
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id),
@@ -1104,6 +1212,7 @@ export type NewPlatformCredentialRow = typeof platformCredentials.$inferInsert;
 // Compute Usage
 // =============================================================================
 
+/** Tracks vCPU-hour usage per workspace for metering and quota enforcement. */
 export const computeUsage = sqliteTable(
   'compute_usage',
   {
@@ -1111,12 +1220,15 @@ export const computeUsage = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** Soft reference — no FK. Workspace/node may be destroyed while usage records are retained for billing. */
     workspaceId: text('workspace_id').notNull(),
+    /** Soft reference — no FK. See workspaceId comment. */
     nodeId: text('node_id').notNull(),
     serverType: text('server_type').notNull(),
     vcpuCount: integer('vcpu_count').notNull(),
     credentialSource: text('credential_source').notNull().default('user'),
     startedAt: text('started_at').notNull(),
+    /** ISO-8601 timestamp. Null while workspace is still running (open-ended usage record). */
     endedAt: text('ended_at'),
     createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
   },
@@ -1136,11 +1248,13 @@ export type NewComputeUsageRow = typeof computeUsage.$inferInsert;
 // Compute Quotas
 // =============================================================================
 
-/** Platform-wide default quota (singleton row). */
+/** Platform-wide default quota (singleton row). Null limit means unlimited. */
 export const defaultQuotas = sqliteTable('default_quotas', {
   id: text('id').primaryKey(),
+  /** Null = unlimited. Applies to all users who don't have a per-user override in userQuotas. */
   monthlyVcpuHoursLimit: real('monthly_vcpu_hours_limit'),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  /** Admin who last updated. Bare FK — no onDelete to preserve audit trail. */
   updatedBy: text('updated_by')
     .notNull()
     .references(() => users.id),
@@ -1148,15 +1262,17 @@ export const defaultQuotas = sqliteTable('default_quotas', {
 
 export type DefaultQuotaRow = typeof defaultQuotas.$inferSelect;
 
-/** Per-user quota overrides set by admin. */
+/** Per-user quota overrides set by admin. Takes precedence over defaultQuotas. */
 export const userQuotas = sqliteTable('user_quotas', {
   id: text('id').primaryKey(),
   userId: text('user_id')
     .notNull()
     .unique()
-    .references(() => users.id, { onDelete: 'cascade' }),
+    .references(() => users.id, { onDelete: 'cascade' }), // Cascade — quota meaningless without the user
+  /** Null = unlimited (overrides any default limit). */
   monthlyVcpuHoursLimit: real('monthly_vcpu_hours_limit'),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  /** Admin who last updated. Bare FK — no onDelete to preserve audit trail. */
   updatedBy: text('updated_by')
     .notNull()
     .references(() => users.id),
