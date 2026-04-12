@@ -59,6 +59,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   const [timeoutMinutes, setTimeoutMinutes] = useState('');
   const [vmSizeOverride, setVmSizeOverride] = useState('');
   const [workspaceProfile, setWorkspaceProfile] = useState('');
+  const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
   const [taskMode, setTaskMode] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +77,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setTimeoutMinutes(profile.timeoutMinutes != null ? String(profile.timeoutMinutes) : '');
       setVmSizeOverride(profile.vmSizeOverride ?? '');
       setWorkspaceProfile(profile.workspaceProfile ?? '');
+      setDevcontainerConfigName(profile.devcontainerConfigName ?? '');
       setTaskMode(profile.taskMode ?? '');
     } else if (isOpen) {
       setName('');
@@ -88,6 +90,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setTimeoutMinutes('');
       setVmSizeOverride('');
       setWorkspaceProfile('');
+      setDevcontainerConfigName('');
       setTaskMode('');
     }
     setError(null);
@@ -114,6 +117,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         timeoutMinutes: timeoutMinutes ? parseInt(timeoutMinutes, 10) : null,
         vmSizeOverride: vmSizeOverride || null,
         workspaceProfile: workspaceProfile || null,
+        devcontainerConfigName: devcontainerConfigName.trim() || null,
         taskMode: taskMode || null,
       };
       await onSave(data);
@@ -293,6 +297,19 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               ))}
             </select>
           </label>
+
+          {/* Devcontainer Config Name */}
+          {workspaceProfile !== 'lightweight' && (
+            <label className="grid gap-1.5">
+              <span className="text-sm text-fg-muted">Devcontainer Config</span>
+              <Input
+                value={devcontainerConfigName}
+                onChange={(e) => setDevcontainerConfigName(e.target.value)}
+                disabled={saving}
+                placeholder="Auto-detect"
+              />
+            </label>
+          )}
 
           {/* Task Mode */}
           <label className="grid gap-1.5">
