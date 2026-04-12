@@ -1,3 +1,4 @@
+import { DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
@@ -30,11 +31,11 @@ const TaskAttachmentSchema = v.object({
   contentType: v.string(),
 });
 
-/** Devcontainer config name — alphanumeric, hyphens, underscores, max 128 chars. */
+/** Devcontainer config name — alphanumeric, hyphens, underscores, max length from shared constants. */
 const DevcontainerConfigNameSchema = v.pipe(
   v.string(),
-  v.regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/, 'Config name must be alphanumeric with hyphens/underscores'),
-  v.maxLength(128, 'Config name must be at most 128 characters'),
+  v.regex(DEVCONTAINER_CONFIG_NAME_REGEX, 'Config name must be alphanumeric with hyphens/underscores'),
+  v.maxLength(DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, `Config name must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`),
 );
 
 export const SubmitTaskSchema = v.object({
