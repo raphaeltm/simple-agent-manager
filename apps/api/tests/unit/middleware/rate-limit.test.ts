@@ -1,5 +1,7 @@
+import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/index';
 import {
   checkRateLimit,
   createRateLimitKey,
@@ -7,6 +9,8 @@ import {
   DEFAULT_WINDOW_SECONDS,
   getCurrentWindowStart,
   getRateLimit,
+  rateLimit,
+  RateLimitError,
 } from '../../../src/middleware/rate-limit';
 
 // ---------------------------------------------------------------------------
@@ -15,9 +19,10 @@ import {
 
 function createMockKV(store: Map<string, string> = new Map()): KVNamespace {
   return {
-    get: vi.fn(async (key: string) => {
+    get: vi.fn(async (key: string, type?: string) => {
       const val = store.get(key);
-      return val ? JSON.parse(val) : null;
+      if (!val) return null;
+      return type === 'json' ? JSON.parse(val) : val;
     }),
     put: vi.fn(async (key: string, value: string) => {
       store.set(key, value);
@@ -116,34 +121,136 @@ describe('checkRateLimit', () => {
 });
 
 // ---------------------------------------------------------------------------
-// rateLimit middleware — integration-style tests
+// rateLimit middleware — behavioral tests
 // ---------------------------------------------------------------------------
 
-describe('rateLimit middleware', () => {
-  // We import the middleware dynamically to avoid Hono + Workers type conflicts
-  // in the plain vitest runner. Instead, test the core logic above and verify
-  // the IP fallback behavior via the code path analysis.
+describe('rateLimit middleware (behavioral)', () => {
+  let store: Map<string, string>;
+  let kv: KVNamespace;
+  let mockEnv: Partial<Env>;
 
-  it('falls back to IP-based rate limiting when auth is missing (code path verification)', async () => {
-    // Read the source to verify the fallback path exists
-    // This supplements the behavioral tests above that verify checkRateLimit works
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/middleware/rate-limit.ts'),
-      'utf8',
+  beforeEach(() => {
+    store = new Map();
+    kv = createMockKV(store);
+    mockEnv = { KV: kv } as Partial<Env>;
+  });
+
+  function createApp(options: {
+    useIp?: boolean;
+    limit?: number;
+    keyPrefix?: string;
+    injectAuth?: { user: { id: string } };
+  }) {
+    const app = new Hono<{ Bindings: Env }>();
+
+    // Error handler to surface RateLimitError as 429
+    app.onError((err, c) => {
+      if (err instanceof RateLimitError) {
+        return c.json({ error: 'RATE_LIMIT_EXCEEDED' }, 429);
+      }
+      return c.json({ error: 'INTERNAL_ERROR', message: (err as Error).message }, 500);
+    });
+
+    // Optionally inject auth context
+    if (options.injectAuth) {
+      app.use('/test', async (c, next) => {
+        c.set('auth' as any, options.injectAuth);
+        await next();
+      });
+    }
+
+    // Apply rate limit middleware
+    app.use(
+      '/test',
+      rateLimit({
+        limit: options.limit ?? 3,
+        keyPrefix: options.keyPrefix ?? 'test',
+        useIp: options.useIp,
+      }) as any,
     );
 
-    // The old behavior was: if no auth, early-return next() (bypass rate limiting)
-    // The new behavior is: if no auth, fall back to getClientIp(c)
-    // Verify the unauthenticated branch does NOT have an early return next()
-    // (the file still has `return next()` at the end — that's the normal "request allowed" path)
-    const authBlock = source.slice(
-      source.indexOf('if (!auth?.user?.id)'),
-      source.indexOf('identifier = auth.user.id'),
-    );
-    expect(authBlock).not.toContain('return next()');
-    expect(authBlock).toContain('identifier = getClientIp(c)');
-    expect(source).toContain('rate_limit.ip_fallback');
+    app.get('/test', (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  it('rate limits authenticated users by user ID when useIp is false', async () => {
+    const app = createApp({
+      useIp: false,
+      limit: 2,
+      injectAuth: { user: { id: 'user-abc' } },
+    });
+
+    // First request — allowed
+    const res1 = await app.request('/test', {}, mockEnv);
+    expect(res1.status).toBe(200);
+
+    // Second request — allowed
+    const res2 = await app.request('/test', {}, mockEnv);
+    expect(res2.status).toBe(200);
+
+    // Third request — blocked
+    const res3 = await app.request('/test', {}, mockEnv);
+    expect(res3.status).toBe(429);
+
+    // Verify KV was keyed on user ID
+    const kvPutCalls = (kv.put as any).mock.calls as [string, string][];
+    const keys = kvPutCalls.map(([k]) => k);
+    expect(keys.every((k) => k.includes('user-abc'))).toBe(true);
+  });
+
+  it('falls back to IP-based rate limiting when auth is missing and useIp is false', async () => {
+    // No auth injected — simulates unauthenticated request
+    const app = createApp({ useIp: false, limit: 2 });
+
+    // Request with CF-Connecting-IP header (no auth)
+    const req1 = new Request('http://localhost/test', {
+      headers: { 'CF-Connecting-IP': '1.2.3.4' },
+    });
+    const res1 = await app.request(req1, undefined, mockEnv);
+    expect(res1.status).toBe(200);
+
+    // Second request from same IP
+    const req2 = new Request('http://localhost/test', {
+      headers: { 'CF-Connecting-IP': '1.2.3.4' },
+    });
+    const res2 = await app.request(req2, undefined, mockEnv);
+    expect(res2.status).toBe(200);
+
+    // Third request from same IP — should be blocked
+    const req3 = new Request('http://localhost/test', {
+      headers: { 'CF-Connecting-IP': '1.2.3.4' },
+    });
+    const res3 = await app.request(req3, undefined, mockEnv);
+    expect(res3.status).toBe(429);
+
+    // Verify KV was keyed on IP, not a user ID
+    const kvPutCalls = (kv.put as any).mock.calls as [string, string][];
+    const keys = kvPutCalls.map(([k]) => k);
+    expect(keys.every((k) => k.includes('1.2.3.4'))).toBe(true);
+    expect(keys.every((k) => !k.includes('user-'))).toBe(true);
+  });
+
+  it('allows requests from different IPs independently in IP-fallback mode', async () => {
+    const app = createApp({ useIp: false, limit: 1 });
+
+    // First IP hits the limit
+    const req1 = new Request('http://localhost/test', {
+      headers: { 'CF-Connecting-IP': '1.1.1.1' },
+    });
+    const res1 = await app.request(req1, undefined, mockEnv);
+    expect(res1.status).toBe(200);
+
+    const req2 = new Request('http://localhost/test', {
+      headers: { 'CF-Connecting-IP': '1.1.1.1' },
+    });
+    const res2 = await app.request(req2, undefined, mockEnv);
+    expect(res2.status).toBe(429);
+
+    // Different IP is still allowed
+    const req3 = new Request('http://localhost/test', {
+      headers: { 'CF-Connecting-IP': '2.2.2.2' },
+    });
+    const res3 = await app.request(req3, undefined, mockEnv);
+    expect(res3.status).toBe(200);
   });
 });
