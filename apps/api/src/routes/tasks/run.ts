@@ -11,7 +11,7 @@
  * 4. Async: selects/creates node, creates workspace, runs agent, creates PR, cleans up
  */
 import type { CredentialProvider,RunTaskResponse, TaskStatus, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -147,7 +147,10 @@ runRoutes.post('/:taskId/run', async (c) => {
   const vmSize: VMSize = body.vmSize
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
-  const provider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
+  const provider: CredentialProvider | null =
+    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
+      ? project.defaultProvider
+      : null;
   const vmLocation: VMLocation = (body.vmLocation as VMLocation)
     ?? (project.defaultLocation as VMLocation | null)
     ?? (provider ? getDefaultLocationForProvider(provider) as VMLocation | null : null)

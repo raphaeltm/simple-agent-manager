@@ -7,7 +7,7 @@
  * Config precedence: explicit field → profile value → project default → platform default.
  */
 import type { CredentialProvider, TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider } from '@simple-agent-manager/shared';
+import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -309,9 +309,17 @@ export async function handleDispatchTask(
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
 
+  const profileProvider =
+    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
+      ? resolvedProfile.provider
+      : null;
+  const projectDefaultProvider =
+    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
+      ? project.defaultProvider
+      : null;
   const resolvedProvider: CredentialProvider | null = explicitProvider
-    ?? (resolvedProfile?.provider as CredentialProvider | null)
-    ?? (project.defaultProvider as CredentialProvider | null)
+    ?? profileProvider
+    ?? projectDefaultProvider
     ?? null;
 
   const resolvedVmLocation: VMLocation = (explicitVmLocation as VMLocation)

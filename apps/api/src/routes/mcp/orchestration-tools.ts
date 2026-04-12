@@ -3,7 +3,7 @@
  * for agent-to-agent communication.
  */
 import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -189,7 +189,10 @@ export async function handleRetrySubtask(
   // Resolve VM size from project defaults (not executionStep, which tracks runner state)
   const resolvedVmSize: VMSize = (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
-  const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
+  const resolvedProvider: CredentialProvider | null =
+    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
+      ? project.defaultProvider
+      : null;
   const resolvedVmLocation: VMLocation = (project.defaultLocation as VMLocation | null)
     ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
     ?? DEFAULT_VM_LOCATION;
@@ -600,4 +603,3 @@ export async function handleRemovePendingSubtask(
     }],
   });
 }
-
