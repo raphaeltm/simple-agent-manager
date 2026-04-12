@@ -220,7 +220,9 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.GitHubID = opt.GitHubID
 		}
 		runtime.Lightweight = opt.Lightweight
-		runtime.DevcontainerConfigName = opt.DevcontainerConfigName
+		if opt.DevcontainerConfigName != "" {
+			runtime.DevcontainerConfigName = opt.DevcontainerConfigName
+		}
 		runtime.UpdatedAt = time.Now().UTC()
 
 		if metadataChanged && runtime.Repository != "" {

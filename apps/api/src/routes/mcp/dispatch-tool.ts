@@ -7,7 +7,7 @@
  * Config precedence: explicit field → profile value → project default → platform default.
  */
 import type { CredentialProvider, TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, DEVCONTAINER_CONFIG_NAME_REGEX, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
+import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -128,6 +128,8 @@ export async function handleDispatchTask(
       explicitDevcontainerConfigName = null;
     } else if (typeof params.devcontainerConfigName !== 'string' || !DEVCONTAINER_CONFIG_NAME_REGEX.test(params.devcontainerConfigName)) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'devcontainerConfigName must be alphanumeric with hyphens/underscores');
+    } else if (params.devcontainerConfigName.length > DEVCONTAINER_CONFIG_NAME_MAX_LENGTH) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `devcontainerConfigName must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`);
     } else {
       explicitDevcontainerConfigName = params.devcontainerConfigName;
     }

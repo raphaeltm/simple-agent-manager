@@ -952,6 +952,21 @@ func TestHasDevcontainerConfig(t *testing.T) {
 			t.Fatal("expected hasDevcontainerConfig to return true")
 		}
 	})
+
+	t.Run("with named subdirectory config", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		subDir := filepath.Join(tmpDir, ".devcontainer", "python")
+		if err := os.MkdirAll(subDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(subDir, "devcontainer.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if !hasDevcontainerConfig(tmpDir) {
+			t.Fatal("expected hasDevcontainerConfig to return true for subdirectory config")
+		}
+	})
 }
 
 func TestVolumeNameForWorkspace(t *testing.T) {
@@ -1014,6 +1029,53 @@ func TestDevcontainerUpArgs(t *testing.T) {
 			}
 		}
 		if !found {
+			t.Fatalf("expected --override-config flag in args: %v", args)
+		}
+	})
+
+	t.Run("with named devcontainer config", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.Config{
+			WorkspaceDir: "/workspace/my-repo",
+			Repository:   "owner/my-repo",
+		}
+		args := devcontainerUpArgs(cfg, "", "python")
+		expectedConfigPath := "/workspace/my-repo/.devcontainer/python/devcontainer.json"
+		foundConfig := false
+		for i, a := range args {
+			if a == "--config" && i+1 < len(args) {
+				if args[i+1] != expectedConfigPath {
+					t.Fatalf("unexpected --config value: got %s, want %s", args[i+1], expectedConfigPath)
+				}
+				foundConfig = true
+			}
+		}
+		if !foundConfig {
+			t.Fatalf("expected --config flag in args: %v", args)
+		}
+	})
+
+	t.Run("named config with override config", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.Config{
+			WorkspaceDir: "/workspace/my-repo",
+			Repository:   "owner/my-repo",
+		}
+		args := devcontainerUpArgs(cfg, "/etc/sam/override.json", "rust")
+		foundConfig := false
+		foundOverride := false
+		for i, a := range args {
+			if a == "--config" && i+1 < len(args) {
+				foundConfig = true
+			}
+			if a == "--override-config" && i+1 < len(args) {
+				foundOverride = true
+			}
+		}
+		if !foundConfig {
+			t.Fatalf("expected --config flag in args: %v", args)
+		}
+		if !foundOverride {
 			t.Fatalf("expected --override-config flag in args: %v", args)
 		}
 	})
@@ -1212,7 +1274,7 @@ func TestEnsureContainerUserResolvedHonorsOverride(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{ContainerUser: "custom-user"}
-	ensureContainerUserResolved(context.Background(), cfg)
+	ensureContainerUserResolved(context.Background(), cfg, "")
 	if cfg.ContainerUser != "custom-user" {
 		t.Fatalf("ContainerUser=%q, want %q", cfg.ContainerUser, "custom-user")
 	}
@@ -1240,7 +1302,7 @@ exit 1
 	t.Setenv("PATH", mockBinDir+":"+origPath)
 
 	cfg := &config.Config{WorkspaceDir: t.TempDir()}
-	ensureContainerUserResolved(context.Background(), cfg)
+	ensureContainerUserResolved(context.Background(), cfg, "")
 
 	if cfg.ContainerUser != "node" {
 		t.Fatalf("ContainerUser=%q, want %q", cfg.ContainerUser, "node")
@@ -1286,7 +1348,7 @@ exit 1
 		ContainerLabelKey:   "devcontainer.local_folder",
 		ContainerLabelValue: "/workspace/ws-1",
 	}
-	ensureContainerUserResolved(context.Background(), cfg)
+	ensureContainerUserResolved(context.Background(), cfg, "")
 
 	if cfg.ContainerUser != "vscode" {
 		t.Fatalf("ContainerUser=%q, want %q", cfg.ContainerUser, "vscode")
@@ -1338,7 +1400,7 @@ exit 1
 		ContainerLabelKey:   "devcontainer.local_folder",
 		ContainerLabelValue: "/workspace/ws-1",
 	}
-	ensureContainerUserResolved(context.Background(), cfg)
+	ensureContainerUserResolved(context.Background(), cfg, "")
 
 	if cfg.ContainerUser != "node" {
 		t.Fatalf("ContainerUser=%q, want %q", cfg.ContainerUser, "node")

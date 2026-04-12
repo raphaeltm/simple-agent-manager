@@ -183,6 +183,10 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 
 	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
 	reporter.Log("devcontainer_up", "started", "Building devcontainer")
+	// DevcontainerConfigName is not available in the bootstrap-token path because
+	// bootstrapState (from redeemBootstrapToken) does not carry it. Named
+	// devcontainer configs are only supported via the control-plane POST /workspaces
+	// flow (PrepareWorkspace), which threads state.DevcontainerConfigName directly.
 	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath, "")
 	if err != nil {
 		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
@@ -750,7 +754,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		slog.Info("Container already running (lightweight)", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
-		ensureContainerUserResolved(ctx, cfg)
+		ensureContainerUserResolved(ctx, cfg, "")
 		if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
 			return false, err
 		}
@@ -766,7 +770,7 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 		return false, err
 	}
 
-	ensureContainerUserResolved(ctx, cfg)
+	ensureContainerUserResolved(ctx, cfg, "")
 	if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
 		return false, err
 	}
@@ -784,7 +788,7 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName string) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		slog.Info("Devcontainer already running", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
-		ensureContainerUserResolved(ctx, cfg)
+		ensureContainerUserResolved(ctx, cfg, devcontainerConfigName)
 		if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
 			return false, err
 		}
@@ -865,7 +869,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 	if !usedFallback {
 		clearBuildErrorArtifacts(ctx, cfg, volumeName)
 	}
-	ensureContainerUserResolved(ctx, cfg)
+	ensureContainerUserResolved(ctx, cfg, devcontainerConfigName)
 	if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
 		return false, err
 	}
@@ -1141,8 +1145,8 @@ func extractContainerUserFromMetadataLabel(raw string) string {
 	return resolved
 }
 
-func detectContainerUserFromReadConfiguration(ctx context.Context, cfg *config.Config) string {
-	readResult, err := runReadConfiguration(ctx, cfg.WorkspaceDir, "")
+func detectContainerUserFromReadConfiguration(ctx context.Context, cfg *config.Config, devcontainerConfigName string) string {
+	readResult, err := runReadConfiguration(ctx, cfg.WorkspaceDir, devcontainerConfigName)
 	if err != nil {
 		slog.Warn("Container user detection: read-configuration unavailable", "error", err)
 		return ""
@@ -1205,7 +1209,7 @@ func detectContainerUserFromExec(ctx context.Context, cfg *config.Config) string
 	return strings.TrimSpace(string(output))
 }
 
-func ensureContainerUserResolved(ctx context.Context, cfg *config.Config) {
+func ensureContainerUserResolved(ctx context.Context, cfg *config.Config, devcontainerConfigName string) {
 	override := strings.TrimSpace(cfg.ContainerUser)
 	if override != "" {
 		slog.Info("Container user override active", "containerUser", override)
@@ -1213,7 +1217,7 @@ func ensureContainerUserResolved(ctx context.Context, cfg *config.Config) {
 		return
 	}
 
-	if detected := detectContainerUserFromReadConfiguration(ctx, cfg); detected != "" {
+	if detected := detectContainerUserFromReadConfiguration(ctx, cfg, devcontainerConfigName); detected != "" {
 		cfg.ContainerUser = detected
 		if detected == "root" {
 			slog.Warn("Detected devcontainer user is root", "source", "read-configuration")

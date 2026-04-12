@@ -88,6 +88,11 @@ export function useProjectChatState() {
     (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE,
   );
 
+  // Devcontainer config name — empty string means auto-detect
+  const [selectedDevcontainerConfigName, setSelectedDevcontainerConfigName] = useState(
+    project?.defaultDevcontainerConfigName ?? '',
+  );
+
   // Task mode selection — defaults based on workspace profile
   const [selectedTaskMode, setSelectedTaskMode] = useState<TaskMode>(
     ((project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE) === 'lightweight'
@@ -336,6 +341,9 @@ export function useProjectChatState() {
             message: trimmed,
             ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
             workspaceProfile: selectedWorkspaceProfile,
+            ...(selectedWorkspaceProfile !== 'lightweight' && selectedDevcontainerConfigName.trim()
+              ? { devcontainerConfigName: selectedDevcontainerConfigName.trim() }
+              : {}),
             taskMode: selectedTaskMode,
           };
       const result = await submitTask(projectId, attachmentRefs.length > 0
@@ -454,6 +462,7 @@ export function useProjectChatState() {
     agentProfiles, selectedProfileId, setSelectedProfileId,
     handleUpdateProfile, slashCommands,
     selectedWorkspaceProfile, setSelectedWorkspaceProfile,
+    selectedDevcontainerConfigName, setSelectedDevcontainerConfigName,
     selectedTaskMode, handleTaskModeChange,
     ...attachments,
     provisioning, bootLogs, bootLogPanelOpen, setBootLogPanelOpen,

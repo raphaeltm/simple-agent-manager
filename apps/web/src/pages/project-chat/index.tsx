@@ -239,6 +239,8 @@ export function ProjectChat() {
               onUpdateProfile={state.handleUpdateProfile}
               selectedWorkspaceProfile={state.selectedWorkspaceProfile}
               onWorkspaceProfileChange={state.setSelectedWorkspaceProfile}
+              selectedDevcontainerConfigName={state.selectedDevcontainerConfigName}
+              onDevcontainerConfigNameChange={state.setSelectedDevcontainerConfigName}
               selectedTaskMode={state.selectedTaskMode}
               onTaskModeChange={state.handleTaskModeChange}
               slashCommands={state.slashCommands}

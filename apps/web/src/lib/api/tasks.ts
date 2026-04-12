@@ -42,6 +42,7 @@ export interface SubmitTaskRequest {
   nodeId?: string;
   agentType?: string;
   workspaceProfile?: 'full' | 'lightweight';
+  devcontainerConfigName?: string | null;
   parentTaskId?: string;
   contextSummary?: string;
   taskMode?: 'task' | 'conversation';

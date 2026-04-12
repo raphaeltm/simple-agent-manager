@@ -298,6 +298,14 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject devcontainerConfigName values that could escape the .devcontainer/ directory.
+	if name := body.DevcontainerConfigName; name != "" {
+		if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+			writeError(w, http.StatusBadRequest, "devcontainerConfigName must not contain path separators or '..'")
+			return
+		}
+	}
+
 	if !s.requireNodeManagementAuth(w, r, body.WorkspaceID) {
 		return
 	}

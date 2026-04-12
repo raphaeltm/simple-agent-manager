@@ -34,6 +34,8 @@ export function ChatInput({
   onUpdateProfile,
   selectedWorkspaceProfile,
   onWorkspaceProfileChange,
+  selectedDevcontainerConfigName,
+  onDevcontainerConfigNameChange,
   selectedTaskMode,
   onTaskModeChange,
   slashCommands,
@@ -59,6 +61,8 @@ export function ChatInput({
   onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<void>;
   selectedWorkspaceProfile: WorkspaceProfile;
   onWorkspaceProfileChange: (profile: WorkspaceProfile) => void;
+  selectedDevcontainerConfigName: string;
+  onDevcontainerConfigNameChange: (name: string) => void;
   selectedTaskMode: TaskMode;
   onTaskModeChange: (mode: TaskMode) => void;
   slashCommands?: SlashCommand[];
@@ -200,6 +204,17 @@ export function ChatInput({
                 <option value="full">Full</option>
                 <option value="lightweight">Lightweight</option>
               </select>
+              {selectedWorkspaceProfile !== 'lightweight' && (
+                <input
+                  type="text"
+                  value={selectedDevcontainerConfigName}
+                  onChange={(e) => onDevcontainerConfigNameChange(e.target.value)}
+                  disabled={submitting}
+                  placeholder="Config (auto)"
+                  aria-label="Devcontainer config name"
+                  className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+                />
+              )}
               <select
                 value={selectedTaskMode}
                 onChange={(e) => onTaskModeChange(e.target.value as TaskMode)}
@@ -279,6 +294,20 @@ export function ChatInput({
                   <option value="lightweight">Lightweight</option>
                 </select>
               </div>
+              {selectedWorkspaceProfile !== 'lightweight' && (
+                <div className="flex items-center gap-2">
+                  <label htmlFor="devcontainer-config-select" className="text-xs text-fg-muted whitespace-nowrap">Config:</label>
+                  <input
+                    id="devcontainer-config-select"
+                    type="text"
+                    value={selectedDevcontainerConfigName}
+                    onChange={(e) => onDevcontainerConfigNameChange(e.target.value)}
+                    disabled={submitting}
+                    placeholder="Auto-detect"
+                    className="w-24 px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+                  />
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <label htmlFor="task-mode-select" className="text-xs text-fg-muted whitespace-nowrap">Run mode:</label>
                 <select

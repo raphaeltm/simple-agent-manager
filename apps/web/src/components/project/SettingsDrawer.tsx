@@ -8,7 +8,7 @@
  * See: specs/022-simplified-chat-ux/tasks.md (T038-T040)
  */
 import type { ProjectRuntimeConfigResponse, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { Button, Spinner } from '@simple-agent-manager/ui';
+import { Button, Input, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -437,21 +437,22 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <input
+                  <Input
                     type="text"
                     value={defaultDevcontainerConfigName}
                     onChange={(e) => setDefaultDevcontainerConfigName(e.target.value)}
                     placeholder="Auto-detect"
-                    className="flex-1 rounded-md border border-border-default bg-surface text-fg-primary py-2 px-3 text-sm"
+                    className="flex-1"
                   />
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => void handleSaveDevcontainerConfig()}
+                    loading={savingDevcontainerConfig}
                     disabled={savingDevcontainerConfig}
-                    className="rounded-md bg-accent text-white px-3 py-2 text-sm font-medium disabled:opacity-60"
                   >
-                    {savingDevcontainerConfig ? 'Saving...' : 'Save'}
-                  </button>
+                    Save
+                  </Button>
                 </div>
               </section>
             )}

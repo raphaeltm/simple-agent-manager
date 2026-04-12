@@ -117,7 +117,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         timeoutMinutes: timeoutMinutes ? parseInt(timeoutMinutes, 10) : null,
         vmSizeOverride: vmSizeOverride || null,
         workspaceProfile: workspaceProfile || null,
-        devcontainerConfigName: devcontainerConfigName.trim() || null,
+        devcontainerConfigName: workspaceProfile !== 'lightweight' ? (devcontainerConfigName.trim() || null) : null,
         taskMode: taskMode || null,
       };
       await onSave(data);

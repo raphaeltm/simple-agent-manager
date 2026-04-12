@@ -13,6 +13,7 @@ export const CreateAgentProfileSchema = v.object({
   provider: v.optional(v.nullable(v.string())),
   vmLocation: v.optional(v.nullable(v.string())),
   workspaceProfile: v.optional(v.nullable(v.string())),
+  devcontainerConfigName: v.optional(v.nullable(v.string())),
   taskMode: v.optional(v.nullable(v.string())),
 });
 
@@ -29,6 +30,7 @@ export const UpdateAgentProfileSchema = v.object({
   provider: v.optional(v.nullable(v.string())),
   vmLocation: v.optional(v.nullable(v.string())),
   workspaceProfile: v.optional(v.nullable(v.string())),
+  devcontainerConfigName: v.optional(v.nullable(v.string())),
   taskMode: v.optional(v.nullable(v.string())),
 });
 
