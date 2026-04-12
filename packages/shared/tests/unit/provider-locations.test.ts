@@ -4,6 +4,7 @@ import {
   getDefaultLocationForProvider,
   getLocationsForProvider,
   isValidLocationForProvider,
+  isValidProvider,
   PROVIDER_DEFAULT_LOCATIONS,
   PROVIDER_LOCATIONS,
   resolveProjectScalingConfig,
@@ -41,8 +42,8 @@ describe('Provider-Location Validation', () => {
       expect(isValidLocationForProvider('hetzner', 'fr-par-1')).toBe(false);
     });
 
-    it('returns false for unknown provider', () => {
-      expect(isValidLocationForProvider('aws', 'us-east-1')).toBe(false);
+    it('rejects unknown provider via isValidProvider guard', () => {
+      expect(isValidProvider('aws')).toBe(false);
     });
 
     it('returns false for empty location', () => {
@@ -57,8 +58,10 @@ describe('Provider-Location Validation', () => {
       expect(locations.map((l) => l.id)).toContain('nbg1');
     });
 
-    it('returns empty array for unknown provider', () => {
-      expect(getLocationsForProvider('aws')).toEqual([]);
+    it('returns valid locations for all known providers', () => {
+      expect(getLocationsForProvider('hetzner').length).toBeGreaterThan(0);
+      expect(getLocationsForProvider('scaleway').length).toBeGreaterThan(0);
+      expect(getLocationsForProvider('gcp').length).toBeGreaterThan(0);
     });
   });
 
@@ -75,8 +78,24 @@ describe('Provider-Location Validation', () => {
       expect(getDefaultLocationForProvider('gcp')).toBe('us-central1-a');
     });
 
-    it('returns undefined for unknown provider', () => {
-      expect(getDefaultLocationForProvider('aws')).toBeUndefined();
+    it('returns a default for all known providers', () => {
+      expect(getDefaultLocationForProvider('hetzner')).toBe('fsn1');
+      expect(getDefaultLocationForProvider('scaleway')).toBe('fr-par-1');
+      expect(getDefaultLocationForProvider('gcp')).toBe('us-central1-a');
+    });
+  });
+
+  describe('isValidProvider', () => {
+    it('accepts known providers', () => {
+      expect(isValidProvider('hetzner')).toBe(true);
+      expect(isValidProvider('scaleway')).toBe(true);
+      expect(isValidProvider('gcp')).toBe(true);
+    });
+
+    it('rejects unknown providers', () => {
+      expect(isValidProvider('aws')).toBe(false);
+      expect(isValidProvider('')).toBe(false);
+      expect(isValidProvider('HETZNER')).toBe(false);
     });
   });
 
