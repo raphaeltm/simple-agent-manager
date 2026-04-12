@@ -76,9 +76,9 @@ export const SVG_SANITIZE_CONFIG = {
     'image', 'a',
     // Mermaid uses inline <style> for diagram themes
     'style',
-    // foreignObject for rich text labels (Mermaid strict mode blocks XSS inside these)
-    'foreignObject',
-    // HTML elements Mermaid embeds inside foreignObject
+    // HTML elements Mermaid embeds inside foreignObject for rich text labels.
+    // foreignObject itself is NOT allowed — it is the most dangerous SVG element
+    // and Mermaid's securityLevel: 'strict' disables it anyway.
     'div', 'span', 'p', 'br', 'b', 'i', 'em', 'strong', 'u',
     'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   ],

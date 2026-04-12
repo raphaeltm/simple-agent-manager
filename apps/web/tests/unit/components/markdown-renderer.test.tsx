@@ -209,8 +209,8 @@ describe('RenderedMarkdown', () => {
       expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR).toBeDefined();
       expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR!.length).toBeGreaterThan(10);
 
-      // script, iframe, object, embed must NOT be in the allowlist
-      const blockedTags = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'textarea'];
+      // script, iframe, object, embed, foreignObject must NOT be in the allowlist
+      const blockedTags = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'foreignObject'];
       for (const tag of blockedTags) {
         expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).not.toContain(tag);
       }
