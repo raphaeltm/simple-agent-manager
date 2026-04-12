@@ -27,6 +27,7 @@ describe('compute quota pipeline', () => {
   const nodeStepsFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/node-steps.ts'), 'utf8');
   const nodesRoute = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
   const migrationFile = readFileSync(resolve(process.cwd(), 'src/db/migrations/0039_compute_quotas.sql'), 'utf8');
+  const dispatchToolFile = readFileSync(resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'), 'utf8');
 
   // ===========================================================================
   // Migration
@@ -334,6 +335,37 @@ describe('compute quota pipeline', () => {
   });
 
   // ===========================================================================
+  // Quota Enforcement: MCP Dispatch Task
+  // ===========================================================================
+  describe('quota enforcement at MCP dispatch', () => {
+    it('uses resolveCredentialSource for credential resolution', () => {
+      expect(dispatchToolFile).toContain('resolveCredentialSource');
+    });
+
+    it('passes resolvedProvider to credential source check', () => {
+      expect(dispatchToolFile).toContain('resolveCredentialSource(db, tokenData.userId, resolvedProvider');
+    });
+
+    it('enforces quota when credential source is platform', () => {
+      expect(dispatchToolFile).toContain("credResult.credentialSource === 'platform'");
+    });
+
+    it('checks quota before task INSERT', () => {
+      const quotaIdx = dispatchToolFile.indexOf('resolveCredentialSource');
+      const insertIdx = dispatchToolFile.indexOf('INSERT INTO tasks');
+      expect(quotaIdx).toBeLessThan(insertIdx);
+    });
+
+    it('rejects when no credential exists', () => {
+      expect(dispatchToolFile).toContain('Cloud provider credentials required');
+    });
+
+    it('respects COMPUTE_QUOTA_ENFORCEMENT_ENABLED kill switch', () => {
+      expect(dispatchToolFile).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
+    });
+  });
+
+  // ===========================================================================
   // Env Var
   // ===========================================================================
   describe('environment configuration', () => {
@@ -361,10 +393,15 @@ describe('compute quota pipeline', () => {
       expect(nodeStepsFile).not.toContain('if (!hasOwnCreds)');
     });
 
-    it('all three enforcement points use resolveCredentialSource', () => {
+    it('MCP dispatch does NOT use raw credential existence check in Promise.all', () => {
+      expect(dispatchToolFile).not.toContain("eq(schema.credentials.credentialType, 'cloud-provider')");
+    });
+
+    it('all four enforcement points use resolveCredentialSource', () => {
       expect(submitRoute).toContain('resolveCredentialSource');
       expect(nodeStepsFile).toContain('resolveCredentialSource');
       expect(nodesRoute).toContain('resolveCredentialSource');
+      expect(dispatchToolFile).toContain('resolveCredentialSource');
     });
   });
 });

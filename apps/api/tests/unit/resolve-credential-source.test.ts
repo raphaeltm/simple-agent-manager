@@ -129,6 +129,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     resolve(process.cwd(), 'src/routes/nodes.ts'),
     'utf8',
   );
+  const dispatchSource = readFileSync(
+    resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
+    'utf8',
+  );
 
   // =========================================================================
   // Regression: The OLD pattern that must NOT exist
@@ -148,6 +152,11 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     it('node-steps.ts does NOT use hasOwnCreds guard', () => {
       expect(nodeStepsSource).not.toContain('if (!hasOwnCreds)');
     });
+
+    it('dispatch-tool.ts does NOT have raw credential existence check in Promise.all', () => {
+      // The old pattern: query credentials table in parallel and gate on !credential
+      expect(dispatchSource).not.toContain("eq(schema.credentials.credentialType, 'cloud-provider')");
+    });
   });
 
   // =========================================================================
@@ -164,6 +173,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
 
     it('nodes.ts (manual creation) uses resolveCredentialSource', () => {
       expect(nodesSource).toContain('resolveCredentialSource');
+    });
+
+    it('dispatch-tool.ts (MCP dispatch) uses resolveCredentialSource', () => {
+      expect(dispatchSource).toContain('resolveCredentialSource');
     });
   });
 
@@ -182,6 +195,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     it('nodes.ts checks credentialSource === platform', () => {
       expect(nodesSource).toContain("credResult.credentialSource === 'platform'");
     });
+
+    it('dispatch-tool.ts checks credentialSource === platform', () => {
+      expect(dispatchSource).toContain("credResult.credentialSource === 'platform'");
+    });
   });
 
   // =========================================================================
@@ -198,6 +215,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
 
     it('nodes.ts passes provider from request body', () => {
       expect(nodesSource).toContain('resolveCredentialSource(db, userId, provider');
+    });
+
+    it('dispatch-tool.ts passes resolvedProvider', () => {
+      expect(dispatchSource).toContain('resolveCredentialSource(db, tokenData.userId, resolvedProvider');
     });
   });
 
@@ -226,6 +247,7 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     it('all points reject when no credential exists', () => {
       expect(submitSource).toContain('Cloud provider credentials required');
       expect(nodesSource).toContain('Cloud provider credentials required');
+      expect(dispatchSource).toContain('Cloud provider credentials required');
     });
 
     it('node-steps.ts intentionally does NOT reject when credResult is null (silent skip)', () => {
@@ -251,6 +273,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     it('nodes.ts respects COMPUTE_QUOTA_ENFORCEMENT_ENABLED', () => {
       expect(nodesSource).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
     });
+
+    it('dispatch-tool.ts respects COMPUTE_QUOTA_ENFORCEMENT_ENABLED', () => {
+      expect(dispatchSource).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
+    });
   });
 
   // =========================================================================
@@ -271,6 +297,14 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(quotaIdx).toBeGreaterThan(0);
       expect(createIdx).toBeGreaterThan(0);
       expect(quotaIdx).toBeLessThan(createIdx);
+    });
+
+    it('dispatch-tool.ts checks quota before task INSERT', () => {
+      const quotaIdx = dispatchSource.indexOf('resolveCredentialSource');
+      const insertIdx = dispatchSource.indexOf('INSERT INTO tasks');
+      expect(quotaIdx).toBeGreaterThan(0);
+      expect(insertIdx).toBeGreaterThan(0);
+      expect(quotaIdx).toBeLessThan(insertIdx);
     });
   });
 });
