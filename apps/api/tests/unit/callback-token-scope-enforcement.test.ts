@@ -171,32 +171,26 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('ACCEPTS legacy node-level tokens via node fallback (backward compatible)', async () => {
+  it('REJECTS legacy node-level tokens (node fallback removed)', async () => {
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'node-123',
       type: 'callback',
       // No scope — legacy token
     });
 
-    // DB returns workspace with matching nodeId
-    mockDbSelect.mockResolvedValue([{ nodeId: 'node-123' }]);
-
     const c = makeContext('legacy-node-token');
 
     await expect(
       verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow('Insufficient token scope');
   });
 
-  it('REJECTS legacy tokens when neither workspace nor node matches', async () => {
+  it('REJECTS legacy tokens when workspace claim does not match', async () => {
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'unrelated-id',
       type: 'callback',
       // No scope — legacy token
     });
-
-    // DB returns workspace with different nodeId
-    mockDbSelect.mockResolvedValue([{ nodeId: 'node-other' }]);
 
     const c = makeContext('bad-legacy-token');
 
