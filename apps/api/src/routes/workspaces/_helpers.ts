@@ -131,31 +131,6 @@ export async function verifyWorkspaceCallbackAuth(
     return;
   }
 
-  // Legacy fallback: allow node-level token to access workspaces on that node.
-  // This preserves backward compatibility for VMs with pre-scoped tokens.
-  // TODO: Remove after 2026-04-23 — all nodes should have scoped tokens by then.
-  const db = drizzle(c.env.DATABASE, { schema });
-  const rows = await db
-    .select({ nodeId: schema.workspaces.nodeId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = rows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-
-  if (workspace.nodeId && payload.workspace === workspace.nodeId) {
-    log.warn('workspace_auth.legacy_node_token_fallback', {
-      tokenWorkspace: payload.workspace,
-      workspaceId,
-      nodeId: workspace.nodeId,
-      action: 'allowed_legacy_node_fallback',
-    });
-    return;
-  }
-
   throw errors.forbidden('Insufficient token scope');
 }
 
