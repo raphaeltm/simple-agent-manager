@@ -47,6 +47,77 @@ function ensureMermaidInit() {
   mermaidInitialized = true;
 }
 
+// ---------- SVG Sanitization Config ----------
+
+/**
+ * Explicit allowlists for DOMPurify SVG sanitization.
+ * Covers all elements and attributes that Mermaid generates.
+ * Defense-in-depth: even though DOMPurify's SVG profile is reasonable,
+ * an explicit allowlist prevents future DOMPurify default changes from
+ * widening the attack surface.
+ */
+export const SVG_SANITIZE_CONFIG: DOMPurify.Config = {
+  USE_PROFILES: { svg: true, svgFilters: true },
+  ALLOWED_TAGS: [
+    // SVG structural
+    'svg', 'g', 'defs', 'symbol', 'use', 'title', 'desc',
+    // SVG shapes
+    'path', 'circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon',
+    // SVG text
+    'text', 'tspan', 'textPath',
+    // SVG painting / clipping
+    'clipPath', 'mask', 'pattern', 'marker',
+    // SVG gradients
+    'linearGradient', 'radialGradient', 'stop',
+    // SVG filters
+    'filter', 'feBlend', 'feColorMatrix', 'feComposite', 'feFlood',
+    'feGaussianBlur', 'feMerge', 'feMergeNode', 'feOffset',
+    // SVG references
+    'image', 'a',
+    // Mermaid uses inline <style> for diagram themes
+    'style',
+    // foreignObject for rich text labels (Mermaid strict mode blocks XSS inside these)
+    'foreignObject',
+    // HTML elements Mermaid embeds inside foreignObject
+    'div', 'span', 'p', 'br', 'b', 'i', 'em', 'strong', 'u',
+    'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  ],
+  ALLOWED_ATTR: [
+    // Core SVG attributes
+    'id', 'class', 'style', 'xmlns', 'xmlns:xlink',
+    // Viewbox / dimensions
+    'viewBox', 'width', 'height', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
+    'cx', 'cy', 'r', 'rx', 'ry',
+    // Path / shape data
+    'd', 'points', 'fill', 'stroke', 'stroke-width', 'stroke-dasharray',
+    'stroke-linecap', 'stroke-linejoin', 'stroke-opacity', 'fill-opacity',
+    'opacity', 'fill-rule', 'clip-rule',
+    // Transforms
+    'transform', 'transform-origin',
+    // Text attributes
+    'text-anchor', 'dominant-baseline', 'alignment-baseline',
+    'font-family', 'font-size', 'font-weight', 'font-style',
+    'letter-spacing', 'text-decoration', 'dx', 'dy',
+    // References / links
+    'href', 'xlink:href', 'clip-path', 'marker-start', 'marker-mid',
+    'marker-end', 'mask',
+    // Gradient / pattern
+    'offset', 'stop-color', 'stop-opacity', 'gradientTransform',
+    'gradientUnits', 'patternUnits', 'patternTransform',
+    'spreadMethod', 'fx', 'fy',
+    // Filter attributes
+    'in', 'in2', 'result', 'mode', 'stdDeviation', 'flood-color',
+    'flood-opacity', 'color-interpolation-filters',
+    // Marker attributes
+    'markerWidth', 'markerHeight', 'refX', 'refY', 'orient',
+    'markerUnits', 'overflow',
+    // Misc
+    'preserveAspectRatio', 'requiredExtensions', 'systemLanguage',
+    'aria-hidden', 'role', 'tabindex', 'data-testid',
+    'color', 'display', 'visibility',
+  ],
+};
+
 // ---------- Mermaid Diagram Component ----------
 
 let mermaidCounter = 0;
@@ -65,9 +136,7 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
       try {
         const { svg } = await mermaid.render(diagramId, code);
         if (!cancelled && containerRef.current) {
-          containerRef.current.innerHTML = DOMPurify.sanitize(svg, {
-            USE_PROFILES: { svg: true, svgFilters: true },
-          });
+          containerRef.current.innerHTML = DOMPurify.sanitize(svg, SVG_SANITIZE_CONFIG);
         }
       } catch (err) {
         if (!cancelled) {
