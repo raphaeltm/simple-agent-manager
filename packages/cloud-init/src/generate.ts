@@ -20,14 +20,16 @@ const JOURNALD_SIZE_RE = /^[0-9]+[KMGT]?$/;
 /** journald time span: digits + time unit */
 const JOURNALD_TIME_RE = /^[0-9]+(us|ms|s|min|h|day|week|month|year)$/;
 
-/** URL must start with https:// and contain only safe characters */
-const SAFE_URL_RE = /^https:\/\/[a-zA-Z0-9._~:/?#[\]@!$&'()*+,;=-]+$/;
+/** URL must start with https:// and contain only safe characters.
+ * Excludes $ (systemd variable expansion) and ' (shell quoting risk). */
+const SAFE_URL_RE = /^https:\/\/[a-zA-Z0-9._~:/?#[\]@!&()*+,;=-]+$/;
 
 /** callbackToken: JWT format (base64url segments separated by dots) */
 const SAFE_TOKEN_RE = /^[a-zA-Z0-9_.\-/+=]+$/;
 
-/** Docker DNS servers: quoted IPs like "1.1.1.1", "8.8.8.8" */
-const SAFE_DNS_SERVERS_RE = /^["0-9., ]+$/;
+/** Docker DNS servers: one or more quoted dotted-decimal IPv4 addresses, comma-separated.
+ * e.g. "1.1.1.1", "8.8.8.8" */
+const SAFE_DNS_SERVERS_RE = /^"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"(, "\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")*$/;
 
 /**
  * Validate all CloudInitVariables before they are embedded into shell/YAML.

@@ -983,6 +983,42 @@ describe('validateCloudInitVariables', () => {
       }))).toThrow('controlPlaneUrl');
     });
 
+    it('rejects controlPlaneUrl with dollar sign (systemd expansion risk)', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com/$HOME/path',
+      }))).toThrow('controlPlaneUrl');
+    });
+
+    it('rejects controlPlaneUrl with single-quote', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: "https://api.example.com/it's",
+      }))).toThrow('controlPlaneUrl');
+    });
+
+    it('rejects unquoted DNS server values', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '1.1.1.1',
+      }))).toThrow('dockerDnsServers');
+    });
+
+    it('rejects DNS server with invalid octet count', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"1.1.1"',
+      }))).toThrow('dockerDnsServers');
+    });
+
+    it('accepts properly quoted DNS servers', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
+      }))).not.toThrow();
+    });
+
+    it('accepts single properly quoted DNS server', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"1.1.1.1"',
+      }))).not.toThrow();
+    });
+
     it('collects multiple validation errors', () => {
       try {
         validateCloudInitVariables({
@@ -1034,6 +1070,158 @@ describe('validateCloudInitVariables', () => {
         nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
       }));
       expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Additional tests for gaps identified during security review
+  // ---------------------------------------------------------------------------
+
+  describe('URL field shell injection vectors', () => {
+    // control_plane_url is embedded inside a double-quoted shell string in the
+    // cloud-init runcmd (template line 45):
+    //   curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download..."
+    // In bash, $() and $VAR inside double quotes are expanded. SAFE_URL_RE correctly
+    // excludes $ from its character class, so these vectors are rejected.
+
+    it('rejects controlPlaneUrl with $ (prevents variable expansion in double-quoted shell arg)', () => {
+      // control_plane_url is embedded in: curl ... "{{ control_plane_url }}/api/agent/..."
+      // In bash, $VAR inside double quotes is expanded. SAFE_URL_RE has no $ in its
+      // character class, so dollar-sign values are correctly rejected.
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com/$PATH',
+      }))).toThrow('controlPlaneUrl');
+    });
+
+    it('rejects controlPlaneUrl with $() (prevents command substitution in shell context)', () => {
+      // $(id) in a double-quoted bash string causes command substitution — RCE.
+      // SAFE_URL_RE correctly rejects this because $ is not in the character class.
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com/$(id)',
+      }))).toThrow('controlPlaneUrl');
+    });
+
+    it('rejects controlPlaneUrl with backtick injection', () => {
+      // Backticks are not in SAFE_URL_RE, so this is already rejected.
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com/`id`',
+      }))).toThrow('controlPlaneUrl');
+    });
+
+    it('rejects jwksUrl with shell metacharacters', () => {
+      // jwksUrl is also embedded in the systemd unit (inside single-quoted heredoc,
+      // so lower risk there) but the regex is the same as controlPlaneUrl.
+      expect(() => validateCloudInitVariables(baseVariables({
+        jwksUrl: 'https://api.example.com/path`id`',
+      }))).toThrow('jwksUrl');
+    });
+
+    it('rejects jwksUrl that is HTTP (non-HTTPS)', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        jwksUrl: 'http://api.example.com/.well-known/jwks.json',
+      }))).toThrow('jwksUrl');
+    });
+
+    it('rejects jwksUrl that is empty', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        jwksUrl: '',
+      }))).toThrow('jwksUrl');
+    });
+  });
+
+  describe('hostname format edge cases', () => {
+    // SAFE_HOSTNAME_RE (/^[a-zA-Z0-9.-]+$/) allows leading/trailing dots, which
+    // produce invalid hostnames. cloud-init will accept them but the resulting
+    // hostname is non-conforming. These tests document the current behaviour.
+    it('currently accepts leading-dot hostname (invalid per RFC 1123, documents known gap)', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: '.invalid-hostname',
+      }))).not.toThrow();
+    });
+
+    it('currently accepts trailing-dot hostname (invalid per RFC 1123, documents known gap)', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'hostname.',
+      }))).not.toThrow();
+    });
+
+    it('rejects hostname with shell special characters', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'host$(cmd)',
+      }))).toThrow('hostname');
+    });
+
+    it('rejects hostname with ampersand', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'host&evil',
+      }))).toThrow('hostname');
+    });
+  });
+
+  describe('optional ID fields shell injection coverage', () => {
+    // projectId already has a test; these cover the other SAFE_ID_RE fields.
+    it('rejects chatSessionId with command substitution', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        chatSessionId: '$(id)',
+      }))).toThrow('chatSessionId');
+    });
+
+    it('rejects chatSessionId with semicolon chaining', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        chatSessionId: 'sess; rm -rf /',
+      }))).toThrow('chatSessionId');
+    });
+
+    it('rejects taskId with command substitution', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        taskId: '$(id)',
+      }))).toThrow('taskId');
+    });
+
+    it('rejects taskId with pipe', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        taskId: 'task|cat /etc/passwd',
+      }))).toThrow('taskId');
+    });
+  });
+
+  describe('journald field coverage', () => {
+    it('rejects logJournalKeepFree with invalid format', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalKeepFree: '500MB',
+      }))).toThrow('logJournalKeepFree');
+    });
+
+    it('rejects logJournalKeepFree with shell metacharacters', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalKeepFree: '500M; rm -rf /',
+      }))).toThrow('logJournalKeepFree');
+    });
+
+    it('rejects logJournalMaxUse with shell metacharacters', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalMaxUse: '1G$(id)',
+      }))).toThrow('logJournalMaxUse');
+    });
+
+    it('rejects logJournalMaxRetention with shell metacharacters', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalMaxRetention: '7day; echo pwned',
+      }))).toThrow('logJournalMaxRetention');
+    });
+  });
+
+  describe('cfIpFetchTimeout edge cases', () => {
+    it('rejects cfIpFetchTimeout with decimal point', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        cfIpFetchTimeout: '30.5',
+      }))).toThrow('cfIpFetchTimeout');
+    });
+
+    it('rejects cfIpFetchTimeout with shell metacharacters', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        cfIpFetchTimeout: '30; rm -rf /',
+      }))).toThrow('cfIpFetchTimeout');
     });
   });
 });
