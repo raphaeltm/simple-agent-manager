@@ -20,7 +20,7 @@ vi.mock('mermaid', () => ({
   },
 }));
 
-import { RenderedMarkdown } from '../../../src/components/MarkdownRenderer';
+import { RenderedMarkdown, SVG_SANITIZE_CONFIG } from '../../../src/components/MarkdownRenderer';
 
 describe('RenderedMarkdown', () => {
   beforeEach(() => {
@@ -199,6 +199,61 @@ describe('RenderedMarkdown', () => {
         expect(diagram.innerHTML).toContain('<rect');
         expect(diagram.innerHTML).toContain('<text');
         expect(diagram.innerHTML).toContain('fill="#1a3a32"');
+      });
+    });
+
+    it('uses explicit ALLOWED_TAGS and ALLOWED_ATTR in SVG sanitize config', () => {
+      // Verify the config has explicit allowlists (defense-in-depth)
+      expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).toBeDefined();
+      expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS!.length).toBeGreaterThan(10);
+      expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR).toBeDefined();
+      expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR!.length).toBeGreaterThan(10);
+
+      // script, iframe, object, embed, foreignObject must NOT be in the allowlist
+      const blockedTags = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'foreignObject'];
+      for (const tag of blockedTags) {
+        expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).not.toContain(tag);
+      }
+
+      // Event handler attributes must NOT be in the allowlist
+      const blockedAttrs = ['onclick', 'onerror', 'onload', 'onmouseover', 'onfocus'];
+      for (const attr of blockedAttrs) {
+        expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR).not.toContain(attr);
+      }
+
+      // Core Mermaid-required tags must be present
+      const requiredTags = ['svg', 'g', 'path', 'rect', 'text', 'tspan', 'defs', 'style', 'marker'];
+      for (const tag of requiredTags) {
+        expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).toContain(tag);
+      }
+    });
+
+    it('preserves complex Mermaid SVG with gradients, markers, and filters', async () => {
+      const complexSvg = [
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">',
+        '<defs>',
+        '<linearGradient id="grad1"><stop offset="0%" stop-color="#1a3a32"/><stop offset="100%" stop-color="#29423b"/></linearGradient>',
+        '<marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9fb7ae"/></marker>',
+        '</defs>',
+        '<g transform="translate(10,10)">',
+        '<rect x="0" y="0" width="80" height="40" fill="url(#grad1)" stroke="#29423b" rx="5"/>',
+        '<text x="40" y="25" text-anchor="middle" font-size="14" fill="#e6f2ee">Node</text>',
+        '<line x1="40" y1="40" x2="40" y2="80" stroke="#9fb7ae" marker-end="url(#arrow)"/>',
+        '</g>',
+        '</svg>',
+      ].join('');
+      mocks.mermaidRender.mockResolvedValue({ svg: complexSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).toContain('<linearGradient');
+        expect(diagram.innerHTML).toContain('<marker');
+        expect(diagram.innerHTML).toContain('<polygon');
+        expect(diagram.innerHTML).toContain('text-anchor');
+        expect(diagram.innerHTML).toContain('transform=');
+        expect(diagram.innerHTML).toContain('Node');
       });
     });
 

@@ -157,10 +157,16 @@ export function rateLimit(config: RateLimitConfig): MiddlewareHandler<{ Bindings
     } else {
       const auth = c.get('auth');
       if (!auth?.user?.id) {
-        log.warn('rate_limit.unauthenticated_without_ip', {});
-        return next();
+        const fallbackIp = getClientIp(c);
+        log.warn('rate_limit.ip_fallback', {
+          reason: 'unauthenticated_request_on_user_scoped_endpoint',
+          keyPrefix: config.keyPrefix,
+          ip: fallbackIp,
+        });
+        identifier = fallbackIp;
+      } else {
+        identifier = auth.user.id;
       }
-      identifier = auth.user.id;
     }
 
     const windowStart = getCurrentWindowStart(windowSeconds);
