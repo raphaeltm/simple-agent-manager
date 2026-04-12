@@ -133,51 +133,6 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
     parentBranch = parentTask.outputBranch;
   }
 
-  // Check cloud provider credentials (user's own or platform fallback)
-  const [credential] = await db
-    .select({ id: schema.credentials.id })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'cloud-provider')
-      )
-    )
-    .limit(1);
-
-  const userHasByocCredentials = !!credential;
-
-  if (!userHasByocCredentials) {
-    // Check if platform credentials exist as fallback
-    const [platformCred] = await db
-      .select({ id: schema.platformCredentials.id })
-      .from(schema.platformCredentials)
-      .where(
-        and(
-          eq(schema.platformCredentials.credentialType, 'cloud-provider'),
-          eq(schema.platformCredentials.isEnabled, true)
-        )
-      )
-      .limit(1);
-
-    if (!platformCred) {
-      throw errors.forbidden('Cloud provider credentials required. Connect your account in Settings.');
-    }
-
-    // User will use platform compute — enforce quota
-    const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
-    if (quotaEnforcementEnabled) {
-      const { checkQuotaForUser } = await import('../../services/compute-quotas');
-      const quotaCheck = await checkQuotaForUser(db, userId);
-      if (!quotaCheck.allowed) {
-        throw errors.forbidden(
-          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
-          'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
-        );
-      }
-    }
-  }
-
   // Validate nodeId if provided
   if (body.nodeId) {
     const [node] = await db
@@ -265,6 +220,31 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
     throw errors.badRequest(
       `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
     );
+  }
+
+  // Check cloud provider credentials and enforce compute quota.
+  // This runs AFTER provider resolution so we know which provider will be used,
+  // ensuring quota enforcement is based on the actual credential source — not
+  // just whether the user has ANY cloud credential registered.
+  const { resolveCredentialSource } = await import('../../services/provider-credentials');
+  const credResult = await resolveCredentialSource(db, userId, provider ?? undefined);
+
+  if (!credResult) {
+    throw errors.forbidden('Cloud provider credentials required. Connect your account in Settings.');
+  }
+
+  if (credResult.credentialSource === 'platform') {
+    const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+    if (quotaEnforcementEnabled) {
+      const { checkQuotaForUser } = await import('../../services/compute-quotas');
+      const quotaCheck = await checkQuotaForUser(db, userId);
+      if (!quotaCheck.allowed) {
+        throw errors.forbidden(
+          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+          'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+        );
+      }
+    }
   }
 
   // Determine task mode: explicit override > profile > inferred from workspace profile > default 'task'

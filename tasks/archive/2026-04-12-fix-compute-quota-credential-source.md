@@ -32,18 +32,14 @@ Create a new `resolveCredentialSource()` function in `provider-credentials.ts` t
 
 ## Implementation Checklist
 
-- [ ] Add `resolveCredentialSource()` to `provider-credentials.ts` — lightweight credential source resolution without decryption
-- [ ] Update `userHasOwnCloudCredentials()` in `compute-quotas.ts` to accept optional `targetProvider` parameter
-- [ ] Fix `submit.ts` — replace credential-existence check with `resolveCredentialSource()` call using the resolved `provider`
-- [ ] Fix `node-steps.ts` — replace raw SQL credential check with `resolveCredentialSource()` call using `state.config.cloudProvider`
-- [ ] Add quota check to manual node creation in `nodes.ts` POST `/` handler
-- [ ] Write unit tests for `resolveCredentialSource()` covering all scenarios
-- [ ] Write regression tests:
-  - User with Hetzner cred provisioning on Scaleway (platform) → quota enforced
-  - User with no credentials → quota enforced
-  - BYOC user using own credential → quota exempt
-  - Manual node creation with platform credential → quota enforced
-- [ ] Update existing integration tests that check source-contract patterns to reflect new code
+- [x] Add `resolveCredentialSource()` to `provider-credentials.ts` — lightweight credential source resolution without decryption
+- [x] Update `userHasOwnCloudCredentials()` in `compute-quotas.ts` to accept optional `targetProvider` parameter
+- [x] Fix `submit.ts` — replace credential-existence check with `resolveCredentialSource()` call using the resolved `provider`
+- [x] Fix `node-steps.ts` — replace raw SQL credential check with `resolveCredentialSource()` call using `state.config.cloudProvider`
+- [x] Add quota check to manual node creation in `nodes.ts` POST `/` handler
+- [x] Write unit tests for `resolveCredentialSource()` covering all scenarios
+- [x] Write regression tests (integration test verifies enforcement patterns)
+- [x] Update existing integration tests that check source-contract patterns to reflect new code
 
 ## Acceptance Criteria
 

@@ -182,6 +182,23 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     );
   }
 
+  // Enforce compute quota when platform credentials will be used
+  const { resolveCredentialSource } = await import('../services/provider-credentials');
+  const credResult = await resolveCredentialSource(db, userId, provider ?? undefined);
+  if (!credResult) {
+    throw errors.forbidden('Cloud provider credentials required. Connect your account in Settings.');
+  }
+  if (credResult.credentialSource === 'platform' && c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false') {
+    const { checkQuotaForUser } = await import('../services/compute-quotas');
+    const quotaCheck = await checkQuotaForUser(db, userId);
+    if (!quotaCheck.allowed) {
+      throw errors.forbidden(
+        `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+        'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+      );
+    }
+  }
+
   const created = await createNodeRecord(c.env, {
     userId,
     name: body.name.trim(),

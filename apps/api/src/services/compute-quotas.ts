@@ -7,7 +7,7 @@
  * Quotas only apply to platform-provisioned compute (credential_source = 'platform').
  * BYOC users are exempt.
  */
-import type { QuotaSource } from '@simple-agent-manager/shared';
+import type { CredentialProvider, QuotaSource } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
@@ -111,21 +111,29 @@ export async function checkQuotaForUser(
 
 /**
  * Determine if a user has their own cloud credentials (BYOC).
- * BYOC users are exempt from compute quotas.
+ * When `targetProvider` is specified, only checks for credentials matching that provider.
+ * Without `targetProvider`, checks for ANY cloud-provider credential (used for informational display).
+ *
+ * IMPORTANT: For quota enforcement, always pass `targetProvider` to avoid the bypass bug
+ * where a user with a Hetzner credential is exempt when provisioning on Scaleway (platform).
  */
 export async function userHasOwnCloudCredentials(
   db: DrizzleD1Database<typeof schema>,
-  userId: string
+  userId: string,
+  targetProvider?: CredentialProvider,
 ): Promise<boolean> {
+  const conditions = [
+    eq(schema.credentials.userId, userId),
+    eq(schema.credentials.credentialType, 'cloud-provider'),
+  ];
+  if (targetProvider) {
+    conditions.push(eq(schema.credentials.provider, targetProvider));
+  }
+
   const [cred] = await db
     .select({ id: schema.credentials.id })
     .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'cloud-provider')
-      )
-    )
+    .where(and(...conditions))
     .limit(1);
 
   return !!cred;

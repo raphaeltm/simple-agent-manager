@@ -184,12 +184,11 @@ export async function handleDispatchTask(
   // ── Compute new depth (enforcement deferred until project overrides are resolved) ──
   const newDepth = currentTask.dispatchDepth + 1;
 
-  // ── Parallel: pre-flight checks, credential check, project fetch, and AI title ─
+  // ── Parallel: pre-flight checks, project fetch, and AI title ────────────
   const titleConfig = getTaskTitleConfig(env);
   const [
     [childCountResult],
     [activeDispatchedResult],
-    [credential],
     [project],
     taskTitle,
   ] = await Promise.all([
@@ -207,13 +206,6 @@ export async function handleDispatchTask(
         inArray(schema.tasks.status, ACTIVE_STATUSES),
         sql`${schema.tasks.dispatchDepth} > 0`,
       )),
-    db.select({ id: schema.credentials.id })
-      .from(schema.credentials)
-      .where(and(
-        eq(schema.credentials.userId, tokenData.userId),
-        eq(schema.credentials.credentialType, 'cloud-provider'),
-      ))
-      .limit(1),
     db.select()
       .from(schema.projects)
       .where(eq(schema.projects.id, tokenData.projectId))
@@ -271,15 +263,6 @@ export async function handleDispatchTask(
       INVALID_PARAMS,
       `Project has ${activeDispatched} active agent-dispatched tasks (limit: ${effectiveMaxActive}). ` +
       'Wait for existing tasks to complete before dispatching more.',
-    );
-  }
-
-  // ── Verify cloud credentials exist for the user ─────────────────────────
-  if (!credential) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
     );
   }
 
@@ -379,6 +362,37 @@ export async function handleDispatchTask(
 
   // Explicit branch > project default branch.
   const checkoutBranch = explicitBranch || project.defaultBranch;
+
+  // ── Verify cloud credentials and enforce quota ──────────────────────────
+  // Uses resolveCredentialSource to determine whether the user's own credential
+  // or a platform credential will be used for the resolved provider. Quota is
+  // enforced only when platform credentials are used.
+  const { resolveCredentialSource } = await import('../../services/provider-credentials');
+  const credResult = await resolveCredentialSource(db, tokenData.userId, resolvedProvider ?? undefined);
+
+  if (!credResult) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
+    );
+  }
+
+  if (credResult.credentialSource === 'platform') {
+    const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+    if (quotaEnforcementEnabled) {
+      const { checkQuotaForUser } = await import('../../services/compute-quotas');
+      const quotaCheck = await checkQuotaForUser(db, tokenData.userId);
+      if (!quotaCheck.allowed) {
+        return jsonRpcError(
+          requestId,
+          INVALID_PARAMS,
+          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+          'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.',
+        );
+      }
+    }
+  }
 
   // ── Atomic conditional INSERT (prevents TOCTOU race) ─────────────────
   const statusPlaceholders = ACTIVE_STATUSES.map(() => '?').join(', ');
