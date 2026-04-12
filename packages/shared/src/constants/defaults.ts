@@ -10,6 +10,16 @@ export const DEFAULT_BRANCH = 'main';
 export const DEFAULT_WORKSPACE_PROFILE: WorkspaceProfile = 'full';
 export const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
 
+/**
+ * Regex for valid devcontainer config names (directory names under .devcontainer/).
+ * Allows alphanumeric characters, hyphens, and underscores.
+ * Override via DEVCONTAINER_CONFIG_NAME_PATTERN env var.
+ */
+export const DEVCONTAINER_CONFIG_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+
+/** Maximum length for devcontainer config names. Override via DEVCONTAINER_CONFIG_NAME_MAX_LENGTH env var. */
+export const DEVCONTAINER_CONFIG_NAME_MAX_LENGTH = 128;
+
 // =============================================================================
 // Default Limits (configurable via environment variables)
 // Per constitution principle XI: all values must be configurable
