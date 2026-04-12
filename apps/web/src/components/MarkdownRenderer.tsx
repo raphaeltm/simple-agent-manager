@@ -74,13 +74,13 @@ export const SVG_SANITIZE_CONFIG = {
     'feGaussianBlur', 'feMerge', 'feMergeNode', 'feOffset',
     // SVG references
     'image', 'a',
-    // Mermaid uses inline <style> for diagram themes
+    // Mermaid uses inline <style> for diagram themes (accepted trade-off;
+    // CSS injection risk mitigated by CSP headers on the app origin)
     'style',
-    // HTML elements Mermaid embeds inside foreignObject for rich text labels.
-    // foreignObject itself is NOT allowed — it is the most dangerous SVG element
-    // and Mermaid's securityLevel: 'strict' disables it anyway.
-    'div', 'span', 'p', 'br', 'b', 'i', 'em', 'strong', 'u',
-    'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    // NOTE: foreignObject is intentionally NOT allowed. It is the most
+    // dangerous SVG element (switches to HTML parser) and Mermaid's
+    // securityLevel: 'strict' disables it. HTML elements (div, span, etc.)
+    // are also excluded since they only render inside foreignObject.
   ],
   ALLOWED_ATTR: [
     // Core SVG attributes
@@ -98,7 +98,9 @@ export const SVG_SANITIZE_CONFIG = {
     'text-anchor', 'dominant-baseline', 'alignment-baseline',
     'font-family', 'font-size', 'font-weight', 'font-style',
     'letter-spacing', 'text-decoration', 'dx', 'dy',
-    // References / links
+    // References / links — URL sanitization (stripping non-local hrefs) is
+    // provided by USE_PROFILES, not this allowlist. xlink:href is deprecated
+    // in SVG 2.0 but still needed for older Mermaid output.
     'href', 'xlink:href', 'clip-path', 'marker-start', 'marker-mid',
     'marker-end', 'mask',
     // Gradient / pattern
