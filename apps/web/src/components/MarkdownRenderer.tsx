@@ -56,7 +56,7 @@ function ensureMermaidInit() {
  * an explicit allowlist prevents future DOMPurify default changes from
  * widening the attack surface.
  */
-export const SVG_SANITIZE_CONFIG: DOMPurify.Config = {
+export const SVG_SANITIZE_CONFIG = {
   USE_PROFILES: { svg: true, svgFilters: true },
   ALLOWED_TAGS: [
     // SVG structural

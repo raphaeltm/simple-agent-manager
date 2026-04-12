@@ -1,12 +1,12 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   checkRateLimit,
   createRateLimitKey,
-  getCurrentWindowStart,
-  getRateLimit,
   DEFAULT_RATE_LIMITS,
   DEFAULT_WINDOW_SECONDS,
+  getCurrentWindowStart,
+  getRateLimit,
 } from '../../../src/middleware/rate-limit';
 
 // ---------------------------------------------------------------------------
