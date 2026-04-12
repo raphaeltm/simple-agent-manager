@@ -143,7 +143,14 @@ export async function handleNodeProvisioning(
       (state.config.cloudProvider as import('@simple-agent-manager/shared').CredentialProvider) ?? undefined,
     );
 
-    if (credResult?.credentialSource === 'platform') {
+    if (!credResult) {
+      throw Object.assign(
+        new Error('No cloud provider credentials available for provisioning.'),
+        { permanent: true },
+      );
+    }
+
+    if (credResult.credentialSource === 'platform') {
       const { checkQuotaForUser } = await import('../../services/compute-quotas');
       const quotaCheck = await checkQuotaForUser(db, state.userId);
 

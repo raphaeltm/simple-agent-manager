@@ -287,7 +287,7 @@ describe('compute quota pipeline', () => {
     });
 
     it('enforces quota only when credential source is platform', () => {
-      expect(nodeStepsFile).toContain("credResult?.credentialSource === 'platform'");
+      expect(nodeStepsFile).toContain("credResult.credentialSource === 'platform'");
     });
 
     it('re-checks quota before provisioning', () => {

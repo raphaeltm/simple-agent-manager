@@ -189,7 +189,7 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     });
 
     it('node-steps.ts checks credentialSource === platform', () => {
-      expect(nodeStepsSource).toContain("credResult?.credentialSource === 'platform'");
+      expect(nodeStepsSource).toContain("credResult.credentialSource === 'platform'");
     });
 
     it('nodes.ts checks credentialSource === platform', () => {
@@ -250,11 +250,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(dispatchSource).toContain('Cloud provider credentials required');
     });
 
-    it('node-steps.ts intentionally does NOT reject when credResult is null (silent skip)', () => {
-      // node-steps.ts uses optional chaining (credResult?.credentialSource); it silently
-      // skips quota check when no credential exists. This is intentional — the DO context
-      // handles credential absence differently from the HTTP request handlers.
-      expect(nodeStepsSource).not.toContain('Cloud provider credentials required');
+    it('node-steps.ts rejects with permanent error when no credential exists', () => {
+      // node-steps.ts now has an explicit null check matching submit.ts and nodes.ts
+      expect(nodeStepsSource).toContain('No cloud provider credentials available');
+      expect(nodeStepsSource).toContain('{ permanent: true }');
     });
   });
 
