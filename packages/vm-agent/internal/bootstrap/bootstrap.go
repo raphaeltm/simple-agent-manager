@@ -92,13 +92,14 @@ type ProjectRuntimeFile struct {
 // ProvisionState carries optional credential and git identity data used when
 // preparing a workspace environment outside the bootstrap-token flow.
 type ProvisionState struct {
-	GitHubToken    string
-	GitUserName    string
-	GitUserEmail   string
-	GitHubID       string
-	ProjectEnvVars []ProjectRuntimeEnvVar
-	ProjectFiles   []ProjectRuntimeFile
-	Lightweight    bool // Skip devcontainer build, use fallback image for faster startup
+	GitHubToken              string
+	GitUserName              string
+	GitUserEmail             string
+	GitHubID                 string
+	ProjectEnvVars           []ProjectRuntimeEnvVar
+	ProjectFiles             []ProjectRuntimeFile
+	Lightweight              bool   // Skip devcontainer build, use fallback image for faster startup
+	DevcontainerConfigName   string // Named devcontainer config (subdirectory under .devcontainer/)
 }
 
 // Run redeems bootstrap credentials (if configured), prepares the workspace, and signals ready.
@@ -182,7 +183,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 
 	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
 	reporter.Log("devcontainer_up", "started", "Building devcontainer")
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath, "")
 	if err != nil {
 		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
 		return err
@@ -328,7 +329,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	} else {
 		reporter.Log("devcontainer_up", "started", "Building devcontainer")
 		var devErr error
-		usedFallback, devErr = ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath)
+		usedFallback, devErr = ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath, state.DevcontainerConfigName)
 		if devErr != nil {
 			reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", devErr.Error())
 			return false, devErr
@@ -780,7 +781,7 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 // volume mounted at /workspaces instead of the default bind mount. This eliminates
 // host/container permission mismatches because the container user owns everything
 // inside the volume.
-func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) (bool, error) {
+func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName string) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		slog.Info("Devcontainer already running", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
 		ensureContainerUserResolved(ctx, cfg)
@@ -811,7 +812,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		var overridePath string
 		if volumeName != "" {
 			var mountErr error
-			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName, credHelperHostPath)
+			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName, credHelperHostPath, devcontainerConfigName)
 			if mountErr != nil {
 				slog.Warn("Failed to prepare repo mount override config, falling back to default image", "error", mountErr)
 				fallbackOutput := []byte(fmt.Sprintf("failed to prepare repo devcontainer mount override: %v\n", mountErr))
@@ -836,7 +837,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		}
 
 		if !usedFallback {
-			args := devcontainerUpArgs(cfg, overridePath)
+			args := devcontainerUpArgs(cfg, overridePath, devcontainerConfigName)
 			if cfg.AdditionalFeatures != "" {
 				slog.Info("Repo has its own devcontainer config, skipping additional-features injection")
 			}
@@ -904,11 +905,18 @@ func fallbackToDefaultDevcontainer(
 
 // devcontainerUpArgs builds the argument slice for `devcontainer up`.
 // When overrideConfigPath is non-empty, it adds --override-config.
+// When devcontainerConfigName is non-empty, it adds --config pointing to the
+// named subdirectory under .devcontainer/.
 // Volume mount settings are injected via the workspaceMount property in the
 // override config (NOT via the --mount CLI flag, which only adds supplementary
 // mounts and does not replace the default workspace bind mount).
-func devcontainerUpArgs(cfg *config.Config, overrideConfigPath string) []string {
+func devcontainerUpArgs(cfg *config.Config, overrideConfigPath, devcontainerConfigName string) []string {
 	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
+
+	if devcontainerConfigName != "" {
+		configPath := filepath.Join(cfg.WorkspaceDir, ".devcontainer", devcontainerConfigName, "devcontainer.json")
+		args = append(args, "--config", configPath)
+	}
 
 	if overrideConfigPath != "" {
 		args = append(args, "--override-config", overrideConfigPath)
@@ -1063,11 +1071,15 @@ func normalizeLifecycleCommandValue(value interface{}) interface{} {
 	}
 }
 
-func runReadConfiguration(ctx context.Context, workspaceDir string) (*devcontainerReadConfigurationResult, error) {
+func runReadConfiguration(ctx context.Context, workspaceDir, devcontainerConfigName string) (*devcontainerReadConfigurationResult, error) {
 	args := []string{
 		"read-configuration",
 		"--workspace-folder", workspaceDir,
 		"--include-merged-configuration",
+	}
+	if devcontainerConfigName != "" {
+		configPath := filepath.Join(workspaceDir, ".devcontainer", devcontainerConfigName, "devcontainer.json")
+		args = append(args, "--config", configPath)
 	}
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
 	output, err := cmd.CombinedOutput()
@@ -1130,7 +1142,7 @@ func extractContainerUserFromMetadataLabel(raw string) string {
 }
 
 func detectContainerUserFromReadConfiguration(ctx context.Context, cfg *config.Config) string {
-	readResult, err := runReadConfiguration(ctx, cfg.WorkspaceDir)
+	readResult, err := runReadConfiguration(ctx, cfg.WorkspaceDir, "")
 	if err != nil {
 		slog.Warn("Container user detection: read-configuration unavailable", "error", err)
 		return ""
@@ -1321,13 +1333,13 @@ func statContainerPathOwnership(ctx context.Context, containerID, path string) (
 // writeMountOverrideConfig resolves the repo devcontainer configuration via
 // `devcontainer read-configuration` and writes a full override config that
 // includes workspaceMount/workspaceFolder for named-volume workspaces.
-func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) (string, error) {
+func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName string) (string, error) {
 	repoDirName := config.DeriveRepoDirName(cfg.Repository)
 	if repoDirName == "" {
 		repoDirName = filepath.Base(cfg.WorkspaceDir)
 	}
 
-	readResult, err := runReadConfiguration(ctx, cfg.WorkspaceDir)
+	readResult, err := runReadConfiguration(ctx, cfg.WorkspaceDir, devcontainerConfigName)
 	if err != nil {
 		return "", err
 	}
@@ -1403,7 +1415,7 @@ func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeN
 	}
 	slog.Info("Using default devcontainer config", "configPath", configPath, "image", cfg.DefaultDevcontainerImage)
 
-	args := devcontainerUpArgs(cfg, configPath)
+	args := devcontainerUpArgs(cfg, configPath, "") // fallback uses default config, not named
 	if cfg.AdditionalFeatures != "" {
 		slog.Info("Injecting additional devcontainer features", "features", cfg.AdditionalFeatures)
 		args = append(args, "--additional-features", cfg.AdditionalFeatures)
@@ -1513,7 +1525,11 @@ func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName, credHelperHo
 }
 
 // hasDevcontainerConfig checks whether the workspace directory contains a devcontainer
-// configuration (either .devcontainer/devcontainer.json or .devcontainer.json).
+// configuration. It checks (in order):
+//  1. .devcontainer/devcontainer.json (standard default)
+//  2. .devcontainer.json (root-level shorthand)
+//  3. .devcontainer/*/devcontainer.json (named subdirectory configs)
+//
 // When present, we skip --additional-features to avoid conflicts with the repo's own setup.
 func hasDevcontainerConfig(workspaceDir string) bool {
 	candidates := []string{
@@ -1524,6 +1540,20 @@ func hasDevcontainerConfig(workspaceDir string) bool {
 		if _, err := os.Stat(path); err == nil {
 			slog.Info("Found devcontainer config", "path", path)
 			return true
+		}
+	}
+	// Check for named subdirectory configs (.devcontainer/*/devcontainer.json)
+	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	entries, err := os.ReadDir(devcontainerDir)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				subConfig := filepath.Join(devcontainerDir, entry.Name(), "devcontainer.json")
+				if _, statErr := os.Stat(subConfig); statErr == nil {
+					slog.Info("Found named devcontainer config", "path", subConfig)
+					return true
+				}
+			}
 		}
 	}
 	return false

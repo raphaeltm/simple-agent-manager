@@ -16,14 +16,25 @@ import (
 	"github.com/workspace/vm-agent/internal/pty"
 )
 
+// firstNonEmpty returns the first non-empty string argument, or "".
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // workspaceRuntimeOpts holds optional fields for upsertWorkspaceRuntime that
 // must be set under the workspace mutex to avoid data races with concurrent
 // goroutines reading the runtime struct.
 type workspaceRuntimeOpts struct {
-	GitUserName  string
-	GitUserEmail string
-	GitHubID     string
-	Lightweight  bool
+	GitUserName            string
+	GitUserEmail           string
+	GitHubID               string
+	Lightweight            bool
+	DevcontainerConfigName string
 }
 
 func (s *Server) routedNodeID(r *http.Request) string {
@@ -209,6 +220,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.GitHubID = opt.GitHubID
 		}
 		runtime.Lightweight = opt.Lightweight
+		runtime.DevcontainerConfigName = opt.DevcontainerConfigName
 		runtime.UpdatedAt = time.Now().UTC()
 
 		if metadataChanged && runtime.Repository != "" {
@@ -223,6 +235,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	effectiveBranch := branch
 	var persistedWorkspaceDir, persistedContainerWorkDir, persistedContainerLabelValue, persistedContainerUser string
 	var persistedLightweight bool
+	var persistedDevcontainerConfigName string
 
 	if s.store != nil {
 		meta, err := s.store.GetWorkspaceMetadata(workspaceID)
@@ -243,6 +256,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			persistedContainerLabelValue = meta.ContainerLabelVal
 			persistedContainerUser = meta.ContainerUser
 			persistedLightweight = meta.Lightweight
+			persistedDevcontainerConfigName = meta.DevcontainerConfigName
 		}
 	}
 
@@ -280,8 +294,9 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		GitUserName:         opt.GitUserName,
 		GitUserEmail:        opt.GitUserEmail,
 		GitHubID:            opt.GitHubID,
-		Lightweight:         opt.Lightweight || persistedLightweight,
-		PTY:                 manager,
+		Lightweight:              opt.Lightweight || persistedLightweight,
+		DevcontainerConfigName:   firstNonEmpty(opt.DevcontainerConfigName, persistedDevcontainerConfigName),
+		PTY:                      manager,
 	}
 	s.workspaces[workspaceID] = runtime
 
@@ -436,14 +451,15 @@ func (s *Server) persistWorkspaceMetadata(runtime *WorkspaceRuntime) {
 		return
 	}
 	if err := s.store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{
-		WorkspaceID:       runtime.ID,
-		Repository:        runtime.Repository,
-		Branch:            runtime.Branch,
-		ContainerWorkDir:  runtime.ContainerWorkDir,
-		ContainerUser:     runtime.ContainerUser,
-		ContainerLabelVal: runtime.ContainerLabelValue,
-		WorkspaceDir:      runtime.WorkspaceDir,
-		Lightweight:       runtime.Lightweight,
+		WorkspaceID:            runtime.ID,
+		Repository:             runtime.Repository,
+		Branch:                 runtime.Branch,
+		ContainerWorkDir:       runtime.ContainerWorkDir,
+		ContainerUser:          runtime.ContainerUser,
+		ContainerLabelVal:      runtime.ContainerLabelValue,
+		WorkspaceDir:           runtime.WorkspaceDir,
+		Lightweight:            runtime.Lightweight,
+		DevcontainerConfigName: runtime.DevcontainerConfigName,
 	}); err != nil {
 		slog.Warn("Failed to persist workspace metadata", "workspace", runtime.ID, "error", err)
 	}
