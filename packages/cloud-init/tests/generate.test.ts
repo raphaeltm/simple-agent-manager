@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import YAML from 'yaml';
-import { generateCloudInit, validateCloudInitSize, indentForYamlBlock } from '../src/generate';
+import { generateCloudInit, validateCloudInitSize, validateCloudInitVariables, indentForYamlBlock } from '../src/generate';
 import type { CloudInitVariables } from '../src/generate';
 
 function baseVariables(overrides?: Partial<CloudInitVariables>): CloudInitVariables {
@@ -654,7 +654,7 @@ describe('generateCloudInit', () => {
 
       const runcmd: string[] = parsed.runcmd;
       const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain('docker pull ghcr.io/m1k1o/neko/google-chrome:latest');
+      expect(runcmdStr).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest'");
     });
 
     it('uses custom Neko image when specified', () => {
@@ -665,7 +665,7 @@ describe('generateCloudInit', () => {
 
       const runcmd: string[] = parsed.runcmd;
       const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain('docker pull ghcr.io/m1k1o/neko/firefox:latest');
+      expect(runcmdStr).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
       expect(runcmdStr).not.toContain('google-chrome');
     });
 
@@ -684,7 +684,7 @@ describe('generateCloudInit', () => {
 
     it('pre-pull command includes || true for fault tolerance', () => {
       const config = generateCloudInit(baseVariables());
-      expect(config).toContain('docker pull ghcr.io/m1k1o/neko/google-chrome:latest || true');
+      expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest' || true");
     });
 
     it('config with Neko pre-pull stays within 32KB limit', () => {
@@ -737,5 +737,303 @@ describe('validateCloudInitSize', () => {
     }));
 
     expect(validateCloudInitSize(config)).toBe(true);
+  });
+});
+
+describe('validateCloudInitVariables', () => {
+  describe('accepts valid inputs', () => {
+    it('accepts realistic production values', () => {
+      expect(() => validateCloudInitVariables(baseVariables())).not.toThrow();
+    });
+
+    it('accepts ULID-style nodeId (uppercase alphanumeric)', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: '01HXYZ9ABC123DEF456',
+      }))).not.toThrow();
+    });
+
+    it('accepts lowercase nodeId with hyphens', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'node-abc-123',
+      }))).not.toThrow();
+    });
+
+    it('accepts hostname with dots (FQDN style)', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'node-abc.sammy.party',
+      }))).not.toThrow();
+    });
+
+    it('accepts all optional fields with valid values', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        projectId: 'proj-abc-123',
+        chatSessionId: 'sess-def-456',
+        taskId: 'task-ghi-789',
+        taskMode: 'conversation',
+        vmAgentPort: '8443',
+        nekoImage: 'ghcr.io/m1k1o/neko/google-chrome:latest',
+        cfIpFetchTimeout: '30',
+        logJournalMaxUse: '1G',
+        logJournalKeepFree: '2G',
+        logJournalMaxRetention: '14day',
+        dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
+      }))).not.toThrow();
+    });
+
+    it('accepts omitted optional fields', () => {
+      expect(() => validateCloudInitVariables(baseVariables())).not.toThrow();
+    });
+
+    it('accepts empty string for optional ID fields', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        projectId: '',
+        chatSessionId: '',
+        taskId: '',
+      }))).not.toThrow();
+    });
+
+    it('accepts valid port numbers at boundaries', () => {
+      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '1' }))).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '65535' }))).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8080' }))).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8443' }))).not.toThrow();
+    });
+
+    it('accepts Docker image with SHA256 digest', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nekoImage: 'ghcr.io/m1k1o/neko/google-chrome@sha256:abcdef1234567890',
+      }))).not.toThrow();
+    });
+
+    it('accepts all valid journald time units', () => {
+      for (const unit of ['us', 'ms', 's', 'min', 'h', 'day', 'week', 'month', 'year']) {
+        expect(() => validateCloudInitVariables(baseVariables({
+          logJournalMaxRetention: `7${unit}`,
+        }))).not.toThrow();
+      }
+    });
+
+    it('accepts all valid journald size suffixes', () => {
+      for (const suffix of ['K', 'M', 'G', 'T', '']) {
+        expect(() => validateCloudInitVariables(baseVariables({
+          logJournalMaxUse: `500${suffix}`,
+        }))).not.toThrow();
+      }
+    });
+
+    it('accepts JWT-style callbackToken', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        callbackToken: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJub2RlLTEyMyJ9.signature_base64',
+      }))).not.toThrow();
+    });
+  });
+
+  describe('rejects shell metacharacters', () => {
+    it('rejects nodeId with command substitution', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: '$(rm -rf /)',
+      }))).toThrow('nodeId');
+    });
+
+    it('rejects nodeId with backtick injection', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: '`whoami`',
+      }))).toThrow('nodeId');
+    });
+
+    it('rejects nodeId with semicolon command chaining', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'valid; rm -rf /',
+      }))).toThrow('nodeId');
+    });
+
+    it('rejects nodeId with pipe', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'valid|cat /etc/passwd',
+      }))).toThrow('nodeId');
+    });
+
+    it('rejects hostname with newline injection', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'valid\nmalicious',
+      }))).toThrow('hostname');
+    });
+
+    it('rejects hostname with spaces', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'valid host',
+      }))).toThrow('hostname');
+    });
+
+    it('rejects nekoImage with shell injection', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nekoImage: 'image; rm -rf /',
+      }))).toThrow('nekoImage');
+    });
+
+    it('rejects nekoImage with command substitution', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nekoImage: '$(malicious)',
+      }))).toThrow('nekoImage');
+    });
+
+    it('rejects callbackToken with shell metacharacters', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        callbackToken: 'token; rm -rf /',
+      }))).toThrow('callbackToken');
+    });
+
+    it('rejects projectId with shell metacharacters', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        projectId: 'proj$(cmd)',
+      }))).toThrow('projectId');
+    });
+
+    it('rejects dockerDnsServers with shell injection', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"1.1.1.1"; rm -rf /',
+      }))).toThrow('dockerDnsServers');
+    });
+  });
+
+  describe('rejects invalid formats', () => {
+    it('rejects empty nodeId', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: '',
+      }))).toThrow('nodeId');
+    });
+
+    it('rejects empty hostname', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: '',
+      }))).toThrow('hostname');
+    });
+
+    it('rejects empty controlPlaneUrl', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: '',
+      }))).toThrow('controlPlaneUrl');
+    });
+
+    it('rejects HTTP (non-HTTPS) controlPlaneUrl', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'http://api.example.com',
+      }))).toThrow('controlPlaneUrl');
+    });
+
+    it('rejects vmAgentPort of 0', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        vmAgentPort: '0',
+      }))).toThrow('vmAgentPort');
+    });
+
+    it('rejects vmAgentPort above 65535', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        vmAgentPort: '70000',
+      }))).toThrow('vmAgentPort');
+    });
+
+    it('rejects non-numeric vmAgentPort', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        vmAgentPort: 'abc',
+      }))).toThrow('vmAgentPort');
+    });
+
+    it('rejects invalid taskMode', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        taskMode: 'invalid',
+      }))).toThrow('taskMode');
+    });
+
+    it('rejects invalid logJournalMaxUse format', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalMaxUse: '500MB',
+      }))).toThrow('logJournalMaxUse');
+    });
+
+    it('rejects invalid logJournalMaxRetention format', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalMaxRetention: '7days',
+      }))).toThrow('logJournalMaxRetention');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('rejects nodeId with Unicode characters', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'node-\u00e9\u00e8',
+      }))).toThrow('nodeId');
+    });
+
+    it('rejects nodeId with null bytes', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'node\x00id',
+      }))).toThrow('nodeId');
+    });
+
+    it('rejects hostname with path traversal', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: '../../../etc/passwd',
+      }))).toThrow('hostname');
+    });
+
+    it('rejects controlPlaneUrl with YAML injection', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com\n  malicious_key: value',
+      }))).toThrow('controlPlaneUrl');
+    });
+
+    it('collects multiple validation errors', () => {
+      try {
+        validateCloudInitVariables({
+          nodeId: '',
+          hostname: '',
+          controlPlaneUrl: '',
+          jwksUrl: '',
+          callbackToken: '',
+        });
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        const msg = (e as Error).message;
+        expect(msg).toContain('nodeId');
+        expect(msg).toContain('hostname');
+        expect(msg).toContain('controlPlaneUrl');
+        expect(msg).toContain('jwksUrl');
+        expect(msg).toContain('callbackToken');
+      }
+    });
+
+    it('rejects nekoImage starting with hyphen', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        nekoImage: '-malicious',
+      }))).toThrow('nekoImage');
+    });
+  });
+
+  describe('generateCloudInit calls validation', () => {
+    it('throws on invalid nodeId before generating config', () => {
+      expect(() => generateCloudInit(baseVariables({
+        nodeId: '$(rm -rf /)',
+      }))).toThrow('nodeId');
+    });
+
+    it('succeeds with valid variables', () => {
+      const config = generateCloudInit(baseVariables());
+      expect(config).toContain('hostname: sam-test-node');
+    });
+  });
+
+  describe('buildNekoPrePullCmd single-quotes image', () => {
+    it('default image is single-quoted in output', () => {
+      const config = generateCloudInit(baseVariables());
+      expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest'");
+    });
+
+    it('custom image is single-quoted in output', () => {
+      const config = generateCloudInit(baseVariables({
+        nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
+      }));
+      expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
+    });
   });
 });

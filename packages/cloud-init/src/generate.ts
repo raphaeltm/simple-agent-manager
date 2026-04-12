@@ -1,5 +1,121 @@
 import { CLOUD_INIT_TEMPLATE } from './template';
 
+// --- Validation patterns for shell-embedded variables ---
+
+/** Alphanumeric, hyphens, underscores (IDs like nodeId, projectId, etc.) */
+const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+/** Valid hostname: alphanumeric, hyphens, dots */
+const SAFE_HOSTNAME_RE = /^[a-zA-Z0-9.-]+$/;
+
+/** Valid Docker image reference: registry/repo:tag@sha256:digest */
+const SAFE_DOCKER_IMAGE_RE = /^[a-zA-Z0-9][a-zA-Z0-9./:@_-]*$/;
+
+/** Numeric positive integer */
+const NUMERIC_RE = /^[0-9]+$/;
+
+/** journald size values: digits + optional K/M/G/T suffix */
+const JOURNALD_SIZE_RE = /^[0-9]+[KMGT]?$/;
+
+/** journald time span: digits + time unit */
+const JOURNALD_TIME_RE = /^[0-9]+(us|ms|s|min|h|day|week|month|year)$/;
+
+/** URL must start with https:// and contain only safe characters */
+const SAFE_URL_RE = /^https:\/\/[a-zA-Z0-9._~:/?#[\]@!$&'()*+,;=-]+$/;
+
+/** callbackToken: JWT format (base64url segments separated by dots) */
+const SAFE_TOKEN_RE = /^[a-zA-Z0-9_.\-/+=]+$/;
+
+/** Docker DNS servers: quoted IPs like "1.1.1.1", "8.8.8.8" */
+const SAFE_DNS_SERVERS_RE = /^["0-9., ]+$/;
+
+/**
+ * Validate all CloudInitVariables before they are embedded into shell/YAML.
+ * Throws an error describing the first invalid field found.
+ */
+export function validateCloudInitVariables(variables: CloudInitVariables): void {
+  const errors: string[] = [];
+
+  // Required fields
+  if (!variables.nodeId || !SAFE_ID_RE.test(variables.nodeId)) {
+    errors.push(`nodeId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.nodeId)})`);
+  }
+  if (!variables.hostname || !SAFE_HOSTNAME_RE.test(variables.hostname)) {
+    errors.push(`hostname: must match ${SAFE_HOSTNAME_RE} (got ${JSON.stringify(variables.hostname)})`);
+  }
+  if (!variables.controlPlaneUrl || !SAFE_URL_RE.test(variables.controlPlaneUrl)) {
+    errors.push(`controlPlaneUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.controlPlaneUrl)})`);
+  }
+  if (!variables.jwksUrl || !SAFE_URL_RE.test(variables.jwksUrl)) {
+    errors.push(`jwksUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.jwksUrl)})`);
+  }
+  if (!variables.callbackToken || !SAFE_TOKEN_RE.test(variables.callbackToken)) {
+    errors.push(`callbackToken: must contain only safe token characters (got ${JSON.stringify(variables.callbackToken)})`);
+  }
+
+  // Optional fields — only validated when present and non-empty
+  if (variables.vmAgentPort !== undefined && variables.vmAgentPort !== '') {
+    const port = Number(variables.vmAgentPort);
+    if (!NUMERIC_RE.test(variables.vmAgentPort) || port < 1 || port > 65535) {
+      errors.push(`vmAgentPort: must be numeric 1-65535 (got ${JSON.stringify(variables.vmAgentPort)})`);
+    }
+  }
+  if (variables.nekoImage !== undefined && variables.nekoImage !== '') {
+    if (!SAFE_DOCKER_IMAGE_RE.test(variables.nekoImage)) {
+      errors.push(`nekoImage: must match ${SAFE_DOCKER_IMAGE_RE} (got ${JSON.stringify(variables.nekoImage)})`);
+    }
+  }
+  if (variables.cfIpFetchTimeout !== undefined && variables.cfIpFetchTimeout !== '') {
+    if (!NUMERIC_RE.test(variables.cfIpFetchTimeout)) {
+      errors.push(`cfIpFetchTimeout: must be a positive integer (got ${JSON.stringify(variables.cfIpFetchTimeout)})`);
+    }
+  }
+  if (variables.projectId !== undefined && variables.projectId !== '') {
+    if (!SAFE_ID_RE.test(variables.projectId)) {
+      errors.push(`projectId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.projectId)})`);
+    }
+  }
+  if (variables.chatSessionId !== undefined && variables.chatSessionId !== '') {
+    if (!SAFE_ID_RE.test(variables.chatSessionId)) {
+      errors.push(`chatSessionId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.chatSessionId)})`);
+    }
+  }
+  if (variables.taskId !== undefined && variables.taskId !== '') {
+    if (!SAFE_ID_RE.test(variables.taskId)) {
+      errors.push(`taskId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.taskId)})`);
+    }
+  }
+  if (variables.taskMode !== undefined && variables.taskMode !== '') {
+    if (variables.taskMode !== 'task' && variables.taskMode !== 'conversation') {
+      errors.push(`taskMode: must be 'task' or 'conversation' (got ${JSON.stringify(variables.taskMode)})`);
+    }
+  }
+  if (variables.logJournalMaxUse !== undefined && variables.logJournalMaxUse !== '') {
+    if (!JOURNALD_SIZE_RE.test(variables.logJournalMaxUse)) {
+      errors.push(`logJournalMaxUse: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalMaxUse)})`);
+    }
+  }
+  if (variables.logJournalKeepFree !== undefined && variables.logJournalKeepFree !== '') {
+    if (!JOURNALD_SIZE_RE.test(variables.logJournalKeepFree)) {
+      errors.push(`logJournalKeepFree: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalKeepFree)})`);
+    }
+  }
+  if (variables.logJournalMaxRetention !== undefined && variables.logJournalMaxRetention !== '') {
+    if (!JOURNALD_TIME_RE.test(variables.logJournalMaxRetention)) {
+      errors.push(`logJournalMaxRetention: must match ${JOURNALD_TIME_RE} (got ${JSON.stringify(variables.logJournalMaxRetention)})`);
+    }
+  }
+  if (variables.dockerDnsServers !== undefined && variables.dockerDnsServers !== '') {
+    if (!SAFE_DNS_SERVERS_RE.test(variables.dockerDnsServers)) {
+      errors.push(`dockerDnsServers: must contain only quoted IPs (got ${JSON.stringify(variables.dockerDnsServers)})`);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Cloud-init variable validation failed:\n${errors.join('\n')}`);
+  }
+}
+
 /**
  * Variables for cloud-init generation.
  */
@@ -43,6 +159,8 @@ export interface CloudInitVariables {
  * Generate cloud-init configuration from template with variables.
  */
 export function generateCloudInit(variables: CloudInitVariables): string {
+  validateCloudInitVariables(variables);
+
   let config = CLOUD_INIT_TEMPLATE;
 
   const replacements: Record<string, string> = {
@@ -109,7 +227,7 @@ function buildNekoPrePullCmd(variables: CloudInitVariables): string {
     return '# Neko pre-pull disabled';
   }
   const image = variables.nekoImage ?? 'ghcr.io/m1k1o/neko/google-chrome:latest';
-  return `- docker pull ${image} || true`;
+  return `- docker pull '${image}' || true`;
 }
 
 /**
