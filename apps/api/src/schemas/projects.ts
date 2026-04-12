@@ -21,6 +21,7 @@ export const UpdateProjectSchema = v.object({
   defaultVmSize: v.optional(v.nullable(VMSizeSchema)),
   defaultAgentType: v.optional(v.nullable(v.string())),
   defaultWorkspaceProfile: v.optional(v.nullable(WorkspaceProfileSchema)),
+  defaultDevcontainerConfigName: v.optional(v.nullable(v.string())),
   defaultProvider: v.optional(v.nullable(CredentialProviderSchema)),
   defaultLocation: v.optional(v.nullable(v.string())),
   workspaceIdleTimeoutMs: v.optional(v.nullable(v.number())),

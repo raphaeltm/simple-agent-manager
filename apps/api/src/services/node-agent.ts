@@ -192,6 +192,8 @@ export async function createWorkspaceOnNode(
     gitUserEmail?: string | null;
     githubId?: string | null;
     lightweight?: boolean;
+    /** Devcontainer config name (subdirectory under .devcontainer/). Undefined = auto-discover. */
+    devcontainerConfigName?: string;
   }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, '/workspaces', {

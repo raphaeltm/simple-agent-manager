@@ -158,6 +158,9 @@ runRoutes.post('/:taskId/run', async (c) => {
   const workspaceProfile: WorkspaceProfile = body.workspaceProfile
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
+  const devcontainerConfigName: string | null = workspaceProfile === 'lightweight'
+    ? null
+    : (body.devcontainerConfigName ?? project.defaultDevcontainerConfigName ?? null);
   const branch = body.branch ?? project.defaultBranch;
 
   // Validate location against provider
@@ -255,6 +258,7 @@ runRoutes.post('/:taskId/run', async (c) => {
       chatSessionId: sessionId,
       agentType: project.defaultAgentType ?? null,
       workspaceProfile,
+      devcontainerConfigName,
       cloudProvider: provider,
       // Agent profile resolution is not supported on the kanban Run path — tasks
       // re-run with project defaults. Profile support (model, permissionMode,

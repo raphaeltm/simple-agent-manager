@@ -30,6 +30,13 @@ const TaskAttachmentSchema = v.object({
   contentType: v.string(),
 });
 
+/** Devcontainer config name — alphanumeric, hyphens, underscores, max 128 chars. */
+const DevcontainerConfigNameSchema = v.pipe(
+  v.string(),
+  v.regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/, 'Config name must be alphanumeric with hyphens/underscores'),
+  v.maxLength(128, 'Config name must be at most 128 characters'),
+);
+
 export const SubmitTaskSchema = v.object({
   message: v.string(),
   vmSize: v.optional(VMSizeSchema),
@@ -37,6 +44,7 @@ export const SubmitTaskSchema = v.object({
   nodeId: v.optional(v.string()),
   agentType: v.optional(v.string()),
   workspaceProfile: v.optional(WorkspaceProfileSchema),
+  devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
   provider: v.optional(CredentialProviderSchema),
   parentTaskId: v.optional(v.string()),
   contextSummary: v.optional(v.string()),
@@ -83,6 +91,7 @@ export const RunTaskSchema = v.object({
   vmSize: v.optional(VMSizeSchema),
   vmLocation: v.optional(VMLocationSchema),
   workspaceProfile: v.optional(WorkspaceProfileSchema),
+  devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
   nodeId: v.optional(v.string()),
   branch: v.optional(v.string()),
 });

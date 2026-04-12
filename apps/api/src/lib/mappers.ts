@@ -36,6 +36,7 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     vmSize: ws.vmSize as WorkspaceResponse['vmSize'],
     vmLocation: ws.vmLocation as WorkspaceResponse['vmLocation'],
     workspaceProfile: (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? DEFAULT_WORKSPACE_PROFILE,
+    devcontainerConfigName: ws.devcontainerConfigName ?? null,
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
     errorMessage: ws.errorMessage,

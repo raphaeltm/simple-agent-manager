@@ -50,6 +50,9 @@ export interface TaskRunConfig {
   agentType: string | null;
   /** Workspace provisioning profile. 'lightweight' skips devcontainer build for faster startup. */
   workspaceProfile: WorkspaceProfile | null;
+  /** Devcontainer config name (subdirectory under .devcontainer/). Null = auto-discover default.
+   * Only relevant when workspaceProfile is 'full' — ignored for 'lightweight'. */
+  devcontainerConfigName: string | null;
   /** Cloud provider for auto-provisioned nodes. Null means system picks any available credential. */
   cloudProvider: CredentialProvider | null;
   /** Task execution mode. 'task' = push/PR/complete lifecycle. 'conversation' = human-controlled. */
