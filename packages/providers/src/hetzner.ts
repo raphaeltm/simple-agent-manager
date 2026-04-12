@@ -92,6 +92,9 @@ export class HetznerProvider implements Provider {
 
   async createVM(config: VMConfig): Promise<VMInstance> {
     const sizeConfig = this.sizes[config.size];
+    if (!sizeConfig) {
+      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
+    }
     const primaryLocation = config.location || this.datacenter;
 
     // Build attempt order: primary twice (with a delay between), then remaining locations shuffled

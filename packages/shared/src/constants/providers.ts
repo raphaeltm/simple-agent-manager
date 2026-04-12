@@ -1,4 +1,4 @@
-import type { CredentialProvider } from '../types';
+import { CREDENTIAL_PROVIDERS,type CredentialProvider } from '../types';
 
 // =============================================================================
 // Provider Display Labels
@@ -92,18 +92,22 @@ export const VM_LOCATIONS: Record<string, { name: string; country: string }> = O
     .map((loc) => [loc.id, { name: loc.name, country: loc.country }])
 );
 
-/** Get valid locations for a provider. Returns empty array for unknown providers. */
-export function getLocationsForProvider(provider: string): LocationMeta[] {
-  return (PROVIDER_LOCATIONS as Record<string, LocationMeta[]>)[provider] ?? [];
+/** Type guard: check if a string is a valid CredentialProvider. Use at system boundaries for untrusted input. */
+export function isValidProvider(value: string): value is CredentialProvider {
+  return (CREDENTIAL_PROVIDERS as readonly string[]).includes(value);
 }
 
-/** Get the default location for a provider. Returns undefined for unknown providers. */
-export function getDefaultLocationForProvider(provider: string): string | undefined {
-  return (PROVIDER_DEFAULT_LOCATIONS as Record<string, string>)[provider];
+/** Get valid locations for a provider. */
+export function getLocationsForProvider(provider: CredentialProvider): LocationMeta[] {
+  return PROVIDER_LOCATIONS[provider];
+}
+
+/** Get the default location for a provider. */
+export function getDefaultLocationForProvider(provider: CredentialProvider): string {
+  return PROVIDER_DEFAULT_LOCATIONS[provider];
 }
 
 /** Check if a location is valid for the given provider. */
-export function isValidLocationForProvider(provider: string, location: string): boolean {
-  const locations = (PROVIDER_LOCATIONS as Record<string, LocationMeta[]>)[provider];
-  return locations != null && locations.some((loc: LocationMeta) => loc.id === location);
+export function isValidLocationForProvider(provider: CredentialProvider, location: string): boolean {
+  return PROVIDER_LOCATIONS[provider].some((loc) => loc.id === location);
 }

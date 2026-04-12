@@ -58,11 +58,13 @@ export function createProvider(config: ProviderConfig): Provider {
         config.timeoutMs,
         config.operationPollTimeoutMs,
       );
-    default:
+    default: {
+      const _exhaustive: never = config;
       throw new ProviderError(
         'factory',
         undefined,
-        `Unsupported provider: ${(config as { provider: string }).provider}`,
+        `Unsupported provider: ${(_exhaustive as { provider: string }).provider}`,
       );
+    }
   }
 }

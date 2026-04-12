@@ -110,6 +110,9 @@ export class ScalewayProvider implements Provider {
    */
   async createVM(config: VMConfig): Promise<VMInstance> {
     const sizeConfig = this.sizes[config.size];
+    if (!sizeConfig) {
+      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
+    }
     const location = config.location || this.zone;
 
     // Resolve image UUID by name for the target zone

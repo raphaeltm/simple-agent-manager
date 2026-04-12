@@ -9,6 +9,7 @@ import {
   CREDENTIAL_PROVIDERS,
   isValidAgentType,
   isValidLocationForProvider,
+  isValidProvider,
   MAX_NODE_IDLE_TIMEOUT_MS,
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
   MIN_NODE_IDLE_TIMEOUT_MS,
@@ -601,8 +602,8 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
 
   // Validate defaultLocation against the effective provider
   if (body.defaultLocation !== undefined && body.defaultLocation !== null) {
-    if (!effectiveProvider) {
-      throw errors.badRequest('Cannot set defaultLocation without a defaultProvider');
+    if (!effectiveProvider || !isValidProvider(effectiveProvider)) {
+      throw errors.badRequest('Cannot set defaultLocation without a valid defaultProvider');
     }
     if (!isValidLocationForProvider(effectiveProvider, body.defaultLocation)) {
       throw errors.badRequest(`defaultLocation '${body.defaultLocation}' is not valid for provider '${effectiveProvider}'`);

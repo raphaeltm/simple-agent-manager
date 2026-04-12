@@ -17,7 +17,7 @@ import type {
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { ATTACHMENT_DEFAULTS, CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, MAX_CONTEXT_SUMMARY_BYTES, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import { ATTACHMENT_DEFAULTS, CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider, MAX_CONTEXT_SUMMARY_BYTES, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -223,9 +223,17 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
   // Determine cloud provider: explicit override > profile > project default > null (system picks)
+  const projectDefaultProvider =
+    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
+      ? project.defaultProvider
+      : null;
+  const profileProvider =
+    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
+      ? resolvedProfile.provider
+      : null;
   const provider: CredentialProvider | null = body.provider
-    ?? (resolvedProfile?.provider as CredentialProvider | null)
-    ?? (project.defaultProvider as CredentialProvider | null)
+    ?? profileProvider
+    ?? projectDefaultProvider
     ?? null;
   // Location resolution: explicit > profile > project default > provider default > platform default
   const vmLocation: VMLocation = (body.vmLocation as VMLocation)

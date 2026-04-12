@@ -14,6 +14,7 @@ export {
   getDefaultLocationForProvider,
   getLocationsForProvider,
   isValidLocationForProvider,
+  isValidProvider,
   PROVIDER_DEFAULT_LOCATIONS,
   PROVIDER_HELP,
   PROVIDER_LABELS,

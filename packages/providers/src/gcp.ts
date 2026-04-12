@@ -237,7 +237,11 @@ export class GcpProvider implements Provider {
 
   async createVM(config: VMConfig): Promise<VMInstance> {
     const zone = config.location || this.defaultLocation;
-    const machineType = SIZE_MAP[config.size]?.type || 'e2-medium';
+    const sizeConfig = SIZE_MAP[config.size];
+    if (!sizeConfig) {
+      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
+    }
+    const machineType = sizeConfig.type;
     const headers = await this.authHeaders();
 
     // Ensure firewall rule exists before creating VM

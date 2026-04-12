@@ -18,6 +18,7 @@ import {
   DEFAULT_VM_SIZE,
   DEFAULT_WORKSPACE_PROFILE,
   getDefaultLocationForProvider,
+  isValidProvider,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -109,9 +110,17 @@ export async function submitTriggeredTask(
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
 
+  const profileProvider =
+    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
+      ? resolvedProfile.provider
+      : null;
+  const projectDefaultProvider =
+    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
+      ? project.defaultProvider
+      : null;
   const provider: CredentialProvider | null =
-    (resolvedProfile?.provider as CredentialProvider | null)
-    ?? (project.defaultProvider as CredentialProvider | null)
+    profileProvider
+    ?? projectDefaultProvider
     ?? null;
 
   const vmLocation: VMLocation =
