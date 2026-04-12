@@ -247,6 +247,8 @@ export const projects = sqliteTable(
     defaultVmSize: text('default_vm_size'),
     defaultAgentType: text('default_agent_type'),
     defaultWorkspaceProfile: text('default_workspace_profile'),
+    /** Default devcontainer config name for new workspaces. null = auto-discover default. */
+    defaultDevcontainerConfigName: text('default_devcontainer_config_name'),
     defaultProvider: text('default_provider'),
     defaultLocation: text('default_location'),
     workspaceIdleTimeoutMs: integer('workspace_idle_timeout_ms'),
@@ -573,6 +575,8 @@ export const workspaces = sqliteTable(
     vmSize: text('vm_size').notNull(),
     vmLocation: text('vm_location').notNull(),
     workspaceProfile: text('workspace_profile').default(DEFAULT_WORKSPACE_PROFILE),
+    /** Selected devcontainer config name. null = auto-discover default. */
+    devcontainerConfigName: text('devcontainer_config_name'),
     hetznerServerId: text('hetzner_server_id'),
     vmIp: text('vm_ip'),
     dnsRecordId: text('dns_record_id'),
@@ -711,6 +715,8 @@ export const agentProfiles = sqliteTable(
     provider: text('provider'),
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
+    /** Devcontainer config name override. null = inherit from project/platform defaults. */
+    devcontainerConfigName: text('devcontainer_config_name'),
     taskMode: text('task_mode'),
     isBuiltin: integer('is_builtin').notNull().default(0),
     createdAt: text('created_at')
