@@ -100,13 +100,14 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	}
 
 	recoveryMode, err := prepareWorkspaceForRuntime(provisionCtx, &cfg, bootstrap.ProvisionState{
-		GitHubToken:    gitToken,
-		GitUserName:    runtime.GitUserName,
-		GitUserEmail:   runtime.GitUserEmail,
-		GitHubID:       runtime.GitHubID,
-		ProjectEnvVars: runtimeAssets.EnvVars,
-		ProjectFiles:   runtimeAssets.Files,
-		Lightweight:    runtime.Lightweight,
+		GitHubToken:            gitToken,
+		GitUserName:            runtime.GitUserName,
+		GitUserEmail:           runtime.GitUserEmail,
+		GitHubID:               runtime.GitHubID,
+		ProjectEnvVars:         runtimeAssets.EnvVars,
+		ProjectFiles:           runtimeAssets.Files,
+		Lightweight:            runtime.Lightweight,
+		DevcontainerConfigName: runtime.DevcontainerConfigName,
 	}, reporter)
 	if err != nil {
 		return false, err
@@ -172,6 +173,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	state.ProjectEnvVars = runtimeAssets.EnvVars
 	state.ProjectFiles = runtimeAssets.Files
 	state.Lightweight = runtime.Lightweight
+	state.DevcontainerConfigName = runtime.DevcontainerConfigName
 
 	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state, nil)
 	if err != nil {

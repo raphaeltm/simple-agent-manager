@@ -21,6 +21,8 @@ export interface Project {
   defaultVmSize?: VMSize | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
+  /** Default devcontainer config name. null = auto-discover default. */
+  defaultDevcontainerConfigName?: string | null;
   defaultProvider?: CredentialProvider | null;
   defaultLocation?: string | null;
   workspaceIdleTimeoutMs?: number | null;
@@ -86,6 +88,8 @@ export interface UpdateProjectRequest {
   defaultVmSize?: VMSize | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
+  /** Default devcontainer config name. null = reset to auto-discover. */
+  defaultDevcontainerConfigName?: string | null;
   defaultProvider?: CredentialProvider | null;
   defaultLocation?: string | null;
   workspaceIdleTimeoutMs?: number | null;

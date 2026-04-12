@@ -177,6 +177,8 @@ export interface WorkspaceResponse {
   vmSize: VMSize;
   vmLocation: VMLocation;
   workspaceProfile?: WorkspaceProfile | null;
+  /** Selected devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
+  devcontainerConfigName?: string | null;
   vmIp: string | null;
   lastActivityAt: string | null;
   errorMessage: string | null;
@@ -198,6 +200,8 @@ export interface CreateWorkspaceRequest {
   vmLocation?: VMLocation;
   installationId?: string;
   provider?: CredentialProvider;
+  /** Devcontainer config name (subdirectory under .devcontainer/). null/undefined = auto-discover default. */
+  devcontainerConfigName?: string | null;
 }
 
 export interface UpdateWorkspaceRequest {

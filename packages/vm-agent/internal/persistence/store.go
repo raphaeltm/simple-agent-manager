@@ -25,15 +25,16 @@ type McpServer struct {
 // repository name, and other runtime state can be recovered without
 // re-fetching from the control plane.
 type WorkspaceMetadata struct {
-	WorkspaceID       string `json:"workspaceId"`
-	Repository        string `json:"repository"`
-	Branch            string `json:"branch"`
-	ContainerWorkDir  string `json:"containerWorkDir"`
-	ContainerUser     string `json:"containerUser"`
-	ContainerLabelVal string `json:"containerLabelValue"`
-	WorkspaceDir      string `json:"workspaceDir"`
-	Lightweight       bool   `json:"lightweight"`
-	UpdatedAt         string `json:"updatedAt"`
+	WorkspaceID            string `json:"workspaceId"`
+	Repository             string `json:"repository"`
+	Branch                 string `json:"branch"`
+	ContainerWorkDir       string `json:"containerWorkDir"`
+	ContainerUser          string `json:"containerUser"`
+	ContainerLabelVal      string `json:"containerLabelValue"`
+	WorkspaceDir           string `json:"workspaceDir"`
+	Lightweight            bool   `json:"lightweight"`
+	DevcontainerConfigName string `json:"devcontainerConfigName,omitempty"`
+	UpdatedAt              string `json:"updatedAt"`
 }
 
 // Tab represents a persisted tab (terminal or chat session).

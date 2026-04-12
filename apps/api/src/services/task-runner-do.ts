@@ -49,6 +49,8 @@ export async function startTaskRunnerDO(
     agentType?: string | null;
     /** Workspace provisioning profile. 'lightweight' skips devcontainer build. */
     workspaceProfile?: WorkspaceProfile | null;
+    /** Devcontainer config name (subdirectory under .devcontainer/). Null = auto-discover. */
+    devcontainerConfigName?: string | null;
     /** Cloud provider for auto-provisioned nodes. Falls back to any available credential. */
     cloudProvider?: CredentialProvider | null;
     /** Task execution mode. 'task' = push/PR/complete. 'conversation' = human-controlled. */
@@ -94,6 +96,7 @@ export async function startTaskRunnerDO(
       chatSessionId: input.chatSessionId ?? null,
       agentType: input.agentType ?? null,
       workspaceProfile: input.workspaceProfile ?? null,
+      devcontainerConfigName: input.devcontainerConfigName ?? null,
       cloudProvider: input.cloudProvider ?? null,
       taskMode: input.taskMode ?? 'task',
       model: input.model ?? null,

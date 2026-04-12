@@ -28,6 +28,7 @@ export interface TaskSubmitOptions {
   agentProfileId?: string;
   vmSize?: VMSize;
   workspaceProfile?: WorkspaceProfile;
+  devcontainerConfigName?: string | null;
   attachments?: TaskAttachmentRef[];
 }
 
@@ -53,6 +54,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [agentProfileId, setAgentProfileId] = useState<string | null>(null);
   const [vmSize, setVmSize] = useState<VMSize | ''>('');
   const [workspaceProfile, setWorkspaceProfile] = useState<WorkspaceProfile | ''>('');
+  const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
@@ -200,6 +202,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           priority: priority || undefined,
           vmSize: vmSize || undefined,
           workspaceProfile: workspaceProfile || undefined,
+          devcontainerConfigName: devcontainerConfigName.trim() || undefined,
         };
 
     return completedAttachments.length > 0
@@ -214,6 +217,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
     setAgentProfileId(null);
     setVmSize('');
     setWorkspaceProfile('');
+    setDevcontainerConfigName('');
     setAttachments([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -453,8 +457,23 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                     <option value="">Default</option>
                     <option value="full">Full</option>
                     <option value="lightweight">Lightweight</option>
-              </select>
+                  </select>
                 </div>
+
+                {workspaceProfile !== 'lightweight' && (
+                  <div>
+                    <label className="text-xs text-fg-muted block mb-1">
+                      Devcontainer Config
+                    </label>
+                    <input
+                      type="text"
+                      value={devcontainerConfigName}
+                      onChange={(e) => setDevcontainerConfigName(e.target.value)}
+                      placeholder="Auto-detect"
+                      className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm w-full"
+                    />
+                  </div>
+                )}
               </>
             )}
           </div>

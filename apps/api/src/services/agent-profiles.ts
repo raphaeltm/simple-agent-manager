@@ -83,6 +83,7 @@ function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
     provider: row.provider,
     vmLocation: row.vmLocation,
     workspaceProfile: row.workspaceProfile,
+    devcontainerConfigName: row.devcontainerConfigName,
     taskMode: row.taskMode,
     isBuiltin: row.isBuiltin === 1,
     createdAt: row.createdAt,
@@ -249,6 +250,7 @@ export async function createProfile(
     provider: body.provider ?? null,
     vmLocation: body.vmLocation ?? null,
     workspaceProfile: body.workspaceProfile ?? null,
+    devcontainerConfigName: body.devcontainerConfigName ?? null,
     taskMode: body.taskMode ?? null,
     isBuiltin: 0,
   });
@@ -312,6 +314,7 @@ export async function updateProfile(
   if (body.provider !== undefined) updates.provider = body.provider;
   if (body.vmLocation !== undefined) updates.vmLocation = body.vmLocation;
   if (body.workspaceProfile !== undefined) updates.workspaceProfile = body.workspaceProfile;
+  if (body.devcontainerConfigName !== undefined) updates.devcontainerConfigName = body.devcontainerConfigName;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
 
   await db
@@ -377,6 +380,7 @@ export async function resolveAgentProfile(
       provider: p.provider,
       vmLocation: p.vmLocation,
       workspaceProfile: p.workspaceProfile,
+      devcontainerConfigName: p.devcontainerConfigName,
       taskMode: p.taskMode,
     };
   }
@@ -396,6 +400,7 @@ export async function resolveAgentProfile(
       provider: null,
       vmLocation: null,
       workspaceProfile: null,
+      devcontainerConfigName: null,
       taskMode: null,
     };
   }
@@ -476,6 +481,7 @@ export async function resolveAgentProfile(
     provider: null,
     vmLocation: null,
     workspaceProfile: null,
+    devcontainerConfigName: null,
     taskMode: null,
   };
 }

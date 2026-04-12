@@ -8,7 +8,7 @@
  * See: specs/022-simplified-chat-ux/tasks.md (T038-T040)
  */
 import type { ProjectRuntimeConfigResponse, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { Button, Spinner } from '@simple-agent-manager/ui';
+import { Button, Input, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -60,6 +60,12 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   );
   const [savingWorkspaceProfile, setSavingWorkspaceProfile] = useState(false);
 
+  // Devcontainer config name
+  const [defaultDevcontainerConfigName, setDefaultDevcontainerConfigName] = useState(
+    project?.defaultDevcontainerConfigName ?? ''
+  );
+  const [savingDevcontainerConfig, setSavingDevcontainerConfig] = useState(false);
+
   // Runtime config
   const [runtimeConfig, setRuntimeConfig] = useState<ProjectRuntimeConfigResponse>({ envVars: [], files: [] });
   const [runtimeConfigLoading, setRuntimeConfigLoading] = useState(true);
@@ -83,6 +89,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
     if (project) {
       setDefaultVmSize(project.defaultVmSize ?? null);
       setDefaultWorkspaceProfile((project.defaultWorkspaceProfile as WorkspaceProfile | null) ?? null);
+      setDefaultDevcontainerConfigName(project.defaultDevcontainerConfigName ?? '');
     }
   }, [project]);
 
@@ -199,6 +206,22 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
       toast.error(err instanceof Error ? err.message : 'Failed to update workspace profile');
     } finally {
       setSavingWorkspaceProfile(false);
+    }
+  };
+
+  // Devcontainer config name handler
+  const handleSaveDevcontainerConfig = async () => {
+    const val = defaultDevcontainerConfigName.trim() || null;
+    setSavingDevcontainerConfig(true);
+    try {
+      await updateProject(projectId, { defaultDevcontainerConfigName: val });
+      await reload();
+      toast.success(val ? `Default devcontainer config set to "${val}"` : 'Default devcontainer config cleared');
+    } catch (err) {
+      setDefaultDevcontainerConfigName(project?.defaultDevcontainerConfigName ?? '');
+      toast.error(err instanceof Error ? err.message : 'Failed to update devcontainer config');
+    } finally {
+      setSavingDevcontainerConfig(false);
     }
   };
 
@@ -401,6 +424,38 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                 </div>
               )}
             </section>
+
+            {/* Default Devcontainer Config Name */}
+            {defaultWorkspaceProfile !== 'lightweight' && (
+              <section className="grid gap-3">
+                <div>
+                  <h3 className="sam-type-card-title m-0 text-fg-primary">
+                    Devcontainer Config
+                  </h3>
+                  <p className="m-0 mt-1 text-xs text-fg-muted">
+                    Named devcontainer config (subdirectory under .devcontainer/). Leave empty to auto-detect.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    type="text"
+                    value={defaultDevcontainerConfigName}
+                    onChange={(e) => setDefaultDevcontainerConfigName(e.target.value)}
+                    placeholder="Auto-detect"
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleSaveDevcontainerConfig()}
+                    loading={savingDevcontainerConfig}
+                    disabled={savingDevcontainerConfig}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </section>
+            )}
 
             {/* Runtime Config */}
             <section className="grid gap-3">

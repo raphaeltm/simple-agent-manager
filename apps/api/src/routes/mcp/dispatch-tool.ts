@@ -7,7 +7,7 @@
  * Config precedence: explicit field → profile value → project default → platform default.
  */
 import type { CredentialProvider, TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
+import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -119,6 +119,20 @@ export async function handleDispatchTask(
       return jsonRpcError(requestId, INVALID_PARAMS, `workspaceProfile must be one of: ${VALID_WORKSPACE_PROFILES.join(', ')}`);
     }
     explicitWorkspaceProfile = params.workspaceProfile as WorkspaceProfile;
+  }
+
+  // devcontainerConfigName
+  let explicitDevcontainerConfigName: string | null | undefined;
+  if (params.devcontainerConfigName !== undefined) {
+    if (params.devcontainerConfigName === null) {
+      explicitDevcontainerConfigName = null;
+    } else if (typeof params.devcontainerConfigName !== 'string' || !DEVCONTAINER_CONFIG_NAME_REGEX.test(params.devcontainerConfigName)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'devcontainerConfigName must be alphanumeric with hyphens/underscores');
+    } else if (params.devcontainerConfigName.length > DEVCONTAINER_CONFIG_NAME_MAX_LENGTH) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `devcontainerConfigName must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`);
+    } else {
+      explicitDevcontainerConfigName = params.devcontainerConfigName;
+    }
   }
 
   // provider
@@ -333,6 +347,15 @@ export async function handleDispatchTask(
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
 
+  // Devcontainer config name: explicit → profile → project default → null (auto-discover).
+  // Irrelevant when workspace profile is 'lightweight' (devcontainer build skipped entirely).
+  const resolvedDevcontainerConfigName: string | null = resolvedWorkspaceProfile === 'lightweight'
+    ? null
+    : (explicitDevcontainerConfigName
+      ?? resolvedProfile?.devcontainerConfigName
+      ?? project.defaultDevcontainerConfigName
+      ?? null);
+
   // Validate location against resolved provider
   if (resolvedProvider !== null && !isValidLocationForProvider(resolvedProvider, resolvedVmLocation)) {
     const validLocations = getLocationsForProvider(resolvedProvider).map((l) => l.id);
@@ -489,6 +512,7 @@ export async function handleDispatchTask(
       chatSessionId: sessionId,
       agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
+      devcontainerConfigName: resolvedDevcontainerConfigName,
       cloudProvider: resolvedProvider,
       taskMode: resolvedTaskMode,
       model: resolvedProfile?.model ?? null,

@@ -7,6 +7,8 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   CREDENTIAL_PROVIDERS,
+  DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
+  DEVCONTAINER_CONFIG_NAME_REGEX,
   isValidAgentType,
   isValidLocationForProvider,
   isValidProvider,
@@ -553,7 +555,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
 
   const allFieldKeys: (keyof UpdateProjectRequest)[] = [
     'name', 'description', 'defaultBranch', 'defaultVmSize', 'defaultAgentType',
-    'defaultWorkspaceProfile', 'defaultProvider', 'defaultLocation',
+    'defaultWorkspaceProfile', 'defaultDevcontainerConfigName', 'defaultProvider', 'defaultLocation',
     'workspaceIdleTimeoutMs', 'nodeIdleTimeoutMs',
     'taskExecutionTimeoutMs', 'maxConcurrentTasks', 'maxDispatchDepth', 'maxSubTasksPerTask',
     'warmNodeTimeoutMs', 'maxWorkspacesPerNode', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent',
@@ -584,6 +586,12 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
 
   if (body.defaultWorkspaceProfile !== undefined && body.defaultWorkspaceProfile !== null && !VALID_WORKSPACE_PROFILES.includes(body.defaultWorkspaceProfile)) {
     throw errors.badRequest('defaultWorkspaceProfile must be full or lightweight');
+  }
+
+  if (body.defaultDevcontainerConfigName !== undefined && body.defaultDevcontainerConfigName !== null) {
+    if (!DEVCONTAINER_CONFIG_NAME_REGEX.test(body.defaultDevcontainerConfigName) || body.defaultDevcontainerConfigName.length > DEVCONTAINER_CONFIG_NAME_MAX_LENGTH) {
+      throw errors.badRequest('defaultDevcontainerConfigName must be alphanumeric with hyphens/underscores, max 128 chars');
+    }
   }
 
   if (body.defaultProvider !== undefined && body.defaultProvider !== null && !CREDENTIAL_PROVIDERS.includes(body.defaultProvider)) {
@@ -666,6 +674,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
       defaultVmSize: body.defaultVmSize === undefined ? existing.defaultVmSize : (body.defaultVmSize ?? null),
       defaultAgentType: body.defaultAgentType === undefined ? existing.defaultAgentType : (body.defaultAgentType ?? null),
       defaultWorkspaceProfile: body.defaultWorkspaceProfile === undefined ? existing.defaultWorkspaceProfile : (body.defaultWorkspaceProfile ?? null),
+      defaultDevcontainerConfigName: body.defaultDevcontainerConfigName === undefined ? existing.defaultDevcontainerConfigName : (body.defaultDevcontainerConfigName ?? null),
       defaultProvider: body.defaultProvider === undefined ? existing.defaultProvider : (body.defaultProvider ?? null),
       defaultLocation: body.defaultLocation === undefined ? existing.defaultLocation : (body.defaultLocation ?? null),
       workspaceIdleTimeoutMs: body.workspaceIdleTimeoutMs === undefined ? existing.workspaceIdleTimeoutMs : (body.workspaceIdleTimeoutMs ?? null),

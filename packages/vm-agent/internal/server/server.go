@@ -114,8 +114,9 @@ type WorkspaceRuntime struct {
 	GitUserName         string
 	GitUserEmail        string
 	GitHubID            string
-	Lightweight         bool // Skip devcontainer build, use fallback image for faster startup
-	PTY                 *pty.Manager
+	Lightweight              bool   // Skip devcontainer build, use fallback image for faster startup
+	DevcontainerConfigName   string // Named devcontainer config (subdirectory under .devcontainer/)
+	PTY                      *pty.Manager
 
 	// ReadyCallbackPending is true when the workspace provisioned successfully but
 	// the workspace-ready callback to the control plane failed (e.g., transient

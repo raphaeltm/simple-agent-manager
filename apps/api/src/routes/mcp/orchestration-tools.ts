@@ -198,6 +198,9 @@ export async function handleRetrySubtask(
     ?? DEFAULT_VM_LOCATION;
   const resolvedWorkspaceProfile: WorkspaceProfile = (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
+  const resolvedDevcontainerConfigName: string | null = resolvedWorkspaceProfile === 'lightweight'
+    ? null
+    : (project.defaultDevcontainerConfigName ?? null);
 
   const checkoutBranch = project.defaultBranch;
 
@@ -286,6 +289,7 @@ export async function handleRetrySubtask(
       chatSessionId: sessionId,
       agentType: project.defaultAgentType ?? null,
       workspaceProfile: resolvedWorkspaceProfile,
+      devcontainerConfigName: resolvedDevcontainerConfigName,
       cloudProvider: resolvedProvider,
       model: null,
       permissionMode: null,

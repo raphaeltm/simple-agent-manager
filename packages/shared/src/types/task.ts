@@ -233,6 +233,9 @@ export interface SubmitTaskRequest {
   agentType?: string;
   /** Workspace provisioning profile. 'lightweight' skips devcontainer build for faster startup. */
   workspaceProfile?: WorkspaceProfile;
+  /** Devcontainer config name (subdirectory under .devcontainer/). null/undefined = auto-discover default.
+   * Only relevant when workspaceProfile is 'full' — ignored for 'lightweight' (devcontainer build skipped). */
+  devcontainerConfigName?: string | null;
   /** Cloud provider to use for auto-provisioned nodes. Falls back to project default, then any available credential. */
   provider?: CredentialProvider;
   /** ID of a parent task to continue from (conversation forking). When set, the new workspace

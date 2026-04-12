@@ -1,3 +1,4 @@
+import { DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
@@ -30,6 +31,13 @@ const TaskAttachmentSchema = v.object({
   contentType: v.string(),
 });
 
+/** Devcontainer config name — alphanumeric, hyphens, underscores, max length from shared constants. */
+const DevcontainerConfigNameSchema = v.pipe(
+  v.string(),
+  v.regex(DEVCONTAINER_CONFIG_NAME_REGEX, 'Config name must be alphanumeric with hyphens/underscores'),
+  v.maxLength(DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, `Config name must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`),
+);
+
 export const SubmitTaskSchema = v.object({
   message: v.string(),
   vmSize: v.optional(VMSizeSchema),
@@ -37,6 +45,7 @@ export const SubmitTaskSchema = v.object({
   nodeId: v.optional(v.string()),
   agentType: v.optional(v.string()),
   workspaceProfile: v.optional(WorkspaceProfileSchema),
+  devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
   provider: v.optional(CredentialProviderSchema),
   parentTaskId: v.optional(v.string()),
   contextSummary: v.optional(v.string()),
@@ -83,6 +92,7 @@ export const RunTaskSchema = v.object({
   vmSize: v.optional(VMSizeSchema),
   vmLocation: v.optional(VMLocationSchema),
   workspaceProfile: v.optional(WorkspaceProfileSchema),
+  devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
   nodeId: v.optional(v.string()),
   branch: v.optional(v.string()),
 });

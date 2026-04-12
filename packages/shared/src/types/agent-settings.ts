@@ -65,6 +65,8 @@ export interface AgentProfile {
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
+  /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
+  devcontainerConfigName: string | null;
   taskMode: string | null;
   isBuiltin: boolean;
   createdAt: string;
@@ -85,6 +87,8 @@ export interface CreateAgentProfileRequest {
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
+  /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
+  devcontainerConfigName?: string | null;
   taskMode?: string | null;
 }
 
@@ -102,6 +106,8 @@ export interface UpdateAgentProfileRequest {
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
+  /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
+  devcontainerConfigName?: string | null;
   taskMode?: string | null;
 }
 
@@ -119,5 +125,7 @@ export interface ResolvedAgentProfile {
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
+  /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
+  devcontainerConfigName: string | null;
   taskMode: string | null;
 }

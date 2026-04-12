@@ -86,6 +86,7 @@ export async function handleWorkspaceCreation(
       vmSize: state.config.vmSize,
       vmLocation: state.config.vmLocation,
       workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
+      devcontainerConfigName: state.config.devcontainerConfigName ?? null,
       createdAt: now,
       updatedAt: now,
     });
@@ -146,6 +147,7 @@ export async function handleWorkspaceCreation(
       gitUserEmail: state.config.userEmail,
       githubId: state.config.githubId,
       lightweight: state.config.workspaceProfile === 'lightweight',
+      devcontainerConfigName: state.config.devcontainerConfigName ?? undefined,
     });
 
     await rc.ctx.storage.put('state', state);

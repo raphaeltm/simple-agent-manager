@@ -246,6 +246,15 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
 
+  // Devcontainer config name resolution: explicit > profile > project default > null (auto-discover).
+  // Only meaningful when workspaceProfile is 'full' — lightweight skips devcontainer build entirely.
+  const devcontainerConfigName: string | null = workspaceProfile === 'lightweight'
+    ? null
+    : (body.devcontainerConfigName
+      ?? resolvedProfile?.devcontainerConfigName
+      ?? project.defaultDevcontainerConfigName
+      ?? null);
+
   if (provider !== null && !CREDENTIAL_PROVIDERS.includes(provider)) {
     throw errors.badRequest(`provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
   }
@@ -421,6 +430,7 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
       chatSessionId: sessionId,
       agentType: body.agentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
       workspaceProfile,
+      devcontainerConfigName,
       cloudProvider: provider,
       taskMode,
       model: resolvedProfile?.model ?? null,
