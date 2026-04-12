@@ -244,3 +244,63 @@ export async function createProviderForUser(
   const config = buildProviderConfig(platformProvider, decryptedToken);
   return { provider: createProvider(config), providerName: platformProvider, credentialSource: 'platform' };
 }
+
+/**
+ * Lightweight credential source resolution — determines whether 'user' or 'platform'
+ * credentials would be used for a given target provider WITHOUT decrypting tokens
+ * or instantiating provider instances. Used for quota enforcement gating.
+ *
+ * Returns 'user' if the user has a cloud-provider credential for the target provider,
+ * 'platform' if only a platform credential is available, or null if no credential exists.
+ */
+export async function resolveCredentialSource(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  targetProvider?: CredentialProvider,
+): Promise<{ credentialSource: CredentialSource; providerName: CredentialProvider } | null> {
+  // 1. Check user's own credential for the target provider
+  const userConditions = [
+    eq(schema.credentials.userId, userId),
+    eq(schema.credentials.credentialType, 'cloud-provider'),
+  ];
+  if (targetProvider) {
+    userConditions.push(eq(schema.credentials.provider, targetProvider));
+  }
+
+  const [userCred] = await db
+    .select({ id: schema.credentials.id, provider: schema.credentials.provider })
+    .from(schema.credentials)
+    .where(and(...userConditions))
+    .limit(1);
+
+  if (userCred) {
+    return {
+      credentialSource: 'user',
+      providerName: userCred.provider as CredentialProvider,
+    };
+  }
+
+  // 2. Check platform credential
+  const platformConditions = [
+    eq(schema.platformCredentials.credentialType, 'cloud-provider'),
+    eq(schema.platformCredentials.isEnabled, true),
+  ];
+  if (targetProvider) {
+    platformConditions.push(eq(schema.platformCredentials.provider, targetProvider));
+  }
+
+  const [platformCred] = await db
+    .select({ id: schema.platformCredentials.id, provider: schema.platformCredentials.provider })
+    .from(schema.platformCredentials)
+    .where(and(...platformConditions))
+    .limit(1);
+
+  if (platformCred?.provider) {
+    return {
+      credentialSource: 'platform',
+      providerName: platformCred.provider as CredentialProvider,
+    };
+  }
+
+  return null;
+}

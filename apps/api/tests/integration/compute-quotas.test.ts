@@ -6,9 +6,10 @@
  * 2. Service functions implement quota resolution chain
  * 3. Admin routes are mounted and handle CRUD
  * 4. User route returns quota status
- * 5. Task submission checks quota before accepting
- * 6. Node provisioning re-checks quota (hard gate)
- * 7. BYOC users are exempt from quotas
+ * 5. Task submission checks quota based on credential SOURCE (not existence)
+ * 6. Node provisioning re-checks quota using resolveCredentialSource (hard gate)
+ * 7. Manual node creation enforces quota for platform credentials
+ * 8. BYOC users are exempt only when using their own credential for the target provider
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -18,11 +19,13 @@ import { describe, expect, it } from 'vitest';
 describe('compute quota pipeline', () => {
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
   const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/compute-quotas.ts'), 'utf8');
+  const providerCredsFile = readFileSync(resolve(process.cwd(), 'src/services/provider-credentials.ts'), 'utf8');
   const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
   const adminQuotaRoute = readFileSync(resolve(process.cwd(), 'src/routes/admin-quotas.ts'), 'utf8');
   const usageRoute = readFileSync(resolve(process.cwd(), 'src/routes/usage.ts'), 'utf8');
   const submitRoute = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
   const nodeStepsFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/node-steps.ts'), 'utf8');
+  const nodesRoute = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
   const migrationFile = readFileSync(resolve(process.cwd(), 'src/db/migrations/0039_compute_quotas.sql'), 'utf8');
 
   // ===========================================================================
@@ -105,6 +108,11 @@ describe('compute quota pipeline', () => {
       expect(serviceFile).toContain("eq(schema.credentials.credentialType, 'cloud-provider')");
     });
 
+    it('userHasOwnCloudCredentials accepts optional targetProvider parameter', () => {
+      expect(serviceFile).toContain('targetProvider?: CredentialProvider');
+      expect(serviceFile).toContain('eq(schema.credentials.provider, targetProvider)');
+    });
+
     it('setDefaultQuota implements upsert pattern', () => {
       expect(serviceFile).toContain('.insert(schema.defaultQuotas)');
       expect(serviceFile).toContain('.update(schema.defaultQuotas)');
@@ -117,6 +125,39 @@ describe('compute quota pipeline', () => {
 
     it('removeUserQuotaOverride deletes the override row', () => {
       expect(serviceFile).toContain('.delete(schema.userQuotas)');
+    });
+  });
+
+  // ===========================================================================
+  // resolveCredentialSource
+  // ===========================================================================
+  describe('resolveCredentialSource', () => {
+    it('is exported from provider-credentials service', () => {
+      expect(providerCredsFile).toContain('export async function resolveCredentialSource');
+    });
+
+    it('checks user credentials for the target provider first', () => {
+      expect(providerCredsFile).toContain("eq(schema.credentials.credentialType, 'cloud-provider')");
+      // When targetProvider is passed, it filters by provider
+      expect(providerCredsFile).toContain('eq(schema.credentials.provider, targetProvider)');
+    });
+
+    it('falls back to platform credentials', () => {
+      expect(providerCredsFile).toContain("eq(schema.platformCredentials.credentialType, 'cloud-provider')");
+      expect(providerCredsFile).toContain('eq(schema.platformCredentials.isEnabled, true)');
+    });
+
+    it('returns credentialSource: user when user has own credential', () => {
+      expect(providerCredsFile).toContain("credentialSource: 'user'");
+    });
+
+    it('returns credentialSource: platform when falling back', () => {
+      expect(providerCredsFile).toContain("credentialSource: 'platform'");
+    });
+
+    it('returns null when no credential exists', () => {
+      // Verify the function returns null when no credentials are found
+      expect(providerCredsFile).toContain('return null;');
     });
   });
 
@@ -190,19 +231,23 @@ describe('compute quota pipeline', () => {
   });
 
   // ===========================================================================
-  // Quota Enforcement: Task Submission
+  // Quota Enforcement: Task Submission (credential SOURCE, not existence)
   // ===========================================================================
   describe('quota enforcement at task submission', () => {
-    it('checks if user has own cloud credentials', () => {
-      expect(submitRoute).toContain('userHasByocCredentials');
+    it('uses resolveCredentialSource for credential resolution', () => {
+      expect(submitRoute).toContain('resolveCredentialSource');
     });
 
-    it('checks for platform credentials when user has no BYOC', () => {
-      expect(submitRoute).toContain('platformCredentials');
-      expect(submitRoute).toContain("credentialType, 'cloud-provider'");
+    it('passes resolved provider to credential source check', () => {
+      // The provider is resolved earlier in the function, then passed to resolveCredentialSource
+      expect(submitRoute).toContain('resolveCredentialSource(db, userId, provider');
     });
 
-    it('checks quota for non-BYOC users', () => {
+    it('enforces quota only when credential source is platform', () => {
+      expect(submitRoute).toContain("credResult.credentialSource === 'platform'");
+    });
+
+    it('checks quota for platform users', () => {
       expect(submitRoute).toContain('checkQuotaForUser');
     });
 
@@ -215,9 +260,8 @@ describe('compute quota pipeline', () => {
       expect(submitRoute).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
     });
 
-    it('does NOT check quota for BYOC users', () => {
-      // The checkQuotaForUser is only called inside the !userHasByocCredentials block
-      expect(submitRoute).toContain('if (!userHasByocCredentials)');
+    it('rejects when no credential exists at all', () => {
+      expect(submitRoute).toContain('Cloud provider credentials required');
     });
   });
 
@@ -225,12 +269,20 @@ describe('compute quota pipeline', () => {
   // Quota Enforcement: Node Provisioning (Hard Gate)
   // ===========================================================================
   describe('quota enforcement at node provisioning', () => {
-    it('re-checks quota before provisioning', () => {
-      expect(nodeStepsFile).toContain('checkQuotaForUser');
+    it('uses resolveCredentialSource for credential resolution', () => {
+      expect(nodeStepsFile).toContain('resolveCredentialSource');
     });
 
-    it('checks if user has own cloud credentials', () => {
-      expect(nodeStepsFile).toContain("credential_type = 'cloud-provider'");
+    it('passes cloud provider from config to credential source check', () => {
+      expect(nodeStepsFile).toContain('state.config.cloudProvider');
+    });
+
+    it('enforces quota only when credential source is platform', () => {
+      expect(nodeStepsFile).toContain("credResult?.credentialSource === 'platform'");
+    });
+
+    it('re-checks quota before provisioning', () => {
+      expect(nodeStepsFile).toContain('checkQuotaForUser');
     });
 
     it('rejects with permanent error when quota exceeded', () => {
@@ -241,9 +293,35 @@ describe('compute quota pipeline', () => {
     it('respects COMPUTE_QUOTA_ENFORCEMENT_ENABLED kill switch', () => {
       expect(nodeStepsFile).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
     });
+  });
 
-    it('skips quota check when user has own credentials', () => {
-      expect(nodeStepsFile).toContain('if (!hasOwnCreds)');
+  // ===========================================================================
+  // Quota Enforcement: Manual Node Creation
+  // ===========================================================================
+  describe('quota enforcement at manual node creation', () => {
+    it('uses resolveCredentialSource for credential resolution', () => {
+      expect(nodesRoute).toContain('resolveCredentialSource');
+    });
+
+    it('enforces quota when credential source is platform', () => {
+      expect(nodesRoute).toContain("credResult.credentialSource === 'platform'");
+    });
+
+    it('checks quota before creating node record', () => {
+      // resolveCredentialSource and checkQuotaForUser appear before createNodeRecord
+      const resolveIdx = nodesRoute.indexOf('resolveCredentialSource');
+      const quotaIdx = nodesRoute.indexOf('checkQuotaForUser');
+      const createIdx = nodesRoute.indexOf('createNodeRecord(c.env');
+      expect(resolveIdx).toBeLessThan(createIdx);
+      expect(quotaIdx).toBeLessThan(createIdx);
+    });
+
+    it('rejects when no credential exists', () => {
+      expect(nodesRoute).toContain('Cloud provider credentials required');
+    });
+
+    it('respects COMPUTE_QUOTA_ENFORCEMENT_ENABLED kill switch', () => {
+      expect(nodesRoute).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
     });
   });
 
@@ -253,6 +331,32 @@ describe('compute quota pipeline', () => {
   describe('environment configuration', () => {
     it('Env interface includes COMPUTE_QUOTA_ENFORCEMENT_ENABLED', () => {
       expect(indexFile).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
+    });
+  });
+
+  // ===========================================================================
+  // Regression: Credential source bypass prevention
+  // ===========================================================================
+  describe('credential source bypass prevention', () => {
+    it('task submission does NOT use raw credential existence check', () => {
+      // The old pattern checked for ANY cloud-provider credential
+      // and set userHasByocCredentials. This is now replaced by resolveCredentialSource.
+      expect(submitRoute).not.toContain('userHasByocCredentials');
+    });
+
+    it('node provisioning does NOT use raw SQL credential existence check', () => {
+      // The old pattern used raw SQL: SELECT id FROM credentials WHERE ...
+      expect(nodeStepsFile).not.toContain("credential_type = 'cloud-provider' LIMIT 1");
+    });
+
+    it('node provisioning does NOT use hasOwnCreds guard', () => {
+      expect(nodeStepsFile).not.toContain('if (!hasOwnCreds)');
+    });
+
+    it('all three enforcement points use resolveCredentialSource', () => {
+      expect(submitRoute).toContain('resolveCredentialSource');
+      expect(nodeStepsFile).toContain('resolveCredentialSource');
+      expect(nodesRoute).toContain('resolveCredentialSource');
     });
   });
 });

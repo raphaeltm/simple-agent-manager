@@ -127,18 +127,23 @@ export async function handleNodeProvisioning(
     );
   }
 
-  // Re-check quota before provisioning (hard gate for platform compute)
+  // Re-check quota before provisioning (hard gate for platform compute).
+  // Resolves credential source for the target provider — not just whether the user
+  // has ANY cloud credential. A user with a Hetzner credential who provisions on
+  // Scaleway (platform) must still be quota-enforced.
   const quotaEnforcementEnabled = rc.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
   if (quotaEnforcementEnabled) {
-    // Check if user has own cloud credentials — only enforce quota for platform compute
-    const hasOwnCreds = await rc.env.DATABASE.prepare(
-      `SELECT id FROM credentials WHERE user_id = ? AND credential_type = 'cloud-provider' LIMIT 1`
-    ).bind(state.userId).first<{ id: string }>();
+    const { drizzle } = await import('drizzle-orm/d1');
+    const drizzleSchema = await import('../../db/schema');
+    const db = drizzle(rc.env.DATABASE, { schema: drizzleSchema });
+    const { resolveCredentialSource } = await import('../../services/provider-credentials');
+    const credResult = await resolveCredentialSource(
+      db,
+      state.userId,
+      (state.config.cloudProvider as import('@simple-agent-manager/shared').CredentialProvider) ?? undefined,
+    );
 
-    if (!hasOwnCreds) {
-      const { drizzle } = await import('drizzle-orm/d1');
-      const drizzleSchema = await import('../../db/schema');
-      const db = drizzle(rc.env.DATABASE, { schema: drizzleSchema });
+    if (credResult?.credentialSource === 'platform') {
       const { checkQuotaForUser } = await import('../../services/compute-quotas');
       const quotaCheck = await checkQuotaForUser(db, state.userId);
 
