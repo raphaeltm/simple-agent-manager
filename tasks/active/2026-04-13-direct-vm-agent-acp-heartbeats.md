@@ -55,40 +55,36 @@ This is simpler, more robust, and works for both task-mode and conversation-mode
 ## Implementation Checklist
 
 ### Phase 1: API — New node-level ACP heartbeat endpoint
-- [ ] Add `POST /api/projects/:projectId/node-acp-heartbeat` route in `apps/api/src/routes/projects/acp-sessions.ts`
-  - Auth: callback token (Bearer) — same as node heartbeat
-  - Body: `{ nodeId: string }`
+- [x] Add `POST /api/projects/:projectId/node-acp-heartbeat` route in `apps/api/src/routes/projects/acp-sessions.ts`
+  - Auth: JWT via requireAuth() middleware (callback token from VM agent)
+  - Body: `{ nodeId: string }` — reuses `AcpSessionHeartbeatSchema`
   - Calls `projectDataService.updateNodeHeartbeats(env, projectId, nodeId)`
   - Returns 204 on success
-- [ ] Add schema validation for the new endpoint
+- [x] Schema validation via existing `AcpSessionHeartbeatSchema`
 
 ### Phase 2: VM Agent — Direct ACP heartbeat goroutine
-- [ ] Add `AcpHeartbeatInterval` to `config.Config` loaded from `ACP_SESSION_HEARTBEAT_INTERVAL_MS` env var (default: 60s per `ACP_SESSION_DEFAULTS.HEARTBEAT_INTERVAL_MS`)
-- [ ] Add `startAcpHeartbeatReporter()` method on Server in a new file `packages/vm-agent/internal/server/acp_heartbeat.go`
-  - Goroutine that ticks every `AcpHeartbeatInterval`
-  - On each tick, collect unique (projectId, workspaceId) pairs from active workspaces
-  - For each unique projectId, POST to `{ControlPlaneURL}/api/projects/{projectId}/node-acp-heartbeat` with `{ nodeId }`
-  - Use callback token for auth
-  - Log errors but don't crash
-- [ ] Call `startAcpHeartbeatReporter()` in Server startup (alongside `startNodeHealthReporter()`)
-- [ ] Store projectId in WorkspaceRuntime so the heartbeat goroutine can find it
+- [x] Add `ACPHeartbeatInterval` to `config.Config` loaded from `ACP_HEARTBEAT_INTERVAL` env var (default: 60s)
+- [x] Add `startAcpHeartbeatReporter()` method on Server in `packages/vm-agent/internal/server/acp_heartbeat.go`
+- [x] Call `startAcpHeartbeatReporter()` in Server startup (alongside `startNodeHealthReporter()`)
+- [x] Store `ProjectID` in `WorkspaceRuntime` — set at boot for auto-provisioned nodes and in `handleCreateAgentSession` for multi-workspace nodes
 
 ### Phase 3: Diagnostic logging for piggybacking sweep
-- [ ] Add structured log at START of `waitUntil` callback in `nodes.ts:640` (before D1 query)
-- [ ] Log workspace query results: count found, how many have projectId
-- [ ] Log per-project update results
+- [x] Add structured log at START of `waitUntil` callback in `nodes.ts`
+- [x] Log workspace query results: count found, how many have projectId, unique projects
+- [x] Log per-project update results with session count
 
 ### Phase 4: Tests
-- [ ] Unit test for new heartbeat endpoint
-- [ ] Go test for ACP heartbeat goroutine lifecycle (starts/stops with Server)
-- [ ] Verify heartbeat goroutine skips when no active workspaces
+- [x] Go test for `activeProjectIDs` (deduplication, filtering by status/projectID)
+- [x] Go test for `sendAcpHeartbeats` (correct endpoint, auth header, body)
+- [x] Go test for goroutine lifecycle (starts, sends heartbeats, stops on done channel)
+- [x] Go test for skip when no callback token
 
 ## Acceptance Criteria
-- [ ] VM agent sends direct ACP heartbeats every 60s to control plane while workspaces have active projects
-- [ ] Heartbeat goroutine stops cleanly when Server shuts down
-- [ ] Sessions survive beyond the 5-minute detection window when agent is running
-- [ ] Existing piggybacking sweep is retained as backup (not removed)
-- [ ] Diagnostic logging added to piggybacking sweep
-- [ ] All new config values are configurable via environment variables
-- [ ] Both task-mode and conversation-mode sessions benefit from direct heartbeats
-- [ ] Tests verify heartbeat goroutine starts/stops with Server lifecycle
+- [x] VM agent sends direct ACP heartbeats every 60s to control plane while workspaces have active projects
+- [x] Heartbeat goroutine stops cleanly when Server shuts down
+- [ ] Sessions survive beyond the 5-minute detection window when agent is running (requires live staging test)
+- [x] Existing piggybacking sweep is retained as backup (not removed)
+- [x] Diagnostic logging added to piggybacking sweep
+- [x] All new config values are configurable via environment variables
+- [x] Both task-mode and conversation-mode sessions benefit from direct heartbeats
+- [x] Tests verify heartbeat goroutine starts/stops with Server lifecycle

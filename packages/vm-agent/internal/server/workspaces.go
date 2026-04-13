@@ -635,6 +635,15 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	chatSID := strings.TrimSpace(body.ChatSessionID)
 	projectID := strings.TrimSpace(body.ProjectID)
 
+	// Store projectID on workspace runtime for ACP heartbeat goroutine.
+	if projectID != "" {
+		s.workspaceMu.Lock()
+		if rt, ok := s.workspaces[workspaceID]; ok {
+			rt.ProjectID = projectID
+		}
+		s.workspaceMu.Unlock()
+	}
+
 	// Ensure a per-workspace message reporter exists for this workspace.
 	// This handles both:
 	// - Auto-provisioned nodes: reporter may already exist from boot time

@@ -111,6 +111,7 @@ type WorkspaceRuntime struct {
 	ContainerWorkDir    string
 	ContainerUser       string
 	CallbackToken       string
+	ProjectID           string
 	GitUserName         string
 	GitUserEmail        string
 	GitHubID            string
@@ -419,6 +420,7 @@ func New(cfg *config.Config) (*Server, error) {
 			ContainerWorkDir:    strings.TrimSpace(cfg.ContainerWorkDir),
 			ContainerUser:       strings.TrimSpace(cfg.ContainerUser),
 			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
+			ProjectID:           strings.TrimSpace(cfg.ProjectID),
 			PTY:                 ptyManager,
 		}
 	}
@@ -655,6 +657,7 @@ func (s *Server) stopAllPortScanners() {
 // Start starts the HTTP server (plain HTTP or TLS based on config).
 func (s *Server) Start() error {
 	s.startNodeHealthReporter()
+	s.startAcpHeartbeatReporter()
 
 	// Start error reporter background flush
 	s.errorReporter.Start()
