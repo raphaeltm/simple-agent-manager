@@ -39,7 +39,7 @@ type profileOverrides struct {
 	Model            string
 	PermissionMode   string
 	OpencodeProvider string
-	OpencodeBaseUrl  string
+	OpencodeBaseURL  string
 }
 
 // Server is the HTTP server for the VM Agent.

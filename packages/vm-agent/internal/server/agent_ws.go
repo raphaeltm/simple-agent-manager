@@ -318,7 +318,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		cfg.ModelOverride = ovr.Model
 		cfg.PermissionModeOverride = ovr.PermissionMode
 		cfg.OpencodeProviderOverride = ovr.OpencodeProvider
-		cfg.OpencodeBaseUrlOverride = ovr.OpencodeBaseUrl
+		cfg.OpencodeBaseURLOverride = ovr.OpencodeBaseURL
 	}
 
 	hostCfg := acp.SessionHostConfig{

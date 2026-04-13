@@ -471,7 +471,7 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 
 	// Apply profile overrides from the control plane (take precedence over fetched settings)
 	if h.config.ModelOverride != "" || h.config.PermissionModeOverride != "" ||
-		h.config.OpencodeProviderOverride != "" || h.config.OpencodeBaseUrlOverride != "" {
+		h.config.OpencodeProviderOverride != "" || h.config.OpencodeBaseURLOverride != "" {
 		if settings == nil {
 			settings = &agentSettingsPayload{}
 		}
@@ -487,9 +487,9 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 			settings.OpencodeProvider = h.config.OpencodeProviderOverride
 			slog.Info("OpenCode provider overridden by profile", "provider", h.config.OpencodeProviderOverride)
 		}
-		if h.config.OpencodeBaseUrlOverride != "" {
-			settings.OpencodeBaseUrl = h.config.OpencodeBaseUrlOverride
-			slog.Info("OpenCode base URL overridden by profile", "baseUrl", h.config.OpencodeBaseUrlOverride)
+		if h.config.OpencodeBaseURLOverride != "" {
+			settings.OpencodeBaseURL = h.config.OpencodeBaseURLOverride
+			slog.Info("OpenCode base URL overridden by profile", "baseUrl", h.config.OpencodeBaseURLOverride)
 		}
 	}
 

@@ -714,7 +714,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		Model            string               `json:"model,omitempty"`
 		PermissionMode   string               `json:"permissionMode,omitempty"`
 		OpencodeProvider string               `json:"opencodeProvider,omitempty"`
-		OpencodeBaseUrl  string               `json:"opencodeBaseUrl,omitempty"`
+		OpencodeBaseURL  string               `json:"opencodeBaseUrl,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -789,14 +789,15 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		Model:            body.Model,
 		PermissionMode:   body.PermissionMode,
 		OpencodeProvider: body.OpencodeProvider,
-		OpencodeBaseUrl:  body.OpencodeBaseUrl,
+		OpencodeBaseURL:  body.OpencodeBaseURL,
 	}
 	s.sessionHostMu.Unlock()
-	if body.Model != "" || body.PermissionMode != "" || body.OpencodeProvider != "" {
+	if body.Model != "" || body.PermissionMode != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {
 		slog.Info("Profile overrides registered for agent session",
 			"workspace", workspaceID, "session", sessionID,
 			"model", body.Model, "permissionMode", body.PermissionMode,
-			"opencodeProvider", body.OpencodeProvider)
+			"opencodeProvider", body.OpencodeProvider,
+			"opencodeBaseUrl", body.OpencodeBaseURL)
 	}
 
 	// Create or retrieve the SessionHost for this session.

@@ -196,9 +196,9 @@ type GatewayConfig struct {
 	// OpencodeProviderOverride, if non-empty, overrides the OpenCode inference provider.
 	// Values: "platform", "scaleway", "google-vertex", "openai-compatible", "anthropic", "custom".
 	OpencodeProviderOverride string
-	// OpencodeBaseUrlOverride, if non-empty, overrides the OpenCode base URL
+	// OpencodeBaseURLOverride, if non-empty, overrides the OpenCode base URL
 	// (used for "custom" and "openai-compatible" providers).
-	OpencodeBaseUrlOverride string
+	OpencodeBaseURLOverride string
 }
 
 // McpServerEntry is a lightweight MCP server config passed from the control
@@ -430,7 +430,7 @@ type agentSettingsPayload struct {
 	Model            string `json:"model"`
 	PermissionMode   string `json:"permissionMode"`
 	OpencodeProvider string `json:"opencodeProvider"`
-	OpencodeBaseUrl  string `json:"opencodeBaseUrl"`
+	OpencodeBaseURL  string `json:"opencodeBaseUrl"`
 }
 
 // truncate limits a string to maxLen characters, appending "..." if truncated.
@@ -1081,6 +1081,8 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 			},
 		}
 	case "google-vertex":
+		// Uses Google's Gemini API (generativelanguage.googleapis.com) via its OpenAI-compatible endpoint.
+		// Named "google-vertex" in the UI for user familiarity; actual Vertex AI would need different auth.
 		config["provider"] = map[string]interface{}{
 			"openai-compatible": map[string]interface{}{
 				"options": map[string]interface{}{
@@ -1099,8 +1101,8 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 		}
 	case "openai-compatible", "custom":
 		baseURL := getOpencodeDefault("OPENCODE_COMPATIBLE_DEFAULT_BASE_URL", DefaultCompatibleFallbackBaseURL)
-		if settings != nil && settings.OpencodeBaseUrl != "" {
-			baseURL = settings.OpencodeBaseUrl
+		if settings != nil && settings.OpencodeBaseURL != "" {
+			baseURL = settings.OpencodeBaseURL
 		}
 		config["provider"] = map[string]interface{}{
 			"openai-compatible": map[string]interface{}{
