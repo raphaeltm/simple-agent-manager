@@ -248,11 +248,10 @@ export function confirmObservation(sql: SqlStorage, observationId: string) {
 }
 
 export function getObservationsForEntity(sql: SqlStorage, entityId: string, includeInactive = false) {
-  const activeClause = includeInactive ? '' : 'AND is_active = 1';
-  const rows = sql.exec(
-    `SELECT * FROM knowledge_observations WHERE entity_id = ? ${activeClause} ORDER BY last_confirmed_at DESC`,
-    entityId,
-  ).toArray();
+  const query = includeInactive
+    ? 'SELECT * FROM knowledge_observations WHERE entity_id = ? ORDER BY last_confirmed_at DESC'
+    : 'SELECT * FROM knowledge_observations WHERE entity_id = ? AND is_active = 1 ORDER BY last_confirmed_at DESC';
+  const rows = sql.exec(query, entityId).toArray();
   return rows.map(parseKnowledgeObservationRow);
 }
 
