@@ -16,7 +16,7 @@ export const SaveAgentSettingsSchema = v.pipe(
     deniedTools: v.optional(v.nullable(v.array(v.string()))),
     additionalEnv: v.optional(v.nullable(v.record(v.string(), v.string()))),
     opencodeProvider: v.optional(v.nullable(OpenCodeProviderSchema)),
-    opencodeBaseUrl: v.optional(v.nullable(v.pipe(v.string(), v.url()))),
+    opencodeBaseUrl: v.optional(v.nullable(v.string())),
     opencodeProviderName: v.optional(v.nullable(v.string())),
   }),
   v.check(

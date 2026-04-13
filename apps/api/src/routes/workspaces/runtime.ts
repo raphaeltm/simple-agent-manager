@@ -235,6 +235,7 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
       permissionMode: null,
       opencodeProvider: null,
       opencodeBaseUrl: null,
+      opencodeProviderName: null,
     });
   }
 
@@ -243,6 +244,7 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     permissionMode: row.permissionMode,
     opencodeProvider: row.opencodeProvider ?? null,
     opencodeBaseUrl: row.opencodeBaseUrl ?? null,
+    opencodeProviderName: row.opencodeProviderName ?? null,
   });
 });
 runtimeRoutes.get('/:id/runtime', async (c) => {

@@ -117,6 +117,10 @@ agentSettingsRoutes.put('/:agentType', jsonValidator(SaveAgentSettingsSchema), a
     )
     .limit(1);
 
+  // Clear opencodeBaseUrl when switching to a provider that doesn't need it
+  const requiresBaseUrl = (p: string | null | undefined) =>
+    p === 'custom' || p === 'openai-compatible';
+
   const values = {
     model: body.model ?? null,
     permissionMode: body.permissionMode ?? null,
@@ -124,7 +128,9 @@ agentSettingsRoutes.put('/:agentType', jsonValidator(SaveAgentSettingsSchema), a
     deniedTools: body.deniedTools ? JSON.stringify(body.deniedTools) : null,
     additionalEnv: body.additionalEnv ? JSON.stringify(body.additionalEnv) : null,
     opencodeProvider: body.opencodeProvider ?? null,
-    opencodeBaseUrl: body.opencodeBaseUrl ?? null,
+    opencodeBaseUrl: requiresBaseUrl(body.opencodeProvider)
+      ? (body.opencodeBaseUrl ?? null)
+      : null,
     opencodeProviderName: body.opencodeProviderName ?? null,
     updatedAt: now,
   };
