@@ -180,7 +180,7 @@ export async function selectNodeForTaskRun(
         }
 
         const result = await nodeLifecycle.tryClaim(
-          env as unknown as import('../index').Env,
+          env as unknown as import('../env').Env,
           warmNode.id,
           taskId
         );
