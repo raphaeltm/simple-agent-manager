@@ -526,6 +526,109 @@ export async function getCachedCommands(
 }
 
 // =========================================================================
+// Knowledge Graph
+// =========================================================================
+
+export async function createKnowledgeEntity(
+  env: Env, projectId: string, name: string, entityType: string, description: string | null,
+): Promise<{ id: string; createdAt: number }> {
+  const stub = await getStub(env, projectId);
+  return stub.createKnowledgeEntity(name, entityType, description);
+}
+
+export async function getKnowledgeEntity(env: Env, projectId: string, entityId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getKnowledgeEntity(entityId);
+}
+
+export async function getKnowledgeEntityByName(env: Env, projectId: string, name: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getKnowledgeEntityByName(name);
+}
+
+export async function listKnowledgeEntities(
+  env: Env, projectId: string, entityType: string | null, limit: number, offset: number,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.listKnowledgeEntities(entityType, limit, offset);
+}
+
+export async function updateKnowledgeEntity(
+  env: Env, projectId: string, entityId: string, updates: { name?: string; entityType?: string; description?: string | null },
+) {
+  const stub = await getStub(env, projectId);
+  return stub.updateKnowledgeEntity(entityId, updates);
+}
+
+export async function deleteKnowledgeEntity(env: Env, projectId: string, entityId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.deleteKnowledgeEntity(entityId);
+}
+
+export async function addKnowledgeObservation(
+  env: Env, projectId: string, entityId: string,
+  content: string, confidence: number, sourceType: string, sourceSessionId: string | null,
+): Promise<{ id: string; createdAt: number }> {
+  const stub = await getStub(env, projectId);
+  return stub.addKnowledgeObservation(entityId, content, confidence, sourceType, sourceSessionId);
+}
+
+export async function updateKnowledgeObservation(
+  env: Env, projectId: string, observationId: string, newContent: string, confidence: number | null,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.updateKnowledgeObservation(observationId, newContent, confidence);
+}
+
+export async function removeKnowledgeObservation(env: Env, projectId: string, observationId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.removeKnowledgeObservation(observationId);
+}
+
+export async function confirmKnowledgeObservation(env: Env, projectId: string, observationId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.confirmKnowledgeObservation(observationId);
+}
+
+export async function getKnowledgeObservationsForEntity(
+  env: Env, projectId: string, entityId: string, includeInactive: boolean,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.getKnowledgeObservationsForEntity(entityId, includeInactive);
+}
+
+export async function searchKnowledgeObservations(
+  env: Env, projectId: string, query: string, entityType: string | null, minConfidence: number | null, limit: number,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.searchKnowledgeObservations(query, entityType, minConfidence, limit);
+}
+
+export async function getRelevantKnowledge(env: Env, projectId: string, context: string, limit: number) {
+  const stub = await getStub(env, projectId);
+  return stub.getRelevantKnowledge(context, limit);
+}
+
+export async function createKnowledgeRelation(
+  env: Env, projectId: string, sourceEntityId: string, targetEntityId: string, relationType: string, description: string | null,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.createKnowledgeRelation(sourceEntityId, targetEntityId, relationType, description);
+}
+
+export async function getKnowledgeRelated(env: Env, projectId: string, entityId: string, relationType: string | null) {
+  const stub = await getStub(env, projectId);
+  return stub.getKnowledgeRelated(entityId, relationType);
+}
+
+export async function flagKnowledgeContradiction(
+  env: Env, projectId: string, existingObservationId: string, newObservation: string, sourceSessionId: string | null,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.flagKnowledgeContradiction(existingObservationId, newObservation, sourceSessionId);
+}
+
+// =========================================================================
 // WebSocket
 // =========================================================================
 

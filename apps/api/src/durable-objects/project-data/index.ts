@@ -21,6 +21,7 @@ import * as activity from './activity';
 import * as commands from './commands';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
+import * as knowledge from './knowledge';
 import * as materialization from './materialization';
 import * as messages from './messages';
 import * as sessions from './sessions';
@@ -381,6 +382,84 @@ export class ProjectData extends DurableObject<Env> {
 
   async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> { ws.close(); }
   async webSocketError(ws: WebSocket, _error: unknown): Promise<void> { ws.close(); }
+
+  // --- Knowledge Graph ---
+
+  async createKnowledgeEntity(name: string, entityType: string, description: string | null) {
+    const { id, now } = knowledge.createEntity(this.sql, this.env, name, entityType as Parameters<typeof knowledge.createEntity>[3], description);
+    this.broadcastEvent('knowledge.entity.created', { id, name, entityType });
+    return { id, createdAt: now };
+  }
+
+  async getKnowledgeEntity(entityId: string) {
+    return knowledge.getEntity(this.sql, entityId);
+  }
+
+  async getKnowledgeEntityByName(name: string) {
+    return knowledge.getEntityByName(this.sql, name);
+  }
+
+  async listKnowledgeEntities(entityType: string | null, limit: number, offset: number) {
+    return knowledge.listEntities(this.sql, entityType, limit, offset);
+  }
+
+  async updateKnowledgeEntity(entityId: string, updates: { name?: string; entityType?: string; description?: string | null }) {
+    const result = knowledge.updateEntity(this.sql, entityId, updates as Parameters<typeof knowledge.updateEntity>[2]);
+    this.broadcastEvent('knowledge.entity.updated', { entityId });
+    return result;
+  }
+
+  async deleteKnowledgeEntity(entityId: string) {
+    knowledge.deleteEntity(this.sql, entityId);
+    this.broadcastEvent('knowledge.entity.deleted', { entityId });
+  }
+
+  async addKnowledgeObservation(entityId: string, content: string, confidence: number, sourceType: string, sourceSessionId: string | null) {
+    const { id, now } = knowledge.addObservation(this.sql, this.env, entityId, content, confidence, sourceType as Parameters<typeof knowledge.addObservation>[5], sourceSessionId);
+    this.broadcastEvent('knowledge.observation.added', { id, entityId });
+    return { id, createdAt: now };
+  }
+
+  async updateKnowledgeObservation(observationId: string, newContent: string, confidence: number | null) {
+    const result = knowledge.updateObservation(this.sql, observationId, newContent, confidence);
+    this.broadcastEvent('knowledge.observation.updated', { id: result.id });
+    return result;
+  }
+
+  async removeKnowledgeObservation(observationId: string) {
+    knowledge.removeObservation(this.sql, observationId);
+    this.broadcastEvent('knowledge.observation.removed', { observationId });
+  }
+
+  async confirmKnowledgeObservation(observationId: string) {
+    knowledge.confirmObservation(this.sql, observationId);
+  }
+
+  async getKnowledgeObservationsForEntity(entityId: string, includeInactive: boolean) {
+    return knowledge.getObservationsForEntity(this.sql, entityId, includeInactive);
+  }
+
+  async searchKnowledgeObservations(query: string, entityType: string | null, minConfidence: number | null, limit: number) {
+    return knowledge.searchObservations(this.sql, query, entityType, minConfidence, limit);
+  }
+
+  async getRelevantKnowledge(context: string, limit: number) {
+    return knowledge.getRelevantKnowledge(this.sql, context, limit);
+  }
+
+  async createKnowledgeRelation(sourceEntityId: string, targetEntityId: string, relationType: string, description: string | null) {
+    const result = knowledge.createRelation(this.sql, sourceEntityId, targetEntityId, relationType as Parameters<typeof knowledge.createRelation>[3], description);
+    this.broadcastEvent('knowledge.relation.created', { id: result.id });
+    return result;
+  }
+
+  async getKnowledgeRelated(entityId: string, relationType: string | null) {
+    return knowledge.getRelated(this.sql, entityId, relationType);
+  }
+
+  async flagKnowledgeContradiction(existingObservationId: string, newObservation: string, sourceSessionId: string | null) {
+    return knowledge.flagContradiction(this.sql, this.env, existingObservationId, newObservation, sourceSessionId);
+  }
 
   // --- Internal Helpers ---
 

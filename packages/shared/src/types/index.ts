@@ -341,5 +341,28 @@ export type {
   UserQuotaStatusResponse,
 } from './compute-quotas';
 
+// Knowledge Graph
+export type {
+  AddObservationRequest,
+  CreateKnowledgeEntityRequest,
+  KnowledgeEntity,
+  KnowledgeEntityDetail,
+  KnowledgeEntityType,
+  KnowledgeObservation,
+  KnowledgeRelation,
+  KnowledgeRelationType,
+  KnowledgeSourceType,
+  ListKnowledgeEntitiesResponse,
+  SearchKnowledgeResponse,
+  UpdateKnowledgeEntityRequest,
+  UpdateObservationRequest,
+} from './knowledge';
+export {
+  KNOWLEDGE_DEFAULTS,
+  KNOWLEDGE_ENTITY_TYPES,
+  KNOWLEDGE_RELATION_TYPES,
+  KNOWLEDGE_SOURCE_TYPES,
+} from './knowledge';
+
 // API Error
 export type { ApiError } from './api-error';

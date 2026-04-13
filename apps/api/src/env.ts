@@ -246,6 +246,14 @@ export interface Env {
   MCP_IDEA_SEARCH_MAX?: string;                    // Max results for search_ideas (default: 20)
   MCP_IDEA_TITLE_MAX_LENGTH?: string;              // Max length for idea title (default: 200)
   MCP_SESSION_TOPIC_MAX_LENGTH?: string;           // Max length for session topic (default: 200)
+  // Knowledge graph limits
+  KNOWLEDGE_MAX_ENTITIES_PER_PROJECT?: string;     // Max knowledge entities per project (default: 500)
+  KNOWLEDGE_MAX_OBSERVATIONS_PER_ENTITY?: string;  // Max observations per entity (default: 100)
+  KNOWLEDGE_SEARCH_LIMIT?: string;                 // Max search results (default: 20)
+  KNOWLEDGE_AUTO_RETRIEVE_LIMIT?: string;          // Max auto-retrieved observations on session start (default: 20)
+  KNOWLEDGE_OBSERVATION_MAX_LENGTH?: string;       // Max observation text length (default: 1000)
+  KNOWLEDGE_ENTITY_NAME_MAX_LENGTH?: string;       // Max entity name length (default: 200)
+  KNOWLEDGE_DESCRIPTION_MAX_LENGTH?: string;       // Max entity description length (default: 2000)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;

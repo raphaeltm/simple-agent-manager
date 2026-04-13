@@ -12,6 +12,7 @@
  *   - tool-definitions-trigger-tools.ts       (trigger management — cron automation)
  */
 
+export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 export { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 export { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 export { PROFILE_TOOLS } from './tool-definitions-profile-tools';
@@ -21,6 +22,7 @@ export { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 export { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
+import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 import { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 import { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 import { PROFILE_TOOLS } from './tool-definitions-profile-tools';
@@ -39,4 +41,5 @@ export const MCP_TOOLS = [
   ...ORCHESTRATION_TOOLS,
   ...TRIGGER_TOOLS,
   ...PROFILE_TOOLS,
+  ...KNOWLEDGE_TOOLS,
 ];

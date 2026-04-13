@@ -350,6 +350,87 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '016-knowledge-graph',
+    run: (sql) => {
+      // Knowledge entities (nodes in the graph)
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_entities (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          entity_type TEXT NOT NULL,
+          description TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_knowledge_entities_type
+          ON knowledge_entities(entity_type)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_knowledge_entities_updated
+          ON knowledge_entities(updated_at DESC)
+      `);
+
+      // Observations (facts attached to entities)
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_observations (
+          id TEXT PRIMARY KEY,
+          entity_id TEXT NOT NULL,
+          content TEXT NOT NULL,
+          confidence REAL NOT NULL DEFAULT 0.7,
+          source_type TEXT NOT NULL DEFAULT 'inferred',
+          source_session_id TEXT,
+          created_at INTEGER NOT NULL,
+          last_confirmed_at INTEGER NOT NULL,
+          superseded_by TEXT,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          FOREIGN KEY (entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_knowledge_obs_entity
+          ON knowledge_observations(entity_id, is_active)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_knowledge_obs_source
+          ON knowledge_observations(source_type)
+      `);
+
+      // Relations between entities
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_relations (
+          id TEXT PRIMARY KEY,
+          source_entity_id TEXT NOT NULL,
+          target_entity_id TEXT NOT NULL,
+          relation_type TEXT NOT NULL,
+          description TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (source_entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+          FOREIGN KEY (target_entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_knowledge_rel_source
+          ON knowledge_relations(source_entity_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_knowledge_rel_target
+          ON knowledge_relations(target_entity_id)
+      `);
+
+      // FTS5 for searching observations
+      try {
+        sql.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_observations_fts
+          USING fts5(content, content='knowledge_observations', content_rowid='rowid', tokenize='unicode61')
+        `);
+      } catch {
+        // FTS5 may already exist from a partial migration
+      }
+    },
+  },
 ];
 
 /**
