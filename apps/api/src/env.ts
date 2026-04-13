@@ -392,6 +392,15 @@ export interface Env {
   LIBRARY_MAX_DIRECTORY_DEPTH?: string;          // Max directory nesting depth (default: 10)
   LIBRARY_MAX_DIRECTORY_PATH_LENGTH?: string;    // Max directory path length in chars (default: 500)
   LIBRARY_MAX_DIRECTORIES_PER_PROJECT?: string;  // Max directories per project (default: 500)
+  // AI Inference Proxy (OpenAI-compatible Workers AI gateway)
+  AI_PROXY_ENABLED?: string;                           // Kill switch: "false" to disable (default: enabled)
+  AI_PROXY_DEFAULT_MODEL?: string;                     // Default Workers AI model (default: @cf/qwen/qwen3-30b-a3b-fp8)
+  AI_PROXY_ALLOWED_MODELS?: string;                    // Comma-separated allowed model IDs
+  AI_PROXY_DAILY_INPUT_TOKEN_LIMIT?: string;           // Per-user daily input token limit (default: 500000)
+  AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT?: string;          // Per-user daily output token limit (default: 200000)
+  AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST?: string;      // Max input tokens per request (default: 32000)
+  AI_PROXY_RATE_LIMIT_RPM?: string;                    // Per-user requests per minute (default: 30)
+  AI_PROXY_STREAM_TIMEOUT_MS?: string;                 // Streaming response timeout in ms (default: 120000)
   // Compute usage metering
   COMPUTE_USAGE_RECENT_RECORDS_LIMIT?: string;  // Max recent records in admin user detail (default: 50)
   // Compute quota enforcement

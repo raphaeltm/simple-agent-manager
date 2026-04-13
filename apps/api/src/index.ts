@@ -30,6 +30,7 @@ import { agentRoutes } from './routes/agent';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
+import { aiProxyRoutes } from './routes/ai-proxy';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
@@ -406,6 +407,21 @@ app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/notifications', notificationRoutes);
 app.route('/api/gcp', gcpRoutes);
 app.route('/auth/google', googleAuthRoutes);
+// AI proxy CORS override — uses Bearer callback token auth (not cookies/sessions),
+// so it needs credentials: false + origin: '*' to allow VM agent requests from any origin.
+app.use('/ai/*', cors({
+  origin: '*',
+  credentials: false,
+  allowHeaders: ['Content-Type', 'Authorization'],
+  allowMethods: ['GET', 'POST', 'OPTIONS'],
+}));
+app.use('/ai/*', async (c, next) => {
+  await next();
+  c.res.headers.delete('Access-Control-Allow-Credentials');
+});
+// AI proxy endpoint — OpenAI-compatible inference route for workspace agents.
+// Uses workspace callback token auth, not session auth.
+app.route('/ai/v1', aiProxyRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),
 // so it needs credentials: false + origin: '*' to allow VM agent requests from any origin.
 // This must run after the global CORS middleware to overwrite its headers.

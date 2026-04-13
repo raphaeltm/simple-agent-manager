@@ -109,3 +109,29 @@ export const DEFAULT_TTS_RETRY_ATTEMPTS = 3;
 
 /** Default base delay (ms) for exponential backoff between TTS retries. Override via TTS_RETRY_BASE_DELAY_MS env var. */
 export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
+
+// =============================================================================
+// AI Inference Proxy (OpenAI-compatible Workers AI gateway)
+// =============================================================================
+
+/** Default Workers AI model for AI proxy inference. Override via AI_PROXY_DEFAULT_MODEL env var. */
+export const DEFAULT_AI_PROXY_MODEL = '@cf/qwen/qwen3-30b-a3b-fp8';
+
+/** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var. */
+export const DEFAULT_AI_PROXY_ALLOWED_MODELS =
+  '@cf/qwen/qwen3-30b-a3b-fp8,@cf/meta/llama-4-scout-17b-16e-instruct,@cf/google/gemma-3-12b-it';
+
+/** Default daily input token limit per user. Override via AI_PROXY_DAILY_INPUT_TOKEN_LIMIT env var. */
+export const DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT = 500_000;
+
+/** Default daily output token limit per user. Override via AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT env var. */
+export const DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT = 200_000;
+
+/** Default max input tokens per request. Override via AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST env var. */
+export const DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST = 32_000;
+
+/** Default rate limit in requests per minute per user. Override via AI_PROXY_RATE_LIMIT_RPM env var. */
+export const DEFAULT_AI_PROXY_RATE_LIMIT_RPM = 30;
+
+/** Default streaming timeout in ms. Override via AI_PROXY_STREAM_TIMEOUT_MS env var. */
+export const DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS = 120_000;
