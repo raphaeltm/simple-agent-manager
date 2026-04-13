@@ -17,8 +17,21 @@ const trialRoutes = new Hono<{ Bindings: Env }>();
 trialRoutes.get('/trial-status', requireAuth(), requireApproved(), async (c) => {
   const user = c.get('user' as never) as { id: string };
   const db = drizzle(c.env.DATABASE, { schema });
-  const status = await getTrialStatus(db, user.id, c.env);
-  return c.json(status);
+  try {
+    const status = await getTrialStatus(db, user.id, c.env);
+    return c.json(status);
+  } catch (err) {
+    // Trial status is non-critical — return unavailable rather than 500
+    console.error('trial-status error', err instanceof Error ? err.message : String(err));
+    return c.json({
+      available: false,
+      agentType: null,
+      hasInfraCredential: false,
+      hasAgentCredential: false,
+      dailyTokenBudget: null,
+      dailyTokenUsage: null,
+    });
+  }
 });
 
 export { trialRoutes };
