@@ -16,6 +16,7 @@ import {
   Server,
   Settings,
   Shield,
+  UserCog,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
@@ -42,9 +43,10 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
   { label: 'Library', path: 'library', icon: <FolderOpen size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
-  { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
   { label: 'Notifications', path: 'notifications', icon: <Bell size={18} /> },
   { label: 'Triggers', path: 'triggers', icon: <Clock size={18} /> },
+  { label: 'Profiles', path: 'profiles', icon: <UserCog size={18} /> },
+  { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
   { label: 'Settings', path: 'settings', icon: <Settings size={18} /> },
 ];
 

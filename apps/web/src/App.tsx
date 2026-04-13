@@ -32,6 +32,7 @@ import { ProjectActivity } from './pages/ProjectActivity';
 import { ProjectCreate } from './pages/ProjectCreate';
 import { ProjectLibrary } from './pages/ProjectLibrary';
 import { ProjectNotifications } from './pages/ProjectNotifications';
+import { ProjectProfiles } from './pages/ProjectProfiles';
 import { Projects } from './pages/Projects';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
@@ -93,6 +94,7 @@ export default function App() {
               <Route path="notifications" element={<ProjectNotifications />} />
               <Route path="triggers" element={<ProjectTriggers />} />
               <Route path="triggers/:triggerId" element={<ProjectTriggerDetail />} />
+              <Route path="profiles" element={<ProjectProfiles />} />
             </Route>
 
             <Route path="/nodes" element={<Nodes />} />

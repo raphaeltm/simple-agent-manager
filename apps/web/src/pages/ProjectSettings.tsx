@@ -9,10 +9,8 @@ import { Button, Skeleton,Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-import { ProfileList } from '../components/agent-profiles/ProfileList';
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ScalingSettings } from '../components/ScalingSettings';
-import { useAgentProfiles } from '../hooks/useAgentProfiles';
 import { useToast } from '../hooks/useToast';
 import {
   deleteProject,
@@ -36,16 +34,6 @@ export function ProjectSettings() {
   const toast = useToast();
   const navigate = useNavigate();
   const { projectId, project, reload } = useProjectContext();
-
-  // Agent profiles
-  const {
-    profiles: agentProfiles,
-    loading: profilesLoading,
-    error: profilesError,
-    createProfile,
-    updateProfile,
-    deleteProfile: deleteAgentProfile,
-  } = useAgentProfiles(projectId);
 
   // Project name editing
   const [projectName, setProjectName] = useState(project?.name ?? '');
@@ -653,18 +641,6 @@ export function ProjectSettings() {
 
       {/* Deploy to Cloud */}
       <DeploymentSettings projectId={projectId} />
-
-      {/* Agent Profiles */}
-      <section className="border border-border-default rounded-md bg-surface p-4">
-        <ProfileList
-          profiles={agentProfiles}
-          loading={profilesLoading}
-          error={profilesError}
-          onCreateProfile={createProfile}
-          onUpdateProfile={updateProfile}
-          onDeleteProfile={deleteAgentProfile}
-        />
-      </section>
 
       {/* Danger Zone */}
       <section className="border border-danger rounded-md bg-surface p-4 grid gap-3">
