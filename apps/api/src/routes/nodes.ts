@@ -633,15 +633,11 @@ nodesRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c)
     .set(updatePayload)
     .where(eq(schema.nodes.id, nodeId));
 
-  // Update ACP session heartbeats for all running workspaces on this node.
-  // This is the BACKUP mechanism — the primary heartbeat is now sent directly
-  // by the VM agent via POST /api/projects/:id/node-acp-heartbeat.
-  // Retained as a secondary safety net. Diagnostic logging added to understand
-  // why this sweep was consistently failing before the direct heartbeat fix.
+  // Backup ACP heartbeat sweep — primary heartbeat is now sent directly by the
+  // VM agent via POST /api/projects/:id/node-acp-heartbeat. Retained as safety net.
   const acpSweepTimeoutMs = parseInt(c.env.HEARTBEAT_ACP_SWEEP_TIMEOUT_MS || '8000', 10);
   c.executionCtx.waitUntil(
     (async () => {
-      log.info('heartbeat.acp_sweep_start', { nodeId });
       try {
         const workspaces = await db
           .select({ id: schema.workspaces.id, projectId: schema.workspaces.projectId })
@@ -653,17 +649,9 @@ nodesRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c)
             )
           );
 
-        // Deduplicate projects to minimize DO calls
         const projectIds = [...new Set(workspaces.map((w) => w.projectId).filter(Boolean))] as string[];
+        log.info('heartbeat.acp_sweep', { nodeId, workspaces: workspaces.length, projects: projectIds.length });
 
-        log.info('heartbeat.acp_sweep_workspaces', {
-          nodeId,
-          workspaceCount: workspaces.length,
-          withProjectId: workspaces.filter((w) => w.projectId).length,
-          uniqueProjects: projectIds.length,
-        });
-
-        // Update ACP session heartbeats per project with per-call timeout
         await Promise.all(
           projectIds.map(async (projectId) => {
             try {
@@ -673,7 +661,7 @@ nodesRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c)
                   setTimeout(() => reject(new Error('acp_sweep_timeout')), acpSweepTimeoutMs)
                 ),
               ]);
-              log.info('heartbeat.acp_sweep_project_updated', { nodeId, projectId, updatedSessions: updated });
+              log.info('heartbeat.acp_sweep_updated', { nodeId, projectId, updatedSessions: updated });
             } catch (err) {
               log.warn('heartbeat.acp_session_update_failed', { nodeId, projectId, error: String(err) });
             }
