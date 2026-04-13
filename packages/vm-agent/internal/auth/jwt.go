@@ -48,7 +48,7 @@ func NewJWTValidator(jwksURL, nodeID, issuer, audience string) (*JWTValidator, e
 
 func (v *JWTValidator) parse(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, v.jwks.Keyfunc,
-		jwt.WithValidMethods([]string{"RS256"}))
+		jwt.WithValidMethods([]string{"EdDSA", "RS256"}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
