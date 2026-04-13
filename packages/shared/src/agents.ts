@@ -176,8 +176,22 @@ export interface SaveAgentCredentialRequest {
   autoActivate?: boolean; // Default true
 }
 
+/** Inference configuration for platform-managed AI proxy */
+export interface InferenceConfig {
+  /** Provider type (e.g., 'openai-compatible') */
+  provider: string;
+  /** Base URL for the inference API (e.g., 'https://api.{domain}/ai/v1') */
+  baseURL: string;
+  /** Default model identifier (e.g., '@cf/qwen/qwen3-30b-a3b-fp8') */
+  model: string;
+  /** How the API key is sourced — 'callback-token' means reuse workspace callback token */
+  apiKeySource?: string;
+}
+
 /** Response from /api/workspaces/:id/agent-key endpoint */
 export interface AgentKeyResponse {
   apiKey: string; // Decrypted credential (API key or OAuth token)
   credentialKind: CredentialKind; // Type for proper env var injection
+  /** When present, tells the VM agent to build provider config for a platform-managed proxy */
+  inferenceConfig?: InferenceConfig;
 }

@@ -412,4 +412,7 @@ export interface Env {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string;    // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string;       // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string;       // Max stale executions to recover per sweep (default: 100)
+  // AI inference proxy configuration
+  AI_PROXY_ENABLED?: string;                         // "true" to enable Workers AI proxy for agents (default: disabled)
+  AI_PROXY_DEFAULT_MODEL?: string;                   // Default model for AI proxy (default: @cf/qwen/qwen3-30b-a3b-fp8)
 }

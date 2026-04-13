@@ -1,4 +1,4 @@
-import { type BootstrapTokenData, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import { type BootstrapTokenData, getAgentDefinition, type InferenceConfig, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -69,6 +69,24 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
+  // AI proxy fallback: when no user/fallback credential exists but the platform AI proxy is enabled,
+  // return an inferenceConfig that tells the VM agent to use the proxy with the workspace callback token.
+  let inferenceConfig: InferenceConfig | undefined;
+  if (!credentialData && body.agentType === 'opencode' && c.env.AI_PROXY_ENABLED === 'true') {
+    const defaultModel = c.env.AI_PROXY_DEFAULT_MODEL || '@cf/qwen/qwen3-30b-a3b-fp8';
+    inferenceConfig = {
+      provider: 'openai-compatible',
+      baseURL: `https://api.${c.env.BASE_DOMAIN}/ai/v1`,
+      model: defaultModel,
+      apiKeySource: 'callback-token',
+    };
+    credentialData = {
+      credential: 'proxy',
+      credentialKind: 'api-key',
+      credentialSource: 'platform',
+    };
+  }
+
   if (!credentialData) {
     throw errors.notFound('Agent credential');
   }
@@ -92,6 +110,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   return c.json({
     apiKey: credentialData.credential,
     credentialKind: credentialData.credentialKind,
+    ...(inferenceConfig && { inferenceConfig }),
   });
 });
 

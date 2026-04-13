@@ -180,6 +180,161 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
     expect(resp.status).toBe(404);
   });
 
+  it('returns inferenceConfig when AI_PROXY_ENABLED and no user credential', async () => {
+    let queryCount = 0;
+    mockDB.limit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) {
+        return [{ userId: 'user-1' }];
+      }
+      // All credential lookups return empty
+      return [];
+    });
+
+    const proxyEnv = {
+      ...mockEnv,
+      AI_PROXY_ENABLED: 'true',
+      AI_PROXY_DEFAULT_MODEL: '@cf/test-model',
+      BASE_DOMAIN: 'example.com',
+    } as unknown as Env;
+
+    const resp = await app.request(
+      '/api/workspaces/ws-123/agent-key',
+      {
+        method: 'POST',
+        body: JSON.stringify({ agentType: 'opencode' }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-callback-token',
+        },
+      },
+      proxyEnv,
+    );
+    expect(resp.status).toBe(200);
+
+    const json = await resp.json();
+    expect(json.apiKey).toBe('proxy');
+    expect(json.credentialKind).toBe('api-key');
+    expect(json.inferenceConfig).toBeDefined();
+    expect(json.inferenceConfig.provider).toBe('openai-compatible');
+    expect(json.inferenceConfig.baseURL).toBe('https://api.example.com/ai/v1');
+    expect(json.inferenceConfig.model).toBe('@cf/test-model');
+    expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
+  });
+
+  it('uses default model when AI_PROXY_DEFAULT_MODEL is not set', async () => {
+    let queryCount = 0;
+    mockDB.limit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) {
+        return [{ userId: 'user-1' }];
+      }
+      return [];
+    });
+
+    const proxyEnv = {
+      ...mockEnv,
+      AI_PROXY_ENABLED: 'true',
+      BASE_DOMAIN: 'example.com',
+    } as unknown as Env;
+
+    const resp = await app.request(
+      '/api/workspaces/ws-123/agent-key',
+      {
+        method: 'POST',
+        body: JSON.stringify({ agentType: 'opencode' }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-callback-token',
+        },
+      },
+      proxyEnv,
+    );
+    expect(resp.status).toBe(200);
+
+    const json = await resp.json();
+    expect(json.inferenceConfig.model).toBe('@cf/qwen/qwen3-30b-a3b-fp8');
+  });
+
+  it('does NOT return inferenceConfig when user has own credential', async () => {
+    let queryCount = 0;
+    mockDB.limit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) {
+        return [{ userId: 'user-1' }];
+      }
+      if (queryCount === 2) {
+        // User has a dedicated agent key
+        return [{
+          encryptedToken: 'encrypted-user',
+          iv: 'iv-user',
+          credentialKind: 'api-key',
+          isActive: true,
+        }];
+      }
+      return [];
+    });
+
+    mockDecrypt.mockResolvedValueOnce('user-api-key');
+
+    const proxyEnv = {
+      ...mockEnv,
+      AI_PROXY_ENABLED: 'true',
+      AI_PROXY_DEFAULT_MODEL: '@cf/test-model',
+      BASE_DOMAIN: 'example.com',
+    } as unknown as Env;
+
+    const resp = await app.request(
+      '/api/workspaces/ws-123/agent-key',
+      {
+        method: 'POST',
+        body: JSON.stringify({ agentType: 'opencode' }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-callback-token',
+        },
+      },
+      proxyEnv,
+    );
+    expect(resp.status).toBe(200);
+
+    const json = await resp.json();
+    expect(json.apiKey).toBe('user-api-key');
+    expect(json.inferenceConfig).toBeUndefined();
+  });
+
+  it('does NOT return inferenceConfig for non-opencode agents even with AI proxy enabled', async () => {
+    let queryCount = 0;
+    mockDB.limit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) {
+        return [{ userId: 'user-1' }];
+      }
+      return [];
+    });
+
+    const proxyEnv = {
+      ...mockEnv,
+      AI_PROXY_ENABLED: 'true',
+      BASE_DOMAIN: 'example.com',
+    } as unknown as Env;
+
+    const resp = await app.request(
+      '/api/workspaces/ws-123/agent-key',
+      {
+        method: 'POST',
+        body: JSON.stringify({ agentType: 'claude-code' }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-callback-token',
+        },
+      },
+      proxyEnv,
+    );
+    // Should return 404, not use proxy for non-opencode agents
+    expect(resp.status).toBe(404);
+  });
+
   it('handles malformed Scaleway credential JSON gracefully', async () => {
     let queryCount = 0;
     mockDB.limit.mockImplementation(() => {

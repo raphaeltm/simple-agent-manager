@@ -948,33 +948,17 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		}
 	}
 
-	// For OpenCode: build OPENCODE_CONFIG_CONTENT JSON for Scaleway inference.
-	// Uses the env var (highest priority config source) to inject provider and model
-	// settings without overwriting any repo-level .opencode.json.
+	// For OpenCode: build OPENCODE_CONFIG_CONTENT JSON dynamically based on credential source.
+	// When an inferenceConfig is returned (platform AI proxy), use it with the callback token.
+	// Otherwise fall back to the legacy Scaleway config.
 	if agentType == "opencode" {
-		model := "scaleway/qwen3-coder-30b-a3b-instruct" // default
-		if settings != nil && settings.Model != "" {
-			model = settings.Model
-		}
-
-		opencodeConfig := map[string]interface{}{
-			"provider": map[string]interface{}{
-				"scaleway": map[string]interface{}{
-					"options": map[string]interface{}{
-						"baseURL": "https://api.scaleway.ai/v1",
-						"apiKey":  "{env:SCW_SECRET_KEY}",
-					},
-				},
-			},
-			"model": model,
-		}
-
-		configJSON, err := json.Marshal(opencodeConfig)
+		configJSON, err := json.Marshal(buildOpenCodeConfig(cred, settings, h.config.CallbackToken))
 		if err != nil {
 			slog.Error("opencode: failed to marshal config", "error", err)
 		} else {
 			envVars = append(envVars, "OPENCODE_CONFIG_CONTENT="+string(configJSON))
-			slog.Info("OpenCode config injected", "model", model)
+			slog.Info("OpenCode config injected",
+				"hasInferenceConfig", cred.inferenceConfig != nil)
 		}
 	}
 
@@ -2061,8 +2045,9 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	}
 
 	var result struct {
-		APIKey         string `json:"apiKey"`
-		CredentialKind string `json:"credentialKind"`
+		APIKey          string           `json:"apiKey"`
+		CredentialKind  string           `json:"credentialKind"`
+		InferenceConfig *inferenceConfig `json:"inferenceConfig,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
@@ -2077,8 +2062,9 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	}
 
 	return &agentCredential{
-		credential:     result.APIKey,
-		credentialKind: result.CredentialKind,
+		credential:      result.APIKey,
+		credentialKind:  result.CredentialKind,
+		inferenceConfig: result.InferenceConfig,
 	}, nil
 }
 
@@ -2120,6 +2106,69 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 
 	slog.Info("Fetched agent settings from control plane", "model", result.Model, "permissionMode", result.PermissionMode)
 	return &result
+}
+
+// buildOpenCodeConfig builds the OPENCODE_CONFIG_CONTENT JSON object dynamically
+// based on the credential source. When the control plane returns an inferenceConfig
+// (platform AI proxy), it builds an openai-compatible provider config using the
+// proxy URL and callback token. Otherwise falls back to the legacy Scaleway config.
+func buildOpenCodeConfig(cred *agentCredential, settings *agentSettingsPayload, callbackToken string) map[string]interface{} {
+	if cred.inferenceConfig != nil {
+		return buildOpenAICompatibleConfig(cred.inferenceConfig, settings, callbackToken)
+	}
+
+	// Legacy: Scaleway default
+	return buildScalewayOpenCodeConfig(settings)
+}
+
+// buildOpenAICompatibleConfig builds an OpenCode provider config for an OpenAI-compatible
+// API endpoint (e.g., the SAM AI proxy). Uses the callback token as the API key when
+// apiKeySource is "callback-token".
+func buildOpenAICompatibleConfig(cfg *inferenceConfig, settings *agentSettingsPayload, callbackToken string) map[string]interface{} {
+	apiKey := callbackToken
+	if cfg.ApiKeySource != "callback-token" {
+		// If not using callback token, leave apiKey as the literal credential
+		// (future: could support other sources)
+		apiKey = cfg.ApiKeySource
+	}
+
+	model := cfg.Model
+	if settings != nil && settings.Model != "" {
+		model = settings.Model
+	}
+
+	return map[string]interface{}{
+		"provider": map[string]interface{}{
+			"sam-ai": map[string]interface{}{
+				"npm": "@ai-sdk/openai-compatible",
+				"options": map[string]interface{}{
+					"baseURL": cfg.BaseURL,
+					"apiKey":  apiKey,
+				},
+			},
+		},
+		"model": "sam-ai/" + model,
+	}
+}
+
+// buildScalewayOpenCodeConfig builds the legacy Scaleway provider config for OpenCode.
+func buildScalewayOpenCodeConfig(settings *agentSettingsPayload) map[string]interface{} {
+	model := "scaleway/qwen3-coder-30b-a3b-instruct"
+	if settings != nil && settings.Model != "" {
+		model = settings.Model
+	}
+
+	return map[string]interface{}{
+		"provider": map[string]interface{}{
+			"scaleway": map[string]interface{}{
+				"options": map[string]interface{}{
+					"baseURL": "https://api.scaleway.ai/v1",
+					"apiKey":  "{env:SCW_SECRET_KEY}",
+				},
+			},
+		},
+		"model": model,
+	}
 }
 
 // --- sessionHostClient: ACP SDK client interface ---

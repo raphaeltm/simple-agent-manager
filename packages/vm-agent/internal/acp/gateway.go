@@ -409,10 +409,19 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 
 // --- Shared types and utilities used by both Gateway and SessionHost ---
 
+// inferenceConfig holds platform-managed AI proxy configuration returned from the control plane.
+type inferenceConfig struct {
+	Provider     string `json:"provider"`
+	BaseURL      string `json:"baseURL"`
+	Model        string `json:"model"`
+	ApiKeySource string `json:"apiKeySource,omitempty"`
+}
+
 // agentCredential holds the credential and its type returned from the control plane.
 type agentCredential struct {
-	credential     string
-	credentialKind string // "api-key" or "oauth-token"
+	credential      string
+	credentialKind  string // "api-key" or "oauth-token"
+	inferenceConfig *inferenceConfig
 }
 
 func byteReader(data []byte) io.ReadCloser {
