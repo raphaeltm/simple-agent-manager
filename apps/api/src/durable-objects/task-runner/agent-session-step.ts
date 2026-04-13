@@ -154,6 +154,8 @@ export async function handleAgentSession(
       {
         model: state.config.model,
         permissionMode: state.config.permissionMode,
+        opencodeProvider: state.config.opencodeProvider,
+        opencodeBaseUrl: state.config.opencodeBaseUrl,
       },
     );
 

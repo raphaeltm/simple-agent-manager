@@ -258,6 +258,9 @@ export async function submitTriggeredTask(
       taskMode,
       model: resolvedProfile?.model ?? null,
       permissionMode: resolvedProfile?.permissionMode ?? null,
+      // OpenCode settings: VM agent fetches user-level settings via callback
+      opencodeProvider: null,
+      opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,

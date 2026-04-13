@@ -276,6 +276,10 @@ export interface McpServerConfig {
 export interface AgentSessionOverrides {
   model?: string | null;
   permissionMode?: string | null;
+  /** OpenCode inference provider (e.g. 'scaleway', 'anthropic', 'custom'). */
+  opencodeProvider?: string | null;
+  /** Base URL for custom/openai-compatible OpenCode providers. */
+  opencodeBaseUrl?: string | null;
 }
 
 export async function startAgentSessionOnNode(
@@ -303,6 +307,12 @@ export async function startAgentSessionOnNode(
   }
   if (overrides?.permissionMode != null) {
     body.permissionMode = overrides.permissionMode;
+  }
+  if (overrides?.opencodeProvider != null) {
+    body.opencodeProvider = overrides.opencodeProvider;
+  }
+  if (overrides?.opencodeBaseUrl != null) {
+    body.opencodeBaseUrl = overrides.opencodeBaseUrl;
   }
   return nodeAgentRequest(
     nodeId,

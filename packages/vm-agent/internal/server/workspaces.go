@@ -708,11 +708,13 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	}
 
 	var body struct {
-		AgentType      string               `json:"agentType"`
-		InitialPrompt  string               `json:"initialPrompt"`
-		McpServers     []acp.McpServerEntry  `json:"mcpServers,omitempty"`
-		Model          string               `json:"model,omitempty"`
-		PermissionMode string               `json:"permissionMode,omitempty"`
+		AgentType        string               `json:"agentType"`
+		InitialPrompt    string               `json:"initialPrompt"`
+		McpServers       []acp.McpServerEntry  `json:"mcpServers,omitempty"`
+		Model            string               `json:"model,omitempty"`
+		PermissionMode   string               `json:"permissionMode,omitempty"`
+		OpencodeProvider string               `json:"opencodeProvider,omitempty"`
+		OpencodeBaseURL  string               `json:"opencodeBaseUrl,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -784,14 +786,18 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	// Even empty overrides are stored to distinguish "no profile" from "not set".
 	s.sessionHostMu.Lock()
 	s.sessionProfileOvr[hostKey] = profileOverrides{
-		Model:          body.Model,
-		PermissionMode: body.PermissionMode,
+		Model:            body.Model,
+		PermissionMode:   body.PermissionMode,
+		OpencodeProvider: body.OpencodeProvider,
+		OpencodeBaseURL:  body.OpencodeBaseURL,
 	}
 	s.sessionHostMu.Unlock()
-	if body.Model != "" || body.PermissionMode != "" {
+	if body.Model != "" || body.PermissionMode != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {
 		slog.Info("Profile overrides registered for agent session",
 			"workspace", workspaceID, "session", sessionID,
-			"model", body.Model, "permissionMode", body.PermissionMode)
+			"model", body.Model, "permissionMode", body.PermissionMode,
+			"opencodeProvider", body.OpencodeProvider,
+			"opencodeBaseUrl", body.OpencodeBaseURL)
 	}
 
 	// Create or retrieve the SessionHost for this session.

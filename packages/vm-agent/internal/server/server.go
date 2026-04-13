@@ -33,11 +33,13 @@ import (
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
-// profileOverrides holds model/permissionMode overrides from agent profiles.
+// profileOverrides holds model/permissionMode/opencode provider overrides from agent profiles.
 // Passed from the control plane in the start-agent-session request.
 type profileOverrides struct {
-	Model          string
-	PermissionMode string
+	Model            string
+	PermissionMode   string
+	OpencodeProvider string
+	OpencodeBaseURL  string
 }
 
 // Server is the HTTP server for the VM Agent.

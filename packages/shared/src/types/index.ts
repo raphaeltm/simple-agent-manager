@@ -246,9 +246,15 @@ export type {
   AgentSettings,
   AgentSettingsResponse,
   CreateAgentProfileRequest,
+  OpenCodeProvider,
+  OpenCodeProviderMeta,
   ResolvedAgentProfile,
   SaveAgentSettingsRequest,
   UpdateAgentProfileRequest,
+} from './agent-settings';
+export {
+  OPENCODE_PROVIDER_OPTIONS,
+  OPENCODE_PROVIDERS,
 } from './agent-settings';
 
 // Orchestration (agent-to-agent communication)

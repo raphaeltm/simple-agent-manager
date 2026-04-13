@@ -1,6 +1,7 @@
 import type {
   AgentPermissionMode,
   AgentSettingsResponse,
+  OpenCodeProvider,
 } from '@simple-agent-manager/shared';
 import {
   isValidAgentType,
@@ -33,6 +34,9 @@ function toResponse(row: schema.AgentSettingsRow): AgentSettingsResponse {
     allowedTools: row.allowedTools ? JSON.parse(row.allowedTools) : null,
     deniedTools: row.deniedTools ? JSON.parse(row.deniedTools) : null,
     additionalEnv: row.additionalEnv ? JSON.parse(row.additionalEnv) : null,
+    opencodeProvider: (row.opencodeProvider as OpenCodeProvider) ?? null,
+    opencodeBaseUrl: row.opencodeBaseUrl ?? null,
+    opencodeProviderName: row.opencodeProviderName ?? null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
   };
@@ -71,6 +75,9 @@ agentSettingsRoutes.get('/:agentType', async (c) => {
       allowedTools: null,
       deniedTools: null,
       additionalEnv: null,
+      opencodeProvider: null,
+      opencodeBaseUrl: null,
+      opencodeProviderName: null,
       createdAt: null,
       updatedAt: null,
     } as AgentSettingsResponse);
@@ -110,12 +117,21 @@ agentSettingsRoutes.put('/:agentType', jsonValidator(SaveAgentSettingsSchema), a
     )
     .limit(1);
 
+  // Clear opencodeBaseUrl when switching to a provider that doesn't need it
+  const requiresBaseUrl = (p: string | null | undefined) =>
+    p === 'custom' || p === 'openai-compatible';
+
   const values = {
     model: body.model ?? null,
     permissionMode: body.permissionMode ?? null,
     allowedTools: body.allowedTools ? JSON.stringify(body.allowedTools) : null,
     deniedTools: body.deniedTools ? JSON.stringify(body.deniedTools) : null,
     additionalEnv: body.additionalEnv ? JSON.stringify(body.additionalEnv) : null,
+    opencodeProvider: body.opencodeProvider ?? null,
+    opencodeBaseUrl: requiresBaseUrl(body.opencodeProvider)
+      ? (body.opencodeBaseUrl ?? null)
+      : null,
+    opencodeProviderName: body.opencodeProviderName ?? null,
     updatedAt: now,
   };
 

@@ -10,6 +10,91 @@ export type AgentPermissionMode =
   | 'dontAsk'
   | 'bypassPermissions';
 
+/** Valid OpenCode inference provider types */
+export type OpenCodeProvider =
+  | 'platform'
+  | 'scaleway'
+  | 'google-vertex'
+  | 'openai-compatible'
+  | 'anthropic'
+  | 'custom';
+
+/** Metadata for an OpenCode provider option */
+export interface OpenCodeProviderMeta {
+  label: string;
+  modelPlaceholder: string;
+  /** Whether a base URL field is required for this provider */
+  requiresBaseUrl: boolean;
+  /** Whether an API key is required (false for platform) */
+  requiresApiKey: boolean;
+  /** Label for the API key field */
+  keyLabel: string;
+  /** Help text for the credential form */
+  keyHelpText: string;
+}
+
+/** Provider metadata registry — used by both UI and validation */
+export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> = {
+  platform: {
+    label: 'SAM Platform (Workers AI)',
+    modelPlaceholder: 'e.g. @cf/qwen/qwen3-30b-a3b-fp8',
+    requiresBaseUrl: false,
+    requiresApiKey: false,
+    keyLabel: '',
+    keyHelpText: "Using SAM's platform AI — daily limit applies",
+  },
+  scaleway: {
+    label: 'Scaleway',
+    modelPlaceholder: 'e.g. scaleway/qwen3-coder-30b-a3b-instruct',
+    requiresBaseUrl: false,
+    requiresApiKey: true,
+    keyLabel: 'Scaleway Secret Key',
+    keyHelpText: 'Create a Scaleway API key with GenerativeApisModelAccess permission',
+  },
+  'google-vertex': {
+    label: 'Google Vertex',
+    modelPlaceholder: 'e.g. gemini-2.5-pro',
+    requiresBaseUrl: false,
+    requiresApiKey: true,
+    keyLabel: 'Google Cloud API Key',
+    keyHelpText: 'Enter your Google Cloud API key for Vertex AI',
+  },
+  'openai-compatible': {
+    label: 'OpenAI Compatible',
+    modelPlaceholder: 'e.g. your-model-name',
+    requiresBaseUrl: true,
+    requiresApiKey: true,
+    keyLabel: 'API Key',
+    keyHelpText: 'Enter your API key for the OpenAI-compatible endpoint',
+  },
+  anthropic: {
+    label: 'Anthropic',
+    modelPlaceholder: 'e.g. claude-sonnet-4-5-20250514',
+    requiresBaseUrl: false,
+    requiresApiKey: true,
+    keyLabel: 'Anthropic API Key',
+    keyHelpText: 'Enter your Anthropic API key',
+  },
+  custom: {
+    label: 'Custom',
+    modelPlaceholder: 'e.g. your-model-name',
+    requiresBaseUrl: true,
+    requiresApiKey: true,
+    keyLabel: 'API Key',
+    keyHelpText: 'Enter your API key for the custom provider',
+  },
+};
+
+/** Ordered list of OpenCode provider values for dropdown rendering */
+export const OPENCODE_PROVIDER_OPTIONS: OpenCodeProvider[] = [
+  'platform',
+  'scaleway',
+  'google-vertex',
+  'openai-compatible',
+  'anthropic',
+  'custom',
+];
+
 /** Agent settings stored per-user, per-agent in D1 */
 export interface AgentSettings {
   id: string;
@@ -31,6 +116,12 @@ export interface AgentSettingsResponse {
   allowedTools: string[] | null;
   deniedTools: string[] | null;
   additionalEnv: Record<string, string> | null;
+  /** OpenCode inference provider. null = use default. */
+  opencodeProvider: OpenCodeProvider | null;
+  /** Base URL for custom/openai-compatible providers. */
+  opencodeBaseUrl: string | null;
+  /** Display name for custom providers. */
+  opencodeProviderName: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -42,6 +133,12 @@ export interface SaveAgentSettingsRequest {
   allowedTools?: string[] | null;
   deniedTools?: string[] | null;
   additionalEnv?: Record<string, string> | null;
+  /** OpenCode inference provider. null = use default. */
+  opencodeProvider?: OpenCodeProvider | null;
+  /** Base URL for custom/openai-compatible providers. */
+  opencodeBaseUrl?: string | null;
+  /** Display name for custom providers. */
+  opencodeProviderName?: string | null;
 }
 
 // =============================================================================

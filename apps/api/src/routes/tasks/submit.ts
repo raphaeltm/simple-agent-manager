@@ -415,6 +415,10 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
       taskMode,
       model: resolvedProfile?.model ?? null,
       permissionMode: resolvedProfile?.permissionMode ?? null,
+      // OpenCode provider/baseUrl: null = no profile-level override.
+      // The VM agent fetches user-level agent settings via the POST /:id/agent-settings callback.
+      opencodeProvider: null,
+      opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
       attachments: validatedAttachments.length > 0 ? validatedAttachments : null,
       projectScaling: {

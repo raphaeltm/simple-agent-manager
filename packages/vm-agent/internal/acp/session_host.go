@@ -470,7 +470,8 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 	}
 
 	// Apply profile overrides from the control plane (take precedence over fetched settings)
-	if h.config.ModelOverride != "" || h.config.PermissionModeOverride != "" {
+	if h.config.ModelOverride != "" || h.config.PermissionModeOverride != "" ||
+		h.config.OpencodeProviderOverride != "" || h.config.OpencodeBaseURLOverride != "" {
 		if settings == nil {
 			settings = &agentSettingsPayload{}
 		}
@@ -481,6 +482,14 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 		if h.config.PermissionModeOverride != "" {
 			settings.PermissionMode = h.config.PermissionModeOverride
 			slog.Info("Agent permission mode overridden by profile", "permissionMode", h.config.PermissionModeOverride)
+		}
+		if h.config.OpencodeProviderOverride != "" {
+			settings.OpencodeProvider = h.config.OpencodeProviderOverride
+			slog.Info("OpenCode provider overridden by profile", "provider", h.config.OpencodeProviderOverride)
+		}
+		if h.config.OpencodeBaseURLOverride != "" {
+			settings.OpencodeBaseURL = h.config.OpencodeBaseURLOverride
+			slog.Info("OpenCode base URL overridden by profile", "baseUrl", h.config.OpencodeBaseURLOverride)
 		}
 	}
 
@@ -948,33 +957,21 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		}
 	}
 
-	// For OpenCode: build OPENCODE_CONFIG_CONTENT JSON for Scaleway inference.
+	// For OpenCode: build OPENCODE_CONFIG_CONTENT JSON based on the selected provider.
 	// Uses the env var (highest priority config source) to inject provider and model
 	// settings without overwriting any repo-level .opencode.json.
 	if agentType == "opencode" {
-		model := "scaleway/qwen3-coder-30b-a3b-instruct" // default
-		if settings != nil && settings.Model != "" {
-			model = settings.Model
-		}
-
-		opencodeConfig := map[string]interface{}{
-			"provider": map[string]interface{}{
-				"scaleway": map[string]interface{}{
-					"options": map[string]interface{}{
-						"baseURL": "https://api.scaleway.ai/v1",
-						"apiKey":  "{env:SCW_SECRET_KEY}",
-					},
-				},
-			},
-			"model": model,
-		}
-
+		opencodeConfig := buildOpencodeConfig(settings)
 		configJSON, err := json.Marshal(opencodeConfig)
 		if err != nil {
 			slog.Error("opencode: failed to marshal config", "error", err)
 		} else {
 			envVars = append(envVars, "OPENCODE_CONFIG_CONTENT="+string(configJSON))
-			slog.Info("OpenCode config injected", "model", model)
+			provider := "scaleway"
+			if settings != nil && settings.OpencodeProvider != "" {
+				provider = settings.OpencodeProvider
+			}
+			slog.Info("OpenCode config injected", "provider", provider, "model", opencodeConfig["model"])
 		}
 	}
 

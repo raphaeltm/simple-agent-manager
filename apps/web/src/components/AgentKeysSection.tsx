@@ -1,9 +1,9 @@
-import type { AgentCredentialInfo, AgentInfo, AgentType, CredentialKind,SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
+import type { AgentCredentialInfo, AgentInfo, AgentType, CredentialKind, OpenCodeProvider, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
-import { deleteAgentCredential,listAgentCredentials, listAgents, saveAgentCredential } from '../lib/api';
+import { deleteAgentCredential, getAgentSettings, listAgentCredentials, listAgents, saveAgentCredential } from '../lib/api';
 import { AgentKeyCard } from './AgentKeyCard';
 
 /**
@@ -13,18 +13,21 @@ export function AgentKeysSection() {
   const toast = useToast();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [credentials, setCredentials] = useState<AgentCredentialInfo[]>([]);
+  const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      const [agentResult, credResult] = await Promise.all([
+      const [agentResult, credResult, opencodeSettings] = await Promise.all([
         listAgents(),
         listAgentCredentials(),
+        getAgentSettings('opencode').catch(() => null),
       ]);
       setAgents(agentResult.agents);
       setCredentials(credResult.credentials);
+      setOpencodeProvider((opencodeSettings?.opencodeProvider as OpenCodeProvider) ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load agent data');
     } finally {
@@ -106,6 +109,7 @@ export function AgentKeysSection() {
             credentials={agentCredentials.length > 0 ? agentCredentials : null}
             onSave={handleSave}
             onDelete={handleDelete}
+            opencodeProvider={agent.id === 'opencode' ? opencodeProvider : undefined}
           />
         );
       })}

@@ -193,6 +193,12 @@ type GatewayConfig struct {
 	// PermissionModeOverride, if non-empty, overrides the permission mode fetched from
 	// user agent settings. Set by the control plane when an agent profile specifies a permission mode.
 	PermissionModeOverride string
+	// OpencodeProviderOverride, if non-empty, overrides the OpenCode inference provider.
+	// Values: "platform", "scaleway", "google-vertex", "openai-compatible", "anthropic", "custom".
+	OpencodeProviderOverride string
+	// OpencodeBaseURLOverride, if non-empty, overrides the OpenCode base URL
+	// (used for "custom" and "openai-compatible" providers).
+	OpencodeBaseURLOverride string
 }
 
 // McpServerEntry is a lightweight MCP server config passed from the control
@@ -421,8 +427,10 @@ func byteReader(data []byte) io.ReadCloser {
 
 // agentSettingsPayload holds per-user, per-agent settings from the control plane.
 type agentSettingsPayload struct {
-	Model          string `json:"model"`
-	PermissionMode string `json:"permissionMode"`
+	Model            string `json:"model"`
+	PermissionMode   string `json:"permissionMode"`
+	OpencodeProvider string `json:"opencodeProvider"`
+	OpencodeBaseURL  string `json:"opencodeBaseUrl"`
 }
 
 // truncate limits a string to maxLen characters, appending "..." if truncated.
@@ -1013,6 +1021,110 @@ func resolveVibeActiveModel(settings *agentSettingsPayload) string {
 		return settings.Model
 	}
 	return vibeDefaultActiveModel
+}
+
+// Default values for OpenCode provider configuration.
+// Each has an env-var override so operators can change them without rebuilding the binary.
+const (
+	DefaultOpencodeModel             = "scaleway/qwen3-coder-30b-a3b-instruct"
+	DefaultScalewayBaseURL           = "https://api.scaleway.ai/v1"
+	DefaultGoogleVertexBaseURL       = "https://generativelanguage.googleapis.com/v1beta/openai"
+	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
+)
+
+func getOpencodeDefault(envKey, fallback string) string {
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// buildOpencodeConfig creates the OPENCODE_CONFIG_CONTENT JSON structure
+// based on the provider selected in agent settings.
+func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} {
+	provider := "scaleway" // default provider
+	model := getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
+
+	if settings != nil {
+		if settings.OpencodeProvider != "" {
+			provider = settings.OpencodeProvider
+		}
+		if settings.Model != "" {
+			model = settings.Model
+		}
+	}
+
+	config := map[string]interface{}{
+		"model": model,
+	}
+
+	scalewayBaseURL := getOpencodeDefault("OPENCODE_SCALEWAY_BASE_URL", DefaultScalewayBaseURL)
+
+	switch provider {
+	case "platform":
+		// SAM Platform (Workers AI) — no API key needed, uses platform AI
+		config["provider"] = map[string]interface{}{
+			"openai-compatible": map[string]interface{}{
+				"options": map[string]interface{}{
+					"baseURL": "{env:OPENCODE_PLATFORM_BASE_URL}",
+					"apiKey":  "{env:OPENCODE_PLATFORM_API_KEY}",
+				},
+			},
+		}
+	case "scaleway":
+		config["provider"] = map[string]interface{}{
+			"scaleway": map[string]interface{}{
+				"options": map[string]interface{}{
+					"baseURL": scalewayBaseURL,
+					"apiKey":  "{env:SCW_SECRET_KEY}",
+				},
+			},
+		}
+	case "google-vertex":
+		// Uses Google's Gemini API (generativelanguage.googleapis.com) via its OpenAI-compatible endpoint.
+		// Named "google-vertex" in the UI for user familiarity; actual Vertex AI would need different auth.
+		config["provider"] = map[string]interface{}{
+			"openai-compatible": map[string]interface{}{
+				"options": map[string]interface{}{
+					"baseURL": getOpencodeDefault("OPENCODE_GOOGLE_VERTEX_BASE_URL", DefaultGoogleVertexBaseURL),
+					"apiKey":  "{env:GOOGLE_API_KEY}",
+				},
+			},
+		}
+	case "anthropic":
+		config["provider"] = map[string]interface{}{
+			"anthropic": map[string]interface{}{
+				"options": map[string]interface{}{
+					"apiKey": "{env:ANTHROPIC_API_KEY}",
+				},
+			},
+		}
+	case "openai-compatible", "custom":
+		baseURL := getOpencodeDefault("OPENCODE_COMPATIBLE_DEFAULT_BASE_URL", DefaultCompatibleFallbackBaseURL)
+		if settings != nil && settings.OpencodeBaseURL != "" {
+			baseURL = settings.OpencodeBaseURL
+		}
+		config["provider"] = map[string]interface{}{
+			"openai-compatible": map[string]interface{}{
+				"options": map[string]interface{}{
+					"baseURL": baseURL,
+					"apiKey":  "{env:OPENCODE_API_KEY}",
+				},
+			},
+		}
+	default:
+		// Unknown provider — fallback to scaleway
+		config["provider"] = map[string]interface{}{
+			"scaleway": map[string]interface{}{
+				"options": map[string]interface{}{
+					"baseURL": scalewayBaseURL,
+					"apiKey":  "{env:SCW_SECRET_KEY}",
+				},
+			},
+		}
+	}
+
+	return config
 }
 
 // writeVibeConfigToContainer writes a .vibe/config.toml into the container
