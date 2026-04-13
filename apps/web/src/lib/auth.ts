@@ -41,14 +41,3 @@ export async function signOut() {
  */
 export const useSession = authClient.useSession;
 
-/**
- * Check if user is authenticated.
- */
-export function useIsAuthenticated() {
-  const { data: session, isPending } = useSession();
-  return {
-    isAuthenticated: !!session?.user,
-    isPending,
-    user: session?.user,
-  };
-}

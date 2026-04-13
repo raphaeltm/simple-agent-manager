@@ -9,6 +9,7 @@ import { Link } from 'react-router';
 
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
 import type { GitStatusData } from '../lib/api';
+import { formatFileSize } from '../lib/file-utils';
 import { BrowserSidecar } from './BrowserSidecar';
 import { CollapsibleSection } from './CollapsibleSection';
 import { ResourceBar } from './node/ResourceBar';
@@ -79,15 +80,6 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const k = 1024;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const val = bytes / Math.pow(k, i);
-  return `${val.toFixed(1)} ${units[i]}`;
 }
 
 // VM display helpers using shared provider-agnostic constants
@@ -378,12 +370,12 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                 <ResourceBar
                   label="Memory"
                   percent={systemInfo.memory.usedPercent}
-                  detail={`${formatBytes(systemInfo.memory.usedBytes)} / ${formatBytes(systemInfo.memory.totalBytes)}`}
+                  detail={`${formatFileSize(systemInfo.memory.usedBytes)} / ${formatFileSize(systemInfo.memory.totalBytes)}`}
                 />
                 <ResourceBar
                   label="Disk"
                   percent={systemInfo.disk.usedPercent}
-                  detail={`${formatBytes(systemInfo.disk.usedBytes)} / ${formatBytes(systemInfo.disk.totalBytes)}`}
+                  detail={`${formatFileSize(systemInfo.disk.usedBytes)} / ${formatFileSize(systemInfo.disk.totalBytes)}`}
                 />
               </div>
             ) : systemInfoError ? (

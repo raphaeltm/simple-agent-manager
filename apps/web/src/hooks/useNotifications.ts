@@ -102,11 +102,6 @@ export function useNotifications(): UseNotificationsReturn {
     try {
       await apiDismiss(id);
       setNotifications((prev) => prev.filter((n) => n.id !== id));
-      // If dismissed notification was unread, decrement count
-      setNotifications((prev) => {
-        // We already filtered, so just update unread count
-        return prev;
-      });
       // Re-fetch unread count
       const { count } = await getNotificationUnreadCount();
       if (mountedRef.current) setUnreadCount(count);

@@ -3,6 +3,7 @@ import { Skeleton } from '@simple-agent-manager/ui';
 import { Cpu } from 'lucide-react';
 import type { FC } from 'react';
 
+import { formatFileSize } from '../../lib/file-utils';
 import { ResourceBar } from './ResourceBar';
 import { Section } from './Section';
 import { SectionHeader } from './SectionHeader';
@@ -11,15 +12,6 @@ interface SystemResourcesSectionProps {
   systemInfo?: NodeSystemInfo | null;
   fallbackMetrics?: NodeMetrics | null;
   loading?: boolean;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const k = 1024;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const val = bytes / Math.pow(k, i);
-  return `${val.toFixed(1)} ${units[i]}`;
 }
 
 export const SystemResourcesSection: FC<SystemResourcesSectionProps> = ({
@@ -42,12 +34,12 @@ export const SystemResourcesSection: FC<SystemResourcesSectionProps> = ({
 
   const memPercent = systemInfo?.memory.usedPercent ?? fallbackMetrics?.memoryPercent ?? null;
   const memDetail = systemInfo
-    ? `${formatBytes(systemInfo.memory.usedBytes)} / ${formatBytes(systemInfo.memory.totalBytes)}`
+    ? `${formatFileSize(systemInfo.memory.usedBytes)} / ${formatFileSize(systemInfo.memory.totalBytes)}`
     : undefined;
 
   const diskPercent = systemInfo?.disk.usedPercent ?? fallbackMetrics?.diskPercent ?? null;
   const diskDetail = systemInfo
-    ? `${formatBytes(systemInfo.disk.usedBytes)} / ${formatBytes(systemInfo.disk.totalBytes)}`
+    ? `${formatFileSize(systemInfo.disk.usedBytes)} / ${formatFileSize(systemInfo.disk.totalBytes)}`
     : undefined;
 
   const hasData = cpuPercent != null || memPercent != null || diskPercent != null;
@@ -95,9 +87,9 @@ export const SystemResourcesSection: FC<SystemResourcesSectionProps> = ({
       {systemInfo?.network && (systemInfo.network.rxBytes > 0 || systemInfo.network.txBytes > 0) && (
         <div className="flex gap-6 mt-4 pt-3 border-t border-border-default text-fg-muted" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
           <span>
-            {systemInfo.network.interface || 'Network'} RX: {formatBytes(systemInfo.network.rxBytes)}
+            {systemInfo.network.interface || 'Network'} RX: {formatFileSize(systemInfo.network.rxBytes)}
           </span>
-          <span>TX: {formatBytes(systemInfo.network.txBytes)}</span>
+          <span>TX: {formatFileSize(systemInfo.network.txBytes)}</span>
         </div>
       )}
     </Section>

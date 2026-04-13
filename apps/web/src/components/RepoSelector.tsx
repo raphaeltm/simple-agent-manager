@@ -54,7 +54,7 @@ export function RepoSelector({
         }
       } catch (err) {
         // Silently fail if GitHub not connected - user can still paste URLs
-        console.log('Could not fetch GitHub repositories:', err);
+        console.error('Could not fetch GitHub repositories:', err);
         setError('GitHub not connected');
         setRepositories([]);
       } finally {

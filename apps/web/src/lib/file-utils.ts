@@ -56,8 +56,29 @@ export const FILE_PREVIEW_LOAD_MAX_BYTES =
 /** Format file size as human-readable string. */
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const val = bytes / Math.pow(1024, i);
   return `${val < 10 ? val.toFixed(1) : Math.round(val)} ${units[i]}`;
+}
+
+/** Map file extensions to Prism language identifiers. */
+const EXT_TO_LANG: Record<string, string> = {
+  ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
+  go: 'go', py: 'python', css: 'css', html: 'markup', htm: 'markup',
+  json: 'json', yaml: 'yaml', yml: 'yaml', md: 'markdown',
+  sh: 'bash', bash: 'bash', zsh: 'bash', dockerfile: 'docker',
+  toml: 'toml', sql: 'sql', rs: 'rust', rb: 'ruby', java: 'java',
+  c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp', xml: 'markup', svg: 'markup',
+  graphql: 'graphql', gql: 'graphql',
+};
+
+/** Detect syntax highlighting language from a file path. */
+export function detectLanguage(filePath: string): string {
+  const filename = filePath.split('/').pop() ?? '';
+  const lower = filename.toLowerCase();
+  if (lower === 'dockerfile' || lower.startsWith('dockerfile.')) return 'docker';
+  if (lower === 'makefile') return 'makefile';
+  const ext = lower.split('.').pop() ?? '';
+  return EXT_TO_LANG[ext] ?? '';
 }

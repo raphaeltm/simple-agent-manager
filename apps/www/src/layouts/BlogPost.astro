@@ -2,6 +2,7 @@
 import Base from './Base.astro';
 import Header from '../components/Header.astro';
 import CtaFooter from '../components/CtaFooter.astro';
+import { categoryColors } from '../lib/blog-utils';
 
 interface Props {
   title: string;
@@ -13,13 +14,6 @@ interface Props {
 }
 
 const { title, description, date, author, category, tags } = Astro.props;
-
-const categoryColors: Record<string, string> = {
-  announcement: 'var(--color-accent)',
-  engineering: 'var(--color-success)',
-  tutorial: '#a855f7',
-  devlog: 'var(--color-warning)',
-};
 
 const categoryColor = categoryColors[category] ?? 'var(--color-fg-dim)';
 

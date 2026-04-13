@@ -3,6 +3,7 @@ import { ChevronRight, FileText, Folder, RefreshCw, X } from 'lucide-react';
 import { type CSSProperties, type FC, useCallback, useEffect, useState } from 'react';
 
 import { type FileEntry,getFileList } from '../lib/api';
+import { formatFileSize } from '../lib/file-utils';
 
 interface FileBrowserPanelProps {
   workspaceUrl: string;
@@ -16,13 +17,6 @@ interface FileBrowserPanelProps {
   onNavigate: (dirPath: string) => void;
 }
 
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const val = bytes / Math.pow(1024, i);
-  return `${val < 10 ? val.toFixed(1) : Math.round(val)} ${units[i]}`;
-}
 
 export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
   workspaceUrl,
@@ -338,7 +332,7 @@ const FileRow: FC<FileRowProps> = ({ entry, onClick, isMobile }) => {
             whiteSpace: 'nowrap',
           }}
         >
-          {formatSize(entry.size)}
+          {formatFileSize(entry.size)}
         </span>
       )}
     </div>
