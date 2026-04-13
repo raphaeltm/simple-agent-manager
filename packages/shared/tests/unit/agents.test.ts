@@ -40,7 +40,7 @@ describe('AGENT_CATALOG', () => {
     expect(opencode!.credentialHelpUrl).toBe(
       'https://console.scaleway.com/iam/api-keys'
     );
-    expect(opencode!.installCommand).toBe('npm install -g opencode-ai@1.4.0');
+    expect(opencode!.installCommand).toBe('npm install -g opencode-ai@1.4.3');
   });
 
   it('opencode has no OAuth support', () => {

@@ -785,7 +785,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "SCW_SECRET_KEY",
-			installCmd:    "npm install -g opencode-ai@1.4.0",
+			installCmd:    "npm install -g opencode-ai@1.4.3",
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",

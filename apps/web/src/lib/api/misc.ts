@@ -198,3 +198,20 @@ export async function getWorkspaceBrowserSidecarPorts(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/browser/ports`
   );
 }
+
+// -------------------------------------------------------------------------
+// Platform Trial Status
+// -------------------------------------------------------------------------
+
+export interface TrialStatusResponse {
+  available: boolean;
+  agentType: 'opencode' | null;
+  hasInfraCredential: boolean;
+  hasAgentCredential: boolean;
+  dailyTokenBudget: { input: number; output: number } | null;
+  dailyTokenUsage: { input: number; output: number } | null;
+}
+
+export async function getTrialStatus(): Promise<TrialStatusResponse> {
+  return request<TrialStatusResponse>('/api/trial-status');
+}
