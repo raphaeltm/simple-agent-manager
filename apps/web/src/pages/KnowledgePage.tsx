@@ -31,6 +31,15 @@ import {
   listKnowledgeEntities,
 } from '../lib/api';
 
+// ─── Configurable defaults (Constitution Principle XI) ────────────────────────
+
+const KNOWLEDGE_LIST_FETCH_LIMIT = Number(
+  import.meta.env.VITE_KNOWLEDGE_LIST_FETCH_LIMIT ?? 200,
+);
+const EXPLICIT_OBSERVATION_CONFIDENCE = Number(
+  import.meta.env.VITE_EXPLICIT_OBSERVATION_CONFIDENCE ?? 0.9,
+);
+
 // ─── Type badge colors ──────────────────────────────────────────────────────
 
 const TYPE_COLORS: Record<string, string> = {
@@ -85,7 +94,7 @@ export function KnowledgePage() {
     try {
       const result = await listKnowledgeEntities(projectId, {
         entityType: filterType || undefined,
-        limit: 200,
+        limit: KNOWLEDGE_LIST_FETCH_LIMIT,
       });
       setEntities(result.entities);
       setTotal(result.total);
@@ -168,7 +177,7 @@ export function KnowledgePage() {
       await addObservation(projectId, selectedEntityId, {
         content: newObsContent.trim(),
         sourceType: 'explicit',
-        confidence: 0.9,
+        confidence: EXPLICIT_OBSERVATION_CONFIDENCE,
       });
       setNewObsContent('');
       setShowAddObs(false);
@@ -235,7 +244,7 @@ export function KnowledgePage() {
         </div>
         <button
           onClick={() => setShowCreateForm(!showCreateForm)}
-          className="flex items-center gap-1.5 px-3 min-h-[36px] text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors"
+          className="flex items-center gap-1.5 px-3 min-h-[44px] text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors"
         >
           <Plus size={14} /> Add Entity
         </button>
@@ -273,14 +282,14 @@ export function KnowledgePage() {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowCreateForm(false)}
-                className="px-3 min-h-[36px] text-sm rounded-lg text-fg-muted hover:text-fg-primary hover:bg-surface-hover transition-colors"
+                className="px-3 min-h-[44px] text-sm rounded-lg text-fg-muted hover:text-fg-primary hover:bg-surface-hover transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => void handleCreate()}
                 disabled={creating || !newName.trim()}
-                className="px-4 min-h-[36px] text-sm font-medium rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50"
+                className="px-4 min-h-[44px] text-sm font-medium rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50"
               >
                 {creating ? 'Creating...' : 'Create'}
               </button>
@@ -405,8 +414,11 @@ function EntityCard({
   onDelete: () => void;
 }) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       className={`group flex items-start gap-3 px-3 py-2.5 min-h-[48px] rounded-lg border transition-colors cursor-pointer text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
         selected
           ? 'border-accent bg-accent/5'
@@ -438,13 +450,13 @@ function EntityCard({
       <button
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
         className={`p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded text-fg-muted hover:text-danger transition-colors shrink-0 ${
-          isMobile ? '' : 'opacity-0 group-hover:opacity-100'
+          isMobile ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
         }`}
         aria-label={`Delete ${entity.name}`}
       >
         <Trash2 size={14} />
       </button>
-    </button>
+    </div>
   );
 }
 
@@ -561,7 +573,7 @@ function EntityDetail({
                 </div>
                 <button
                   onClick={() => onDeleteObservation(obs.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-fg-muted hover:text-danger transition-opacity shrink-0"
+                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 text-fg-muted hover:text-danger transition-opacity shrink-0"
                   aria-label="Delete observation"
                 >
                   <X size={12} />
