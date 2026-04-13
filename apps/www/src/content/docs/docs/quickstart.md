@@ -21,13 +21,11 @@ Go to **Settings** and add your [Hetzner API token](https://console.hetzner.clou
 
 In **Settings**, click **Install GitHub App** on the repositories you want to use with SAM. This grants SAM read/write access to repository contents.
 
-### 4. Create a Workspace
+### 4. Start a Project Chat
 
-From the **Dashboard**, click **New Workspace** and select:
-- **Repository** — from your installed GitHub App repos
-- **VM Size** — Small (2 vCPU, 4GB), Medium (4 vCPU, 8GB), or Large (8 vCPU, 16GB)
+From the **Dashboard**, open a **Project** and type your task description in the chat. SAM will automatically provision a workspace, run an AI coding agent, and stream results back to you in the chat.
 
-Click **Create Workspace**. Provisioning takes 2-5 minutes.
+Alternatively, you can manually create a workspace: click **New Workspace** from the Dashboard, select a repository and VM size, and click **Create Workspace**. Provisioning takes 2-5 minutes.
 
 ### 5. Use It
 

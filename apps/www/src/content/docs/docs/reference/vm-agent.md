@@ -1,9 +1,9 @@
 ---
 title: VM Agent Reference
-description: The Go agent running on each VM — managing terminals, containers, and Claude Code sessions.
+description: The Go agent running on each VM — managing terminals, containers, and AI coding agent sessions.
 ---
 
-The VM Agent is a Go binary (`packages/vm-agent/`) that runs on each Hetzner node. It listens on port 8080 and provides HTTP/WebSocket endpoints for terminal sessions, container management, and Claude Code agent sessions.
+The VM Agent is a Go binary (`packages/vm-agent/`) that runs on each provisioned node. It listens on port 8443 (HTTPS) and provides HTTP/WebSocket endpoints for terminal sessions, container management, and AI coding agent sessions (Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, and OpenCode).
 
 ## HTTP Endpoints
 
@@ -40,7 +40,7 @@ Opens a PTY terminal session inside the workspace container. Supports:
 WebSocket /workspaces/:id/agent
 ```
 
-Opens a Claude Code agent session using the Agent Communication Protocol (ACP). Messages are JSON-encoded with types:
+Opens an AI coding agent session using the Agent Communication Protocol (ACP). Messages are JSON-encoded with types:
 - `session/prompt` — send a user prompt
 - `session/update` — streaming agent output
 - `session/complete` — agent finished
@@ -86,7 +86,7 @@ Handles Docker operations:
 
 ### ACP Gateway
 
-Implements the Agent Communication Protocol for Claude Code:
+Implements the Agent Communication Protocol for AI coding agents:
 1. **Initialize** — establish protocol version and capabilities
 2. **NewSession** — create a session with working directory and MCP servers
 3. **Prompt** — send user prompts, receive streaming responses
