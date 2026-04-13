@@ -11,16 +11,13 @@ import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import * as agentProfileService from '../../services/agent-profiles';
 import {
+  INTERNAL_ERROR,
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
-
-function getDb(env: Env) {
-  return drizzle(env.DATABASE, { schema });
-}
 
 /** Extract optional profile fields from MCP params — shared by create and update handlers. */
 export function extractProfileFields(params: Record<string, unknown>): Omit<UpdateAgentProfileRequest, 'name'> {
@@ -48,7 +45,7 @@ export async function handleListAgentProfiles(
   env: Env,
 ): Promise<JsonRpcResponse> {
   try {
-    const db = getDb(env);
+    const db = drizzle(env.DATABASE, { schema });
     const profiles = await agentProfileService.listProfiles(db, tokenData.projectId, tokenData.userId, env);
 
     return jsonRpcSuccess(requestId, {
@@ -69,7 +66,7 @@ export async function handleListAgentProfiles(
     });
   } catch (err) {
     log.error('mcp.list_agent_profiles_failed', { projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INVALID_PARAMS, `Failed to list profiles: ${(err as Error).message}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to list profiles: ${(err as Error).message}`);
   }
 }
 
@@ -85,7 +82,7 @@ export async function handleGetAgentProfile(
   }
 
   try {
-    const db = getDb(env);
+    const db = drizzle(env.DATABASE, { schema });
     const profile = await agentProfileService.getProfile(db, tokenData.projectId, profileId, tokenData.userId);
 
     return jsonRpcSuccess(requestId, {
@@ -119,7 +116,7 @@ export async function handleGetAgentProfile(
       return jsonRpcError(requestId, INVALID_PARAMS, `Agent profile not found: ${profileId}`);
     }
     log.error('mcp.get_agent_profile_failed', { profileId, projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INVALID_PARAMS, `Failed to get profile: ${(err as Error).message}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get profile: ${(err as Error).message}`);
   }
 }
 
@@ -137,7 +134,7 @@ export async function handleCreateAgentProfile(
   const body: CreateAgentProfileRequest = { name, ...extractProfileFields(params) };
 
   try {
-    const db = getDb(env);
+    const db = drizzle(env.DATABASE, { schema });
     const profile = await agentProfileService.createProfile(db, tokenData.projectId, tokenData.userId, body, env);
 
     log.info('mcp.create_agent_profile', {
@@ -167,7 +164,7 @@ export async function handleCreateAgentProfile(
       return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
     }
     log.error('mcp.create_agent_profile_failed', { projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INVALID_PARAMS, `Failed to create profile: ${(err as Error).message}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create profile: ${(err as Error).message}`);
   }
 }
 
@@ -191,7 +188,7 @@ export async function handleUpdateAgentProfile(
   }
 
   try {
-    const db = getDb(env);
+    const db = drizzle(env.DATABASE, { schema });
     const profile = await agentProfileService.updateProfile(db, tokenData.projectId, profileId, tokenData.userId, body);
 
     log.info('mcp.update_agent_profile', {
@@ -220,7 +217,7 @@ export async function handleUpdateAgentProfile(
       return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
     }
     log.error('mcp.update_agent_profile_failed', { profileId, projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INVALID_PARAMS, `Failed to update profile: ${(err as Error).message}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to update profile: ${(err as Error).message}`);
   }
 }
 
@@ -236,7 +233,7 @@ export async function handleDeleteAgentProfile(
   }
 
   try {
-    const db = getDb(env);
+    const db = drizzle(env.DATABASE, { schema });
     await agentProfileService.deleteProfile(db, tokenData.projectId, profileId, tokenData.userId);
 
     log.info('mcp.delete_agent_profile', {
@@ -260,6 +257,6 @@ export async function handleDeleteAgentProfile(
       return jsonRpcError(requestId, INVALID_PARAMS, `Agent profile not found: ${profileId}`);
     }
     log.error('mcp.delete_agent_profile_failed', { profileId, projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INVALID_PARAMS, `Failed to delete profile: ${(err as Error).message}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to delete profile: ${(err as Error).message}`);
   }
 }

@@ -382,7 +382,7 @@ describe('MCP Profile Tools', () => {
       expect(() => JSON.parse(resultObj.content[0].text)).not.toThrow();
     });
 
-    it('error responses have jsonrpc 2.0 and error object', async () => {
+    it('validation error responses use INVALID_PARAMS code', async () => {
       const result = await handleGetAgentProfile(42, {}, tokenData, mockEnv);
 
       expect(result.jsonrpc).toBe('2.0');
@@ -390,6 +390,18 @@ describe('MCP Profile Tools', () => {
       expect(result.error).toBeDefined();
       expect(result.error!.code).toBe(-32602); // INVALID_PARAMS
       expect(typeof result.error!.message).toBe('string');
+    });
+
+    it('unexpected service errors use INTERNAL_ERROR code', async () => {
+      vi.mocked(agentProfileService.listProfiles).mockRejectedValue(new Error('D1 timeout'));
+
+      const result = await handleListAgentProfiles(42, {}, tokenData, mockEnv);
+
+      expect(result.jsonrpc).toBe('2.0');
+      expect(result.id).toBe(42);
+      expect(result.error).toBeDefined();
+      expect(result.error!.code).toBe(-32603); // INTERNAL_ERROR
+      expect(result.error!.message).toContain('D1 timeout');
     });
   });
 });
