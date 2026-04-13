@@ -11,6 +11,9 @@ import {
   handleUpdateAgentProfile,
 } from '../../../src/routes/mcp/profile-tools';
 
+// Mock drizzle-orm/d1 to prevent real D1 interactions
+vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn().mockReturnValue({}) }));
+
 // Mock the agent-profiles service
 vi.mock('../../../src/services/agent-profiles', () => ({
   listProfiles: vi.fn(),
@@ -105,6 +108,14 @@ describe('MCP Profile Tools', () => {
       expect(content.profiles[0].permissionMode).toBeUndefined();
     });
 
+    it('passes correct projectId and userId to service', async () => {
+      vi.mocked(agentProfileService.listProfiles).mockResolvedValue([]);
+      await handleListAgentProfiles(1, {}, tokenData, mockEnv);
+      expect(agentProfileService.listProfiles).toHaveBeenCalledWith(
+        expect.anything(), 'proj-456', 'user-789', mockEnv,
+      );
+    });
+
     it('returns empty array when no profiles exist', async () => {
       vi.mocked(agentProfileService.listProfiles).mockResolvedValue([]);
 
@@ -140,8 +151,22 @@ describe('MCP Profile Tools', () => {
       expect(content.updatedAt).toBeDefined();
     });
 
+    it('passes correct arguments to service', async () => {
+      vi.mocked(agentProfileService.getProfile).mockResolvedValue(makeProfile());
+      await handleGetAgentProfile(1, { profileId: 'prof-1' }, tokenData, mockEnv);
+      expect(agentProfileService.getProfile).toHaveBeenCalledWith(
+        expect.anything(), 'proj-456', 'prof-1', 'user-789',
+      );
+    });
+
     it('returns error when profileId is missing', async () => {
       const result = await handleGetAgentProfile(1, {}, tokenData, mockEnv);
+      expect(result.error).toBeDefined();
+      expect(result.error!.message).toContain('profileId is required');
+    });
+
+    it('returns error when profileId is whitespace only', async () => {
+      const result = await handleGetAgentProfile(1, { profileId: '  ' }, tokenData, mockEnv);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('profileId is required');
     });
@@ -154,6 +179,13 @@ describe('MCP Profile Tools', () => {
       const result = await handleGetAgentProfile(1, { profileId: 'nonexistent' }, tokenData, mockEnv);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Agent profile not found');
+    });
+
+    it('returns INTERNAL_ERROR for unexpected service failures', async () => {
+      vi.mocked(agentProfileService.getProfile).mockRejectedValue(new Error('DB connection failed'));
+      const result = await handleGetAgentProfile(1, { profileId: 'prof-1' }, tokenData, mockEnv);
+      expect(result.error!.code).toBe(-32603);
+      expect(result.error!.message).toContain('Failed to get profile');
     });
   });
 
@@ -274,6 +306,12 @@ describe('MCP Profile Tools', () => {
       expect(result.error!.message).toContain('No fields to update');
     });
 
+    it('returns error when profileId is whitespace only', async () => {
+      const result = await handleUpdateAgentProfile(1, { profileId: '  ', name: 'x' }, tokenData, mockEnv);
+      expect(result.error).toBeDefined();
+      expect(result.error!.message).toContain('profileId is required');
+    });
+
     it('returns error when profile not found', async () => {
       const err = new Error('Agent profile not found') as Error & { statusCode: number };
       err.statusCode = 404;
@@ -285,6 +323,42 @@ describe('MCP Profile Tools', () => {
       }, tokenData, mockEnv);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Agent profile not found');
+    });
+
+    it('returns INVALID_PARAMS for 409 rename conflict', async () => {
+      const err = new Error('Profile "default" already exists') as Error & { statusCode: number };
+      err.statusCode = 409;
+      vi.mocked(agentProfileService.updateProfile).mockRejectedValue(err);
+
+      const result = await handleUpdateAgentProfile(1, {
+        profileId: 'prof-1',
+        name: 'default',
+      }, tokenData, mockEnv);
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('already exists');
+    });
+
+    it('returns INVALID_PARAMS for 400 validation error', async () => {
+      const err = new Error('Invalid agent type: bad-type') as Error & { statusCode: number };
+      err.statusCode = 400;
+      vi.mocked(agentProfileService.updateProfile).mockRejectedValue(err);
+
+      const result = await handleUpdateAgentProfile(1, {
+        profileId: 'prof-1',
+        agentType: 'bad-type',
+      }, tokenData, mockEnv);
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('Invalid agent type');
+    });
+
+    it('returns INTERNAL_ERROR for unexpected service failures', async () => {
+      vi.mocked(agentProfileService.updateProfile).mockRejectedValue(new Error('DB timeout'));
+      const result = await handleUpdateAgentProfile(1, {
+        profileId: 'prof-1',
+        name: 'new-name',
+      }, tokenData, mockEnv);
+      expect(result.error!.code).toBe(-32603);
+      expect(result.error!.message).toContain('Failed to update profile');
     });
   });
 
@@ -316,6 +390,31 @@ describe('MCP Profile Tools', () => {
       const result = await handleDeleteAgentProfile(1, { profileId: 'nonexistent' }, tokenData, mockEnv);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Agent profile not found');
+    });
+
+    it('returns error for whitespace-only profileId', async () => {
+      const result = await handleDeleteAgentProfile(1, { profileId: '   ' }, tokenData, mockEnv);
+      expect(result.error).toBeDefined();
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('profileId is required');
+    });
+
+    it('passes correct projectId and userId to service', async () => {
+      vi.mocked(agentProfileService.deleteProfile).mockResolvedValue(undefined);
+      await handleDeleteAgentProfile(1, { profileId: 'prof-1' }, tokenData, mockEnv);
+      expect(agentProfileService.deleteProfile).toHaveBeenCalledWith(
+        expect.anything(), // db
+        tokenData.projectId,
+        'prof-1',
+        tokenData.userId,
+      );
+    });
+
+    it('returns INTERNAL_ERROR for unexpected service failures', async () => {
+      vi.mocked(agentProfileService.deleteProfile).mockRejectedValue(new Error('DB timeout'));
+      const result = await handleDeleteAgentProfile(1, { profileId: 'prof-1' }, tokenData, mockEnv);
+      expect(result.error!.code).toBe(-32603);
+      expect(result.error!.message).toContain('Failed to delete profile');
     });
   });
 
