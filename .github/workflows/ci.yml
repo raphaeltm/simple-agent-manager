@@ -20,6 +20,7 @@ concurrency:
 jobs:
   changes:
     name: Detect Changes
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     outputs:
       vm-agent: ${{ steps.filter.outputs.vm-agent }}
@@ -47,7 +48,7 @@ jobs:
   preflight-evidence:
     name: Preflight Evidence
     if: github.event_name == 'pull_request'
-
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -68,7 +69,7 @@ jobs:
   specialist-review-evidence:
     name: Specialist Review Evidence
     if: github.event_name == 'pull_request'
-
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -88,6 +89,7 @@ jobs:
 
   ui-compliance:
     name: UI Compliance
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -107,6 +109,7 @@ jobs:
 
   lint:
     name: Lint
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -126,6 +129,7 @@ jobs:
 
   typecheck:
     name: Type Check
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -148,6 +152,7 @@ jobs:
 
   test:
     name: Test
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -170,6 +175,7 @@ jobs:
 
   build:
     name: Build
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -189,6 +195,7 @@ jobs:
 
   deploy-scripts:
     name: Validate Deploy Scripts
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -218,6 +225,7 @@ jobs:
 
   code-quality:
     name: Code Quality Checks
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -243,6 +251,7 @@ jobs:
 
   pulumi-infra:
     name: Pulumi Infrastructure Tests
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -269,6 +278,7 @@ jobs:
     name: VM Agent Test
     needs: [changes]
     if: needs.changes.outputs.vm-agent == 'true'
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

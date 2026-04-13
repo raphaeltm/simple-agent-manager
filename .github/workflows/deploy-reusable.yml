@@ -416,6 +416,9 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
+          SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
+          GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
+          GA4_MEASUREMENT_ID: ${{ secrets.GA4_MEASUREMENT_ID }}
 
       # ========================================
       # Phase 4: VM Agent
@@ -484,46 +487,6 @@ jobs:
         run: |
           echo "api_url=https://api.${{ vars.BASE_DOMAIN }}" >> $GITHUB_OUTPUT
           echo "app_url=https://app.${{ vars.BASE_DOMAIN }}" >> $GITHUB_OUTPUT
-
-      # ========================================
-      # PR Comment (staging deploys from PRs)
-      # ========================================
-      - name: Comment Staging URLs on PR
-        if: ${{ inputs.dry_run != true && github.event_name == 'pull_request' }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const body = `## Staging Deployment
-
-            | | URL |
-            |---|---|
-            | **API** | https://api.${{ vars.BASE_DOMAIN }} |
-            | **Web UI** | https://app.${{ vars.BASE_DOMAIN }} |
-
-            Deployed commit: \`${{ github.event.pull_request.head.sha }}\``;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body.includes('## Staging Deployment'));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
 
       # ========================================
       # Job Summary

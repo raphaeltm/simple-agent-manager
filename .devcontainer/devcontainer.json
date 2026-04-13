@@ -13,7 +13,7 @@
 		"ghcr.io/devcontainers/features/github-cli:1": {},
 		// Go for VM Agent development
 		"ghcr.io/devcontainers/features/go:1": {
-			"version": "1.22"
+			"version": "1.24"
 		}
 	},
 	// Ports for local development

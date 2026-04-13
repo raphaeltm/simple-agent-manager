@@ -17,22 +17,22 @@ Multiple infrastructure and CI configuration issues were flagged in a comprehens
 
 ## Implementation Checklist
 
-- [ ] 1. Update Go version in `.devcontainer/devcontainer.json` from `"1.22"` to `"1.24"`
-- [ ] 2. Add `timeout-minutes: 15` to all 10 CI jobs that lack it
-- [ ] 3. Add optional secret forwarding blocks for `SEGMENT_WRITE_KEY`, `GA4_API_SECRET`, `GA4_MEASUREMENT_ID` in `configure-secrets.sh`
-- [ ] 4. Change `BASE_DOMAIN` in `.env.example` to `workspaces.example.com`
-- [ ] 5. Fix `CODEX_REFRESH_PROXY_ENABLED` comment in `.env.example`
-- [ ] 6. Update `compatibility_date` to `"2026-01-01"` in both wrangler.toml files
-- [ ] 7. Replace hardcoded `sam-www` with `${{ vars.RESOURCE_PREFIX || 'sam' }}-www` in 3 www workflows
-- [ ] 8. Remove dead "Comment Staging URLs on PR" step from `deploy-reusable.yml`
+- [x] 1. Update Go version in `.devcontainer/devcontainer.json` from `"1.22"` to `"1.24"`
+- [x] 2. Add `timeout-minutes: 15` to all 10 CI jobs that lack it
+- [x] 3. Add optional secret forwarding blocks for `SEGMENT_WRITE_KEY`, `GA4_API_SECRET`, `GA4_MEASUREMENT_ID` in `configure-secrets.sh`
+- [x] 4. Change `BASE_DOMAIN` in `.env.example` to `workspaces.example.com`
+- [x] 5. Fix `CODEX_REFRESH_PROXY_ENABLED` comment in `.env.example`
+- [x] 6. Update `compatibility_date` to `"2026-01-01"` in both wrangler.toml files
+- [x] 7. Replace hardcoded `sam-www` with `${{ vars.RESOURCE_PREFIX || 'sam' }}-www` in 3 www workflows
+- [x] 8. Remove dead "Comment Staging URLs on PR" step from `deploy-reusable.yml`
 
 ## Acceptance Criteria
 
-- [ ] All CI jobs have timeout protection
-- [ ] Go version consistent across devcontainer and CI
-- [ ] Analytics secrets are forwarded when present
-- [ ] .env.example does not point at production
-- [ ] Wrangler compatibility dates are current
-- [ ] www workflows are fork-friendly
-- [ ] No dead workflow steps remain
+- [x] All CI jobs have timeout protection
+- [x] Go version consistent across devcontainer and CI
+- [x] Analytics secrets are forwarded when present
+- [x] .env.example does not point at production
+- [x] Wrangler compatibility dates are current
+- [x] www workflows are fork-friendly
+- [x] No dead workflow steps remain
 - [ ] CI passes with all changes
