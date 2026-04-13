@@ -14,8 +14,8 @@ concurrency:
 
 env:
   NODE_VERSION: '22'
-  # Pages project name — must match provision-www.yml
-  PAGES_PROJECT: sam-www
+  # Pages project name — must match provision-www.yml and teardown-www.yml
+  PAGES_PROJECT: ${{ vars.RESOURCE_PREFIX || 'sam' }}-www
 
 jobs:
   deploy:

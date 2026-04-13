@@ -158,6 +158,23 @@ else
   echo -e "${YELLOW}ℹ  Skipping R2 S3 credentials (R2_ACCESS_KEY_ID/SECRET not set — task attachment uploads disabled)${NC}"
 fi
 
+# Configure analytics forwarding secrets (optional — only needed for external event forwarding)
+SEGMENT_WRITE_KEY="${SEGMENT_WRITE_KEY:-}"
+if [ -n "$SEGMENT_WRITE_KEY" ]; then
+  set_worker_secret "SEGMENT_WRITE_KEY" "$SEGMENT_WRITE_KEY" "$ENVIRONMENT" "false"
+else
+  echo -e "${YELLOW}ℹ  Skipping SEGMENT_WRITE_KEY (not set — Segment analytics forwarding disabled)${NC}"
+fi
+
+GA4_API_SECRET="${GA4_API_SECRET:-}"
+GA4_MEASUREMENT_ID="${GA4_MEASUREMENT_ID:-}"
+if [ -n "$GA4_API_SECRET" ] && [ -n "$GA4_MEASUREMENT_ID" ]; then
+  set_worker_secret "GA4_API_SECRET" "$GA4_API_SECRET" "$ENVIRONMENT" "false"
+  set_worker_secret "GA4_MEASUREMENT_ID" "$GA4_MEASUREMENT_ID" "$ENVIRONMENT" "false"
+else
+  echo -e "${YELLOW}ℹ  Skipping GA4 secrets (GA4_API_SECRET/GA4_MEASUREMENT_ID not set — GA4 analytics forwarding disabled)${NC}"
+fi
+
 # Configure smoke test auth (optional — only needed for staging/test environments)
 SMOKE_TEST_AUTH_ENABLED="${SMOKE_TEST_AUTH_ENABLED:-}"
 if [ -n "$SMOKE_TEST_AUTH_ENABLED" ]; then

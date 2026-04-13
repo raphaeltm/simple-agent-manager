@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PAGES_PROJECT: sam-www
+  # Pages project name — must match deploy-www.yml and provision-www.yml
+  PAGES_PROJECT: ${{ vars.RESOURCE_PREFIX || 'sam' }}-www
 
 jobs:
   teardown:
