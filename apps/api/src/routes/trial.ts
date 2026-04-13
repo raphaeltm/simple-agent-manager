@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { requireApproved, requireAuth } from '../middleware/auth';
 import { getTrialStatus } from '../services/platform-trial';
 
@@ -22,7 +23,7 @@ trialRoutes.get('/trial-status', requireAuth(), requireApproved(), async (c) => 
     return c.json(status);
   } catch (err) {
     // Trial status is non-critical — return unavailable rather than 500
-    console.error('trial-status error', err instanceof Error ? err.message : String(err));
+    log.error('trial_status.error', { error: err instanceof Error ? err.message : String(err) });
     return c.json({
       available: false,
       agentType: null,

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   listAgentProfiles: vi.fn(),
   listChatSessions: vi.fn(),
   listCredentials: vi.fn(),
+  getTrialStatus: vi.fn(),
   listProjectTasks: vi.fn(),
   submitTask: vi.fn(),
   getProjectTask: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listAgentProfiles: mocks.listAgentProfiles,
   listChatSessions: mocks.listChatSessions,
   listCredentials: mocks.listCredentials,
+  getTrialStatus: mocks.getTrialStatus,
   listProjectTasks: mocks.listProjectTasks,
   submitTask: mocks.submitTask,
   getProjectTask: mocks.getProjectTask,
@@ -138,6 +140,7 @@ describe('ProjectChat new chat button', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
@@ -277,6 +280,7 @@ describe('ProjectChat voice input', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
@@ -331,6 +335,7 @@ describe('ProjectChat agent type selection', () => {
     mocks.listCredentials.mockResolvedValue([
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
@@ -414,6 +419,7 @@ describe('ProjectChat workspace profile selection', () => {
     mocks.listCredentials.mockResolvedValue([
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
@@ -574,6 +580,7 @@ describe('ProjectChat close conversation button', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgents.mockResolvedValue({ agents: [{ agentType: 'claude-code', label: 'Claude Code' }] });
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.closeConversationTask.mockResolvedValue({});
@@ -625,6 +632,7 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
@@ -685,6 +693,7 @@ describe('ProjectChat idea tags on sessions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
   });
@@ -754,6 +763,7 @@ describe('ProjectChat agent profile selection', () => {
     mocks.listCredentials.mockResolvedValue([
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue(TEST_PROFILES);
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
