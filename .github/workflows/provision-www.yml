@@ -72,7 +72,7 @@ jobs:
           API="https://api.cloudflare.com/client/v4"
           AUTH="Authorization: Bearer $CF_API_TOKEN"
 
-          # --- www CNAME → sam-www.pages.dev (proxied) ---
+          # --- www CNAME → ${PAGES_PROJECT}.pages.dev (proxied) ---
           echo "=== Creating CNAME record for www.$BASE_DOMAIN ==="
           EXISTING=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=www.$BASE_DOMAIN" \
             -H "$AUTH" | jq '.result | length')
