@@ -22,6 +22,25 @@ function getDb(env: Env) {
   return drizzle(env.DATABASE, { schema });
 }
 
+/** Extract optional profile fields from MCP params — shared by create and update handlers. */
+export function extractProfileFields(params: Record<string, unknown>): Omit<UpdateAgentProfileRequest, 'name'> {
+  const fields: Omit<UpdateAgentProfileRequest, 'name'> = {};
+  if (typeof params.description === 'string') fields.description = params.description;
+  if (typeof params.agentType === 'string') fields.agentType = params.agentType;
+  if (typeof params.model === 'string') fields.model = params.model;
+  if (typeof params.permissionMode === 'string') fields.permissionMode = params.permissionMode;
+  if (typeof params.systemPromptAppend === 'string') fields.systemPromptAppend = params.systemPromptAppend;
+  if (typeof params.maxTurns === 'number') fields.maxTurns = params.maxTurns;
+  if (typeof params.timeoutMinutes === 'number') fields.timeoutMinutes = params.timeoutMinutes;
+  if (typeof params.vmSizeOverride === 'string') fields.vmSizeOverride = params.vmSizeOverride;
+  if (typeof params.provider === 'string') fields.provider = params.provider;
+  if (typeof params.vmLocation === 'string') fields.vmLocation = params.vmLocation;
+  if (typeof params.workspaceProfile === 'string') fields.workspaceProfile = params.workspaceProfile;
+  if (typeof params.devcontainerConfigName === 'string') fields.devcontainerConfigName = params.devcontainerConfigName;
+  if (typeof params.taskMode === 'string') fields.taskMode = params.taskMode;
+  return fields;
+}
+
 export async function handleListAgentProfiles(
   requestId: string | number | null,
   _params: Record<string, unknown>,
@@ -86,6 +105,7 @@ export async function handleGetAgentProfile(
           provider: profile.provider,
           vmLocation: profile.vmLocation,
           workspaceProfile: profile.workspaceProfile,
+          devcontainerConfigName: profile.devcontainerConfigName,
           taskMode: profile.taskMode,
           isBuiltin: profile.isBuiltin,
           createdAt: profile.createdAt,
@@ -114,19 +134,7 @@ export async function handleCreateAgentProfile(
     return jsonRpcError(requestId, INVALID_PARAMS, 'name is required and must be a non-empty string');
   }
 
-  const body: CreateAgentProfileRequest = { name };
-  if (typeof params.description === 'string') body.description = params.description;
-  if (typeof params.agentType === 'string') body.agentType = params.agentType;
-  if (typeof params.model === 'string') body.model = params.model;
-  if (typeof params.permissionMode === 'string') body.permissionMode = params.permissionMode;
-  if (typeof params.systemPromptAppend === 'string') body.systemPromptAppend = params.systemPromptAppend;
-  if (typeof params.maxTurns === 'number') body.maxTurns = params.maxTurns;
-  if (typeof params.timeoutMinutes === 'number') body.timeoutMinutes = params.timeoutMinutes;
-  if (typeof params.vmSizeOverride === 'string') body.vmSizeOverride = params.vmSizeOverride;
-  if (typeof params.provider === 'string') body.provider = params.provider;
-  if (typeof params.vmLocation === 'string') body.vmLocation = params.vmLocation;
-  if (typeof params.workspaceProfile === 'string') body.workspaceProfile = params.workspaceProfile;
-  if (typeof params.taskMode === 'string') body.taskMode = params.taskMode;
+  const body: CreateAgentProfileRequest = { name, ...extractProfileFields(params) };
 
   try {
     const db = getDb(env);
@@ -176,18 +184,7 @@ export async function handleUpdateAgentProfile(
 
   const body: UpdateAgentProfileRequest = {};
   if (typeof params.name === 'string') body.name = params.name;
-  if (typeof params.description === 'string') body.description = params.description;
-  if (typeof params.agentType === 'string') body.agentType = params.agentType;
-  if (typeof params.model === 'string') body.model = params.model;
-  if (typeof params.permissionMode === 'string') body.permissionMode = params.permissionMode;
-  if (typeof params.systemPromptAppend === 'string') body.systemPromptAppend = params.systemPromptAppend;
-  if (typeof params.maxTurns === 'number') body.maxTurns = params.maxTurns;
-  if (typeof params.timeoutMinutes === 'number') body.timeoutMinutes = params.timeoutMinutes;
-  if (typeof params.vmSizeOverride === 'string') body.vmSizeOverride = params.vmSizeOverride;
-  if (typeof params.provider === 'string') body.provider = params.provider;
-  if (typeof params.vmLocation === 'string') body.vmLocation = params.vmLocation;
-  if (typeof params.workspaceProfile === 'string') body.workspaceProfile = params.workspaceProfile;
-  if (typeof params.taskMode === 'string') body.taskMode = params.taskMode;
+  Object.assign(body, extractProfileFields(params));
 
   if (Object.keys(body).length === 0) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'No fields to update. Provide at least one field to change.');

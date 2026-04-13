@@ -4,6 +4,62 @@
  * Lets agents manage reusable agent profile configurations for their project.
  */
 
+/** Shared property schemas for profile fields used by both create and update tools. */
+const PROFILE_FIELD_PROPERTIES = {
+  description: {
+    type: 'string',
+    description: 'Human-readable description of the profile\'s purpose',
+  },
+  agentType: {
+    type: 'string',
+    description: 'Agent type (e.g., claude-code, codex). Defaults to project default.',
+  },
+  model: {
+    type: 'string',
+    description: 'Model identifier (e.g., claude-sonnet-4-5-20250929, claude-opus-4-6)',
+  },
+  permissionMode: {
+    type: 'string',
+    description: 'Permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions',
+  },
+  systemPromptAppend: {
+    type: 'string',
+    description: 'Text appended to the agent\'s system prompt',
+  },
+  maxTurns: {
+    type: 'number',
+    description: 'Maximum conversation turns',
+  },
+  timeoutMinutes: {
+    type: 'number',
+    description: 'Task timeout in minutes',
+  },
+  vmSizeOverride: {
+    type: 'string',
+    description: 'VM size override: small, medium, large',
+  },
+  provider: {
+    type: 'string',
+    description: 'Cloud provider: hetzner, scaleway, gcp',
+  },
+  vmLocation: {
+    type: 'string',
+    description: 'VM location/region for the provider',
+  },
+  workspaceProfile: {
+    type: 'string',
+    description: 'Workspace profile: full, lightweight',
+  },
+  devcontainerConfigName: {
+    type: 'string',
+    description: 'Devcontainer config name (subdirectory under .devcontainer/). Omit for auto-discover default.',
+  },
+  taskMode: {
+    type: 'string',
+    description: 'Task mode: task, conversation',
+  },
+} as const;
+
 export const PROFILE_TOOLS = [
   {
     name: 'list_agent_profiles',
@@ -49,54 +105,7 @@ export const PROFILE_TOOLS = [
           type: 'string',
           description: 'Unique name for the profile within the project',
         },
-        description: {
-          type: 'string',
-          description: 'Human-readable description of the profile\'s purpose',
-        },
-        agentType: {
-          type: 'string',
-          description: 'Agent type (e.g., claude-code, codex). Defaults to project default.',
-        },
-        model: {
-          type: 'string',
-          description: 'Model identifier (e.g., claude-sonnet-4-5-20250929, claude-opus-4-6)',
-        },
-        permissionMode: {
-          type: 'string',
-          description: 'Permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions',
-        },
-        systemPromptAppend: {
-          type: 'string',
-          description: 'Text appended to the agent\'s system prompt',
-        },
-        maxTurns: {
-          type: 'number',
-          description: 'Maximum conversation turns',
-        },
-        timeoutMinutes: {
-          type: 'number',
-          description: 'Task timeout in minutes',
-        },
-        vmSizeOverride: {
-          type: 'string',
-          description: 'VM size override: small, medium, large',
-        },
-        provider: {
-          type: 'string',
-          description: 'Cloud provider: hetzner, scaleway, gcp',
-        },
-        vmLocation: {
-          type: 'string',
-          description: 'VM location/region for the provider',
-        },
-        workspaceProfile: {
-          type: 'string',
-          description: 'Workspace profile: full, lightweight',
-        },
-        taskMode: {
-          type: 'string',
-          description: 'Task mode: task, conversation',
-        },
+        ...PROFILE_FIELD_PROPERTIES,
       },
       required: ['name'],
       additionalProperties: false,
@@ -121,54 +130,7 @@ export const PROFILE_TOOLS = [
           type: 'string',
           description: 'New name for the profile',
         },
-        description: {
-          type: 'string',
-          description: 'New description',
-        },
-        agentType: {
-          type: 'string',
-          description: 'Agent type (e.g., claude-code, codex)',
-        },
-        model: {
-          type: 'string',
-          description: 'Model identifier',
-        },
-        permissionMode: {
-          type: 'string',
-          description: 'Permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions',
-        },
-        systemPromptAppend: {
-          type: 'string',
-          description: 'Text appended to the agent\'s system prompt',
-        },
-        maxTurns: {
-          type: 'number',
-          description: 'Maximum conversation turns',
-        },
-        timeoutMinutes: {
-          type: 'number',
-          description: 'Task timeout in minutes',
-        },
-        vmSizeOverride: {
-          type: 'string',
-          description: 'VM size override: small, medium, large',
-        },
-        provider: {
-          type: 'string',
-          description: 'Cloud provider: hetzner, scaleway, gcp',
-        },
-        vmLocation: {
-          type: 'string',
-          description: 'VM location/region for the provider',
-        },
-        workspaceProfile: {
-          type: 'string',
-          description: 'Workspace profile: full, lightweight',
-        },
-        taskMode: {
-          type: 'string',
-          description: 'Task mode: task, conversation',
-        },
+        ...PROFILE_FIELD_PROPERTIES,
       },
       required: ['profileId'],
       additionalProperties: false,

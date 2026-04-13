@@ -3,6 +3,7 @@ import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import {
+  extractProfileFields,
   handleCreateAgentProfile,
   handleDeleteAgentProfile,
   handleGetAgentProfile,
@@ -59,6 +60,7 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     provider: null,
     vmLocation: null,
     workspaceProfile: null,
+    devcontainerConfigName: null,
     taskMode: null,
     isBuiltin: false,
     createdAt: '2026-04-12T00:00:00Z',
@@ -116,11 +118,12 @@ describe('MCP Profile Tools', () => {
   // ─── get_agent_profile ────────────────────────────────────────────
 
   describe('handleGetAgentProfile', () => {
-    it('returns full profile details', async () => {
+    it('returns full profile details including devcontainerConfigName', async () => {
       const profile = makeProfile({
         systemPromptAppend: 'Focus on tests.',
         maxTurns: 50,
         taskMode: 'task',
+        devcontainerConfigName: 'python-dev',
       });
       vi.mocked(agentProfileService.getProfile).mockResolvedValue(profile);
 
@@ -132,6 +135,7 @@ describe('MCP Profile Tools', () => {
       expect(content.systemPromptAppend).toBe('Focus on tests.');
       expect(content.maxTurns).toBe(50);
       expect(content.taskMode).toBe('task');
+      expect(content.devcontainerConfigName).toBe('python-dev');
       expect(content.createdAt).toBeDefined();
       expect(content.updatedAt).toBeDefined();
     });
@@ -173,6 +177,7 @@ describe('MCP Profile Tools', () => {
         provider: 'hetzner',
         vmLocation: 'fsn1',
         workspaceProfile: 'full',
+        devcontainerConfigName: 'python-dev',
         taskMode: 'task',
       }, tokenData, mockEnv);
 
@@ -182,7 +187,7 @@ describe('MCP Profile Tools', () => {
       expect(content.name).toBe('my-agent');
       expect(content.message).toContain('created');
 
-      // Verify service was called with the right body
+      // Verify service was called with the right body including devcontainerConfigName
       expect(agentProfileService.createProfile).toHaveBeenCalledWith(
         expect.anything(), // db
         'proj-456',
@@ -192,6 +197,7 @@ describe('MCP Profile Tools', () => {
           description: 'Custom agent',
           model: 'claude-opus-4-6',
           permissionMode: 'plan',
+          devcontainerConfigName: 'python-dev',
         }),
         mockEnv,
       );
@@ -310,6 +316,53 @@ describe('MCP Profile Tools', () => {
       const result = await handleDeleteAgentProfile(1, { profileId: 'nonexistent' }, tokenData, mockEnv);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Agent profile not found');
+    });
+  });
+
+  // ─── extractProfileFields ─────────────────────────────────────────
+
+  describe('extractProfileFields', () => {
+    it('extracts all supported string and number fields', () => {
+      const params = {
+        description: 'desc',
+        agentType: 'claude-code',
+        model: 'claude-opus-4-6',
+        permissionMode: 'plan',
+        systemPromptAppend: 'extra',
+        maxTurns: 100,
+        timeoutMinutes: 60,
+        vmSizeOverride: 'large',
+        provider: 'hetzner',
+        vmLocation: 'fsn1',
+        workspaceProfile: 'full',
+        devcontainerConfigName: 'python-dev',
+        taskMode: 'task',
+      };
+      const fields = extractProfileFields(params);
+      expect(fields).toEqual(params);
+    });
+
+    it('ignores fields with wrong types', () => {
+      const fields = extractProfileFields({
+        description: 123, // wrong type
+        maxTurns: 'not-a-number', // wrong type
+        model: null, // wrong type
+      });
+      expect(fields).toEqual({});
+    });
+
+    it('ignores unknown fields', () => {
+      const fields = extractProfileFields({
+        unknownField: 'value',
+        description: 'valid',
+      });
+      expect(fields).toEqual({ description: 'valid' });
+      expect((fields as Record<string, unknown>).unknownField).toBeUndefined();
+    });
+
+    it('returns empty object when no valid fields provided', () => {
+      const fields = extractProfileFields({});
+      expect(fields).toEqual({});
     });
   });
 
