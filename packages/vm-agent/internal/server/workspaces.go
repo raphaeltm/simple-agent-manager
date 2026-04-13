@@ -126,7 +126,7 @@ func (s *Server) requireNodeManagementAuth(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusForbidden, "workspace route mismatch")
 			return false
 		}
-		if claims.Workspace != "" && claims.Workspace != workspaceID {
+		if claims.Workspace != workspaceID {
 			writeError(w, http.StatusForbidden, "workspace claim mismatch")
 			return false
 		}

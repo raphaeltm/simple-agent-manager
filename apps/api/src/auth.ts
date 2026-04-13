@@ -86,9 +86,10 @@ export function createAuth(env: Env) {
     trustedOrigins: [
       `https://app.${env.BASE_DOMAIN}`,
       `https://api.${env.BASE_DOMAIN}`,
-      // Allow localhost for development
-      'http://localhost:5173',
-      'http://localhost:3000',
+      // Allow localhost only in development (BASE_DOMAIN contains 'localhost' or is empty)
+      ...(!env.BASE_DOMAIN || env.BASE_DOMAIN.includes('localhost')
+        ? ['http://localhost:5173', 'http://localhost:3000']
+        : []),
     ],
     session: {
       cookieCache: {

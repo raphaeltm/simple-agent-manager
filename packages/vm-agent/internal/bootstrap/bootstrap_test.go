@@ -522,13 +522,13 @@ func TestBuildSAMStaticEnv(t *testing.T) {
 	env := buildSAMStaticEnv(cfg, "ghs_token")
 
 	for _, want := range []string{
-		`export GH_TOKEN="ghs_token"`,
-		`export SAM_API_URL="https://api.example.com"`,
-		`export SAM_BRANCH="main"`,
-		`export SAM_NODE_ID="node-456"`,
-		`export SAM_REPOSITORY="octo/repo"`,
-		`export SAM_WORKSPACE_ID="ws-123"`,
-		`export SAM_WORKSPACE_URL="https://ws-ws-123.example.com"`,
+		`export GH_TOKEN='ghs_token'`,
+		`export SAM_API_URL='https://api.example.com'`,
+		`export SAM_BRANCH='main'`,
+		`export SAM_NODE_ID='node-456'`,
+		`export SAM_REPOSITORY='octo/repo'`,
+		`export SAM_WORKSPACE_ID='ws-123'`,
+		`export SAM_WORKSPACE_URL='https://ws-ws-123.example.com'`,
 	} {
 		if !strings.Contains(env, want) {
 			t.Errorf("static env missing %q\ngot:\n%s", want, env)
@@ -551,9 +551,9 @@ func TestBuildSAMStaticEnvIncludesProjectContext(t *testing.T) {
 	env := buildSAMStaticEnv(cfg, "")
 
 	for _, want := range []string{
-		`export SAM_PROJECT_ID="proj-789"`,
-		`export SAM_CHAT_SESSION_ID="session-abc"`,
-		`export SAM_TASK_ID="task-def"`,
+		`export SAM_PROJECT_ID='proj-789'`,
+		`export SAM_CHAT_SESSION_ID='session-abc'`,
+		`export SAM_TASK_ID='task-def'`,
 	} {
 		if !strings.Contains(env, want) {
 			t.Errorf("static env missing %q\ngot:\n%s", want, env)
@@ -991,6 +991,104 @@ func TestVolumeNameForWorkspace(t *testing.T) {
 				t.Fatalf("VolumeNameForWorkspace(%q) = %q, want %q", tc.workspaceID, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestVolumeNameForWorkspaceSanitization(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		workspaceID string
+		want        string
+	}{
+		{name: "path traversal attempt", workspaceID: "../../../etc/passwd", want: "sam-ws-etcpasswd"},
+		{name: "shell metacharacters", workspaceID: "ws-123; rm -rf /", want: "sam-ws-ws-123rm-rf"},
+		{name: "slashes stripped", workspaceID: "ws/../../root", want: "sam-ws-wsroot"},
+		{name: "dots stripped", workspaceID: "ws..123", want: "sam-ws-ws123"},
+		{name: "spaces stripped", workspaceID: "ws 123", want: "sam-ws-ws123"},
+		{name: "normal id passes through", workspaceID: "abc-123", want: "sam-ws-abc-123"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := VolumeNameForWorkspace(tc.workspaceID)
+			if got != tc.want {
+				t.Fatalf("VolumeNameForWorkspace(%q) = %q, want %q", tc.workspaceID, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildSAMStaticEnvShellInjection(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		NodeID:          "node-456",
+		// Use a value with shell injection payload
+		Repository: "$(whoami)",
+		Branch:     "`id`",
+	}
+
+	env := buildSAMStaticEnv(cfg, "token$(cat /etc/passwd)")
+
+	// Single-quoted values should prevent shell expansion
+	if strings.Contains(env, `"$(whoami)"`) {
+		t.Error("buildSAMStaticEnv should use single quotes, not double quotes")
+	}
+	// Verify single quotes are used
+	if !strings.Contains(env, `'$(whoami)'`) {
+		t.Errorf("expected single-quoted value for shell injection payload, got:\n%s", env)
+	}
+	if !strings.Contains(env, "'`id`'") {
+		t.Errorf("expected single-quoted backtick value, got:\n%s", env)
+	}
+	// Token with injection should also be single-quoted
+	if !strings.Contains(env, `'token$(cat /etc/passwd)'`) {
+		t.Errorf("expected single-quoted token with injection payload, got:\n%s", env)
+	}
+}
+
+func TestBuildSAMStaticEnvSingleQuoteEscaping(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		NodeID:          "node-456",
+		Repository:      "it's a test",
+	}
+
+	env := buildSAMStaticEnv(cfg, "")
+
+	// Single quotes within values must be escaped with the '"'"' pattern
+	if !strings.Contains(env, `'it'"'"'s a test'`) {
+		t.Errorf("expected properly escaped single quote, got:\n%s", env)
+	}
+}
+
+func TestBuildSAMStaticEnvCombinedQuoteAndInjection(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		NodeID:          "node-456",
+		// Value with embedded single-quote AND shell injection
+		Repository: "it's a $(whoami)",
+	}
+
+	env := buildSAMStaticEnv(cfg, "")
+
+	// Must produce: export SAM_REPOSITORY='it'"'"'s a $(whoami)'
+	// The single-quote is escaped, and $(whoami) is inside single quotes (no expansion)
+	expected := `'it'"'"'s a $(whoami)'`
+	if !strings.Contains(env, expected) {
+		t.Errorf("expected combined quote+injection escaping %q, got:\n%s", expected, env)
 	}
 }
 

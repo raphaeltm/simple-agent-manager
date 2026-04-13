@@ -56,8 +56,9 @@ func (e *CallbackError) Unwrap() error {
 
 // VolumeNameForWorkspace returns the Docker named volume name for a workspace.
 // Exported so that workspace deletion can also remove the volume.
+// The workspace ID is sanitized to prevent path-traversal attacks.
 func VolumeNameForWorkspace(workspaceID string) string {
-	return volumePrefix + workspaceID
+	return volumePrefix + sanitizeWorkspaceID(workspaceID)
 }
 
 type bootstrapResponse struct {
@@ -2182,8 +2183,9 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 	return sb.String()
 }
 
-// buildSAMStaticEnv returns a simple KEY=VALUE file (no shell commands) for
-// /etc/sam/env, which is parsed by ReadContainerEnvFiles for ACP sessions.
+// buildSAMStaticEnv returns a shell-quoted env file (POSIX single-quoting via
+// shellSingleQuote) for /etc/sam/env. Format: export KEY='value'.
+// Parsed by ReadContainerEnvFiles (parseEnvExportLines) for ACP sessions.
 func buildSAMStaticEnv(cfg *config.Config, githubToken string) string {
 	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
 
@@ -2209,7 +2211,9 @@ func buildSAMStaticEnv(cfg *config.Config, githubToken string) string {
 	sb.WriteString("# SAM workspace environment variables (auto-generated)\n")
 	for _, e := range entries {
 		if e.value != "" {
-			sb.WriteString(fmt.Sprintf("export %s=%q\n", e.key, e.value))
+			// Use single-quoted values to prevent shell expansion of $(), backticks, etc.
+			// Matches the safer pattern used by buildSAMEnvScript. See INJ-VULN-02.
+			sb.WriteString(fmt.Sprintf("export %s=%s\n", e.key, shellSingleQuote(e.value)))
 		}
 	}
 	return sb.String()

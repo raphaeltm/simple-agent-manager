@@ -64,7 +64,10 @@ func (s *Server) handleTerminalResize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := ptySession.Resize(body.Rows, body.Cols); err != nil {
+	// Clamp dimensions to [1, 500] to prevent abuse — matches WebSocket resize path.
+	rows := clampTerminalDimension(body.Rows, 24)
+	cols := clampTerminalDimension(body.Cols, 80)
+	if err := ptySession.Resize(rows, cols); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to resize terminal")
 		return
 	}

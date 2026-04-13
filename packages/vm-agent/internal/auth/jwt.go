@@ -47,7 +47,8 @@ func NewJWTValidator(jwksURL, nodeID, issuer, audience string) (*JWTValidator, e
 }
 
 func (v *JWTValidator) parse(tokenString string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, v.jwks.Keyfunc)
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, v.jwks.Keyfunc,
+		jwt.WithValidMethods([]string{"RS256"}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
@@ -138,7 +139,10 @@ func (v *JWTValidator) ValidateNodeManagementToken(tokenString, workspaceID stri
 		return nil, fmt.Errorf("node ID mismatch: expected %s, got %s", v.nodeID, claims.Node)
 	}
 
-	if workspaceID != "" && claims.Workspace != "" && claims.Workspace != workspaceID {
+	// When a specific workspace is requested, the token MUST carry a matching
+	// workspace claim. An empty claims.Workspace must NOT pass — otherwise a
+	// node-scoped token (no workspace claim) could access any workspace.
+	if workspaceID != "" && claims.Workspace != workspaceID {
 		return nil, fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
 	}
 
