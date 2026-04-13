@@ -1,5 +1,5 @@
-import type { AgentCredentialInfo, AgentInfo, AgentType, CredentialKind, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
-import { getAgentDefinition } from '@simple-agent-manager/shared';
+import type { AgentCredentialInfo, AgentInfo, AgentType, CredentialKind, OpenCodeProvider, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
+import { getAgentDefinition, OPENCODE_PROVIDERS } from '@simple-agent-manager/shared';
 import { Alert, Button, Input, StatusBadge } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
@@ -8,12 +8,14 @@ interface AgentKeyCardProps {
   credentials?: AgentCredentialInfo[] | null; // Now an array for multiple credential types
   onSave: (request: SaveAgentCredentialRequest) => Promise<void>;
   onDelete: (agentType: AgentType, credentialKind: CredentialKind) => Promise<void>;
+  /** The currently selected OpenCode provider (from agent settings). Affects key labels. */
+  opencodeProvider?: OpenCodeProvider | null;
 }
 
 /**
  * Card for managing a single agent's credentials (API key and/or OAuth token).
  */
-export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyCardProps) {
+export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodeProvider }: AgentKeyCardProps) {
   const [credential, setCredential] = useState('');
   const [credentialKind, setCredentialKind] = useState<CredentialKind>('api-key');
   const [loading, setLoading] = useState(false);
@@ -28,8 +30,17 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
   const activeCredential = credentials?.find(c => c.isActive);
   const hasAnyCredential = (credentials?.length ?? 0) > 0;
 
-  // OpenCode can use Scaleway cloud credential as fallback
-  const usesScalewayFallback = agent.fallbackCredentialSource === 'scaleway-cloud';
+  // OpenCode can use Scaleway cloud credential as fallback (only when using Scaleway provider)
+  const isOpenCodePlatform = agent.id === 'opencode' && opencodeProvider === 'platform';
+  const usesScalewayFallback = agent.fallbackCredentialSource === 'scaleway-cloud' && (!opencodeProvider || opencodeProvider === 'scaleway');
+
+  // Get provider-specific key label for OpenCode
+  const opencodeKeyLabel = agent.id === 'opencode' && opencodeProvider
+    ? OPENCODE_PROVIDERS[opencodeProvider]?.keyLabel || 'API Key'
+    : null;
+  const opencodeKeyHelp = agent.id === 'opencode' && opencodeProvider
+    ? OPENCODE_PROVIDERS[opencodeProvider]?.keyHelpText || ''
+    : null;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,18 +89,31 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
           <p className="text-xs text-fg-muted">{agent.description}</p>
         </div>
         <StatusBadge
-          status={hasAnyCredential || usesScalewayFallback ? 'connected' : 'disconnected'}
+          status={hasAnyCredential || usesScalewayFallback || isOpenCodePlatform ? 'connected' : 'disconnected'}
           label={
-            hasAnyCredential
-              ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
-              : usesScalewayFallback
-                ? 'Using Scaleway Cloud Key'
-                : 'Not Configured'
+            isOpenCodePlatform
+              ? 'Platform AI'
+              : hasAnyCredential
+                ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
+                : usesScalewayFallback
+                  ? 'Using Scaleway Cloud Key'
+                  : 'Not Configured'
           }
         />
       </div>
 
-      {usesScalewayFallback && !hasAnyCredential && !showForm && (
+      {isOpenCodePlatform && !showForm && (
+        <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-fg-muted">SAM Platform (Workers AI)</span>
+            <span className="text-sm text-fg-primary">
+              Using SAM&apos;s platform AI — daily limit applies. No API key needed.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {usesScalewayFallback && !hasAnyCredential && !showForm && !isOpenCodePlatform && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
             <div className="flex flex-col gap-1">
@@ -141,7 +165,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
         </div>
       )}
 
-      {((!hasAnyCredential && !usesScalewayFallback) || showForm) && (
+      {((!hasAnyCredential && !usesScalewayFallback && !isOpenCodePlatform) || showForm) && (
         <form onSubmit={handleSave} className="flex flex-col gap-3">
           {supportsOAuth && (
             <div className="flex gap-2 mb-2">
@@ -192,9 +216,11 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
                 placeholder={
                   credentialKind === 'oauth-token'
                     ? 'Paste your OAuth token from "claude setup-token"'
-                    : agent.id === 'opencode'
-                      ? 'Enter your Scaleway Secret Key'
-                      : `Enter your ${agent.name} API key`
+                    : opencodeKeyLabel
+                      ? `Enter your ${opencodeKeyLabel}`
+                      : agent.id === 'opencode'
+                        ? 'Enter your Scaleway Secret Key'
+                        : `Enter your ${agent.name} API key`
                 }
                 required
               />
@@ -207,6 +233,8 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
                     View subscription
                   </a>
                 </>
+              ) : agent.id === 'opencode' && opencodeKeyHelp ? (
+                <>{opencodeKeyHelp}</>
               ) : agent.id === 'opencode' ? (
                 <>
                   Create a Scaleway API key with <strong>GenerativeApisModelAccess</strong> permission at{' '}

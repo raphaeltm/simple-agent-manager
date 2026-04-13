@@ -1,9 +1,21 @@
-import type { AgentInfo, AgentPermissionMode, AgentSettingsResponse, AgentType } from '@simple-agent-manager/shared';
-import { AGENT_PERMISSION_MODE_LABELS, VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
+import type {
+  AgentInfo,
+  AgentPermissionMode,
+  AgentSettingsResponse,
+  AgentType,
+  OpenCodeProvider,
+  SaveAgentSettingsRequest,
+} from '@simple-agent-manager/shared';
+import {
+  AGENT_PERMISSION_MODE_LABELS,
+  OPENCODE_PROVIDER_OPTIONS,
+  OPENCODE_PROVIDERS,
+  VALID_PERMISSION_MODES,
+} from '@simple-agent-manager/shared';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { deleteAgentSettings,getAgentSettings, listAgents, saveAgentSettings } from '../lib/api';
+import { deleteAgentSettings, getAgentSettings, listAgents, saveAgentSettings } from '../lib/api';
 
 /**
  * Per-agent settings card for model selection and permission mode.
@@ -16,22 +28,35 @@ function AgentSettingsCard({
 }: {
   agent: AgentInfo;
   settings: AgentSettingsResponse | null;
-  onSave: (agentType: AgentType, model: string | null, permissionMode: AgentPermissionMode | null) => Promise<void>;
+  onSave: (agentType: AgentType, data: SaveAgentSettingsRequest) => Promise<void>;
   onReset: (agentType: AgentType) => Promise<void>;
 }) {
   const [model, setModel] = useState(settings?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
     settings?.permissionMode ?? 'default'
   );
+  const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider | ''>(
+    settings?.opencodeProvider ?? ''
+  );
+  const [opencodeBaseUrl, setOpencodeBaseUrl] = useState(settings?.opencodeBaseUrl ?? '');
+  const [opencodeProviderName, setOpencodeProviderName] = useState(settings?.opencodeProviderName ?? '');
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  const isOpenCode = agent.id === 'opencode';
+  const selectedProvider = opencodeProvider || null;
+  const providerMeta = selectedProvider ? OPENCODE_PROVIDERS[selectedProvider] : null;
+  const showBaseUrl = selectedProvider === 'custom' || selectedProvider === 'openai-compatible';
+
   // Sync state when settings prop changes
   useEffect(() => {
     setModel(settings?.model ?? '');
     setPermissionMode(settings?.permissionMode ?? 'default');
+    setOpencodeProvider(settings?.opencodeProvider ?? '');
+    setOpencodeBaseUrl(settings?.opencodeBaseUrl ?? '');
+    setOpencodeProviderName(settings?.opencodeProviderName ?? '');
   }, [settings]);
 
   const handleSave = async () => {
@@ -39,11 +64,19 @@ function AgentSettingsCard({
       setError(null);
       setSuccess(false);
       setSaving(true);
-      await onSave(
-        agent.id,
-        model.trim() || null,
-        permissionMode
-      );
+
+      const data: SaveAgentSettingsRequest = {
+        model: model.trim() || null,
+        permissionMode,
+      };
+
+      if (isOpenCode) {
+        data.opencodeProvider = opencodeProvider || null;
+        data.opencodeBaseUrl = opencodeBaseUrl.trim() || null;
+        data.opencodeProviderName = opencodeProviderName.trim() || null;
+      }
+
+      await onSave(agent.id, data);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
@@ -61,6 +94,9 @@ function AgentSettingsCard({
       await onReset(agent.id);
       setModel('');
       setPermissionMode('default');
+      setOpencodeProvider('');
+      setOpencodeBaseUrl('');
+      setOpencodeProviderName('');
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
@@ -71,6 +107,9 @@ function AgentSettingsCard({
   };
 
   const modelPlaceholder = (() => {
+    if (isOpenCode && providerMeta) {
+      return providerMeta.modelPlaceholder;
+    }
     switch (agent.id) {
       case 'claude-code':
         return 'e.g. claude-opus-4-6, claude-sonnet-4-5-20250929';
@@ -79,15 +118,22 @@ function AgentSettingsCard({
       case 'google-gemini':
         return 'e.g. gemini-2.5-pro';
       case 'opencode':
-        return 'e.g. scaleway/qwen3-coder-30b-a3b-instruct, scaleway/devstral-2-123b-instruct-2512';
+        return 'e.g. scaleway/qwen3-coder-30b-a3b-instruct';
       default:
         return 'Model identifier';
     }
   })();
 
-  const hasChanges =
-    (model.trim() || null) !== (settings?.model ?? null) ||
-    permissionMode !== (settings?.permissionMode ?? 'default');
+  const hasChanges = (() => {
+    if ((model.trim() || null) !== (settings?.model ?? null)) return true;
+    if (permissionMode !== (settings?.permissionMode ?? 'default')) return true;
+    if (isOpenCode) {
+      if ((opencodeProvider || null) !== (settings?.opencodeProvider ?? null)) return true;
+      if ((opencodeBaseUrl.trim() || null) !== (settings?.opencodeBaseUrl ?? null)) return true;
+      if ((opencodeProviderName.trim() || null) !== (settings?.opencodeProviderName ?? null)) return true;
+    }
+    return false;
+  })();
 
   return (
     <div className="p-4 rounded-md border border-border-default bg-inset" data-testid={`agent-settings-${agent.id}`}>
@@ -104,6 +150,76 @@ function AgentSettingsCard({
       {success && (
         <div className="mb-3">
           <Alert variant="success">Settings saved</Alert>
+        </div>
+      )}
+
+      {/* OpenCode provider selection */}
+      {isOpenCode && (
+        <div className="mb-4">
+          <div className="text-sm font-medium text-fg-primary mb-1">Inference Provider</div>
+          <div className="text-xs text-fg-muted mb-2">
+            Select the AI provider for OpenCode inference. Leave as &quot;Default&quot; to auto-detect.
+          </div>
+          <select
+            value={opencodeProvider}
+            onChange={(e) => {
+              setOpencodeProvider(e.target.value as OpenCodeProvider | '');
+              // Clear base URL when switching away from providers that need it
+              if (e.target.value !== 'custom' && e.target.value !== 'openai-compatible') {
+                setOpencodeBaseUrl('');
+              }
+            }}
+            className="w-full py-2 px-3 rounded-md border border-border-default bg-surface text-fg-primary text-sm outline-none box-border"
+            data-testid="opencode-provider-select"
+          >
+            <option value="">Default (auto-detect)</option>
+            {OPENCODE_PROVIDER_OPTIONS.map((p) => (
+              <option key={p} value={p}>
+                {OPENCODE_PROVIDERS[p].label}
+              </option>
+            ))}
+          </select>
+          {providerMeta && !providerMeta.requiresApiKey && (
+            <div className="text-xs text-fg-muted py-2 px-3 rounded-md bg-inset mt-2 border border-border-default">
+              {providerMeta.keyHelpText}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Base URL (for custom/openai-compatible) */}
+      {isOpenCode && showBaseUrl && (
+        <div className="mb-4">
+          <div className="text-sm font-medium text-fg-primary mb-1">Base URL</div>
+          <div className="text-xs text-fg-muted mb-2">
+            The HTTPS endpoint for your provider&apos;s API.
+          </div>
+          <input
+            type="url"
+            value={opencodeBaseUrl}
+            onChange={(e) => setOpencodeBaseUrl(e.target.value)}
+            placeholder="https://api.example.com/v1"
+            className="w-full py-2 px-3 rounded-md border border-border-default bg-surface text-fg-primary text-sm outline-none box-border"
+            data-testid="opencode-base-url-input"
+          />
+        </div>
+      )}
+
+      {/* Custom provider name */}
+      {isOpenCode && selectedProvider === 'custom' && (
+        <div className="mb-4">
+          <div className="text-sm font-medium text-fg-primary mb-1">Provider Name</div>
+          <div className="text-xs text-fg-muted mb-2">
+            A display name for your custom provider.
+          </div>
+          <input
+            type="text"
+            value={opencodeProviderName}
+            onChange={(e) => setOpencodeProviderName(e.target.value)}
+            placeholder="e.g. My Custom Provider"
+            className="w-full py-2 px-3 rounded-md border border-border-default bg-surface text-fg-primary text-sm outline-none box-border"
+            data-testid="opencode-provider-name-input"
+          />
         </div>
       )}
 
@@ -225,10 +341,9 @@ export function AgentSettingsSection() {
 
   const handleSave = async (
     agentType: AgentType,
-    model: string | null,
-    permissionMode: AgentPermissionMode | null
+    data: SaveAgentSettingsRequest
   ) => {
-    const result = await saveAgentSettings(agentType, { model, permissionMode });
+    const result = await saveAgentSettings(agentType, data);
     setSettingsMap((prev) => ({ ...prev, [agentType]: result }));
   };
 

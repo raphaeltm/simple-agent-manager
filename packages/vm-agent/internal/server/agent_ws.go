@@ -313,10 +313,12 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 			"workspace", workspaceID, "sessionId", sessionID, "count", len(prefetchedMcpServers))
 	}
 
-	// Inject per-session profile overrides (model/permissionMode from agent profiles).
+	// Inject per-session profile overrides (model/permissionMode/opencode from agent profiles).
 	if ovr, ok := s.sessionProfileOvr[hostKey]; ok {
 		cfg.ModelOverride = ovr.Model
 		cfg.PermissionModeOverride = ovr.PermissionMode
+		cfg.OpencodeProviderOverride = ovr.OpencodeProvider
+		cfg.OpencodeBaseUrlOverride = ovr.OpencodeBaseUrl
 	}
 
 	hostCfg := acp.SessionHostConfig{

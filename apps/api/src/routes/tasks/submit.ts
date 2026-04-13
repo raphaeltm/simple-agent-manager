@@ -415,6 +415,8 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
       taskMode,
       model: resolvedProfile?.model ?? null,
       permissionMode: resolvedProfile?.permissionMode ?? null,
+      opencodeProvider: null,
+      opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
       attachments: validatedAttachments.length > 0 ? validatedAttachments : null,
       projectScaling: {

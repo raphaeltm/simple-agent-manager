@@ -531,6 +531,8 @@ export async function handleDispatchTask(
       taskMode: resolvedTaskMode,
       model: resolvedProfile?.model ?? null,
       permissionMode: resolvedProfile?.permissionMode ?? null,
+      opencodeProvider: null,
+      opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,

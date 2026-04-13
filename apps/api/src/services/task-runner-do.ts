@@ -59,6 +59,10 @@ export async function startTaskRunnerDO(
     model?: string | null;
     /** Permission mode override from agent profile. Null = use agent default. */
     permissionMode?: string | null;
+    /** OpenCode inference provider override. Null = use agent default. */
+    opencodeProvider?: string | null;
+    /** OpenCode base URL override for custom/openai-compatible providers. */
+    opencodeBaseUrl?: string | null;
     /** System prompt text to append to the initial prompt (from agent profile). */
     systemPromptAppend?: string | null;
     /** File attachments uploaded to R2 before task submission. */
@@ -101,6 +105,8 @@ export async function startTaskRunnerDO(
       taskMode: input.taskMode ?? 'task',
       model: input.model ?? null,
       permissionMode: input.permissionMode ?? null,
+      opencodeProvider: input.opencodeProvider ?? null,
+      opencodeBaseUrl: input.opencodeBaseUrl ?? null,
       systemPromptAppend: input.systemPromptAppend ?? null,
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,

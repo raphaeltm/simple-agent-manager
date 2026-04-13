@@ -61,6 +61,10 @@ export interface TaskRunConfig {
   model: string | null;
   /** Permission mode override from agent profile (forwarded to VM agent). Null = use agent default. */
   permissionMode: string | null;
+  /** OpenCode inference provider override (forwarded to VM agent). Null = use agent default. */
+  opencodeProvider: string | null;
+  /** OpenCode base URL override for custom/openai-compatible providers. Null = use agent default. */
+  opencodeBaseUrl: string | null;
   /** System prompt text to append to the initial prompt (from agent profile). Null = no append. */
   systemPromptAppend: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */

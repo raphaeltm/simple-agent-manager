@@ -668,6 +668,12 @@ export const agentSettings = sqliteTable(
     allowedTools: text('allowed_tools'),
     deniedTools: text('denied_tools'),
     additionalEnv: text('additional_env'),
+    /** OpenCode inference provider: 'platform' | 'scaleway' | 'google-vertex' | 'openai-compatible' | 'anthropic' | 'custom'. null = use default. */
+    opencodeProvider: text('opencode_provider'),
+    /** Base URL for custom/openai-compatible OpenCode providers. */
+    opencodeBaseUrl: text('opencode_base_url'),
+    /** Display name for custom OpenCode providers. */
+    opencodeProviderName: text('opencode_provider_name'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .notNull()
       .default(sql`(cast(unixepoch() * 1000 as integer))`),

@@ -233,12 +233,16 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     return c.json({
       model: null,
       permissionMode: null,
+      opencodeProvider: null,
+      opencodeBaseUrl: null,
     });
   }
 
   return c.json({
     model: row.model,
     permissionMode: row.permissionMode,
+    opencodeProvider: row.opencodeProvider ?? null,
+    opencodeBaseUrl: row.opencodeBaseUrl ?? null,
   });
 });
 runtimeRoutes.get('/:id/runtime', async (c) => {
