@@ -20,20 +20,14 @@ export function AgentKeysSection() {
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      const [agentResult, credResult] = await Promise.all([
+      const [agentResult, credResult, opencodeSettings] = await Promise.all([
         listAgents(),
         listAgentCredentials(),
+        getAgentSettings('opencode').catch(() => null),
       ]);
       setAgents(agentResult.agents);
       setCredentials(credResult.credentials);
-
-      // Fetch opencode provider setting for dynamic key labels
-      try {
-        const opencodeSettings = await getAgentSettings('opencode');
-        setOpencodeProvider((opencodeSettings.opencodeProvider as OpenCodeProvider) ?? null);
-      } catch {
-        // Agent settings may not exist yet — ignore
-      }
+      setOpencodeProvider((opencodeSettings?.opencodeProvider as OpenCodeProvider) ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load agent data');
     } finally {
