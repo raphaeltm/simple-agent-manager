@@ -45,61 +45,61 @@ Agents operating across sessions in a project have no shared memory. Each new se
 
 ### Phase 1: Data Model + MCP Tools
 
-- [ ] 1.1 Add shared types in `packages/shared/src/types/knowledge.ts`
+- [x]1.1 Add shared types in `packages/shared/src/types/knowledge.ts`
   - `KnowledgeEntity`, `KnowledgeObservation`, `KnowledgeRelation` types
   - Request/response types for all operations
   - Constants: `KNOWLEDGE_ENTITY_TYPES`, `KNOWLEDGE_SOURCE_TYPES`, `KNOWLEDGE_RELATION_TYPES`
   - Configurable defaults: `KNOWLEDGE_DEFAULTS`
-- [ ] 1.2 Export shared types from `packages/shared/src/types/index.ts`
-- [ ] 1.3 Add migration 016 in `apps/api/src/durable-objects/project-data/migrations.ts`
+- [x]1.2 Export shared types from `packages/shared/src/types/index.ts`
+- [x]1.3 Add migration 016 in `apps/api/src/durable-objects/project-data/migrations.ts`
   - `knowledge_entities` table
   - `knowledge_observations` table with FTS5 triggers
   - `knowledge_relations` table
   - `knowledge_observations_fts` FTS5 virtual table
   - Indexes on entity_type, entity_id, source_type, is_active
-- [ ] 1.4 Add Valibot row schemas in `row-schemas.ts`
+- [x]1.4 Add Valibot row schemas in `row-schemas.ts`
   - `KnowledgeEntityRowSchema`, `KnowledgeObservationRowSchema`, `KnowledgeRelationRowSchema`
   - Parser functions: `parseKnowledgeEntityRow()`, etc.
-- [ ] 1.5 Create DO service module `apps/api/src/durable-objects/project-data/knowledge.ts`
+- [x]1.5 Create DO service module `apps/api/src/durable-objects/project-data/knowledge.ts`
   - `createEntity()`, `getEntity()`, `listEntities()`, `updateEntity()`, `deleteEntity()`
   - `addObservation()`, `updateObservation()`, `removeObservation()`, `confirmObservation()`
   - `searchObservations()` — FTS5 MATCH with LIKE fallback
   - `getRelevantKnowledge()` — FTS5 + recency/confidence weighting
   - `createRelation()`, `getRelated()`, `flagContradiction()`
-- [ ] 1.6 Add DO methods in `project-data/index.ts`
+- [x]1.6 Add DO methods in `project-data/index.ts`
   - Delegate to knowledge service module
   - Broadcast events on mutations
-- [ ] 1.7 Add service wrapper methods in `apps/api/src/services/project-data.ts`
-- [ ] 1.8 Add configurable limits to `_helpers.ts` `getMcpLimits()`
+- [x]1.7 Add service wrapper methods in `apps/api/src/services/project-data.ts`
+- [x]1.8 Add configurable limits to `_helpers.ts` `getMcpLimits()`
   - `KNOWLEDGE_MAX_ENTITIES_PER_PROJECT` (default: 500)
   - `KNOWLEDGE_MAX_OBSERVATIONS_PER_ENTITY` (default: 100)
   - `KNOWLEDGE_SEARCH_LIMIT` (default: 20)
   - `KNOWLEDGE_AUTO_RETRIEVE_LIMIT` (default: 20)
   - `KNOWLEDGE_OBSERVATION_MAX_LENGTH` (default: 1000)
   - `KNOWLEDGE_ENTITY_NAME_MAX_LENGTH` (default: 200)
-- [ ] 1.9 Create MCP tool handlers in `apps/api/src/routes/mcp/knowledge-tools.ts`
+- [x]1.9 Create MCP tool handlers in `apps/api/src/routes/mcp/knowledge-tools.ts`
   - `handleAddKnowledge`, `handleUpdateKnowledge`, `handleRemoveKnowledge`
   - `handleGetKnowledge`, `handleSearchKnowledge`
   - `handleGetProjectKnowledge`, `handleGetRelevantKnowledge`
   - `handleRelateKnowledge`, `handleGetRelated`
   - `handleConfirmKnowledge`, `handleFlagContradiction`
-- [ ] 1.10 Create tool definitions in `apps/api/src/routes/mcp/tool-definitions-knowledge-tools.ts`
-- [ ] 1.11 Register tools in `tool-definitions.ts` MCP_TOOLS array
-- [ ] 1.12 Add switch cases in `apps/api/src/routes/mcp/index.ts`
-- [ ] 1.13 Write capability tests for MCP knowledge tools
+- [x]1.10 Create tool definitions in `apps/api/src/routes/mcp/tool-definitions-knowledge-tools.ts`
+- [x]1.11 Register tools in `tool-definitions.ts` MCP_TOOLS array
+- [x]1.12 Add switch cases in `apps/api/src/routes/mcp/index.ts`
+- [x]1.13 Write capability tests for MCP knowledge tools
 
 ### Phase 2: Agent Integration
 
-- [ ] 2.1 Add knowledge system prompt injection
+- [x]2.1 Add knowledge system prompt injection
   - When agent session starts, inject guidance about knowledge tools
   - Located in agent prompt construction (check existing system prompt injection patterns)
-- [ ] 2.2 Implement auto-retrieval of relevant knowledge on session start
+- [x]2.2 Implement auto-retrieval of relevant knowledge on session start
   - Call `getRelevantKnowledge()` with task description/initial prompt as context
   - Inject top-N observations into system prompt
 
 ### Phase 3: UI — Knowledge Browser
 
-- [ ] 3.1 Add REST API routes for knowledge CRUD
+- [x]3.1 Add REST API routes for knowledge CRUD
   - `GET /api/projects/:projectId/knowledge` — list entities
   - `GET /api/projects/:projectId/knowledge/:entityId` — get entity with observations
   - `POST /api/projects/:projectId/knowledge` — create entity
@@ -109,24 +109,24 @@ Agents operating across sessions in a project have no shared memory. Each new se
   - `PATCH /api/projects/:projectId/knowledge/observations/:observationId` — update observation
   - `DELETE /api/projects/:projectId/knowledge/observations/:observationId` — delete observation
   - `GET /api/projects/:projectId/knowledge/search?q=` — search
-- [ ] 3.2 Add API client functions in `apps/web/src/lib/api/knowledge.ts`
-- [ ] 3.3 Add "Knowledge" nav item to `PROJECT_NAV_ITEMS` in `NavSidebar.tsx` (Brain icon)
-- [ ] 3.4 Add route in `App.tsx`: `<Route path="knowledge" element={<KnowledgePage />} />`
-- [ ] 3.5 Build `KnowledgePage` component
+- [x]3.2 Add API client functions in `apps/web/src/lib/api/knowledge.ts`
+- [x]3.3 Add "Knowledge" nav item to `PROJECT_NAV_ITEMS` in `NavSidebar.tsx` (Brain icon)
+- [x]3.4 Add route in `App.tsx`: `<Route path="knowledge" element={<KnowledgePage />} />`
+- [x]3.5 Build `KnowledgePage` component
   - Entity list with search + entity type filter chips
   - Entity detail panel (slide-over on mobile, side panel on desktop)
   - Observation list with confidence indicators, source badges
   - Entity CRUD, observation inline editing
   - Empty state, loading state, error state
-- [ ] 3.6 Mobile responsive layout
-- [ ] 3.7 Playwright visual audit (mobile 375px + desktop 1280px, diverse mock data)
+- [x]3.6 Mobile responsive layout
+- [x]3.7 Playwright visual audit (mobile 375px + desktop 1280px, diverse mock data)
 
 ### Quality
 
-- [ ] Q.1 All configurable values use env vars with defaults (Constitution Principle XI)
-- [ ] Q.2 No files exceed 500 lines (rule 18)
-- [ ] Q.3 Documentation updated (CLAUDE.md recent changes)
-- [ ] Q.4 Lint + typecheck + test pass
+- [x]Q.1 All configurable values use env vars with defaults (Constitution Principle XI)
+- [x]Q.2 No files exceed 500 lines (rule 18)
+- [x]Q.3 Documentation updated (CLAUDE.md recent changes)
+- [x]Q.4 Lint + typecheck + test pass
 
 ## Acceptance Criteria
 

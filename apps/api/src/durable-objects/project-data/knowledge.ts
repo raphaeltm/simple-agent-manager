@@ -186,8 +186,11 @@ export function updateObservation(
   newContent: string,
   confidence: number | null,
 ) {
+  // Join with entities to verify the observation belongs to a valid entity in this DO
   const rows = sql.exec(
-    'SELECT * FROM knowledge_observations WHERE id = ?',
+    `SELECT o.* FROM knowledge_observations o
+     JOIN knowledge_entities e ON e.id = o.entity_id
+     WHERE o.id = ?`,
     observationId,
   ).toArray();
   if (rows.length === 0) throw new Error(`Observation not found: ${observationId}`);
@@ -219,7 +222,13 @@ export function updateObservation(
 }
 
 export function removeObservation(sql: SqlStorage, observationId: string) {
-  const rows = sql.exec('SELECT entity_id FROM knowledge_observations WHERE id = ?', observationId).toArray();
+  // Join with entities to verify the observation belongs to a valid entity in this DO
+  const rows = sql.exec(
+    `SELECT o.entity_id FROM knowledge_observations o
+     JOIN knowledge_entities e ON e.id = o.entity_id
+     WHERE o.id = ?`,
+    observationId,
+  ).toArray();
   if (rows.length === 0) throw new Error(`Observation not found: ${observationId}`);
 
   sql.exec('UPDATE knowledge_observations SET is_active = 0 WHERE id = ?', observationId);
@@ -476,11 +485,16 @@ function removeObservationFromFts(sql: SqlStorage, observationId: string) {
   }
 }
 
+// FTS5 reserved keywords that must be stripped to prevent query injection
+const FTS5_RESERVED = new Set(['AND', 'OR', 'NOT', 'NEAR']);
+
 function buildFtsQuery(query: string): string | null {
   const cleaned = query.replace(/[^\w\s]/g, ' ').trim();
   if (!cleaned) return null;
-  // Split into words and join with AND for multi-word queries
-  const words = cleaned.split(/\s+/).filter(Boolean);
+  // Split into words, strip FTS5 operators, and join for implicit AND matching
+  const words = cleaned
+    .split(/\s+/)
+    .filter((w) => w && !FTS5_RESERVED.has(w.toUpperCase()));
   if (words.length === 0) return null;
   return words.join(' ');
 }

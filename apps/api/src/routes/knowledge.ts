@@ -52,7 +52,9 @@ knowledgeRoutes.get('/', async (c) => {
   await requireOwnedProject(db, projectId, auth.user.id);
 
   const entityType = c.req.query('entityType') || null;
-  const limit = Math.min(parseInt(c.req.query('limit') || '50', 10) || 50, 200);
+  const defaultPageSize = getLimit(c.env, 'KNOWLEDGE_LIST_PAGE_SIZE', KNOWLEDGE_DEFAULTS.listPageSize);
+  const maxPageSize = getLimit(c.env, 'KNOWLEDGE_LIST_MAX_PAGE_SIZE', KNOWLEDGE_DEFAULTS.listMaxPageSize);
+  const limit = Math.min(parseInt(c.req.query('limit') || String(defaultPageSize), 10) || defaultPageSize, maxPageSize);
   const offset = parseInt(c.req.query('offset') || '0', 10) || 0;
 
   const result = await projectDataService.listKnowledgeEntities(
@@ -76,7 +78,8 @@ knowledgeRoutes.get('/search', async (c) => {
   const entityType = c.req.query('entityType') || null;
   const minConfidence = c.req.query('minConfidence') ? parseFloat(c.req.query('minConfidence')!) : null;
   const searchLimit = getLimit(c.env, 'KNOWLEDGE_SEARCH_LIMIT', KNOWLEDGE_DEFAULTS.searchLimit);
-  const limit = Math.min(parseInt(c.req.query('limit') || String(searchLimit), 10) || searchLimit, 100);
+  const searchMaxLimit = getLimit(c.env, 'KNOWLEDGE_SEARCH_MAX_LIMIT', KNOWLEDGE_DEFAULTS.searchMaxLimit);
+  const limit = Math.min(parseInt(c.req.query('limit') || String(searchLimit), 10) || searchLimit, searchMaxLimit);
 
   const results = await projectDataService.searchKnowledgeObservations(
     c.env, projectId, query, entityType, minConfidence, limit,

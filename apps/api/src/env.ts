@@ -254,6 +254,9 @@ export interface Env {
   KNOWLEDGE_OBSERVATION_MAX_LENGTH?: string;       // Max observation text length (default: 1000)
   KNOWLEDGE_ENTITY_NAME_MAX_LENGTH?: string;       // Max entity name length (default: 200)
   KNOWLEDGE_DESCRIPTION_MAX_LENGTH?: string;       // Max entity description length (default: 2000)
+  KNOWLEDGE_LIST_PAGE_SIZE?: string;               // Default page size for entity list (default: 50)
+  KNOWLEDGE_LIST_MAX_PAGE_SIZE?: string;           // Max page size for entity list (default: 200)
+  KNOWLEDGE_SEARCH_MAX_LIMIT?: string;             // Max search results cap (default: 100)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;

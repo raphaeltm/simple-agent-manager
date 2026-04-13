@@ -217,8 +217,11 @@ export async function handleGetProjectKnowledge(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
+  const limits = getMcpLimits(env);
   const entityType = typeof params.entityType === 'string' ? params.entityType : null;
-  const limit = typeof params.limit === 'number' ? Math.min(Math.max(1, params.limit), 100) : 50;
+  const limit = typeof params.limit === 'number'
+    ? Math.min(Math.max(1, params.limit), limits.knowledgeSearchLimit * 5)
+    : limits.knowledgeSearchLimit;
 
   const result = await projectDataService.listKnowledgeEntities(
     env, tokenData.projectId, entityType, limit, 0,
