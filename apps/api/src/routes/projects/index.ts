@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 import { requireApproved,requireAuth } from '../../middleware/auth';
 import { acpSessionRoutes } from './acp-sessions';
 import { browserProxyRoutes } from './browser';

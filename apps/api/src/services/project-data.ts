@@ -7,7 +7,7 @@
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
 import type { ProjectData } from '../durable-objects/project-data';
-import type { Env } from '../index';
+import type { Env } from '../env';
 
 /**
  * Get a typed DO stub for the given project and ensure the DO knows its projectId.

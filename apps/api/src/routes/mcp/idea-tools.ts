@@ -3,7 +3,7 @@
  * find_related_ideas) and idea management (create_idea, update_idea, get_idea,
  * list_ideas, search_ideas).
  */
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import * as projectDataService from '../../services/project-data';

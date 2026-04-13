@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 
 import { createAuth } from '../auth';
 import * as schema from '../db/schema';
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { getBetterAuthSecret } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';

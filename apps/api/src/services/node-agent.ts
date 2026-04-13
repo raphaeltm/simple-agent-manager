@@ -1,4 +1,4 @@
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';

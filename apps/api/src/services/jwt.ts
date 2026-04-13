@@ -1,7 +1,7 @@
 import { DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS } from '@simple-agent-manager/shared';
 import { decodeJwt, exportJWK, importPKCS8, importSPKI,jwtVerify, SignJWT } from 'jose';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 
 // Key ID format: key-YYYY-MM (rotates monthly)
 const KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;

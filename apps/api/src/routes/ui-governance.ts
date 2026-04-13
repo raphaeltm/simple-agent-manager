@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { getUserId,requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {

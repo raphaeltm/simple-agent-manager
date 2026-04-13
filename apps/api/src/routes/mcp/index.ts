@@ -9,7 +9,7 @@
  */
 import { Hono } from 'hono';
 
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 import {
   authenticateMcpRequest,
   checkMcpRateLimit,

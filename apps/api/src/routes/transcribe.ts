@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
 import { requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';

@@ -7,7 +7,7 @@
  *
  * See: specs/023-admin-observability/tasks.md (T023-T024)
  */
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { purgeExpiredErrors, type PurgeResult } from '../services/observability';
 
 export async function runObservabilityPurge(env: Env): Promise<PurgeResult> {

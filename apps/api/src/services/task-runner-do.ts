@@ -8,7 +8,7 @@
 import type { CredentialProvider, TaskAttachment,TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 
 import type { StartTaskInput, TaskRunner } from '../durable-objects/task-runner';
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 
 /**

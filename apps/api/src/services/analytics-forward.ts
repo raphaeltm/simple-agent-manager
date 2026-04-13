@@ -6,7 +6,7 @@
  *
  * Runs daily via cron. Uses a KV cursor to avoid re-sending events.
  */
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 
 // ─── Defaults (configurable via env vars per constitution Principle XI) ───

@@ -3,7 +3,7 @@
  *
  * Used across all MCP tool handler files (instruction-tools, task-tools, session-tools, idea-tools).
  */
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { type McpTokenData,validateMcpToken } from '../../services/mcp-token';

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 import { crudRoutes } from './crud';
 import { runRoutes } from './run';
 import { submitRoutes } from './submit';

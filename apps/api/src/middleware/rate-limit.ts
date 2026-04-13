@@ -7,7 +7,7 @@
 
 import type { Context, MiddlewareHandler,Next } from 'hono';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { AppError } from './error';
 

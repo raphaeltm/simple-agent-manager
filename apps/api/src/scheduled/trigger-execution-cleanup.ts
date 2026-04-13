@@ -26,7 +26,7 @@ import {
   DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 
 const log = createModuleLogger('trigger-execution-cleanup');

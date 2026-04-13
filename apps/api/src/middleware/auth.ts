@@ -2,7 +2,7 @@ import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 import type { Context, MiddlewareHandler,Next } from 'hono';
 
 import { createAuth } from '../auth';
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { AppError, errors } from './error';
 

@@ -7,7 +7,7 @@ import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
 import { and, eq, like, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import type { AppDb } from '../middleware/project-auth';

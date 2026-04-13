@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 import { agentSessionRoutes } from './agent-sessions';
 import { browserRoutes } from './browser';
 import { crudRoutes } from './crud';

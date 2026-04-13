@@ -3,7 +3,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from './db/schema';
-import type { Env } from './index';
+import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { getBetterAuthSecret } from './lib/secrets';
 
