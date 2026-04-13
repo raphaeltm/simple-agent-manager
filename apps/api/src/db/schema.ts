@@ -1224,7 +1224,7 @@ export type NewPlatformCredentialRow = typeof platformCredentials.$inferInsert;
 // Compute Usage
 // =============================================================================
 
-/** Tracks vCPU-hour usage per workspace for metering and quota enforcement. */
+/** Tracks workspace usage events that are aggregated to node-billed vCPU-hours for metering and quota enforcement. */
 export const computeUsage = sqliteTable(
   'compute_usage',
   {

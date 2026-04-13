@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { getCurrentPeriodBounds } from '../../src/services/compute-usage';
+import { calculateNodeVcpuHours, getCurrentPeriodBounds } from '../../src/services/compute-usage';
 
 describe('getCurrentPeriodBounds', () => {
   it('returns start at the first day of the current month at midnight UTC', () => {
@@ -52,36 +52,12 @@ describe('getCurrentPeriodBounds', () => {
 });
 
 describe('vCPU-hours calculation logic', () => {
-  // These test the pure math that calculateVcpuHoursForPeriod uses internally.
-  // We can't call the function directly without a DB, but we can verify the
-  // calculation formula matches expectations.
-
-  function calculateVcpuHours(
-    sessions: Array<{ startedAt: string; endedAt: string | null; vcpuCount: number }>,
-    periodStart: Date,
-    periodEnd: Date,
-    now: Date = new Date()
-  ): number {
-    let totalMs = 0;
-    for (const row of sessions) {
-      const sessionStart = new Date(row.startedAt);
-      const sessionEnd = row.endedAt ? new Date(row.endedAt) : now;
-      const effectiveStart = sessionStart < periodStart ? periodStart : sessionStart;
-      const effectiveEnd = sessionEnd > periodEnd ? periodEnd : sessionEnd;
-      const durationMs = effectiveEnd.getTime() - effectiveStart.getTime();
-      if (durationMs > 0) {
-        totalMs += durationMs * row.vcpuCount;
-      }
-    }
-    return totalMs / (1000 * 60 * 60);
-  }
-
   const periodStart = new Date('2026-04-01T00:00:00.000Z');
   const periodEnd = new Date('2026-04-30T23:59:59.999Z');
 
   it('calculates correctly for session fully inside the period', () => {
-    const result = calculateVcpuHours(
-      [{ startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T02:00:00Z', vcpuCount: 4 }],
+    const result = calculateNodeVcpuHours(
+      [{ nodeId: 'node-1', startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T02:00:00Z', vcpuCount: 4 }],
       periodStart,
       periodEnd
     );
@@ -90,8 +66,8 @@ describe('vCPU-hours calculation logic', () => {
   });
 
   it('clamps session start to period start when session starts before period', () => {
-    const result = calculateVcpuHours(
-      [{ startedAt: '2026-03-28T00:00:00Z', endedAt: '2026-04-02T00:00:00Z', vcpuCount: 2 }],
+    const result = calculateNodeVcpuHours(
+      [{ nodeId: 'node-1', startedAt: '2026-03-28T00:00:00Z', endedAt: '2026-04-02T00:00:00Z', vcpuCount: 2 }],
       periodStart,
       periodEnd
     );
@@ -100,8 +76,8 @@ describe('vCPU-hours calculation logic', () => {
   });
 
   it('clamps session end to period end when session extends past period', () => {
-    const result = calculateVcpuHours(
-      [{ startedAt: '2026-04-29T00:00:00Z', endedAt: '2026-05-05T00:00:00Z', vcpuCount: 2 }],
+    const result = calculateNodeVcpuHours(
+      [{ nodeId: 'node-1', startedAt: '2026-04-29T00:00:00Z', endedAt: '2026-05-05T00:00:00Z', vcpuCount: 2 }],
       periodStart,
       periodEnd
     );
@@ -111,8 +87,8 @@ describe('vCPU-hours calculation logic', () => {
   });
 
   it('returns zero for session entirely before the period', () => {
-    const result = calculateVcpuHours(
-      [{ startedAt: '2026-03-01T00:00:00Z', endedAt: '2026-03-15T00:00:00Z', vcpuCount: 4 }],
+    const result = calculateNodeVcpuHours(
+      [{ nodeId: 'node-1', startedAt: '2026-03-01T00:00:00Z', endedAt: '2026-03-15T00:00:00Z', vcpuCount: 4 }],
       periodStart,
       periodEnd
     );
@@ -120,8 +96,8 @@ describe('vCPU-hours calculation logic', () => {
   });
 
   it('returns zero for session entirely after the period', () => {
-    const result = calculateVcpuHours(
-      [{ startedAt: '2026-05-01T00:00:00Z', endedAt: '2026-05-02T00:00:00Z', vcpuCount: 4 }],
+    const result = calculateNodeVcpuHours(
+      [{ nodeId: 'node-1', startedAt: '2026-05-01T00:00:00Z', endedAt: '2026-05-02T00:00:00Z', vcpuCount: 4 }],
       periodStart,
       periodEnd
     );
@@ -130,8 +106,8 @@ describe('vCPU-hours calculation logic', () => {
 
   it('uses current time for running sessions (null endedAt)', () => {
     const now = new Date('2026-04-15T12:00:00Z');
-    const result = calculateVcpuHours(
-      [{ startedAt: '2026-04-15T10:00:00Z', endedAt: null, vcpuCount: 2 }],
+    const result = calculateNodeVcpuHours(
+      [{ nodeId: 'node-1', startedAt: '2026-04-15T10:00:00Z', endedAt: null, vcpuCount: 2 }],
       periodStart,
       periodEnd,
       now
@@ -140,11 +116,11 @@ describe('vCPU-hours calculation logic', () => {
     expect(result).toBe(4);
   });
 
-  it('sums multiple concurrent sessions independently', () => {
-    const result = calculateVcpuHours(
+  it('counts overlapping sessions on different nodes independently', () => {
+    const result = calculateNodeVcpuHours(
       [
-        { startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T01:00:00Z', vcpuCount: 4 },
-        { startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T01:00:00Z', vcpuCount: 8 },
+        { nodeId: 'node-1', startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T01:00:00Z', vcpuCount: 4 },
+        { nodeId: 'node-2', startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T01:00:00Z', vcpuCount: 8 },
       ],
       periodStart,
       periodEnd
@@ -153,9 +129,35 @@ describe('vCPU-hours calculation logic', () => {
     expect(result).toBe(12);
   });
 
+  it('merges overlapping sessions on the same node', () => {
+    const result = calculateNodeVcpuHours(
+      [
+        { nodeId: 'node-1', startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T02:00:00Z', vcpuCount: 4 },
+        { nodeId: 'node-1', startedAt: '2026-04-10T01:00:00Z', endedAt: '2026-04-10T03:00:00Z', vcpuCount: 4 },
+      ],
+      periodStart,
+      periodEnd
+    );
+
+    expect(result).toBe(12);
+  });
+
+  it('does not double-count identical overlapping workspace sessions on one node', () => {
+    const result = calculateNodeVcpuHours(
+      [
+        { nodeId: 'node-1', startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T01:00:00Z', vcpuCount: 4 },
+        { nodeId: 'node-1', startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T01:00:00Z', vcpuCount: 4 },
+      ],
+      periodStart,
+      periodEnd
+    );
+
+    expect(result).toBe(4);
+  });
+
   it('returns zero for zero-duration session', () => {
-    const result = calculateVcpuHours(
-      [{ startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T00:00:00Z', vcpuCount: 4 }],
+    const result = calculateNodeVcpuHours(
+      [{ nodeId: 'node-1', startedAt: '2026-04-10T00:00:00Z', endedAt: '2026-04-10T00:00:00Z', vcpuCount: 4 }],
       periodStart,
       periodEnd
     );
@@ -163,13 +165,13 @@ describe('vCPU-hours calculation logic', () => {
   });
 
   it('returns zero for empty sessions array', () => {
-    const result = calculateVcpuHours([], periodStart, periodEnd);
+    const result = calculateNodeVcpuHours([], periodStart, periodEnd);
     expect(result).toBe(0);
   });
 
   it('handles session spanning entire period', () => {
-    const result = calculateVcpuHours(
-      [{ startedAt: '2026-03-15T00:00:00Z', endedAt: '2026-05-15T00:00:00Z', vcpuCount: 1 }],
+    const result = calculateNodeVcpuHours(
+      [{ nodeId: 'node-1', startedAt: '2026-03-15T00:00:00Z', endedAt: '2026-05-15T00:00:00Z', vcpuCount: 1 }],
       periodStart,
       periodEnd
     );

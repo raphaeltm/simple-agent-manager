@@ -4,7 +4,7 @@ import type { CredentialSource } from './user';
 // Compute Usage Metering Types
 // =============================================================================
 
-/** A single compute usage record — tracks one workspace session's resource consumption. */
+/** A single compute usage record — tracks one workspace session that is later aggregated by node for billing. */
 export interface ComputeUsageRecord {
   id: string;
   userId: string;
