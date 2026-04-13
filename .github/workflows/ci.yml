@@ -20,6 +20,7 @@ concurrency:
 jobs:
   changes:
     name: Detect Changes
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     outputs:
       vm-agent: ${{ steps.filter.outputs.vm-agent }}
@@ -277,6 +278,7 @@ jobs:
     name: VM Agent Test
     needs: [changes]
     if: needs.changes.outputs.vm-agent == 'true'
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
