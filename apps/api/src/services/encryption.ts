@@ -6,7 +6,16 @@
 import { log } from '../lib/logger';
 
 function bufferToBase64(buffer: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  const bytes = new Uint8Array(buffer);
+  // Build string in chunks to avoid stack overflow from spreading large arrays
+  // into String.fromCharCode (which pushes every byte as a function argument).
+  const CHUNK_SIZE = 8192;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
 }
 
 function base64ToBuffer(base64: string): ArrayBuffer {

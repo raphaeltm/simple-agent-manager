@@ -707,10 +707,11 @@ app.use('*', cors({
   origin: (origin, c) => {
     if (!origin) return null;
     const baseDomain = c.env?.BASE_DOMAIN || '';
-    // Allow localhost for development
+    // Allow localhost only in development (BASE_DOMAIN contains 'localhost' or is empty)
+    const isDevEnvironment = !baseDomain || baseDomain.includes('localhost');
     try {
       const url = new URL(origin);
-      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return origin;
+      if (isDevEnvironment && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')) return origin;
     } catch {
       // Malformed origin — reject
       return null;
