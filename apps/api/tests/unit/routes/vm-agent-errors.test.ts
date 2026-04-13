@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 
 // Mock JWT verification — accept any token
 vi.mock('../../../src/services/jwt', () => ({

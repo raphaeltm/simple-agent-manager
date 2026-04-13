@@ -9,7 +9,7 @@ import {
   DEFAULT_GCP_TOKEN_CACHE_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { GcpApiError } from './gcp-errors';
 import { signIdentityToken } from './jwt';
 

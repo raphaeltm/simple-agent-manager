@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { bucketUserAgent } from '../middleware/analytics';
 import { optionalAuth } from '../middleware/auth';

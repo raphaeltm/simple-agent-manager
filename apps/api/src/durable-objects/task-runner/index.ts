@@ -36,7 +36,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';

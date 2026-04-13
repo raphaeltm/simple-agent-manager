@@ -1,6 +1,6 @@
 import { importPKCS8,SignJWT } from 'jose';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 
 /**

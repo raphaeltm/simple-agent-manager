@@ -7,7 +7,7 @@
  */
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../src/index';
+import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 
 // Mock deleteNodeResources

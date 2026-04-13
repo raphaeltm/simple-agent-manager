@@ -7,7 +7,7 @@
  *
  * See: specs/018-project-first-architecture/tasks.md (T025)
  */
-import type { Env } from '../index';
+import type { Env } from '../env';
 import * as projectDataService from './project-data';
 
 /**

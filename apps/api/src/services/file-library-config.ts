@@ -11,7 +11,7 @@ import {
   validateDirectoryPath,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { errors } from '../middleware/error';
 
 // ---------------------------------------------------------------------------

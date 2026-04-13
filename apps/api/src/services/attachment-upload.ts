@@ -9,7 +9,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { TaskAttachment } from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 
 // ---------------------------------------------------------------------------

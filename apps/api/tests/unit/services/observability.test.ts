@@ -1,6 +1,6 @@
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 
 // Use vi.hoisted() so mock functions are available when vi.mock factories run
 const {

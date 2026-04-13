@@ -21,7 +21,7 @@ import { NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 
 import type { NotificationService } from '../durable-objects/notification';
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { jsonValidator, UpdateNotificationPreferenceSchema } from '../schemas';

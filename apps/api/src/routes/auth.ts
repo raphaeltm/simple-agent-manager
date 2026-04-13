@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 
 import { createAuth } from '../auth';
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 

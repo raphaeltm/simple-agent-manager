@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 import { cachedCommandRoutes } from '../../../src/routes/cached-commands';
 
 vi.mock('drizzle-orm/d1');

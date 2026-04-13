@@ -9,7 +9,7 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 
 // --- Auth mock ---
 const SUPERADMIN_USER_ID = 'user-superadmin-123';

@@ -3,7 +3,7 @@
  *
  * Also exports TokenRow and groupTokensIntoMessages for use by tests and other modules.
  */
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,

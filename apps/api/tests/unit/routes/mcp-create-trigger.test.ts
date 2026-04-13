@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────

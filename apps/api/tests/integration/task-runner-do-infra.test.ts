@@ -17,6 +17,10 @@ const indexSource = readFileSync(
   resolve(process.cwd(), 'src/index.ts'),
   'utf8'
 );
+const envSource = readFileSync(
+  resolve(process.cwd(), 'src/env.ts'),
+  'utf8'
+);
 // TaskRunner DO is split across task-runner/ directory — read all module files
 const doDir = resolve(process.cwd(), 'src/durable-objects/task-runner');
 const doSource = [
@@ -55,7 +59,7 @@ describe('wrangler.toml bindings', () => {
 
 describe('Env interface', () => {
   it('declares TASK_RUNNER as DurableObjectNamespace', () => {
-    expect(indexSource).toContain('TASK_RUNNER: DurableObjectNamespace');
+    expect(envSource).toContain('TASK_RUNNER: DurableObjectNamespace');
   });
 
   it('declares all TaskRunner env vars', () => {
@@ -70,7 +74,7 @@ describe('Env interface', () => {
       'TASK_RUNNER_PROVISION_POLL_INTERVAL_MS',
     ];
     for (const v of envVars) {
-      expect(indexSource).toContain(`${v}?: string`);
+      expect(envSource).toContain(`${v}?: string`);
     }
   });
 });
@@ -126,7 +130,7 @@ describe('TaskRunner DO env type', () => {
   it('uses the full Env type from index.ts (no partial TaskRunnerEnv)', () => {
     // TaskRunner uses the full Env interface so service functions receive
     // properly typed env without `as any` casts.
-    expect(doSource).toContain("import type { Env } from '../../index'");
+    expect(doSource).toContain("import type { Env } from '../../env'");
     expect(doSource).toContain('extends DurableObject<Env>');
     expect(doSource).not.toContain('type TaskRunnerEnv');
   });
@@ -259,7 +263,7 @@ describe('Initial prompt delivery: two-step idempotency', () => {
 
 describe('Initial prompt delivery: Env and config', () => {
   it('Env interface declares DEFAULT_TASK_AGENT_TYPE', () => {
-    expect(indexSource).toContain('DEFAULT_TASK_AGENT_TYPE?: string');
+    expect(envSource).toContain('DEFAULT_TASK_AGENT_TYPE?: string');
   });
 
   it('wrangler.toml top-level has DEFAULT_TASK_AGENT_TYPE', () => {

@@ -13,7 +13,7 @@ import type {
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 
 // TaskRunner uses the full Env type because it delegates to service functions
 // (createNodeRecord, provisionNode, createWorkspaceOnNode, etc.) that expect

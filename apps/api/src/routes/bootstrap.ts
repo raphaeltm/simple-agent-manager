@@ -8,7 +8,7 @@
 import type { BootstrapResponse } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { rateLimit } from '../middleware/rate-limit';

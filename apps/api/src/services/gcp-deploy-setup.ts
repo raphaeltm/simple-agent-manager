@@ -6,7 +6,7 @@ import {
   DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../index';
+import type { Env } from '../env';
 import {
   createOidcProvider,
   createServiceAccount,

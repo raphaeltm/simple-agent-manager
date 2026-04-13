@@ -11,6 +11,7 @@ import { resolve } from 'node:path';
 import { describe, expect,it } from 'vitest';
 
 const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+const envFile = readFileSync(resolve(process.cwd(), 'src/env.ts'), 'utf8');
 const routeFile = readFileSync(resolve(process.cwd(), 'src/routes/agent-profiles.ts'), 'utf8');
 const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/agent-profiles.ts'), 'utf8');
 const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
@@ -54,8 +55,8 @@ describe('agent profiles integration wiring', () => {
   });
 
   it('Env interface includes configurable built-in profile model env vars', () => {
-    expect(indexFile).toContain('BUILTIN_PROFILE_SONNET_MODEL');
-    expect(indexFile).toContain('BUILTIN_PROFILE_OPUS_MODEL');
+    expect(envFile).toContain('BUILTIN_PROFILE_SONNET_MODEL');
+    expect(envFile).toContain('BUILTIN_PROFILE_OPUS_MODEL');
   });
 
   it('service uses env vars for built-in profile model configuration', () => {

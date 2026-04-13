@@ -20,7 +20,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 import { credentialsRoutes } from '../../../src/routes/credentials';
 
 vi.mock('drizzle-orm/d1');

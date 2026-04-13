@@ -23,7 +23,7 @@ import { buildLibraryR2Key } from '@simple-agent-manager/shared';
 import { and, asc, desc, eq, inArray, like, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';

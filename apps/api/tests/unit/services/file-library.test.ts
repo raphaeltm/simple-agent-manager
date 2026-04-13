@@ -1,7 +1,7 @@
 import { buildLibraryR2Key, LIBRARY_DEFAULTS, LIBRARY_FILENAME_PATTERN, LIBRARY_TAG_PATTERN } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 import { validateFilename, validateTag } from '../../../src/services/file-library';
 
 describe('file-library contracts', () => {

@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
 
 import { type Workspace,workspaces } from '../db/schema';
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { getUserId } from './auth';
 
 /**

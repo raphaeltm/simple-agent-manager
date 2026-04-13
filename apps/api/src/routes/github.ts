@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getWebhookSecret } from '../lib/secrets';
 import { ulid } from '../lib/ulid';

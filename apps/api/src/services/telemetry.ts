@@ -1,4 +1,4 @@
-import type { Env } from '../index';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 
 export type TelemetryMetricName =

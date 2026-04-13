@@ -9,7 +9,7 @@ import {
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../../index';
+import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';

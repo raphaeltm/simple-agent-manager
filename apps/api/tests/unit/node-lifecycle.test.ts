@@ -13,6 +13,7 @@ describe('NodeLifecycle DO source contract', () => {
   const doFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/node-lifecycle.ts'), 'utf8');
   const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/node-lifecycle.ts'), 'utf8');
   const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+  const envFile = readFileSync(resolve(process.cwd(), 'src/env.ts'), 'utf8');
 
   describe('DO class structure', () => {
     it('extends DurableObject', () => {
@@ -29,7 +30,7 @@ describe('NodeLifecycle DO source contract', () => {
     });
 
     it('has NODE_LIFECYCLE binding in Env type', () => {
-      expect(indexFile).toContain('NODE_LIFECYCLE: DurableObjectNamespace');
+      expect(envFile).toContain('NODE_LIFECYCLE: DurableObjectNamespace');
     });
   });
 
