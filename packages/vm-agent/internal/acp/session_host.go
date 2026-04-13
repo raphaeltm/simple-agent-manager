@@ -937,6 +937,23 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 					"credentialKind", cred.credentialKind)
 			}
 		}
+	} else if cred.inferenceConfig != nil && cred.inferenceConfig.APIKeySource == "callback-token" {
+		// Platform AI proxy: use the workspace callback token as the API key
+		// and inject the proxy base URL for OpenCode's openai-compatible provider.
+		envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+cred.inferenceConfig.BaseURL)
+		envVars = append(envVars, "OPENCODE_PLATFORM_API_KEY="+h.config.CallbackToken)
+		// Force provider to "platform" so buildOpencodeConfig generates the right config
+		if settings == nil {
+			settings = &agentSettingsPayload{}
+		}
+		settings.OpencodeProvider = "platform"
+		if settings.Model == "" && cred.inferenceConfig.Model != "" {
+			settings.Model = cred.inferenceConfig.Model
+		}
+		slog.Info("Platform AI proxy credential injected",
+			"baseURL", cred.inferenceConfig.BaseURL,
+			"model", cred.inferenceConfig.Model,
+			"workspaceId", h.config.WorkspaceID)
 	} else {
 		envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
 	}
@@ -2058,8 +2075,9 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	}
 
 	var result struct {
-		APIKey         string `json:"apiKey"`
-		CredentialKind string `json:"credentialKind"`
+		APIKey          string           `json:"apiKey"`
+		CredentialKind  string           `json:"credentialKind"`
+		InferenceConfig *inferenceConfig `json:"inferenceConfig,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
@@ -2074,8 +2092,9 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	}
 
 	return &agentCredential{
-		credential:     result.APIKey,
-		credentialKind: result.CredentialKind,
+		credential:      result.APIKey,
+		credentialKind:  result.CredentialKind,
+		inferenceConfig: result.InferenceConfig,
 	}, nil
 }
 
