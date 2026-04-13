@@ -123,7 +123,7 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     supportsAcp: true,
     credentialHelpUrl: 'https://console.scaleway.com/iam/api-keys',
     fallbackCloudProvider: 'scaleway',
-    installCommand: 'npm install -g opencode-ai@1.4.0',
+    installCommand: 'npm install -g opencode-ai@1.4.3',
   },
 ] as const;
 
