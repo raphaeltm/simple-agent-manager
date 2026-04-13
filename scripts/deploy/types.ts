@@ -341,6 +341,9 @@ export const REQUIRED_SECRETS = [
 export const OPTIONAL_SECRETS = [
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
+  'SEGMENT_WRITE_KEY',
+  'GA4_API_SECRET',
+  'GA4_MEASUREMENT_ID',
 ] as const;
 
 export const DNS_RECORDS = ['api', 'app', '*'] as const;
