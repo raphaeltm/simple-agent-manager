@@ -3,17 +3,17 @@
  */
 import { KNOWLEDGE_ENTITY_TYPES, KNOWLEDGE_RELATION_TYPES, KNOWLEDGE_SOURCE_TYPES } from '@simple-agent-manager/shared';
 
+import type { Env } from '../../env';
 import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,
   INVALID_PARAMS,
-  type JsonRpcResponse,
   jsonRpcError,
+  type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
-import type { Env } from '../../env';
 
 // ─── Helper: resolve session ID from workspace ─────────────────────────────
 
@@ -60,7 +60,7 @@ export async function handleAddKnowledge(
   const sessionId = await resolveSessionId(env, tokenData.workspaceId);
 
   // Get or create entity
-  let existingEntity = await projectDataService.getKnowledgeEntityByName(env, tokenData.projectId, entityName);
+  const existingEntity = await projectDataService.getKnowledgeEntityByName(env, tokenData.projectId, entityName);
   let entityId: string;
   if (!existingEntity) {
     const created = await projectDataService.createKnowledgeEntity(

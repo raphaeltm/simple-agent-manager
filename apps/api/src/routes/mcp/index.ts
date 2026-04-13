@@ -36,6 +36,7 @@ import {
   handleUnlinkIdea,
   handleUpdateIdea,
 } from './idea-tools';
+import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
 import {
   handleAddKnowledge,
   handleConfirmKnowledge,
@@ -49,7 +50,6 @@ import {
   handleSearchKnowledge,
   handleUpdateKnowledge,
 } from './knowledge-tools';
-import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
 import {
   handleDownloadLibraryFile,
   handleListLibraryFiles,

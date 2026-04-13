@@ -199,7 +199,10 @@ describe('DO Migrations', () => {
       // acp_session_events: 1 (session+created) from migration 008
       // chat_messages: 1 (user content dedup) from migration 014
       // session_inbox: 1 (pending messages) from migration 015
-      expect(indexes.length).toBe(21);
+      // knowledge_entities: 2 (entity_type, updated_at) from migration 016
+      // knowledge_observations: 3 (entity_id+active, source_type, last_confirmed) from migration 016
+      // knowledge_relations: 1 (source_entity, target_entity combined) from migration 016
+      expect(indexes.length).toBe(27);
     });
   });
 });

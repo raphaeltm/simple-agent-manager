@@ -326,7 +326,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('create_agent_profile');
       expect(toolNames).toContain('update_agent_profile');
       expect(toolNames).toContain('delete_agent_profile');
-      expect(body.result.tools).toHaveLength(52);
+      expect(body.result.tools).toHaveLength(63);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

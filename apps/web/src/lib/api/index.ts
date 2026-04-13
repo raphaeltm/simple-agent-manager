@@ -109,6 +109,17 @@ export {
   uploadSessionFiles,
 } from './files';
 export { getGitHubInstallUrl, listBranches, listGitHubInstallations, listRepositories } from './github';
+export {
+  addObservation,
+  createKnowledgeEntity,
+  deleteKnowledgeEntity,
+  deleteObservation,
+  getKnowledgeEntity,
+  listKnowledgeEntities,
+  searchKnowledge,
+  updateKnowledgeEntity,
+  updateObservation,
+} from './knowledge';
 export type { UploadLibraryFileOptions } from './library';
 export {
   deleteLibraryFile,
@@ -261,14 +272,3 @@ export {
   suspendAgentSession,
   updateWorkspace,
 } from './workspaces';
-export {
-  addObservation,
-  createKnowledgeEntity,
-  deleteKnowledgeEntity,
-  deleteObservation,
-  getKnowledgeEntity,
-  listKnowledgeEntities,
-  searchKnowledge,
-  updateKnowledgeEntity,
-  updateObservation,
-} from './knowledge';
