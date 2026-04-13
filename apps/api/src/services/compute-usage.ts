@@ -83,6 +83,13 @@ export async function stopComputeTracking(
 // Usage Calculation
 // =============================================================================
 
+interface ComputeUsageInterval {
+  nodeId: string;
+  startedAt: string;
+  endedAt: string | null;
+  vcpuCount: number;
+}
+
 /** Get the start and end of the current calendar month in ISO format. */
 export function getCurrentPeriodBounds(): { start: string; end: string } {
   const now = new Date();
@@ -92,9 +99,74 @@ export function getCurrentPeriodBounds(): { start: string; end: string } {
 }
 
 /**
+ * Convert workspace-scoped usage rows into billable vCPU-hours.
+ * Overlapping records on the same node are merged first so shared nodes are
+ * only counted once at any point in time.
+ */
+export function calculateNodeVcpuHours(
+  intervals: ComputeUsageInterval[],
+  periodStart: Date,
+  periodEnd: Date,
+  now: Date = new Date()
+): number {
+  const intervalsByNode = new Map<
+    string,
+    Array<{ startMs: number; endMs: number; vcpuCount: number }>
+  >();
+
+  for (const row of intervals) {
+    const sessionStart = new Date(row.startedAt);
+    const sessionEnd = row.endedAt ? new Date(row.endedAt) : now;
+
+    const effectiveStart = sessionStart < periodStart ? periodStart : sessionStart;
+    const effectiveEnd = sessionEnd > periodEnd ? periodEnd : sessionEnd;
+    const startMs = effectiveStart.getTime();
+    const endMs = effectiveEnd.getTime();
+
+    if (endMs <= startMs) {
+      continue;
+    }
+
+    const nodeIntervals = intervalsByNode.get(row.nodeId) ?? [];
+    nodeIntervals.push({ startMs, endMs, vcpuCount: row.vcpuCount });
+    intervalsByNode.set(row.nodeId, nodeIntervals);
+  }
+
+  let totalMs = 0;
+
+  for (const nodeIntervals of intervalsByNode.values()) {
+    nodeIntervals.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+
+    let current = nodeIntervals[0];
+    if (!current) {
+      continue;
+    }
+
+    for (let i = 1; i < nodeIntervals.length; i++) {
+      const next = nodeIntervals[i]!;
+
+      if (next.startMs <= current.endMs) {
+        current.endMs = Math.max(current.endMs, next.endMs);
+        current.vcpuCount = Math.max(current.vcpuCount, next.vcpuCount);
+        continue;
+      }
+
+      totalMs += (current.endMs - current.startMs) * current.vcpuCount;
+      current = next;
+    }
+
+    totalMs += (current.endMs - current.startMs) * current.vcpuCount;
+  }
+
+  return totalMs / (1000 * 60 * 60);
+}
+
+/**
  * Calculate total vCPU-hours for a user in a given period.
  * Clamps session boundaries to the period window.
  * Running sessions use current time as their effective end.
+ * Overlapping workspace sessions on the same node are merged so billing follows
+ * billable node runtime rather than workspace count.
  */
 export async function calculateVcpuHoursForPeriod(
   db: DrizzleD1Database<typeof schema>,
@@ -121,6 +193,7 @@ export async function calculateVcpuHoursForPeriod(
 
   const rows = await db
     .select({
+      nodeId: schema.computeUsage.nodeId,
       startedAt: schema.computeUsage.startedAt,
       endedAt: schema.computeUsage.endedAt,
       vcpuCount: schema.computeUsage.vcpuCount,
@@ -128,23 +201,7 @@ export async function calculateVcpuHoursForPeriod(
     .from(schema.computeUsage)
     .where(and(...conditions));
 
-  let totalMs = 0;
-  for (const row of rows) {
-    const sessionStart = new Date(row.startedAt);
-    const sessionEnd = row.endedAt ? new Date(row.endedAt) : new Date(nowIso);
-
-    // Clamp to period boundaries
-    const effectiveStart = sessionStart < periodStart ? periodStart : sessionStart;
-    const effectiveEnd = sessionEnd > periodEnd ? periodEnd : sessionEnd;
-
-    const durationMs = effectiveEnd.getTime() - effectiveStart.getTime();
-    if (durationMs > 0) {
-      totalMs += durationMs * row.vcpuCount;
-    }
-  }
-
-  // Convert ms to hours
-  return totalMs / (1000 * 60 * 60);
+  return calculateNodeVcpuHours(rows, periodStart, periodEnd, new Date(nowIso));
 }
 
 // =============================================================================
@@ -218,6 +275,7 @@ export async function getAllUsersUsageSummary(
   const rows = await db
     .select({
       userId: schema.computeUsage.userId,
+      nodeId: schema.computeUsage.nodeId,
       vcpuCount: schema.computeUsage.vcpuCount,
       startedAt: schema.computeUsage.startedAt,
       endedAt: schema.computeUsage.endedAt,
@@ -236,30 +294,32 @@ export async function getAllUsersUsageSummary(
   const periodEnd = new Date(end);
   const nowIso = new Date().toISOString();
 
-  const userMap = new Map<string, { totalMs: number; platformMs: number; userMs: number; activeCount: number }>();
+  const userMap = new Map<string, { totalHours: number; platformHours: number; userHours: number; activeCount: number }>();
+  const rowsByUser = new Map<string, typeof rows>();
 
   for (const row of rows) {
-    const sessionStart = new Date(row.startedAt);
-    const sessionEnd = row.endedAt ? new Date(row.endedAt) : new Date(nowIso);
-    const effectiveStart = sessionStart < periodStart ? periodStart : sessionStart;
-    const effectiveEnd = sessionEnd > periodEnd ? periodEnd : sessionEnd;
-    const durationMs = Math.max(0, effectiveEnd.getTime() - effectiveStart.getTime());
-    const weightedMs = durationMs * row.vcpuCount;
+    const userRows = rowsByUser.get(row.userId) ?? [];
+    userRows.push(row);
+    rowsByUser.set(row.userId, userRows);
+  }
 
-    let entry = userMap.get(row.userId);
-    if (!entry) {
-      entry = { totalMs: 0, platformMs: 0, userMs: 0, activeCount: 0 };
-      userMap.set(row.userId, entry);
-    }
-    entry.totalMs += weightedMs;
-    if (row.credentialSource === 'platform') {
-      entry.platformMs += weightedMs;
-    } else {
-      entry.userMs += weightedMs;
-    }
-    if (!row.endedAt) {
-      entry.activeCount++;
-    }
+  for (const [userId, userRows] of rowsByUser.entries()) {
+    const totalHours = calculateNodeVcpuHours(userRows, periodStart, periodEnd, new Date(nowIso));
+    const platformHours = calculateNodeVcpuHours(
+      userRows.filter((row) => row.credentialSource === 'platform'),
+      periodStart,
+      periodEnd,
+      new Date(nowIso)
+    );
+    const userHours = calculateNodeVcpuHours(
+      userRows.filter((row) => row.credentialSource !== 'platform'),
+      periodStart,
+      periodEnd,
+      new Date(nowIso)
+    );
+    const activeCount = userRows.filter((row) => !row.endedAt).length;
+
+    userMap.set(userId, { totalHours, platformHours, userHours, activeCount });
   }
 
   // Fetch user details for all users with usage
@@ -279,8 +339,6 @@ export async function getAllUsersUsageSummary(
     .where(inArray(schema.users.id, userIds));
 
   const userLookup = new Map(users.map((u) => [u.id, u]));
-  const msToHours = 1 / (1000 * 60 * 60);
-
   const summaries: AdminUserUsageSummary[] = userIds
     .map((userId) => {
       const usage = userMap.get(userId)!;
@@ -290,9 +348,9 @@ export async function getAllUsersUsageSummary(
         email: user?.email ?? null,
         name: user?.name ?? null,
         avatarUrl: user?.avatarUrl ?? null,
-        totalVcpuHours: Math.round(usage.totalMs * msToHours * 100) / 100,
-        platformVcpuHours: Math.round(usage.platformMs * msToHours * 100) / 100,
-        userVcpuHours: Math.round(usage.userMs * msToHours * 100) / 100,
+        totalVcpuHours: Math.round(usage.totalHours * 100) / 100,
+        platformVcpuHours: Math.round(usage.platformHours * 100) / 100,
+        userVcpuHours: Math.round(usage.userHours * 100) / 100,
         activeWorkspaces: usage.activeCount,
       };
     })

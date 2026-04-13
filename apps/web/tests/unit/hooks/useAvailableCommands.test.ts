@@ -170,10 +170,9 @@ describe('useAvailableCommands', () => {
 
     await waitFor(() => {
       expect(mockGetCachedCommands).toHaveBeenCalledTimes(2);
+      // Wait for state update to propagate, not just the API call
+      expect(result.current.commands.find((c) => c.name === 'do')).toBeDefined();
     });
-
-    // New cached command should appear
-    expect(result.current.commands.find((c) => c.name === 'do')).toBeDefined();
   });
 
   it('refetch() imperatively re-fetches cached commands', async () => {

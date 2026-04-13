@@ -7,7 +7,7 @@
  * 3. Orphan cleanup cron is registered and calls closeOrphanedComputeUsage
  * 4. Admin and user API routes are mounted and use correct service functions
  * 5. Schema defines compute_usage table with required columns and indexes
- * 6. Service correctly calculates vCPU-hours with period clamping
+ * 6. Service correctly calculates vCPU-hours with period clamping and node-level overlap merging
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -101,8 +101,13 @@ describe('compute usage metering pipeline', () => {
       expect(serviceFile).toContain('sessionEnd > periodEnd');
     });
 
-    it('calculateVcpuHoursForPeriod weights duration by vCPU count', () => {
-      expect(serviceFile).toContain('durationMs * row.vcpuCount');
+    it('calculateVcpuHoursForPeriod delegates to node-based aggregation', () => {
+      expect(serviceFile).toContain('calculateNodeVcpuHours(rows, periodStart, periodEnd');
+    });
+
+    it('calculateNodeVcpuHours groups rows by node before weighting duration', () => {
+      expect(serviceFile).toContain('const intervalsByNode = new Map');
+      expect(serviceFile).toContain('intervalsByNode.get(row.nodeId)');
     });
 
     it('calculateVcpuHoursForPeriod supports credentialSource filter', () => {
