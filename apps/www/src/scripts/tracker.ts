@@ -41,13 +41,14 @@ interface AnalyticsEvent {
 
   function uid(store: Storage): string {
     try {
-      const existing = store.getItem('sam_id');
+      const key = store === localStorage ? 'sam_analytics_visitor_id' : 'sam_analytics_session_id';
+      const existing = store.getItem(key);
       if (existing) return existing;
       const id =
         typeof crypto !== 'undefined' && crypto.randomUUID
           ? crypto.randomUUID()
           : Date.now().toString(36) + Math.random().toString(36).slice(2);
-      store.setItem('sam_id', id);
+      store.setItem(key, id);
       return id;
     } catch (_) {
       return '';
@@ -68,7 +69,8 @@ interface AnalyticsEvent {
   function send(events: AnalyticsEvent[]): void {
     const body = JSON.stringify({ events });
     if (navigator.sendBeacon) {
-      navigator.sendBeacon(endpoint, body);
+      const blob = new Blob([body], { type: 'application/json' });
+      navigator.sendBeacon(endpoint, blob);
     } else {
       fetch(endpoint, {
         method: 'POST',

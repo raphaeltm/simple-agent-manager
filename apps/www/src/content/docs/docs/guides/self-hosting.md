@@ -13,7 +13,7 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 | **GitHub account** | Authentication, CI/CD | Free tier |
 | **Domain on Cloudflare** | Workspace URLs | Any registrar |
 
-You do **not** need a shared Hetzner account. Users provide their own Hetzner tokens through the Settings UI.
+You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/) or [Scaleway API key](https://console.scaleway.com/iam/api-keys) through the Settings UI.
 
 ## Step 1: Fork the Repository
 
@@ -156,13 +156,23 @@ A typical SAM deployment stays within the free tier for small to medium usage.
 
 ### User VM Costs
 
-VMs are billed to each user's Hetzner account:
+VMs are billed to each user's own cloud provider account. SAM supports Hetzner and Scaleway.
+
+**Hetzner:**
 
 | Size | Specs | Hourly | Monthly |
 |------|-------|--------|---------|
-| Small (CX22) | 2 vCPU, 4GB RAM | ~$0.007 | ~$4.15 |
-| Medium (CX32) | 4 vCPU, 8GB RAM | ~$0.012 | ~$7.50 |
-| Large (CX42) | 8 vCPU, 16GB RAM | ~$0.030 | ~$18 |
+| Small (cx23) | 2 vCPU, 4GB RAM | ~$0.007 | ~$4.15 |
+| Medium (cx33) | 4 vCPU, 8GB RAM | ~$0.012 | ~$7.50 |
+| Large (cx43) | 8 vCPU, 16GB RAM | ~$0.030 | ~$18 |
+
+**Scaleway:**
+
+| Size | Type | Hourly |
+|------|------|--------|
+| Small (DEV1-M) | 3 vCPU, 4GB RAM | ~€0.024 |
+| Medium (DEV1-XL) | 4 vCPU, 12GB RAM | ~€0.048 |
+| Large (GP1-S) | 8 vCPU, 32GB RAM | ~€0.084 |
 
 ## Troubleshooting
 

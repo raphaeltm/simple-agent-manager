@@ -39,7 +39,7 @@ const presentations: Presentation[] = [
 
       <div class="presentation-grid">
         {presentations.map((p) => (
-          <a href={p.href} class="presentation-card animate-on-scroll" target="_blank" rel="noopener">
+          <a href={p.href} class="presentation-card animate-on-scroll" target="_blank" rel="noopener noreferrer">
             <div class="card-meta">
               <time datetime={p.date}>
                 {new Date(p.date + 'T00:00:00').toLocaleDateString('en-US', {
