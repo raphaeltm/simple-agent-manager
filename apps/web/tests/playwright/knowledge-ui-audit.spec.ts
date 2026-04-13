@@ -261,7 +261,7 @@ async function setupApiMocks(page: Page, options: {
 async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(700);
   await page.screenshot({
-    path: `/workspaces/sam-knowledge-graph/.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
     fullPage: true,
   });
 }
