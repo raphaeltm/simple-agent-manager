@@ -16,7 +16,7 @@ const PROFILE_FIELD_PROPERTIES = {
   },
   model: {
     type: 'string',
-    description: 'Model identifier (e.g., claude-sonnet-4-5-20250929, claude-opus-4-6)',
+    description: 'Model identifier override. Omit to use the project or platform default.',
   },
   permissionMode: {
     type: 'string',
@@ -60,6 +60,13 @@ const PROFILE_FIELD_PROPERTIES = {
   },
 } as const;
 
+/** Shared valid-values hint appended to create and update tool descriptions. */
+const VALID_VALUES_HINT =
+  'Valid permissionMode values: default, acceptEdits, plan, dontAsk, bypassPermissions. ' +
+  'Valid vmSize values: small, medium, large. ' +
+  'Valid taskMode values: task, conversation. ' +
+  'Valid workspaceProfile values: full, lightweight.';
+
 export const PROFILE_TOOLS = [
   {
     name: 'list_agent_profiles',
@@ -94,10 +101,7 @@ export const PROFILE_TOOLS = [
     description:
       'Create a new agent profile in the current project. Profiles define reusable agent configurations ' +
       'for task execution roles (e.g., planner, implementer, reviewer). ' +
-      'Valid permissionMode values: default, acceptEdits, plan, dontAsk, bypassPermissions. ' +
-      'Valid vmSize values: small, medium, large. ' +
-      'Valid taskMode values: task, conversation. ' +
-      'Valid workspaceProfile values: full, lightweight.',
+      VALID_VALUES_HINT,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -115,10 +119,7 @@ export const PROFILE_TOOLS = [
     name: 'update_agent_profile',
     description:
       'Update an existing agent profile. Only provided fields are changed; omitted fields remain unchanged. ' +
-      'Valid permissionMode values: default, acceptEdits, plan, dontAsk, bypassPermissions. ' +
-      'Valid vmSize values: small, medium, large. ' +
-      'Valid taskMode values: task, conversation. ' +
-      'Valid workspaceProfile values: full, lightweight.',
+      VALID_VALUES_HINT,
     inputSchema: {
       type: 'object' as const,
       properties: {
