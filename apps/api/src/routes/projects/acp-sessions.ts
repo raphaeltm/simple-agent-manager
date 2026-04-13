@@ -220,6 +220,27 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', jsonValidator(Ac
   return c.body(null, 204);
 });
 
+/**
+ * POST /:id/node-acp-heartbeat — Node-level ACP heartbeat from VM agent.
+ *
+ * Updates heartbeats for ALL active ACP sessions on a node within this project.
+ * This is the primary heartbeat mechanism — a simple 2-hop chain (VM agent → DO)
+ * replacing the fragile 7-hop piggybacking sweep through the node heartbeat handler.
+ *
+ * Auth: JWT via requireAuth() middleware (callback token from VM agent).
+ * No requireOwnedProject — VM agent authenticates as workspace owner, and
+ * updateNodeHeartbeats only touches sessions already assigned to this node.
+ */
+acpSessionRoutes.post('/:id/node-acp-heartbeat', jsonValidator(AcpSessionHeartbeatSchema), async (c) => {
+  getUserId(c); // Ensure authenticated (JWT validated by requireAuth middleware)
+  const projectId = c.req.param('id');
+  const body = c.req.valid('json');
+
+  const updated = await projectDataService.updateNodeHeartbeats(c.env, projectId, body.nodeId);
+  log.info('acp_heartbeat.node_level', { projectId, nodeId: body.nodeId, updatedSessions: updated });
+  return c.body(null, 204);
+});
+
 /** POST /:id/acp-sessions/:sessionId/fork — Fork a completed/interrupted session */
 acpSessionRoutes.post('/:id/acp-sessions/:sessionId/fork', jsonValidator(AcpSessionForkSchema), async (c) => {
   const userId = getUserId(c);

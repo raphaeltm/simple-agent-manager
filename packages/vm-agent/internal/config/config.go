@@ -110,6 +110,7 @@ type Config struct {
 	ACPPromptCancelGrace  time.Duration // Wait after cancel before force-stop fallback (default: 5s)
 	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
 	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
+	ACPHeartbeatInterval     time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
 
 	// Event log settings - configurable per constitution principle XI
 	MaxNodeEvents      int // Max node-level events retained in memory (default: 500)
@@ -319,6 +320,7 @@ func Load() (*Config, error) {
 		ACPPromptCancelGrace:  getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
 		ACPIdleSuspendTimeout:    getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
 		ACPNotifSerializeTimeout: getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
+		ACPHeartbeatInterval:     getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),
 
 		// Event log settings
 		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),
