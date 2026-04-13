@@ -56,7 +56,7 @@ vi.mock('../../../src/services/file-library', () => ({
 
 import { Hono } from 'hono';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 import { libraryRoutes } from '../../../src/routes/library';
 
 const BASE_URL = 'https://api.test.example.com';

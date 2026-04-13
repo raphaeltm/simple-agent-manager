@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 
 // Use vi.hoisted to create mocks that can be referenced in vi.mock factories
 const mockService = vi.hoisted(() => ({

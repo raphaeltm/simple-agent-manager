@@ -16,7 +16,7 @@ import {
   DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../../../src/index';
+import type { Env } from '../../../src/env';
 import { runTriggerExecutionCleanup } from '../../../src/scheduled/trigger-execution-cleanup';
 
 // ---------------------------------------------------------------------------
