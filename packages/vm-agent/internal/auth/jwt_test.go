@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,8 +96,8 @@ func TestValidateNodeManagementToken_WorkspaceBypass(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error when empty workspace claim used to access a specific workspace")
 		}
-		if got := err.Error(); got != "workspace ID mismatch: expected ws-456, got " {
-			t.Errorf("unexpected error message: %s", got)
+		if !strings.Contains(err.Error(), "workspace ID mismatch") {
+			t.Errorf("expected workspace mismatch error, got: %s", err)
 		}
 	})
 
@@ -155,6 +156,30 @@ func TestValidateNodeManagementToken_WorkspaceBypass(t *testing.T) {
 		_, err := validator.ValidateNodeManagementToken(tokenStr, "")
 		if err != nil {
 			t.Fatalf("unexpected error for empty workspaceID: %v", err)
+		}
+	})
+
+	t.Run("empty node claim rejected by management token validation", func(t *testing.T) {
+		t.Parallel()
+		// A token without a node claim must not pass management token validation,
+		// even if the workspace claim matches. This prevents lateral movement
+		// between nodes in multi-node deployments.
+		tokenStr := signToken(t, key, Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Audience:  jwt.ClaimStrings{"node-management"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+			},
+			Node:      "", // no node claim
+			Workspace: "ws-456",
+		})
+
+		_, err := validator.ValidateNodeManagementToken(tokenStr, "ws-456")
+		if err == nil {
+			t.Fatal("expected error: management token with empty Node should be rejected")
+		}
+		if !strings.Contains(err.Error(), "node ID mismatch") {
+			t.Errorf("expected node mismatch error, got: %s", err)
 		}
 	})
 }

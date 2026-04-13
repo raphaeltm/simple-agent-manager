@@ -2183,8 +2183,9 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 	return sb.String()
 }
 
-// buildSAMStaticEnv returns a simple KEY=VALUE file (no shell commands) for
-// /etc/sam/env, which is parsed by ReadContainerEnvFiles for ACP sessions.
+// buildSAMStaticEnv returns a shell-quoted env file (POSIX single-quoting via
+// shellSingleQuote) for /etc/sam/env. Format: export KEY='value'.
+// Parsed by ReadContainerEnvFiles (parseEnvExportLines) for ACP sessions.
 func buildSAMStaticEnv(cfg *config.Config, githubToken string) string {
 	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
 

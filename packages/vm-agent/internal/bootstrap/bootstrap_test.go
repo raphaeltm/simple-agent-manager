@@ -1071,6 +1071,27 @@ func TestBuildSAMStaticEnvSingleQuoteEscaping(t *testing.T) {
 	}
 }
 
+func TestBuildSAMStaticEnvCombinedQuoteAndInjection(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		NodeID:          "node-456",
+		// Value with embedded single-quote AND shell injection
+		Repository: "it's a $(whoami)",
+	}
+
+	env := buildSAMStaticEnv(cfg, "")
+
+	// Must produce: export SAM_REPOSITORY='it'"'"'s a $(whoami)'
+	// The single-quote is escaped, and $(whoami) is inside single quotes (no expansion)
+	expected := `'it'"'"'s a $(whoami)'`
+	if !strings.Contains(env, expected) {
+		t.Errorf("expected combined quote+injection escaping %q, got:\n%s", expected, env)
+	}
+}
+
 func TestDevcontainerUpArgs(t *testing.T) {
 	t.Parallel()
 
