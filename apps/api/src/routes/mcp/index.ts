@@ -38,6 +38,19 @@ import {
 } from './idea-tools';
 import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
 import {
+  handleAddKnowledge,
+  handleConfirmKnowledge,
+  handleFlagContradiction,
+  handleGetKnowledge,
+  handleGetProjectKnowledge,
+  handleGetRelated,
+  handleGetRelevantKnowledge,
+  handleRelateKnowledge,
+  handleRemoveKnowledge,
+  handleSearchKnowledge,
+  handleUpdateKnowledge,
+} from './knowledge-tools';
+import {
   handleDownloadLibraryFile,
   handleListLibraryFiles,
   handleReplaceLibraryFile,
@@ -283,6 +296,29 @@ mcpRoutes.post('/', async (c) => {
         case 'get_repo_setup_guide':
           // Synchronous — no async I/O needed for static content
           return c.json(handleGetRepoSetupGuide(requestId));
+        // ─── Knowledge graph tools ───────────────────────────────────────
+        case 'add_knowledge':
+          return c.json(await handleAddKnowledge(requestId, toolArgs, tokenData, c.env));
+        case 'update_knowledge':
+          return c.json(await handleUpdateKnowledge(requestId, toolArgs, tokenData, c.env));
+        case 'remove_knowledge':
+          return c.json(await handleRemoveKnowledge(requestId, toolArgs, tokenData, c.env));
+        case 'get_knowledge':
+          return c.json(await handleGetKnowledge(requestId, toolArgs, tokenData, c.env));
+        case 'search_knowledge':
+          return c.json(await handleSearchKnowledge(requestId, toolArgs, tokenData, c.env));
+        case 'get_project_knowledge':
+          return c.json(await handleGetProjectKnowledge(requestId, toolArgs, tokenData, c.env));
+        case 'get_relevant_knowledge':
+          return c.json(await handleGetRelevantKnowledge(requestId, toolArgs, tokenData, c.env));
+        case 'relate_knowledge':
+          return c.json(await handleRelateKnowledge(requestId, toolArgs, tokenData, c.env));
+        case 'get_related':
+          return c.json(await handleGetRelated(requestId, toolArgs, tokenData, c.env));
+        case 'confirm_knowledge':
+          return c.json(await handleConfirmKnowledge(requestId, toolArgs, tokenData, c.env));
+        case 'flag_contradiction':
+          return c.json(await handleFlagContradiction(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }

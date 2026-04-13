@@ -15,6 +15,8 @@ export type Env = {
   ACP_SESSION_DETECTION_WINDOW_MS?: string;
   ACP_SESSION_MAX_FORK_DEPTH?: string;
   WORKSPACE_IDLE_TIMEOUT_MS?: string;
+  KNOWLEDGE_MAX_ENTITIES_PER_PROJECT?: string;
+  KNOWLEDGE_MAX_OBSERVATIONS_PER_ENTITY?: string;
 };
 
 export interface SummaryData {

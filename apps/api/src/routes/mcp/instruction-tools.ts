@@ -2,7 +2,7 @@
  * MCP instruction tools — get_instructions and request_human_input.
  */
 import type { HumanInputCategory } from '@simple-agent-manager/shared';
-import { HUMAN_INPUT_CATEGORIES,MAX_HUMAN_INPUT_CONTEXT_LENGTH, MAX_HUMAN_INPUT_OPTION_LENGTH, MAX_HUMAN_INPUT_OPTIONS_COUNT } from '@simple-agent-manager/shared';
+import { HUMAN_INPUT_CATEGORIES, KNOWLEDGE_DEFAULTS, MAX_HUMAN_INPUT_CONTEXT_LENGTH, MAX_HUMAN_INPUT_OPTION_LENGTH, MAX_HUMAN_INPUT_OPTIONS_COUNT } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -10,6 +10,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as notificationService from '../../services/notification';
+import * as projectDataService from '../../services/project-data';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -56,6 +57,38 @@ export async function handleGetInstructions(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
   }
 
+  // Auto-retrieve relevant knowledge for this task context
+  const autoRetrieveLimit = parseInt(env.KNOWLEDGE_AUTO_RETRIEVE_LIMIT || '', 10) || KNOWLEDGE_DEFAULTS.autoRetrieveLimit;
+  let knowledgeContext: { entityName: string; entityType: string; observation: string; confidence: number }[] = [];
+  try {
+    const taskContext = `${task.title || ''} ${task.description || ''}`.trim();
+    if (taskContext) {
+      const relevant = await projectDataService.getRelevantKnowledge(env, tokenData.projectId, taskContext, autoRetrieveLimit);
+      knowledgeContext = relevant.map((r) => ({
+        entityName: r.entityName,
+        entityType: r.entityType,
+        observation: r.content,
+        confidence: r.confidence,
+      }));
+    }
+  } catch (err) {
+    log.warn('mcp.get_instructions.knowledge_retrieval_failed', {
+      projectId: tokenData.projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  const knowledgeInstructions = knowledgeContext.length > 0
+    ? [
+        'You have access to knowledge graph tools (add_knowledge, search_knowledge, etc.) to learn and remember facts about the user and project.',
+        'When you discover user preferences, coding styles, or project conventions, use add_knowledge to store them.',
+        'Use confirm_knowledge to reinforce observations you verify are still accurate.',
+      ]
+    : [
+        'You have access to knowledge graph tools (add_knowledge, search_knowledge, etc.) to learn and remember facts about the user and project.',
+        'When you discover user preferences, coding styles, or project conventions, use add_knowledge to store them.',
+      ];
+
   const result = {
     task: {
       id: task.id,
@@ -71,20 +104,24 @@ export async function handleGetInstructions(
       repository: project.repository,
       defaultBranch: project.defaultBranch,
     },
-    instructions: task.taskMode === 'conversation'
-      ? [
-          'You are in a conversation with a human. Respond to their messages directly.',
-          'Use `dispatch_task` to spawn follow-up work to other agents when needed.',
-          'Use `update_task_status` to report significant findings or progress.',
-          'Do NOT call `complete_task` — the human will end the conversation when they are ready.',
-          'If you encounter blockers, report them via `update_task_status` with a clear description.',
-        ]
-      : [
-          'Call `update_task_status` to report progress as you complete significant milestones.',
-          'Call `complete_task` with a summary when all work is done.',
-          'Push your changes to the output branch before calling `complete_task`.',
-          'If you encounter blockers, report them via `update_task_status` with a clear description.',
-        ],
+    instructions: [
+      ...(task.taskMode === 'conversation'
+        ? [
+            'You are in a conversation with a human. Respond to their messages directly.',
+            'Use `dispatch_task` to spawn follow-up work to other agents when needed.',
+            'Use `update_task_status` to report significant findings or progress.',
+            'Do NOT call `complete_task` — the human will end the conversation when they are ready.',
+            'If you encounter blockers, report them via `update_task_status` with a clear description.',
+          ]
+        : [
+            'Call `update_task_status` to report progress as you complete significant milestones.',
+            'Call `complete_task` with a summary when all work is done.',
+            'Push your changes to the output branch before calling `complete_task`.',
+            'If you encounter blockers, report them via `update_task_status` with a clear description.',
+          ]),
+      ...knowledgeInstructions,
+    ],
+    ...(knowledgeContext.length > 0 ? { knowledgeContext } : {}),
   };
 
   return jsonRpcSuccess(requestId, {

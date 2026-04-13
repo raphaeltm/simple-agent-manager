@@ -23,6 +23,7 @@ import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Dashboard } from './pages/Dashboard';
 import { IdeaDetailPage } from './pages/IdeaDetailPage';
 import { IdeasPage } from './pages/IdeasPage';
+import { KnowledgePage } from './pages/KnowledgePage';
 import { Landing } from './pages/Landing';
 import { Node } from './pages/Node';
 import { Nodes } from './pages/Nodes';
@@ -86,6 +87,7 @@ export default function App() {
               <Route path="chat/:sessionId" element={<ProjectChat />} />
               <Route path="library" element={<ProjectLibrary />} />
               <Route path="ideas" element={<IdeasPage />} />
+              <Route path="knowledge" element={<KnowledgePage />} />
               <Route path="ideas/:taskId" element={<IdeaDetailPage />} />
               <Route path="tasks" element={<Navigate to="../ideas" replace />} />
               <Route path="tasks/:taskId" element={<TaskDetail />} />
