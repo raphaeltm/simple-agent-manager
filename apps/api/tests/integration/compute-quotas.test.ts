@@ -21,6 +21,7 @@ describe('compute quota pipeline', () => {
   const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/compute-quotas.ts'), 'utf8');
   const providerCredsFile = readFileSync(resolve(process.cwd(), 'src/services/provider-credentials.ts'), 'utf8');
   const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+  const envFile = readFileSync(resolve(process.cwd(), 'src/env.ts'), 'utf8');
   const adminQuotaRoute = readFileSync(resolve(process.cwd(), 'src/routes/admin-quotas.ts'), 'utf8');
   const usageRoute = readFileSync(resolve(process.cwd(), 'src/routes/usage.ts'), 'utf8');
   const submitRoute = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
@@ -370,7 +371,7 @@ describe('compute quota pipeline', () => {
   // ===========================================================================
   describe('environment configuration', () => {
     it('Env interface includes COMPUTE_QUOTA_ENFORCEMENT_ENABLED', () => {
-      expect(indexFile).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
+      expect(envFile).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
     });
   });
 

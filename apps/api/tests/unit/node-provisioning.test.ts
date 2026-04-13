@@ -30,7 +30,7 @@ const doSource = [
   readFileSync(resolve(doDir, 'helpers.ts'), 'utf8'),
 ].join('\n');
 const indexSource = readFileSync(
-  resolve(process.cwd(), 'src/index.ts'),
+  resolve(process.cwd(), 'src/env.ts'),
   'utf8'
 );
 

@@ -422,7 +422,7 @@ describe('agent sessions — configurable MAX_AGENT_SESSION_LABEL_LENGTH', () =>
 
 describe('Env interface — new configurable limit env vars', () => {
   const indexSource = readFileSync(
-    resolve(process.cwd(), 'src/index.ts'),
+    resolve(process.cwd(), 'src/env.ts'),
     'utf8'
   );
 
