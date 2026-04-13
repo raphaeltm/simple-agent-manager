@@ -320,7 +320,13 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_repo_setup_guide');
       // Trigger tools
       expect(toolNames).toContain('create_trigger');
-      expect(body.result.tools).toHaveLength(47);
+      // Agent profile tools
+      expect(toolNames).toContain('list_agent_profiles');
+      expect(toolNames).toContain('get_agent_profile');
+      expect(toolNames).toContain('create_agent_profile');
+      expect(toolNames).toContain('update_agent_profile');
+      expect(toolNames).toContain('delete_agent_profile');
+      expect(body.result.tools).toHaveLength(52);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

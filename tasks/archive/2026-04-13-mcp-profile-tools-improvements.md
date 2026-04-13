@@ -21,14 +21,14 @@ PR #679 adds 5 MCP tools for agent profile CRUD but has several issues:
 
 ## Implementation Checklist
 
-- [ ] Extract shared param extraction helper to reduce duplication between create/update
-- [ ] Add `devcontainerConfigName` to tool definitions (create and update schemas)
-- [ ] Add `devcontainerConfigName` to handler param extraction (create and update)
-- [ ] Add `devcontainerConfigName` to get handler response
-- [ ] Update tests to cover `devcontainerConfigName` field
-- [ ] Update test for create handler to verify shared extraction works
-- [ ] Update PR body with full template including preflight evidence
-- [ ] Run lint, typecheck, test, build
+- [x] Extract shared param extraction helper to reduce duplication between create/update
+- [x] Add `devcontainerConfigName` to tool definitions (create and update schemas)
+- [x] Add `devcontainerConfigName` to handler param extraction (create and update)
+- [x] Add `devcontainerConfigName` to get handler response
+- [x] Update tests to cover `devcontainerConfigName` field
+- [x] Update test for create handler to verify shared extraction works
+- [x] Update PR body with full template including preflight evidence
+- [x] Run lint, typecheck, test, build
 - [ ] Deploy to staging and verify
 - [ ] Run specialist reviews
 

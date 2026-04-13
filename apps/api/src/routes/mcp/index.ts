@@ -51,6 +51,13 @@ import {
   handleRetrySubtask,
 } from './orchestration-tools';
 import {
+  handleCreateAgentProfile,
+  handleDeleteAgentProfile,
+  handleGetAgentProfile,
+  handleListAgentProfiles,
+  handleUpdateAgentProfile,
+} from './profile-tools';
+import {
   handleGetSessionMessages,
   handleListSessions,
   handleSearchMessages,
@@ -261,6 +268,17 @@ mcpRoutes.post('/', async (c) => {
         // ─── Trigger management tools ────────────────────────────────
         case 'create_trigger':
           return c.json(await handleCreateTrigger(requestId, toolArgs, tokenData, c.env));
+        // ─── Agent profile tools ──────────────────────────────────────
+        case 'list_agent_profiles':
+          return c.json(await handleListAgentProfiles(requestId, toolArgs, tokenData, c.env));
+        case 'get_agent_profile':
+          return c.json(await handleGetAgentProfile(requestId, toolArgs, tokenData, c.env));
+        case 'create_agent_profile':
+          return c.json(await handleCreateAgentProfile(requestId, toolArgs, tokenData, c.env));
+        case 'update_agent_profile':
+          return c.json(await handleUpdateAgentProfile(requestId, toolArgs, tokenData, c.env));
+        case 'delete_agent_profile':
+          return c.json(await handleDeleteAgentProfile(requestId, toolArgs, tokenData, c.env));
         // ─── Onboarding tools ─────────────────────────────────────────
         case 'get_repo_setup_guide':
           // Synchronous — no async I/O needed for static content
