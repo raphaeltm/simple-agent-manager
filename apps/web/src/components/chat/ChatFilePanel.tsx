@@ -15,7 +15,7 @@ import {
   type GitFileStatus,
   type GitStatusData,
 } from '../../lib/api';
-import { isImageFile } from '../../lib/file-utils';
+import { detectLanguage, formatFileSize, isImageFile } from '../../lib/file-utils';
 import { RenderedMarkdown,SyntaxHighlightedCode } from '../MarkdownRenderer';
 import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
 
@@ -29,37 +29,9 @@ interface ChatFilePanelProps {
   onClose: () => void;
 }
 
-// Map file extensions to Prism language identifiers
-const EXT_TO_LANG: Record<string, string> = {
-  ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-  go: 'go', py: 'python', css: 'css', html: 'markup', htm: 'markup',
-  json: 'json', yaml: 'yaml', yml: 'yaml', md: 'markdown',
-  sh: 'bash', bash: 'bash', zsh: 'bash', dockerfile: 'docker',
-  toml: 'toml', sql: 'sql', rs: 'rust', rb: 'ruby', java: 'java',
-  c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp', xml: 'markup', svg: 'markup',
-  graphql: 'graphql', gql: 'graphql',
-};
-
-function detectLanguage(filePath: string): string {
-  const filename = filePath.split('/').pop() ?? '';
-  const lower = filename.toLowerCase();
-  if (lower === 'dockerfile' || lower.startsWith('dockerfile.')) return 'docker';
-  if (lower === 'makefile') return 'makefile';
-  const ext = lower.split('.').pop() ?? '';
-  return EXT_TO_LANG[ext] ?? '';
-}
-
 function isMarkdownFile(filePath: string): boolean {
   const lower = filePath.toLowerCase();
   return lower.endsWith('.md') || lower.endsWith('.mdx');
-}
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const val = bytes / Math.pow(1024, i);
-  return `${val < 10 ? val.toFixed(1) : Math.round(val)} ${units[i]}`;
 }
 
 interface BreadcrumbItem { label: string; path: string }
@@ -423,7 +395,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                       </span>
                       {entry.type !== 'dir' && entry.size > 0 && (
                         <span className="text-[11px] font-mono text-fg-muted shrink-0">
-                          {formatSize(entry.size)}
+                          {formatFileSize(entry.size)}
                         </span>
                       )}
                     </button>

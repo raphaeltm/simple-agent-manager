@@ -9,7 +9,7 @@ import {
 } from 'react';
 
 import { getFileRawUrl,getGitFile } from '../lib/api';
-import { isImageFile } from '../lib/file-utils';
+import { detectLanguage, isImageFile } from '../lib/file-utils';
 import { RenderedMarkdown,SyntaxHighlightedCode } from './MarkdownRenderer';
 import { ImageViewer } from './shared-file-viewer';
 
@@ -27,52 +27,6 @@ interface FileViewerPanelProps {
   onBack: () => void;
   onClose: () => void;
   onViewDiff?: (filePath: string, staged: boolean) => void;
-}
-
-// Map file extensions to Prism language identifiers
-const EXT_TO_LANG: Record<string, string> = {
-  ts: 'typescript',
-  tsx: 'tsx',
-  js: 'javascript',
-  jsx: 'jsx',
-  go: 'go',
-  py: 'python',
-  css: 'css',
-  html: 'markup',
-  htm: 'markup',
-  json: 'json',
-  yaml: 'yaml',
-  yml: 'yaml',
-  md: 'markdown',
-  sh: 'bash',
-  bash: 'bash',
-  zsh: 'bash',
-  dockerfile: 'docker',
-  toml: 'toml',
-  sql: 'sql',
-  rs: 'rust',
-  rb: 'ruby',
-  java: 'java',
-  c: 'c',
-  cpp: 'cpp',
-  h: 'c',
-  hpp: 'cpp',
-  xml: 'markup',
-  svg: 'markup',
-  graphql: 'graphql',
-  gql: 'graphql',
-};
-
-function detectLanguage(filePath: string): string {
-  const filename = filePath.split('/').pop() ?? '';
-  const lower = filename.toLowerCase();
-
-  // Special filenames
-  if (lower === 'dockerfile' || lower.startsWith('dockerfile.')) return 'docker';
-  if (lower === 'makefile') return 'makefile';
-
-  const ext = lower.split('.').pop() ?? '';
-  return EXT_TO_LANG[ext] ?? '';
 }
 
 function isBinaryContent(content: string): boolean {

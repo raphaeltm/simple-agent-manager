@@ -3,16 +3,10 @@ import { getCollection } from 'astro:content';
 import Base from '../../layouts/Base.astro';
 import Header from '../../components/Header.astro';
 import CtaFooter from '../../components/CtaFooter.astro';
+import { categoryColors } from '../../lib/blog-utils';
 
 const posts = (await getCollection('blog', ({ data }) => !data.draft))
   .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
-
-const categoryColors: Record<string, string> = {
-  announcement: 'var(--color-accent)',
-  engineering: 'var(--color-success)',
-  tutorial: '#a855f7',
-  devlog: 'var(--color-warning)',
-};
 ---
 
 <Base

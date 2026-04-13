@@ -3,6 +3,7 @@ import { Skeleton } from '@simple-agent-manager/ui';
 import { Package } from 'lucide-react';
 import type { FC } from 'react';
 
+import { formatFileSize } from '../../lib/file-utils';
 import { Section } from './Section';
 import { SectionHeader } from './SectionHeader';
 
@@ -45,7 +46,7 @@ export const SoftwareSection: FC<SoftwareSectionProps> = ({ software, agent, loa
     });
     rows.push({
       label: 'Agent Heap',
-      value: formatBytes(agent.heapBytes),
+      value: formatFileSize(agent.heapBytes),
     });
   }
 
@@ -99,11 +100,3 @@ export const SoftwareSection: FC<SoftwareSectionProps> = ({ software, agent, loa
   );
 };
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const k = 1024;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const val = bytes / Math.pow(k, Math.min(i, units.length - 1));
-  return `${val.toFixed(1)} ${units[Math.min(i, units.length - 1)]}`;
-}
