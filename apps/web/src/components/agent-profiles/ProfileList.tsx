@@ -12,6 +12,8 @@ interface ProfileListProps {
   onCreateProfile: (data: CreateAgentProfileRequest) => Promise<AgentProfile>;
   onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<AgentProfile>;
   onDeleteProfile: (profileId: string) => Promise<void>;
+  /** Hide the built-in header when the parent provides its own heading */
+  hideHeader?: boolean;
 }
 
 export const ProfileList: FC<ProfileListProps> = ({
@@ -21,6 +23,7 @@ export const ProfileList: FC<ProfileListProps> = ({
   onCreateProfile,
   onUpdateProfile,
   onDeleteProfile,
+  hideHeader,
 }) => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<AgentProfile | null>(null);
@@ -73,13 +76,23 @@ export const ProfileList: FC<ProfileListProps> = ({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-base font-semibold text-fg-primary">Agent Profiles</h3>
-        <Button onClick={handleCreate}>
-          <Plus className="w-4 h-4 mr-1.5 inline-block" />
-          New Profile
-        </Button>
-      </div>
+      {!hideHeader && (
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-fg-primary">Agent Profiles</h3>
+          <Button onClick={handleCreate}>
+            <Plus className="w-4 h-4 mr-1.5 inline-block" />
+            New Profile
+          </Button>
+        </div>
+      )}
+      {hideHeader && (
+        <div className="flex justify-end mb-4">
+          <Button onClick={handleCreate}>
+            <Plus className="w-4 h-4 mr-1.5 inline-block" />
+            New Profile
+          </Button>
+        </div>
+      )}
 
       {profiles.length === 0 ? (
         <div className="text-center py-8 text-fg-muted text-sm">
