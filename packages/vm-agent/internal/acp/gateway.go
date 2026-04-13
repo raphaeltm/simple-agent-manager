@@ -1023,11 +1023,27 @@ func resolveVibeActiveModel(settings *agentSettingsPayload) string {
 	return vibeDefaultActiveModel
 }
 
+// Default values for OpenCode provider configuration.
+// Each has an env-var override so operators can change them without rebuilding the binary.
+const (
+	DefaultOpencodeModel             = "scaleway/qwen3-coder-30b-a3b-instruct"
+	DefaultScalewayBaseURL           = "https://api.scaleway.ai/v1"
+	DefaultGoogleVertexBaseURL       = "https://generativelanguage.googleapis.com/v1beta/openai"
+	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
+)
+
+func getOpencodeDefault(envKey, fallback string) string {
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return fallback
+}
+
 // buildOpencodeConfig creates the OPENCODE_CONFIG_CONTENT JSON structure
 // based on the provider selected in agent settings.
 func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} {
 	provider := "scaleway" // default provider
-	model := "scaleway/qwen3-coder-30b-a3b-instruct"
+	model := getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
 
 	if settings != nil {
 		if settings.OpencodeProvider != "" {
@@ -1041,6 +1057,8 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 	config := map[string]interface{}{
 		"model": model,
 	}
+
+	scalewayBaseURL := getOpencodeDefault("OPENCODE_SCALEWAY_BASE_URL", DefaultScalewayBaseURL)
 
 	switch provider {
 	case "platform":
@@ -1057,7 +1075,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 		config["provider"] = map[string]interface{}{
 			"scaleway": map[string]interface{}{
 				"options": map[string]interface{}{
-					"baseURL": "https://api.scaleway.ai/v1",
+					"baseURL": scalewayBaseURL,
 					"apiKey":  "{env:SCW_SECRET_KEY}",
 				},
 			},
@@ -1066,7 +1084,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 		config["provider"] = map[string]interface{}{
 			"openai-compatible": map[string]interface{}{
 				"options": map[string]interface{}{
-					"baseURL": "https://generativelanguage.googleapis.com/v1beta/openai",
+					"baseURL": getOpencodeDefault("OPENCODE_GOOGLE_VERTEX_BASE_URL", DefaultGoogleVertexBaseURL),
 					"apiKey":  "{env:GOOGLE_API_KEY}",
 				},
 			},
@@ -1079,21 +1097,8 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 				},
 			},
 		}
-	case "openai-compatible":
-		baseURL := "http://localhost:11434/v1" // fallback
-		if settings != nil && settings.OpencodeBaseUrl != "" {
-			baseURL = settings.OpencodeBaseUrl
-		}
-		config["provider"] = map[string]interface{}{
-			"openai-compatible": map[string]interface{}{
-				"options": map[string]interface{}{
-					"baseURL": baseURL,
-					"apiKey":  "{env:OPENCODE_API_KEY}",
-				},
-			},
-		}
-	case "custom":
-		baseURL := "http://localhost:11434/v1" // fallback
+	case "openai-compatible", "custom":
+		baseURL := getOpencodeDefault("OPENCODE_COMPATIBLE_DEFAULT_BASE_URL", DefaultCompatibleFallbackBaseURL)
 		if settings != nil && settings.OpencodeBaseUrl != "" {
 			baseURL = settings.OpencodeBaseUrl
 		}
@@ -1110,7 +1115,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 		config["provider"] = map[string]interface{}{
 			"scaleway": map[string]interface{}{
 				"options": map[string]interface{}{
-					"baseURL": "https://api.scaleway.ai/v1",
+					"baseURL": scalewayBaseURL,
 					"apiKey":  "{env:SCW_SECRET_KEY}",
 				},
 			},

@@ -17,6 +17,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { deleteAgentSettings, getAgentSettings, listAgents, saveAgentSettings } from '../lib/api';
 
+const SUCCESS_BANNER_DURATION_MS = 3000;
+
 /**
  * Per-agent settings card for model selection and permission mode.
  */
@@ -78,7 +80,7 @@ function AgentSettingsCard({
 
       await onSave(agent.id, data);
       setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      setTimeout(() => setSuccess(false), SUCCESS_BANNER_DURATION_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -98,7 +100,7 @@ function AgentSettingsCard({
       setOpencodeBaseUrl('');
       setOpencodeProviderName('');
       setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      setTimeout(() => setSuccess(false), SUCCESS_BANNER_DURATION_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reset settings');
     } finally {
