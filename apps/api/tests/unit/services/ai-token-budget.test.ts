@@ -124,6 +124,15 @@ describe('checkTokenBudget', () => {
     expect(result.allowed).toBe(false);
   });
 
+  it('allows requests when usage exactly equals limit', async () => {
+    const kv = createMockKV();
+    const key = buildBudgetKey('user-exact');
+    kv._store.set(key, JSON.stringify({ inputTokens: 500_000, outputTokens: 200_000 }));
+
+    const result = await checkTokenBudget(kv, 'user-exact', makeEnv());
+    expect(result.allowed).toBe(true);
+  });
+
   it('respects env var overrides for limits', async () => {
     const kv = createMockKV();
     const key = buildBudgetKey('user-custom');

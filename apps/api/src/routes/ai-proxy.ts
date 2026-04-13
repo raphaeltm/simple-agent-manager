@@ -348,8 +348,8 @@ async function handleStreamingRequest(
         if (line.startsWith('data: ')) {
           const jsonStr = line.slice(6).trim();
           if (jsonStr === '[DONE]') {
-            // Forward the done signal
-            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            // Don't forward upstream [DONE] — flush() sends exactly one [DONE]
+            // after the final finish_reason: 'stop' chunk.
             return;
           }
           try {

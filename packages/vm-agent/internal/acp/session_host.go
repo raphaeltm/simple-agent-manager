@@ -940,6 +940,9 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	} else if cred.inferenceConfig != nil && cred.inferenceConfig.APIKeySource == "callback-token" {
 		// Platform AI proxy: use the workspace callback token as the API key
 		// and inject the proxy base URL for OpenCode's openai-compatible provider.
+		if h.config.CallbackToken == "" {
+			return fmt.Errorf("platform AI proxy configured but CallbackToken is empty for workspace %s", h.config.WorkspaceID)
+		}
 		envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+cred.inferenceConfig.BaseURL)
 		envVars = append(envVars, "OPENCODE_PLATFORM_API_KEY="+h.config.CallbackToken)
 		// Force provider to "platform" so buildOpencodeConfig generates the right config
@@ -2083,7 +2086,8 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if result.APIKey == "" {
+	// Allow empty APIKey when inferenceConfig is present (platform AI proxy path).
+	if result.APIKey == "" && result.InferenceConfig == nil {
 		return nil, fmt.Errorf("empty credential returned for %s", agentType)
 	}
 

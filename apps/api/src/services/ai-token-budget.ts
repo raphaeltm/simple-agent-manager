@@ -60,7 +60,7 @@ export async function checkTokenBudget(
     || DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT;
 
   const usage = await getTokenUsage(kv, userId);
-  const allowed = usage.inputTokens < inputLimit && usage.outputTokens < outputLimit;
+  const allowed = usage.inputTokens <= inputLimit && usage.outputTokens <= outputLimit;
 
   return { allowed, usage, inputLimit, outputLimit };
 }
