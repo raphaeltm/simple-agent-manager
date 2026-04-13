@@ -1,5 +1,5 @@
 /**
- * POST /chat/completions — OpenAI-compatible AI inference proxy.
+ * AI inference proxy — OpenAI-compatible chat/completions + model list.
  *
  * Proxies requests to Cloudflare Workers AI, enabling trial users to use
  * OpenCode without bringing their own API key.
