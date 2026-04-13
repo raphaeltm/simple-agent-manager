@@ -183,3 +183,89 @@ func TestValidateNodeManagementToken_WorkspaceBypass(t *testing.T) {
 		}
 	})
 }
+
+func TestJWTValidation_CoreProperties(t *testing.T) {
+	t.Parallel()
+
+	const nodeID = "node-123"
+	validator, key := testJWKS(t, nodeID)
+
+	t.Run("expired token rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signToken(t, key, Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Audience:  jwt.ClaimStrings{"node-management"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(-1 * time.Second)),
+			},
+			Node: nodeID,
+		})
+
+		_, err := validator.ValidateNodeManagementToken(tokenStr, "")
+		if err == nil {
+			t.Fatal("expected error for expired token")
+		}
+	})
+
+	t.Run("wrong issuer rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signToken(t, key, Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "wrong-issuer",
+				Audience:  jwt.ClaimStrings{"node-management"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+			},
+			Node: nodeID,
+		})
+
+		_, err := validator.ValidateNodeManagementToken(tokenStr, "")
+		if err == nil {
+			t.Fatal("expected error for wrong issuer")
+		}
+		if !strings.Contains(err.Error(), "issuer") {
+			t.Errorf("expected issuer error, got: %s", err)
+		}
+	})
+
+	t.Run("wrong audience rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signToken(t, key, Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Audience:  jwt.ClaimStrings{"wrong-audience"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+			},
+			Node: nodeID,
+		})
+
+		_, err := validator.ValidateNodeManagementToken(tokenStr, "")
+		if err == nil {
+			t.Fatal("expected error for wrong audience")
+		}
+		if !strings.Contains(err.Error(), "audience") {
+			t.Errorf("expected audience error, got: %s", err)
+		}
+	})
+
+	t.Run("token signed with different key rejected", func(t *testing.T) {
+		t.Parallel()
+		// Generate a different RSA key not in the JWKS
+		otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("generate other key: %v", err)
+		}
+		tokenStr := signToken(t, otherKey, Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Audience:  jwt.ClaimStrings{"node-management"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+			},
+			Node: nodeID,
+		})
+
+		_, err = validator.ValidateNodeManagementToken(tokenStr, "")
+		if err == nil {
+			t.Fatal("expected error for token signed with unknown key")
+		}
+	})
+}

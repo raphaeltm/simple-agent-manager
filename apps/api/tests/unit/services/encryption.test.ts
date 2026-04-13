@@ -39,6 +39,23 @@ describe('encryption service', () => {
     });
   });
 
+  describe('tamper detection', () => {
+    it('fails to decrypt with wrong key', async () => {
+      const key1 = generateEncryptionKey();
+      const key2 = generateEncryptionKey();
+      const { ciphertext, iv } = await encrypt('secret data', key1);
+      await expect(decrypt(ciphertext, iv, key2)).rejects.toThrow();
+    });
+
+    it('fails to decrypt with tampered ciphertext', async () => {
+      const key = generateEncryptionKey();
+      const { ciphertext, iv } = await encrypt('sensitive', key);
+      // Flip a character in the base64 ciphertext
+      const tampered = ciphertext.slice(0, -2) + 'AA';
+      await expect(decrypt(tampered, iv, key)).rejects.toThrow();
+    });
+  });
+
   describe('generateEncryptionKey', () => {
     it('returns a base64 string', () => {
       const key = generateEncryptionKey();
