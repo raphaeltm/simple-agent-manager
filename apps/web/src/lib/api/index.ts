@@ -261,3 +261,14 @@ export {
   suspendAgentSession,
   updateWorkspace,
 } from './workspaces';
+export {
+  addObservation,
+  createKnowledgeEntity,
+  deleteKnowledgeEntity,
+  deleteObservation,
+  getKnowledgeEntity,
+  listKnowledgeEntities,
+  searchKnowledge,
+  updateKnowledgeEntity,
+  updateObservation,
+} from './knowledge';
