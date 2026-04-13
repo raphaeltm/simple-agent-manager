@@ -419,6 +419,17 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 type agentCredential struct {
 	credential     string
 	credentialKind string // "api-key" or "oauth-token"
+	// Platform inference proxy fields (set when credentialSource == "platform" for opencode)
+	inferenceConfig *inferenceConfig
+}
+
+// inferenceConfig holds platform AI proxy configuration returned by the control plane
+// when the user has no dedicated agent credential and the AI proxy is enabled.
+type inferenceConfig struct {
+	Provider     string `json:"provider"`     // e.g. "openai-compatible"
+	BaseURL      string `json:"baseURL"`      // e.g. "https://api.example.com/ai/v1"
+	Model        string `json:"model"`        // e.g. "@cf/qwen/qwen3-30b-a3b-fp8"
+	APIKeySource string `json:"apiKeySource"` // "callback-token" means use workspace callback token
 }
 
 func byteReader(data []byte) io.ReadCloser {
@@ -774,7 +785,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "SCW_SECRET_KEY",
-			installCmd:    "npm install -g opencode-ai@1.4.0",
+			installCmd:    "npm install -g opencode-ai@1.4.3",
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",

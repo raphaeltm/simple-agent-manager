@@ -1,7 +1,7 @@
 import { Card } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
-import { listAgentCredentials,listCredentials, listGitHubInstallations } from '../../lib/api';
+import { getTrialStatus, listAgentCredentials,listCredentials, listGitHubInstallations } from '../../lib/api';
 import { useAuth } from '../AuthProvider';
 import { StepAgentKey } from './StepAgentKey';
 import { StepCloudProvider } from './StepCloudProvider';
@@ -46,30 +46,43 @@ export function OnboardingWizard() {
   // Check setup status
   const checkStatus = useCallback(async () => {
     try {
-      const [credentials, installations, agentCreds] = await Promise.all([
+      const [credentials, installations, agentCreds, trialStatus] = await Promise.all([
         listCredentials(),
         listGitHubInstallations(),
         listAgentCredentials(),
+        getTrialStatus().catch(() => null),
       ]);
 
       const hasCloud = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
       const hasGitHub = installations.length > 0;
       const hasAgent = agentCreds.credentials.some((c) => c.isActive);
 
-      setStatus({ hasAgent, hasCloud, hasGitHub });
+      // If platform trial is available, treat agent + cloud as satisfied
+      const trialAvailable = trialStatus?.available ?? false;
+      const effectiveHasAgent = hasAgent || trialAvailable;
+      const effectiveHasCloud = hasCloud || trialAvailable;
 
-      // If all complete, auto-dismiss
-      if (hasAgent && hasCloud && hasGitHub) {
+      setStatus({ hasAgent: effectiveHasAgent, hasCloud: effectiveHasCloud, hasGitHub });
+
+      // If all complete (or trial covers agent+cloud), auto-dismiss
+      if (effectiveHasAgent && effectiveHasCloud && hasGitHub) {
         setDismissed(true);
         if (userId) localStorage.setItem(getStorageKey(userId), 'true');
         return;
       }
 
-      // Start at the first incomplete step
-      if (!hasAgent) setCurrentStep('agent');
-      else if (!hasCloud) setCurrentStep('cloud');
-      else if (!hasGitHub) setCurrentStep('github');
-      else setCurrentStep('how-it-works');
+      // Trial covers agent+cloud but not GitHub — skip to GitHub step
+      if (trialAvailable && !hasGitHub) {
+        setCurrentStep('github');
+      } else if (!effectiveHasAgent) {
+        setCurrentStep('agent');
+      } else if (!effectiveHasCloud) {
+        setCurrentStep('cloud');
+      } else if (!hasGitHub) {
+        setCurrentStep('github');
+      } else {
+        setCurrentStep('how-it-works');
+      }
     } catch {
       // Silently fail — onboarding is non-critical
     } finally {

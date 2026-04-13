@@ -11,6 +11,7 @@ import {
   closeConversationTask,
   getProjectTask,
   getTranscribeApiUrl,
+  getTrialStatus,
   getWorkspace,
   linkSessionIdea,
   listAgentProfiles,
@@ -174,9 +175,14 @@ export function useProjectChatState() {
   }, [selectedWorkspaceProfile]);
 
   useEffect(() => {
-    void listCredentials()
-      .then((creds) => setHasCloudCredentials(creds.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway')))
-      .catch(() => setHasCloudCredentials(false));
+    void Promise.all([
+      listCredentials().catch(() => []),
+      getTrialStatus().catch(() => null),
+    ]).then(([creds, trial]) => {
+      const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway');
+      const trialAvailable = trial?.available ?? false;
+      setHasCloudCredentials(hasUserCreds || trialAvailable);
+    });
   }, []);
 
   useEffect(() => {

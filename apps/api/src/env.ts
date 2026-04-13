@@ -423,4 +423,13 @@ export interface Env {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string;    // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string;       // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string;       // Max stale executions to recover per sweep (default: 100)
+  // AI Inference Proxy (Workers AI gateway for trial users)
+  AI_PROXY_ENABLED?: string;                         // Kill switch: "false" to disable (default: enabled)
+  AI_PROXY_DEFAULT_MODEL?: string;                   // Default Workers AI model (default: @cf/qwen/qwen3-30b-a3b-fp8)
+  AI_PROXY_ALLOWED_MODELS?: string;                  // Comma-separated allowed models
+  AI_PROXY_DAILY_INPUT_TOKEN_LIMIT?: string;         // Per-user daily input token cap (default: 500000)
+  AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT?: string;        // Per-user daily output token cap (default: 200000)
+  AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST?: string;    // Max input tokens per request (default: 32000)
+  AI_PROXY_RATE_LIMIT_RPM?: string;                  // Requests per minute per user (default: 30)
+  AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
 }

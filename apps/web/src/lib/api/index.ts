@@ -139,6 +139,7 @@ export type {
   CreateSmokeTestTokenResponse,
   SmokeTestStatusResponse,
   SmokeTestTokenResponse,
+  TrialStatusResponse,
 } from './misc';
 export {
   createSmokeTestToken,
@@ -146,6 +147,7 @@ export {
   getBrowserSidecarStatus,
   getCachedCommands,
   getSmokeTestStatus,
+  getTrialStatus,
   getWorkspaceBrowserSidecarPorts,
   getWorkspaceBrowserSidecarStatus,
   listSmokeTestTokens,

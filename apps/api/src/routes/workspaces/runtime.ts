@@ -69,6 +69,44 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
+  // AI proxy fallback: if no user credential and the AI proxy is enabled,
+  // return platform inference config so the VM agent can use the proxy.
+  // Only applies to OpenCode — the proxy uses Workers AI for inference.
+  const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
+  if (!credentialData && body.agentType === 'opencode' && aiProxyEnabled) {
+    const baseDomain = c.env.BASE_DOMAIN;
+    const proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
+    const defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? '@cf/qwen/qwen3-30b-a3b-fp8';
+
+    log.info('agent_key.ai_proxy_fallback', { workspaceId, userId: workspace.userId, proxyBaseUrl });
+
+    // Track credential source on associated task
+    const taskRows = await db
+      .select({ id: schema.tasks.id })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.workspaceId, workspaceId))
+      .limit(1);
+    const task = taskRows[0];
+    if (task) {
+      await db
+        .update(schema.tasks)
+        .set({ agentCredentialSource: 'platform' })
+        .where(eq(schema.tasks.id, task.id));
+    }
+
+    return c.json({
+      apiKey: '__platform_proxy__',
+      credentialKind: 'api-key' as const,
+      credentialSource: 'platform' as const,
+      inferenceConfig: {
+        provider: 'openai-compatible',
+        baseURL: proxyBaseUrl,
+        model: defaultModel,
+        apiKeySource: 'callback-token',
+      },
+    });
+  }
+
   if (!credentialData) {
     throw errors.notFound('Agent credential');
   }

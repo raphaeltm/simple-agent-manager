@@ -30,6 +30,7 @@ import { agentRoutes } from './routes/agent';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
+import { aiProxyRoutes } from './routes/ai-proxy';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
@@ -54,6 +55,7 @@ import { smokeTestTokenRoutes } from './routes/smoke-test-tokens';
 import { tasksRoutes } from './routes/tasks';
 import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
+import { trialRoutes } from './routes/trial';
 import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
@@ -406,7 +408,9 @@ app.route('/api/usage', usageRoutes);
 app.route('/api/account-map', accountMapRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/notifications', notificationRoutes);
+app.route('/api', trialRoutes);
 app.route('/api/gcp', gcpRoutes);
+app.route('/ai/v1', aiProxyRoutes);
 app.route('/auth/google', googleAuthRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),
 // so it needs credentials: false + origin: '*' to allow VM agent requests from any origin.
