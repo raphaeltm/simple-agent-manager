@@ -280,6 +280,172 @@ describe('Agent Settings Routes', () => {
     });
   });
 
+  describe('PUT /api/agent-settings/opencode (provider validation)', () => {
+    it('should reject custom provider without opencodeBaseUrl', async () => {
+      const res = await app.request('/api/agent-settings/opencode', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          opencodeProvider: 'custom',
+        }),
+      }, {
+        DATABASE: {} as any,
+      } as Env);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('opencodeBaseUrl is required');
+    });
+
+    it('should reject openai-compatible provider without opencodeBaseUrl', async () => {
+      const res = await app.request('/api/agent-settings/opencode', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          opencodeProvider: 'openai-compatible',
+        }),
+      }, {
+        DATABASE: {} as any,
+      } as Env);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('opencodeBaseUrl is required');
+    });
+
+    it('should reject non-HTTPS opencodeBaseUrl', async () => {
+      const res = await app.request('/api/agent-settings/opencode', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          opencodeProvider: 'custom',
+          opencodeBaseUrl: 'http://example.com/v1',
+        }),
+      }, {
+        DATABASE: {} as any,
+      } as Env);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('HTTPS');
+    });
+
+    it('should accept scaleway provider without opencodeBaseUrl', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      mockDB.limit.mockResolvedValueOnce([{
+        id: 'test-ulid',
+        userId: 'test-user-id',
+        agentType: 'opencode',
+        model: null,
+        permissionMode: null,
+        allowedTools: null,
+        deniedTools: null,
+        additionalEnv: null,
+        opencodeProvider: 'scaleway',
+        opencodeBaseUrl: null,
+        opencodeProviderName: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }]);
+
+      const res = await app.request('/api/agent-settings/opencode', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          opencodeProvider: 'scaleway',
+        }),
+      }, {
+        DATABASE: {} as any,
+      } as Env);
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.opencodeProvider).toBe('scaleway');
+      expect(body.opencodeBaseUrl).toBeNull();
+    });
+
+    it('should accept custom provider with valid HTTPS base URL', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      mockDB.limit.mockResolvedValueOnce([{
+        id: 'test-ulid',
+        userId: 'test-user-id',
+        agentType: 'opencode',
+        model: null,
+        permissionMode: null,
+        allowedTools: null,
+        deniedTools: null,
+        additionalEnv: null,
+        opencodeProvider: 'custom',
+        opencodeBaseUrl: 'https://my-provider.example.com/v1',
+        opencodeProviderName: 'My Provider',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }]);
+
+      const res = await app.request('/api/agent-settings/opencode', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          opencodeProvider: 'custom',
+          opencodeBaseUrl: 'https://my-provider.example.com/v1',
+          opencodeProviderName: 'My Provider',
+        }),
+      }, {
+        DATABASE: {} as any,
+      } as Env);
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.opencodeProvider).toBe('custom');
+      expect(body.opencodeBaseUrl).toBe('https://my-provider.example.com/v1');
+      expect(body.opencodeProviderName).toBe('My Provider');
+    });
+
+    it('should reject invalid opencodeProvider value', async () => {
+      const res = await app.request('/api/agent-settings/opencode', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          opencodeProvider: 'invalid-provider',
+        }),
+      }, {
+        DATABASE: {} as any,
+      } as Env);
+
+      expect(res.status).toBe(400);
+    });
+
+    it('should return opencode fields in GET response', async () => {
+      mockDB.limit.mockResolvedValueOnce([{
+        id: 'test-id',
+        userId: 'test-user-id',
+        agentType: 'opencode',
+        model: 'qwen3-coder',
+        permissionMode: null,
+        allowedTools: null,
+        deniedTools: null,
+        additionalEnv: null,
+        opencodeProvider: 'google-vertex',
+        opencodeBaseUrl: null,
+        opencodeProviderName: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }]);
+
+      const res = await app.request('/api/agent-settings/opencode', {
+        method: 'GET',
+      }, {
+        DATABASE: {} as any,
+      } as Env);
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.opencodeProvider).toBe('google-vertex');
+      expect(body.opencodeBaseUrl).toBeNull();
+      expect(body.opencodeProviderName).toBeNull();
+    });
+  });
+
   describe('DELETE /api/agent-settings/:agentType', () => {
     it('should delete settings successfully', async () => {
       const res = await app.request('/api/agent-settings/claude-code', {
