@@ -152,7 +152,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
     expect(json.credentialKind).toBe('api-key');
   });
 
-  it('returns 404 when no opencode key AND no Scaleway cloud credential', async () => {
+  it('returns platform proxy fallback when no opencode key AND no Scaleway cloud credential', async () => {
     let queryCount = 0;
     mockDB.limit.mockImplementation(() => {
       queryCount++;
@@ -163,6 +163,31 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
     });
 
     const resp = await postAgentKey({ agentType: 'opencode' });
+    // With AI proxy enabled (default), opencode falls back to platform proxy
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.apiKey).toBe('__platform_proxy__');
+    expect(body.credentialSource).toBe('platform');
+    expect(body.inferenceConfig).toBeDefined();
+    expect(body.inferenceConfig.provider).toBe('openai-compatible');
+    expect(body.inferenceConfig.apiKeySource).toBe('callback-token');
+  });
+
+  it('returns 404 when no opencode key AND no Scaleway credential AND AI proxy disabled', async () => {
+    // Override env to disable AI proxy
+    const disabledEnv = { ...mockEnv, AI_PROXY_ENABLED: 'false' } as unknown as Env;
+    const disabledApp = new Hono<{ Bindings: Env }>();
+    disabledApp.route('/', workspacesRoutes);
+    // Re-mount with disabled proxy env
+    const resp = await disabledApp.request(
+      '/api/workspaces/ws-123/agent-key',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
+        body: JSON.stringify({ agentType: 'opencode' }),
+      },
+      disabledEnv,
+    );
     expect(resp.status).toBe(404);
   });
 
@@ -180,7 +205,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
     expect(resp.status).toBe(404);
   });
 
-  it('handles malformed Scaleway credential JSON gracefully', async () => {
+  it('handles malformed Scaleway credential JSON gracefully and falls back to platform proxy', async () => {
     let queryCount = 0;
     mockDB.limit.mockImplementation(() => {
       queryCount++;
@@ -202,6 +227,10 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
     mockDecrypt.mockResolvedValueOnce('not-valid-json');
 
     const resp = await postAgentKey({ agentType: 'opencode' });
-    expect(resp.status).toBe(404);
+    // Malformed Scaleway credential is skipped, falls through to platform proxy
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.apiKey).toBe('__platform_proxy__');
+    expect(body.credentialSource).toBe('platform');
   });
 });

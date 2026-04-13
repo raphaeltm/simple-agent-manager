@@ -3,13 +3,13 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
 import {
   buildBudgetKey,
   checkTokenBudget,
   getTokenUsage,
   incrementTokenUsage,
 } from '../../../src/services/ai-token-budget';
-import type { Env } from '../../../src/env';
 
 /** Create a mock KV namespace with in-memory storage. */
 function createMockKV(): KVNamespace & { _store: Map<string, string> } {
