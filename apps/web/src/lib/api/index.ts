@@ -147,6 +147,7 @@ export {
   getBrowserSidecarStatus,
   getCachedCommands,
   getSmokeTestStatus,
+  getTrialStatus,
   getWorkspaceBrowserSidecarPorts,
   getWorkspaceBrowserSidecarStatus,
   listSmokeTestTokens,
@@ -156,7 +157,6 @@ export {
   startWorkspaceBrowserSidecar,
   stopBrowserSidecar,
   stopWorkspaceBrowserSidecar,
-  getTrialStatus,
 } from './misc';
 export {
   createNode,
