@@ -135,3 +135,6 @@ export const DEFAULT_AI_PROXY_RATE_LIMIT_RPM = 30;
 
 /** Default streaming timeout in ms. Override via AI_PROXY_STREAM_TIMEOUT_MS env var. */
 export const DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS = 120_000;
+
+/** Default rate limit window in seconds. Override via AI_PROXY_RATE_LIMIT_WINDOW_SECONDS env var. */
+export const DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS = 60;

@@ -15,6 +15,7 @@ import {
   DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST,
   DEFAULT_AI_PROXY_MODEL,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
+  DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
 } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -99,7 +100,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   // --- Rate limit: per-user RPM ---
   const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds = 60;
+  const windowSeconds = parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
 

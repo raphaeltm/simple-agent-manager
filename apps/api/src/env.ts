@@ -432,4 +432,5 @@ export interface Env {
   AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST?: string;    // Max input tokens per request (default: 32000)
   AI_PROXY_RATE_LIMIT_RPM?: string;                  // Requests per minute per user (default: 30)
   AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
+  AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
 }
