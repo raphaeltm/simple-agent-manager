@@ -116,12 +116,13 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
 
 /** Default Workers AI model for AI proxy inference. Override via AI_PROXY_DEFAULT_MODEL env var.
  * Note: Qwen3 models default to thinking mode which wraps responses in <think> tags,
- * causing empty visible content in streaming. Llama 4 Scout works reliably without this issue. */
-export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
+ * causing empty visible content in streaming. Llama 4 Scout leaks control tokens
+ * (<|start_header_id|>) and stalls during streaming. Llama 3.3 70B is the most stable. */
+export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 /** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var. */
 export const DEFAULT_AI_PROXY_ALLOWED_MODELS =
-  '@cf/meta/llama-4-scout-17b-16e-instruct,@cf/qwen/qwen3-30b-a3b-fp8,@cf/google/gemma-3-12b-it';
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-4-scout-17b-16e-instruct,@cf/qwen/qwen3-30b-a3b-fp8,@cf/google/gemma-3-12b-it';
 
 /** Default daily input token limit per user. Override via AI_PROXY_DAILY_INPUT_TOKEN_LIMIT env var. */
 export const DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT = 500_000;
