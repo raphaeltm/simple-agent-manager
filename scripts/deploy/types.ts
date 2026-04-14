@@ -125,18 +125,6 @@ export interface MigrationStatus {
   lastRun?: string;
 }
 
-export interface DeploymentState {
-  version: string;
-  environment: string;
-  timestamp: string;
-  status: DeploymentStatus;
-  resources: ProvisionedResources;
-  dnsRecords: DnsRecord[];
-  steps: DeploymentStep[];
-  secretsConfigured: string[];
-  migrations: MigrationStatus;
-}
-
 // ============================================================================
 // Preflight Check Types
 // ============================================================================
@@ -313,8 +301,6 @@ export interface CloudflareWorker {
 // ============================================================================
 // Constants
 // ============================================================================
-
-export const DEPLOYMENT_STATE_VERSION = '1.0.0';
 
 // Note: Resource naming is centralized in config.ts (DEPLOYMENT_CONFIG.resources)
 // Do NOT add resource naming constants here - use DEPLOYMENT_CONFIG instead.
