@@ -84,7 +84,7 @@ jobs:
             MISSING="$MISSING\n  - secrets.GH_APP_SLUG"
           fi
           if [ "$HAS_CF_ORIGIN_CA_KEY" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.CF_ORIGIN_CA_KEY (Cloudflare Origin CA Key — required for Origin CA certificates)"
+            echo "::warning::CF_ORIGIN_CA_KEY not set. Pulumi will try CF_API_TOKEN for Origin CA certs. If it fails with error 1016, set CF_ORIGIN_CA_KEY (My Profile → API Tokens → Origin CA Key)."
           fi
 
           if [ -n "$MISSING" ]; then
