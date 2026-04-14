@@ -67,3 +67,52 @@ export interface AdminUserDetailedUsage {
   activeSessions: ActiveComputeSession[];
   recentRecords: ComputeUsageRecord[];
 }
+
+// =============================================================================
+// Node-Centric Usage Types (admin view)
+// =============================================================================
+
+/** A single node's usage record — tracks the node's lifetime. */
+export interface NodeUsageRecord {
+  nodeId: string;
+  name: string;
+  vmSize: string;
+  vcpuCount: number;
+  vmLocation: string;
+  cloudProvider: string | null;
+  credentialSource: CredentialSource;
+  status: string;
+  createdAt: string;
+  /** Null if node is still alive. Derived from updatedAt when status is destroyed/destroying/deleted. */
+  endedAt: string | null;
+  /** Number of workspaces that have run on this node. */
+  workspaceCount: number;
+}
+
+/** Per-user node usage summary for admin overview. */
+export interface AdminUserNodeUsageSummary {
+  userId: string;
+  email: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+  totalNodeHours: number;
+  totalVcpuHours: number;
+  platformNodeHours: number;
+  activeNodes: number;
+}
+
+/** Response for GET /api/admin/usage/nodes. */
+export interface AdminNodeUsageResponse {
+  period: { start: string; end: string };
+  users: AdminUserNodeUsageSummary[];
+}
+
+/** Detailed node usage for a specific user. */
+export interface AdminUserNodeDetailedUsage {
+  period: { start: string; end: string };
+  totalNodeHours: number;
+  totalVcpuHours: number;
+  platformNodeHours: number;
+  activeNodes: number;
+  nodes: NodeUsageRecord[];
+}
