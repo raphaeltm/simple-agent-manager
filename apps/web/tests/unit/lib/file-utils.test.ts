@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  baseMimeType,
   FILE_PREVIEW_INLINE_MAX_BYTES,
   FILE_PREVIEW_LOAD_MAX_BYTES,
   formatFileSize,
@@ -95,6 +96,13 @@ describe('isPreviewableMime', () => {
     expect(isPreviewableMime('text/markdown')).toBe(true);
   });
 
+  it('handles MIME types with charset parameters', () => {
+    expect(isPreviewableMime('text/markdown; charset=utf-8')).toBe(true);
+    expect(isPreviewableMime('image/png; charset=utf-8')).toBe(true);
+    expect(isPreviewableMime('application/pdf; charset=binary')).toBe(true);
+    expect(isPreviewableMime('text/plain; charset=utf-8')).toBe(false);
+  });
+
   it('returns false for SVG (script risk in iframe)', () => {
     expect(isPreviewableMime('image/svg+xml')).toBe(false);
   });
@@ -148,11 +156,37 @@ describe('isMarkdownMime', () => {
     expect(isMarkdownMime('Text/Markdown')).toBe(true);
   });
 
+  it('returns true for markdown with charset parameter', () => {
+    expect(isMarkdownMime('text/markdown; charset=utf-8')).toBe(true);
+    expect(isMarkdownMime('Text/Markdown; charset=UTF-8')).toBe(true);
+  });
+
   it('returns false for non-markdown', () => {
     expect(isMarkdownMime('text/plain')).toBe(false);
     expect(isMarkdownMime('text/html')).toBe(false);
     expect(isMarkdownMime('application/pdf')).toBe(false);
     expect(isMarkdownMime('image/png')).toBe(false);
+  });
+});
+
+describe('baseMimeType', () => {
+  it('strips charset parameters', () => {
+    expect(baseMimeType('text/markdown; charset=utf-8')).toBe('text/markdown');
+    expect(baseMimeType('image/png; charset=utf-8')).toBe('image/png');
+  });
+
+  it('lowercases the result', () => {
+    expect(baseMimeType('Text/Markdown')).toBe('text/markdown');
+    expect(baseMimeType('APPLICATION/PDF')).toBe('application/pdf');
+  });
+
+  it('handles bare MIME types without parameters', () => {
+    expect(baseMimeType('text/plain')).toBe('text/plain');
+    expect(baseMimeType('image/png')).toBe('image/png');
+  });
+
+  it('handles multiple parameters', () => {
+    expect(baseMimeType('text/markdown; charset=utf-8; boundary=something')).toBe('text/markdown');
   });
 });
 
