@@ -381,7 +381,7 @@ export function ProjectSettings() {
         </div>
         {!defaultAgentType && (
           <div className="text-xs text-fg-muted">
-            No default set — tasks will use the platform default (Claude Code).
+            No default set — tasks will use the platform default (OpenCode).
           </div>
         )}
       </section>

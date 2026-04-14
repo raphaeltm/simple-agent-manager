@@ -219,9 +219,9 @@ describe('Initial prompt delivery: TaskRunner DO wiring', () => {
     expect(doSource).toContain('taskContent');
   });
 
-  it('uses DEFAULT_TASK_AGENT_TYPE env var with claude-code fallback', () => {
+  it('uses DEFAULT_TASK_AGENT_TYPE env var with opencode fallback', () => {
     expect(doSource).toContain('DEFAULT_TASK_AGENT_TYPE');
-    expect(doSource).toContain("'claude-code'");
+    expect(doSource).toContain("'opencode'");
   });
 
   it('logs agent_session_started event', () => {
@@ -267,7 +267,7 @@ describe('Initial prompt delivery: Env and config', () => {
   });
 
   it('wrangler.toml top-level has DEFAULT_TASK_AGENT_TYPE', () => {
-    expect(wranglerConfig).toContain('DEFAULT_TASK_AGENT_TYPE = "claude-code"');
+    expect(wranglerConfig).toContain('DEFAULT_TASK_AGENT_TYPE = "opencode"');
   });
 
   it('DEFAULT_TASK_AGENT_TYPE appears in top-level vars (sync script copies to env sections at deploy time)', () => {
