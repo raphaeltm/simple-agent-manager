@@ -281,19 +281,19 @@ SAM needs a Cloudflare API token with specific permissions:
 
 **Token name**: `simple-agent-manager`
 
-**Permissions** (add all of these):
+**Permissions** — add all of these. Each row maps to a single permission in the Cloudflare UI: select the **Scope** (Account or Zone), then the **Category** group, then the specific **Permission** and **Access Level**.
 
-| Permission Type | Resource | Access Level |
-|-----------------|----------|--------------|
-| **Account** Developer Platform | D1 | Edit |
-| **Account** Developer Platform | Workers KV Storage | Edit |
-| **Account** Developer Platform | Workers R2 Storage | Edit |
-| **Account** Developer Platform | Workers Scripts | Edit |
-| **Account** Developer Platform | Workers Observability | Read |
-| **Account** Developer Platform | Pages | Edit |
-| **Zone** Developer Platform | Workers Routes | Edit |
-| **Zone** DNS & Zone | DNS | Edit |
-| **Zone** DNS & Zone | Zone | Read |
+| Scope | Category | Permission | Access Level |
+|-------|----------|------------|--------------|
+| Account | Developer Platform | D1 | Edit |
+| Account | Developer Platform | Workers KV Storage | Edit |
+| Account | Developer Platform | Workers R2 Storage | Edit |
+| Account | Developer Platform | Workers Scripts | Edit |
+| Account | Developer Platform | Workers Observability | Read |
+| Account | Developer Platform | Pages | Edit |
+| Zone | Developer Platform | Workers Routes | Edit |
+| Zone | DNS & Zone | DNS | Edit |
+| Zone | DNS & Zone | Zone | Read |
 
 **Zone Resources**: Select **Include** → **Specific zone** → *your domain*
 
