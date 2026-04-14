@@ -5,7 +5,7 @@ import type {
   NodeUsageRecord,
 } from '@simple-agent-manager/shared';
 import { getVcpuCount } from '@simple-agent-manager/shared';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -15,7 +15,8 @@ import { getCurrentPeriodBounds } from './compute-usage';
 // Node status helpers
 // =============================================================================
 
-const ENDED_STATUSES = new Set(['destroyed', 'destroying', 'deleted', 'error']);
+const ENDED_STATUSES_ARRAY = ['destroyed', 'destroying', 'deleted', 'error'] as const;
+const ENDED_STATUSES = new Set<string>(ENDED_STATUSES_ARRAY);
 
 function isNodeEnded(status: string): boolean {
   return ENDED_STATUSES.has(status);
@@ -80,7 +81,10 @@ export async function getAllUsersNodeUsageSummary(
     .where(
       and(
         sql`${schema.nodes.createdAt} < ${end}`,
-        sql`(${schema.nodes.status} NOT IN ('destroyed', 'destroying', 'deleted', 'error') OR ${schema.nodes.updatedAt} > ${start})`,
+        or(
+          notInArray(schema.nodes.status, [...ENDED_STATUSES_ARRAY]),
+          sql`${schema.nodes.updatedAt} > ${start}`,
+        ),
       ),
     );
 
@@ -181,7 +185,10 @@ export async function getUserNodeDetailedUsage(
       and(
         eq(schema.nodes.userId, userId),
         sql`${schema.nodes.createdAt} < ${end}`,
-        sql`(${schema.nodes.status} NOT IN ('destroyed', 'destroying', 'deleted', 'error') OR ${schema.nodes.updatedAt} > ${start})`,
+        or(
+          notInArray(schema.nodes.status, [...ENDED_STATUSES_ARRAY]),
+          sql`${schema.nodes.updatedAt} > ${start}`,
+        ),
       ),
     )
     .orderBy(sql`${schema.nodes.createdAt} DESC`)

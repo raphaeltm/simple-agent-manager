@@ -29,18 +29,23 @@ export async function getTrialStatus(
 ): Promise<TrialStatus> {
   const aiProxyEnabled = (env.AI_PROXY_ENABLED ?? 'true') !== 'false';
 
-  // Check for platform cloud credential. Use try-catch because decryption
-  // can fail if the encryption key is missing or mismatched between environments.
+  // Check for platform cloud credential. Decryption can fail with a DOMException
+  // (OperationError) if the encryption key is mismatched between environments.
+  // Let config errors (missing key) propagate — outer handler returns available: false.
   let hasInfraCredential = false;
+  const encryptionKey = getCredentialEncryptionKey(env);
   try {
-    const encryptionKey = getCredentialEncryptionKey(env);
     const platformCloud = await getPlatformCloudCredential(db, encryptionKey);
     hasInfraCredential = platformCloud !== null;
-  } catch {
-    // Decryption failure — credential row exists but can't be decrypted.
-    // Still counts as "infra available" since provisioning uses a different
-    // code path that handles its own decryption.
-    hasInfraCredential = true;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'OperationError') {
+      // Decryption failure — credential row exists but can't be decrypted.
+      // Still counts as "infra available" since provisioning uses a different
+      // code path that handles its own decryption.
+      hasInfraCredential = true;
+    } else {
+      throw err; // D1 failures, network errors — propagate to outer handler
+    }
   }
 
   // The AI proxy itself serves as the agent credential (no separate platform agent credential needed)

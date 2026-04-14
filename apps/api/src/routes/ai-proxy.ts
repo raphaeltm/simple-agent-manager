@@ -31,10 +31,10 @@ import { verifyCallbackToken } from '../services/jwt';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 
-/** Parse allowed models from env or use defaults. */
+/** Parse allowed models from env or use defaults, normalizing prefixes. */
 function getAllowedModels(env: Env): Set<string> {
   const raw = env.AI_PROXY_ALLOWED_MODELS || DEFAULT_AI_PROXY_ALLOWED_MODELS;
-  return new Set(raw.split(',').map((m) => m.trim()).filter(Boolean));
+  return new Set(raw.split(',').map((m) => m.trim()).filter(Boolean).map((m) => resolveModelId(m, env)));
 }
 
 /** Resolve model ID: normalize prefixes, fall back to default. */
