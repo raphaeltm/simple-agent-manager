@@ -31,16 +31,16 @@ For markdown, unlike images/PDFs which render from a URL, we need to:
 
 ## Implementation Checklist
 
-- [ ] Add `text/markdown` to `PREVIEWABLE_MIMES` in `apps/api/src/routes/library.ts`
-- [ ] Add `isMarkdownMime()` function and add markdown to `PREVIEWABLE_MIMES` in `apps/web/src/lib/file-utils.ts`
-- [ ] Update `FilePreviewModal` to:
+- [x] Add `text/markdown` to `PREVIEWABLE_MIMES` in `apps/api/src/routes/library.ts`
+- [x] Add `isMarkdownMime()` function and add markdown to `PREVIEWABLE_MIMES` in `apps/web/src/lib/file-utils.ts`
+- [x] Update `FilePreviewModal` to:
   - Detect markdown files via `isMarkdownMime()`
   - Fetch content as text from the preview URL
   - Render with `RenderedMarkdown` component
   - Add rendered/source toggle button
   - Handle loading and error states
-- [ ] Add unit tests for new `isMarkdownMime()` function
-- [ ] Add behavioral test for FilePreviewModal markdown rendering
+- [x] Add unit tests for new `isMarkdownMime()` function
+- [x] Add behavioral test for FilePreviewModal markdown rendering
 
 ## Acceptance Criteria
 
