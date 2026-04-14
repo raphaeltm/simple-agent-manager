@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env tsx
 /**
  * GitHub App setup wizard.
  * Provides guided setup process for GitHub App integration.

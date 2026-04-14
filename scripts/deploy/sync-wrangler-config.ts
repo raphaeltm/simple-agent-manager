@@ -14,7 +14,7 @@
  *   PULUMI_STACK=prod pnpm tsx scripts/deploy/sync-wrangler-config.ts
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as TOML from "@iarna/toml";
@@ -40,11 +40,11 @@ const FIRST_DEPLOY_MARKER = "/tmp/tail-worker-first-deploy";
 // ============================================================================
 
 function getPulumiOutputs(stack: string): PulumiOutputs {
-  const command = `pulumi stack output --json --stack ${stack}`;
-  console.log(`Fetching Pulumi outputs: ${command}`);
+  const args = ["stack", "output", "--json", "--stack", stack];
+  console.log(`Fetching Pulumi outputs: pulumi ${args.join(" ")}`);
 
   try {
-    const output = execSync(command, {
+    const output = execFileSync("pulumi", args, {
       cwd: INFRA_DIR,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],

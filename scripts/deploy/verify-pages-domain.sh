@@ -53,7 +53,7 @@ parse_status() {
     echo "api_error"
     return
   fi
-  echo "$response" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('result',{}).get('status','unknown'))" 2>/dev/null || echo "parse_error"
+  echo "$response" | jq -r '.result.status // "unknown"' 2>/dev/null || echo "parse_error"
 }
 
 # Log full diagnostic info from API response
@@ -64,21 +64,19 @@ log_diagnostics() {
     log "  $label: API call failed"
     return
   fi
-  python3 -c "
-import sys, json
-r = json.load(sys.stdin)
-result = r.get('result', {})
-print(f'  Status:      {result.get(\"status\", \"unknown\")}')
-vd = result.get('validation_data', {})
-if vd:
-    print(f'  Validation:  status={vd.get(\"status\",\"?\")} method={vd.get(\"method\",\"?\")} error={vd.get(\"error_message\",\"\")}')
-vr = result.get('verification_data', {})
-if vr:
-    print(f'  Verification: status={vr.get(\"status\",\"?\")} error={vr.get(\"error_message\",\"\")}')
-cert = result.get('certificate_authority', '')
-if cert:
-    print(f'  Cert CA:     {cert}')
-" <<< "$response" 2>/dev/null || log "  $label: Could not parse response"
+  echo "$response" | jq -r '
+    .result as $r |
+    "  Status:      \($r.status // "unknown")",
+    (if $r.validation_data then
+      "  Validation:  status=\($r.validation_data.status // "?") method=\($r.validation_data.method // "?") error=\($r.validation_data.error_message // "")"
+    else empty end),
+    (if $r.verification_data then
+      "  Verification: status=\($r.verification_data.status // "?") error=\($r.verification_data.error_message // "")"
+    else empty end),
+    (if ($r.certificate_authority // "") != "" then
+      "  Cert CA:     \($r.certificate_authority)"
+    else empty end)
+  ' 2>/dev/null || log "  $label: Could not parse response"
 }
 
 # PATCH to retry domain validation
@@ -194,12 +192,7 @@ log ""
 log "All domains on ${PAGES_PROJECT}:"
 curl -s "${API_BASE}" \
   -H "Authorization: Bearer ${CF_API_TOKEN}" | \
-  python3 -c "
-import sys, json
-r = json.load(sys.stdin)
-for d in r.get('result', []):
-    print(f'  {d.get(\"name\",\"?\")} -> status={d.get(\"status\",\"?\")}')
-" 2>/dev/null || log "  Could not list domains"
+  jq -r '.result[]? | "  \(.name // "?") -> status=\(.status // "?")"' 2>/dev/null || log "  Could not list domains"
 log_endgroup
 
 # Non-blocking — the domain may activate later
