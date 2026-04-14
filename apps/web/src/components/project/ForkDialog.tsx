@@ -71,12 +71,13 @@ export function ForkDialog({
 
   const handleSubmit = async () => {
     const trimmed = message.trim();
-    if (!trimmed || !session?.task?.id) return;
+    const resolvedTaskId = session?.task?.id ?? session?.taskId;
+    if (!trimmed || !resolvedTaskId) return;
 
     setForkError(null);
     setSubmitting(true);
     try {
-      await onFork(trimmed, summary, session.task.id);
+      await onFork(trimmed, summary, resolvedTaskId);
       onClose();
     } catch (err) {
       setForkError(err instanceof Error ? err.message : 'Failed to start task');
@@ -165,7 +166,7 @@ export function ForkDialog({
             Cancel
           </Button>
           <Button
-            disabled={!message.trim() || loadingSummary || submitting || !session?.task?.id}
+            disabled={!message.trim() || loadingSummary || submitting || !(session?.task?.id ?? session?.taskId)}
             onClick={handleSubmit}
           >
             {submitting ? 'Starting...' : 'Continue'}

@@ -44,9 +44,10 @@ export function RetryDialog({
     let cancelled = false;
 
     // Fetch the original task description
-    if (session.task?.id) {
+    const taskId = session.task?.id ?? session.taskId;
+    if (taskId) {
       setLoadingMessage(true);
-      void getProjectTask(projectId, session.task.id)
+      void getProjectTask(projectId, taskId)
         .then((task) => {
           if (cancelled) return;
           setMessage(task.description ?? '');
@@ -83,24 +84,25 @@ export function RetryDialog({
 
   const handleSubmit = async () => {
     const trimmed = message.trim();
-    if (!trimmed || !session?.task?.id) return;
+    const resolvedTaskId = session?.task?.id ?? session?.taskId;
+    if (!trimmed || !resolvedTaskId) return;
 
     setRetryError(null);
     setSubmitting(true);
     try {
-      const sessionLabel = session.topic ? stripMarkdown(session.topic) : session.id;
+      const sessionLabel = session!.topic ? stripMarkdown(session!.topic) : session!.id;
       // Build a retry context summary that references the original session
       const retryContext = [
         `## Retry Context`,
         `This is a retry of a previous task that may have failed or produced unsatisfactory results.`,
         `Previous session: ${sessionLabel}`,
-        `Previous session ID: ${session.id}`,
-        `Previous task ID: ${session.task.id}`,
+        `Previous session ID: ${session!.id}`,
+        `Previous task ID: ${resolvedTaskId}`,
         '',
         summary ? `## Previous Session Summary\n${summary}` : '',
       ].filter(Boolean).join('\n');
 
-      await onRetry(trimmed, retryContext, session.task.id);
+      await onRetry(trimmed, retryContext, resolvedTaskId);
       onClose();
     } catch (err) {
       setRetryError(err instanceof Error ? err.message : 'Failed to start retry');
@@ -126,7 +128,7 @@ export function RetryDialog({
           <div className="font-semibold text-fg-primary text-sm">
             {sessionTitle}
           </div>
-          {session?.task?.id && (
+          {(session?.task?.id ?? session?.taskId) && (
             <div className="text-xs text-fg-muted font-mono">
               Session: {session.id.slice(0, 8)}
             </div>
@@ -197,7 +199,7 @@ export function RetryDialog({
             Cancel
           </Button>
           <Button
-            disabled={!message.trim() || submitting || !session?.task?.id || loadingSummary || loadingMessage}
+            disabled={!message.trim() || submitting || !(session?.task?.id ?? session?.taskId) || loadingSummary || loadingMessage}
             onClick={handleSubmit}
           >
             {submitting ? 'Starting...' : 'Retry'}

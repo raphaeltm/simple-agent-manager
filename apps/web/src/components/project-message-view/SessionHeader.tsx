@@ -212,7 +212,7 @@ export function SessionHeader({
         )}
 
         {/* Retry & Fork — always visible when session has a task */}
-        {session.task?.id && (
+        {(session.task?.id ?? session.taskId) && (
           <span className="inline-flex items-center gap-0.5 shrink-0">
             {onRetry && (
               <button

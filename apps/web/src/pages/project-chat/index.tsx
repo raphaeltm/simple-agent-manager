@@ -266,11 +266,11 @@ export function ProjectChat() {
               onSessionMutated={() => { void state.loadSessions(); }}
               onRetry={() => {
                 const s = state.sessions.find((sess) => sess.id === state.sessionId);
-                if (s?.task?.id) state.setRetrySession(s);
+                if (s?.taskId) state.setRetrySession(s);
               }}
               onFork={() => {
                 const s = state.sessions.find((sess) => sess.id === state.sessionId);
-                if (s?.task?.id) state.setForkSession(s);
+                if (s?.taskId) state.setForkSession(s);
               }}
             />
             {/* Close conversation button — shown for idle sessions with a task */}
