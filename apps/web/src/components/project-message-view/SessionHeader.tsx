@@ -220,7 +220,7 @@ export function SessionHeader({
                 onClick={onRetry}
                 aria-label="Retry task"
                 title="Retry — re-run this task"
-                className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
+                className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
               >
                 <RotateCcw size={14} />
               </button>
@@ -231,7 +231,7 @@ export function SessionHeader({
                 onClick={onFork}
                 aria-label="Fork session"
                 title="Fork — start a new task from this session"
-                className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
+                className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
               >
                 <GitFork size={14} />
               </button>
