@@ -213,8 +213,8 @@ type Config struct {
 	NekoTCPFallback       bool          // Use TCP fallback for WebRTC (env: NEKO_TCP_FALLBACK, default: true)
 	NekoMuxPort           int           // Single port for WebRTC UDP/TCP mux (env: NEKO_MUX_PORT, default: 59000)
 	NekoNAT1TO1           string        // Public IP for WebRTC NAT traversal (env: NEKO_NAT1TO1, default: auto-detect)
-	NekoPassword          string        // Neko viewer password (env: NEKO_PASSWORD, default: neko)
-	NekoPasswordAdmin     string        // Neko admin password (env: NEKO_PASSWORD_ADMIN, default: admin)
+	NekoPassword          string        // Neko viewer password (env: NEKO_PASSWORD, default: random hex via crypto/rand)
+	NekoPasswordAdmin     string        // Neko admin password (env: NEKO_PASSWORD_ADMIN, default: random hex via crypto/rand)
 	NekoShmSize           string        // Shared memory size for Chrome (env: NEKO_SHM_SIZE, default: 2g)
 	NekoBrowserStartTimeout time.Duration // Timeout for browser sidecar start (env: NEKO_BROWSER_START_TIMEOUT, default: 60s)
 	NekoBrowserStopTimeout  time.Duration // Timeout for browser sidecar stop (env: NEKO_BROWSER_STOP_TIMEOUT, default: 30s)
@@ -665,7 +665,7 @@ func getEnvInt64(key string, defaultValue int64) int64 {
 	if value := os.Getenv(key); value != "" {
 		i, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			slog.Warn("Unparseable env var, using default", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
 			return defaultValue
 		}
 		return i
@@ -760,13 +760,13 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("VM_AGENT_PORT must be 1-65535, got %d", c.Port))
 	}
 
-	// Control plane URL must be a valid URL
-	if c.ControlPlaneURL != "" {
-		if u, err := url.Parse(c.ControlPlaneURL); err != nil {
-			errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL is not a valid URL: %w", err))
-		} else if u.Scheme != "http" && u.Scheme != "https" {
-			errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL must use http or https scheme, got %q", u.Scheme))
-		}
+	// Control plane URL is required and must be valid
+	if c.ControlPlaneURL == "" {
+		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL is required"))
+	} else if u, err := url.Parse(c.ControlPlaneURL); err != nil {
+		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL is not a valid URL: %w", err))
+	} else if u.Scheme != "http" && u.Scheme != "https" {
+		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL must use http or https scheme, got %q", u.Scheme))
 	}
 
 	// TLS cert/key paths must exist when TLS is enabled

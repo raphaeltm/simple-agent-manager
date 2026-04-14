@@ -629,9 +629,12 @@ func TestValidateEmptyControlPlaneURL(t *testing.T) {
 	t.Parallel()
 	cfg := validConfig()
 	cfg.ControlPlaneURL = ""
-	// Validate() should pass — Load() handles the required check
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() should pass for empty ControlPlaneURL (Load handles required check): %v", err)
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for empty ControlPlaneURL")
+	}
+	if !strings.Contains(err.Error(), "CONTROL_PLANE_URL") {
+		t.Fatalf("expected CONTROL_PLANE_URL error, got: %v", err)
 	}
 }
 
