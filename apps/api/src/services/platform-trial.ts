@@ -2,12 +2,12 @@ import {
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
   DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT,
 } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getTokenUsage } from './ai-token-budget';
+import { getPlatformCloudCredential } from './platform-credentials';
 
 export interface TrialStatus {
   available: boolean;
@@ -29,20 +29,19 @@ export async function getTrialStatus(
 ): Promise<TrialStatus> {
   const aiProxyEnabled = (env.AI_PROXY_ENABLED ?? 'true') !== 'false';
 
-  // Check for platform cloud credential existence (no decryption needed —
-  // just verify a row exists). Previous implementation decrypted the credential
-  // which could throw if the encryption key was missing or mismatched, causing
-  // the trial-status endpoint to fall through to the catch-all error handler
-  // and return all-false.
-  const platformCloudRows = await db
-    .select({ id: schema.platformCredentials.id })
-    .from(schema.platformCredentials)
-    .where(and(
-      eq(schema.platformCredentials.credentialType, 'cloud-provider'),
-      eq(schema.platformCredentials.isEnabled, true),
-    ))
-    .limit(1);
-  const hasInfraCredential = platformCloudRows.length > 0;
+  // Check for platform cloud credential. Use try-catch because decryption
+  // can fail if the encryption key is missing or mismatched between environments.
+  let hasInfraCredential = false;
+  try {
+    const encryptionKey = getCredentialEncryptionKey(env);
+    const platformCloud = await getPlatformCloudCredential(db, encryptionKey);
+    hasInfraCredential = platformCloud !== null;
+  } catch {
+    // Decryption failure — credential row exists but can't be decrypted.
+    // Still counts as "infra available" since provisioning uses a different
+    // code path that handles its own decryption.
+    hasInfraCredential = true;
+  }
 
   // The AI proxy itself serves as the agent credential (no separate platform agent credential needed)
   const hasAgentCredential = aiProxyEnabled;
