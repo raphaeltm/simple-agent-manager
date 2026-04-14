@@ -160,6 +160,82 @@ describe('RetryDialog', () => {
     // Submit should be disabled
     expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
   });
+
+  it('displays error and keeps dialog open when onRetry rejects', async () => {
+    const failingRetry = vi.fn().mockRejectedValue(new Error('Network failure'));
+    const user = userEvent.setup();
+    render(
+      <RetryDialog
+        open
+        session={makeSession()}
+        projectId={projectId}
+        onClose={onClose}
+        onRetry={failingRetry}
+      />
+    );
+
+    await waitFor(() => {
+      expect((screen.getByPlaceholderText('Task description...') as HTMLTextAreaElement).value).toBe('Original task description');
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Retry' })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeTruthy();
+      expect(screen.getByText('Network failure')).toBeTruthy();
+    });
+    // Dialog stays open — onClose not called
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('calls onClose after successful retry', async () => {
+    const user = userEvent.setup();
+    render(
+      <RetryDialog
+        open
+        session={makeSession()}
+        projectId={projectId}
+        onClose={onClose}
+        onRetry={onRetry}
+      />
+    );
+
+    await waitFor(() => {
+      expect((screen.getByPlaceholderText('Task description...') as HTMLTextAreaElement).value).toBe('Original task description');
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Retry' })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('falls back to empty message when getProjectTask fails', async () => {
+    const { getProjectTask } = await import('../../src/lib/api');
+    (getProjectTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Not found'));
+
+    render(
+      <RetryDialog
+        open
+        session={makeSession()}
+        projectId={projectId}
+        onClose={onClose}
+        onRetry={onRetry}
+      />
+    );
+
+    await waitFor(() => {
+      const textarea = screen.getByPlaceholderText('Task description...');
+      expect((textarea as HTMLTextAreaElement).value).toBe('');
+    });
+  });
 });
 
 describe('ForkDialog', () => {
@@ -195,6 +271,64 @@ describe('ForkDialog', () => {
   it('exports FORK_MESSAGE_TEMPLATE constant', () => {
     expect(FORK_MESSAGE_TEMPLATE).toContain('SAM MCP tools');
     expect(FORK_MESSAGE_TEMPLATE).toContain('get_session_messages');
+  });
+
+  it('calls onFork with message and summary on submit', async () => {
+    const user = userEvent.setup();
+    render(
+      <ForkDialog
+        open
+        session={makeSession()}
+        projectId={projectId}
+        onClose={onClose}
+        onFork={onFork}
+      />
+    );
+
+    // Wait for template to load and summary to finish
+    await waitFor(() => {
+      const textarea = screen.getByPlaceholderText('Describe the next task...');
+      expect((textarea as HTMLTextAreaElement).value).toContain('SAM MCP tools');
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Continue' })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => {
+      expect(onFork).toHaveBeenCalledTimes(1);
+      const [msg, summary, parentId] = onFork.mock.calls[0] as [string, string, string];
+      expect(msg).toContain('SAM MCP tools');
+      expect(summary).toBe('Summary of previous session');
+      expect(parentId).toBe('task-1');
+    });
+  });
+
+  it('displays error and keeps dialog open when onFork rejects', async () => {
+    const failingFork = vi.fn().mockRejectedValue(new Error('Server error'));
+    const user = userEvent.setup();
+    render(
+      <ForkDialog
+        open
+        session={makeSession()}
+        projectId={projectId}
+        onClose={onClose}
+        onFork={failingFork}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Continue' })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeTruthy();
+      expect(screen.getByText('Server error')).toBeTruthy();
+    });
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
 
