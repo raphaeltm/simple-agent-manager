@@ -966,7 +966,16 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		}
 		settings.OpencodeProvider = "platform"
 		if settings.Model == "" && cred.inferenceConfig.Model != "" {
-			settings.Model = cred.inferenceConfig.Model
+			// Strip @cf/ prefix from Workers AI model IDs. OpenCode's model
+			// resolver interprets @cf/ as a provider prefix (splitting into
+			// providerID:"@cf" + modelID:"vendor/model"), causing
+			// ProviderModelNotFoundError. The AI proxy's resolveModelId()
+			// re-adds @cf/ on the server side.
+			m := cred.inferenceConfig.Model
+			if strings.HasPrefix(m, "@cf/") {
+				m = strings.TrimPrefix(m, "@cf/")
+			}
+			settings.Model = m
 		}
 		slog.Info("Platform AI proxy credential injected",
 			"baseURL", cred.inferenceConfig.BaseURL,
