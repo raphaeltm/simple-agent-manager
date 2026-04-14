@@ -3,11 +3,9 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -209,8 +207,8 @@ type Config struct {
 	NekoTCPFallback       bool          // Use TCP fallback for WebRTC (env: NEKO_TCP_FALLBACK, default: true)
 	NekoMuxPort           int           // Single port for WebRTC UDP/TCP mux (env: NEKO_MUX_PORT, default: 59000)
 	NekoNAT1TO1           string        // Public IP for WebRTC NAT traversal (env: NEKO_NAT1TO1, default: auto-detect)
-	NekoPassword          string        // Neko viewer password (env: NEKO_PASSWORD, default: neko)
-	NekoPasswordAdmin     string        // Neko admin password (env: NEKO_PASSWORD_ADMIN, default: admin)
+	NekoPassword          string        // Neko viewer password (env: NEKO_PASSWORD, default: random hex via crypto/rand)
+	NekoPasswordAdmin     string        // Neko admin password (env: NEKO_PASSWORD_ADMIN, default: random hex via crypto/rand)
 	NekoShmSize           string        // Shared memory size for Chrome (env: NEKO_SHM_SIZE, default: 2g)
 	NekoBrowserStartTimeout time.Duration // Timeout for browser sidecar start (env: NEKO_BROWSER_START_TIMEOUT, default: 60s)
 	NekoBrowserStopTimeout  time.Duration // Timeout for browser sidecar stop (env: NEKO_BROWSER_STOP_TIMEOUT, default: 30s)
@@ -417,8 +415,8 @@ func Load() (*Config, error) {
 		NekoTCPFallback:         getEnvBool("NEKO_TCP_FALLBACK", true),
 		NekoMuxPort:             getEnvInt("NEKO_MUX_PORT", 59000),
 		NekoNAT1TO1:             getEnv("NEKO_NAT1TO1", ""),
-		NekoPassword:            getEnv("NEKO_PASSWORD", "neko"),
-		NekoPasswordAdmin:       getEnv("NEKO_PASSWORD_ADMIN", "admin"),
+		NekoPassword:            getEnvOrGenerate("NEKO_PASSWORD", 16),
+		NekoPasswordAdmin:       getEnvOrGenerate("NEKO_PASSWORD_ADMIN", 16),
 		NekoShmSize:             getEnv("NEKO_SHM_SIZE", "2g"),
 		NekoBrowserStartTimeout: getEnvDuration("NEKO_BROWSER_START_TIMEOUT", 60*time.Second),
 		NekoBrowserStopTimeout:  getEnvDuration("NEKO_BROWSER_STOP_TIMEOUT", 30*time.Second),
@@ -635,71 +633,3 @@ func deriveAllowedOrigins(controlPlaneURL string) []string {
 	}
 }
 
-// getEnv returns the value of an environment variable or a default.
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// getEnvInt returns an integer environment variable or a default.
-func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if i, err := strconv.Atoi(value); err == nil {
-			return i
-		}
-	}
-	return defaultValue
-}
-
-// getEnvInt64 returns an int64 environment variable or a default.
-func getEnvInt64(key string, defaultValue int64) int64 {
-	if value := os.Getenv(key); value != "" {
-		i, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			slog.Warn("Unparseable env var, using default", "key", key, "value", value, "default", defaultValue, "error", err)
-			return defaultValue
-		}
-		return i
-	}
-	return defaultValue
-}
-
-// getEnvBool returns a boolean environment variable or a default.
-func getEnvBool(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		if b, err := strconv.ParseBool(value); err == nil {
-			return b
-		}
-	}
-	return defaultValue
-}
-
-// getEnvDuration returns a duration environment variable or a default.
-func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
-	if value := os.Getenv(key); value != "" {
-		if d, err := time.ParseDuration(value); err == nil {
-			return d
-		}
-	}
-	return defaultValue
-}
-
-// getEnvStringSlice returns a slice from a comma-separated environment variable.
-func getEnvStringSlice(key string, defaultValue []string) []string {
-	if value := os.Getenv(key); value != "" {
-		parts := strings.Split(value, ",")
-		result := make([]string, 0, len(parts))
-		for _, p := range parts {
-			trimmed := strings.TrimSpace(p)
-			if trimmed != "" {
-				result = append(result, trimmed)
-			}
-		}
-		if len(result) > 0 {
-			return result
-		}
-	}
-	return defaultValue
-}

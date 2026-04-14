@@ -308,6 +308,7 @@ func New(cfg *config.Config) (*Server, error) {
 		PromptTimeout:           effectivePromptTimeout(cfg),
 		PromptCancelGracePeriod: cfg.ACPPromptCancelGrace,
 		SAMEnvFallback:          cfg.BuildSAMEnvFallback(),
+		HTTPClient:              config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}
 
 	// Open persistence store for cross-device session state.

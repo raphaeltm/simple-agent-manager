@@ -50,51 +50,51 @@ The Go VM agent uses `http.DefaultClient` (zero timeout) for outbound HTTP calls
 ## Implementation Checklist
 
 ### 1. Create shared HTTP client helper in config package
-- [ ] Add `NewControlPlaneClient(timeout time.Duration) *http.Client` function to config package
-- [ ] Use sensible defaults (30s timeout if 0 passed)
+- [x] Add `NewControlPlaneClient(timeout time.Duration) *http.Client` function to config package
+- [x] Use sensible defaults (30s timeout if 0 passed)
 
 ### 2. Replace http.DefaultClient in bootstrap.go
-- [ ] Replace `http.DefaultClient.Do(req)` at line 627 with timeout-configured client
-- [ ] Replace `http.DefaultClient.Do(req)` at line 2425 with timeout-configured client
+- [x] Replace `http.DefaultClient.Do(req)` at line 627 with timeout-configured client
+- [x] Replace `http.DefaultClient.Do(req)` at line 2425 with timeout-configured client
 
 ### 3. Replace http.DefaultClient in session_host.go
-- [ ] Add `httpClient *http.Client` field to `SessionHostConfig` or `GatewayConfig`
-- [ ] Replace `http.DefaultClient.Do(req)` at line 2067 with configured client
-- [ ] Replace `http.DefaultClient.Do(req)` at line 2123 with configured client
-- [ ] Wire the client from server.go when constructing SessionHost configs
+- [x] Add `httpClient *http.Client` field to `SessionHostConfig` or `GatewayConfig`
+- [x] Replace `http.DefaultClient.Do(req)` at line 2067 with configured client
+- [x] Replace `http.DefaultClient.Do(req)` at line 2123 with configured client
+- [x] Wire the client from server.go when constructing SessionHost configs
 
 ### 4. Add Config.Validate() method
-- [ ] Create `Validate() error` method on Config struct
-- [ ] Validate Port in range 1-65535
-- [ ] Validate TLS cert/key paths exist when TLS is enabled (move from Load)
-- [ ] Validate numeric ranges: SessionMaxCount > 0, DefaultRows/Cols > 0
-- [ ] Validate ControlPlaneURL is a valid URL
-- [ ] Call Validate() after Load() in main.go
+- [x] Create `Validate() error` method on Config struct
+- [x] Validate Port in range 1-65535
+- [x] Validate TLS cert/key paths exist when TLS is enabled (move from Load)
+- [x] Validate numeric ranges: SessionMaxCount > 0, DefaultRows/Cols > 0
+- [x] Validate ControlPlaneURL is a valid URL
+- [x] Call Validate() after Load() in main.go
 
 ### 5. Generate random Neko default passwords
-- [ ] Add `generateRandomPassword(length int) string` using crypto/rand
-- [ ] Replace hardcoded "neko" and "admin" defaults with generated passwords
-- [ ] Log warning if operator explicitly sets weak passwords (< 8 chars)
+- [x] Add `generateRandomPassword(length int) string` using crypto/rand
+- [x] Replace hardcoded "neko" and "admin" defaults with generated passwords
+- [x] Log warning if operator explicitly sets weak passwords (< 8 chars)
 
 ### 6. Add parse warnings to env var helpers
-- [ ] Add `slog.Warn` to `getEnvInt` on parse failure (match getEnvInt64 pattern)
-- [ ] Add `slog.Warn` to `getEnvBool` on parse failure
-- [ ] Add `slog.Warn` to `getEnvDuration` on parse failure
+- [x] Add `slog.Warn` to `getEnvInt` on parse failure (match getEnvInt64 pattern)
+- [x] Add `slog.Warn` to `getEnvBool` on parse failure
+- [x] Add `slog.Warn` to `getEnvDuration` on parse failure
 
 ### 7. Tests
-- [ ] Unit tests for Validate() — valid config, missing TLS paths, invalid port, etc.
-- [ ] Unit tests for random password generation
-- [ ] Unit tests for env var parse warning behavior
-- [ ] Run `go test ./...` and `go vet ./...`
+- [x] Unit tests for Validate() — valid config, missing TLS paths, invalid port, etc.
+- [x] Unit tests for random password generation
+- [x] Unit tests for env var parse warning behavior
+- [x] Run `go test ./...` and `go vet ./...`
 
 ## Acceptance Criteria
 
-- [ ] No `http.DefaultClient` usage remains in the VM agent
-- [ ] All outbound HTTP calls use clients with explicit timeouts
-- [ ] Config.Validate() catches invalid port ranges, missing TLS paths, invalid URLs
-- [ ] Neko passwords default to cryptographically random values
-- [ ] Unparseable env vars produce slog.Warn messages
-- [ ] All existing tests pass
-- [ ] New tests cover validation, password generation, and parse warnings
-- [ ] No function signature changes to externally-called functions
-- [ ] No HTTP endpoint behavior changes
+- [x] No `http.DefaultClient` usage remains in the VM agent
+- [x] All outbound HTTP calls use clients with explicit timeouts
+- [x] Config.Validate() catches invalid port ranges, missing TLS paths, invalid URLs
+- [x] Neko passwords default to cryptographically random values
+- [x] Unparseable env vars produce slog.Warn messages
+- [x] All existing tests pass
+- [x] New tests cover validation, password generation, and parse warnings
+- [x] No function signature changes to externally-called functions
+- [x] No HTTP endpoint behavior changes

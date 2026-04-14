@@ -624,7 +624,8 @@ func redeemBootstrapToken(ctx context.Context, cfg *config.Config) (*bootstrapSt
 		return nil, true, err
 	}
 
-	res, err := http.DefaultClient.Do(req)
+	client := config.NewControlPlaneClient(cfg.HTTPCallbackTimeout)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, true, err
 	}
@@ -2422,7 +2423,8 @@ func markWorkspaceReady(ctx context.Context, cfg *config.Config, status string) 
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+cfg.CallbackToken)
 
-		res, err := http.DefaultClient.Do(req)
+		readyClient := config.NewControlPlaneClient(cfg.WorkspaceReadyCallbackTimeout)
+		res, err := readyClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to call ready endpoint: %w", err)
 		}

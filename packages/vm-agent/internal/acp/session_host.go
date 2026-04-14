@@ -43,6 +43,12 @@ const (
 	// DefaultACPInitTimeout is the safety-net timeout for ACP phase operations
 	// when InitTimeoutMs is not configured. Matches the default for ACP_INIT_TIMEOUT_MS.
 	DefaultACPInitTimeout = 30 * time.Second
+
+	// defaultControlPlaneHTTPTimeout is the safety-net HTTP client timeout
+	// used when no HTTPClient is injected via GatewayConfig. Production code
+	// injects a client via config.NewControlPlaneClient(cfg.HTTPCallbackTimeout);
+	// this constant is only reached in tests or direct struct construction.
+	defaultControlPlaneHTTPTimeout = 30 * time.Second
 )
 
 // buildAcpMcpServers converts McpServerEntry configs into acpsdk.McpServer
@@ -209,6 +215,15 @@ func NewSessionHost(config SessionHostConfig) *SessionHost {
 		ctx:        ctx,
 		cancel:     cancel,
 	}
+}
+
+// httpClient returns the configured HTTP client for control-plane calls,
+// falling back to a default 30-second timeout client if none was provided.
+func (h *SessionHost) httpClient() *http.Client {
+	if h.config.HTTPClient != nil {
+		return h.config.HTTPClient
+	}
+	return &http.Client{Timeout: defaultControlPlaneHTTPTimeout}
 }
 
 // Status returns the current status of the SessionHost.
@@ -2064,7 +2079,7 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := h.httpClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch agent key: %w", err)
 	}
@@ -2120,7 +2135,7 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := h.httpClient().Do(req)
 	if err != nil {
 		slog.Warn("Failed to fetch agent settings", "error", err)
 		return nil
