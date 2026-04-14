@@ -20,29 +20,29 @@ A CTO code review found CRITICAL security issues in `packages/cloud-init/src/gen
 
 ## Implementation Checklist
 
-- [ ] 1. Fix regex injection: change line 193 from `config.replace(regex, value)` to `config.replace(regex, () => value)`
-- [ ] 2. Add PEM validation regex and validate `originCaCert`/`originCaKey` in `validateCloudInitVariables()`
-- [ ] 3. Add `GenerateCloudInitOptions` interface with optional `validateSize` (default: true)
-- [ ] 4. Call `validateCloudInitSize()` at end of `generateCloudInit()` when `validateSize !== false`
-- [ ] 5. Update `generateCloudInit` signature to accept optional options parameter
-- [ ] 6. Export `GenerateCloudInitOptions` from `index.ts` if needed
-- [ ] 7. Add `SAFE_DOCKER_IMAGE_RE` check inside `buildNekoPrePullCmd`
-- [ ] 8. Add test: PEM with `$` characters round-trips correctly through generation
-- [ ] 9. Add test: PEM validation rejects malformed content
-- [ ] 10. Add test: PEM validation accepts valid certificates
-- [ ] 11. Add test: size validation fires when config exceeds 32KB
-- [ ] 12. Add test: size validation can be skipped with option
-- [ ] 13. Add test: buildNekoPrePullCmd rejects invalid docker images
-- [ ] 14. Run `pnpm --filter @simple-agent-manager/cloud-init test`
-- [ ] 15. Run `pnpm typecheck && pnpm lint`
+- [x] 1. Fix regex injection: change line 193 from `config.replace(regex, value)` to `config.replace(regex, () => value)`
+- [x] 2. Add PEM validation regex and validate `originCaCert`/`originCaKey` in `validateCloudInitVariables()`
+- [x] 3. Add `GenerateCloudInitOptions` interface with optional `validateSize` (default: true)
+- [x] 4. Call `validateCloudInitSize()` at end of `generateCloudInit()` when `validateSize !== false`
+- [x] 5. Update `generateCloudInit` signature to accept optional options parameter
+- [x] 6. Export `GenerateCloudInitOptions` from `index.ts`
+- [x] 7. Add `SAFE_DOCKER_IMAGE_RE` check inside `buildNekoPrePullCmd`
+- [x] 8. Add test: PEM with `$` characters round-trips correctly through generation
+- [x] 9. Add test: PEM validation rejects malformed content
+- [x] 10. Add test: PEM validation accepts valid certificates
+- [x] 11. Add test: size validation fires when config exceeds 32KB
+- [x] 12. Add test: size validation can be skipped with option
+- [x] 13. Add test: buildNekoPrePullCmd rejects invalid docker images
+- [x] 14. Run `pnpm --filter @simple-agent-manager/cloud-init test` — 142 passed
+- [x] 15. Run `pnpm typecheck && pnpm lint` — 0 errors
 
 ## Acceptance Criteria
 
-- [ ] PEM content containing `$&`, `$'`, `` $` `` survives generation intact (verified by YAML parse + comparison)
-- [ ] `validateCloudInitVariables` rejects PEM content that doesn't match expected envelope format
-- [ ] `validateCloudInitVariables` accepts valid PEM certificates and keys
-- [ ] `generateCloudInit()` throws when output exceeds 32KB (by default)
-- [ ] `generateCloudInit(vars, { validateSize: false })` skips the size check
-- [ ] `buildNekoPrePullCmd` throws on invalid Docker image names
-- [ ] All existing tests continue to pass
-- [ ] No changes outside `packages/cloud-init/`
+- [x] PEM content containing `$&`, `$'`, `` $` `` survives generation intact (verified by YAML parse + comparison)
+- [x] `validateCloudInitVariables` rejects PEM content that doesn't match expected envelope format
+- [x] `validateCloudInitVariables` accepts valid PEM certificates and keys
+- [x] `generateCloudInit()` throws when output exceeds 32KB (by default)
+- [x] `generateCloudInit(vars, { validateSize: false })` skips the size check
+- [x] `buildNekoPrePullCmd` throws on invalid Docker image names
+- [x] All existing tests continue to pass (127 original + 15 new = 142 total)
+- [x] No changes outside `packages/cloud-init/`

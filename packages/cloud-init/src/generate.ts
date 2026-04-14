@@ -32,6 +32,15 @@ const SAFE_TOKEN_RE = /^[a-zA-Z0-9_.\-/+=]+$/;
 const SAFE_DNS_SERVERS_RE = /^"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"(, "\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")*$/;
 
 /**
+ * PEM envelope: must start with -----BEGIN <label>----- and end with -----END <label>-----.
+ * BEGIN and END labels must match (enforced via backreference).
+ * Content between markers must be base64 characters, spaces, and newlines only.
+ * Uses `[ \n\r]` instead of `\s` to exclude tab/form-feed/vertical-tab which are
+ * not valid in PEM and could smuggle YAML indentation.
+ */
+const PEM_ENVELOPE_RE = /^-----BEGIN ([A-Z0-9 ]+)-----\n[A-Za-z0-9+/= \n\r]+\n-----END \1-----$/;
+
+/**
  * Validate all CloudInitVariables before they are embedded into shell/YAML.
  * Throws an error describing the first invalid field found.
  */
@@ -112,6 +121,16 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       errors.push(`dockerDnsServers: must contain only quoted IPs (got ${JSON.stringify(variables.dockerDnsServers)})`);
     }
   }
+  if (variables.originCaCert !== undefined && variables.originCaCert !== '') {
+    if (!PEM_ENVELOPE_RE.test(variables.originCaCert)) {
+      errors.push('originCaCert: must be a valid PEM-encoded certificate (-----BEGIN ... ----- / -----END ... -----)');
+    }
+  }
+  if (variables.originCaKey !== undefined && variables.originCaKey !== '') {
+    if (!PEM_ENVELOPE_RE.test(variables.originCaKey)) {
+      errors.push('originCaKey: must be a valid PEM-encoded key (-----BEGIN ... ----- / -----END ... -----)');
+    }
+  }
 
   if (errors.length > 0) {
     throw new Error(`Cloud-init variable validation failed:\n${errors.join('\n')}`);
@@ -158,9 +177,20 @@ export interface CloudInitVariables {
 }
 
 /**
+ * Options for cloud-init generation.
+ */
+export interface GenerateCloudInitOptions {
+  /** Whether to validate the output size against the 32KB Hetzner limit (default: true) */
+  validateSize?: boolean;
+}
+
+/**
  * Generate cloud-init configuration from template with variables.
  */
-export function generateCloudInit(variables: CloudInitVariables): string {
+export function generateCloudInit(
+  variables: CloudInitVariables,
+  options?: GenerateCloudInitOptions,
+): string {
   validateCloudInitVariables(variables);
 
   let config = CLOUD_INIT_TEMPLATE;
@@ -189,8 +219,20 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ neko_pre_pull_cmd }}': buildNekoPrePullCmd(variables),
   };
 
+  // Use function replacement to prevent $-pattern interpretation in values.
+  // String.prototype.replace() interprets $&, $', $` etc. in string replacements,
+  // which corrupts PEM content or other values containing $ characters.
   for (const [placeholder, value] of Object.entries(replacements)) {
-    config = config.replace(new RegExp(escapeRegExp(placeholder), 'g'), value);
+    config = config.replace(new RegExp(escapeRegExp(placeholder), 'g'), () => value);
+  }
+
+  if (options?.validateSize !== false) {
+    if (!validateCloudInitSize(config)) {
+      const sizeBytes = new TextEncoder().encode(config).length;
+      throw new Error(
+        `Cloud-init config exceeds ${HETZNER_USER_DATA_MAX_BYTES / 1024}KB Hetzner user-data limit (${sizeBytes} bytes)`,
+      );
+    }
   }
 
   return config;
@@ -229,14 +271,20 @@ function buildNekoPrePullCmd(variables: CloudInitVariables): string {
     return '# Neko pre-pull disabled';
   }
   const image = variables.nekoImage ?? 'ghcr.io/m1k1o/neko/google-chrome:latest';
+  // Defense-in-depth: validate image name independently of top-level validation
+  if (!SAFE_DOCKER_IMAGE_RE.test(image)) {
+    throw new Error(`buildNekoPrePullCmd: unsafe Docker image reference: ${JSON.stringify(image)}`);
+  }
   return `- docker pull '${image}' || true`;
 }
+
+/** Hetzner hard user-data size limit (32KB). */
+export const HETZNER_USER_DATA_MAX_BYTES = 32 * 1024;
 
 /**
  * Validate cloud-init config doesn't exceed Hetzner 32KB user-data limit.
  */
 export function validateCloudInitSize(config: string): boolean {
   const sizeBytes = new TextEncoder().encode(config).length;
-  const maxBytes = 32 * 1024;
-  return sizeBytes <= maxBytes;
+  return sizeBytes <= HETZNER_USER_DATA_MAX_BYTES;
 }
