@@ -2,7 +2,7 @@ import { Button,Card } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-import { listCredentials, listGitHubInstallations, listWorkspaces } from '../lib/api';
+import { getTrialStatus, listCredentials, listGitHubInstallations, listWorkspaces } from '../lib/api';
 import { useAuth } from './AuthProvider';
 
 interface OnboardingStep {
@@ -33,13 +33,16 @@ export function OnboardingChecklist() {
 
   const checkSetup = useCallback(async () => {
     try {
-      const [credentials, installations, workspaces] = await Promise.all([
+      const [credentials, installations, workspaces, trial] = await Promise.all([
         listCredentials(),
         listGitHubInstallations(),
         listWorkspaces(),
+        getTrialStatus().catch(() => null),
       ]);
 
-      const hasCloudProvider = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
+      const hasUserCreds = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
+      const trialAvailable = trial?.available ?? false;
+      const hasCloudProvider = hasUserCreds || trialAvailable;
       const hasGitHubApp = installations.length > 0;
       const hasWorkspace = workspaces.length > 0;
 
