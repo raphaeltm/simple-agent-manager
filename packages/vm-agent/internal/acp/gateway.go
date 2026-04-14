@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -199,6 +200,9 @@ type GatewayConfig struct {
 	// OpencodeBaseURLOverride, if non-empty, overrides the OpenCode base URL
 	// (used for "custom" and "openai-compatible" providers).
 	OpencodeBaseURLOverride string
+	// HTTPClient is the HTTP client used for outbound control-plane calls
+	// (credential fetches, settings fetches). Must have an explicit timeout.
+	HTTPClient *http.Client
 }
 
 // McpServerEntry is a lightweight MCP server config passed from the control

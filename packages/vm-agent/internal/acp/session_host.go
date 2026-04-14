@@ -211,6 +211,15 @@ func NewSessionHost(config SessionHostConfig) *SessionHost {
 	}
 }
 
+// httpClient returns the configured HTTP client for control-plane calls,
+// falling back to a default 30-second timeout client if none was provided.
+func (h *SessionHost) httpClient() *http.Client {
+	if h.config.HTTPClient != nil {
+		return h.config.HTTPClient
+	}
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
 // Status returns the current status of the SessionHost.
 func (h *SessionHost) Status() SessionHostStatus {
 	h.mu.RLock()
@@ -2064,7 +2073,7 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := h.httpClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch agent key: %w", err)
 	}
@@ -2120,7 +2129,7 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := h.httpClient().Do(req)
 	if err != nil {
 		slog.Warn("Failed to fetch agent settings", "error", err)
 		return nil

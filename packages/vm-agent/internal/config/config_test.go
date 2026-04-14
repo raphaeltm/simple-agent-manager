@@ -450,3 +450,260 @@ func splitFirst(s, sep string) []string {
 	}
 	return []string{s}
 }
+
+// --- Validate() tests ---
+
+// validConfig returns a Config with all required fields set to valid values.
+func validConfig() *Config {
+	return &Config{
+		Port:            8080,
+		ControlPlaneURL: "https://api.example.com",
+		NodeID:          "node-1",
+		SessionMaxCount: 100,
+		DefaultRows:     24,
+		DefaultCols:     80,
+		WSReadBufferSize:  1024,
+		WSWriteBufferSize: 1024,
+	}
+}
+
+func TestValidateValidConfig(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error for valid config: %v", err)
+	}
+}
+
+func TestValidateInvalidPort(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		port int
+	}{
+		{"zero", 0},
+		{"negative", -1},
+		{"too high", 70000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Port = tc.port
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() should return error for invalid port")
+			}
+			if !strings.Contains(err.Error(), "VM_AGENT_PORT") {
+				t.Fatalf("expected VM_AGENT_PORT error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateInvalidControlPlaneURL(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.ControlPlaneURL = "ftp://bad-scheme.com"
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for non-http(s) URL")
+	}
+	if !strings.Contains(err.Error(), "CONTROL_PLANE_URL") {
+		t.Fatalf("expected CONTROL_PLANE_URL error, got: %v", err)
+	}
+}
+
+func TestValidateTLSPathsMissing(t *testing.T) {
+	cfg := validConfig()
+	cfg.TLSEnabled = true
+	cfg.TLSCertPath = "/nonexistent/cert.pem"
+	cfg.TLSKeyPath = "/nonexistent/key.pem"
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for missing TLS files")
+	}
+	if !strings.Contains(err.Error(), "TLS_CERT_PATH") {
+		t.Fatalf("expected TLS_CERT_PATH error, got: %v", err)
+	}
+}
+
+func TestValidateTLSPathsExist(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+	os.WriteFile(certPath, []byte("cert"), 0644)
+	os.WriteFile(keyPath, []byte("key"), 0600)
+
+	cfg := validConfig()
+	cfg.TLSEnabled = true
+	cfg.TLSCertPath = certPath
+	cfg.TLSKeyPath = keyPath
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error for valid TLS config: %v", err)
+	}
+}
+
+func TestValidateSessionMaxCount(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.SessionMaxCount = 0
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for SessionMaxCount = 0")
+	}
+	if !strings.Contains(err.Error(), "SESSION_MAX_COUNT") {
+		t.Fatalf("expected SESSION_MAX_COUNT error, got: %v", err)
+	}
+}
+
+func TestValidateMultipleErrors(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.Port = -1
+	cfg.SessionMaxCount = 0
+	cfg.DefaultRows = 0
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for multiple invalid fields")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "VM_AGENT_PORT") {
+		t.Errorf("expected VM_AGENT_PORT in error, got: %v", err)
+	}
+	if !strings.Contains(errStr, "SESSION_MAX_COUNT") {
+		t.Errorf("expected SESSION_MAX_COUNT in error, got: %v", err)
+	}
+	if !strings.Contains(errStr, "DEFAULT_ROWS") {
+		t.Errorf("expected DEFAULT_ROWS in error, got: %v", err)
+	}
+}
+
+// --- GenerateRandomPassword tests ---
+
+func TestGenerateRandomPasswordLength(t *testing.T) {
+	t.Parallel()
+	pw := GenerateRandomPassword(16)
+	// 16 bytes = 32 hex chars
+	if len(pw) != 32 {
+		t.Fatalf("GenerateRandomPassword(16) length = %d, want 32", len(pw))
+	}
+}
+
+func TestGenerateRandomPasswordUniqueness(t *testing.T) {
+	t.Parallel()
+	a := GenerateRandomPassword(16)
+	b := GenerateRandomPassword(16)
+	if a == b {
+		t.Fatal("two calls to GenerateRandomPassword should not return the same value")
+	}
+}
+
+func TestGenerateRandomPasswordValidHex(t *testing.T) {
+	t.Parallel()
+	pw := GenerateRandomPassword(16)
+	for _, c := range pw {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Fatalf("GenerateRandomPassword contains non-hex char: %c", c)
+		}
+	}
+}
+
+// --- getEnvOrGenerate tests ---
+
+func TestGetEnvOrGenerateUsesEnvVar(t *testing.T) {
+	t.Setenv("TEST_NEKO_PW", "my-secure-password")
+	got := getEnvOrGenerate("TEST_NEKO_PW", 16)
+	if got != "my-secure-password" {
+		t.Fatalf("getEnvOrGenerate returned %q, want %q", got, "my-secure-password")
+	}
+}
+
+func TestGetEnvOrGenerateDefaultsToRandom(t *testing.T) {
+	// Ensure env var is not set
+	t.Setenv("TEST_NEKO_PW_UNSET", "")
+	os.Unsetenv("TEST_NEKO_PW_UNSET")
+	got := getEnvOrGenerate("TEST_NEKO_PW_UNSET", 16)
+	if len(got) != 32 {
+		t.Fatalf("getEnvOrGenerate returned %q (len %d), want 32-char hex", got, len(got))
+	}
+}
+
+func TestNekoPasswordsAreRandom(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	// Don't set NEKO_PASSWORD or NEKO_PASSWORD_ADMIN
+	os.Unsetenv("NEKO_PASSWORD")
+	os.Unsetenv("NEKO_PASSWORD_ADMIN")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.NekoPassword == "neko" {
+		t.Fatal("NekoPassword should not be 'neko' — expected random default")
+	}
+	if cfg.NekoPasswordAdmin == "admin" {
+		t.Fatal("NekoPasswordAdmin should not be 'admin' — expected random default")
+	}
+	if len(cfg.NekoPassword) != 32 {
+		t.Fatalf("NekoPassword length = %d, want 32 (hex)", len(cfg.NekoPassword))
+	}
+	if cfg.NekoPassword == cfg.NekoPasswordAdmin {
+		t.Fatal("NekoPassword and NekoPasswordAdmin should be different")
+	}
+}
+
+// --- Env parse warning tests ---
+
+func TestGetEnvIntWarnsOnBadValue(t *testing.T) {
+	t.Setenv("TEST_BAD_INT", "not-a-number")
+	got := getEnvInt("TEST_BAD_INT", 42)
+	if got != 42 {
+		t.Fatalf("getEnvInt returned %d, want default 42", got)
+	}
+	// We can't easily assert on slog output without a custom handler,
+	// but we verify the function returns the default on bad input.
+}
+
+func TestGetEnvBoolWarnsOnBadValue(t *testing.T) {
+	t.Setenv("TEST_BAD_BOOL", "maybe")
+	got := getEnvBool("TEST_BAD_BOOL", true)
+	if got != true {
+		t.Fatalf("getEnvBool returned %v, want default true", got)
+	}
+}
+
+func TestGetEnvDurationWarnsOnBadValue(t *testing.T) {
+	t.Setenv("TEST_BAD_DUR", "five-seconds")
+	got := getEnvDuration("TEST_BAD_DUR", 5*time.Second)
+	if got != 5*time.Second {
+		t.Fatalf("getEnvDuration returned %v, want default 5s", got)
+	}
+}
+
+// --- NewControlPlaneClient tests ---
+
+func TestNewControlPlaneClientTimeout(t *testing.T) {
+	t.Parallel()
+	client := NewControlPlaneClient(15 * time.Second)
+	if client.Timeout != 15*time.Second {
+		t.Fatalf("client.Timeout = %v, want 15s", client.Timeout)
+	}
+}
+
+func TestNewControlPlaneClientDefaultTimeout(t *testing.T) {
+	t.Parallel()
+	client := NewControlPlaneClient(0)
+	if client.Timeout != 30*time.Second {
+		t.Fatalf("client.Timeout = %v, want 30s (default)", client.Timeout)
+	}
+}
+
+func TestNewControlPlaneClientNegativeTimeout(t *testing.T) {
+	t.Parallel()
+	client := NewControlPlaneClient(-5 * time.Second)
+	if client.Timeout != 30*time.Second {
+		t.Fatalf("client.Timeout = %v, want 30s (default)", client.Timeout)
+	}
+}

@@ -2,8 +2,12 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -417,8 +421,8 @@ func Load() (*Config, error) {
 		NekoTCPFallback:         getEnvBool("NEKO_TCP_FALLBACK", true),
 		NekoMuxPort:             getEnvInt("NEKO_MUX_PORT", 59000),
 		NekoNAT1TO1:             getEnv("NEKO_NAT1TO1", ""),
-		NekoPassword:            getEnv("NEKO_PASSWORD", "neko"),
-		NekoPasswordAdmin:       getEnv("NEKO_PASSWORD_ADMIN", "admin"),
+		NekoPassword:            getEnvOrGenerate("NEKO_PASSWORD", 16),
+		NekoPasswordAdmin:       getEnvOrGenerate("NEKO_PASSWORD_ADMIN", 16),
 		NekoShmSize:             getEnv("NEKO_SHM_SIZE", "2g"),
 		NekoBrowserStartTimeout: getEnvDuration("NEKO_BROWSER_START_TIMEOUT", 60*time.Second),
 		NekoBrowserStopTimeout:  getEnvDuration("NEKO_BROWSER_STOP_TIMEOUT", 30*time.Second),
@@ -646,9 +650,12 @@ func getEnv(key, defaultValue string) string {
 // getEnvInt returns an integer environment variable or a default.
 func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
-		if i, err := strconv.Atoi(value); err == nil {
-			return i
+		i, err := strconv.Atoi(value)
+		if err != nil {
+			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			return defaultValue
 		}
+		return i
 	}
 	return defaultValue
 }
@@ -669,9 +676,12 @@ func getEnvInt64(key string, defaultValue int64) int64 {
 // getEnvBool returns a boolean environment variable or a default.
 func getEnvBool(key string, defaultValue bool) bool {
 	if value := os.Getenv(key); value != "" {
-		if b, err := strconv.ParseBool(value); err == nil {
-			return b
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			return defaultValue
 		}
+		return b
 	}
 	return defaultValue
 }
@@ -679,9 +689,12 @@ func getEnvBool(key string, defaultValue bool) bool {
 // getEnvDuration returns a duration environment variable or a default.
 func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
-		if d, err := time.ParseDuration(value); err == nil {
-			return d
+		d, err := time.ParseDuration(value)
+		if err != nil {
+			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			return defaultValue
 		}
+		return d
 	}
 	return defaultValue
 }
@@ -702,4 +715,88 @@ func getEnvStringSlice(key string, defaultValue []string) []string {
 		}
 	}
 	return defaultValue
+}
+
+// getEnvOrGenerate returns the value of an environment variable, or generates
+// a cryptographically random hex password of the given byte length.
+// If the operator sets a value shorter than 8 characters, a warning is logged.
+func getEnvOrGenerate(key string, byteLen int) string {
+	if value := os.Getenv(key); value != "" {
+		if len(value) < 8 {
+			slog.Warn("config: weak password detected — consider using at least 8 characters", "key", key)
+		}
+		return value
+	}
+	return GenerateRandomPassword(byteLen)
+}
+
+// GenerateRandomPassword returns a hex-encoded string of byteLen random bytes
+// using crypto/rand. Panics on rand failure (should never happen on a healthy OS).
+func GenerateRandomPassword(byteLen int) string {
+	b := make([]byte, byteLen)
+	if _, err := rand.Read(b); err != nil {
+		panic("config: crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+// NewControlPlaneClient returns an *http.Client with an explicit timeout
+// for outbound calls to the control plane. If timeout is 0 or negative,
+// a default of 30 seconds is used.
+func NewControlPlaneClient(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return &http.Client{Timeout: timeout}
+}
+
+// Validate checks the loaded configuration for semantic correctness.
+// It returns an error describing all validation failures found.
+func (c *Config) Validate() error {
+	var errs []error
+
+	// Port range
+	if c.Port < 1 || c.Port > 65535 {
+		errs = append(errs, fmt.Errorf("VM_AGENT_PORT must be 1-65535, got %d", c.Port))
+	}
+
+	// Control plane URL must be a valid URL
+	if c.ControlPlaneURL != "" {
+		if u, err := url.Parse(c.ControlPlaneURL); err != nil {
+			errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL is not a valid URL: %w", err))
+		} else if u.Scheme != "http" && u.Scheme != "https" {
+			errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL must use http or https scheme, got %q", u.Scheme))
+		}
+	}
+
+	// TLS cert/key paths must exist when TLS is enabled
+	if c.TLSEnabled {
+		if _, err := os.Stat(c.TLSCertPath); err != nil {
+			errs = append(errs, fmt.Errorf("TLS_CERT_PATH %q: %w", c.TLSCertPath, err))
+		}
+		if _, err := os.Stat(c.TLSKeyPath); err != nil {
+			errs = append(errs, fmt.Errorf("TLS_KEY_PATH %q: %w", c.TLSKeyPath, err))
+		}
+	}
+
+	// Positive integer fields
+	if c.SessionMaxCount < 1 {
+		errs = append(errs, fmt.Errorf("SESSION_MAX_COUNT must be > 0, got %d", c.SessionMaxCount))
+	}
+	if c.DefaultRows < 1 {
+		errs = append(errs, fmt.Errorf("DEFAULT_ROWS must be > 0, got %d", c.DefaultRows))
+	}
+	if c.DefaultCols < 1 {
+		errs = append(errs, fmt.Errorf("DEFAULT_COLS must be > 0, got %d", c.DefaultCols))
+	}
+
+	// WebSocket buffer sizes
+	if c.WSReadBufferSize < 1 {
+		errs = append(errs, fmt.Errorf("WS_READ_BUFFER_SIZE must be > 0, got %d", c.WSReadBufferSize))
+	}
+	if c.WSWriteBufferSize < 1 {
+		errs = append(errs, fmt.Errorf("WS_WRITE_BUFFER_SIZE must be > 0, got %d", c.WSWriteBufferSize))
+	}
+
+	return errors.Join(errs...)
 }

@@ -26,6 +26,10 @@ func main() {
 		slog.Error("Failed to load configuration", "error", err)
 		os.Exit(1)
 	}
+	if err := cfg.Validate(); err != nil {
+		slog.Error("Configuration validation failed", "error", err)
+		os.Exit(1)
+	}
 
 	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.NodeID)
 
