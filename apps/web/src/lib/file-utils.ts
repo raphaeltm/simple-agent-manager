@@ -3,7 +3,7 @@ const IMAGE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'avif', 'ico', 'bmp',
 ]);
 
-/** MIME types that support inline preview (images + PDF). SVG excluded — script risk in iframe. */
+/** MIME types that support inline preview (images + PDF + markdown). SVG excluded — script risk in iframe. */
 const PREVIEWABLE_IMAGE_MIMES = new Set([
   'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
 ]);
@@ -11,6 +11,7 @@ const PREVIEWABLE_IMAGE_MIMES = new Set([
 const PREVIEWABLE_MIMES = new Set([
   ...PREVIEWABLE_IMAGE_MIMES,
   'application/pdf',
+  'text/markdown',
 ]);
 
 /** Check if a file path is a renderable image based on extension. */
@@ -37,6 +38,11 @@ export function isPreviewableImageMime(mimeType: string): boolean {
 /** Check if a MIME type is PDF. */
 export function isPdfMime(mimeType: string): boolean {
   return mimeType.toLowerCase() === 'application/pdf';
+}
+
+/** Check if a MIME type is markdown. */
+export function isMarkdownMime(mimeType: string): boolean {
+  return mimeType.toLowerCase() === 'text/markdown';
 }
 
 /** Default threshold for inline rendering (0–10 MB). Override via VITE_FILE_PREVIEW_INLINE_MAX_BYTES. */
