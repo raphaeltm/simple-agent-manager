@@ -88,6 +88,12 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `GH_APP_PRIVATE_KEY` | GitHub App private key (raw PEM or base64 encoded — both work) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
 
+**Optional secrets** (TLS — usually not needed):
+
+| Secret | Description |
+|--------|-------------|
+| `CF_ORIGIN_CA_KEY` | Cloudflare Origin CA Key — only needed if Pulumi fails to create Origin CA certs with your `CF_API_TOKEN` alone (error 1016). Find it at **My Profile → API Tokens → Origin CA Key**. The Pulumi Cloudflare provider (v3.32.0+) should handle Origin CA using the regular API token, but some accounts require this dedicated key. |
+
 **Optional secrets** (purpose-specific security overrides — recommended for production):
 
 | Secret | Description |
