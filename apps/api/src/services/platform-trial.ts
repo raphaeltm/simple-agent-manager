@@ -2,12 +2,12 @@ import {
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
   DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT,
 } from '@simple-agent-manager/shared';
+import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getTokenUsage } from './ai-token-budget';
-import { getPlatformCloudCredential } from './platform-credentials';
 
 export interface TrialStatus {
   available: boolean;
@@ -28,11 +28,21 @@ export async function getTrialStatus(
   env: Env,
 ): Promise<TrialStatus> {
   const aiProxyEnabled = (env.AI_PROXY_ENABLED ?? 'true') !== 'false';
-  const encryptionKey = getCredentialEncryptionKey(env);
 
-  // Check for platform cloud credential (Hetzner or Scaleway)
-  const platformCloud = await getPlatformCloudCredential(db, encryptionKey);
-  const hasInfraCredential = platformCloud !== null;
+  // Check for platform cloud credential existence (no decryption needed —
+  // just verify a row exists). Previous implementation decrypted the credential
+  // which could throw if the encryption key was missing or mismatched, causing
+  // the trial-status endpoint to fall through to the catch-all error handler
+  // and return all-false.
+  const platformCloudRows = await db
+    .select({ id: schema.platformCredentials.id })
+    .from(schema.platformCredentials)
+    .where(and(
+      eq(schema.platformCredentials.credentialType, 'cloud-provider'),
+      eq(schema.platformCredentials.isEnabled, true),
+    ))
+    .limit(1);
+  const hasInfraCredential = platformCloudRows.length > 0;
 
   // The AI proxy itself serves as the agent credential (no separate platform agent credential needed)
   const hasAgentCredential = aiProxyEnabled;

@@ -231,7 +231,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       return;
     }
     if (!hasCloudCredentials) {
-      setError('Cloud credentials required. Go to Settings to connect your Hetzner account.');
+      setError('Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.');
       return;
     }
     if (uploading) {
