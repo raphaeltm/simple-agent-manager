@@ -10,7 +10,7 @@
  *   pnpm tsx scripts/deploy/setup-local-dev.ts
  */
 
-import { execSync } from "node:child_process";
+import { type ExecSyncOptionsWithStringEncoding, execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as TOML from "@iarna/toml";
@@ -24,10 +24,18 @@ interface LocalResources {
   r2BucketCreated: boolean;
 }
 
+interface ExecError extends Error {
+  stderr?: Buffer | string;
+  stdout?: Buffer | string;
+  status?: number;
+}
+
 function execCommand(command: string): string {
   try {
-    return execSync(command, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-  } catch (error: any) {
+    const options: ExecSyncOptionsWithStringEncoding = { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] };
+    return execSync(command, options).trim();
+  } catch (err: unknown) {
+    const error = err as ExecError;
     if (error.stderr) {
       const stderr = error.stderr.toString();
       // Check if resource already exists
@@ -55,13 +63,13 @@ function createD1Database(name: string): string | undefined {
     const listOutput = execCommand(`npx wrangler d1 list --local --json 2>/dev/null || echo "[]"`);
     try {
       const databases = JSON.parse(listOutput);
-      const existing = databases.find((db: any) => db.name === name);
+      const existing = databases.find((db: { name: string; uuid: string }) => db.name === name);
       if (existing) {
         console.log(`  ✅ Found existing database with ID: ${existing.uuid}`);
         return existing.uuid;
       }
-    } catch {
-      // Ignore JSON parse errors
+    } catch (parseError) {
+      console.log(`  ⚠️ Could not parse D1 database list: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
     }
   } catch (error) {
     console.log(`  ⚠️ Could not create/find database (may already exist)`);
@@ -84,13 +92,13 @@ function createKVNamespace(title: string): string | undefined {
     const listOutput = execCommand(`npx wrangler kv:namespace list --local --json 2>/dev/null || echo "[]"`);
     try {
       const namespaces = JSON.parse(listOutput);
-      const existing = namespaces.find((ns: any) => ns.title === title);
+      const existing = namespaces.find((ns: { title: string; id: string }) => ns.title === title);
       if (existing) {
         console.log(`  ✅ Found existing namespace with ID: ${existing.id}`);
         return existing.id;
       }
-    } catch {
-      // Ignore JSON parse errors
+    } catch (parseError) {
+      console.log(`  ⚠️ Could not parse KV namespace list: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
     }
   } catch (error) {
     console.log(`  ⚠️ Could not create/find KV namespace (may already exist)`);

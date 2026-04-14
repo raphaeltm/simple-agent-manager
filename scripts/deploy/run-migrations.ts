@@ -9,7 +9,7 @@
  *   pnpm tsx scripts/deploy/run-migrations.ts [--env staging|production] [--local]
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as TOML from "@iarna/toml";
@@ -54,12 +54,15 @@ async function main(): Promise<void> {
   for (const db of databases) {
     console.log(`\n📦 Migrating ${db.binding} (${db.name})...\n`);
 
-    const command = `npx wrangler d1 migrations apply ${db.name} ${isLocal ? "--local" : "--remote"}${environment ? ` --env ${environment}` : ""}`;
+    const args = ["wrangler", "d1", "migrations", "apply", db.name];
+    if (isLocal) args.push("--local");
+    else args.push("--remote");
+    if (environment) args.push("--env", environment);
 
-    console.log(`Executing: ${command}\n`);
+    console.log(`Executing: npx ${args.join(" ")}\n`);
 
     try {
-      execSync(command, {
+      execFileSync("npx", args, {
         stdio: "inherit",
         cwd: resolve(import.meta.dirname, "../../apps/api"),
       });

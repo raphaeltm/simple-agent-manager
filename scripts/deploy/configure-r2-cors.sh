@@ -15,6 +15,9 @@
 #
 set -euo pipefail
 
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+
 GREEN='\033[0;32m'
 NC='\033[0m'
 
@@ -60,15 +63,14 @@ CORS_PAYLOAD=$(cat <<CORSEOF
 CORSEOF
 )
 
-RESPONSE=$(curl -s -o /tmp/r2-cors-response.txt -w "%{http_code}" \
+RESPONSE=$(curl -s -o "$TMPFILE" -w "%{http_code}" \
   -X PUT \
   "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${R2_BUCKET_NAME}/cors" \
   -H "Authorization: Bearer ${CF_API_TOKEN}" \
   -H "Content-Type: application/json" \
   -d "${CORS_PAYLOAD}")
 
-BODY=$(cat /tmp/r2-cors-response.txt 2>/dev/null || echo "(empty)")
-rm -f /tmp/r2-cors-response.txt
+BODY=$(cat "$TMPFILE" 2>/dev/null || echo "(empty)")
 
 if [ "$RESPONSE" -ge 200 ] && [ "$RESPONSE" -lt 300 ]; then
   echo -e "${GREEN}R2 CORS configured successfully (HTTP ${RESPONSE})${NC}"
