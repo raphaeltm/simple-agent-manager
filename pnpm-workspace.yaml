@@ -7,7 +7,7 @@ packages:
 catalog:
   # === Build & Dev Tooling ===
   typescript: 5.9.3
-  vite: 6.4.1
+  vite: 8.0.8
   vitest: 4.1.2
   tsx: 4.21.0
   eslint: 8.57.1
