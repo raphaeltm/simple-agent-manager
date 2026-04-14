@@ -1087,12 +1087,34 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 
 	switch provider {
 	case "platform":
-		// SAM Platform (Workers AI) — no API key needed, uses platform AI
+		// SAM Platform (Workers AI) — no API key needed, uses platform AI proxy.
+		//
+		// OpenCode's parseModel() splits model on "/" to extract providerID:
+		//   const [providerID, ...rest] = model.split("/")
+		// A model like "meta/llama-4-scout-17b-16e-instruct" resolves to providerID "meta"
+		// which doesn't exist, causing fallback to big-pickle. Fix: use
+		// "openai-compatible/<alias>" and register the model in the provider's models map.
+		modelAlias := strings.ReplaceAll(model, "/", "-")
+		config["model"] = "openai-compatible/" + modelAlias
 		config["provider"] = map[string]interface{}{
 			"openai-compatible": map[string]interface{}{
 				"options": map[string]interface{}{
 					"baseURL": "{env:OPENCODE_PLATFORM_BASE_URL}",
 					"apiKey":  "{env:OPENCODE_PLATFORM_API_KEY}",
+				},
+				"models": map[string]interface{}{
+					modelAlias: map[string]interface{}{
+						"id":          model,
+						"name":        "SAM Platform AI",
+						"tool_call":   true,
+						"temperature": true,
+						"reasoning":   false,
+						"attachment":  false,
+						"limit": map[string]interface{}{
+							"context": 131072,
+							"output":  8192,
+						},
+					},
 				},
 			},
 		}

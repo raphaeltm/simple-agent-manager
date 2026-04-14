@@ -72,7 +72,8 @@ After staging deployment succeeds, use Playwright to test the live app:
    });
    // Verify login succeeded (status 200, response has success: true)
    ```
-   - The `SAM_PLAYWRIGHT_PRIMARY_USER` env var contains the smoke test token
+   - The `SAM_PLAYWRIGHT_PRIMARY_USER` env var contains the admin smoke test token
+   - The `SAM_PLAYWRIGHT_SECONDARY_USER` env var contains a non-admin smoke test token — use this when testing from a regular user's perspective (e.g., zero-config onboarding, no API keys configured)
    - If the env var is not set, ask the human — do NOT skip this step
 2. Navigate to `https://app.sammy.party` (staging) — the session cookie from step 1 authenticates you
 3. Verify your changes work as intended (see verification checklists below)
