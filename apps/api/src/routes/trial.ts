@@ -23,7 +23,8 @@ trialRoutes.get('/trial-status', requireAuth(), requireApproved(), async (c) => 
     return c.json(status);
   } catch (err) {
     // Trial status is non-critical — return unavailable rather than 500
-    log.error('trial_status.error', { error: err instanceof Error ? err.message : String(err) });
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    log.error('trial_status.error', { error: errorMessage, stack: err instanceof Error ? err.stack : undefined });
     return c.json({
       available: false,
       agentType: null,
@@ -31,6 +32,7 @@ trialRoutes.get('/trial-status', requireAuth(), requireApproved(), async (c) => 
       hasAgentCredential: false,
       dailyTokenBudget: null,
       dailyTokenUsage: null,
+      _debug: errorMessage, // temporary: expose error for debugging
     });
   }
 });
