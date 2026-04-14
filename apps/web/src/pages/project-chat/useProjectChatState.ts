@@ -119,8 +119,9 @@ export function useProjectChatState() {
     if (!provisioning) setBootLogPanelOpen(false);
   }, [provisioning]);
 
-  // Fork dialog state
+  // Fork & Retry dialog state
   const [forkSession, setForkSession] = useState<ChatSessionResponse | null>(null);
+  const [retrySession, setRetrySession] = useState<ChatSessionResponse | null>(null);
 
   // Task/idea title map for session tagging + task info map for grouping
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
@@ -397,14 +398,15 @@ export function useProjectChatState() {
     navigate(`/projects/${projectId}/chat/${id}`);
   };
 
-  const handleFork = async (forkMessage: string, contextSummary: string, parentTaskId: string) => {
+  /** Submit a new task derived from an existing session (used by both fork and retry). */
+  const submitDerivedTask = async (derivedMessage: string, contextSummary: string, parentTaskId: string, errorLabel: string) => {
     setSubmitError(null);
     setSubmitting(true);
     try {
       const result = await submitTask(projectId, selectedProfileId
-        ? { message: forkMessage, parentTaskId, contextSummary, agentProfileId: selectedProfileId }
+        ? { message: derivedMessage, parentTaskId, contextSummary, agentProfileId: selectedProfileId }
         : {
-            message: forkMessage, parentTaskId, contextSummary,
+            message: derivedMessage, parentTaskId, contextSummary,
             ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
             workspaceProfile: selectedWorkspaceProfile,
             taskMode: selectedTaskMode,
@@ -419,11 +421,19 @@ export function useProjectChatState() {
       navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
       void loadSessions();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to fork session');
+      setSubmitError(err instanceof Error ? err.message : errorLabel);
       throw err;
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleFork = async (forkMessage: string, contextSummary: string, parentTaskId: string) => {
+    return submitDerivedTask(forkMessage, contextSummary, parentTaskId, 'Failed to fork session');
+  };
+
+  const handleRetry = async (retryMessage: string, contextSummary: string, parentTaskId: string) => {
+    return submitDerivedTask(retryMessage, contextSummary, parentTaskId, 'Failed to retry task');
   };
 
   const handleCloseConversation = useCallback(async () => {
@@ -473,6 +483,7 @@ export function useProjectChatState() {
     ...attachments,
     provisioning, bootLogs, bootLogPanelOpen, setBootLogPanelOpen,
     forkSession, setForkSession, handleFork,
+    retrySession, setRetrySession, handleRetry,
     closingConversation, closeError, handleCloseConversation,
     transcribeApiUrl, getSessionState,
   };

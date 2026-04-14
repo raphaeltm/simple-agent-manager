@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ForkDialog } from '../../components/project/ForkDialog';
+import { RetryDialog } from '../../components/project/RetryDialog';
 import { ProjectMessageView } from '../../components/project-message-view';
 import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -263,6 +264,14 @@ export function ProjectChat() {
               sessionId={state.sessionId!}
               isProvisioning={!!(state.provisioning && state.sessionId === state.provisioning.sessionId && !isTerminal(state.provisioning.status))}
               onSessionMutated={() => { void state.loadSessions(); }}
+              onRetry={() => {
+                const s = state.sessions.find((sess) => sess.id === state.sessionId);
+                if (s?.taskId) state.setRetrySession(s);
+              }}
+              onFork={() => {
+                const s = state.sessions.find((sess) => sess.id === state.sessionId);
+                if (s?.taskId) state.setForkSession(s);
+              }}
             />
             {/* Close conversation button — shown for idle sessions with a task */}
             {(() => {
@@ -314,6 +323,15 @@ export function ProjectChat() {
         projectId={state.projectId}
         onClose={() => state.setForkSession(null)}
         onFork={state.handleFork}
+      />
+
+      {/* Retry dialog */}
+      <RetryDialog
+        open={!!state.retrySession}
+        session={state.retrySession}
+        projectId={state.projectId}
+        onClose={() => state.setRetrySession(null)}
+        onRetry={state.handleRetry}
       />
 
       {/* Boot log panel */}
