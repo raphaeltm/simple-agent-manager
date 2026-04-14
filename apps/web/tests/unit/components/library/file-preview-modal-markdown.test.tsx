@@ -91,6 +91,13 @@ describe('FilePreviewModal — Markdown', () => {
 
     // Rendered markdown should display the heading
     expect(screen.getByText('Hello World')).toBeInTheDocument();
+
+    // GFM table should render as a <table> element
+    expect(document.querySelector('table')).toBeTruthy();
+    expect(screen.getByText('Column A')).toBeInTheDocument();
+
+    // Code block should render with syntax highlighting
+    expect(document.querySelector('pre')).toBeTruthy();
   });
 
   it('shows rendered/source toggle buttons after content loads', async () => {
@@ -198,5 +205,42 @@ describe('FilePreviewModal — Markdown', () => {
 
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('renders ImageViewer for image files (regression)', () => {
+    const file = makeMarkdownFile({ mimeType: 'image/png', filename: 'photo.png', sizeBytes: 1024 });
+    const { container } = render(
+      <FilePreviewModal
+        file={file}
+        previewUrl="https://example.com/preview/photo.png"
+        onClose={vi.fn()}
+        onDownload={vi.fn()}
+      />,
+    );
+
+    // ImageViewer renders an img element
+    const img = container.querySelector('img');
+    expect(img).toBeTruthy();
+    // No markdown content should be rendered
+    expect(screen.queryByTestId('rendered-markdown')).not.toBeInTheDocument();
+  });
+
+  it('renders PDF iframe for PDF files (regression)', () => {
+    const file = makeMarkdownFile({ mimeType: 'application/pdf', filename: 'doc.pdf', sizeBytes: 2048 });
+    const { container } = render(
+      <FilePreviewModal
+        file={file}
+        previewUrl="https://example.com/preview/doc.pdf"
+        onClose={vi.fn()}
+        onDownload={vi.fn()}
+      />,
+    );
+
+    // PDF renders an iframe
+    const iframe = container.querySelector('iframe');
+    expect(iframe).toBeTruthy();
+    expect(iframe!.getAttribute('title')).toContain('doc.pdf');
+    // No markdown content should be rendered
+    expect(screen.queryByTestId('rendered-markdown')).not.toBeInTheDocument();
   });
 });
