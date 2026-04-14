@@ -252,14 +252,14 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.SessionLastPromptManager = s.agentSessions
 	cfg.EventAppender = &serverEventAppender{server: s}
 	cfg.CredentialSyncer = s
-	// Conversation-mode sessions should NOT be auto-suspended when the viewer
-	// disconnects. The 2-hour workspace idle timeout is the only kill mechanism.
-	// Task-mode sessions keep the default 30-min auto-suspend.
-	if s.config.TaskMode == config.TaskModeConversation {
-		cfg.IdleSuspendTimeout = 0
-	} else {
-		cfg.IdleSuspendTimeout = s.config.ACPIdleSuspendTimeout
-	}
+	// Disable auto-suspend for both conversation and task mode. Viewer presence
+	// is not the right lifecycle signal — the correct shutdown mechanisms are:
+	// 1. 15-min idle cleanup after OnPromptComplete
+	// 2. 6-hour prompt timeout
+	// 3. 2-hour workspace idle timeout
+	// 4. Orphan workspace cron sweep
+	// 5. 4-hour max node lifetime
+	cfg.IdleSuspendTimeout = 0
 	cfg.OnSuspend = func(wsID, sessID string) {
 		s.handleAutoSuspend(wsID, sessID)
 	}

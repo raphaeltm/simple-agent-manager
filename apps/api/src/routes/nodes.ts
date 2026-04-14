@@ -635,7 +635,7 @@ nodesRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c)
 
   // Backup ACP heartbeat sweep — primary heartbeat is now sent directly by the
   // VM agent via POST /api/projects/:id/node-acp-heartbeat. Retained as safety net.
-  const acpSweepTimeoutMs = parseInt(c.env.HEARTBEAT_ACP_SWEEP_TIMEOUT_MS || '8000', 10);
+  const acpSweepTimeoutMs = parseInt(c.env.HEARTBEAT_ACP_SWEEP_TIMEOUT_MS || '15000', 10);
   c.executionCtx.waitUntil(
     (async () => {
       try {
