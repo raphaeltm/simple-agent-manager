@@ -475,6 +475,15 @@ func TestValidateValidConfig(t *testing.T) {
 	}
 }
 
+func TestValidateValidPortBoundary(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.Port = 65535
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error for port 65535: %v", err)
+	}
+}
+
 func TestValidateInvalidPort(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -483,6 +492,7 @@ func TestValidateInvalidPort(t *testing.T) {
 	}{
 		{"zero", 0},
 		{"negative", -1},
+		{"first invalid above range", 65536},
 		{"too high", 70000},
 	}
 	for _, tc := range tests {
@@ -514,6 +524,7 @@ func TestValidateInvalidControlPlaneURL(t *testing.T) {
 }
 
 func TestValidateTLSPathsMissing(t *testing.T) {
+	t.Parallel()
 	cfg := validConfig()
 	cfg.TLSEnabled = true
 	cfg.TLSCertPath = "/nonexistent/cert.pem"
@@ -578,6 +589,52 @@ func TestValidateMultipleErrors(t *testing.T) {
 	}
 }
 
+func TestValidateDefaultCols(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.DefaultCols = 0
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for DefaultCols = 0")
+	}
+	if !strings.Contains(err.Error(), "DEFAULT_COLS") {
+		t.Fatalf("expected DEFAULT_COLS error, got: %v", err)
+	}
+}
+
+func TestValidateWSBufferSizes(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.WSReadBufferSize = 0
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for WSReadBufferSize = 0")
+	}
+	if !strings.Contains(err.Error(), "WS_READ_BUFFER_SIZE") {
+		t.Fatalf("expected WS_READ_BUFFER_SIZE error, got: %v", err)
+	}
+
+	cfg2 := validConfig()
+	cfg2.WSWriteBufferSize = 0
+	err2 := cfg2.Validate()
+	if err2 == nil {
+		t.Fatal("Validate() should return error for WSWriteBufferSize = 0")
+	}
+	if !strings.Contains(err2.Error(), "WS_WRITE_BUFFER_SIZE") {
+		t.Fatalf("expected WS_WRITE_BUFFER_SIZE error, got: %v", err2)
+	}
+}
+
+func TestValidateEmptyControlPlaneURL(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.ControlPlaneURL = ""
+	// Validate() should pass — Load() handles the required check
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() should pass for empty ControlPlaneURL (Load handles required check): %v", err)
+	}
+}
+
 // --- GenerateRandomPassword tests ---
 
 func TestGenerateRandomPasswordLength(t *testing.T) {
@@ -619,21 +676,29 @@ func TestGetEnvOrGenerateUsesEnvVar(t *testing.T) {
 }
 
 func TestGetEnvOrGenerateDefaultsToRandom(t *testing.T) {
-	// Ensure env var is not set
+	// Use empty string via t.Setenv to safely unset for test duration
 	t.Setenv("TEST_NEKO_PW_UNSET", "")
-	os.Unsetenv("TEST_NEKO_PW_UNSET")
-	got := getEnvOrGenerate("TEST_NEKO_PW_UNSET", 16)
+	got := getEnvOrGenerate("TEST_NEKO_PW_UNSET_NEVER_EXISTS", 16)
 	if len(got) != 32 {
 		t.Fatalf("getEnvOrGenerate returned %q (len %d), want 32-char hex", got, len(got))
 	}
 }
 
+func TestGetEnvOrGenerateWeakPassword(t *testing.T) {
+	t.Setenv("TEST_WEAK_PW", "short")
+	got := getEnvOrGenerate("TEST_WEAK_PW", 16)
+	if got != "short" {
+		t.Fatalf("getEnvOrGenerate returned %q, want %q", got, "short")
+	}
+	// Warning is logged but we verify the value is still returned
+}
+
 func TestNekoPasswordsAreRandom(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
-	// Don't set NEKO_PASSWORD or NEKO_PASSWORD_ADMIN
-	os.Unsetenv("NEKO_PASSWORD")
-	os.Unsetenv("NEKO_PASSWORD_ADMIN")
+	// Use t.Setenv with empty string to safely unset for test duration
+	t.Setenv("NEKO_PASSWORD", "")
+	t.Setenv("NEKO_PASSWORD_ADMIN", "")
 
 	cfg, err := Load()
 	if err != nil {
