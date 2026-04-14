@@ -1,5 +1,6 @@
 import * as cloudflare from "@pulumi/cloudflare";
 import * as pulumi from "@pulumi/pulumi";
+import { pagesProject } from "./pages";
 
 const config = new pulumi.Config();
 const zoneId = config.require("cloudflareZoneId");
@@ -19,11 +20,15 @@ export const apiDnsRecord = new cloudflare.Record(`${prefix}-dns-api`, {
 });
 
 // App subdomain (app.example.com -> Pages)
+// IMPORTANT: Use the actual subdomain from the Pages project, not the computed name.
+// Cloudflare Pages subdomains are globally unique — if "sam-web-prod" is taken by another
+// account, CF assigns a suffix (e.g., "sam-web-prod-eui"). Using the computed name would
+// CNAME to someone else's Pages project.
 export const appDnsRecord = new cloudflare.Record(`${prefix}-dns-app`, {
   zoneId: zoneId,
   name: `app`,
   type: "CNAME",
-  content: `${prefix}-web-${stack}.pages.dev`,
+  content: pagesProject.subdomain,
   proxied: true,
   ttl: 1,
   comment: `${prefix.toUpperCase()} Web UI - managed by Pulumi`,
