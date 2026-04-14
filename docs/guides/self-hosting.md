@@ -92,7 +92,7 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 
 | Secret | Description |
 |--------|-------------|
-| `CF_ORIGIN_CA_KEY` | Cloudflare Origin CA Key — only needed if Pulumi fails to create Origin CA certs with your `CF_API_TOKEN` alone (error 1016). Find it at **My Profile → API Tokens → Origin CA Key**. The Pulumi Cloudflare provider (v3.32.0+) should handle Origin CA using the regular API token, but some accounts require this dedicated key. |
+| `CF_ORIGIN_CA_KEY` | **Deprecated fallback.** Cloudflare Origin CA Key — only needed if your `CF_API_TOKEN` lacks the `Zone > SSL and Certificates > Edit` permission and you can't update it. The Origin CA Key is deprecated by Cloudflare (removal Sept 2026). Prefer adding the SSL permission to your API token instead. |
 
 **Optional secrets** (purpose-specific security overrides — recommended for production):
 
@@ -296,6 +296,7 @@ SAM needs a Cloudflare API token with specific permissions:
 | Account | Developer Platform | Workers Observability | Read |
 | Account | Developer Platform | Pages | Edit |
 | Zone | Developer Platform | Workers Routes | Edit |
+| Zone | SSL & Certificates | SSL and Certificates | Edit |
 | Zone | DNS & Zone | DNS | Edit |
 | Zone | DNS & Zone | Zone | Read |
 
