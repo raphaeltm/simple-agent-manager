@@ -37,13 +37,18 @@ function getAllowedModels(env: Env): Set<string> {
   return new Set(raw.split(',').map((m) => m.trim()).filter(Boolean));
 }
 
-/** Resolve model ID: strip workers-ai/ prefix, fall back to default. */
+/** Resolve model ID: normalize prefixes, fall back to default. */
 function resolveModelId(model: string | undefined, env: Env): string {
   if (!model) return env.AI_PROXY_DEFAULT_MODEL || DEFAULT_AI_PROXY_MODEL;
-  // Strip common prefixes that OpenCode may prepend
   let resolved = model;
+  // Strip workers-ai/ prefix that OpenCode may prepend
   if (resolved.startsWith('workers-ai/')) {
     resolved = resolved.slice('workers-ai/'.length);
+  }
+  // Add @cf/ prefix if missing — OpenCode strips it to avoid its model resolver
+  // interpreting @cf/ as a provider prefix. Workers AI requires the full @cf/ path.
+  if (!resolved.startsWith('@cf/') && !resolved.startsWith('@hf/')) {
+    resolved = `@cf/${resolved}`;
   }
   return resolved;
 }

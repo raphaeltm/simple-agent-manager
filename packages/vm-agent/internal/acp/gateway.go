@@ -1069,6 +1069,14 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 		}
 	}
 
+	// Strip @cf/ prefix from Workers AI model IDs for openai-compatible providers.
+	// OpenCode interprets @cf/ as a provider prefix (providerID: "@cf") and fails
+	// with ProviderModelNotFoundError. The AI proxy receives the model without the
+	// prefix and resolves it server-side.
+	if strings.HasPrefix(model, "@cf/") {
+		model = strings.TrimPrefix(model, "@cf/")
+	}
+
 	config := map[string]interface{}{
 		"model": model,
 	}
