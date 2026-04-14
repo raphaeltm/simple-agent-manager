@@ -79,6 +79,7 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `CF_API_TOKEN` | Cloudflare API token with D1, KV, R2, DNS, Workers Scripts, Workers Observability permissions |
 | `CF_ACCOUNT_ID` | Your Cloudflare account ID (32-char hex). Also used as a Worker secret for the admin observability log viewer. |
 | `CF_ZONE_ID` | Your domain's zone ID (32-char hex) |
+| `CF_ORIGIN_CA_KEY` | Cloudflare Origin CA Key — required for TLS certificates on workspace VMs. Find it at **My Profile → API Tokens → Origin CA Key** (separate from the API token above). |
 | `R2_ACCESS_KEY_ID` | R2 API token access key |
 | `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
 | `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase |
