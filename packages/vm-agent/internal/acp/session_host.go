@@ -43,6 +43,12 @@ const (
 	// DefaultACPInitTimeout is the safety-net timeout for ACP phase operations
 	// when InitTimeoutMs is not configured. Matches the default for ACP_INIT_TIMEOUT_MS.
 	DefaultACPInitTimeout = 30 * time.Second
+
+	// defaultControlPlaneHTTPTimeout is the safety-net HTTP client timeout
+	// used when no HTTPClient is injected via GatewayConfig. Production code
+	// injects a client via config.NewControlPlaneClient(cfg.HTTPCallbackTimeout);
+	// this constant is only reached in tests or direct struct construction.
+	defaultControlPlaneHTTPTimeout = 30 * time.Second
 )
 
 // buildAcpMcpServers converts McpServerEntry configs into acpsdk.McpServer
@@ -217,7 +223,7 @@ func (h *SessionHost) httpClient() *http.Client {
 	if h.config.HTTPClient != nil {
 		return h.config.HTTPClient
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return &http.Client{Timeout: defaultControlPlaneHTTPTimeout}
 }
 
 // Status returns the current status of the SessionHost.
