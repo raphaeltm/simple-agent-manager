@@ -278,7 +278,7 @@ nodesRoutes.post('/:id/stop', async (c) => {
       .where(inArray(schema.agentSessions.workspaceId, workspaceIds));
   }
 
-  return c.json({ status: 'deleted' });
+  return c.json({ status: 'stopped' });
 });
 
 nodesRoutes.delete('/:id', async (c) => {
