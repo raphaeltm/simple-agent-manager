@@ -254,12 +254,14 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.CredentialSyncer = s
 	// Disable auto-suspend for both conversation and task mode. Viewer presence
 	// is not the right lifecycle signal — the correct shutdown mechanisms are:
-	// 1. 15-min idle cleanup after OnPromptComplete
+	// 1. 15-min DO alarm after last agent activity (control-plane side)
 	// 2. 6-hour prompt timeout
 	// 3. 2-hour workspace idle timeout
 	// 4. Orphan workspace cron sweep
 	// 5. 4-hour max node lifetime
 	cfg.IdleSuspendTimeout = 0
+	// OnSuspend registered defensively — unreachable while IdleSuspendTimeout is 0
+	// (DetachViewer guards timer creation with IdleSuspendTimeout > 0).
 	cfg.OnSuspend = func(wsID, sessID string) {
 		s.handleAutoSuspend(wsID, sessID)
 	}
