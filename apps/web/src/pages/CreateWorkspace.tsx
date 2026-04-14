@@ -17,6 +17,7 @@ import {
   listNodes,
   listProjects,
 } from '../lib/api';
+import { FALLBACK_VM_SIZES } from '../lib/constants';
 
 type PrereqStatus = 'loading' | 'ready' | 'missing' | 'error';
 
@@ -351,11 +352,7 @@ export function CreateWorkspace() {
             : size,
         };
       })
-    : [
-        { value: 'small' as VMSize, label: 'Small', description: '2-3 vCPUs, 4GB RAM' },
-        { value: 'medium' as VMSize, label: 'Medium', description: '4 vCPUs, 8-12GB RAM' },
-        { value: 'large' as VMSize, label: 'Large', description: '8 vCPUs, 16-32GB RAM' },
-      ];
+    : FALLBACK_VM_SIZES;
 
   // Build location options from catalog
   const locationOptions = activeCatalog

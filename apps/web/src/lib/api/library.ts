@@ -77,6 +77,7 @@ export function uploadLibraryFile(
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_URL}/api/projects/${projectId}/library/upload`);
     xhr.withCredentials = true;
+    xhr.timeout = 120_000; // 2 minutes
 
     const progressCb = options?.onProgress;
     if (progressCb) {
@@ -102,6 +103,7 @@ export function uploadLibraryFile(
 
     xhr.addEventListener('error', () => reject(new Error('Upload network error')));
     xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+    xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
 
     xhr.send(formData);
   });
@@ -127,6 +129,7 @@ export function replaceLibraryFile(
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', `${API_URL}/api/projects/${projectId}/library/${fileId}/replace`);
     xhr.withCredentials = true;
+    xhr.timeout = 120_000; // 2 minutes
 
     const progressCb = options?.onProgress;
     if (progressCb) {
@@ -152,6 +155,7 @@ export function replaceLibraryFile(
 
     xhr.addEventListener('error', () => reject(new Error('Replace network error')));
     xhr.addEventListener('abort', () => reject(new Error('Replace aborted')));
+    xhr.addEventListener('timeout', () => reject(new Error('Replace timed out')));
 
     xhr.send(formData);
   });

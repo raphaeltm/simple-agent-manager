@@ -2,6 +2,7 @@ import { Spinner } from '@simple-agent-manager/ui';
 import { AlertTriangle, Download, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useScrollLock } from '../../hooks/useScrollLock';
 import {
   formatFileSize,
   isPdfMime,
@@ -44,13 +45,8 @@ export function FilePreviewModal({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  // Prevent body scroll
-  useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, []);
+  // Prevent body scroll — always active while this modal is mounted
+  useScrollLock(true);
 
   // Focus trap: cycle Tab between focusable elements within the dialog
   const handleTabTrap = useCallback(

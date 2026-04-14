@@ -12,6 +12,7 @@ import { Button, Input, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import { useScrollLock } from '../../hooks/useScrollLock';
 import { useToast } from '../../hooks/useToast';
 import {
   deleteProjectRuntimeEnvVar,
@@ -22,14 +23,10 @@ import {
   upsertProjectRuntimeFile,
 } from '../../lib/api';
 import { listTriggers } from '../../lib/api/triggers';
+import { FALLBACK_VM_SIZES } from '../../lib/constants';
 import { useProjectContext } from '../../pages/ProjectContext';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { DeploymentSettings } from '../DeploymentSettings';
-
-const VM_SIZES: { value: VMSize; label: string; description: string }[] = [
-  { value: 'small', label: 'Small', description: '2 vCPUs, 4 GB RAM' },
-  { value: 'medium', label: 'Medium', description: '4 vCPUs, 8 GB RAM' },
-  { value: 'large', label: 'Large', description: '8 vCPUs, 16 GB RAM' },
-];
 
 const WORKSPACE_PROFILES: { value: WorkspaceProfile; label: string; description: string }[] = [
   { value: 'full', label: 'Full', description: 'Build project devcontainer' },
@@ -129,25 +126,27 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
     }
   }, [open, loadRuntimeConfig, projectId]);
 
+  // Unsaved changes confirmation dialog state
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+
   // Close with unsaved changes confirmation (T040)
   const handleClose = useCallback(() => {
     if (isDirty) {
-      const confirmed = window.confirm('You have unsaved changes. Discard them?');
-      if (!confirmed) return;
+      setShowDiscardConfirm(true);
+      return;
     }
     setIsDirty(false);
     onClose();
   }, [isDirty, onClose]);
 
+  const handleConfirmDiscard = useCallback(() => {
+    setShowDiscardConfirm(false);
+    setIsDirty(false);
+    onClose();
+  }, [onClose]);
+
   // Prevent body scroll when open
-  useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => { document.body.style.overflow = ''; };
-  }, [open]);
+  useScrollLock(open);
 
   // Focus drawer when opened
   useEffect(() => {
@@ -354,7 +353,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                {VM_SIZES.map((size) => {
+                {FALLBACK_VM_SIZES.map((size) => {
                   const isSelected = defaultVmSize === size.value;
                   return (
                     <button
@@ -674,6 +673,16 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        isOpen={showDiscardConfirm}
+        onClose={() => setShowDiscardConfirm(false)}
+        onConfirm={handleConfirmDiscard}
+        title="Discard unsaved changes?"
+        message="You have unsaved changes that will be lost if you close the settings drawer."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        variant="warning"
+      />
     </>
   );
 };

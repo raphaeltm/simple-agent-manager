@@ -22,13 +22,8 @@ import {
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
 } from '../lib/api';
+import { FALLBACK_VM_SIZES } from '../lib/constants';
 import { useProjectContext } from './ProjectContext';
-
-const FALLBACK_VM_SIZES: { value: VMSize; label: string; description: string }[] = [
-  { value: 'small', label: 'Small', description: '2-3 vCPUs, 4 GB RAM' },
-  { value: 'medium', label: 'Medium', description: '4 vCPUs, 8-12 GB RAM' },
-  { value: 'large', label: 'Large', description: '8 vCPUs, 16-32 GB RAM' },
-];
 
 export function ProjectSettings() {
   const toast = useToast();

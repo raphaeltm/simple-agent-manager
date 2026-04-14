@@ -9,6 +9,7 @@ import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
+import { useScrollLock } from '../../hooks/useScrollLock';
 import { listProjectTasks, listWorkspaces } from '../../lib/api';
 
 interface ProjectInfoPanelProps {
@@ -74,14 +75,7 @@ export const ProjectInfoPanel: FC<ProjectInfoPanelProps> = ({ projectId, open, o
   }, [open, loadData]);
 
   // Prevent body scroll when open
-  useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => { document.body.style.overflow = ''; };
-  }, [open]);
+  useScrollLock(open);
 
   // Close on Escape
   useEffect(() => {

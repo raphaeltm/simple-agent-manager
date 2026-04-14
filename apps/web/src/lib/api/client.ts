@@ -36,11 +36,19 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
     if (!response.ok) {
       throw new ApiClientError(
         'UNKNOWN_ERROR',
-        'Server returned non-JSON response',
+        `Server returned non-JSON error response (${response.status})`,
         response.status
       );
     }
-    return {} as T;
+    // 204 No Content or missing content-type with empty body is expected for void endpoints
+    if (response.status === 204 || !contentType) {
+      return {} as T;
+    }
+    throw new ApiClientError(
+      'UNEXPECTED_CONTENT_TYPE',
+      `Expected JSON response but received: ${contentType}`,
+      response.status
+    );
   }
 
   const data = await response.json();
