@@ -27,7 +27,7 @@ export function isSvgFile(filePath: string): boolean {
 
 /** Strip MIME parameters (e.g. "; charset=utf-8") and return the base type. */
 export function baseMimeType(mimeType: string): string {
-  return mimeType.split(';')[0].trim().toLowerCase();
+  return (mimeType.split(';')[0] ?? mimeType).trim().toLowerCase();
 }
 
 /** Check if a file's MIME type supports inline preview (images + PDF + markdown). */
