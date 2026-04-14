@@ -10,7 +10,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
-	"github.com/workspace/vm-agent/internal/config"
 )
 
 // serverEventAppender adapts the Server's appendNodeEvent method to the
