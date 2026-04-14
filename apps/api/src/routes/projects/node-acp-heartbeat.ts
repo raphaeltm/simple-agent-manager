@@ -31,7 +31,8 @@ nodeAcpHeartbeatRoute.post('/:id/node-acp-heartbeat', jsonValidator(AcpSessionHe
   // Accept both workspace-scoped and node-scoped tokens.
   // Workspace-scoped tokens are the initial token; node-scoped tokens are
   // issued during node heartbeat refresh. Both are valid for node-level
-  // ACP heartbeat reporting.
+  // ACP heartbeat reporting. Legacy tokens without a scope claim are
+  // intentionally rejected — all current VM agents include the scope claim.
   if (payload.scope !== 'workspace' && payload.scope !== 'node') {
     log.error('acp_heartbeat.invalid_token_scope', {
       scope: payload.scope,
