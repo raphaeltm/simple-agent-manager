@@ -296,7 +296,7 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
 
   // Check MIME type BEFORE decrypting to avoid wasting CPU on unsupported types
   const { file } = await getFile(db, projectId, fileId);
-  const mimeTypeLower = file.mimeType.toLowerCase();
+  const mimeTypeLower = (file.mimeType.split(';')[0] ?? file.mimeType).trim().toLowerCase();
   if (!PREVIEWABLE_MIMES.has(mimeTypeLower)) {
     throw errors.badRequest('File type is not supported for inline preview');
   }

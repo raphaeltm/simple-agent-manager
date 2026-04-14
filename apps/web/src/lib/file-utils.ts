@@ -25,24 +25,29 @@ export function isSvgFile(filePath: string): boolean {
   return filePath.toLowerCase().endsWith('.svg');
 }
 
-/** Check if a file's MIME type supports inline preview (images + PDF). */
+/** Strip MIME parameters (e.g. "; charset=utf-8") and return the base type. */
+export function baseMimeType(mimeType: string): string {
+  return (mimeType.split(';')[0] ?? mimeType).trim().toLowerCase();
+}
+
+/** Check if a file's MIME type supports inline preview (images + PDF + markdown). */
 export function isPreviewableMime(mimeType: string): boolean {
-  return PREVIEWABLE_MIMES.has(mimeType.toLowerCase());
+  return PREVIEWABLE_MIMES.has(baseMimeType(mimeType));
 }
 
 /** Check if a MIME type is a previewable image (not SVG, not PDF). */
 export function isPreviewableImageMime(mimeType: string): boolean {
-  return PREVIEWABLE_IMAGE_MIMES.has(mimeType.toLowerCase());
+  return PREVIEWABLE_IMAGE_MIMES.has(baseMimeType(mimeType));
 }
 
 /** Check if a MIME type is PDF. */
 export function isPdfMime(mimeType: string): boolean {
-  return mimeType.toLowerCase() === 'application/pdf';
+  return baseMimeType(mimeType) === 'application/pdf';
 }
 
 /** Check if a MIME type is markdown. */
 export function isMarkdownMime(mimeType: string): boolean {
-  return mimeType.toLowerCase() === 'text/markdown';
+  return baseMimeType(mimeType) === 'text/markdown';
 }
 
 /** Default threshold for inline rendering (0–10 MB). Override via VITE_FILE_PREVIEW_INLINE_MAX_BYTES. */
