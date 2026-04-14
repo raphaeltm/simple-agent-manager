@@ -112,13 +112,11 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
   }
 
   // Validate parentTaskId if provided — must belong to the same project
-  let parentBranch: string | null = null;
   if (body.parentTaskId) {
     const [parentTask] = await db
       .select({
         id: schema.tasks.id,
         projectId: schema.tasks.projectId,
-        outputBranch: schema.tasks.outputBranch,
       })
       .from(schema.tasks)
       .where(eq(schema.tasks.id, body.parentTaskId))
@@ -130,7 +128,6 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
     if (parentTask.projectId !== projectId) {
       throw errors.badRequest('Parent task belongs to a different project');
     }
-    parentBranch = parentTask.outputBranch;
   }
 
   // Validate nodeId if provided
@@ -252,8 +249,10 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
     ?? (resolvedProfile?.taskMode as import('@simple-agent-manager/shared').TaskMode | null)
     ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
 
-  // Use parent task's output branch if forking, otherwise use project default
-  const branch = parentBranch || project.defaultBranch;
+  // Always clone from the project's default branch. Forked tasks get parent
+  // context via contextSummary — the parent's output branch may not exist on
+  // the remote (agent may not have pushed, or branch was deleted).
+  const branch = project.defaultBranch;
 
   // Generate concise task title via AI (falls back to truncation on failure)
   const titleConfig = getTaskTitleConfig(c.env);
