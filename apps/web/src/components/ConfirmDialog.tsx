@@ -1,6 +1,8 @@
 import { Button } from '@simple-agent-manager/ui';
 import { type ReactNode, useEffect, useRef } from 'react';
 
+import { useScrollLock } from '../hooks/useScrollLock';
+
 interface ConfirmDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -60,16 +62,7 @@ export function ConfirmDialog({
   }, [isOpen, loading, onClose]);
 
   // Prevent body scroll when open
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isOpen]);
+  useScrollLock(isOpen);
 
   // Focus trap
   useEffect(() => {

@@ -10,6 +10,7 @@ import { Link } from 'react-router';
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
 import type { GitStatusData } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
+import { sanitizeUrl } from '../lib/url-utils';
 import { BrowserSidecar } from './BrowserSidecar';
 import { CollapsibleSection } from './CollapsibleSection';
 import { ResourceBar } from './node/ResourceBar';
@@ -404,7 +405,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                 .map((p) => (
                   <a
                     key={p.port}
-                    href={p.url}
+                    href={sanitizeUrl(p.url)}
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={`Open port ${p.port} (${p.label})`}

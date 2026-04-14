@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+import { useScrollLock } from '../../hooks/useScrollLock';
 import type { ChatSessionResponse } from '../../lib/api';
 import { isStaleSession } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
@@ -71,10 +72,8 @@ export function MobileSessionDrawer({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = ''; };
-  }, []);
+  // Prevent body scroll — always active while this drawer is mounted
+  useScrollLock(true);
 
   return (
     <>
