@@ -285,15 +285,15 @@ SAM needs a Cloudflare API token with specific permissions:
 
 | Permission Type | Resource | Access Level |
 |-----------------|----------|--------------|
-| **Account** | Cloudflare Workers:D1 | Edit |
-| **Account** | Workers KV Storage | Edit |
-| **Account** | Workers R2 Storage | Edit |
-| **Account** | Workers Scripts | Edit |
-| **Account** | Workers Observability | Read |
-| **Account** | Cloudflare Pages | Edit |
-| **Zone** | DNS | Edit |
-| **Zone** | Workers Routes | Edit |
-| **Zone** | Zone | Read |
+| **Account** Developer Platform | D1 | Edit |
+| **Account** Developer Platform | Workers KV Storage | Edit |
+| **Account** Developer Platform | Workers R2 Storage | Edit |
+| **Account** Developer Platform | Workers Scripts | Edit |
+| **Account** Developer Platform | Workers Observability | Read |
+| **Account** Developer Platform | Pages | Edit |
+| **Zone** Developer Platform | Workers Routes | Edit |
+| **Zone** DNS & Zone | DNS | Edit |
+| **Zone** DNS & Zone | Zone | Read |
 
 **Zone Resources**: Select **Include** → **Specific zone** → *your domain*
 
