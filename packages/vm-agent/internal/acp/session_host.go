@@ -966,16 +966,8 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		}
 		settings.OpencodeProvider = "platform"
 		if settings.Model == "" && cred.inferenceConfig.Model != "" {
-			// Strip @cf/ prefix from Workers AI model IDs. OpenCode's model
-			// resolver interprets @cf/ as a provider prefix (splitting into
-			// providerID:"@cf" + modelID:"vendor/model"), causing
-			// ProviderModelNotFoundError. The AI proxy's resolveModelId()
-			// re-adds @cf/ on the server side.
-			m := cred.inferenceConfig.Model
-			if strings.HasPrefix(m, "@cf/") {
-				m = strings.TrimPrefix(m, "@cf/")
-			}
-			settings.Model = m
+			// Strip @cf/ prefix — see stripCFPrefix() doc comment.
+			settings.Model = stripCFPrefix(cred.inferenceConfig.Model)
 		}
 		slog.Info("Platform AI proxy credential injected",
 			"baseURL", cred.inferenceConfig.BaseURL,
@@ -1228,6 +1220,11 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 		// splits on "/" (e.g. "meta/llama-4-scout..." → providerID:"meta") which
 		// breaks for Workers AI model IDs regardless of prefix. The model is
 		// already set in the OpenCode config file for the openai-compatible provider.
+		//
+		// Safety: OpencodeProvider is only set to "platform" via the credential
+		// injection block (gated on APIKeySource=="callback-token"), which is
+		// currently exclusive to OpenCode + platform proxy. For non-opencode
+		// agents, OpencodeProvider remains empty and this branch is not taken.
 		if settings.OpencodeProvider == "platform" {
 			slog.Info("ACP: skipping SetSessionModel for platform proxy (model set in config)", "model", settings.Model)
 		} else {
