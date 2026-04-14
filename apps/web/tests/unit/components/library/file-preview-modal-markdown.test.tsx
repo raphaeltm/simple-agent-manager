@@ -84,10 +84,10 @@ describe('FilePreviewModal — Markdown', () => {
       expect(screen.getByTestId('rendered-markdown')).toBeInTheDocument();
     });
 
-    // Should fetch with credentials
-    expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/preview', {
+    // Should fetch with credentials and abort signal
+    expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/preview', expect.objectContaining({
       credentials: 'include',
-    });
+    }));
 
     // Rendered markdown should display the heading
     expect(screen.getByText('Hello World')).toBeInTheDocument();

@@ -19,8 +19,17 @@ export interface FilePreviewModalProps {
   onDownload: () => void;
 }
 
-/** Timeout for PDF iframe loading before showing error state (ms). */
-const PDF_LOAD_TIMEOUT_MS = 15_000;
+/** Default timeout for PDF iframe loading before showing error state (ms). */
+const DEFAULT_PDF_LOAD_TIMEOUT_MS = 15_000;
+const PDF_LOAD_TIMEOUT_MS = import.meta.env.VITE_PDF_LOAD_TIMEOUT_MS
+  ? parseInt(import.meta.env.VITE_PDF_LOAD_TIMEOUT_MS, 10)
+  : DEFAULT_PDF_LOAD_TIMEOUT_MS;
+
+/** Default timeout for markdown content fetch (ms). */
+const DEFAULT_MD_FETCH_TIMEOUT_MS = 30_000;
+const MD_FETCH_TIMEOUT_MS = import.meta.env.VITE_MD_FETCH_TIMEOUT_MS
+  ? parseInt(import.meta.env.VITE_MD_FETCH_TIMEOUT_MS, 10)
+  : DEFAULT_MD_FETCH_TIMEOUT_MS;
 
 export function FilePreviewModal({
   file,
@@ -45,30 +54,33 @@ export function FilePreviewModal({
   // Fetch markdown content as text from the preview endpoint
   useEffect(() => {
     if (!isMarkdown) return;
-    let cancelled = false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), MD_FETCH_TIMEOUT_MS);
     setMdLoading(true);
     setMdError(null);
 
-    fetch(previewUrl, { credentials: 'include' })
+    fetch(previewUrl, { credentials: 'include', signal: controller.signal })
       .then((resp) => {
         if (!resp.ok) throw new Error(`Failed to load file (${resp.status})`);
         return resp.text();
       })
       .then((text) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setMdContent(text);
           setMdLoading(false);
         }
       })
       .catch((err: Error) => {
-        if (!cancelled) {
-          setMdError(err.message);
+        if (!controller.signal.aborted) {
+          setMdError(err.name === 'AbortError' ? 'Request timed out' : err.message);
           setMdLoading(false);
         }
-      });
+      })
+      .finally(() => clearTimeout(timer));
 
     return () => {
-      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
     };
   }, [isMarkdown, previewUrl]);
 
