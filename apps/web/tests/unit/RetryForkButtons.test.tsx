@@ -32,9 +32,10 @@ vi.mock('../../src/hooks/useBrowserSidecar', () => ({
   }),
 }));
 
-import { FORK_MESSAGE_TEMPLATE,ForkDialog } from '../../src/components/project/ForkDialog';
+import { FORK_MESSAGE_TEMPLATE, ForkDialog } from '../../src/components/project/ForkDialog';
 import { RetryDialog } from '../../src/components/project/RetryDialog';
 import { SessionHeader } from '../../src/components/project-message-view/SessionHeader';
+import { SessionItem } from '../../src/pages/project-chat/SessionItem';
 
 function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionResponse {
   return {
@@ -274,5 +275,53 @@ describe('SessionHeader retry/fork buttons', () => {
 
     await user.click(screen.getByLabelText('Fork session'));
     expect(onFork).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SessionItem sidebar fork button (regression)', () => {
+  it('shows fork button for terminated sessions with tasks', () => {
+    const onForkSidebar = vi.fn();
+    render(
+      <SessionItem
+        session={makeSession()}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onFork={onForkSidebar}
+      />
+    );
+
+    const forkBtn = screen.getByTitle('Continue from this session');
+    expect(forkBtn).toBeTruthy();
+  });
+
+  it('calls onFork with session when sidebar fork button is clicked', async () => {
+    const user = userEvent.setup();
+    const onForkSidebar = vi.fn();
+    const session = makeSession();
+    render(
+      <SessionItem
+        session={session}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onFork={onForkSidebar}
+      />
+    );
+
+    await user.click(screen.getByTitle('Continue from this session'));
+    expect(onForkSidebar).toHaveBeenCalledTimes(1);
+    expect(onForkSidebar).toHaveBeenCalledWith(session);
+  });
+
+  it('does not show fork button for active sessions', () => {
+    render(
+      <SessionItem
+        session={makeSession({ status: 'active', isIdle: false, endedAt: null })}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onFork={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTitle('Continue from this session')).toBeNull();
   });
 });

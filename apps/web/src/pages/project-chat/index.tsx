@@ -331,7 +331,7 @@ export function ProjectChat() {
         session={state.retrySession}
         projectId={state.projectId}
         onClose={() => state.setRetrySession(null)}
-        onRetry={state.handleFork}
+        onRetry={state.handleRetry}
       />
 
       {/* Boot log panel */}

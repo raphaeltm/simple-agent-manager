@@ -44,52 +44,48 @@ Both buttons must be available regardless of session state (active, idle, termin
 ## Implementation Checklist
 
 ### 1. Add RetryDialog component
-- [ ] Create `apps/web/src/components/project/RetryDialog.tsx`
-- [ ] Show original task message (first user message) in a read-only preview
-- [ ] Show parent session ID/topic for context
-- [ ] Editable message field pre-filled with original message
-- [ ] Option text noting "Retrying session [topic]"
-- [ ] Submit creates a new task with the message + contextSummary noting this is a retry of session X
+- [x] Create `apps/web/src/components/project/RetryDialog.tsx`
+- [x] Show original task message (first user message) in a read-only preview
+- [x] Show parent session ID/topic for context
+- [x] Editable message field pre-filled with original message (fetched via getProjectTask API)
+- [x] Option text noting "Retrying session [topic]"
+- [x] Submit creates a new task with the message + contextSummary noting this is a retry of session X
 
 ### 2. Update ForkDialog for new fork template
-- [ ] Pre-fill the "What should the agent do next?" field with a template:
-  ```
-  Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for context about what was done and what needs to happen next.
-
-  [User's additional instructions here]
-  ```
-- [ ] Ensure the template is editable and the user can modify/replace it
+- [x] Pre-fill the "What should the agent do next?" field with MCP tools reference template
+- [x] Ensure the template is editable and the user can modify/replace it
 
 ### 3. Add Retry and Fork buttons to SessionHeader
-- [ ] Add `RotateCcw` (retry) and `GitFork` (fork) buttons to the action buttons row in SessionHeader
-- [ ] Both buttons always visible (not gated on session state or expanded panel)
-- [ ] Place them in the compact header row (always visible, not in expanded panel)
-- [ ] Wire up to open RetryDialog and ForkDialog respectively
+- [x] Add `RotateCcw` (retry) and `GitFork` (fork) buttons to the action buttons row in SessionHeader
+- [x] Both buttons always visible (not gated on session state or expanded panel)
+- [x] Place them in the compact header row (always visible, not in expanded panel)
+- [x] Wire up to open RetryDialog and ForkDialog respectively
 
 ### 4. Wire up state and handlers
-- [ ] Add `retrySession` state to `useProjectChatState` (similar to `forkSession`)
-- [ ] Add `handleRetry` handler that submits the retried task
-- [ ] Pass retry/fork callbacks down through ProjectMessageView → SessionHeader
-- [ ] Ensure the first user message is available for the retry dialog
+- [x] Add `retrySession` state to `useProjectChatState` (similar to `forkSession`)
+- [x] Add `handleRetry` handler (separate from `handleFork`, both delegate to `submitDerivedTask`)
+- [x] Pass retry/fork callbacks down through ProjectMessageView → SessionHeader
+- [x] Ensure the first user message is available for the retry dialog (via getProjectTask API)
 
 ### 5. Update ForkDialog to work without requiring terminated state
-- [ ] Remove the `canFork = state === 'terminated'` restriction for the header buttons
-- [ ] ForkDialog should work for any session that has a task ID
+- [x] Header buttons bypass `canFork = state === 'terminated'` restriction (sidebar behavior unchanged)
+- [x] ForkDialog works for any session that has a task ID
 
 ### 6. Tests
-- [ ] Unit test RetryDialog renders with original message
-- [ ] Unit test RetryDialog submit calls handler with correct params
-- [ ] Unit test SessionHeader shows retry/fork buttons in all states
-- [ ] Integration test: retry flow creates new task with correct context
+- [x] Unit test RetryDialog renders with original message
+- [x] Unit test RetryDialog submit calls handler with correct params
+- [x] Unit test SessionHeader shows retry/fork buttons in all states (active, idle, terminated)
+- [x] Unit test SessionHeader hides buttons when session has no task
+- [x] Sidebar fork regression test (SessionItem still shows fork button, click calls handler)
 
 ## Acceptance Criteria
 
-- [ ] Retry button (RotateCcw icon) visible in session header for all sessions with a task
-- [ ] Fork button (GitFork icon) visible in session header for all sessions with a task
-- [ ] Retry dialog shows original message, session reference, and submits a new task
-- [ ] Fork dialog pre-fills with MCP tool reference template
-- [ ] Both buttons work for active, idle, and terminated sessions
-- [ ] No regressions to existing fork functionality in sidebar
+- [x] Retry button (RotateCcw icon) visible in session header for all sessions with a task
+- [x] Fork button (GitFork icon) visible in session header for all sessions with a task
+- [x] Retry dialog shows original message, session reference, and submits a new task
+- [x] Fork dialog pre-fills with MCP tool reference template
+- [x] Both buttons work for active, idle, and terminated sessions
+- [x] No regressions to existing fork functionality in sidebar
 - [ ] Mobile-friendly layout (buttons don't overflow on small screens)
 
 ## References
