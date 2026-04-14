@@ -1289,36 +1289,50 @@ describe('validateCloudInitVariables', () => {
         originCaKey: incomplete,
       }))).toThrow('originCaKey');
     });
+
+    it('rejects PEM with mismatched BEGIN/END labels', () => {
+      const mismatched = [
+        '-----BEGIN CERTIFICATE-----',
+        'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
+        '-----END RSA PRIVATE KEY-----',
+      ].join('\n');
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: mismatched,
+      }))).toThrow('originCaCert');
+    });
+
+    it('rejects PEM with tab characters in body', () => {
+      const withTab = [
+        '-----BEGIN CERTIFICATE-----',
+        'MIIEojCCA4qg\tAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
+        '-----END CERTIFICATE-----',
+      ].join('\n');
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: withTab,
+      }))).toThrow('originCaCert');
+    });
   });
 });
 
 describe('regex injection prevention ($-pattern in replacement values)', () => {
   /**
-   * String.prototype.replace() treats $&, $', $` as special patterns.
-   * PEM certificates can contain $ characters in base64. Using a function
-   * replacement (() => value) prevents this interpretation.
+   * String.prototype.replace() treats $&, $', $` as special patterns in string
+   * replacements. The fix uses function replacement (() => value) to prevent this.
+   *
+   * Note: PEM base64 content cannot naturally contain $ characters, so the PEM
+   * round-trip tests above do not exercise this specific fix. The docker_name_tag
+   * replacement '{{.Name}}' doesn't contain $ either. The function replacement
+   * fix is a defensive measure against future fields that might contain $.
+   *
+   * We verify the fix by testing that the replacement function approach is used
+   * (checking that known $-pattern-sensitive template text is correctly output)
+   * and by verifying PEM content survives the full replacement pipeline intact.
    */
 
-  it('PEM cert with $& in base64 survives round-trip intact', () => {
-    // Construct a cert where a base64 line contains "$&" — this would be
-    // corrupted by String.prototype.replace() without function replacement
-    const certWithDollar = [
-      '-----BEGIN CERTIFICATE-----',
-      'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
-      'BQAwgYsxCzAJBgNVBAYTAlVTMRkwFwYDVQQKExBDbG91ZEZsYXJlLCBJbmMuMTQw',
-      'aXR5MRYwFAYDVQQHEw1TYW4gRnJhbmNpc2NvMRMwEQYDVQQIEwpDYWxpZm9ybmlh',
-      '-----END CERTIFICATE-----',
-    ].join('\n');
-    const keyWithDollar = [
-      '-----BEGIN RSA PRIVATE KEY-----',
-      'MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM',
-      'b0xGKHGFqRN6pbO7SMZP1FQ7kS8pT4oXjqypCkrN0VdFMYqBL7hT0sBNq3GlC5M',
-      '-----END RSA PRIVATE KEY-----',
-    ].join('\n');
-
+  it('realistic PEM cert survives full replacement pipeline intact', () => {
     const config = generateCloudInit(baseVariables({
-      originCaCert: certWithDollar,
-      originCaKey: keyWithDollar,
+      originCaCert: REALISTIC_CERT,
+      originCaKey: REALISTIC_KEY,
     }));
 
     const parsed = YAML.parse(config);
@@ -1326,12 +1340,16 @@ describe('regex injection prevention ($-pattern in replacement values)', () => {
       (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca.pem'
     );
     expect(certEntry).toBeDefined();
-    expect(certEntry.content.trim()).toBe(certWithDollar);
+    expect(certEntry.content.trim()).toBe(REALISTIC_CERT);
+
+    const keyEntry = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca-key.pem'
+    );
+    expect(keyEntry).toBeDefined();
+    expect(keyEntry.content.trim()).toBe(REALISTIC_KEY);
   });
 
-  it('docker_name_tag template {{.Name}} with $ in replacement context survives', () => {
-    // The docker_name_tag replacement value is '{{.Name}}' which doesn't contain $,
-    // but verifying the replacement mechanism works correctly for all values
+  it('docker_name_tag template {{.Name}} survives replacement', () => {
     const config = generateCloudInit(baseVariables());
     expect(config).toContain('"tag": "docker/{{.Name}}"');
   });
@@ -1393,19 +1411,26 @@ describe('integrated size validation in generateCloudInit', () => {
 });
 
 describe('buildNekoPrePullCmd defense-in-depth', () => {
-  it('rejects unsafe docker image even if top-level validation is bypassed', () => {
-    // This tests the defense-in-depth assertion inside buildNekoPrePullCmd.
-    // Call generateCloudInit with a nekoImage that passes SAFE_DOCKER_IMAGE_RE
-    // but test the internal function behavior via the public API.
-    // An image with shell metacharacters would be caught by both layers.
+  it('rejects unsafe docker image via top-level validation', () => {
+    // The defense-in-depth assertion inside buildNekoPrePullCmd (SAFE_DOCKER_IMAGE_RE check)
+    // cannot be tested independently through the public API because generateCloudInit
+    // always runs validateCloudInitVariables first, which catches the same invalid images.
+    // The inner check protects against future refactors that might separate validation
+    // from generation. This test verifies the outer layer catches unsafe images.
     expect(() => generateCloudInit(baseVariables({
       nekoImage: '; rm -rf /',
-    }))).toThrow(); // Caught by top-level validation
+    }))).toThrow('nekoImage');
   });
 
-  it('default image passes defense-in-depth check', () => {
-    // When nekoImage is not specified, the default image should pass
+  it('default image is correctly single-quoted in output', () => {
     const config = generateCloudInit(baseVariables());
     expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest'");
+  });
+
+  it('custom valid image is correctly single-quoted in output', () => {
+    const config = generateCloudInit(baseVariables({
+      nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
+    }));
+    expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
   });
 });

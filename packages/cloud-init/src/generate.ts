@@ -33,10 +33,12 @@ const SAFE_DNS_SERVERS_RE = /^"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"(, "\d{1,3}\.\
 
 /**
  * PEM envelope: must start with -----BEGIN <label>----- and end with -----END <label>-----.
- * Content between markers must be base64 + whitespace only. Rejects YAML special characters
- * (`:`, `#`, `{`, `}`, `[`, `]`) outside the PEM structure.
+ * BEGIN and END labels must match (enforced via backreference).
+ * Content between markers must be base64 characters, spaces, and newlines only.
+ * Uses `[ \n\r]` instead of `\s` to exclude tab/form-feed/vertical-tab which are
+ * not valid in PEM and could smuggle YAML indentation.
  */
-const PEM_ENVELOPE_RE = /^-----BEGIN [A-Z0-9 ]+(-----)\n[A-Za-z0-9+/=\s]+\n-----END [A-Z0-9 ]+(-----)$/;
+const PEM_ENVELOPE_RE = /^-----BEGIN ([A-Z0-9 ]+)-----\n[A-Za-z0-9+/= \n\r]+\n-----END \1-----$/;
 
 /**
  * Validate all CloudInitVariables before they are embedded into shell/YAML.
@@ -228,7 +230,7 @@ export function generateCloudInit(
     if (!validateCloudInitSize(config)) {
       const sizeBytes = new TextEncoder().encode(config).length;
       throw new Error(
-        `Cloud-init config exceeds 32KB Hetzner user-data limit (${sizeBytes} bytes)`,
+        `Cloud-init config exceeds ${HETZNER_USER_DATA_MAX_BYTES / 1024}KB Hetzner user-data limit (${sizeBytes} bytes)`,
       );
     }
   }
@@ -276,11 +278,13 @@ function buildNekoPrePullCmd(variables: CloudInitVariables): string {
   return `- docker pull '${image}' || true`;
 }
 
+/** Hetzner hard user-data size limit (32KB). */
+export const HETZNER_USER_DATA_MAX_BYTES = 32 * 1024;
+
 /**
  * Validate cloud-init config doesn't exceed Hetzner 32KB user-data limit.
  */
 export function validateCloudInitSize(config: string): boolean {
   const sizeBytes = new TextEncoder().encode(config).length;
-  const maxBytes = 32 * 1024;
-  return sizeBytes <= maxBytes;
+  return sizeBytes <= HETZNER_USER_DATA_MAX_BYTES;
 }
