@@ -326,8 +326,9 @@ describe('node-level ACP heartbeat auth', () => {
         body: JSON.stringify({ nodeId: NODE_ID }),
       },
     );
-    // verifyCallbackToken throws on invalid JWT → error handler returns 401 or 500
-    expect(response.status).toBeGreaterThanOrEqual(400);
+    // extractBearerToken succeeds but verifyCallbackToken rejects the invalid JWT.
+    // The error handler maps this to 401 (unauthorized).
+    expect(response.status).toBe(401);
   });
 
   it('does NOT require BetterAuth session cookie', async () => {

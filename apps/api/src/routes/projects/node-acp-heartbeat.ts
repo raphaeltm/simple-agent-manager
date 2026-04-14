@@ -44,6 +44,12 @@ nodeAcpHeartbeatRoute.post('/:id/node-acp-heartbeat', jsonValidator(AcpSessionHe
   const projectId = c.req.param('id');
   const body = c.req.valid('json');
 
+  // Note: We intentionally do NOT cross-check payload.workspace against projectId
+  // here. The VM agent iterates over its active projects and sends one heartbeat
+  // per project, all using the same callback token. The DO's updateNodeHeartbeats
+  // only touches sessions assigned to the given nodeId, limiting blast radius.
+  // This matches the existing backup sweep pattern in nodes.ts:655-663.
+  // A D1 lookup per heartbeat would defeat the lightweight 2-hop design.
   const updated = await projectDataService.updateNodeHeartbeats(c.env, projectId, body.nodeId);
   log.info('acp_heartbeat.node_level', { projectId, nodeId: body.nodeId, updatedSessions: updated });
   return c.body(null, 204);
