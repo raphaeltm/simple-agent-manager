@@ -5,6 +5,7 @@ import {
   FILE_PREVIEW_LOAD_MAX_BYTES,
   formatFileSize,
   isImageFile,
+  isMarkdownMime,
   isPdfMime,
   isPreviewableImageMime,
   isPreviewableMime,
@@ -90,6 +91,10 @@ describe('isPreviewableMime', () => {
     expect(isPreviewableMime('application/pdf')).toBe(true);
   });
 
+  it('returns true for markdown', () => {
+    expect(isPreviewableMime('text/markdown')).toBe(true);
+  });
+
   it('returns false for SVG (script risk in iframe)', () => {
     expect(isPreviewableMime('image/svg+xml')).toBe(false);
   });
@@ -134,6 +139,20 @@ describe('isPdfMime', () => {
   it('returns false for non-PDF', () => {
     expect(isPdfMime('image/png')).toBe(false);
     expect(isPdfMime('text/plain')).toBe(false);
+  });
+});
+
+describe('isMarkdownMime', () => {
+  it('returns true for markdown', () => {
+    expect(isMarkdownMime('text/markdown')).toBe(true);
+    expect(isMarkdownMime('Text/Markdown')).toBe(true);
+  });
+
+  it('returns false for non-markdown', () => {
+    expect(isMarkdownMime('text/plain')).toBe(false);
+    expect(isMarkdownMime('text/html')).toBe(false);
+    expect(isMarkdownMime('application/pdf')).toBe(false);
+    expect(isMarkdownMime('image/png')).toBe(false);
   });
 });
 

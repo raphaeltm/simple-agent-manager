@@ -31,25 +31,25 @@ For markdown, unlike images/PDFs which render from a URL, we need to:
 
 ## Implementation Checklist
 
-- [ ] Add `text/markdown` to `PREVIEWABLE_MIMES` in `apps/api/src/routes/library.ts`
-- [ ] Add `isMarkdownMime()` function and add markdown to `PREVIEWABLE_MIMES` in `apps/web/src/lib/file-utils.ts`
-- [ ] Update `FilePreviewModal` to:
+- [x] Add `text/markdown` to `PREVIEWABLE_MIMES` in `apps/api/src/routes/library.ts`
+- [x] Add `isMarkdownMime()` function and add markdown to `PREVIEWABLE_MIMES` in `apps/web/src/lib/file-utils.ts`
+- [x] Update `FilePreviewModal` to:
   - Detect markdown files via `isMarkdownMime()`
   - Fetch content as text from the preview URL
   - Render with `RenderedMarkdown` component
   - Add rendered/source toggle button
   - Handle loading and error states
-- [ ] Add unit tests for new `isMarkdownMime()` function
-- [ ] Add behavioral test for FilePreviewModal markdown rendering
+- [x] Add unit tests for new `isMarkdownMime()` function
+- [x] Add behavioral test for FilePreviewModal markdown rendering
 
 ## Acceptance Criteria
 
-- [ ] Markdown files in the library show as previewable (clickable name, preview in actions menu)
-- [ ] Clicking a markdown file opens the preview modal with properly rendered markdown
-- [ ] GFM tables render correctly
-- [ ] Mermaid diagrams render as SVG
-- [ ] Syntax-highlighted code blocks render properly
-- [ ] User can toggle between rendered and source view
-- [ ] Loading state shown while content fetches
-- [ ] Error state shown if fetch fails
-- [ ] No regressions to image or PDF preview
+- [x] Markdown files in the library show as previewable (clickable name, preview in actions menu)
+- [x] Clicking a markdown file opens the preview modal with properly rendered markdown
+- [x] GFM tables render correctly
+- [x] Mermaid diagrams render as SVG
+- [x] Syntax-highlighted code blocks render properly
+- [x] User can toggle between rendered and source view
+- [x] Loading state shown while content fetches
+- [x] Error state shown if fetch fails
+- [x] No regressions to image or PDF preview

@@ -273,7 +273,7 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
 // GET /:fileId/preview — decrypt + serve inline for previewable types
 // ---------------------------------------------------------------------------
 
-/** MIME types safe to render inline in a browser (images + PDF).
+/** MIME types safe to render inline in a browser (images, PDF, markdown).
  *  Keep in sync with PREVIEWABLE_IMAGE_MIMES + PREVIEWABLE_MIMES in apps/web/src/lib/file-utils.ts */
 const PREVIEWABLE_MIMES = new Set([
   'image/png',
@@ -282,6 +282,7 @@ const PREVIEWABLE_MIMES = new Set([
   'image/webp',
   'image/avif',
   'application/pdf',
+  'text/markdown',
 ]);
 
 libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c) => {
