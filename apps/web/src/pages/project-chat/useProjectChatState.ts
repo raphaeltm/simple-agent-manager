@@ -119,8 +119,9 @@ export function useProjectChatState() {
     if (!provisioning) setBootLogPanelOpen(false);
   }, [provisioning]);
 
-  // Fork dialog state
+  // Fork & Retry dialog state
   const [forkSession, setForkSession] = useState<ChatSessionResponse | null>(null);
+  const [retrySession, setRetrySession] = useState<ChatSessionResponse | null>(null);
 
   // Task/idea title map for session tagging + task info map for grouping
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
@@ -473,6 +474,7 @@ export function useProjectChatState() {
     ...attachments,
     provisioning, bootLogs, bootLogPanelOpen, setBootLogPanelOpen,
     forkSession, setForkSession, handleFork,
+    retrySession, setRetrySession,
     closingConversation, closeError, handleCloseConversation,
     transcribeApiUrl, getSessionState,
   };

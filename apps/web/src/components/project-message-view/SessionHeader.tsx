@@ -1,7 +1,7 @@
 import type { DetectedPort, NodeResponse, TaskDetailResponse, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
-import { Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, Globe, Loader2, MapPin, Monitor, Server } from 'lucide-react';
+import { Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Loader2, MapPin, Monitor, RotateCcw, Server } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
@@ -44,6 +44,8 @@ export function SessionHeader({
   onSessionMutated,
   onOpenFiles,
   onOpenGit,
+  onRetry,
+  onFork,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -57,6 +59,8 @@ export function SessionHeader({
   onSessionMutated?: () => void;
   onOpenFiles?: () => void;
   onOpenGit?: () => void;
+  onRetry?: () => void;
+  onFork?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -203,6 +207,34 @@ export function SessionHeader({
               ))}
             {detectedPorts.length > 3 && (
               <span className="text-[10px] text-fg-muted">+{detectedPorts.length - 3}</span>
+            )}
+          </span>
+        )}
+
+        {/* Retry & Fork — always visible when session has a task */}
+        {session.task?.id && (
+          <span className="inline-flex items-center gap-0.5 shrink-0">
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                aria-label="Retry task"
+                title="Retry — re-run this task"
+                className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
+              >
+                <RotateCcw size={14} />
+              </button>
+            )}
+            {onFork && (
+              <button
+                type="button"
+                onClick={onFork}
+                aria-label="Fork session"
+                title="Fork — start a new task from this session"
+                className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
+              >
+                <GitFork size={14} />
+              </button>
             )}
           </span>
         )}

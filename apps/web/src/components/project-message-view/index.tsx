@@ -24,6 +24,10 @@ interface ProjectMessageViewProps {
   isProvisioning?: boolean;
   /** Called after a mutation (e.g. mark complete) so the parent can refresh session list. */
   onSessionMutated?: () => void;
+  /** Called when user clicks the retry button in the session header. */
+  onRetry?: () => void;
+  /** Called when user clicks the fork button in the session header. */
+  onFork?: () => void;
 }
 
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
@@ -31,6 +35,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   sessionId,
   isProvisioning = false,
   onSessionMutated,
+  onRetry,
+  onFork,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [planModalOpen, setPlanModalOpen] = useState(false);
@@ -118,6 +124,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onSessionMutated={onSessionMutated}
           onOpenFiles={lc.handleOpenFileBrowser}
           onOpenGit={lc.handleOpenGitChanges}
+          onRetry={onRetry}
+          onFork={onFork}
         />
       )}
 

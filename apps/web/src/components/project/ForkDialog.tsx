@@ -3,6 +3,12 @@ import { useEffect, useState } from 'react';
 
 import type { ChatSessionResponse, SessionSummaryResponse } from '../../lib/api';
 import { summarizeSession } from '../../lib/api';
+import { stripMarkdown } from '../../lib/text-utils';
+
+/** Template pre-filled in the fork dialog message field. */
+export const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
+
+`;
 
 interface ForkDialogProps {
   open: boolean;
@@ -27,7 +33,7 @@ export function ForkDialog({
   const [submitting, setSubmitting] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
 
-  // Load summary when dialog opens
+  // Load summary and pre-fill message template when dialog opens
   useEffect(() => {
     if (!open || !session) {
       setSummary('');
@@ -37,6 +43,10 @@ export function ForkDialog({
       setForkError(null);
       return;
     }
+
+    // Pre-fill with MCP reference template including session context
+    const sessionLabel = session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`;
+    setMessage(`${FORK_MESSAGE_TEMPLATE}Previous session: "${sessionLabel}" (${session.id.slice(0, 8)})\n\n`);
 
     let cancelled = false;
     setLoadingSummary(true);
