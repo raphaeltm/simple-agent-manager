@@ -14,9 +14,7 @@ For the fastest deployment experience, use the automated GitHub Actions workflow
 
 1. **Fork this repository**
 2. **Have a domain configured in Cloudflare** with nameservers pointing to Cloudflare
-3. **Create a Cloudflare API Token** with these permissions:
-   - Account: D1, Workers KV Storage, Workers R2 Storage, Workers Scripts, Cloudflare Pages (Edit), Workers Observability (Read)
-   - Zone: DNS (Edit), Workers Routes (Edit), Zone (Read)
+3. **Create a Cloudflare API Token** — see the [detailed permissions table](#step-4-create-api-token-with-required-permissions) below
 4. **Note your Account ID and Zone ID** from the Cloudflare dashboard (domain overview, right sidebar)
 5. **Create an R2 API Token** (separate from above - for Pulumi state storage):
    - Go to Cloudflare Dashboard → R2 → **Manage R2 API Tokens**
@@ -281,19 +279,19 @@ SAM needs a Cloudflare API token with specific permissions:
 
 **Token name**: `simple-agent-manager`
 
-**Permissions** (add all of these):
+**Permissions** — add all of these. Each row maps to a single permission in the Cloudflare UI: select the **Scope** (Account or Zone), then the **Category** group, then the specific **Permission** and **Access Level**.
 
-| Permission Type | Resource | Access Level |
-|-----------------|----------|--------------|
-| **Account** Developer Platform | D1 | Edit |
-| **Account** Developer Platform | Workers KV Storage | Edit |
-| **Account** Developer Platform | Workers R2 Storage | Edit |
-| **Account** Developer Platform | Workers Scripts | Edit |
-| **Account** Developer Platform | Workers Observability | Read |
-| **Account** Developer Platform | Pages | Edit |
-| **Zone** Developer Platform | Workers Routes | Edit |
-| **Zone** DNS & Zone | DNS | Edit |
-| **Zone** DNS & Zone | Zone | Read |
+| Scope | Category | Permission | Access Level |
+|-------|----------|------------|--------------|
+| Account | Developer Platform | D1 | Edit |
+| Account | Developer Platform | Workers KV Storage | Edit |
+| Account | Developer Platform | Workers R2 Storage | Edit |
+| Account | Developer Platform | Workers Scripts | Edit |
+| Account | Developer Platform | Workers Observability | Read |
+| Account | Developer Platform | Pages | Edit |
+| Zone | Developer Platform | Workers Routes | Edit |
+| Zone | DNS & Zone | DNS | Edit |
+| Zone | DNS & Zone | Zone | Read |
 
 **Zone Resources**: Select **Include** → **Specific zone** → *your domain*
 
