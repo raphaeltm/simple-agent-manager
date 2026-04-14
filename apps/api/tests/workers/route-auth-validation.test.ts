@@ -264,3 +264,132 @@ describe('node ready callback', () => {
     expect(response.status).not.toBe(401);
   });
 });
+
+// =============================================================================
+// Node-level ACP heartbeat (callback JWT auth, NOT BetterAuth session)
+// =============================================================================
+
+describe('node-level ACP heartbeat auth', () => {
+  it('accepts workspace-scoped callback token', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${workspaceCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: NODE_ID }),
+      },
+    );
+    // 204 = success (heartbeat accepted). The DO may not find active sessions
+    // but the auth + routing should succeed.
+    expect(response.status).toBe(204);
+  });
+
+  it('accepts node-scoped callback token', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${nodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: NODE_ID }),
+      },
+    );
+    expect(response.status).toBe(204);
+  });
+
+  it('returns 401 without any token', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId: NODE_ID }),
+      },
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it('returns 401 with invalid token', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer invalid-token-value',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: NODE_ID }),
+      },
+    );
+    // extractBearerToken succeeds but verifyCallbackToken rejects the invalid JWT.
+    // The error handler maps this to 401 (unauthorized).
+    expect(response.status).toBe(401);
+  });
+
+  it('does NOT require BetterAuth session cookie', async () => {
+    // This is the critical regression test: the old endpoint was behind requireAuth()
+    // which only validates BetterAuth session cookies. The VM agent sends callback JWTs,
+    // not session cookies — so every heartbeat got 401'd silently.
+    // This test proves the fix works: a valid callback JWT is sufficient.
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${workspaceCallbackToken}`,
+          'Content-Type': 'application/json',
+          // No Cookie header — no BetterAuth session
+        },
+        body: JSON.stringify({ nodeId: NODE_ID }),
+      },
+    );
+    expect(response.status).toBe(204);
+  });
+});
+
+// =============================================================================
+// Contract test: VM agent heartbeat request format matches API expectations
+// =============================================================================
+
+describe('ACP heartbeat contract', () => {
+  it('accepts the exact request format the VM agent sends', async () => {
+    // This mirrors the request format in acp_heartbeat.go:sendAcpHeartbeatForProject()
+    // which sends: POST /api/projects/:id/node-acp-heartbeat
+    // with body: {"nodeId": "<nodeId>"}
+    // and header: Authorization: Bearer <callback-token>
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${nodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: NODE_ID }),
+      },
+    );
+    expect(response.status).toBe(204);
+  });
+
+  it('rejects request missing nodeId field', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${nodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      },
+    );
+    // Schema validation should reject missing nodeId
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+  });
+});

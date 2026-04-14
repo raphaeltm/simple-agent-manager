@@ -10,7 +10,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
-	"github.com/workspace/vm-agent/internal/config"
 )
 
 // serverEventAppender adapts the Server's appendNodeEvent method to the
@@ -252,14 +251,16 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.SessionLastPromptManager = s.agentSessions
 	cfg.EventAppender = &serverEventAppender{server: s}
 	cfg.CredentialSyncer = s
-	// Conversation-mode sessions should NOT be auto-suspended when the viewer
-	// disconnects. The 2-hour workspace idle timeout is the only kill mechanism.
-	// Task-mode sessions keep the default 30-min auto-suspend.
-	if s.config.TaskMode == config.TaskModeConversation {
-		cfg.IdleSuspendTimeout = 0
-	} else {
-		cfg.IdleSuspendTimeout = s.config.ACPIdleSuspendTimeout
-	}
+	// Disable auto-suspend for both conversation and task mode. Viewer presence
+	// is not the right lifecycle signal — the correct shutdown mechanisms are:
+	// 1. 15-min DO alarm after last agent activity (control-plane side)
+	// 2. 6-hour prompt timeout
+	// 3. 2-hour workspace idle timeout
+	// 4. Orphan workspace cron sweep
+	// 5. 4-hour max node lifetime
+	cfg.IdleSuspendTimeout = 0
+	// OnSuspend registered defensively — unreachable while IdleSuspendTimeout is 0
+	// (DetachViewer guards timer creation with IdleSuspendTimeout > 0).
 	cfg.OnSuspend = func(wsID, sessID string) {
 		s.handleAutoSuspend(wsID, sessID)
 	}

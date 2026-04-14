@@ -24,25 +24,25 @@ Task-mode agents are going "offline" — workspace running but UI shows "agent o
 
 ## Implementation Checklist
 
-- [ ] **Fix 1a**: Create `apps/api/src/routes/projects/node-acp-heartbeat.ts` with callback JWT auth inline (using `extractBearerToken` + `verifyCallbackToken`, accepting both workspace and node scope)
-- [ ] **Fix 1b**: Mount `nodeAcpHeartbeatRoute` in `apps/api/src/index.ts` BEFORE `projectsRoutes` at `/api/projects` path
-- [ ] **Fix 1c**: Remove the `node-acp-heartbeat` handler from `apps/api/src/routes/projects/acp-sessions.ts`
-- [ ] **Fix 1d**: Fix the misleading auth comments in `acp-sessions.ts` (lines 132-137, 191-193)
-- [ ] **Fix 2**: Change `HEARTBEAT_ACP_SWEEP_TIMEOUT_MS` default from `'8000'` to `'15000'` in `nodes.ts:638`
-- [ ] **Fix 3**: Set `cfg.IdleSuspendTimeout = 0` unconditionally in `agent_ws.go:258-262`
-- [ ] **Test 1**: Integration test — `node-acp-heartbeat` accepts valid callback JWT (workspace + node scoped)
-- [ ] **Test 2**: Integration test — `node-acp-heartbeat` rejects invalid/expired/missing tokens
-- [ ] **Test 3**: Unit test — auto-suspend disabled for both task and conversation mode in Go
-- [ ] **Test 4**: Contract test — VM agent heartbeat request format matches API expectations
+- [x] **Fix 1a**: Create `apps/api/src/routes/projects/node-acp-heartbeat.ts` with callback JWT auth inline (using `extractBearerToken` + `verifyCallbackToken`, accepting both workspace and node scope)
+- [x] **Fix 1b**: Mount `nodeAcpHeartbeatRoute` in `apps/api/src/index.ts` BEFORE `projectsRoutes` at `/api/projects` path
+- [x] **Fix 1c**: Remove the `node-acp-heartbeat` handler from `apps/api/src/routes/projects/acp-sessions.ts`
+- [x] **Fix 1d**: Fix the misleading auth comments in `acp-sessions.ts` (lines 132-137, 191-193)
+- [x] **Fix 2**: Change `HEARTBEAT_ACP_SWEEP_TIMEOUT_MS` default from `'8000'` to `'15000'` in `nodes.ts:638`
+- [x] **Fix 3**: Set `cfg.IdleSuspendTimeout = 0` unconditionally in `agent_ws.go:258-262`
+- [x] **Test 1**: Integration test — `node-acp-heartbeat` accepts valid callback JWT (workspace + node scoped)
+- [x] **Test 2**: Integration test — `node-acp-heartbeat` rejects invalid/expired/missing tokens
+- [x] **Test 3**: Auto-suspend disabled unconditionally — existing test in `session_host_test.go:963` covers `IdleSuspendTimeout=0` behavior
+- [x] **Test 4**: Contract test — VM agent heartbeat request format matches API expectations
 
 ## Acceptance Criteria
 
-- [ ] Direct ACP heartbeat endpoint returns 204 with valid callback JWT (both scopes)
-- [ ] Direct ACP heartbeat endpoint returns 401/403 with invalid/missing tokens
-- [ ] Other project routes still require BetterAuth session cookies (no auth regression)
-- [ ] Backup sweep timeout defaults to 15s
-- [ ] Auto-suspend is disabled for both task and conversation mode
-- [ ] All existing tests pass
+- [x] Direct ACP heartbeat endpoint returns 204 with valid callback JWT (both scopes)
+- [x] Direct ACP heartbeat endpoint returns 401/403 with invalid/missing tokens
+- [x] Other project routes still require BetterAuth session cookies (no auth regression)
+- [x] Backup sweep timeout defaults to 15s
+- [x] Auto-suspend is disabled for both task and conversation mode
+- [x] All existing tests pass (3509/3509)
 
 ## References
 

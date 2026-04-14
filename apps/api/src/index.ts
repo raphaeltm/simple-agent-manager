@@ -50,6 +50,7 @@ import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
 import { deploymentIdentityTokenRoute,gcpDeployCallbackRoute, projectDeploymentRoutes } from './routes/project-deployment';
 import { projectsRoutes } from './routes/projects';
+import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { providersRoutes } from './routes/providers';
 import { smokeTestTokenRoutes } from './routes/smoke-test-tokens';
 import { tasksRoutes } from './routes/tasks';
@@ -381,13 +382,14 @@ app.route('/api/tts', ttsRoutes);
 app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
 app.route('/api/t', analyticsIngestRoutes);
-// ORDERING IS CRITICAL: deploymentIdentityTokenRoute MUST be mounted before
+// ORDERING IS CRITICAL: Routes using callback JWT auth MUST be mounted before
 // projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
-// all siblings at the same base path — mounting identity token route first
-// causes it to match and return before the session auth middleware runs.
-// Reversing this order silently breaks GCP agent deployments with 401.
+// all siblings at the same base path — mounting these routes first causes them
+// to match and return before the session auth middleware runs.
 // See docs/notes/2026-03-25-deployment-identity-token-middleware-leak-postmortem.md
+// See .claude/rules/06-api-patterns.md (Hono middleware scoping)
 app.route('/api/projects', deploymentIdentityTokenRoute);
+app.route('/api/projects', nodeAcpHeartbeatRoute);
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
