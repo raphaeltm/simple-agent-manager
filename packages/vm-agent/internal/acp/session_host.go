@@ -1224,21 +1224,29 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 	}
 
 	if settings.Model != "" {
-		slog.Info("ACP: setting session model", "model", settings.Model)
-		if _, err := h.acpConn.SetSessionModel(ctx, acpsdk.SetSessionModelRequest{
-			SessionId: h.sessionID,
-			ModelId:   acpsdk.ModelId(settings.Model),
-		}); err != nil {
-			slog.Warn("ACP SetSessionModel failed (non-fatal)", "model", settings.Model, "error", err)
-			h.reportLifecycle("warn", "ACP SetSessionModel failed", map[string]interface{}{
-				"model": settings.Model,
-				"error": err.Error(),
-			})
+		// Skip SetSessionModel for platform AI proxy — OpenCode's model resolver
+		// splits on "/" (e.g. "meta/llama-4-scout..." → providerID:"meta") which
+		// breaks for Workers AI model IDs regardless of prefix. The model is
+		// already set in the OpenCode config file for the openai-compatible provider.
+		if settings.OpencodeProvider == "platform" {
+			slog.Info("ACP: skipping SetSessionModel for platform proxy (model set in config)", "model", settings.Model)
 		} else {
-			slog.Info("ACP: session model set", "model", settings.Model)
-			h.reportLifecycle("info", "ACP session model applied", map[string]interface{}{
-				"model": settings.Model,
-			})
+			slog.Info("ACP: setting session model", "model", settings.Model)
+			if _, err := h.acpConn.SetSessionModel(ctx, acpsdk.SetSessionModelRequest{
+				SessionId: h.sessionID,
+				ModelId:   acpsdk.ModelId(settings.Model),
+			}); err != nil {
+				slog.Warn("ACP SetSessionModel failed (non-fatal)", "model", settings.Model, "error", err)
+				h.reportLifecycle("warn", "ACP SetSessionModel failed", map[string]interface{}{
+					"model": settings.Model,
+					"error": err.Error(),
+				})
+			} else {
+				slog.Info("ACP: session model set", "model", settings.Model)
+				h.reportLifecycle("info", "ACP session model applied", map[string]interface{}{
+					"model": settings.Model,
+				})
+			}
 		}
 	}
 
