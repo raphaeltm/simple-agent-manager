@@ -32,8 +32,8 @@ vi.mock('../../src/hooks/useBrowserSidecar', () => ({
   }),
 }));
 
+import { FORK_MESSAGE_TEMPLATE,ForkDialog } from '../../src/components/project/ForkDialog';
 import { RetryDialog } from '../../src/components/project/RetryDialog';
-import { ForkDialog, FORK_MESSAGE_TEMPLATE } from '../../src/components/project/ForkDialog';
 import { SessionHeader } from '../../src/components/project-message-view/SessionHeader';
 
 function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionResponse {
