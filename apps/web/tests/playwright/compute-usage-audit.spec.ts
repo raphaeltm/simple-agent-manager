@@ -27,7 +27,7 @@ const MOCK_USER = {
 };
 
 // ---------------------------------------------------------------------------
-// Compute Usage Mock Payloads
+// Node Usage Mock Payloads (AdminNodeUsageResponse shape)
 // ---------------------------------------------------------------------------
 
 const PERIOD = {
@@ -35,27 +35,157 @@ const PERIOD = {
   end: '2026-04-30T23:59:59Z',
 };
 
-function makeUserSummary(overrides: {
+function makeUserNodeSummary(overrides: {
   userId: string;
   name?: string | null;
   email?: string | null;
   avatarUrl?: string | null;
+  totalNodeHours?: number;
   totalVcpuHours?: number;
-  platformVcpuHours?: number;
-  userVcpuHours?: number;
-  activeWorkspaces?: number;
+  platformNodeHours?: number;
+  activeNodes?: number;
 }) {
   return {
     userId: overrides.userId,
     name: overrides.name ?? `User ${overrides.userId}`,
     email: overrides.email ?? `user-${overrides.userId}@example.com`,
     avatarUrl: overrides.avatarUrl ?? null,
-    totalVcpuHours: overrides.totalVcpuHours ?? 12.5,
-    platformVcpuHours: overrides.platformVcpuHours ?? 10.0,
-    userVcpuHours: overrides.userVcpuHours ?? 2.5,
-    activeWorkspaces: overrides.activeWorkspaces ?? 0,
+    totalNodeHours: overrides.totalNodeHours ?? 12.5,
+    totalVcpuHours: overrides.totalVcpuHours ?? 50.0,
+    platformNodeHours: overrides.platformNodeHours ?? 10.0,
+    activeNodes: overrides.activeNodes ?? 0,
   };
 }
+
+function makeNodeUsageRecord(overrides: {
+  nodeId: string;
+  name?: string;
+  vmSize?: string;
+  vcpuCount?: number;
+  vmLocation?: string;
+  cloudProvider?: string | null;
+  credentialSource?: string;
+  status?: string;
+  createdAt?: string;
+  endedAt?: string | null;
+  workspaceCount?: number;
+}) {
+  return {
+    nodeId: overrides.nodeId,
+    name: overrides.name ?? `node-${overrides.nodeId.slice(0, 6)}`,
+    vmSize: overrides.vmSize ?? 'cpx21',
+    vcpuCount: overrides.vcpuCount ?? 2,
+    vmLocation: overrides.vmLocation ?? 'hel1',
+    cloudProvider: overrides.cloudProvider ?? 'hetzner',
+    credentialSource: overrides.credentialSource ?? 'platform',
+    status: overrides.status ?? 'running',
+    createdAt: overrides.createdAt ?? '2026-04-10T08:00:00Z',
+    endedAt: overrides.endedAt ?? null,
+    workspaceCount: overrides.workspaceCount ?? 1,
+  };
+}
+
+// Normal dataset: a few users, mixed platform/BYOC, one with active nodes
+const USERS_NORMAL = [
+  makeUserNodeSummary({ userId: 'u1', name: 'Alice Johnson', email: 'alice@example.com', totalNodeHours: 24.5, totalVcpuHours: 98.0, platformNodeHours: 20.0, activeNodes: 2 }),
+  makeUserNodeSummary({ userId: 'u2', name: 'Bob Smith', email: 'bob@example.com', totalNodeHours: 8.2, totalVcpuHours: 32.8, platformNodeHours: 8.2, activeNodes: 0 }),
+  makeUserNodeSummary({ userId: 'u3', name: null, email: 'charlie@example.com', totalNodeHours: 1.1, totalVcpuHours: 4.4, platformNodeHours: 0, activeNodes: 0 }),
+];
+
+// Long text dataset: names/emails longer than 60 chars
+const USERS_LONG_TEXT = [
+  makeUserNodeSummary({
+    userId: 'u-long',
+    name: 'Alexandrina Bartholomew-Christodoulou von Österreich-Ungarn',
+    email: 'very-long-email-address-that-might-overflow@extremely-long-subdomain.example.com',
+    totalNodeHours: 999.99,
+    totalVcpuHours: 3999.96,
+    platformNodeHours: 500.0,
+    activeNodes: 1,
+  }),
+  makeUserNodeSummary({
+    userId: 'u-unicode',
+    name: '田中 太郎 🤖 <test>',
+    email: 'unicode+emoji@example.org',
+    totalNodeHours: 0.001,
+    totalVcpuHours: 0.004,
+    platformNodeHours: 0.001,
+    activeNodes: 0,
+  }),
+];
+
+// Many users: 30+ to test scroll/list behavior
+const USERS_MANY = Array.from({ length: 32 }, (_, i) =>
+  makeUserNodeSummary({
+    userId: `user-${i}`,
+    name: `Test User ${i + 1}`,
+    email: `user${i + 1}@example.com`,
+    totalNodeHours: Math.random() * 50,
+    totalVcpuHours: Math.random() * 200,
+    platformNodeHours: Math.random() * 30,
+    activeNodes: i % 5 === 0 ? 1 : 0,
+  })
+);
+
+// Node records for the detail view
+const NODES_NORMAL = [
+  makeNodeUsageRecord({ nodeId: 'node-abc123def456ghi', name: 'prod-worker-1', vmSize: 'cpx31', vcpuCount: 4, credentialSource: 'platform', status: 'running' }),
+  makeNodeUsageRecord({ nodeId: 'node-xyz789uvw012jkl', name: 'dev-node-1', vmSize: 'ccx13', vcpuCount: 2, credentialSource: 'user', status: 'destroyed', endedAt: '2026-04-15T12:00:00Z' }),
+];
+
+const NODES_LONG_ID = [
+  makeNodeUsageRecord({
+    nodeId: 'node-averylongnodeidthatmightcauseoverflowissues-abc123',
+    name: 'a-very-long-node-name-that-might-not-fit-in-the-column',
+    vmSize: 'cx11',
+    vcpuCount: 1,
+    credentialSource: 'platform',
+    status: 'running',
+  }),
+];
+
+const NODES_MANY = Array.from({ length: 20 }, (_, i) =>
+  makeNodeUsageRecord({
+    nodeId: `node-rec${i}-abcdef123456${i}`,
+    name: `node-${i + 1}`,
+    vmSize: i % 2 === 0 ? 'cpx21' : 'cpx31',
+    vcpuCount: i % 2 === 0 ? 2 : 4,
+    credentialSource: i % 3 === 0 ? 'user' : 'platform',
+    status: i % 4 === 0 ? 'running' : 'destroyed',
+    endedAt: i % 4 === 0 ? null : `2026-04-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
+    workspaceCount: i + 1,
+  })
+);
+
+// Admin node usage overview response (AdminNodeUsageResponse)
+function makeAdminNodeUsageResponse(users: ReturnType<typeof makeUserNodeSummary>[]) {
+  return {
+    period: PERIOD,
+    users,
+  };
+}
+
+// Per-user node detail response (AdminUserNodeDetailedUsage)
+function makeDetailedNodeUsage(options: {
+  totalNodeHours?: number;
+  totalVcpuHours?: number;
+  platformNodeHours?: number;
+  activeNodes?: number;
+  nodes?: ReturnType<typeof makeNodeUsageRecord>[];
+} = {}) {
+  return {
+    period: PERIOD,
+    totalNodeHours: options.totalNodeHours ?? 24.5,
+    totalVcpuHours: options.totalVcpuHours ?? 98.0,
+    platformNodeHours: options.platformNodeHours ?? 20.0,
+    activeNodes: options.activeNodes ?? (options.nodes ?? NODES_NORMAL).filter((n) => n.status === 'running').length,
+    nodes: options.nodes ?? NODES_NORMAL,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Settings-level compute usage mock (unchanged — still uses /api/usage/compute)
+// ---------------------------------------------------------------------------
 
 function makeActiveSession(overrides: {
   workspaceId?: string;
@@ -73,69 +203,6 @@ function makeActiveSession(overrides: {
   };
 }
 
-function makeUsageRecord(overrides: {
-  id: string;
-  workspaceId?: string;
-  serverType?: string;
-  vcpuCount?: number;
-  credentialSource?: string;
-  startedAt?: string;
-  endedAt?: string | null;
-}) {
-  return {
-    id: overrides.id,
-    workspaceId: overrides.workspaceId ?? `ws-${overrides.id}-abcdef123456`,
-    serverType: overrides.serverType ?? 'cpx21',
-    vcpuCount: overrides.vcpuCount ?? 2,
-    credentialSource: overrides.credentialSource ?? 'platform',
-    startedAt: overrides.startedAt ?? '2026-04-10T08:00:00Z',
-    endedAt: overrides.endedAt ?? '2026-04-10T10:30:00Z',
-  };
-}
-
-// Normal dataset: a few users, mixed platform/BYOC, one with active workspace
-const USERS_NORMAL = [
-  makeUserSummary({ userId: 'u1', name: 'Alice Johnson', email: 'alice@example.com', totalVcpuHours: 24.5, platformVcpuHours: 20.0, userVcpuHours: 4.5, activeWorkspaces: 2 }),
-  makeUserSummary({ userId: 'u2', name: 'Bob Smith', email: 'bob@example.com', totalVcpuHours: 8.2, platformVcpuHours: 8.2, userVcpuHours: 0, activeWorkspaces: 0 }),
-  makeUserSummary({ userId: 'u3', name: null, email: 'charlie@example.com', totalVcpuHours: 1.1, platformVcpuHours: 0, userVcpuHours: 1.1, activeWorkspaces: 0 }),
-];
-
-// Long text dataset: names/emails longer than 60 chars
-const USERS_LONG_TEXT = [
-  makeUserSummary({
-    userId: 'u-long',
-    name: 'Alexandrina Bartholomew-Christodoulou von Österreich-Ungarn',
-    email: 'very-long-email-address-that-might-overflow@extremely-long-subdomain.example.com',
-    totalVcpuHours: 999.99,
-    platformVcpuHours: 500.0,
-    userVcpuHours: 499.99,
-    activeWorkspaces: 1,
-  }),
-  makeUserSummary({
-    userId: 'u-unicode',
-    name: '田中 太郎 🤖 <test>',
-    email: 'unicode+emoji@example.org',
-    totalVcpuHours: 0.001,
-    platformVcpuHours: 0.001,
-    userVcpuHours: 0,
-    activeWorkspaces: 0,
-  }),
-];
-
-// Many users: 30+ to test scroll/list behavior
-const USERS_MANY = Array.from({ length: 32 }, (_, i) =>
-  makeUserSummary({
-    userId: `user-${i}`,
-    name: `Test User ${i + 1}`,
-    email: `user${i + 1}@example.com`,
-    totalVcpuHours: Math.random() * 50,
-    platformVcpuHours: Math.random() * 30,
-    userVcpuHours: Math.random() * 20,
-    activeWorkspaces: i % 5 === 0 ? 1 : 0,
-  })
-);
-
-// Active sessions for detail view
 const ACTIVE_SESSIONS_NORMAL = [
   makeActiveSession({ workspaceId: 'ws-abc123def456ghi', serverType: 'cpx31', vcpuCount: 4, credentialSource: 'platform' }),
   makeActiveSession({ workspaceId: 'ws-xyz789uvw012jkl', serverType: 'ccx13', vcpuCount: 2, credentialSource: 'user', startedAt: new Date(Date.now() - 7200000).toISOString() }),
@@ -150,46 +217,6 @@ const ACTIVE_SESSIONS_LONG = [
   }),
 ];
 
-const RECENT_RECORDS_NORMAL = [
-  makeUsageRecord({ id: 'r1', workspaceId: 'ws-finished1abcdef', serverType: 'cpx21', vcpuCount: 2, credentialSource: 'platform', startedAt: '2026-04-08T10:00:00Z', endedAt: '2026-04-08T12:30:00Z' }),
-  makeUsageRecord({ id: 'r2', workspaceId: 'ws-finished2ghijkl', serverType: 'cpx31', vcpuCount: 4, credentialSource: 'user', startedAt: '2026-04-09T14:00:00Z', endedAt: '2026-04-09T16:45:00Z' }),
-  makeUsageRecord({ id: 'r3', workspaceId: 'ws-running3mnopqr', serverType: 'ccx13', vcpuCount: 2, credentialSource: 'platform', startedAt: '2026-04-10T08:00:00Z', endedAt: null }),
-];
-
-const RECENT_RECORDS_MANY = Array.from({ length: 20 }, (_, i) =>
-  makeUsageRecord({
-    id: `rec-${i}`,
-    workspaceId: `ws-rec${i}-abcdef123456${i}`,
-    serverType: i % 2 === 0 ? 'cpx21' : 'cpx31',
-    vcpuCount: i % 2 === 0 ? 2 : 4,
-    credentialSource: i % 3 === 0 ? 'user' : 'platform',
-    startedAt: `2026-04-${String(i + 1).padStart(2, '0')}T08:00:00Z`,
-    endedAt: i % 4 === 0 ? null : `2026-04-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
-  })
-);
-
-// Detailed usage response (for admin user drill-down)
-function makeDetailedUsage(options: {
-  totalVcpuHours?: number;
-  activeSessions?: ReturnType<typeof makeActiveSession>[];
-  recentRecords?: ReturnType<typeof makeUsageRecord>[];
-} = {}) {
-  return {
-    userId: 'u1',
-    currentPeriod: {
-      totalVcpuHours: options.totalVcpuHours ?? 24.5,
-      platformVcpuHours: 20.0,
-      userVcpuHours: 4.5,
-      activeWorkspaces: (options.activeSessions ?? []).length,
-      start: PERIOD.start,
-      end: PERIOD.end,
-    },
-    activeSessions: options.activeSessions ?? ACTIVE_SESSIONS_NORMAL,
-    recentRecords: options.recentRecords ?? RECENT_RECORDS_NORMAL,
-  };
-}
-
-// Settings-level usage response
 function makeComputeUsageResponse(options: {
   activeSessions?: ReturnType<typeof makeActiveSession>[];
   totalVcpuHours?: number;
@@ -211,35 +238,21 @@ function makeComputeUsageResponse(options: {
   };
 }
 
-// Admin overview payload (used by AdminComputeUsage)
-function makeAdminUsageResponse(users: ReturnType<typeof makeUserSummary>[]) {
-  return {
-    period: PERIOD,
-    users,
-    totals: {
-      totalVcpuHours: users.reduce((s, u) => s + u.totalVcpuHours, 0),
-      platformVcpuHours: users.reduce((s, u) => s + u.platformVcpuHours, 0),
-      userVcpuHours: users.reduce((s, u) => s + u.userVcpuHours, 0),
-      activeWorkspaces: users.reduce((s, u) => s + u.activeWorkspaces, 0),
-    },
-  };
-}
-
 // ---------------------------------------------------------------------------
 // API Mock Setup
 // ---------------------------------------------------------------------------
 
 type MockOptions = {
-  adminUsers?: ReturnType<typeof makeUserSummary>[];
-  userDetailedUsage?: ReturnType<typeof makeDetailedUsage>;
+  adminUsers?: ReturnType<typeof makeUserNodeSummary>[];
+  userDetailedUsage?: ReturnType<typeof makeDetailedNodeUsage>;
   computeUsage?: ReturnType<typeof makeComputeUsageResponse>;
   adminUsageError?: boolean;
   computeUsageError?: boolean;
 };
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
-  const adminUsageData = makeAdminUsageResponse(options.adminUsers ?? USERS_NORMAL);
-  const userDetailData = options.userDetailedUsage ?? makeDetailedUsage();
+  const adminUsageData = makeAdminNodeUsageResponse(options.adminUsers ?? USERS_NORMAL);
+  const userDetailData = options.userDetailedUsage ?? makeDetailedNodeUsage();
   const computeUsageData = options.computeUsage ?? makeComputeUsageResponse({ activeSessions: ACTIVE_SESSIONS_NORMAL });
 
   await page.route('**/api/**', async (route: Route) => {
@@ -266,22 +279,37 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     // Smoke test status
     if (path.includes('/api/smoke-test')) return respond(200, { enabled: false });
 
-    // Admin compute usage (overview list) — GET /api/admin/usage/compute
-    if (path === '/api/admin/usage/compute') {
+    // Admin node usage (overview list) — GET /api/admin/usage/nodes
+    if (path === '/api/admin/usage/nodes') {
       if (options.adminUsageError) return respond(500, { error: 'Internal server error' });
       return respond(200, adminUsageData);
     }
 
-    // Admin compute usage user detail — GET /api/admin/usage/compute/:userId
-    const userDetailMatch = path.match(/^\/api\/admin\/usage\/compute\/([^/]+)$/);
-    if (userDetailMatch) {
+    // Admin node usage user detail — GET /api/admin/usage/nodes/:userId
+    const nodeUserDetailMatch = path.match(/^\/api\/admin\/usage\/nodes\/([^/]+)$/);
+    if (nodeUserDetailMatch) {
       return respond(200, userDetailData);
     }
 
-    // Settings compute usage — GET /api/usage/compute
+    // Settings compute usage — GET /api/usage/compute (unchanged)
     if (path === '/api/usage/compute') {
       if (options.computeUsageError) return respond(500, { error: 'Failed to fetch' });
       return respond(200, computeUsageData);
+    }
+
+    // Trial status
+    if (path === '/api/trial-status') return respond(200, { available: false });
+
+    // User quota status (for SettingsComputeUsage — returns "no quota configured" shape)
+    if (path === '/api/usage/quota') {
+      return respond(200, {
+        byocExempt: false,
+        monthlyVcpuHoursLimit: null,
+        currentUsage: 0,
+        remaining: null,
+        periodStart: PERIOD.start,
+        periodEnd: PERIOD.end,
+      });
     }
 
     // Nodes
@@ -335,7 +363,7 @@ async function assertNoOverflow(page: Page) {
 }
 
 // ===========================================================================
-// ADMIN COMPUTE USAGE — Mobile (375x667)
+// ADMIN NODE USAGE — Mobile (375x667)
 // ===========================================================================
 
 test.describe('AdminComputeUsage — Mobile (375x667)', () => {
@@ -358,7 +386,7 @@ test.describe('AdminComputeUsage — Mobile (375x667)', () => {
   test('empty state: renders correctly with icon and message', async ({ page }) => {
     await setupMocks(page, { adminUsers: [] });
     await goToAdminUsage(page);
-    await expect(page.locator('text=No compute usage this period.')).toBeVisible();
+    await expect(page.locator('text=No node usage this period.')).toBeVisible();
     await screenshot(page, 'admin-usage-empty-mobile');
     await assertNoOverflow(page);
   });
@@ -379,14 +407,13 @@ test.describe('AdminComputeUsage — Mobile (375x667)', () => {
     await assertNoOverflow(page);
   });
 
-  test('active-workspace indicator uses design token color (not green-500)', async ({ page }) => {
+  test('active-node indicator uses design token color (not green-500)', async ({ page }) => {
     await setupMocks(page, {
-      adminUsers: [makeUserSummary({ userId: 'u1', name: 'Alice', activeWorkspaces: 3 })],
+      adminUsers: [makeUserNodeSummary({ userId: 'u1', name: 'Alice', activeNodes: 3 })],
     });
     await goToAdminUsage(page);
 
-    // The green dot should exist and not use an arbitrary Tailwind color like bg-green-500
-    // It should use bg-success which maps to the design system color
+    // The green dot should use bg-success (design system token), not an arbitrary Tailwind color
     const greenDot = page.locator('.bg-success').first();
     await expect(greenDot).toBeVisible();
 
@@ -397,55 +424,57 @@ test.describe('AdminComputeUsage — Mobile (375x667)', () => {
   test('drill-down: clicking user navigates to detail view', async ({ page }) => {
     await setupMocks(page, {
       adminUsers: USERS_NORMAL,
-      userDetailedUsage: makeDetailedUsage(),
+      userDetailedUsage: makeDetailedNodeUsage(),
     });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
     await expect(page.locator('text=Back to all users')).toBeVisible();
-    await expect(page.locator('text=Active Sessions')).toBeVisible();
+    // Detail view should show stat cards and the Nodes table section
+    await expect(page.locator('text=Node-hrs')).toBeVisible();
     await screenshot(page, 'admin-usage-detail-mobile');
     await assertNoOverflow(page);
   });
 
-  test('detail view: long workspace IDs do not cause overflow', async ({ page }) => {
+  test('detail view: long node IDs do not cause overflow', async ({ page }) => {
     await setupMocks(page, {
       adminUsers: USERS_NORMAL,
-      userDetailedUsage: makeDetailedUsage({ activeSessions: ACTIVE_SESSIONS_LONG }),
+      userDetailedUsage: makeDetailedNodeUsage({ nodes: NODES_LONG_ID }),
     });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
-    await expect(page.locator('text=Active Sessions')).toBeVisible();
-    await screenshot(page, 'admin-usage-detail-long-ws-mobile');
+    await expect(page.locator('text=Back to all users')).toBeVisible();
+    await screenshot(page, 'admin-usage-detail-long-node-mobile');
     await assertNoOverflow(page);
   });
 
-  test('detail view: empty records section', async ({ page }) => {
+  test('detail view: empty nodes section', async ({ page }) => {
     await setupMocks(page, {
       adminUsers: USERS_NORMAL,
-      userDetailedUsage: makeDetailedUsage({ activeSessions: [], recentRecords: [] }),
+      userDetailedUsage: makeDetailedNodeUsage({ nodes: [] }),
     });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
-    await expect(page.locator('text=No usage records.')).toBeVisible();
-    await screenshot(page, 'admin-usage-detail-empty-records-mobile');
+    await expect(page.locator('text=No nodes this period.')).toBeVisible();
+    await screenshot(page, 'admin-usage-detail-empty-nodes-mobile');
     await assertNoOverflow(page);
   });
 
-  test('detail view: many records in table do not overflow', async ({ page }) => {
+  test('detail view: many nodes in table do not overflow', async ({ page }) => {
     await setupMocks(page, {
       adminUsers: USERS_NORMAL,
-      userDetailedUsage: makeDetailedUsage({ recentRecords: RECENT_RECORDS_MANY }),
+      userDetailedUsage: makeDetailedNodeUsage({ nodes: NODES_MANY }),
     });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
+    await expect(page.locator('text=Back to all users')).toBeVisible();
     await page.waitForTimeout(400);
-    await screenshot(page, 'admin-usage-detail-many-records-mobile');
+    await screenshot(page, 'admin-usage-detail-many-nodes-mobile');
     // Table has overflow-x-auto container so body should not overflow
     await assertNoOverflow(page);
   });
 
   test('detail view: back button meets 44px minimum touch target', async ({ page }) => {
-    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedUsage() });
+    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage() });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
     await expect(page.locator('text=Back to all users')).toBeVisible();
@@ -466,10 +495,25 @@ test.describe('AdminComputeUsage — Mobile (375x667)', () => {
     await screenshot(page, 'admin-usage-special-chars-mobile');
     await assertNoOverflow(page);
   });
+
+  test('node status badge: running node shows green indicator', async ({ page }) => {
+    await setupMocks(page, {
+      adminUsers: USERS_NORMAL,
+      userDetailedUsage: makeDetailedNodeUsage({ nodes: NODES_NORMAL }),
+    });
+    await goToAdminUsage(page);
+    await page.locator('button:has-text("Alice Johnson")').click();
+    await expect(page.locator('text=Back to all users')).toBeVisible();
+    // The running node status badge should have a green dot (bg-success token)
+    const badge = page.locator('.bg-success').first();
+    await expect(badge).toBeVisible();
+    await screenshot(page, 'admin-usage-node-status-badge-mobile');
+    await assertNoOverflow(page);
+  });
 });
 
 // ===========================================================================
-// ADMIN COMPUTE USAGE — Desktop (1280x800)
+// ADMIN NODE USAGE — Desktop (1280x800)
 // ===========================================================================
 
 test.describe('AdminComputeUsage — Desktop (1280x800)', () => {
@@ -496,32 +540,50 @@ test.describe('AdminComputeUsage — Desktop (1280x800)', () => {
   test('empty state: renders cleanly', async ({ page }) => {
     await setupMocks(page, { adminUsers: [] });
     await goToAdminUsage(page);
-    await expect(page.locator('text=No compute usage this period.')).toBeVisible();
+    await expect(page.locator('text=No node usage this period.')).toBeVisible();
     await screenshot(page, 'admin-usage-empty-desktop');
     await assertNoOverflow(page);
   });
 
-  test('detail view: stat cards and table visible', async ({ page }) => {
-    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedUsage() });
+  test('detail view: stat cards and nodes table visible', async ({ page }) => {
+    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage() });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
-    await expect(page.locator('text=Total vCPU-hrs')).toBeVisible();
-    await expect(page.locator('text=Recent Records')).toBeVisible();
+    // Four stat card labels: node-hrs, vCPU-hrs, Platform, Active Nodes
+    await expect(page.locator('text=Node-hrs')).toBeVisible();
+    await expect(page.locator('text=vCPU-hrs').first()).toBeVisible();
+    await expect(page.locator('text=Nodes').first()).toBeVisible();
     await screenshot(page, 'admin-usage-detail-desktop');
     await assertNoOverflow(page);
   });
 
-  test('detail view: 4 stat cards all have icon (visual consistency)', async ({ page }) => {
-    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedUsage() });
+  test('detail view: 4 stat cards all have icons', async ({ page }) => {
+    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage() });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
-    // Verify the four stat card labels are present (scoped to the caption elements under Cards)
-    await expect(page.locator('text=Total vCPU-hrs')).toBeVisible();
-    // Each label is a <p class="sam-type-caption ..."> under a Card
-    await expect(page.locator('p.sam-type-caption:has-text("Platform")').first()).toBeVisible();
-    await expect(page.locator('p.sam-type-caption:has-text("BYOC")').first()).toBeVisible();
-    await expect(page.locator('p.sam-type-caption:has-text("Active")').first()).toBeVisible();
+    // All four stat card caption labels should be visible
+    await expect(page.locator('p.sam-type-caption:has-text("Node-hrs")')).toBeVisible();
+    await expect(page.locator('p.sam-type-caption:has-text("vCPU-hrs")')).toBeVisible();
+    await expect(page.locator('p.sam-type-caption:has-text("Platform")')).toBeVisible();
+    await expect(page.locator('p.sam-type-caption:has-text("Active Nodes")')).toBeVisible();
     await screenshot(page, 'admin-usage-detail-stat-cards-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('detail view: nodes table has correct column headers', async ({ page }) => {
+    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage() });
+    await goToAdminUsage(page);
+    await page.locator('button:has-text("Alice Johnson")').click();
+    // Column headers from the new node-centric table
+    await expect(page.locator('th:has-text("Node")')).toBeVisible();
+    await expect(page.locator('th:has-text("Size")')).toBeVisible();
+    await expect(page.locator('th:has-text("vCPUs")')).toBeVisible();
+    await expect(page.locator('th:has-text("Location")')).toBeVisible();
+    await expect(page.locator('th:has-text("Source")')).toBeVisible();
+    await expect(page.locator('th:has-text("Workspaces")')).toBeVisible();
+    await expect(page.locator('th:has-text("Uptime")')).toBeVisible();
+    await expect(page.locator('th:has-text("Status")')).toBeVisible();
+    await screenshot(page, 'admin-usage-detail-table-headers-desktop');
     await assertNoOverflow(page);
   });
 
@@ -530,6 +592,15 @@ test.describe('AdminComputeUsage — Desktop (1280x800)', () => {
     await goToAdminUsage(page);
     await page.waitForTimeout(400);
     await screenshot(page, 'admin-usage-many-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('detail view: node name and truncated ID shown in node column', async ({ page }) => {
+    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage({ nodes: NODES_NORMAL }) });
+    await goToAdminUsage(page);
+    await page.locator('button:has-text("Alice Johnson")').click();
+    await expect(page.locator('text=prod-worker-1')).toBeVisible();
+    await screenshot(page, 'admin-usage-detail-node-name-desktop');
     await assertNoOverflow(page);
   });
 });
