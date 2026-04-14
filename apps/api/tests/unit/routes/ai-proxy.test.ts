@@ -134,6 +134,9 @@ describe('model ID resolution', () => {
     if (resolved.startsWith('workers-ai/')) {
       resolved = resolved.slice('workers-ai/'.length);
     }
+    if (!resolved.startsWith('@cf/') && !resolved.startsWith('@hf/')) {
+      resolved = `@cf/${resolved}`;
+    }
     return resolved;
   }
 
@@ -149,6 +152,11 @@ describe('model ID resolution', () => {
   it('strips workers-ai/ prefix', () => {
     expect(resolveModelId('workers-ai/@cf/qwen/qwen3-30b-a3b-fp8', '@cf/default'))
       .toBe('@cf/qwen/qwen3-30b-a3b-fp8');
+  });
+
+  it('adds @cf/ prefix when missing (OpenCode strips it)', () => {
+    expect(resolveModelId('meta/llama-4-scout-17b-16e-instruct', '@cf/default'))
+      .toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
   });
 });
 

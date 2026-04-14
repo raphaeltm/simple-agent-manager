@@ -278,6 +278,24 @@ export async function fetchAdminUserComputeUsage(
 }
 
 // =============================================================================
+// Admin Node Usage
+// =============================================================================
+
+export type { AdminNodeUsageResponse, AdminUserNodeDetailedUsage } from '@simple-agent-manager/shared';
+
+export async function fetchAdminNodeUsage(): Promise<
+  import('@simple-agent-manager/shared').AdminNodeUsageResponse
+> {
+  return request('/api/admin/usage/nodes');
+}
+
+export async function fetchAdminUserNodeUsage(
+  userId: string,
+): Promise<import('@simple-agent-manager/shared').AdminUserNodeDetailedUsage> {
+  return request(`/api/admin/usage/nodes/${userId}`);
+}
+
+// =============================================================================
 // Admin Compute Quotas
 // =============================================================================
 

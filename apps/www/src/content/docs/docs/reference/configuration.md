@@ -77,7 +77,7 @@ GitHub secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`) because GitHub reserves 
 | `MAX_AUTO_NODE_LIFETIME_MS` | `14400000` (4 hr) | Absolute max lifetime for auto-provisioned nodes |
 | `NODE_WARM_GRACE_PERIOD_MS` | `2100000` (35 min) | Cron sweep grace period (must be > warm timeout) |
 | `NODE_LIFECYCLE_ALARM_RETRY_MS` | `60000` (1 min) | Retry delay for DO alarm failures |
-| `DEFAULT_TASK_AGENT_TYPE` | `claude-code` | Default agent for autonomous idea execution |
+| `DEFAULT_TASK_AGENT_TYPE` | `opencode` | Default agent for autonomous idea execution |
 
 ## Notification System
 

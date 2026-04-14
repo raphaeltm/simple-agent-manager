@@ -46,7 +46,7 @@ export async function handleAgentSession(
     const sessionLabel = `Task: ${state.config.taskTitle.slice(0, 40)}`;
     const now = new Date().toISOString();
 
-    const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
+    const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
 
     await db.insert(schema.agentSessions).values({
       id: sessionId,
@@ -111,7 +111,7 @@ export async function handleAgentSession(
   // a retry will skip creation and retry only the start call.
   if (!state.stepResults.agentStarted) {
     const { startAgentSessionOnNode } = await import('../../services/node-agent');
-    const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
+    const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
     const taskContent = state.config.taskDescription || state.config.taskTitle;
 
     // Build attachment context if files were transferred

@@ -324,11 +324,15 @@ export {
 export type {
   ActiveComputeSession,
   AdminComputeUsageResponse,
+  AdminNodeUsageResponse,
   AdminUserDetailedUsage,
+  AdminUserNodeDetailedUsage,
+  AdminUserNodeUsageSummary,
   AdminUserUsageSummary,
   ComputeUsagePeriod,
   ComputeUsageRecord,
   ComputeUsageResponse,
+  NodeUsageRecord,
 } from './compute-usage';
 
 // Compute Quotas

@@ -41,7 +41,7 @@ const tokenData: McpTokenData = {
 
 const mockEnv = {
   DATABASE: {} as unknown,
-  DEFAULT_TASK_AGENT_TYPE: 'claude-code',
+  DEFAULT_TASK_AGENT_TYPE: 'opencode',
   BUILTIN_PROFILE_SONNET_MODEL: '',
   BUILTIN_PROFILE_OPUS_MODEL: '',
 } as unknown as Parameters<typeof handleListAgentProfiles>[3];

@@ -1047,6 +1047,13 @@ const (
 	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
 )
 
+// stripCFPrefix removes the "@cf/" prefix from Workers AI model IDs.
+// OpenCode's model resolver treats "@cf/" as a provider prefix, causing
+// ProviderModelNotFoundError. The AI proxy re-adds @cf/ server-side.
+func stripCFPrefix(model string) string {
+	return strings.TrimPrefix(model, "@cf/")
+}
+
 func getOpencodeDefault(envKey, fallback string) string {
 	if v := os.Getenv(envKey); v != "" {
 		return v
@@ -1068,6 +1075,9 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 			model = settings.Model
 		}
 	}
+
+	// Strip @cf/ prefix from Workers AI model IDs for openai-compatible providers.
+	model = stripCFPrefix(model)
 
 	config := map[string]interface{}{
 		"model": model,

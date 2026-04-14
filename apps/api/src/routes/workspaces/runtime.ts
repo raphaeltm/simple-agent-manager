@@ -1,4 +1,4 @@
-import { type BootstrapTokenData, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import { type BootstrapTokenData, DEFAULT_AI_PROXY_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -76,7 +76,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   if (!credentialData && body.agentType === 'opencode' && aiProxyEnabled) {
     const baseDomain = c.env.BASE_DOMAIN;
     const proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
-    const defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? '@cf/qwen/qwen3-30b-a3b-fp8';
+    const defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
 
     log.info('agent_key.ai_proxy_fallback', { workspaceId, userId: workspace.userId, proxyBaseUrl });
 

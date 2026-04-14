@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { requireApproved, requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { getTrialStatus } from '../services/platform-trial';
 
 const trialRoutes = new Hono<{ Bindings: Env }>();
@@ -16,10 +16,10 @@ const trialRoutes = new Hono<{ Bindings: Env }>();
  * without bringing their own credentials.
  */
 trialRoutes.get('/trial-status', requireAuth(), requireApproved(), async (c) => {
-  const user = c.get('user' as never) as { id: string };
+  const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
   try {
-    const status = await getTrialStatus(db, user.id, c.env);
+    const status = await getTrialStatus(db, userId, c.env);
     return c.json(status);
   } catch (err) {
     // Trial status is non-critical — return unavailable rather than 500

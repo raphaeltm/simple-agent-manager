@@ -102,7 +102,7 @@ function makeProfileRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Agent Profile Service', () => {
-  const env = { DEFAULT_TASK_AGENT_TYPE: 'claude-code' } as any;
+  const env = { DEFAULT_TASK_AGENT_TYPE: 'opencode' } as any;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -119,7 +119,7 @@ describe('Agent Profile Service', () => {
 
       expect(result.profileId).toBeNull();
       expect(result.profileName).toBeNull();
-      expect(result.agentType).toBe('claude-code');
+      expect(result.agentType).toBe('opencode');
     });
 
     it('returns platform defaults when profileNameOrId is empty string', async () => {
@@ -129,7 +129,7 @@ describe('Agent Profile Service', () => {
       );
 
       expect(result.profileId).toBeNull();
-      expect(result.agentType).toBe('claude-code');
+      expect(result.agentType).toBe('opencode');
     });
 
     it('uses DEFAULT_TASK_AGENT_TYPE env var as fallback', async () => {

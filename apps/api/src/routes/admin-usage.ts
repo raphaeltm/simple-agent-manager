@@ -10,19 +10,23 @@ import {
   getAllUsersUsageSummary,
   getUserDetailedUsage,
 } from '../services/compute-usage';
+import {
+  getAllUsersNodeUsageSummary,
+  getUserNodeDetailedUsage,
+} from '../services/node-usage';
 
 const adminUsageRoutes = new Hono<{ Bindings: Env }>();
 
 adminUsageRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
-/** GET /api/admin/usage/compute — all users' usage summary for current period. */
+/** GET /api/admin/usage/compute — all users' usage summary for current period (legacy workspace-based). */
 adminUsageRoutes.get('/compute', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const result = await getAllUsersUsageSummary(db);
   return c.json(result);
 });
 
-/** GET /api/admin/usage/compute/:userId — specific user's detailed usage. */
+/** GET /api/admin/usage/compute/:userId — specific user's detailed usage (legacy workspace-based). */
 adminUsageRoutes.get('/compute/:userId', async (c) => {
   const userId = c.req.param('userId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -40,6 +44,33 @@ adminUsageRoutes.get('/compute/:userId', async (c) => {
 
   const recentLimit = parseInt(c.env.COMPUTE_USAGE_RECENT_RECORDS_LIMIT ?? '50', 10);
   const result = await getUserDetailedUsage(db, userId, recentLimit);
+  return c.json(result);
+});
+
+/** GET /api/admin/usage/nodes — all users' node usage summary for current period. */
+adminUsageRoutes.get('/nodes', async (c) => {
+  const db = drizzle(c.env.DATABASE, { schema });
+  const result = await getAllUsersNodeUsageSummary(db);
+  return c.json(result);
+});
+
+/** GET /api/admin/usage/nodes/:userId — specific user's node usage detail. */
+adminUsageRoutes.get('/nodes/:userId', async (c) => {
+  const userId = c.req.param('userId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const [user] = await db
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .limit(1);
+
+  if (!user) {
+    throw errors.notFound('User');
+  }
+
+  const recentLimit = parseInt(c.env.COMPUTE_USAGE_RECENT_RECORDS_LIMIT ?? '50', 10);
+  const result = await getUserNodeDetailedUsage(db, userId, recentLimit);
   return c.json(result);
 });
 

@@ -240,7 +240,7 @@ export async function createProfile(
     userId,
     name,
     description: body.description ?? null,
-    agentType: body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'claude-code',
+    agentType: body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode',
     model: body.model ?? null,
     permissionMode: body.permissionMode ?? null,
     systemPromptAppend: body.systemPromptAppend ?? null,
@@ -390,7 +390,7 @@ export async function resolveAgentProfile(
     return {
       profileId: null,
       profileName: null,
-      agentType: env.DEFAULT_TASK_AGENT_TYPE || 'claude-code',
+      agentType: env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
       model: null,
       permissionMode: null,
       systemPromptAppend: null,
@@ -466,7 +466,7 @@ export async function resolveAgentProfile(
   // No matching profile found — return defaults with the hint as agent type if valid
   const agentType = isValidAgentType(profileNameOrId)
     ? profileNameOrId
-    : env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
+    : env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
 
   return {
     profileId: null,

@@ -39,7 +39,7 @@ const REQUEST_PATH = '/api/projects/test-project-id/agent-profiles';
 function makeEnv(): Env {
   return {
     DATABASE: {} as any,
-    DEFAULT_TASK_AGENT_TYPE: 'claude-code',
+    DEFAULT_TASK_AGENT_TYPE: 'opencode',
   } as Env;
 }
 

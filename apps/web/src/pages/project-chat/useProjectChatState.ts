@@ -329,7 +329,7 @@ export function useProjectChatState() {
     const trimmed = message.trim();
     if (!trimmed) return;
     if (!hasCloudCredentials) {
-      setSubmitError('Cloud credentials required. Go to Settings to connect your Hetzner account.');
+      setSubmitError('Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.');
       return;
     }
     if (attachments.chatUploading) {

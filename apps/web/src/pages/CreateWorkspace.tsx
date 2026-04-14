@@ -11,6 +11,7 @@ import {
   createWorkspace,
   getProject,
   getProviderCatalog,
+  getTrialStatus,
   listBranches,
   listCredentials,
   listGitHubInstallations,
@@ -118,10 +119,14 @@ export function CreateWorkspace() {
 
   // Check each prerequisite independently so status appears incrementally
   useEffect(() => {
-    // Cloud provider credentials + catalog
-    listCredentials()
-      .then((creds) => {
-        const hasCloud = creds.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
+    // Cloud provider credentials + catalog (also check platform trial)
+    Promise.all([
+      listCredentials().catch(() => []),
+      getTrialStatus().catch(() => null),
+    ]).then(([creds, trial]) => {
+        const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway');
+        const trialAvailable = trial?.available ?? false;
+        const hasCloud = hasUserCreds || trialAvailable;
         setHasCloudProvider(hasCloud);
         setCloudStatus(hasCloud ? 'ready' : 'missing');
 
@@ -386,7 +391,7 @@ export function CreateWorkspace() {
             status={cloudStatus}
             detail={
               cloudStatus === 'ready' ? 'Connected' :
-              cloudStatus === 'missing' ? 'Required to provision VMs (Hetzner or Scaleway)' :
+              cloudStatus === 'missing' ? 'Connect a cloud provider in Settings, or ask your admin to enable platform trial' :
               cloudStatus === 'error' ? 'Failed to check credentials' : undefined
             }
             actionLabel={cloudStatus === 'missing' || cloudStatus === 'error' ? 'Settings' : undefined}
