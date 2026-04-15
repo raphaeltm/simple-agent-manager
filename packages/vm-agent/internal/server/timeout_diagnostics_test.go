@@ -13,40 +13,40 @@ import (
 
 // stubCollector returns a sysinfo.Collector with injectable procfs data for testing.
 func stubCollector(loadAvg1, memPercent, diskPercent float64) *sysinfo.Collector {
-	c := sysinfo.NewCollector(sysinfo.CollectorConfig{})
-	c.SetReadFileFunc(func(path string) (string, error) {
-		switch path {
-		case "/proc/loadavg":
-			return fmt.Sprintf("%.2f 0.00 0.00 1/1 1", loadAvg1), nil
-		case "/proc/meminfo":
-			total := uint64(1000000) // kB
-			available := uint64(float64(total) * (100 - memPercent) / 100)
-			return fmt.Sprintf("MemTotal: %d kB\nMemAvailable: %d kB\n", total, available), nil
-		default:
-			return "", fmt.Errorf("stub: unknown path %s", path)
-		}
+	return sysinfo.NewCollector(sysinfo.CollectorConfig{
+		ReadFileFunc: func(path string) (string, error) {
+			switch path {
+			case "/proc/loadavg":
+				return fmt.Sprintf("%.2f 0.00 0.00 1/1 1", loadAvg1), nil
+			case "/proc/meminfo":
+				total := uint64(1000000) // kB
+				available := uint64(float64(total) * (100 - memPercent) / 100)
+				return fmt.Sprintf("MemTotal: %d kB\nMemAvailable: %d kB\n", total, available), nil
+			default:
+				return "", fmt.Errorf("stub: unknown path %s", path)
+			}
+		},
+		StatFSFunc: func(_ string) (*syscall.Statfs_t, error) {
+			totalBlocks := uint64(1000000)
+			bsize := int64(4096)
+			usedBlocks := uint64(float64(totalBlocks) * diskPercent / 100)
+			freeBlocks := totalBlocks - usedBlocks
+			return &syscall.Statfs_t{
+				Blocks: totalBlocks,
+				Bsize:  bsize,
+				Bfree:  freeBlocks,
+				Bavail: freeBlocks,
+			}, nil
+		},
 	})
-	c.SetStatFSFunc(func(_ string) (*syscall.Statfs_t, error) {
-		totalBlocks := uint64(1000000)
-		bsize := int64(4096)
-		usedBlocks := uint64(float64(totalBlocks) * diskPercent / 100)
-		freeBlocks := totalBlocks - usedBlocks
-		return &syscall.Statfs_t{
-			Blocks: totalBlocks,
-			Bsize:  bsize,
-			Bfree:  freeBlocks,
-			Bavail: freeBlocks,
-		}, nil
-	})
-	return c
 }
 
 func failingCollector() *sysinfo.Collector {
-	c := sysinfo.NewCollector(sysinfo.CollectorConfig{})
-	c.SetReadFileFunc(func(_ string) (string, error) {
-		return "", fmt.Errorf("stub: procfs unavailable")
+	return sysinfo.NewCollector(sysinfo.CollectorConfig{
+		ReadFileFunc: func(_ string) (string, error) {
+			return "", fmt.Errorf("stub: procfs unavailable")
+		},
 	})
-	return c
 }
 
 func newTestServerWithCollector(collector *sysinfo.Collector) *Server {

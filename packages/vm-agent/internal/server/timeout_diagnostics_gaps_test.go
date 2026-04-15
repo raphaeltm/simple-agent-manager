@@ -28,21 +28,21 @@ import (
 // stubCollectorStatFSFail returns a collector where procfs reads succeed but statfs fails.
 // This exercises the CollectQuick error path via the disk collection failure.
 func stubCollectorStatFSFail() *sysinfo.Collector {
-	c := sysinfo.NewCollector(sysinfo.CollectorConfig{})
-	c.SetReadFileFunc(func(path string) (string, error) {
-		switch path {
-		case "/proc/loadavg":
-			return "1.00 0.00 0.00 1/1 1", nil
-		case "/proc/meminfo":
-			return "MemTotal: 1000000 kB\nMemAvailable: 600000 kB\n", nil
-		default:
-			return "", fmt.Errorf("stub: unknown path %s", path)
-		}
+	return sysinfo.NewCollector(sysinfo.CollectorConfig{
+		ReadFileFunc: func(path string) (string, error) {
+			switch path {
+			case "/proc/loadavg":
+				return "1.00 0.00 0.00 1/1 1", nil
+			case "/proc/meminfo":
+				return "MemTotal: 1000000 kB\nMemAvailable: 600000 kB\n", nil
+			default:
+				return "", fmt.Errorf("stub: unknown path %s", path)
+			}
+		},
+		StatFSFunc: func(_ string) (*syscall.Statfs_t, error) {
+			return nil, fmt.Errorf("stub: statfs unavailable")
+		},
 	})
-	c.SetStatFSFunc(func(_ string) (*syscall.Statfs_t, error) {
-		return nil, fmt.Errorf("stub: statfs unavailable")
-	})
-	return c
 }
 
 // TestBuildTimeoutDiagnostics_AllThreeConstraints verifies that when CPU, memory, and disk
