@@ -75,7 +75,13 @@ function mapMessages(messages: Array<Record<string, any>>): Array<Record<string,
     if (m.role === 'assistant') {
       mapped.content = m.content ?? null;
       if (m.tool_calls?.length) {
-        mapped.tool_calls = m.tool_calls;
+        // Convert OpenAI tool_calls to Workers AI format:
+        // OpenAI: {id, type: "function", function: {name, arguments: string}}
+        // Workers AI: {name, arguments: object}
+        mapped.tool_calls = m.tool_calls.map((tc: { function: { name: string; arguments: string } }) => ({
+          name: tc.function.name,
+          arguments: safeParseJSON(tc.function.arguments),
+        }));
       }
     } else if (m.role === 'tool') {
       mapped.content = m.content;
@@ -86,6 +92,29 @@ function mapMessages(messages: Array<Record<string, any>>): Array<Record<string,
 
     return mapped;
   });
+}
+
+/**
+ * Convert OpenAI-format tools to Workers AI flat format.
+ * OpenAI: [{type: "function", function: {name, description, parameters}}]
+ * Workers AI: [{name, description, parameters}]
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toWorkersAITools(tools: Array<{ type: string; function: Record<string, any> }>): Array<Record<string, unknown>> {
+  return tools.map((t) => ({
+    name: t.function.name,
+    description: t.function.description,
+    parameters: t.function.parameters,
+  }));
+}
+
+/** Safely parse JSON string, returning the string itself on failure. */
+function safeParseJSON(str: string): unknown {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return str;
+  }
 }
 
 /**
@@ -341,7 +370,7 @@ async function handleNonStreamingRequest(
 ): Promise<Response> {
   const { modelId, messages, temperature, max_tokens, tools, tool_choice, completionId, created, userId, workspaceId } = params;
 
-  // Build AI.run() options — Workers AI accepts OpenAI-format tools directly
+  // Build AI.run() options — convert tools from OpenAI to Workers AI flat format
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const aiOptions: Record<string, any> = {
     messages: mapMessages(messages),
@@ -349,7 +378,7 @@ async function handleNonStreamingRequest(
     max_tokens,
   };
   if (tools?.length) {
-    aiOptions.tools = tools;
+    aiOptions.tools = toWorkersAITools(tools);
   }
   if (tool_choice !== undefined) {
     aiOptions.tool_choice = tool_choice;
@@ -419,7 +448,7 @@ async function handleStreamingRequest(
 ): Promise<Response> {
   const { modelId, messages, temperature, max_tokens, tools, tool_choice, completionId, created, userId, workspaceId } = params;
 
-  // Build AI.run() options
+  // Build AI.run() options — convert tools from OpenAI to Workers AI flat format
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const aiOptions: Record<string, any> = {
     messages: mapMessages(messages),
@@ -428,7 +457,7 @@ async function handleStreamingRequest(
     stream: true,
   };
   if (tools?.length) {
-    aiOptions.tools = tools;
+    aiOptions.tools = toWorkersAITools(tools);
   }
   if (tool_choice !== undefined) {
     aiOptions.tool_choice = tool_choice;
