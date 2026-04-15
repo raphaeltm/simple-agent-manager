@@ -1106,7 +1106,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 					modelAlias: map[string]interface{}{
 						"id":          model,
 						"name":        "SAM Platform AI",
-						"tool_call":   true,
+						"tool_call":   false,
 						"temperature": true,
 						"reasoning":   false,
 						"attachment":  false,
