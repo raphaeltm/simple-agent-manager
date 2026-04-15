@@ -498,4 +498,46 @@ aiProxyRoutes.get('/models', async (c) => {
   return c.json({ object: 'list', data: models });
 });
 
+/**
+ * GET /test — Debug endpoint for testing Workers AI binding.
+ * No auth required — returns a simple AI response to verify the binding works.
+ * TODO: Remove this debug endpoint before production merge.
+ */
+aiProxyRoutes.get('/test', async (c) => {
+  const startMs = Date.now();
+  try {
+    const model = '@cf/qwen/qwen2.5-coder-32b-instruct';
+    log.info('ai_proxy.test_start', { model });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (c.env.AI as any).run(model, {
+      messages: [{ role: 'user', content: 'Say hello in one word' }],
+      stream: false,
+      max_tokens: 50,
+    });
+
+    const elapsedMs = Date.now() - startMs;
+    log.info('ai_proxy.test_result', {
+      elapsedMs,
+      resultType: typeof result,
+      resultKeys: result && typeof result === 'object' ? Object.keys(result).join(',') : 'N/A',
+      response: typeof result === 'string' ? result.substring(0, 200) : JSON.stringify(result).substring(0, 500),
+    });
+
+    return c.json({ ok: true, elapsedMs, result });
+  } catch (err) {
+    const elapsedMs = Date.now() - startMs;
+    log.error('ai_proxy.test_error', {
+      elapsedMs,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    return c.json({
+      ok: false,
+      elapsedMs,
+      error: err instanceof Error ? err.message : String(err),
+    }, 500);
+  }
+});
+
 export { aiProxyRoutes };
