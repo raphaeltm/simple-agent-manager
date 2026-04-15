@@ -780,4 +780,166 @@ aiProxyRoutes.get('/models', async (c) => {
   return c.json({ object: 'list', data: models });
 });
 
+/**
+ * DEBUG ENDPOINT — TEMPORARY, REMOVE BEFORE MERGE.
+ * Allows direct testing of Workers AI tool calling without workspace auth.
+ * Uses a hardcoded debug secret for authentication.
+ */
+const DEBUG_SECRET = 'sam-debug-tool-call-2026';
+
+aiProxyRoutes.post('/debug/chat/completions', async (c) => {
+  // Simple shared-secret auth
+  const authHeader = c.req.header('Authorization');
+  if (authHeader !== `Bearer ${DEBUG_SECRET}`) {
+    return c.json({ error: { message: 'Invalid debug secret', type: 'invalid_request_error' } }, 401);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
+  }
+
+  const parsed = chatCompletionRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({
+      error: {
+        message: `Invalid request: ${parsed.error.issues.map((i) => i.message).join(', ')}`,
+        type: 'invalid_request_error',
+      },
+    }, 400);
+  }
+  const req = parsed.data;
+
+  const modelId = resolveModelId(req.model, c.env);
+  const workersAiModel = toWorkersAiModel(modelId);
+  const hasTools = (req.tools?.length ?? 0) > 0;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const aiInputs: Record<string, any> = {
+    messages: req.messages,
+    stream: req.stream && !hasTools,
+  };
+  if (req.temperature !== undefined) aiInputs.temperature = req.temperature;
+  if (req.max_tokens !== undefined) aiInputs.max_tokens = req.max_tokens;
+  if (req.tools?.length) aiInputs.tools = req.tools;
+  if (req.tool_choice !== undefined) aiInputs.tool_choice = req.tool_choice;
+
+  const aiOptions = getAiRunOptions(c.env);
+
+  log.info('ai_proxy.debug_start', {
+    workersAiModel,
+    messageCount: req.messages.length,
+    hasTools,
+    toolCount: req.tools?.length ?? 0,
+    toolNames: req.tools?.map(t => t.function.name).join(','),
+    clientStream: req.stream,
+    hasGateway: !!aiOptions.gateway,
+    // Log the full request for debugging
+    requestBody: JSON.stringify(body),
+  });
+
+  const streamTimeoutMs = parseInt(c.env.AI_PROXY_STREAM_TIMEOUT_MS || '', 10) || DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS;
+
+  try {
+    const startMs = Date.now();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const aiPromise = (c.env.AI as any).run(workersAiModel, aiInputs, aiOptions);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Workers AI inference timed out after ${streamTimeoutMs}ms`)), streamTimeoutMs),
+    );
+
+    const rawResult = await Promise.race([aiPromise, timeoutPromise]);
+    const elapsedMs = Date.now() - startMs;
+
+    // For streaming, pass through directly
+    if (req.stream && !hasTools && rawResult instanceof ReadableStream) {
+      const completionId = generateCompletionId();
+      const created = Math.floor(Date.now() / 1000);
+      const outputStream = transformWorkersAiStream(rawResult as ReadableStream<Uint8Array>, completionId, created, modelId);
+      return new Response(outputStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        },
+      });
+    }
+
+    // Log the raw result for debugging
+    let rawResultStr: string;
+    try {
+      rawResultStr = JSON.stringify(rawResult);
+    } catch {
+      rawResultStr = String(rawResult);
+    }
+
+    const result = normalizeWorkersAiResult(rawResult);
+
+    log.info('ai_proxy.debug_result', {
+      elapsedMs,
+      rawResult: rawResultStr.substring(0, 2000),
+      normalizedResponse: result.response?.substring(0, 500),
+      hasToolCalls: !!(result.tool_calls?.length),
+      toolCallCount: result.tool_calls?.length ?? 0,
+      toolCallDetails: result.tool_calls ? JSON.stringify(result.tool_calls) : undefined,
+    });
+
+    const completionId = generateCompletionId();
+    const created = Math.floor(Date.now() / 1000);
+    const hasToolCalls = result.tool_calls && result.tool_calls.length > 0;
+
+    const responseContent = hasToolCalls
+      ? (result.response || null)
+      : (result.response ?? '');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const message: Record<string, any> = {
+      role: 'assistant',
+      content: responseContent,
+    };
+    if (hasToolCalls) {
+      message.tool_calls = transformToolCalls(result.tool_calls!);
+    }
+
+    const openAiResponse = {
+      id: completionId,
+      object: 'chat.completion',
+      created,
+      model: modelId,
+      choices: [{
+        index: 0,
+        message,
+        finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
+      }],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      // Include raw debug info
+      _debug: {
+        rawResult: rawResultStr.substring(0, 5000),
+        elapsedMs,
+        workersAiModel,
+      },
+    };
+
+    if (req.stream) {
+      return formatAsSSE(completionId, created, modelId, message, hasToolCalls);
+    } else {
+      return new Response(JSON.stringify(openAiResponse), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  } catch (err) {
+    log.error('ai_proxy.debug_error', {
+      workersAiModel,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    return new Response(JSON.stringify({
+      error: { message: `Debug inference failed: ${err instanceof Error ? err.message : String(err)}`, type: 'server_error' },
+    }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+  }
+});
+
 export { aiProxyRoutes };
