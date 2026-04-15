@@ -758,7 +758,7 @@ function formatAsSSE(
 /** TEMPORARY debug endpoint — full chat/completions without auth for direct testing.
  * Mirrors the real endpoint but skips auth/rate-limit/budget checks.
  * Remove before merging to production. */
-aiProxyRoutes.post('/debug/chat', async (c) => {
+aiProxyRoutes.post('/debug/chat/completions', async (c) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let body: any;
   try {
@@ -833,6 +833,15 @@ aiProxyRoutes.post('/debug/chat', async (c) => {
   } catch (err) {
     return c.json({ error: { message: err instanceof Error ? err.message : String(err), type: 'server_error' } }, 502);
   }
+});
+
+/** TEMPORARY debug models endpoint — mirrors /models without auth. */
+aiProxyRoutes.get('/debug/models', async (c) => {
+  const allowedModels = getAllowedModels(c.env);
+  const models = Array.from(allowedModels).map((id) => ({
+    id, object: 'model' as const, created: 0, owned_by: 'cloudflare',
+  }));
+  return c.json({ object: 'list', data: models });
 });
 
 /** TEMPORARY debug endpoint — test Workers AI directly without VM/auth overhead.
