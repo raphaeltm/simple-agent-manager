@@ -84,8 +84,16 @@ function getAiRunOptions(env: Env): { gateway?: { id: string } } {
   return {};
 }
 
+/** Workers AI tool call — either native format (name + arguments at top level)
+ * or OpenAI format (id + type + function.name + function.arguments). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type WorkersAiToolCall = { name: string; arguments: Record<string, unknown> | string };
+type WorkersAiToolCall = {
+  name?: string;
+  arguments?: Record<string, unknown> | string;
+  id?: string;
+  type?: string;
+  function?: { name: string; arguments: string };
+};
 
 /** Strip `<think>...</think>` reasoning tags from model output.
  * Some Workers AI models (Qwen3, Llama 4 Scout) wrap reasoning in these tags.
@@ -112,26 +120,40 @@ function stripThinkingTags(text: string): string {
  * populating the `tool_calls` array. We detect this and normalize to tool_calls.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizeWorkersAiResult(raw: any): { response?: string; tool_calls?: WorkersAiToolCall[] } {
+function normalizeWorkersAiResult(raw: any): { response?: string; tool_calls?: WorkersAiToolCall[]; usage?: { prompt_tokens?: number; completion_tokens?: number } } {
   if (!raw) return { response: '' };
   if (typeof raw === 'string') return { response: stripThinkingTags(raw) || '' };
   if (raw instanceof ReadableStream) {
     return { response: '[streaming result — unexpected]' };
   }
 
+  // Some Workers AI models (Qwen3) return full OpenAI-compatible format with choices[].
+  // Detect and extract from that format first.
+  if (raw.choices?.length && raw.choices[0]?.message) {
+    const msg = raw.choices[0].message;
+    const toolCalls = msg.tool_calls?.length ? msg.tool_calls : undefined;
+    let response = typeof msg.content === 'string' ? stripThinkingTags(msg.content) : '';
+    // If content is just whitespace and we have tool calls, treat as no content
+    if (toolCalls && response.trim() === '') response = '';
+    return {
+      response: response || undefined,
+      tool_calls: toolCalls,
+      usage: raw.usage,
+    };
+  }
+
+  // Native Workers AI format: { response: string, tool_calls: [...] }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let toolCalls: WorkersAiToolCall[] | undefined = raw.tool_calls?.length ? raw.tool_calls : undefined;
   let response: string | undefined;
 
-  // Check if response is a tool call object (Qwen model behavior)
+  // Check if response is a tool call object (older Qwen model behavior)
   if (raw.response && typeof raw.response === 'object' && !Array.isArray(raw.response)) {
     const resp = raw.response;
     if (resp.name && resp.arguments !== undefined) {
-      // The response IS a tool call — move it to tool_calls
       toolCalls = [{ name: resp.name, arguments: resp.arguments }];
-      response = undefined; // No text content when tool calling
+      response = undefined;
     } else {
-      // Unknown object shape — stringify it
       response = JSON.stringify(raw.response);
     }
   } else {
@@ -139,7 +161,7 @@ function normalizeWorkersAiResult(raw: any): { response?: string; tool_calls?: W
     response = stripThinkingTags(rawResponse) || rawResponse || '';
   }
 
-  return { response, tool_calls: toolCalls };
+  return { response, tool_calls: toolCalls, usage: raw.usage };
 }
 
 /** Transform Workers AI tool_calls to OpenAI format.
@@ -152,13 +174,24 @@ function transformToolCalls(toolCalls: WorkersAiToolCall[]): Array<{
   function: { name: string; arguments: string };
 }> {
   return toolCalls.map((tc, i) => {
+    // Handle OpenAI-format tool calls (Qwen3 returns these directly)
+    if (tc.function?.name) {
+      let args = tc.function.arguments || '{}';
+      try { JSON.parse(args); } catch { args = '{}'; }
+      return {
+        id: tc.id || `call_${Date.now()}_${i}`,
+        type: 'function' as const,
+        function: {
+          name: tc.function.name,
+          arguments: args,
+        },
+      };
+    }
+
+    // Handle native Workers AI format (name + arguments at top level)
     let args: string;
     if (typeof tc.arguments === 'string') {
-      // Validate it's valid JSON; default to empty object if not
-      try {
-        JSON.parse(tc.arguments);
-        args = tc.arguments;
-      } catch {
+      try { JSON.parse(tc.arguments); args = tc.arguments; } catch {
         args = tc.arguments ? JSON.stringify({ raw: tc.arguments }) : '{}';
       }
     } else if (tc.arguments !== null && tc.arguments !== undefined) {
@@ -167,7 +200,7 @@ function transformToolCalls(toolCalls: WorkersAiToolCall[]): Array<{
       args = '{}';
     }
     return {
-      id: `call_${Date.now()}_${i}`,
+      id: tc.id || `call_${Date.now()}_${i}`,
       type: 'function' as const,
       function: {
         name: tc.name || 'unknown',
@@ -413,13 +446,12 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       toolCallNames: result.tool_calls?.map(tc => tc.name).join(','),
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rawUsage = (rawResult as any)?.usage;
-    const promptTokens = rawUsage?.prompt_tokens ?? Math.ceil(
+    const usage = result.usage ?? (rawResult as { usage?: { prompt_tokens?: number; completion_tokens?: number } })?.usage;
+    const promptTokens = usage?.prompt_tokens ?? Math.ceil(
       (aiInputs.messages as Array<{ content?: string }>)
         .reduce((s, m) => s + (m.content?.length ?? 0), 0) / 4,
     );
-    const completionTokens = rawUsage?.completion_tokens ?? Math.ceil((result.response?.length ?? 0) / 4);
+    const completionTokens = usage?.completion_tokens ?? Math.ceil((result.response?.length ?? 0) / 4);
 
     if (promptTokens || completionTokens) {
       incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens).catch((err) => {
