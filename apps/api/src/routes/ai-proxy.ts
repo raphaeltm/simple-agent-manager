@@ -341,6 +341,10 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     // Normalize to { response, tool_calls }.
     const result = normalizeWorkersAiResult(rawResult);
 
+    // Log full raw response for debugging ACP ContentBlock marshal errors.
+    // eslint-disable-next-line no-console
+    console.log('[AI_PROXY_DEBUG] raw Workers AI result:', JSON.stringify(rawResult).substring(0, 2000));
+
     log.info('ai_proxy.workers_ai_result', {
       userId,
       workspaceId,
@@ -378,10 +382,16 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     const created = Math.floor(Date.now() / 1000);
     const hasToolCalls = result.tool_calls && result.tool_calls.length > 0;
 
+    // Ensure content is never undefined — OpenAI format uses null when only tool calls,
+    // or the actual text when the model responds with text. An empty string is valid.
+    const responseContent = hasToolCalls
+      ? (result.response || null) // null when doing tool calls (OpenAI convention)
+      : (result.response ?? '');  // empty string fallback for text responses
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const message: Record<string, any> = {
       role: 'assistant',
-      content: result.response ?? null,
+      content: responseContent,
     };
     if (hasToolCalls) {
       message.tool_calls = transformToolCalls(result.tool_calls!);
@@ -462,8 +472,10 @@ function formatAsSSE(
     }],
   })}\n\n`);
 
-  // Content chunk (if any)
-  if (message.content) {
+  // Content chunk — always include even if empty, to ensure OpenCode receives
+  // a complete content delta. Omitting this causes some ACP clients to create
+  // ContentBlocks with empty json.RawMessage fields that fail to marshal.
+  if (message.content !== null && message.content !== undefined) {
     events.push(`data: ${JSON.stringify({
       id: completionId,
       object: 'chat.completion.chunk',
@@ -471,14 +483,20 @@ function formatAsSSE(
       model: modelId,
       choices: [{
         index: 0,
-        delta: { content: message.content },
+        delta: { content: message.content || '' },
         finish_reason: null,
       }],
     })}\n\n`);
   }
 
-  // Tool calls chunk (if any)
+  // Tool calls chunk (if any) — send each tool call with its index field,
+  // matching the OpenAI streaming format that sends tool calls incrementally.
   if (hasToolCalls && message.tool_calls) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolCallsWithIndex = message.tool_calls.map((tc: any, i: number) => ({
+      index: i,
+      ...tc,
+    }));
     events.push(`data: ${JSON.stringify({
       id: completionId,
       object: 'chat.completion.chunk',
@@ -486,7 +504,7 @@ function formatAsSSE(
       model: modelId,
       choices: [{
         index: 0,
-        delta: { tool_calls: message.tool_calls },
+        delta: { tool_calls: toolCallsWithIndex },
         finish_reason: null,
       }],
     })}\n\n`);
