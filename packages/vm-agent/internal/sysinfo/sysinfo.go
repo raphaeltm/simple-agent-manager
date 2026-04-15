@@ -187,6 +187,16 @@ func NewCollector(cfg CollectorConfig) *Collector {
 	}
 }
 
+// SetReadFileFunc replaces the file reader (for testing outside the package).
+func (c *Collector) SetReadFileFunc(fn func(path string) (string, error)) {
+	c.readFile = fn
+}
+
+// SetStatFSFunc replaces the statfs function (for testing outside the package).
+func (c *Collector) SetStatFSFunc(fn func(path string) (*syscall.Statfs_t, error)) {
+	c.statFS = fn
+}
+
 // CollectQuick returns lightweight metrics from procfs only (no exec calls).
 // Safe to call from the heartbeat path.
 func (c *Collector) CollectQuick() (*QuickMetrics, error) {
