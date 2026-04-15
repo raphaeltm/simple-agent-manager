@@ -51,7 +51,11 @@ func failingCollector() *sysinfo.Collector {
 
 func newTestServerWithCollector(collector *sysinfo.Collector) *Server {
 	return &Server{
-		config:           &config.Config{},
+		config: &config.Config{
+			DiagCPUSaturationThreshold: 2.0,
+			DiagMemExhaustedThreshold:  90,
+			DiagDiskFullThreshold:      90,
+		},
 		sysInfoCollector: collector,
 	}
 }
@@ -243,5 +247,36 @@ func TestBuildTimeoutDiagnostics_DiskFullOnly(t *testing.T) {
 	}
 	if !strings.Contains(msg, "larger VM size") {
 		t.Errorf("expected 'larger VM size' suggestion, got: %s", msg)
+	}
+}
+
+func TestBuildTimeoutDiagnostics_CustomThresholds(t *testing.T) {
+	// With custom thresholds: CPU > 1.0 per core, memory > 50%, disk > 50%
+	// Even moderate resource usage should trigger all constraints.
+	s := &Server{
+		config: &config.Config{
+			DiagCPUSaturationThreshold: 1.0,
+			DiagMemExhaustedThreshold:  50,
+			DiagDiskFullThreshold:      50,
+		},
+		sysInfoCollector: stubCollector(4.0, 60, 60),
+	}
+
+	msg, diag := s.buildTimeoutDiagnostics(context.DeadlineExceeded)
+
+	if diag == nil {
+		t.Fatal("expected diagnostics, got nil")
+	}
+
+	// On any machine, 4.0 / numCPU > 1.0 as long as numCPU < 4.
+	// Memory 60% > 50%, Disk 60% > 50%.
+	if !diag.MemExhausted {
+		t.Error("expected MemExhausted=true with custom threshold of 50%")
+	}
+	if !diag.DiskFull {
+		t.Error("expected DiskFull=true with custom threshold of 50%")
+	}
+	if !strings.Contains(msg, "larger VM size") {
+		t.Errorf("expected 'larger VM size' suggestion with custom thresholds, got: %s", msg)
 	}
 }

@@ -210,9 +210,9 @@ func (s *Server) buildTimeoutDiagnostics(err error) (string, *resourceDiagnostic
 		Metrics:      metrics,
 		NumCPU:       numCPU,
 		CPUPerCore:   cpuPerCore,
-		CPUSaturated: cpuPerCore > 2.0,
-		MemExhausted: metrics.MemoryPercent > 90,
-		DiskFull:     metrics.DiskPercent > 90,
+		CPUSaturated: cpuPerCore > s.config.DiagCPUSaturationThreshold,
+		MemExhausted: metrics.MemoryPercent > s.config.DiagMemExhaustedThreshold,
+		DiskFull:     metrics.DiskPercent > s.config.DiagDiskFullThreshold,
 	}
 
 	var msg strings.Builder
