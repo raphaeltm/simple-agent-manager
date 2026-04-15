@@ -1042,7 +1042,7 @@ func resolveVibeActiveModel(settings *agentSettingsPayload) string {
 // Each has an env-var override so operators can change them without rebuilding the binary.
 const (
 	DefaultOpencodeModel             = "scaleway/qwen3-coder-30b-a3b-instruct"
-	DefaultPlatformModel             = "workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct"
+	DefaultPlatformModel             = "workers-ai/@cf/qwen/qwen3-30b-a3b-fp8"
 	DefaultScalewayBaseURL           = "https://api.scaleway.ai/v1"
 	DefaultGoogleVertexBaseURL       = "https://generativelanguage.googleapis.com/v1beta/openai"
 	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
