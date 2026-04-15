@@ -5,6 +5,9 @@
  * AI Gateway routing for analytics and caching. Transforms Workers AI
  * native responses into OpenAI-compatible format for OpenCode consumption.
  *
+ * Always calls Workers AI in non-streaming mode for reliability, then
+ * wraps the response as SSE events if the client requested streaming.
+ *
  * Auth: Bearer token in Authorization header (workspace callback token).
  * Rate limit: per-user RPM via KV.
  * Token budget: per-user daily input/output token limits via KV.
@@ -71,8 +74,7 @@ function messageContentLength(msg: { content?: string | null }): number {
 /** Build AI binding options, optionally routing through AI Gateway. */
 function getAiRunOptions(env: Env): { gateway?: { id: string } } {
   const gatewayId = env.AI_GATEWAY_ID || DEFAULT_AI_GATEWAY_ID;
-  // Only use gateway if explicitly configured (not the 'default' fallback,
-  // since we don't know if a gateway exists in the account)
+  // Only use gateway if explicitly configured
   if (env.AI_GATEWAY_ID) {
     return { gateway: { id: gatewayId } };
   }
@@ -233,12 +235,13 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     }, 400);
   }
 
-  // --- Build Workers AI request ---
+  // --- Call Workers AI (always non-streaming for reliability) ---
   const workersAiModel = toWorkersAiModel(modelId);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const aiInputs: Record<string, any> = {
     messages: req.messages,
-    stream: req.stream,
+    // Always use non-streaming — we wrap the response in SSE if client requested streaming
+    stream: false,
   };
   if (req.temperature !== undefined) aiInputs.temperature = req.temperature;
   if (req.max_tokens !== undefined) aiInputs.max_tokens = req.max_tokens;
@@ -253,7 +256,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     modelId,
     workersAiModel,
     messageCount: req.messages.length,
-    stream: req.stream,
+    clientStream: req.stream,
     hasTools: (req.tools?.length ?? 0) > 0,
     toolCount: req.tools?.length ?? 0,
     hasGateway: !!aiOptions.gateway,
@@ -261,23 +264,87 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   });
 
   try {
-    if (req.stream) {
-      return await handleStreamingRequest(c.env, {
-        workersAiModel,
-        aiInputs,
-        aiOptions,
-        modelId,
-        userId,
-        workspaceId,
+    // Call Workers AI binding — no API token needed, uses implicit binding auth
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (c.env.AI as any).run(workersAiModel, aiInputs, aiOptions) as {
+      response?: string;
+      tool_calls?: WorkersAiToolCall[];
+    };
+
+    log.info('ai_proxy.workers_ai_result', {
+      userId,
+      workspaceId,
+      hasResponse: !!result.response,
+      responseLength: result.response?.length ?? 0,
+      responsePreview: result.response?.substring(0, 200),
+      hasToolCalls: !!(result.tool_calls?.length),
+      toolCallCount: result.tool_calls?.length ?? 0,
+      toolCallNames: result.tool_calls?.map(tc => tc.name).join(','),
+    });
+
+    // Estimate token usage
+    const promptTokens = Math.ceil(
+      (aiInputs.messages as Array<{ content?: string }>)
+        .reduce((s, m) => s + (m.content?.length ?? 0), 0) / 4,
+    );
+    const completionTokens = Math.ceil((result.response?.length ?? 0) / 4);
+
+    if (promptTokens || completionTokens) {
+      incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens).catch((err) => {
+        log.error('ai_proxy.budget_update_failed', {
+          userId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
+    }
+
+    // Build OpenAI-format response
+    const completionId = generateCompletionId();
+    const created = Math.floor(Date.now() / 1000);
+    const hasToolCalls = result.tool_calls && result.tool_calls.length > 0;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const message: Record<string, any> = {
+      role: 'assistant',
+      content: result.response ?? null,
+    };
+    if (hasToolCalls) {
+      message.tool_calls = transformToolCalls(result.tool_calls!);
+    }
+
+    const openAiResponse = {
+      id: completionId,
+      object: 'chat.completion',
+      created,
+      model: modelId,
+      choices: [{
+        index: 0,
+        message,
+        finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
+      }],
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+      },
+    };
+
+    log.info('ai_proxy.inference_complete', {
+      userId,
+      workspaceId,
+      modelId,
+      promptTokens,
+      completionTokens,
+      finishReason: hasToolCalls ? 'tool_calls' : 'stop',
+      clientStream: req.stream,
+    });
+
+    if (req.stream) {
+      // Client requested streaming — wrap the complete response in SSE events
+      return formatAsSSE(openAiResponse, completionId, created, modelId, message, hasToolCalls);
     } else {
-      return await handleNonStreamingRequest(c.env, {
-        workersAiModel,
-        aiInputs,
-        aiOptions,
-        modelId,
-        userId,
-        workspaceId,
+      return new Response(JSON.stringify(openAiResponse), {
+        headers: { 'Content-Type': 'application/json' },
       });
     }
   } catch (err) {
@@ -293,6 +360,87 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     }), { status: 502, headers: { 'Content-Type': 'application/json' } });
   }
 });
+
+/** Format a complete response as SSE events for streaming clients. */
+function formatAsSSE(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  _fullResponse: Record<string, any>,
+  completionId: string,
+  created: number,
+  modelId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  message: Record<string, any>,
+  hasToolCalls: boolean | undefined,
+): Response {
+  const events: string[] = [];
+
+  // First chunk: role
+  events.push(`data: ${JSON.stringify({
+    id: completionId,
+    object: 'chat.completion.chunk',
+    created,
+    model: modelId,
+    choices: [{
+      index: 0,
+      delta: { role: 'assistant' },
+      finish_reason: null,
+    }],
+  })}\n\n`);
+
+  // Content chunk (if any)
+  if (message.content) {
+    events.push(`data: ${JSON.stringify({
+      id: completionId,
+      object: 'chat.completion.chunk',
+      created,
+      model: modelId,
+      choices: [{
+        index: 0,
+        delta: { content: message.content },
+        finish_reason: null,
+      }],
+    })}\n\n`);
+  }
+
+  // Tool calls chunk (if any)
+  if (hasToolCalls && message.tool_calls) {
+    events.push(`data: ${JSON.stringify({
+      id: completionId,
+      object: 'chat.completion.chunk',
+      created,
+      model: modelId,
+      choices: [{
+        index: 0,
+        delta: { tool_calls: message.tool_calls },
+        finish_reason: null,
+      }],
+    })}\n\n`);
+  }
+
+  // Final chunk with finish_reason
+  events.push(`data: ${JSON.stringify({
+    id: completionId,
+    object: 'chat.completion.chunk',
+    created,
+    model: modelId,
+    choices: [{
+      index: 0,
+      delta: {},
+      finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
+    }],
+  })}\n\n`);
+
+  events.push('data: [DONE]\n\n');
+
+  return new Response(events.join(''), {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
 
 /** OpenAI models endpoint — returns available models. */
 aiProxyRoutes.get('/models', async (c) => {
@@ -310,238 +458,5 @@ aiProxyRoutes.get('/models', async (c) => {
 
   return c.json({ object: 'list', data: models });
 });
-
-// --- Internal helpers ---
-
-interface InferenceParams {
-  workersAiModel: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  aiInputs: Record<string, any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  aiOptions: Record<string, any>;
-  modelId: string;
-  userId: string;
-  workspaceId: string;
-}
-
-async function handleNonStreamingRequest(
-  env: Env,
-  params: InferenceParams,
-): Promise<Response> {
-  const { workersAiModel, aiInputs, aiOptions, modelId, userId, workspaceId } = params;
-
-  // Call Workers AI binding — no API token needed, uses implicit binding auth
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await (env.AI as any).run(workersAiModel, aiInputs, aiOptions) as {
-    response?: string;
-    tool_calls?: WorkersAiToolCall[];
-  };
-
-  log.info('ai_proxy.workers_ai_result', {
-    userId,
-    workspaceId,
-    hasResponse: !!result.response,
-    responseLength: result.response?.length ?? 0,
-    hasToolCalls: !!(result.tool_calls?.length),
-    toolCallCount: result.tool_calls?.length ?? 0,
-  });
-
-  // Estimate token usage (Workers AI doesn't always return usage stats)
-  const promptTokens = Math.ceil(
-    (aiInputs.messages as Array<{ content?: string }>)
-      .reduce((s, m) => s + (m.content?.length ?? 0), 0) / 4,
-  );
-  const completionTokens = Math.ceil((result.response?.length ?? 0) / 4);
-
-  if (promptTokens || completionTokens) {
-    await incrementTokenUsage(env.KV, userId, promptTokens, completionTokens);
-  }
-
-  // Transform to OpenAI format
-  const completionId = generateCompletionId();
-  const hasToolCalls = result.tool_calls && result.tool_calls.length > 0;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const message: Record<string, any> = {
-    role: 'assistant',
-    content: result.response ?? null,
-  };
-  if (hasToolCalls) {
-    message.tool_calls = transformToolCalls(result.tool_calls!);
-  }
-
-  const openAiResponse = {
-    id: completionId,
-    object: 'chat.completion',
-    created: Math.floor(Date.now() / 1000),
-    model: modelId,
-    choices: [{
-      index: 0,
-      message,
-      finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
-    }],
-    usage: {
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: promptTokens + completionTokens,
-    },
-  };
-
-  log.info('ai_proxy.inference_complete', {
-    userId,
-    workspaceId,
-    modelId,
-    promptTokens,
-    completionTokens,
-    finishReason: hasToolCalls ? 'tool_calls' : 'stop',
-    stream: false,
-  });
-
-  return new Response(JSON.stringify(openAiResponse), {
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
-async function handleStreamingRequest(
-  env: Env,
-  params: InferenceParams,
-): Promise<Response> {
-  const { workersAiModel, aiInputs, aiOptions, modelId, userId, workspaceId } = params;
-
-  // Call Workers AI binding with stream: true — returns a ReadableStream
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream = await (env.AI as any).run(workersAiModel, aiInputs, aiOptions) as ReadableStream;
-
-  if (!stream || !(stream instanceof ReadableStream)) {
-    log.error('ai_proxy.stream_not_readable', {
-      userId,
-      workspaceId,
-      modelId,
-      resultType: typeof stream,
-    });
-    return new Response(JSON.stringify({
-      error: { message: 'Workers AI did not return a stream', type: 'server_error' },
-    }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  // Transform Workers AI SSE format to OpenAI SSE format
-  const completionId = generateCompletionId();
-  const created = Math.floor(Date.now() / 1000);
-  let totalContent = '';
-  let chunkCount = 0;
-  let isFirstChunk = true;
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-
-  const transformStream = new TransformStream({
-    transform(chunk, controller) {
-      const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-
-      const lines = text.split('\n');
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const jsonStr = line.slice(6).trim();
-
-        if (jsonStr === '[DONE]') {
-          // Send final chunk with finish_reason before [DONE]
-          const finalChunk = {
-            id: completionId,
-            object: 'chat.completion.chunk',
-            created,
-            model: modelId,
-            choices: [{
-              index: 0,
-              delta: {},
-              finish_reason: 'stop',
-            }],
-          };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          return;
-        }
-
-        if (!jsonStr) continue;
-
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const content = parsed.response ?? '';
-
-          if (content) {
-            totalContent += content;
-            chunkCount++;
-          }
-
-          // Build OpenAI-format chunk
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const delta: Record<string, any> = {};
-          if (isFirstChunk) {
-            delta.role = 'assistant';
-            isFirstChunk = false;
-          }
-          if (content) {
-            delta.content = content;
-          }
-
-          // Handle streamed tool calls if present
-          if (parsed.tool_calls) {
-            delta.tool_calls = transformToolCalls(parsed.tool_calls);
-          }
-
-          const openAiChunk = {
-            id: completionId,
-            object: 'chat.completion.chunk',
-            created,
-            model: modelId,
-            choices: [{
-              index: 0,
-              delta,
-              finish_reason: null,
-            }],
-          };
-
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAiChunk)}\n\n`));
-        } catch {
-          // Non-JSON SSE line — skip
-        }
-      }
-    },
-    async flush() {
-      // Update token budget with estimates
-      const promptTokens = Math.ceil(
-        (aiInputs.messages as Array<{ content?: string }>)
-          .reduce((s, m) => s + (m.content?.length ?? 0), 0) / 4,
-      );
-      const completionTokens = Math.ceil(totalContent.length / 4);
-
-      incrementTokenUsage(env.KV, userId, promptTokens, completionTokens).catch((err) => {
-        log.error('ai_proxy.budget_update_failed', {
-          userId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-
-      log.info('ai_proxy.inference_complete', {
-        userId,
-        workspaceId,
-        modelId,
-        promptTokens,
-        completionTokens,
-        chunkCount,
-        stream: true,
-      });
-    },
-  });
-
-  const readable = stream.pipeThrough(transformStream);
-
-  return new Response(readable, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    },
-  });
-}
 
 export { aiProxyRoutes };
