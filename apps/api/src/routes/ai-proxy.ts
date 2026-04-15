@@ -633,7 +633,7 @@ function transformWorkersAiStream(
                   sentRole = true;
                 }
 
-                const token = parsed.response ?? '';
+                const token = String(parsed.response ?? '');
                 if (token) {
                   const cleaned = processStreamToken(token);
                   if (cleaned) {
@@ -664,7 +664,9 @@ function transformWorkersAiStream(
     },
   });
 
-  /** Process a streaming token, stripping <think> tags. */
+  /** Process a streaming token, stripping <think>...</think> tags.
+   * Uses a simple state machine: accumulate chars only when we might be
+   * inside a tag boundary. Otherwise flush immediately. */
   function processStreamToken(token: string): string {
     let result = '';
     for (const char of token) {
@@ -674,21 +676,26 @@ function transformWorkersAiStream(
           insideThink = false;
           thinkingBuffer = '';
         }
-      } else {
+      } else if (thinkingBuffer.length > 0) {
+        // We're accumulating a potential <think> tag
         thinkingBuffer += char;
-        if (thinkingBuffer.endsWith('<think>')) {
-          insideThink = true;
-          result = result.slice(0, result.length - '<think'.length);
-          thinkingBuffer = '';
-        } else if (thinkingBuffer.length > 7) {
+        if ('<think>'.startsWith(thinkingBuffer)) {
+          // Still matching prefix of <think>
+          if (thinkingBuffer === '<think>') {
+            insideThink = true;
+            thinkingBuffer = '';
+          }
+        } else {
+          // Mismatch — flush the buffer, it's not a <think> tag
           result += thinkingBuffer;
           thinkingBuffer = '';
         }
+      } else if (char === '<') {
+        // Might be start of <think>
+        thinkingBuffer = '<';
+      } else {
+        result += char;
       }
-    }
-    if (!insideThink && thinkingBuffer.length > 7) {
-      result += thinkingBuffer;
-      thinkingBuffer = '';
     }
     return result;
   }
