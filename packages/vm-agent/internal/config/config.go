@@ -222,6 +222,11 @@ type Config struct {
 	NekoViewportMinHeight   int           // Min viewport height for validation (env: NEKO_VIEWPORT_MIN_HEIGHT, default: 240)
 	NekoViewportMaxHeight   int           // Max viewport height for validation (env: NEKO_VIEWPORT_MAX_HEIGHT, default: 4320)
 	NekoViewportMaxDPR      int           // Max device pixel ratio for validation (env: NEKO_VIEWPORT_MAX_DPR, default: 4)
+
+	// Resource diagnostics thresholds - configurable per constitution principle XI
+	DiagCPUSaturationThreshold float64 // Load per core above which build is "CPU saturated" (env: DIAG_CPU_SATURATION_THRESHOLD, default: 2.0)
+	DiagMemExhaustedThreshold  float64 // Memory % above which build is "memory exhausted" (env: DIAG_MEM_EXHAUSTED_THRESHOLD, default: 90)
+	DiagDiskFullThreshold      float64 // Disk % above which build is "disk full" (env: DIAG_DISK_FULL_THRESHOLD, default: 90)
 }
 
 // Load reads configuration from environment variables.
@@ -430,6 +435,10 @@ func Load() (*Config, error) {
 		NekoViewportMinHeight:   getEnvInt("NEKO_VIEWPORT_MIN_HEIGHT", 240),
 		NekoViewportMaxHeight:   getEnvInt("NEKO_VIEWPORT_MAX_HEIGHT", 4320),
 		NekoViewportMaxDPR:      getEnvInt("NEKO_VIEWPORT_MAX_DPR", 4),
+
+		DiagCPUSaturationThreshold: getEnvFloat("DIAG_CPU_SATURATION_THRESHOLD", 2.0),
+		DiagMemExhaustedThreshold:  getEnvFloat("DIAG_MEM_EXHAUSTED_THRESHOLD", 90),
+		DiagDiskFullThreshold:      getEnvFloat("DIAG_DISK_FULL_THRESHOLD", 90),
 	}
 
 	// Derive TLS enabled state from cert/key paths

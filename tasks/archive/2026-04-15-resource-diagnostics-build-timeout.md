@@ -28,7 +28,7 @@ When a workspace build times out (30-min bootstrap timeout), the user gets a gen
 
 ## Implementation Checklist
 
-- [ ] Create `buildTimeoutDiagnostics()` function in workspaces.go that:
+- [x] Create `buildTimeoutDiagnostics()` function in workspaces.go that:
   - Takes the original error and returns an enriched error message string
   - Checks `errors.Is(err, context.DeadlineExceeded)` — returns original error message if not a timeout
   - Calls `s.sysInfoCollector.CollectQuick()` to get resource metrics
@@ -36,23 +36,25 @@ When a workspace build times out (30-min bootstrap timeout), the user gets a gen
   - Applies heuristics: CPU saturated (loadAvg1/numCPU > 2.0), memory exhausted (>90%), disk full (>90%)
   - Builds diagnostic message with raw metrics and actionable suggestion
   - Handles sysinfo collection failure gracefully (returns original error message)
-- [ ] Modify error path in `startWorkspaceProvision()` to use enriched message for `notifyWorkspaceProvisioningFailed()`
-- [ ] Add `resourceDiagnostics` to node event detail map with raw metrics
-- [ ] Add unit tests:
+- [x] Modify error path in `startWorkspaceProvision()` to use enriched message for `notifyWorkspaceProvisioningFailed()`
+- [x] Add `resourceDiagnostics` to node event detail map with raw metrics
+- [x] Add unit tests:
   - Timeout error + high resource usage → diagnostic message generated
   - Timeout error + normal resource usage → diagnostic message with metrics but no "under-resourced" suggestion
   - Non-timeout error → no resource diagnostics appended
   - Sysinfo collection failure → falls back to original error message
-- [ ] Verify no API or UI changes needed (existing errorMessage field and ProvisioningIndicator handle it)
+  - Wrapped timeout error → diagnostics still triggered
+  - Disk full only → correct constraint message
+- [x] Verify no API or UI changes needed (existing errorMessage field and ProvisioningIndicator handle it)
 
 ## Acceptance Criteria
 
-- [ ] When provisioning times out with high resource usage, the error message includes resource metrics and suggests a larger VM
-- [ ] When provisioning times out with normal resource usage, the error message includes resource metrics but does not suggest a larger VM
-- [ ] When provisioning fails for non-timeout reasons, the error message is unchanged
-- [ ] If sysinfo collection fails, the original error message is preserved (no masking)
-- [ ] Resource diagnostics appear in node events for observability
-- [ ] All new code has unit tests
+- [x] When provisioning times out with high resource usage, the error message includes resource metrics and suggests a larger VM
+- [x] When provisioning times out with normal resource usage, the error message includes resource metrics but does not suggest a larger VM
+- [x] When provisioning fails for non-timeout reasons, the error message is unchanged
+- [x] If sysinfo collection fails, the original error message is preserved (no masking)
+- [x] Resource diagnostics appear in node events for observability
+- [x] All new code has unit tests
 
 ## References
 

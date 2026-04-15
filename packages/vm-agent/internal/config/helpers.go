@@ -75,6 +75,19 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	return defaultValue
 }
 
+// getEnvFloat returns a float64 environment variable or a default.
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			return defaultValue
+		}
+		return f
+	}
+	return defaultValue
+}
+
 // getEnvStringSlice returns a slice from a comma-separated environment variable.
 func getEnvStringSlice(key string, defaultValue []string) []string {
 	if value := os.Getenv(key); value != "" {
