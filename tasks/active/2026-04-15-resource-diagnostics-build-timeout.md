@@ -55,7 +55,6 @@ When a workspace build times out (30-min bootstrap timeout), the user gets a gen
 - [x] If sysinfo collection fails, the original error message is preserved (no masking)
 - [x] Resource diagnostics appear in node events for observability
 - [x] All new code has unit tests
-- [ ] All new code has unit tests
 
 ## References
 

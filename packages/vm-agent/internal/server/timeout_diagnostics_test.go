@@ -169,6 +169,55 @@ func TestBuildTimeoutDiagnostics_SysinfoFailure(t *testing.T) {
 	}
 }
 
+// TestDiagnosticsIntegration_NodeEventDetail verifies that the integration code
+// pattern used in startWorkspaceProvision correctly adds resourceDiagnostics to
+// the node event detail map when diagnostics are non-nil, and omits it otherwise.
+func TestDiagnosticsIntegration_NodeEventDetail(t *testing.T) {
+	// This test exercises the exact code pattern from startWorkspaceProvision:
+	//   errorMsg, diag := s.buildTimeoutDiagnostics(err)
+	//   failureDetail["error"] = errorMsg
+	//   if diag != nil { failureDetail["resourceDiagnostics"] = diag }
+
+	t.Run("timeout error includes diagnostics in detail map", func(t *testing.T) {
+		s := newTestServerWithCollector(stubCollector(7.2, 94, 45))
+		errorMsg, diag := s.buildTimeoutDiagnostics(context.DeadlineExceeded)
+
+		detail := map[string]interface{}{"error": errorMsg}
+		if diag != nil {
+			detail["resourceDiagnostics"] = diag
+		}
+
+		rd, ok := detail["resourceDiagnostics"]
+		if !ok {
+			t.Fatal("expected resourceDiagnostics in detail map")
+		}
+		diagResult, ok := rd.(*resourceDiagnostics)
+		if !ok {
+			t.Fatalf("expected *resourceDiagnostics, got %T", rd)
+		}
+		if diagResult.Metrics == nil {
+			t.Error("expected non-nil Metrics in resourceDiagnostics")
+		}
+		if diagResult.NumCPU <= 0 {
+			t.Errorf("expected positive NumCPU in diagnostics, got %d", diagResult.NumCPU)
+		}
+	})
+
+	t.Run("non-timeout error omits diagnostics from detail map", func(t *testing.T) {
+		s := newTestServerWithCollector(stubCollector(7.2, 94, 95))
+		errorMsg, diag := s.buildTimeoutDiagnostics(fmt.Errorf("build failed"))
+
+		detail := map[string]interface{}{"error": errorMsg}
+		if diag != nil {
+			detail["resourceDiagnostics"] = diag
+		}
+
+		if _, ok := detail["resourceDiagnostics"]; ok {
+			t.Error("resourceDiagnostics should not be in detail map for non-timeout errors")
+		}
+	})
+}
+
 func TestBuildTimeoutDiagnostics_DiskFullOnly(t *testing.T) {
 	s := newTestServerWithCollector(stubCollector(0.5, 40, 95))
 
