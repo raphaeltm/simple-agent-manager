@@ -58,6 +58,36 @@ function generateCompletionId(): string {
   return `chatcmpl-${crypto.randomUUID()}`;
 }
 
+/** Extract text content from a message for token estimation. */
+function messageContentLength(msg: { content?: string | null }): number {
+  return (msg.content ?? '').length;
+}
+
+/**
+ * Map validated messages to the format Workers AI expects.
+ * Workers AI accepts system, user, assistant (with tool_calls), and tool roles.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapMessages(messages: Array<Record<string, any>>): Array<Record<string, unknown>> {
+  return messages.map((m) => {
+    const mapped: Record<string, unknown> = { role: m.role };
+
+    if (m.role === 'assistant') {
+      mapped.content = m.content ?? null;
+      if (m.tool_calls?.length) {
+        mapped.tool_calls = m.tool_calls;
+      }
+    } else if (m.role === 'tool') {
+      mapped.content = m.content;
+      mapped.tool_call_id = m.tool_call_id;
+    } else {
+      mapped.content = m.content;
+    }
+
+    return mapped;
+  });
+}
+
 /**
  * POST /chat/completions — OpenAI-compatible chat completions endpoint.
  */
@@ -177,7 +207,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   // --- Rough input token estimate for pre-flight check ---
   const estimatedInputTokens = Math.ceil(
-    req.messages.reduce((sum, m) => sum + m.content.length, 0) / 4,
+    req.messages.reduce((sum, m) => sum + messageContentLength(m), 0) / 4,
   );
   const maxInputPerRequest = parseInt(c.env.AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST || '', 10)
     || DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST;
@@ -200,6 +230,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     modelId,
     messageCount: req.messages.length,
     stream: req.stream,
+    toolCount: req.tools?.length ?? 0,
     estimatedInputTokens,
   });
 
@@ -210,6 +241,8 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         messages: req.messages,
         temperature: req.temperature,
         max_tokens: req.max_tokens,
+        tools: req.tools,
+        tool_choice: req.tool_choice,
         completionId,
         created,
         userId,
@@ -221,6 +254,8 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         messages: req.messages,
         temperature: req.temperature,
         max_tokens: req.max_tokens,
+        tools: req.tools,
+        tool_choice: req.tool_choice,
         completionId,
         created,
         userId,
@@ -259,40 +294,88 @@ aiProxyRoutes.get('/models', async (c) => {
 
 // --- Internal helpers ---
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ToolDef = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ToolChoice = any;
+
 interface InferenceParams {
   modelId: string;
-  messages: Array<{ role: string; content: string }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  messages: Array<Record<string, any>>;
   temperature?: number;
   max_tokens?: number;
+  tools?: ToolDef[];
+  tool_choice?: ToolChoice;
   completionId: string;
   created: number;
   userId: string;
   workspaceId: string;
 }
 
+/** Workers AI tool_call response shape. */
+interface WorkersAIToolCall {
+  name: string;
+  arguments: Record<string, unknown> | string;
+}
+
+/** Convert Workers AI tool_calls to OpenAI format. */
+function toOpenAIToolCalls(waiToolCalls: WorkersAIToolCall[]): Array<{
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}> {
+  return waiToolCalls.map((tc) => ({
+    id: `call_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    type: 'function' as const,
+    function: {
+      name: tc.name,
+      arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments),
+    },
+  }));
+}
+
 async function handleNonStreamingRequest(
   c: { env: Env; json: (data: unknown, status?: number) => Response },
   params: InferenceParams,
 ): Promise<Response> {
-  const { modelId, messages, temperature, max_tokens, completionId, created, userId, workspaceId } = params;
+  const { modelId, messages, temperature, max_tokens, tools, tool_choice, completionId, created, userId, workspaceId } = params;
 
-  const aiResponse = await c.env.AI.run(modelId as Parameters<Ai['run']>[0], {
-    messages: messages.map((m) => ({ role: m.role as 'system' | 'user' | 'assistant', content: m.content })),
+  // Build AI.run() options — Workers AI accepts OpenAI-format tools directly
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const aiOptions: Record<string, any> = {
+    messages: mapMessages(messages),
     temperature,
     max_tokens,
-  });
+  };
+  if (tools?.length) {
+    aiOptions.tools = tools;
+  }
+  if (tool_choice !== undefined) {
+    aiOptions.tool_choice = tool_choice;
+  }
 
-  // Workers AI returns either { response: string } or the content directly
-  const content = typeof aiResponse === 'string'
-    ? aiResponse
-    : (aiResponse as { response?: string }).response ?? JSON.stringify(aiResponse);
+  const aiResponse = await c.env.AI.run(modelId as Parameters<Ai['run']>[0], aiOptions);
+
+  // Workers AI returns either:
+  // - { response: string } for text responses
+  // - { response: null, tool_calls: [{name, arguments}] } for tool calls
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const responseObj = aiResponse as any;
+  const rawToolCalls = responseObj?.tool_calls as WorkersAIToolCall[] | undefined;
+  const hasToolCalls = rawToolCalls && rawToolCalls.length > 0;
+
+  const content = hasToolCalls
+    ? null
+    : typeof aiResponse === 'string'
+      ? aiResponse
+      : responseObj?.response ?? JSON.stringify(aiResponse);
 
   // Extract usage if available from Workers AI response
-  const usage = (aiResponse as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
-  const promptTokens = usage?.prompt_tokens ?? Math.ceil(messages.reduce((s, m) => s + m.content.length, 0) / 4);
-  const completionTokens = usage?.completion_tokens ?? Math.ceil(content.length / 4);
+  const usage = responseObj?.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+  const promptTokens = usage?.prompt_tokens ?? Math.ceil(messages.reduce((s, m) => s + messageContentLength(m), 0) / 4);
+  const completionTokens = usage?.completion_tokens ?? Math.ceil((content ?? '').length / 4);
 
-  // Update token budget (fire-and-forget in waitUntil would be ideal but c.executionCtx not available here)
   await incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens);
 
   log.info('ai_proxy.inference_complete', {
@@ -301,8 +384,16 @@ async function handleNonStreamingRequest(
     modelId,
     promptTokens,
     completionTokens,
+    hasToolCalls,
     stream: false,
   });
+
+  // Build assistant message
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const assistantMessage: Record<string, any> = { role: 'assistant', content };
+  if (hasToolCalls) {
+    assistantMessage.tool_calls = toOpenAIToolCalls(rawToolCalls);
+  }
 
   return c.json({
     id: completionId,
@@ -311,8 +402,8 @@ async function handleNonStreamingRequest(
     model: modelId,
     choices: [{
       index: 0,
-      message: { role: 'assistant', content },
-      finish_reason: 'stop',
+      message: assistantMessage,
+      finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
     }],
     usage: {
       prompt_tokens: promptTokens,
@@ -326,40 +417,57 @@ async function handleStreamingRequest(
   c: { env: Env; header: (name: string, value: string) => void; body: (data: ReadableStream | null, init?: ResponseInit) => Response },
   params: InferenceParams,
 ): Promise<Response> {
-  const { modelId, messages, temperature, max_tokens, completionId, created, userId, workspaceId } = params;
+  const { modelId, messages, temperature, max_tokens, tools, tool_choice, completionId, created, userId, workspaceId } = params;
 
-  const aiStream = await c.env.AI.run(modelId as Parameters<Ai['run']>[0], {
-    messages: messages.map((m) => ({ role: m.role as 'system' | 'user' | 'assistant', content: m.content })),
+  // Build AI.run() options
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const aiOptions: Record<string, any> = {
+    messages: mapMessages(messages),
     temperature,
     max_tokens,
     stream: true,
-  });
+  };
+  if (tools?.length) {
+    aiOptions.tools = tools;
+  }
+  if (tool_choice !== undefined) {
+    aiOptions.tool_choice = tool_choice;
+  }
+
+  const aiStream = await c.env.AI.run(modelId as Parameters<Ai['run']>[0], aiOptions);
 
   // Workers AI with stream: true returns a ReadableStream of text
   const encoder = new TextEncoder();
   let totalContent = '';
   let chunkCount = 0;
+  let accumulatedToolCalls: WorkersAIToolCall[] = [];
+  let finishReason: 'stop' | 'tool_calls' = 'stop';
 
   const transformStream = new TransformStream({
     async transform(chunk, controller) {
-      // Workers AI streams text chunks directly
       const text = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
 
       // Workers AI streaming returns SSE-formatted data like:
       // data: {"response":"token"}\n\n
-      // Or sometimes just raw text chunks depending on the model.
-      // We need to parse these and re-emit in OpenAI SSE format.
+      // Or for tool calls: data: {"response":"","tool_calls":[...]}\n\n
       const lines = text.split('\n');
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const jsonStr = line.slice(6).trim();
           if (jsonStr === '[DONE]') {
-            // Don't forward upstream [DONE] — flush() sends exactly one [DONE]
-            // after the final finish_reason: 'stop' chunk.
             return;
           }
           try {
             const parsed = JSON.parse(jsonStr);
+
+            // Check for tool_calls in the streaming chunk
+            if (parsed.tool_calls?.length) {
+              accumulatedToolCalls = accumulatedToolCalls.concat(parsed.tool_calls);
+              finishReason = 'tool_calls';
+              // Don't emit tool calls as streaming content — emit them in flush()
+              // after we have the complete tool call data
+            }
+
             const tokenContent = parsed.response ?? '';
             if (tokenContent) {
               totalContent += tokenContent;
@@ -416,6 +524,23 @@ async function handleStreamingRequest(
       }
     },
     async flush(controller) {
+      // If tool calls were accumulated during streaming, emit them as a single chunk
+      if (accumulatedToolCalls.length > 0) {
+        const openAIToolCalls = toOpenAIToolCalls(accumulatedToolCalls);
+        const toolCallData = JSON.stringify({
+          id: completionId,
+          object: 'chat.completion.chunk',
+          created,
+          model: modelId,
+          choices: [{
+            index: 0,
+            delta: { tool_calls: openAIToolCalls },
+            finish_reason: null,
+          }],
+        });
+        controller.enqueue(encoder.encode(`data: ${toolCallData}\n\n`));
+      }
+
       // Send final chunk with finish_reason
       const finalData = JSON.stringify({
         id: completionId,
@@ -425,14 +550,14 @@ async function handleStreamingRequest(
         choices: [{
           index: 0,
           delta: {},
-          finish_reason: 'stop',
+          finish_reason: finishReason,
         }],
       });
       controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
       controller.enqueue(encoder.encode('data: [DONE]\n\n'));
 
       // Update token budget with estimates
-      const promptTokens = Math.ceil(messages.reduce((s, m) => s + m.content.length, 0) / 4);
+      const promptTokens = Math.ceil(messages.reduce((s, m) => s + messageContentLength(m), 0) / 4);
       const completionTokens = Math.ceil(totalContent.length / 4);
       // Best-effort budget update — don't block the stream close
       incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens).catch((err) => {
@@ -449,6 +574,7 @@ async function handleStreamingRequest(
         promptTokens,
         completionTokens,
         chunkCount,
+        hasToolCalls: accumulatedToolCalls.length > 0,
         stream: true,
       });
     },
