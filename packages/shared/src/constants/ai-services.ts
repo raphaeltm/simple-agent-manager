@@ -114,14 +114,22 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
 // AI Inference Proxy (OpenAI-compatible Workers AI gateway)
 // =============================================================================
 
-/** Default Workers AI model for AI proxy inference. Override via AI_PROXY_DEFAULT_MODEL env var.
- * Note: Qwen3 models default to thinking mode which wraps responses in <think> tags,
- * causing empty visible content in streaming. Llama 4 Scout works reliably without this issue. */
-export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
+/** Default model for AI proxy inference via AI Gateway unified API.
+ * Format: {provider}/{model} — e.g. workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct.
+ * Override via AI_PROXY_DEFAULT_MODEL env var. */
+export const DEFAULT_AI_PROXY_MODEL = 'workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct';
 
-/** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var. */
-export const DEFAULT_AI_PROXY_ALLOWED_MODELS =
-  '@cf/meta/llama-4-scout-17b-16e-instruct,@cf/qwen/qwen3-30b-a3b-fp8,@cf/google/gemma-3-12b-it';
+/** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var.
+ * Format: {provider}/{model} for AI Gateway unified API. */
+export const DEFAULT_AI_PROXY_ALLOWED_MODELS = [
+  'workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct',
+  'workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+  'workers-ai/@cf/meta/llama-4-scout-17b-16e-instruct',
+  'workers-ai/@cf/qwen/qwen3-30b-a3b-fp8',
+].join(',');
+
+/** Default AI Gateway ID. Override via AI_GATEWAY_ID env var. */
+export const DEFAULT_AI_GATEWAY_ID = 'default';
 
 /** Default daily input token limit per user. Override via AI_PROXY_DAILY_INPUT_TOKEN_LIMIT env var. */
 export const DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT = 500_000;

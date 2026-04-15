@@ -1042,6 +1042,7 @@ func resolveVibeActiveModel(settings *agentSettingsPayload) string {
 // Each has an env-var override so operators can change them without rebuilding the binary.
 const (
 	DefaultOpencodeModel             = "scaleway/qwen3-coder-30b-a3b-instruct"
+	DefaultPlatformModel             = "workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct"
 	DefaultScalewayBaseURL           = "https://api.scaleway.ai/v1"
 	DefaultGoogleVertexBaseURL       = "https://generativelanguage.googleapis.com/v1beta/openai"
 	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
@@ -1087,15 +1088,40 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 
 	switch provider {
 	case "platform":
-		// SAM Platform (Workers AI) — no API key needed, uses platform AI
+		// SAM Platform — proxied through Cloudflare AI Gateway unified API.
+		// The proxy accepts standard OpenAI format including tools/function calling.
+		// Model uses AI Gateway format: {provider}/{model} (e.g. workers-ai/@cf/qwen/...).
+		platformModel := getOpencodeDefault("OPENCODE_PLATFORM_MODEL", DefaultPlatformModel)
+		if settings != nil && settings.Model != "" {
+			platformModel = settings.Model
+		}
+		// OpenCode's parseModel() splits on "/" to extract providerID.
+		// Use an alias that OpenCode can parse: openai-compatible/<alias>.
+		modelAlias := strings.ReplaceAll(platformModel, "/", "-")
+		config["model"] = "openai-compatible/" + modelAlias
 		config["provider"] = map[string]interface{}{
 			"openai-compatible": map[string]interface{}{
 				"options": map[string]interface{}{
 					"baseURL": "{env:OPENCODE_PLATFORM_BASE_URL}",
 					"apiKey":  "{env:OPENCODE_PLATFORM_API_KEY}",
 				},
+				"models": map[string]interface{}{
+					modelAlias: map[string]interface{}{
+						"id":          platformModel,
+						"name":        "SAM Platform AI",
+						"tool_call":   true,
+						"temperature": true,
+						"reasoning":   false,
+						"attachment":  false,
+						"limit": map[string]interface{}{
+							"context": 32768,
+							"output":  8192,
+						},
+					},
+				},
 			},
 		}
+		return config
 	case "scaleway":
 		config["provider"] = map[string]interface{}{
 			"scaleway": map[string]interface{}{

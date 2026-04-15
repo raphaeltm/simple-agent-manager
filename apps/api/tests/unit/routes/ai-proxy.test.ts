@@ -26,7 +26,7 @@ describe('chatCompletionRequestSchema', () => {
 
   it('accepts full request with all optional fields', () => {
     const result = chatCompletionRequestSchema.safeParse({
-      model: '@cf/qwen/qwen3-30b-a3b-fp8',
+      model: 'workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct',
       messages: [
         { role: 'system', content: 'You are helpful' },
         { role: 'user', content: 'Hello' },
@@ -91,6 +91,56 @@ describe('chatCompletionRequestSchema', () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it('accepts tool messages', () => {
+    const result = chatCompletionRequestSchema.safeParse({
+      messages: [
+        { role: 'user', content: 'What is the weather?' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: 'call_abc123',
+            type: 'function',
+            function: { name: 'getWeather', arguments: '{"location":"London"}' },
+          }],
+        },
+        { role: 'tool', content: '{"temp": 15}', tool_call_id: 'call_abc123' },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts tools and tool_choice', () => {
+    const result = chatCompletionRequestSchema.safeParse({
+      messages: [{ role: 'user', content: 'Hello' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'getWeather',
+          description: 'Get the weather',
+          parameters: {
+            type: 'object',
+            properties: { location: { type: 'string' } },
+          },
+        },
+      }],
+      tool_choice: 'auto',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts tool_choice with specific function', () => {
+    const result = chatCompletionRequestSchema.safeParse({
+      messages: [{ role: 'user', content: 'Hello' }],
+      tools: [{
+        type: 'function',
+        function: { name: 'getWeather' },
+      }],
+      tool_choice: { type: 'function', function: { name: 'getWeather' } },
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 // =============================================================================
@@ -104,20 +154,22 @@ describe('model allowlist parsing', () => {
   }
 
   it('parses comma-separated model list', () => {
-    const models = parseAllowedModels('@cf/model-a,@cf/model-b,@cf/model-c');
+    const models = parseAllowedModels(
+      'workers-ai/@cf/model-a,workers-ai/@cf/model-b,workers-ai/@cf/model-c',
+    );
     expect(models.size).toBe(3);
-    expect(models.has('@cf/model-a')).toBe(true);
-    expect(models.has('@cf/model-c')).toBe(true);
+    expect(models.has('workers-ai/@cf/model-a')).toBe(true);
+    expect(models.has('workers-ai/@cf/model-c')).toBe(true);
   });
 
   it('trims whitespace around model names', () => {
-    const models = parseAllowedModels(' @cf/model-a , @cf/model-b ');
-    expect(models.has('@cf/model-a')).toBe(true);
-    expect(models.has('@cf/model-b')).toBe(true);
+    const models = parseAllowedModels(' workers-ai/@cf/model-a , workers-ai/@cf/model-b ');
+    expect(models.has('workers-ai/@cf/model-a')).toBe(true);
+    expect(models.has('workers-ai/@cf/model-b')).toBe(true);
   });
 
   it('filters empty strings from trailing commas', () => {
-    const models = parseAllowedModels('@cf/model-a,,@cf/model-b,');
+    const models = parseAllowedModels('workers-ai/@cf/model-a,,workers-ai/@cf/model-b,');
     expect(models.size).toBe(2);
   });
 });
@@ -131,32 +183,26 @@ describe('model ID resolution', () => {
   function resolveModelId(model: string | undefined, defaultModel: string): string {
     if (!model) return defaultModel;
     let resolved = model;
-    if (resolved.startsWith('workers-ai/')) {
+    // Strip double workers-ai/ prefix if OpenCode duplicates it
+    if (resolved.startsWith('workers-ai/workers-ai/')) {
       resolved = resolved.slice('workers-ai/'.length);
-    }
-    if (!resolved.startsWith('@cf/') && !resolved.startsWith('@hf/')) {
-      resolved = `@cf/${resolved}`;
     }
     return resolved;
   }
 
   it('returns default when model is undefined', () => {
-    expect(resolveModelId(undefined, '@cf/default')).toBe('@cf/default');
+    expect(resolveModelId(undefined, 'workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct'))
+      .toBe('workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct');
   });
 
-  it('returns model as-is when no prefix', () => {
-    expect(resolveModelId('@cf/qwen/qwen3-30b-a3b-fp8', '@cf/default'))
-      .toBe('@cf/qwen/qwen3-30b-a3b-fp8');
+  it('returns model as-is in gateway format', () => {
+    expect(resolveModelId('workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct', 'default'))
+      .toBe('workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct');
   });
 
-  it('strips workers-ai/ prefix', () => {
-    expect(resolveModelId('workers-ai/@cf/qwen/qwen3-30b-a3b-fp8', '@cf/default'))
-      .toBe('@cf/qwen/qwen3-30b-a3b-fp8');
-  });
-
-  it('adds @cf/ prefix when missing (OpenCode strips it)', () => {
-    expect(resolveModelId('meta/llama-4-scout-17b-16e-instruct', '@cf/default'))
-      .toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
+  it('deduplicates workers-ai/ prefix', () => {
+    expect(resolveModelId('workers-ai/workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct', 'default'))
+      .toBe('workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct');
   });
 });
 
@@ -166,12 +212,11 @@ describe('model ID resolution', () => {
 
 describe('OpenAI response format', () => {
   it('non-streaming response has correct structure', () => {
-    // Simulate what the route builds
     const response = {
       id: 'chatcmpl-test-uuid',
       object: 'chat.completion',
       created: 1700000000,
-      model: '@cf/qwen/qwen3-30b-a3b-fp8',
+      model: 'workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct',
       choices: [{
         index: 0,
         message: { role: 'assistant', content: 'Hello!' },
@@ -193,12 +238,43 @@ describe('OpenAI response format', () => {
     );
   });
 
+  it('tool call response has correct structure', () => {
+    const response = {
+      id: 'chatcmpl-test-uuid',
+      object: 'chat.completion',
+      created: 1700000000,
+      model: 'workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: 'call_abc123',
+            type: 'function',
+            function: { name: 'getWeather', arguments: '{"location":"London"}' },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 15,
+        total_tokens: 25,
+      },
+    };
+
+    expect(response.choices[0].finish_reason).toBe('tool_calls');
+    expect(response.choices[0].message.tool_calls).toHaveLength(1);
+    expect(response.choices[0].message.tool_calls![0].function.name).toBe('getWeather');
+  });
+
   it('streaming chunk has correct structure', () => {
     const chunk = {
       id: 'chatcmpl-test-uuid',
       object: 'chat.completion.chunk',
       created: 1700000000,
-      model: '@cf/qwen/qwen3-30b-a3b-fp8',
+      model: 'workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct',
       choices: [{
         index: 0,
         delta: { content: 'Hello' },
@@ -216,7 +292,7 @@ describe('OpenAI response format', () => {
       id: 'chatcmpl-test-uuid',
       object: 'chat.completion.chunk',
       created: 1700000000,
-      model: '@cf/qwen/qwen3-30b-a3b-fp8',
+      model: 'workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct',
       choices: [{
         index: 0,
         delta: {},

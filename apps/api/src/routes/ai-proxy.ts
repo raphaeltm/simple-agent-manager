@@ -1,8 +1,10 @@
 /**
  * AI inference proxy — OpenAI-compatible chat/completions + model list.
  *
- * Proxies requests to Cloudflare Workers AI, enabling trial users to use
- * OpenCode without bringing their own API key.
+ * Proxies requests to Cloudflare AI Gateway's unified API, enabling
+ * access to models from Workers AI, Anthropic, Google, and other providers
+ * through a single OpenAI-compatible interface with full tool/function
+ * calling support.
  *
  * Auth: Bearer token in Authorization header (workspace callback token).
  * Rate limit: per-user RPM via KV.
@@ -11,6 +13,7 @@
  * Mount point: app.route('/ai/v1', aiProxyRoutes) in index.ts.
  */
 import {
+  DEFAULT_AI_GATEWAY_ID,
   DEFAULT_AI_PROXY_ALLOWED_MODELS,
   DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST,
   DEFAULT_AI_PROXY_MODEL,
@@ -31,35 +34,38 @@ import { verifyCallbackToken } from '../services/jwt';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 
-/** Parse allowed models from env or use defaults, normalizing prefixes. */
+/** Parse allowed models from env or use defaults. */
 function getAllowedModels(env: Env): Set<string> {
   const raw = env.AI_PROXY_ALLOWED_MODELS || DEFAULT_AI_PROXY_ALLOWED_MODELS;
-  return new Set(raw.split(',').map((m) => m.trim()).filter(Boolean).map((m) => resolveModelId(m, env)));
+  return new Set(raw.split(',').map((m) => m.trim()).filter(Boolean));
 }
 
-/** Resolve model ID: normalize prefixes, fall back to default. */
+/** Resolve model ID, falling back to default. */
 function resolveModelId(model: string | undefined, env: Env): string {
   if (!model) return env.AI_PROXY_DEFAULT_MODEL || DEFAULT_AI_PROXY_MODEL;
   let resolved = model;
-  // Strip workers-ai/ prefix that OpenCode may prepend
-  if (resolved.startsWith('workers-ai/')) {
+  // Strip workers-ai/ prefix if OpenCode prepends it (it adds the provider as a prefix)
+  if (resolved.startsWith('workers-ai/workers-ai/')) {
     resolved = resolved.slice('workers-ai/'.length);
-  }
-  // Add @cf/ prefix if missing — OpenCode strips it to avoid its model resolver
-  // interpreting @cf/ as a provider prefix. Workers AI requires the full @cf/ path.
-  if (!resolved.startsWith('@cf/') && !resolved.startsWith('@hf/')) {
-    resolved = `@cf/${resolved}`;
   }
   return resolved;
 }
 
-/** Generate a unique completion ID. */
-function generateCompletionId(): string {
-  return `chatcmpl-${crypto.randomUUID()}`;
+/** Build the AI Gateway unified API URL. */
+function getGatewayUrl(env: Env): string {
+  const accountId = env.CF_ACCOUNT_ID;
+  const gatewayId = env.AI_GATEWAY_ID || DEFAULT_AI_GATEWAY_ID;
+  return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/compat/chat/completions`;
+}
+
+/** Extract text content length from a message for token estimation. */
+function messageContentLength(msg: { content?: string | null }): number {
+  return (msg.content ?? '').length;
 }
 
 /**
  * POST /chat/completions — OpenAI-compatible chat completions endpoint.
+ * Proxies to Cloudflare AI Gateway unified API.
  */
 aiProxyRoutes.post('/chat/completions', async (c) => {
   // Kill switch
@@ -177,7 +183,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   // --- Rough input token estimate for pre-flight check ---
   const estimatedInputTokens = Math.ceil(
-    req.messages.reduce((sum, m) => sum + m.content.length, 0) / 4,
+    req.messages.reduce((sum, m) => sum + messageContentLength(m), 0) / 4,
   );
   const maxInputPerRequest = parseInt(c.env.AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST || '', 10)
     || DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST;
@@ -190,9 +196,18 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     }, 400);
   }
 
-  // --- Call Workers AI ---
-  const completionId = generateCompletionId();
-  const created = Math.floor(Date.now() / 1000);
+  // --- Build gateway request ---
+  const gatewayUrl = getGatewayUrl(c.env);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gatewayBody: Record<string, any> = {
+    model: modelId,
+    messages: req.messages,
+    stream: req.stream,
+  };
+  if (req.temperature !== undefined) gatewayBody.temperature = req.temperature;
+  if (req.max_tokens !== undefined) gatewayBody.max_tokens = req.max_tokens;
+  if (req.tools?.length) gatewayBody.tools = req.tools;
+  if (req.tool_choice !== undefined) gatewayBody.tool_choice = req.tool_choice;
 
   log.info('ai_proxy.inference_start', {
     userId,
@@ -200,31 +215,28 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     modelId,
     messageCount: req.messages.length,
     stream: req.stream,
+    hasTools: (req.tools?.length ?? 0) > 0,
     estimatedInputTokens,
   });
 
   try {
     if (req.stream) {
       return await handleStreamingRequest(c, {
+        gatewayUrl,
+        gatewayBody,
         modelId,
-        messages: req.messages,
-        temperature: req.temperature,
-        max_tokens: req.max_tokens,
-        completionId,
-        created,
         userId,
         workspaceId,
+        cfApiToken: c.env.CF_API_TOKEN,
       });
     } else {
       return await handleNonStreamingRequest(c, {
+        gatewayUrl,
+        gatewayBody,
         modelId,
-        messages: req.messages,
-        temperature: req.temperature,
-        max_tokens: req.max_tokens,
-        completionId,
-        created,
         userId,
         workspaceId,
+        cfApiToken: c.env.CF_API_TOKEN,
       });
     }
   } catch (err) {
@@ -259,41 +271,54 @@ aiProxyRoutes.get('/models', async (c) => {
 
 // --- Internal helpers ---
 
-interface InferenceParams {
+interface GatewayParams {
+  gatewayUrl: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  gatewayBody: Record<string, any>;
   modelId: string;
-  messages: Array<{ role: string; content: string }>;
-  temperature?: number;
-  max_tokens?: number;
-  completionId: string;
-  created: number;
   userId: string;
   workspaceId: string;
+  cfApiToken: string;
 }
 
 async function handleNonStreamingRequest(
   c: { env: Env; json: (data: unknown, status?: number) => Response },
-  params: InferenceParams,
+  params: GatewayParams,
 ): Promise<Response> {
-  const { modelId, messages, temperature, max_tokens, completionId, created, userId, workspaceId } = params;
+  const { gatewayUrl, gatewayBody, modelId, userId, workspaceId, cfApiToken } = params;
 
-  const aiResponse = await c.env.AI.run(modelId as Parameters<Ai['run']>[0], {
-    messages: messages.map((m) => ({ role: m.role as 'system' | 'user' | 'assistant', content: m.content })),
-    temperature,
-    max_tokens,
+  const response = await fetch(gatewayUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'cf-aig-authorization': `Bearer ${cfApiToken}`,
+    },
+    body: JSON.stringify(gatewayBody),
   });
 
-  // Workers AI returns either { response: string } or the content directly
-  const content = typeof aiResponse === 'string'
-    ? aiResponse
-    : (aiResponse as { response?: string }).response ?? JSON.stringify(aiResponse);
+  if (!response.ok) {
+    const errorText = await response.text();
+    log.error('ai_proxy.gateway_error', {
+      userId,
+      workspaceId,
+      modelId,
+      status: response.status,
+      error: errorText.slice(0, 500),
+    });
+    return c.json({
+      error: { message: 'AI Gateway request failed', type: 'server_error' },
+    }, 502);
+  }
 
-  // Extract usage if available from Workers AI response
-  const usage = (aiResponse as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
-  const promptTokens = usage?.prompt_tokens ?? Math.ceil(messages.reduce((s, m) => s + m.content.length, 0) / 4);
-  const completionTokens = usage?.completion_tokens ?? Math.ceil(content.length / 4);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = await response.json() as any;
 
-  // Update token budget (fire-and-forget in waitUntil would be ideal but c.executionCtx not available here)
-  await incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens);
+  // Extract usage for token budget tracking
+  const promptTokens = result.usage?.prompt_tokens ?? 0;
+  const completionTokens = result.usage?.completion_tokens ?? 0;
+  if (promptTokens || completionTokens) {
+    await incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens);
+  }
 
   log.info('ai_proxy.inference_complete', {
     userId,
@@ -304,137 +329,79 @@ async function handleNonStreamingRequest(
     stream: false,
   });
 
-  return c.json({
-    id: completionId,
-    object: 'chat.completion',
-    created,
-    model: modelId,
-    choices: [{
-      index: 0,
-      message: { role: 'assistant', content },
-      finish_reason: 'stop',
-    }],
-    usage: {
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: promptTokens + completionTokens,
-    },
-  });
+  // Pass through the gateway response as-is (already in OpenAI format)
+  return c.json(result);
 }
 
 async function handleStreamingRequest(
   c: { env: Env; header: (name: string, value: string) => void; body: (data: ReadableStream | null, init?: ResponseInit) => Response },
-  params: InferenceParams,
+  params: GatewayParams,
 ): Promise<Response> {
-  const { modelId, messages, temperature, max_tokens, completionId, created, userId, workspaceId } = params;
+  const { gatewayUrl, gatewayBody, modelId, userId, workspaceId, cfApiToken } = params;
 
-  const aiStream = await c.env.AI.run(modelId as Parameters<Ai['run']>[0], {
-    messages: messages.map((m) => ({ role: m.role as 'system' | 'user' | 'assistant', content: m.content })),
-    temperature,
-    max_tokens,
-    stream: true,
+  const response = await fetch(gatewayUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'cf-aig-authorization': `Bearer ${cfApiToken}`,
+    },
+    body: JSON.stringify(gatewayBody),
   });
 
-  // Workers AI with stream: true returns a ReadableStream of text
-  const encoder = new TextEncoder();
+  if (!response.ok || !response.body) {
+    const errorText = await response.text();
+    log.error('ai_proxy.gateway_stream_error', {
+      userId,
+      workspaceId,
+      modelId,
+      status: response.status,
+      error: errorText.slice(0, 500),
+    });
+    return new Response(JSON.stringify({
+      error: { message: 'AI Gateway streaming request failed', type: 'server_error' },
+    }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Track token usage from streaming response
   let totalContent = '';
   let chunkCount = 0;
+  const encoder = new TextEncoder();
 
   const transformStream = new TransformStream({
-    async transform(chunk, controller) {
-      // Workers AI streams text chunks directly
+    transform(chunk, controller) {
+      // Pass through chunks as-is — gateway already sends OpenAI SSE format
       const text = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
 
-      // Workers AI streaming returns SSE-formatted data like:
-      // data: {"response":"token"}\n\n
-      // Or sometimes just raw text chunks depending on the model.
-      // We need to parse these and re-emit in OpenAI SSE format.
+      // Count content for token estimation
       const lines = text.split('\n');
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') {
-            // Don't forward upstream [DONE] — flush() sends exactly one [DONE]
-            // after the final finish_reason: 'stop' chunk.
-            return;
-          }
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const tokenContent = parsed.response ?? '';
-            if (tokenContent) {
-              totalContent += tokenContent;
-              chunkCount++;
-              const sseData = JSON.stringify({
-                id: completionId,
-                object: 'chat.completion.chunk',
-                created,
-                model: modelId,
-                choices: [{
-                  index: 0,
-                  delta: { content: tokenContent },
-                  finish_reason: null,
-                }],
-              });
-              controller.enqueue(encoder.encode(`data: ${sseData}\n\n`));
-            }
-          } catch {
-            // Non-JSON line from Workers AI — treat as raw content
-            if (jsonStr) {
-              totalContent += jsonStr;
-              chunkCount++;
-              const sseData = JSON.stringify({
-                id: completionId,
-                object: 'chat.completion.chunk',
-                created,
-                model: modelId,
-                choices: [{
-                  index: 0,
-                  delta: { content: jsonStr },
-                  finish_reason: null,
-                }],
-              });
-              controller.enqueue(encoder.encode(`data: ${sseData}\n\n`));
+          if (jsonStr && jsonStr !== '[DONE]') {
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const delta = parsed.choices?.[0]?.delta;
+              if (delta?.content) {
+                totalContent += delta.content;
+                chunkCount++;
+              }
+            } catch {
+              // Non-JSON — pass through
             }
           }
-        } else if (line.trim() && !line.startsWith(':')) {
-          // Raw text content (some models don't use SSE format)
-          totalContent += line;
-          chunkCount++;
-          const sseData = JSON.stringify({
-            id: completionId,
-            object: 'chat.completion.chunk',
-            created,
-            model: modelId,
-            choices: [{
-              index: 0,
-              delta: { content: line },
-              finish_reason: null,
-            }],
-          });
-          controller.enqueue(encoder.encode(`data: ${sseData}\n\n`));
         }
       }
-    },
-    async flush(controller) {
-      // Send final chunk with finish_reason
-      const finalData = JSON.stringify({
-        id: completionId,
-        object: 'chat.completion.chunk',
-        created,
-        model: modelId,
-        choices: [{
-          index: 0,
-          delta: {},
-          finish_reason: 'stop',
-        }],
-      });
-      controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
-      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
 
-      // Update token budget with estimates
-      const promptTokens = Math.ceil(messages.reduce((s, m) => s + m.content.length, 0) / 4);
+      controller.enqueue(typeof chunk === 'string' ? encoder.encode(chunk) : chunk);
+    },
+    async flush() {
+      // Update token budget with estimates from streamed content
+      const promptTokens = Math.ceil(
+        (gatewayBody.messages as Array<{ content?: string }>)
+          .reduce((s, m) => s + (m.content?.length ?? 0), 0) / 4,
+      );
       const completionTokens = Math.ceil(totalContent.length / 4);
-      // Best-effort budget update — don't block the stream close
+
       incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens).catch((err) => {
         log.error('ai_proxy.budget_update_failed', {
           userId,
@@ -454,8 +421,7 @@ async function handleStreamingRequest(
     },
   });
 
-  // Pipe the AI stream through the transform
-  const readable = (aiStream as ReadableStream).pipeThrough(transformStream);
+  const readable = response.body.pipeThrough(transformStream);
 
   return new Response(readable, {
     headers: {
