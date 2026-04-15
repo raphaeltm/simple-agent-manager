@@ -68,8 +68,10 @@ function generateCompletionId(): string {
 }
 
 /** Extract text content length from a message for token estimation. */
-function messageContentLength(msg: { content?: string | null }): number {
-  return (msg.content ?? '').length;
+function messageContentLength(msg: { content?: string | unknown[] | null }): number {
+  if (typeof msg.content === 'string') return msg.content.length;
+  if (Array.isArray(msg.content)) return JSON.stringify(msg.content).length;
+  return 0;
 }
 
 /** Build AI binding options, optionally routing through AI Gateway. */
@@ -310,12 +312,16 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   // --- Call Workers AI ---
   const workersAiModel = toWorkersAiModel(modelId);
+  const hasTools = (req.tools?.length ?? 0) > 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const aiInputs: Record<string, any> = {
     messages: req.messages,
-    // Always non-streaming — Workers AI streaming format differs from OpenAI and causes
-    // ACP ContentBlock marshal errors. We buffer the full response and wrap as SSE if needed.
-    stream: false,
+    // Use real streaming when client requests it and no tools are involved.
+    // Tool-calling requires the full response to extract tool_calls array, so we
+    // must buffer for those. For text-only streaming, Workers AI returns a
+    // ReadableStream in EventSource format ({"response":"token"}\n) that we
+    // transform into OpenAI-compatible SSE chunks.
+    stream: req.stream && !hasTools,
   };
   if (req.temperature !== undefined) aiInputs.temperature = req.temperature;
   if (req.max_tokens !== undefined) aiInputs.max_tokens = req.max_tokens;
@@ -331,7 +337,8 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     workersAiModel,
     messageCount: req.messages.length,
     clientStream: req.stream,
-    hasTools: (req.tools?.length ?? 0) > 0,
+    realStream: req.stream && !hasTools,
+    hasTools,
     toolCount: req.tools?.length ?? 0,
     hasGateway: !!aiOptions.gateway,
     estimatedInputTokens,
@@ -340,11 +347,8 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   const streamTimeoutMs = parseInt(c.env.AI_PROXY_STREAM_TIMEOUT_MS || '', 10) || DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS;
 
   try {
-    // Call Workers AI binding with a timeout guard.
-    // The AI binding is an I/O operation (doesn't count against CPU time) but we add
-    // a timeout to prevent indefinite hangs if the model is unresponsive.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const startMs = Date.now();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const aiPromise = (c.env.AI as any).run(workersAiModel, aiInputs, aiOptions);
 
     const timeoutPromise = new Promise<never>((_, reject) =>
@@ -352,15 +356,50 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     );
 
     const rawResult = await Promise.race([aiPromise, timeoutPromise]);
+
+    // --- Real streaming path: transform Workers AI stream to OpenAI SSE ---
+    if (req.stream && !hasTools && rawResult instanceof ReadableStream) {
+      const completionId = generateCompletionId();
+      const created = Math.floor(Date.now() / 1000);
+
+      log.info('ai_proxy.streaming_start', { userId, workspaceId, modelId, completionId });
+
+      // Estimate input tokens for budget tracking (output tracked per-chunk is impractical,
+      // so we estimate after the fact via a rough character count)
+      const estimatedPromptTokens = Math.ceil(
+        req.messages.reduce((sum, m) => sum + messageContentLength(m), 0) / 4,
+      );
+
+      const outputStream = transformWorkersAiStream(
+        rawResult as ReadableStream<Uint8Array>,
+        completionId,
+        created,
+        modelId,
+      );
+
+      // Background: update token budget after stream completes (best-effort)
+      // We can't know output tokens until the stream finishes, so we estimate
+      // a minimum and rely on the daily budget being generous enough.
+      incrementTokenUsage(c.env.KV, userId, estimatedPromptTokens, 0).catch((err) => {
+        log.error('ai_proxy.budget_update_failed', {
+          userId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+      return new Response(outputStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        },
+      });
+    }
+
+    // --- Non-streaming path (tool calls or non-streaming client) ---
     const elapsedMs = Date.now() - startMs;
-
-    // Workers AI may return different shapes depending on model/version.
-    // Normalize to { response, tool_calls }.
     const result = normalizeWorkersAiResult(rawResult);
-
-    // Log full raw response for debugging ACP ContentBlock marshal errors.
-    // eslint-disable-next-line no-console
-    console.log('[AI_PROXY_DEBUG] raw Workers AI result:', JSON.stringify(rawResult).substring(0, 2000));
 
     log.info('ai_proxy.workers_ai_result', {
       userId,
@@ -372,11 +411,8 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       hasToolCalls: !!(result.tool_calls?.length),
       toolCallCount: result.tool_calls?.length ?? 0,
       toolCallNames: result.tool_calls?.map(tc => tc.name).join(','),
-      rawResultType: typeof rawResult,
-      rawResultKeys: rawResult && typeof rawResult === 'object' ? Object.keys(rawResult).join(',') : 'N/A',
     });
 
-    // Use actual usage from Workers AI if available, otherwise estimate
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rawUsage = (rawResult as any)?.usage;
     const promptTokens = rawUsage?.prompt_tokens ?? Math.ceil(
@@ -394,16 +430,13 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       });
     }
 
-    // Build OpenAI-format response
     const completionId = generateCompletionId();
     const created = Math.floor(Date.now() / 1000);
     const hasToolCalls = result.tool_calls && result.tool_calls.length > 0;
 
-    // Ensure content is never undefined — OpenAI format uses null when only tool calls,
-    // or the actual text when the model responds with text. An empty string is valid.
     const responseContent = hasToolCalls
-      ? (result.response || null) // null when doing tool calls (OpenAI convention)
-      : (result.response ?? '');  // empty string fallback for text responses
+      ? (result.response || null)
+      : (result.response ?? '');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const message: Record<string, any> = {
@@ -431,16 +464,6 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       },
     };
 
-    // eslint-disable-next-line no-console
-    console.log('[AI_PROXY_DEBUG] OpenAI-format response:', JSON.stringify({
-      content: responseContent?.substring(0, 500),
-      contentLength: responseContent?.length ?? 0,
-      hasToolCalls,
-      toolCallCount: message.tool_calls?.length ?? 0,
-      toolCallNames: message.tool_calls?.map((tc: { function: { name: string } }) => tc.function.name).join(','),
-      clientStream: req.stream,
-    }));
-
     log.info('ai_proxy.inference_complete', {
       userId,
       workspaceId,
@@ -452,8 +475,9 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     });
 
     if (req.stream) {
-      // Client requested streaming — wrap the complete response in SSE events
-      return formatAsSSE(openAiResponse, completionId, created, modelId, message, hasToolCalls);
+      // Client requested streaming but we used non-streaming for tool calls —
+      // wrap the complete response in SSE events
+      return formatAsSSE(completionId, created, modelId, message, hasToolCalls);
     } else {
       return new Response(JSON.stringify(openAiResponse), {
         headers: { 'Content-Type': 'application/json' },
@@ -473,10 +497,171 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   }
 });
 
-/** Format a complete response as SSE events for streaming clients. */
+/** Transform a Workers AI streaming response into OpenAI-compatible SSE.
+ *
+ * Workers AI streams arrive as EventSource data lines:
+ *   data: {"response":"token"}
+ *   data: {"response":"next token"}
+ *   data: [DONE]
+ *
+ * We transform each into OpenAI chat.completion.chunk format:
+ *   data: {"id":"...","object":"chat.completion.chunk","choices":[{"delta":{"content":"token"}}]}
+ */
+function transformWorkersAiStream(
+  workersStream: ReadableStream<Uint8Array>,
+  completionId: string,
+  created: number,
+  modelId: string,
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let sentRole = false;
+  let thinkingBuffer = ''; // Buffer for stripping <think> tags from streamed output
+  let insideThink = false;
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = workersStream.getReader();
+      try {
+        // Send initial role chunk
+        const roleChunk = makeChunk(completionId, created, modelId, { role: 'assistant' }, null);
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(roleChunk)}\n\n`));
+        sentRole = true;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Process complete lines
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? ''; // Keep incomplete last line in buffer
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            // Workers AI SSE lines start with "data: "
+            if (trimmed.startsWith('data: ')) {
+              const payload = trimmed.slice(6);
+
+              if (payload === '[DONE]') {
+                // Send final chunk with finish_reason
+                const finalChunk = makeChunk(completionId, created, modelId, {}, 'stop');
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                continue;
+              }
+
+              try {
+                const parsed = JSON.parse(payload);
+                const token = parsed.response ?? '';
+
+                // Strip <think> tags from streaming output
+                const cleaned = processStreamToken(token);
+                if (cleaned) {
+                  const chunk = makeChunk(completionId, created, modelId, { content: cleaned }, null);
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+                }
+              } catch {
+                // Skip malformed JSON lines
+              }
+            }
+          }
+        }
+
+        // Handle any remaining buffer
+        if (buffer.trim()) {
+          const trimmed = buffer.trim();
+          if (trimmed.startsWith('data: ') && trimmed.slice(6) !== '[DONE]') {
+            try {
+              const parsed = JSON.parse(trimmed.slice(6));
+              const token = parsed.response ?? '';
+              const cleaned = processStreamToken(token);
+              if (cleaned) {
+                const chunk = makeChunk(completionId, created, modelId, { content: cleaned }, null);
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+              }
+            } catch {
+              // Skip malformed
+            }
+          }
+        }
+
+        // Ensure we always send [DONE] if not already sent
+        if (!sentRole) {
+          const roleChunk = makeChunk(completionId, created, modelId, { role: 'assistant' }, null);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(roleChunk)}\n\n`));
+        }
+        const finalChunk = makeChunk(completionId, created, modelId, {}, 'stop');
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      } catch (err) {
+        controller.error(err);
+      } finally {
+        reader.releaseLock();
+        controller.close();
+      }
+    },
+  });
+
+  /** Process a streaming token, stripping <think> tags. */
+  function processStreamToken(token: string): string {
+    let result = '';
+    for (const char of token) {
+      if (insideThink) {
+        thinkingBuffer += char;
+        if (thinkingBuffer.endsWith('</think>')) {
+          insideThink = false;
+          thinkingBuffer = '';
+        }
+      } else {
+        thinkingBuffer += char;
+        if (thinkingBuffer.endsWith('<think>')) {
+          insideThink = true;
+          // Remove the <think> from anything we were about to emit
+          result = result.slice(0, result.length - '<think'.length);
+          thinkingBuffer = '';
+        } else if (thinkingBuffer.length > 7) {
+          // No match possible — flush the buffered chars
+          result += thinkingBuffer;
+          thinkingBuffer = '';
+        }
+      }
+    }
+    // Don't flush thinkingBuffer yet — it might be a partial <think> tag
+    if (!insideThink && thinkingBuffer.length > 0 && thinkingBuffer.length <= 7) {
+      // Still potentially matching — hold it
+    } else if (!insideThink && thinkingBuffer.length > 7) {
+      result += thinkingBuffer;
+      thinkingBuffer = '';
+    }
+    return result;
+  }
+}
+
+/** Build an OpenAI chat.completion.chunk object. */
+function makeChunk(
+  id: string,
+  created: number,
+  model: string,
+  delta: Record<string, unknown>,
+  finishReason: string | null,
+) {
+  return {
+    id,
+    object: 'chat.completion.chunk',
+    created,
+    model,
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
+  };
+}
+
+/** Format a buffered (non-streaming) response as SSE events for streaming clients.
+ * Used when tool calls require buffering the full Workers AI response. */
 function formatAsSSE(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  _fullResponse: Record<string, any>,
   completionId: string,
   created: number,
   modelId: string,
@@ -487,69 +672,25 @@ function formatAsSSE(
   const events: string[] = [];
 
   // First chunk: role
-  events.push(`data: ${JSON.stringify({
-    id: completionId,
-    object: 'chat.completion.chunk',
-    created,
-    model: modelId,
-    choices: [{
-      index: 0,
-      delta: { role: 'assistant' },
-      finish_reason: null,
-    }],
-  })}\n\n`);
+  events.push(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { role: 'assistant' }, null))}\n\n`);
 
-  // Content chunk — always include even if empty, to ensure OpenCode receives
-  // a complete content delta. Omitting this causes some ACP clients to create
-  // ContentBlocks with empty json.RawMessage fields that fail to marshal.
+  // Content chunk
   if (message.content !== null && message.content !== undefined) {
-    events.push(`data: ${JSON.stringify({
-      id: completionId,
-      object: 'chat.completion.chunk',
-      created,
-      model: modelId,
-      choices: [{
-        index: 0,
-        delta: { content: message.content || '' },
-        finish_reason: null,
-      }],
-    })}\n\n`);
+    events.push(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { content: message.content || '' }, null))}\n\n`);
   }
 
-  // Tool calls chunk (if any) — send each tool call with its index field,
-  // matching the OpenAI streaming format that sends tool calls incrementally.
+  // Tool calls chunk
   if (hasToolCalls && message.tool_calls) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const toolCallsWithIndex = message.tool_calls.map((tc: any, i: number) => ({
       index: i,
       ...tc,
     }));
-    events.push(`data: ${JSON.stringify({
-      id: completionId,
-      object: 'chat.completion.chunk',
-      created,
-      model: modelId,
-      choices: [{
-        index: 0,
-        delta: { tool_calls: toolCallsWithIndex },
-        finish_reason: null,
-      }],
-    })}\n\n`);
+    events.push(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { tool_calls: toolCallsWithIndex }, null))}\n\n`);
   }
 
   // Final chunk with finish_reason
-  events.push(`data: ${JSON.stringify({
-    id: completionId,
-    object: 'chat.completion.chunk',
-    created,
-    model: modelId,
-    choices: [{
-      index: 0,
-      delta: {},
-      finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
-    }],
-  })}\n\n`);
-
+  events.push(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, {}, hasToolCalls ? 'tool_calls' : 'stop'))}\n\n`);
   events.push('data: [DONE]\n\n');
 
   return new Response(events.join(''), {
@@ -561,6 +702,88 @@ function formatAsSSE(
     },
   });
 }
+
+/** TEMPORARY debug endpoint — test Workers AI directly without VM/auth overhead.
+ * Accepts a simple prompt, calls Workers AI both streaming and non-streaming,
+ * and returns raw results. Remove before merging to production. */
+aiProxyRoutes.post('/debug/test', async (c) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON' }, 400);
+  }
+
+  const prompt = body.prompt || 'Say hello in one sentence.';
+  const model = body.model || toWorkersAiModel(c.env.AI_PROXY_DEFAULT_MODEL || DEFAULT_AI_PROXY_MODEL);
+  const testStream = body.stream ?? false;
+  const tools = body.tools;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const aiInputs: Record<string, any> = {
+    messages: [{ role: 'user', content: prompt }],
+    stream: testStream,
+  };
+  if (tools) aiInputs.tools = tools;
+
+  try {
+    const startMs = Date.now();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawResult = await (c.env.AI as any).run(model, aiInputs);
+    const elapsedMs = Date.now() - startMs;
+
+    if (testStream && rawResult instanceof ReadableStream) {
+      // For stream testing, collect all chunks and return as JSON
+      const reader = rawResult.getReader();
+      const decoder = new TextDecoder();
+      const chunks: string[] = [];
+      let fullText = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        chunks.push(text);
+        // Parse SSE data lines
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data: ') && trimmed.slice(6) !== '[DONE]') {
+            try {
+              const parsed = JSON.parse(trimmed.slice(6));
+              if (parsed.response) fullText += parsed.response;
+            } catch { /* skip */ }
+          }
+        }
+      }
+      return c.json({
+        model,
+        mode: 'streaming',
+        elapsedMs,
+        chunkCount: chunks.length,
+        fullText,
+        rawChunks: chunks.slice(0, 10), // First 10 chunks for inspection
+      });
+    }
+
+    // Non-streaming
+    const normalized = normalizeWorkersAiResult(rawResult);
+    return c.json({
+      model,
+      mode: 'non-streaming',
+      elapsedMs,
+      rawResultType: typeof rawResult,
+      rawResultKeys: rawResult && typeof rawResult === 'object' ? Object.keys(rawResult) : [],
+      rawResultPreview: JSON.stringify(rawResult).substring(0, 3000),
+      normalized,
+    });
+  } catch (err) {
+    return c.json({
+      model,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    }, 500);
+  }
+});
 
 /** OpenAI models endpoint — returns available models. */
 aiProxyRoutes.get('/models', async (c) => {
