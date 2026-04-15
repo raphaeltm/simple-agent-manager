@@ -51,11 +51,13 @@ function resolveModelId(model: string | undefined, env: Env): string {
   return resolved;
 }
 
-/** Build the AI Gateway unified API URL. */
+/** Build the AI Gateway URL.
+ * Uses the Workers AI provider-specific endpoint for now (standard Bearer auth).
+ * Future: switch to /compat/ unified API endpoint when provider BYOK keys are configured. */
 function getGatewayUrl(env: Env): string {
   const accountId = env.CF_ACCOUNT_ID;
   const gatewayId = env.AI_GATEWAY_ID || DEFAULT_AI_GATEWAY_ID;
-  return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/compat/chat/completions`;
+  return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/workers-ai/v1/chat/completions`;
 }
 
 /** Extract text content length from a message for token estimation. */
@@ -198,9 +200,14 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   // --- Build gateway request ---
   const gatewayUrl = getGatewayUrl(c.env);
+  // Strip provider prefix for the provider-specific gateway endpoint.
+  // The gateway already knows the provider from the URL path.
+  const gatewayModelId = modelId.startsWith('workers-ai/')
+    ? modelId.slice('workers-ai/'.length)
+    : modelId;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const gatewayBody: Record<string, any> = {
-    model: modelId,
+    model: gatewayModelId,
     messages: req.messages,
     stream: req.stream,
   };
@@ -291,7 +298,7 @@ async function handleNonStreamingRequest(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'cf-aig-authorization': `Bearer ${cfApiToken}`,
+      'Authorization': `Bearer ${cfApiToken}`,
     },
     body: JSON.stringify(gatewayBody),
   });
@@ -343,7 +350,7 @@ async function handleStreamingRequest(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'cf-aig-authorization': `Bearer ${cfApiToken}`,
+      'Authorization': `Bearer ${cfApiToken}`,
     },
     body: JSON.stringify(gatewayBody),
   });
