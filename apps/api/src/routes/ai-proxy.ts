@@ -509,12 +509,29 @@ aiProxyRoutes.get('/test', async (c) => {
     const model = '@cf/qwen/qwen2.5-coder-32b-instruct';
     log.info('ai_proxy.test_start', { model });
 
+    const useTools = c.req.query('tools') === '1';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (c.env.AI as any).run(model, {
-      messages: [{ role: 'user', content: 'Say hello in one word' }],
+    const inputs: Record<string, any> = {
+      messages: [
+        { role: 'system', content: 'You are a coding assistant.' },
+        { role: 'user', content: useTools ? 'List the files in the current directory' : 'Say hello in one word' },
+      ],
       stream: false,
-      max_tokens: 50,
-    });
+      max_tokens: 200,
+    };
+    if (useTools) {
+      inputs.tools = [{
+        type: 'function',
+        function: {
+          name: 'list_directory',
+          description: 'List files in a directory',
+          parameters: { type: 'object', properties: { path: { type: 'string', description: 'Directory path' } }, required: ['path'] },
+        },
+      }];
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (c.env.AI as any).run(model, inputs);
 
     const elapsedMs = Date.now() - startMs;
     log.info('ai_proxy.test_result', {
