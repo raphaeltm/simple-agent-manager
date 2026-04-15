@@ -531,13 +531,20 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
 /** Transform a Workers AI streaming response into OpenAI-compatible SSE.
  *
- * Workers AI streams arrive as EventSource data lines:
- *   data: {"response":"token"}
- *   data: {"response":"next token"}
- *   data: [DONE]
+ * Workers AI models return two different streaming formats:
  *
- * We transform each into OpenAI chat.completion.chunk format:
- *   data: {"id":"...","object":"chat.completion.chunk","choices":[{"delta":{"content":"token"}}]}
+ * 1. Native format (Llama models):
+ *    data: {"response":"token"}
+ *    data: [DONE]
+ *
+ * 2. OpenAI-compatible format (Qwen3):
+ *    data: {"choices":[{"delta":{"content":"token"}}]}
+ *    data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}
+ *    data: [DONE]
+ *
+ * We detect the format from the first chunk and handle both, outputting
+ * standard OpenAI chat.completion.chunk format in all cases.
+ * Strips reasoning_content (Qwen3) and <think> tags (Llama) from output.
  */
 function transformWorkersAiStream(
   workersStream: ReadableStream<Uint8Array>,
@@ -549,18 +556,14 @@ function transformWorkersAiStream(
   const decoder = new TextDecoder();
   let buffer = '';
   let sentRole = false;
-  let thinkingBuffer = ''; // Buffer for stripping <think> tags from streamed output
+  let sentDone = false;
+  let thinkingBuffer = '';
   let insideThink = false;
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       const reader = workersStream.getReader();
       try {
-        // Send initial role chunk
-        const roleChunk = makeChunk(completionId, created, modelId, { role: 'assistant' }, null);
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(roleChunk)}\n\n`));
-        sentRole = true;
-
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -569,67 +572,89 @@ function transformWorkersAiStream(
 
           // Process complete lines
           const lines = buffer.split('\n');
-          buffer = lines.pop() ?? ''; // Keep incomplete last line in buffer
+          buffer = lines.pop() ?? '';
 
           for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed) continue;
+            if (!trimmed || !trimmed.startsWith('data: ')) continue;
+            const payload = trimmed.slice(6);
 
-            // Workers AI SSE lines start with "data: "
-            if (trimmed.startsWith('data: ')) {
-              const payload = trimmed.slice(6);
-
-              if (payload === '[DONE]') {
-                // Send final chunk with finish_reason
-                const finalChunk = makeChunk(completionId, created, modelId, {}, 'stop');
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
-                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                continue;
+            if (payload === '[DONE]') {
+              if (!sentRole) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { role: 'assistant' }, null))}\n\n`));
               }
-
-              try {
-                const parsed = JSON.parse(payload);
-                const token = parsed.response ?? '';
-
-                // Strip <think> tags from streaming output
-                const cleaned = processStreamToken(token);
-                if (cleaned) {
-                  const chunk = makeChunk(completionId, created, modelId, { content: cleaned }, null);
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-                }
-              } catch {
-                // Skip malformed JSON lines
-              }
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, {}, 'stop'))}\n\n`));
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              sentDone = true;
+              continue;
             }
-          }
-        }
 
-        // Handle any remaining buffer
-        if (buffer.trim()) {
-          const trimmed = buffer.trim();
-          if (trimmed.startsWith('data: ') && trimmed.slice(6) !== '[DONE]') {
             try {
-              const parsed = JSON.parse(trimmed.slice(6));
-              const token = parsed.response ?? '';
-              const cleaned = processStreamToken(token);
-              if (cleaned) {
-                const chunk = makeChunk(completionId, created, modelId, { content: cleaned }, null);
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const parsed: any = JSON.parse(payload);
+
+              // Detect format: OpenAI-compatible has choices[], native has response
+              if (parsed.choices?.length) {
+                // OpenAI-compatible format (Qwen3)
+                const delta = parsed.choices[0]?.delta;
+                if (!delta) continue;
+
+                // Send role if this is the first chunk with role
+                if (delta.role && !sentRole) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { role: delta.role }, null))}\n\n`));
+                  sentRole = true;
+                }
+
+                // Skip reasoning_content chunks (Qwen3 thinking)
+                if (delta.reasoning_content !== undefined) continue;
+
+                // Forward content chunks
+                if (delta.content !== undefined && delta.content !== null) {
+                  const cleaned = processStreamToken(delta.content);
+                  if (cleaned) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { content: cleaned }, null))}\n\n`));
+                  }
+                }
+
+                // Forward finish_reason
+                if (parsed.choices[0]?.finish_reason) {
+                  if (!sentRole) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { role: 'assistant' }, null))}\n\n`));
+                    sentRole = true;
+                  }
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, {}, parsed.choices[0].finish_reason))}\n\n`));
+                  controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                  sentDone = true;
+                }
+              } else {
+                // Native Workers AI format (Llama models)
+                if (!sentRole) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { role: 'assistant' }, null))}\n\n`));
+                  sentRole = true;
+                }
+
+                const token = parsed.response ?? '';
+                if (token) {
+                  const cleaned = processStreamToken(token);
+                  if (cleaned) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { content: cleaned }, null))}\n\n`));
+                  }
+                }
               }
             } catch {
-              // Skip malformed
+              // Skip malformed JSON lines
             }
           }
         }
 
-        // Ensure we always send [DONE] if not already sent
-        if (!sentRole) {
-          const roleChunk = makeChunk(completionId, created, modelId, { role: 'assistant' }, null);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(roleChunk)}\n\n`));
+        // Ensure we always send termination
+        if (!sentDone) {
+          if (!sentRole) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, { role: 'assistant' }, null))}\n\n`));
+          }
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(makeChunk(completionId, created, modelId, {}, 'stop'))}\n\n`));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         }
-        const finalChunk = makeChunk(completionId, created, modelId, {}, 'stop');
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
       } catch (err) {
         controller.error(err);
       } finally {
@@ -653,20 +678,15 @@ function transformWorkersAiStream(
         thinkingBuffer += char;
         if (thinkingBuffer.endsWith('<think>')) {
           insideThink = true;
-          // Remove the <think> from anything we were about to emit
           result = result.slice(0, result.length - '<think'.length);
           thinkingBuffer = '';
         } else if (thinkingBuffer.length > 7) {
-          // No match possible — flush the buffered chars
           result += thinkingBuffer;
           thinkingBuffer = '';
         }
       }
     }
-    // Don't flush thinkingBuffer yet — it might be a partial <think> tag
-    if (!insideThink && thinkingBuffer.length > 0 && thinkingBuffer.length <= 7) {
-      // Still potentially matching — hold it
-    } else if (!insideThink && thinkingBuffer.length > 7) {
+    if (!insideThink && thinkingBuffer.length > 7) {
       result += thinkingBuffer;
       thinkingBuffer = '';
     }
