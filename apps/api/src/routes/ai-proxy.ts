@@ -87,23 +87,44 @@ type WorkersAiToolCall = { name: string; arguments: Record<string, unknown> | st
 
 /** Normalize Workers AI result to a consistent shape.
  * Workers AI text-generation models can return different shapes:
- * - { response: string } for simple text completion
- * - { response: string, tool_calls: [...] } for tool-calling models
+ * - { response: string } — simple text completion
+ * - { response: string, tool_calls: [{name, arguments}] } — tool-calling with explicit array
+ * - { response: {name, arguments}, tool_calls: [] } — tool call embedded in response field (Qwen)
  * - A ReadableStream if stream: true was somehow set
  * - Possibly a string directly for older models
+ *
+ * When the model decides to call a tool, some Workers AI models put the tool call
+ * in the `response` field as a JSON object (with name + arguments) instead of
+ * populating the `tool_calls` array. We detect this and normalize to tool_calls.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeWorkersAiResult(raw: any): { response?: string; tool_calls?: WorkersAiToolCall[] } {
   if (!raw) return { response: '' };
   if (typeof raw === 'string') return { response: raw };
   if (raw instanceof ReadableStream) {
-    // Shouldn't happen since we set stream: false, but handle gracefully
     return { response: '[streaming result — unexpected]' };
   }
-  return {
-    response: raw.response ?? raw.content ?? raw.text ?? '',
-    tool_calls: raw.tool_calls,
-  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let toolCalls: WorkersAiToolCall[] | undefined = raw.tool_calls?.length ? raw.tool_calls : undefined;
+  let response: string | undefined;
+
+  // Check if response is a tool call object (Qwen model behavior)
+  if (raw.response && typeof raw.response === 'object' && !Array.isArray(raw.response)) {
+    const resp = raw.response;
+    if (resp.name && resp.arguments !== undefined) {
+      // The response IS a tool call — move it to tool_calls
+      toolCalls = [{ name: resp.name, arguments: resp.arguments }];
+      response = undefined; // No text content when tool calling
+    } else {
+      // Unknown object shape — stringify it
+      response = JSON.stringify(raw.response);
+    }
+  } else {
+    response = typeof raw.response === 'string' ? raw.response : (raw.response ? String(raw.response) : '');
+  }
+
+  return { response, tool_calls: toolCalls };
 }
 
 /** Transform Workers AI tool_calls to OpenAI format. */
@@ -321,12 +342,14 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       rawResultKeys: rawResult && typeof rawResult === 'object' ? Object.keys(rawResult).join(',') : 'N/A',
     });
 
-    // Estimate token usage
-    const promptTokens = Math.ceil(
+    // Use actual usage from Workers AI if available, otherwise estimate
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawUsage = (rawResult as any)?.usage;
+    const promptTokens = rawUsage?.prompt_tokens ?? Math.ceil(
       (aiInputs.messages as Array<{ content?: string }>)
         .reduce((s, m) => s + (m.content?.length ?? 0), 0) / 4,
     );
-    const completionTokens = Math.ceil((result.response?.length ?? 0) / 4);
+    const completionTokens = rawUsage?.completion_tokens ?? Math.ceil((result.response?.length ?? 0) / 4);
 
     if (promptTokens || completionTokens) {
       incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens).catch((err) => {

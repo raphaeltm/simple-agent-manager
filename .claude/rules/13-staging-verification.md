@@ -159,6 +159,15 @@ Match the verification to what the PR actually changes:
 | Auth changes | Log out and log back in, confirm the auth flow works end-to-end |
 | API endpoint changes | Call the affected endpoints and verify responses |
 
+### Use Lightweight Workspaces for Staging Tests
+
+When submitting test tasks on staging, **always use lightweight workspace profile** (`workspaceProfile: "lightweight"`) unless you specifically need to test devcontainer behavior. Lightweight workspaces boot faster and avoid failures caused by poorly structured or missing project devcontainer configs. The test project's devcontainer is not guaranteed to be well-structured.
+
+```bash
+# Via API
+curl -X POST ".../tasks/submit" -d '{"message": "...", "workspaceProfile": "lightweight"}'
+```
+
 ### What Is NOT Acceptable as Feature Verification
 
 - Confirming pages load (this is a regression check, not feature verification)
