@@ -2203,9 +2203,15 @@ func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.Sessi
 		"params":  params,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to marshal session update: %w", err)
+		// ContentBlock marshal can fail when Workers AI models produce malformed
+		// content (e.g., empty json.RawMessage from <think> tags). Log the error
+		// but still attempt message extraction and persistence — the session update
+		// is lost from the WebSocket broadcast but chat messages are preserved.
+		slog.Error("SessionUpdate: marshal failed, skipping broadcast but persisting messages",
+			"error", err)
+	} else {
+		c.host.broadcastMessage(data)
 	}
-	c.host.broadcastMessage(data)
 
 	// Persist chat messages to the control plane via the message reporter.
 	if c.host.config.MessageReporter != nil {

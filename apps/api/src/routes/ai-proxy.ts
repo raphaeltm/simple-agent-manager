@@ -85,6 +85,18 @@ function getAiRunOptions(env: Env): { gateway?: { id: string } } {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type WorkersAiToolCall = { name: string; arguments: Record<string, unknown> | string };
 
+/** Strip `<think>...</think>` reasoning tags from model output.
+ * Some Workers AI models (Qwen3, Llama 4 Scout) wrap reasoning in these tags.
+ * OpenCode may try to parse these as "thinking" ContentBlocks, causing ACP marshal
+ * errors ("unexpected end of JSON input") when the thinking content is empty or malformed.
+ * We strip the tags and return only the non-thinking content. */
+function stripThinkingTags(text: string): string {
+  // Remove <think>...</think> blocks (including multiline, lazy match)
+  const stripped = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  // Also handle unclosed <think> tags (model cut off mid-reasoning)
+  return stripped.replace(/<think>[\s\S]*/gi, '').trim();
+}
+
 /** Normalize Workers AI result to a consistent shape.
  * Workers AI text-generation models can return different shapes:
  * - { response: string } — simple text completion
@@ -100,7 +112,7 @@ type WorkersAiToolCall = { name: string; arguments: Record<string, unknown> | st
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeWorkersAiResult(raw: any): { response?: string; tool_calls?: WorkersAiToolCall[] } {
   if (!raw) return { response: '' };
-  if (typeof raw === 'string') return { response: raw };
+  if (typeof raw === 'string') return { response: stripThinkingTags(raw) || '' };
   if (raw instanceof ReadableStream) {
     return { response: '[streaming result — unexpected]' };
   }
@@ -121,7 +133,8 @@ function normalizeWorkersAiResult(raw: any): { response?: string; tool_calls?: W
       response = JSON.stringify(raw.response);
     }
   } else {
-    response = typeof raw.response === 'string' ? raw.response : (raw.response ? String(raw.response) : '');
+    const rawResponse = typeof raw.response === 'string' ? raw.response : (raw.response ? String(raw.response) : '');
+    response = stripThinkingTags(rawResponse) || rawResponse || '';
   }
 
   return { response, tool_calls: toolCalls };
