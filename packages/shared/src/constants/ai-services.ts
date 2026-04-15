@@ -117,7 +117,7 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
 /** Default model for AI proxy inference via AI Gateway unified API.
  * Format: {provider}/{model} — e.g. workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct.
  * Override via AI_PROXY_DEFAULT_MODEL env var. */
-export const DEFAULT_AI_PROXY_MODEL = 'workers-ai/@cf/qwen/qwen3-30b-a3b-fp8';
+export const DEFAULT_AI_PROXY_MODEL = 'workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 /** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var.
  * Format: {provider}/{model} for AI Gateway unified API. */
