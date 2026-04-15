@@ -755,6 +755,86 @@ function formatAsSSE(
   });
 }
 
+/** TEMPORARY debug endpoint — full chat/completions without auth for direct testing.
+ * Mirrors the real endpoint but skips auth/rate-limit/budget checks.
+ * Remove before merging to production. */
+aiProxyRoutes.post('/debug/chat', async (c) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
+  }
+
+  const parsed = chatCompletionRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: { message: `Invalid request: ${parsed.error.issues.map((i) => i.message).join(', ')}`, type: 'invalid_request_error' } }, 400);
+  }
+  const req = parsed.data;
+
+  const modelId = resolveModelId(req.model, c.env);
+  const workersAiModel = toWorkersAiModel(modelId);
+  const hasTools = (req.tools?.length ?? 0) > 0;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const aiInputs: Record<string, any> = {
+    messages: req.messages,
+    stream: req.stream && !hasTools,
+  };
+  if (req.temperature !== undefined) aiInputs.temperature = req.temperature;
+  if (req.max_tokens !== undefined) aiInputs.max_tokens = req.max_tokens;
+  if (req.tools?.length) aiInputs.tools = req.tools;
+  if (req.tool_choice !== undefined) aiInputs.tool_choice = req.tool_choice;
+
+  const aiOptions = getAiRunOptions(c.env);
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawResult = await (c.env.AI as any).run(workersAiModel, aiInputs, aiOptions);
+
+    // Real streaming path
+    if (req.stream && !hasTools && rawResult instanceof ReadableStream) {
+      const completionId = generateCompletionId();
+      const created = Math.floor(Date.now() / 1000);
+      const outputStream = transformWorkersAiStream(rawResult as ReadableStream<Uint8Array>, completionId, created, modelId);
+      return new Response(outputStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        },
+      });
+    }
+
+    // Non-streaming path
+    const result = normalizeWorkersAiResult(rawResult);
+    const completionId = generateCompletionId();
+    const created = Math.floor(Date.now() / 1000);
+    const hasToolCalls = result.tool_calls && result.tool_calls.length > 0;
+    const responseContent = hasToolCalls ? (result.response || null) : (result.response ?? '');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const message: Record<string, any> = { role: 'assistant', content: responseContent };
+    if (hasToolCalls) message.tool_calls = transformToolCalls(result.tool_calls!);
+
+    const usage = result.usage ?? (rawResult as { usage?: { prompt_tokens?: number; completion_tokens?: number } })?.usage;
+    const openAiResponse = {
+      id: completionId, object: 'chat.completion', created, model: modelId,
+      choices: [{ index: 0, message, finish_reason: hasToolCalls ? 'tool_calls' : 'stop' }],
+      usage: { prompt_tokens: usage?.prompt_tokens ?? 0, completion_tokens: usage?.completion_tokens ?? 0, total_tokens: (usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0) },
+    };
+
+    if (req.stream) {
+      return formatAsSSE(completionId, created, modelId, message, hasToolCalls);
+    }
+    return new Response(JSON.stringify(openAiResponse), { headers: { 'Content-Type': 'application/json' } });
+  } catch (err) {
+    return c.json({ error: { message: err instanceof Error ? err.message : String(err), type: 'server_error' } }, 502);
+  }
+});
+
 /** TEMPORARY debug endpoint — test Workers AI directly without VM/auth overhead.
  * Accepts a simple prompt, calls Workers AI both streaming and non-streaming,
  * and returns raw results. Remove before merging to production. */
