@@ -220,9 +220,12 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     userId,
     workspaceId,
     modelId,
+    gatewayModelId,
+    gatewayUrl,
     messageCount: req.messages.length,
     stream: req.stream,
     hasTools: (req.tools?.length ?? 0) > 0,
+    toolCount: req.tools?.length ?? 0,
     estimatedInputTokens,
   });
 
@@ -294,6 +297,16 @@ async function handleNonStreamingRequest(
 ): Promise<Response> {
   const { gatewayUrl, gatewayBody, modelId, userId, workspaceId, cfApiToken } = params;
 
+  log.info('ai_proxy.gateway_fetch_start', {
+    userId,
+    workspaceId,
+    gatewayUrl,
+    model: gatewayBody.model,
+    stream: gatewayBody.stream,
+    hasApiToken: !!cfApiToken,
+    apiTokenPrefix: cfApiToken?.slice(0, 8) + '...',
+  });
+
   const response = await fetch(gatewayUrl, {
     method: 'POST',
     headers: {
@@ -303,6 +316,15 @@ async function handleNonStreamingRequest(
     body: JSON.stringify(gatewayBody),
   });
 
+  log.info('ai_proxy.gateway_fetch_response', {
+    userId,
+    workspaceId,
+    status: response.status,
+    statusText: response.statusText,
+    contentType: response.headers.get('content-type'),
+    cfRay: response.headers.get('cf-ray'),
+  });
+
   if (!response.ok) {
     const errorText = await response.text();
     log.error('ai_proxy.gateway_error', {
@@ -310,10 +332,11 @@ async function handleNonStreamingRequest(
       workspaceId,
       modelId,
       status: response.status,
-      error: errorText.slice(0, 500),
+      statusText: response.statusText,
+      error: errorText.slice(0, 1000),
     });
     return c.json({
-      error: { message: 'AI Gateway request failed', type: 'server_error' },
+      error: { message: 'AI Gateway request failed', type: 'server_error', details: errorText.slice(0, 200) },
     }, 502);
   }
 
@@ -346,6 +369,14 @@ async function handleStreamingRequest(
 ): Promise<Response> {
   const { gatewayUrl, gatewayBody, modelId, userId, workspaceId, cfApiToken } = params;
 
+  log.info('ai_proxy.gateway_stream_fetch_start', {
+    userId,
+    workspaceId,
+    gatewayUrl,
+    model: gatewayBody.model,
+    hasApiToken: !!cfApiToken,
+  });
+
   const response = await fetch(gatewayUrl, {
     method: 'POST',
     headers: {
@@ -355,6 +386,16 @@ async function handleStreamingRequest(
     body: JSON.stringify(gatewayBody),
   });
 
+  log.info('ai_proxy.gateway_stream_fetch_response', {
+    userId,
+    workspaceId,
+    status: response.status,
+    statusText: response.statusText,
+    contentType: response.headers.get('content-type'),
+    hasBody: !!response.body,
+    cfRay: response.headers.get('cf-ray'),
+  });
+
   if (!response.ok || !response.body) {
     const errorText = await response.text();
     log.error('ai_proxy.gateway_stream_error', {
@@ -362,7 +403,8 @@ async function handleStreamingRequest(
       workspaceId,
       modelId,
       status: response.status,
-      error: errorText.slice(0, 500),
+      statusText: response.statusText,
+      error: errorText.slice(0, 1000),
     });
     return new Response(JSON.stringify({
       error: { message: 'AI Gateway streaming request failed', type: 'server_error' },
