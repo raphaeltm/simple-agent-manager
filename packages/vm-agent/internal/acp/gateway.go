@@ -430,10 +430,22 @@ type agentCredential struct {
 // inferenceConfig holds platform AI proxy configuration returned by the control plane
 // when the user has no dedicated agent credential and the AI proxy is enabled.
 type inferenceConfig struct {
-	Provider     string `json:"provider"`     // e.g. "openai-compatible"
-	BaseURL      string `json:"baseURL"`      // e.g. "https://api.example.com/ai/v1"
-	Model        string `json:"model"`        // e.g. "@cf/qwen/qwen3-30b-a3b-fp8"
-	APIKeySource string `json:"apiKeySource"` // "callback-token" means use workspace callback token
+	Provider          string                          `json:"provider"`          // e.g. "openai-compatible"
+	BaseURL           string                          `json:"baseURL"`           // e.g. "https://api.example.com/ai/v1"
+	Model             string                          `json:"model"`             // e.g. "@cf/qwen/qwen3-30b-a3b-fp8"
+	APIKeySource      string                          `json:"apiKeySource"`      // "callback-token" means use workspace callback token
+	AllowedModels     []string                        `json:"allowedModels"`     // model IDs available for selection
+	ModelCapabilities map[string]modelCapabilityEntry  `json:"modelCapabilities"` // per-model capabilities from registry
+}
+
+// modelCapabilityEntry holds per-model capabilities fetched from the control plane.
+// This is the single source of truth — the VM agent MUST NOT hardcode these values.
+type modelCapabilityEntry struct {
+	Name          string `json:"name"`
+	ToolCall      bool   `json:"toolCall"`
+	Reasoning     bool   `json:"reasoning"`
+	ContextWindow int    `json:"contextWindow"`
+	MaxOutput     int    `json:"maxOutput"`
 }
 
 func byteReader(data []byte) io.ReadCloser {
@@ -1042,7 +1054,7 @@ func resolveVibeActiveModel(settings *agentSettingsPayload) string {
 // Each has an env-var override so operators can change them without rebuilding the binary.
 const (
 	DefaultOpencodeModel             = "scaleway/qwen3-coder-30b-a3b-instruct"
-	DefaultPlatformModel             = "workers-ai/@cf/meta/llama-4-scout-17b-16e-instruct"
+	DefaultPlatformModel             = "workers-ai/@cf/qwen/qwen3-30b-a3b-fp8"
 	DefaultScalewayBaseURL           = "https://api.scaleway.ai/v1"
 	DefaultGoogleVertexBaseURL       = "https://generativelanguage.googleapis.com/v1beta/openai"
 	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
@@ -1064,7 +1076,8 @@ func getOpencodeDefault(envKey, fallback string) string {
 
 // buildOpencodeConfig creates the OPENCODE_CONFIG_CONTENT JSON structure
 // based on the provider selected in agent settings.
-func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} {
+// infCfg provides model capabilities fetched from the control plane (single source of truth).
+func buildOpencodeConfig(settings *agentSettingsPayload, infCfg *inferenceConfig) map[string]interface{} {
 	provider := "scaleway" // default provider
 	model := getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
 
@@ -1095,6 +1108,26 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 		if settings != nil && settings.Model != "" {
 			platformModel = settings.Model
 		}
+
+		// Look up capabilities from the control plane response (single source of truth).
+		// Fall back to safe defaults if capabilities were not provided.
+		toolCall := true
+		reasoning := false
+		contextWindow := 32768
+		maxOutput := 8192
+		modelName := "SAM Platform AI"
+		if infCfg != nil && infCfg.ModelCapabilities != nil {
+			if cap, ok := infCfg.ModelCapabilities[platformModel]; ok {
+				toolCall = cap.ToolCall
+				reasoning = cap.Reasoning
+				contextWindow = cap.ContextWindow
+				maxOutput = cap.MaxOutput
+				if cap.Name != "" {
+					modelName = cap.Name
+				}
+			}
+		}
+
 		// OpenCode's parseModel() splits on "/" to extract providerID.
 		// Use an alias that OpenCode can parse: openai-compatible/<alias>.
 		modelAlias := strings.ReplaceAll(platformModel, "/", "-")
@@ -1108,14 +1141,14 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 				"models": map[string]interface{}{
 					modelAlias: map[string]interface{}{
 						"id":          platformModel,
-						"name":        "SAM Platform AI",
-						"tool_call":   true,
+						"name":        modelName,
+						"tool_call":   toolCall,
 						"temperature": true,
-						"reasoning":   false,
+						"reasoning":   reasoning,
 						"attachment":  false,
 						"limit": map[string]interface{}{
-							"context": 32768,
-							"output":  8192,
+							"context": contextWindow,
+							"output":  maxOutput,
 						},
 					},
 				},

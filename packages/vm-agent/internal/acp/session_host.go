@@ -997,7 +997,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	// Uses the env var (highest priority config source) to inject provider and model
 	// settings without overwriting any repo-level .opencode.json.
 	if agentType == "opencode" {
-		opencodeConfig := buildOpencodeConfig(settings)
+		opencodeConfig := buildOpencodeConfig(settings, cred.inferenceConfig)
 		configJSON, err := json.Marshal(opencodeConfig)
 		if err != nil {
 			slog.Error("opencode: failed to marshal config", "error", err)
