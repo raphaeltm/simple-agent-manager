@@ -128,8 +128,10 @@ export const DEFAULT_AI_PROXY_ALLOWED_MODELS = [
   'workers-ai/@cf/qwen/qwen3-30b-a3b-fp8',
 ].join(',');
 
-/** Default AI Gateway ID. Override via AI_GATEWAY_ID env var. */
-export const DEFAULT_AI_GATEWAY_ID = 'default';
+/** Default AI Gateway ID. Override via AI_GATEWAY_ID env var.
+ * Set AI_GATEWAY_ID to enable gateway routing for analytics/caching.
+ * If not set, the AI binding is used directly without gateway routing. */
+export const DEFAULT_AI_GATEWAY_ID = 'sam';
 
 /** Default daily input token limit per user. Override via AI_PROXY_DAILY_INPUT_TOKEN_LIMIT env var. */
 export const DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT = 500_000;

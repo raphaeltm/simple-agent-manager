@@ -423,8 +423,8 @@ export interface Env {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string;    // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string;       // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string;       // Max stale executions to recover per sweep (default: 100)
-  // AI Inference Proxy (Cloudflare AI Gateway unified API)
-  AI_GATEWAY_ID?: string;                            // AI Gateway ID (default: "default")
+  // AI Inference Proxy (Workers AI binding with optional AI Gateway routing)
+  AI_GATEWAY_ID?: string;                            // AI Gateway ID — set to enable gateway analytics/caching (default: unset = direct binding)
   AI_PROXY_ENABLED?: string;                         // Kill switch: "false" to disable (default: enabled)
   AI_PROXY_DEFAULT_MODEL?: string;                   // Default model in {provider}/{model} format (default: workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct)
   AI_PROXY_ALLOWED_MODELS?: string;                  // Comma-separated allowed models

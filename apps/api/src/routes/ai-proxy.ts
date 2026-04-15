@@ -1,10 +1,9 @@
 /**
  * AI inference proxy — OpenAI-compatible chat/completions + model list.
  *
- * Proxies requests to Cloudflare AI Gateway's unified API, enabling
- * access to models from Workers AI, Anthropic, Google, and other providers
- * through a single OpenAI-compatible interface with full tool/function
- * calling support.
+ * Uses the Workers AI binding (c.env.AI) to call models, with optional
+ * AI Gateway routing for analytics and caching. Transforms Workers AI
+ * native responses into OpenAI-compatible format for OpenCode consumption.
  *
  * Auth: Bearer token in Authorization header (workspace callback token).
  * Rate limit: per-user RPM via KV.
@@ -51,13 +50,17 @@ function resolveModelId(model: string | undefined, env: Env): string {
   return resolved;
 }
 
-/** Build the AI Gateway URL.
- * Uses the Workers AI provider-specific endpoint for now (standard Bearer auth).
- * Future: switch to /compat/ unified API endpoint when provider BYOK keys are configured. */
-function getGatewayUrl(env: Env): string {
-  const accountId = env.CF_ACCOUNT_ID;
-  const gatewayId = env.AI_GATEWAY_ID || DEFAULT_AI_GATEWAY_ID;
-  return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/workers-ai/v1/chat/completions`;
+/** Extract the Workers AI model name from the model ID.
+ * Strips the `workers-ai/` provider prefix since the AI binding doesn't need it. */
+function toWorkersAiModel(modelId: string): string {
+  return modelId.startsWith('workers-ai/')
+    ? modelId.slice('workers-ai/'.length)
+    : modelId;
+}
+
+/** Generate a unique completion ID. */
+function generateCompletionId(): string {
+  return `chatcmpl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /** Extract text content length from a message for token estimation. */
@@ -65,9 +68,41 @@ function messageContentLength(msg: { content?: string | null }): number {
   return (msg.content ?? '').length;
 }
 
+/** Build AI binding options, optionally routing through AI Gateway. */
+function getAiRunOptions(env: Env): { gateway?: { id: string } } {
+  const gatewayId = env.AI_GATEWAY_ID || DEFAULT_AI_GATEWAY_ID;
+  // Only use gateway if explicitly configured (not the 'default' fallback,
+  // since we don't know if a gateway exists in the account)
+  if (env.AI_GATEWAY_ID) {
+    return { gateway: { id: gatewayId } };
+  }
+  return {};
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type WorkersAiToolCall = { name: string; arguments: Record<string, unknown> | string };
+
+/** Transform Workers AI tool_calls to OpenAI format. */
+function transformToolCalls(toolCalls: WorkersAiToolCall[]): Array<{
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}> {
+  return toolCalls.map((tc, i) => ({
+    id: `call_${Date.now()}_${i}`,
+    type: 'function' as const,
+    function: {
+      name: tc.name,
+      arguments: typeof tc.arguments === 'string'
+        ? tc.arguments
+        : JSON.stringify(tc.arguments),
+    },
+  }));
+}
+
 /**
  * POST /chat/completions — OpenAI-compatible chat completions endpoint.
- * Proxies to Cloudflare AI Gateway unified API.
+ * Uses Workers AI binding with optional AI Gateway routing.
  */
 aiProxyRoutes.post('/chat/completions', async (c) => {
   // Kill switch
@@ -198,55 +233,51 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     }, 400);
   }
 
-  // --- Build gateway request ---
-  const gatewayUrl = getGatewayUrl(c.env);
-  // Strip provider prefix for the provider-specific gateway endpoint.
-  // The gateway already knows the provider from the URL path.
-  const gatewayModelId = modelId.startsWith('workers-ai/')
-    ? modelId.slice('workers-ai/'.length)
-    : modelId;
+  // --- Build Workers AI request ---
+  const workersAiModel = toWorkersAiModel(modelId);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const gatewayBody: Record<string, any> = {
-    model: gatewayModelId,
+  const aiInputs: Record<string, any> = {
     messages: req.messages,
     stream: req.stream,
   };
-  if (req.temperature !== undefined) gatewayBody.temperature = req.temperature;
-  if (req.max_tokens !== undefined) gatewayBody.max_tokens = req.max_tokens;
-  if (req.tools?.length) gatewayBody.tools = req.tools;
-  if (req.tool_choice !== undefined) gatewayBody.tool_choice = req.tool_choice;
+  if (req.temperature !== undefined) aiInputs.temperature = req.temperature;
+  if (req.max_tokens !== undefined) aiInputs.max_tokens = req.max_tokens;
+  if (req.tools?.length) aiInputs.tools = req.tools;
+  if (req.tool_choice !== undefined) aiInputs.tool_choice = req.tool_choice;
+
+  const aiOptions = getAiRunOptions(c.env);
 
   log.info('ai_proxy.inference_start', {
     userId,
     workspaceId,
     modelId,
-    gatewayModelId,
-    gatewayUrl,
+    workersAiModel,
     messageCount: req.messages.length,
     stream: req.stream,
     hasTools: (req.tools?.length ?? 0) > 0,
     toolCount: req.tools?.length ?? 0,
+    hasGateway: !!aiOptions.gateway,
     estimatedInputTokens,
   });
 
   try {
     if (req.stream) {
-      return await handleStreamingRequest(c, {
-        gatewayUrl,
-        gatewayBody,
+      return await handleStreamingRequest(c.env, {
+        workersAiModel,
+        aiInputs,
+        aiOptions,
         modelId,
         userId,
         workspaceId,
-        cfApiToken: c.env.CF_API_TOKEN,
       });
     } else {
-      return await handleNonStreamingRequest(c, {
-        gatewayUrl,
-        gatewayBody,
+      return await handleNonStreamingRequest(c.env, {
+        workersAiModel,
+        aiInputs,
+        aiOptions,
         modelId,
         userId,
         workspaceId,
-        cfApiToken: c.env.CF_API_TOKEN,
       });
     }
   } catch (err) {
@@ -255,10 +286,11 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       workspaceId,
       modelId,
       error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
     });
-    return c.json({
+    return new Response(JSON.stringify({
       error: { message: 'Inference failed. Please try again.', type: 'server_error' },
-    }, 502);
+    }), { status: 502, headers: { 'Content-Type': 'application/json' } });
   }
 });
 
@@ -281,74 +313,79 @@ aiProxyRoutes.get('/models', async (c) => {
 
 // --- Internal helpers ---
 
-interface GatewayParams {
-  gatewayUrl: string;
+interface InferenceParams {
+  workersAiModel: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  gatewayBody: Record<string, any>;
+  aiInputs: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  aiOptions: Record<string, any>;
   modelId: string;
   userId: string;
   workspaceId: string;
-  cfApiToken: string;
 }
 
 async function handleNonStreamingRequest(
-  c: { env: Env; json: (data: unknown, status?: number) => Response },
-  params: GatewayParams,
+  env: Env,
+  params: InferenceParams,
 ): Promise<Response> {
-  const { gatewayUrl, gatewayBody, modelId, userId, workspaceId, cfApiToken } = params;
+  const { workersAiModel, aiInputs, aiOptions, modelId, userId, workspaceId } = params;
 
-  log.info('ai_proxy.gateway_fetch_start', {
+  // Call Workers AI binding — no API token needed, uses implicit binding auth
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = await (env.AI as any).run(workersAiModel, aiInputs, aiOptions) as {
+    response?: string;
+    tool_calls?: WorkersAiToolCall[];
+  };
+
+  log.info('ai_proxy.workers_ai_result', {
     userId,
     workspaceId,
-    gatewayUrl,
-    model: gatewayBody.model,
-    stream: gatewayBody.stream,
-    hasApiToken: !!cfApiToken,
-    apiTokenPrefix: cfApiToken?.slice(0, 8) + '...',
+    hasResponse: !!result.response,
+    responseLength: result.response?.length ?? 0,
+    hasToolCalls: !!(result.tool_calls?.length),
+    toolCallCount: result.tool_calls?.length ?? 0,
   });
 
-  const response = await fetch(gatewayUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${cfApiToken}`,
-    },
-    body: JSON.stringify(gatewayBody),
-  });
+  // Estimate token usage (Workers AI doesn't always return usage stats)
+  const promptTokens = Math.ceil(
+    (aiInputs.messages as Array<{ content?: string }>)
+      .reduce((s, m) => s + (m.content?.length ?? 0), 0) / 4,
+  );
+  const completionTokens = Math.ceil((result.response?.length ?? 0) / 4);
 
-  log.info('ai_proxy.gateway_fetch_response', {
-    userId,
-    workspaceId,
-    status: response.status,
-    statusText: response.statusText,
-    contentType: response.headers.get('content-type'),
-    cfRay: response.headers.get('cf-ray'),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    log.error('ai_proxy.gateway_error', {
-      userId,
-      workspaceId,
-      modelId,
-      status: response.status,
-      statusText: response.statusText,
-      error: errorText.slice(0, 1000),
-    });
-    return c.json({
-      error: { message: 'AI Gateway request failed', type: 'server_error', details: errorText.slice(0, 200) },
-    }, 502);
+  if (promptTokens || completionTokens) {
+    await incrementTokenUsage(env.KV, userId, promptTokens, completionTokens);
   }
+
+  // Transform to OpenAI format
+  const completionId = generateCompletionId();
+  const hasToolCalls = result.tool_calls && result.tool_calls.length > 0;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await response.json() as any;
-
-  // Extract usage for token budget tracking
-  const promptTokens = result.usage?.prompt_tokens ?? 0;
-  const completionTokens = result.usage?.completion_tokens ?? 0;
-  if (promptTokens || completionTokens) {
-    await incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens);
+  const message: Record<string, any> = {
+    role: 'assistant',
+    content: result.response ?? null,
+  };
+  if (hasToolCalls) {
+    message.tool_calls = transformToolCalls(result.tool_calls!);
   }
+
+  const openAiResponse = {
+    id: completionId,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: modelId,
+    choices: [{
+      index: 0,
+      message,
+      finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
+    }],
+    usage: {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens,
+    },
+  };
 
   log.info('ai_proxy.inference_complete', {
     userId,
@@ -356,102 +393,127 @@ async function handleNonStreamingRequest(
     modelId,
     promptTokens,
     completionTokens,
+    finishReason: hasToolCalls ? 'tool_calls' : 'stop',
     stream: false,
   });
 
-  // Pass through the gateway response as-is (already in OpenAI format)
-  return c.json(result);
+  return new Response(JSON.stringify(openAiResponse), {
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 async function handleStreamingRequest(
-  c: { env: Env; header: (name: string, value: string) => void; body: (data: ReadableStream | null, init?: ResponseInit) => Response },
-  params: GatewayParams,
+  env: Env,
+  params: InferenceParams,
 ): Promise<Response> {
-  const { gatewayUrl, gatewayBody, modelId, userId, workspaceId, cfApiToken } = params;
+  const { workersAiModel, aiInputs, aiOptions, modelId, userId, workspaceId } = params;
 
-  log.info('ai_proxy.gateway_stream_fetch_start', {
-    userId,
-    workspaceId,
-    gatewayUrl,
-    model: gatewayBody.model,
-    hasApiToken: !!cfApiToken,
-  });
+  // Call Workers AI binding with stream: true — returns a ReadableStream
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream = await (env.AI as any).run(workersAiModel, aiInputs, aiOptions) as ReadableStream;
 
-  const response = await fetch(gatewayUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${cfApiToken}`,
-    },
-    body: JSON.stringify(gatewayBody),
-  });
-
-  log.info('ai_proxy.gateway_stream_fetch_response', {
-    userId,
-    workspaceId,
-    status: response.status,
-    statusText: response.statusText,
-    contentType: response.headers.get('content-type'),
-    hasBody: !!response.body,
-    cfRay: response.headers.get('cf-ray'),
-  });
-
-  if (!response.ok || !response.body) {
-    const errorText = await response.text();
-    log.error('ai_proxy.gateway_stream_error', {
+  if (!stream || !(stream instanceof ReadableStream)) {
+    log.error('ai_proxy.stream_not_readable', {
       userId,
       workspaceId,
       modelId,
-      status: response.status,
-      statusText: response.statusText,
-      error: errorText.slice(0, 1000),
+      resultType: typeof stream,
     });
     return new Response(JSON.stringify({
-      error: { message: 'AI Gateway streaming request failed', type: 'server_error' },
+      error: { message: 'Workers AI did not return a stream', type: 'server_error' },
     }), { status: 502, headers: { 'Content-Type': 'application/json' } });
   }
 
-  // Track token usage from streaming response
+  // Transform Workers AI SSE format to OpenAI SSE format
+  const completionId = generateCompletionId();
+  const created = Math.floor(Date.now() / 1000);
   let totalContent = '';
   let chunkCount = 0;
+  let isFirstChunk = true;
   const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
 
   const transformStream = new TransformStream({
     transform(chunk, controller) {
-      // Pass through chunks as-is — gateway already sends OpenAI SSE format
-      const text = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+      const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
 
-      // Count content for token estimation
       const lines = text.split('\n');
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr && jsonStr !== '[DONE]') {
-            try {
-              const parsed = JSON.parse(jsonStr);
-              const delta = parsed.choices?.[0]?.delta;
-              if (delta?.content) {
-                totalContent += delta.content;
-                chunkCount++;
-              }
-            } catch {
-              // Non-JSON — pass through
-            }
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.slice(6).trim();
+
+        if (jsonStr === '[DONE]') {
+          // Send final chunk with finish_reason before [DONE]
+          const finalChunk = {
+            id: completionId,
+            object: 'chat.completion.chunk',
+            created,
+            model: modelId,
+            choices: [{
+              index: 0,
+              delta: {},
+              finish_reason: 'stop',
+            }],
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          return;
+        }
+
+        if (!jsonStr) continue;
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.response ?? '';
+
+          if (content) {
+            totalContent += content;
+            chunkCount++;
           }
+
+          // Build OpenAI-format chunk
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const delta: Record<string, any> = {};
+          if (isFirstChunk) {
+            delta.role = 'assistant';
+            isFirstChunk = false;
+          }
+          if (content) {
+            delta.content = content;
+          }
+
+          // Handle streamed tool calls if present
+          if (parsed.tool_calls) {
+            delta.tool_calls = transformToolCalls(parsed.tool_calls);
+          }
+
+          const openAiChunk = {
+            id: completionId,
+            object: 'chat.completion.chunk',
+            created,
+            model: modelId,
+            choices: [{
+              index: 0,
+              delta,
+              finish_reason: null,
+            }],
+          };
+
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAiChunk)}\n\n`));
+        } catch {
+          // Non-JSON SSE line — skip
         }
       }
-
-      controller.enqueue(typeof chunk === 'string' ? encoder.encode(chunk) : chunk);
     },
     async flush() {
-      // Update token budget with estimates from streamed content
+      // Update token budget with estimates
       const promptTokens = Math.ceil(
-        (gatewayBody.messages as Array<{ content?: string }>)
+        (aiInputs.messages as Array<{ content?: string }>)
           .reduce((s, m) => s + (m.content?.length ?? 0), 0) / 4,
       );
       const completionTokens = Math.ceil(totalContent.length / 4);
 
-      incrementTokenUsage(c.env.KV, userId, promptTokens, completionTokens).catch((err) => {
+      incrementTokenUsage(env.KV, userId, promptTokens, completionTokens).catch((err) => {
         log.error('ai_proxy.budget_update_failed', {
           userId,
           error: err instanceof Error ? err.message : String(err),
@@ -470,7 +532,7 @@ async function handleStreamingRequest(
     },
   });
 
-  const readable = response.body.pipeThrough(transformStream);
+  const readable = stream.pipeThrough(transformStream);
 
   return new Response(readable, {
     headers: {
