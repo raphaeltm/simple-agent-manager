@@ -21,6 +21,7 @@ import {
   DEFAULT_AI_PROXY_MODEL,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
+  DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -83,6 +84,27 @@ function getAiRunOptions(env: Env): { gateway?: { id: string } } {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type WorkersAiToolCall = { name: string; arguments: Record<string, unknown> | string };
+
+/** Normalize Workers AI result to a consistent shape.
+ * Workers AI text-generation models can return different shapes:
+ * - { response: string } for simple text completion
+ * - { response: string, tool_calls: [...] } for tool-calling models
+ * - A ReadableStream if stream: true was somehow set
+ * - Possibly a string directly for older models
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeWorkersAiResult(raw: any): { response?: string; tool_calls?: WorkersAiToolCall[] } {
+  if (!raw) return { response: '' };
+  if (typeof raw === 'string') return { response: raw };
+  if (raw instanceof ReadableStream) {
+    // Shouldn't happen since we set stream: false, but handle gracefully
+    return { response: '[streaming result — unexpected]' };
+  }
+  return {
+    response: raw.response ?? raw.content ?? raw.text ?? '',
+    tool_calls: raw.tool_calls,
+  };
+}
 
 /** Transform Workers AI tool_calls to OpenAI format. */
 function transformToolCalls(toolCalls: WorkersAiToolCall[]): Array<{
@@ -235,12 +257,13 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     }, 400);
   }
 
-  // --- Call Workers AI (always non-streaming for reliability) ---
+  // --- Call Workers AI ---
   const workersAiModel = toWorkersAiModel(modelId);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const aiInputs: Record<string, any> = {
     messages: req.messages,
-    // Always use non-streaming — we wrap the response in SSE if client requested streaming
+    // Always non-streaming — Workers AI streaming format differs from OpenAI and causes
+    // ACP ContentBlock marshal errors. We buffer the full response and wrap as SSE if needed.
     stream: false,
   };
   if (req.temperature !== undefined) aiInputs.temperature = req.temperature;
@@ -263,23 +286,39 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     estimatedInputTokens,
   });
 
+  const streamTimeoutMs = parseInt(c.env.AI_PROXY_STREAM_TIMEOUT_MS || '', 10) || DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS;
+
   try {
-    // Call Workers AI binding — no API token needed, uses implicit binding auth
+    // Call Workers AI binding with a timeout guard.
+    // The AI binding is an I/O operation (doesn't count against CPU time) but we add
+    // a timeout to prevent indefinite hangs if the model is unresponsive.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (c.env.AI as any).run(workersAiModel, aiInputs, aiOptions) as {
-      response?: string;
-      tool_calls?: WorkersAiToolCall[];
-    };
+    const startMs = Date.now();
+    const aiPromise = (c.env.AI as any).run(workersAiModel, aiInputs, aiOptions);
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Workers AI inference timed out after ${streamTimeoutMs}ms`)), streamTimeoutMs),
+    );
+
+    const rawResult = await Promise.race([aiPromise, timeoutPromise]);
+    const elapsedMs = Date.now() - startMs;
+
+    // Workers AI may return different shapes depending on model/version.
+    // Normalize to { response, tool_calls }.
+    const result = normalizeWorkersAiResult(rawResult);
 
     log.info('ai_proxy.workers_ai_result', {
       userId,
       workspaceId,
+      elapsedMs,
       hasResponse: !!result.response,
       responseLength: result.response?.length ?? 0,
       responsePreview: result.response?.substring(0, 200),
       hasToolCalls: !!(result.tool_calls?.length),
       toolCallCount: result.tool_calls?.length ?? 0,
       toolCallNames: result.tool_calls?.map(tc => tc.name).join(','),
+      rawResultType: typeof rawResult,
+      rawResultKeys: rawResult && typeof rawResult === 'object' ? Object.keys(rawResult).join(',') : 'N/A',
     });
 
     // Estimate token usage
