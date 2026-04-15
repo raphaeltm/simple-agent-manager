@@ -140,22 +140,39 @@ function normalizeWorkersAiResult(raw: any): { response?: string; tool_calls?: W
   return { response, tool_calls: toolCalls };
 }
 
-/** Transform Workers AI tool_calls to OpenAI format. */
+/** Transform Workers AI tool_calls to OpenAI format.
+ * Ensures arguments is always a valid JSON string — Workers AI models may
+ * return empty strings, undefined, or malformed arguments that cause
+ * ACP ContentBlock marshal failures if passed through as-is. */
 function transformToolCalls(toolCalls: WorkersAiToolCall[]): Array<{
   id: string;
   type: 'function';
   function: { name: string; arguments: string };
 }> {
-  return toolCalls.map((tc, i) => ({
-    id: `call_${Date.now()}_${i}`,
-    type: 'function' as const,
-    function: {
-      name: tc.name,
-      arguments: typeof tc.arguments === 'string'
-        ? tc.arguments
-        : JSON.stringify(tc.arguments),
-    },
-  }));
+  return toolCalls.map((tc, i) => {
+    let args: string;
+    if (typeof tc.arguments === 'string') {
+      // Validate it's valid JSON; default to empty object if not
+      try {
+        JSON.parse(tc.arguments);
+        args = tc.arguments;
+      } catch {
+        args = tc.arguments ? JSON.stringify({ raw: tc.arguments }) : '{}';
+      }
+    } else if (tc.arguments !== null && tc.arguments !== undefined) {
+      args = JSON.stringify(tc.arguments);
+    } else {
+      args = '{}';
+    }
+    return {
+      id: `call_${Date.now()}_${i}`,
+      type: 'function' as const,
+      function: {
+        name: tc.name || 'unknown',
+        arguments: args,
+      },
+    };
+  });
 }
 
 /**
@@ -413,6 +430,16 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         total_tokens: promptTokens + completionTokens,
       },
     };
+
+    // eslint-disable-next-line no-console
+    console.log('[AI_PROXY_DEBUG] OpenAI-format response:', JSON.stringify({
+      content: responseContent?.substring(0, 500),
+      contentLength: responseContent?.length ?? 0,
+      hasToolCalls,
+      toolCallCount: message.tool_calls?.length ?? 0,
+      toolCallNames: message.tool_calls?.map((tc: { function: { name: string } }) => tc.function.name).join(','),
+      clientStream: req.stream,
+    }));
 
     log.info('ai_proxy.inference_complete', {
       userId,
