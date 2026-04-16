@@ -447,6 +447,10 @@ export class ProjectData extends DurableObject<Env> {
     return knowledge.getRelevantKnowledge(this.sql, context, limit);
   }
 
+  async getAllHighConfidenceKnowledge(minConfidence: number, limit: number) {
+    return knowledge.getAllHighConfidenceKnowledge(this.sql, minConfidence, limit);
+  }
+
   async createKnowledgeRelation(sourceEntityId: string, targetEntityId: string, relationType: string, description: string | null) {
     const result = knowledge.createRelation(this.sql, sourceEntityId, targetEntityId, relationType as Parameters<typeof knowledge.createRelation>[3], description);
     this.broadcastEvent('knowledge.relation.created', { id: result.id });

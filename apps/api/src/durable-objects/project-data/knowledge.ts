@@ -375,6 +375,29 @@ export function getRelevantKnowledge(sql: SqlStorage, context: string, limit: nu
   return rows.map(parseKnowledgeObservationSearchRow);
 }
 
+/**
+ * Get ALL active observations with confidence >= threshold, ordered by entity
+ * then recency. Used for session-start knowledge injection — returns everything
+ * important rather than trying to guess relevance from keywords.
+ */
+export function getAllHighConfidenceKnowledge(
+  sql: SqlStorage,
+  minConfidence: number,
+  limit: number,
+) {
+  const rows = sql.exec(
+    `SELECT o.*, e.name as entity_name, e.entity_type
+     FROM knowledge_observations o
+     JOIN knowledge_entities e ON e.id = o.entity_id
+     WHERE o.is_active = 1 AND o.confidence >= ?
+     ORDER BY e.name, o.last_confirmed_at DESC
+     LIMIT ?`,
+    minConfidence, limit,
+  ).toArray();
+
+  return rows.map(parseKnowledgeObservationSearchRow);
+}
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export function createRelation(
