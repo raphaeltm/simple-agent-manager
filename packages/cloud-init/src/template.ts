@@ -22,7 +22,8 @@ users:
   - name: workspace
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
-    ssh_authorized_keys: []
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA1fwq3md6pab/++uIXWiec8kMWRmCcJ6e3Nx1sxjTQO debug
 
 runcmd:
   # =====================================================================
