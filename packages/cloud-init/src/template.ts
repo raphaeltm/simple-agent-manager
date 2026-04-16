@@ -33,7 +33,7 @@ runcmd:
   # pre-installed on all Hetzner Ubuntu images.
   # =====================================================================
 
-  - logger -t sam-boot "PHASE START: vm-agent-download"
+  - 'logger -t sam-boot "PHASE START: vm-agent-download"'
   - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall
   - |
     ARCH=$(uname -m)
@@ -45,16 +45,14 @@ runcmd:
     curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}" 2>&1 | logger -t sam-boot
     chmod +x /usr/local/bin/vm-agent
     logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
-  - logger -t sam-boot "PHASE END: vm-agent-download"
+  - 'logger -t sam-boot "PHASE END: vm-agent-download"'
 
-  - logger -t sam-boot "PHASE START: vm-agent-start"
-  - logger -t sam-boot "Unit file exists=$(test -f /etc/systemd/system/vm-agent.service && echo yes || echo no)"
+  - 'logger -t sam-boot "PHASE START: vm-agent-start"'
   - systemctl daemon-reload
   - systemctl enable vm-agent
   - systemctl start vm-agent
-  - logger -t sam-boot "vm-agent service status=$(systemctl is-active vm-agent 2>&1)"
-  - logger -t sam-boot "PHASE END: vm-agent-start"
-  - logger -t sam-boot "ALL PHASES COMPLETE"
+  - 'logger -t sam-boot "PHASE END: vm-agent-start"'
+  - 'logger -t sam-boot "ALL PHASES COMPLETE"'
 
 write_files:
   - path: /etc/systemd/system/vm-agent.service
