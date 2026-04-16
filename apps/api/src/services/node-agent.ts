@@ -487,6 +487,28 @@ export async function getNodeLogsFromNode(
   });
 }
 
+/**
+ * Raw binary proxy to a VM agent endpoint.
+ * Returns the raw Response (not parsed as JSON) so callers can stream the body.
+ * Used for downloading SQLite database files (events, metrics).
+ */
+export async function nodeAgentRawRequest(
+  nodeId: string,
+  env: Env,
+  path: string,
+  userId: string
+): Promise<Response> {
+  const { token } = await signNodeManagementToken(userId, nodeId, null, env);
+  const url = `${getNodeBackendBaseUrl(nodeId, env)}${path}`;
+  const headers = new Headers();
+  headers.set('Authorization', `Bearer ${token}`);
+  headers.set('X-SAM-Node-Id', nodeId);
+
+  const DEFAULT_EXPORT_TIMEOUT_MS = 60_000;
+  const timeoutMs = getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_EXPORT_TIMEOUT_MS);
+  return fetchWithTimeout(url, { method: 'GET', headers }, timeoutMs);
+}
+
 export async function rebuildWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,

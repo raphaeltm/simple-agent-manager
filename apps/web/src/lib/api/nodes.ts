@@ -80,6 +80,42 @@ export function getNodeLogStreamUrl(nodeId: string, filter?: Partial<NodeLogFilt
 }
 
 /**
+ * Download the raw SQLite event database from a node.
+ * Triggers a browser file download.
+ */
+export async function downloadNodeEvents(nodeId: string): Promise<void> {
+  const url = `${API_URL}/api/nodes/${nodeId}/events/export`;
+  const response = await fetch(url, { credentials: 'include' });
+  if (!response.ok) {
+    throw new Error(`Failed to download events: ${response.status}`);
+  }
+  const blob = await response.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `events-${nodeId}.db`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/**
+ * Download the raw SQLite metrics database from a node.
+ * Triggers a browser file download.
+ */
+export async function downloadNodeMetrics(nodeId: string): Promise<void> {
+  const url = `${API_URL}/api/nodes/${nodeId}/metrics/export`;
+  const response = await fetch(url, { credentials: 'include' });
+  if (!response.ok) {
+    throw new Error(`Failed to download metrics: ${response.status}`);
+  }
+  const blob = await response.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `metrics-${nodeId}.db`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/**
  * Fetch node events via the control plane proxy.
  * Node events are proxied because vm-* DNS records are DNS-only (no Cloudflare SSL
  * termination), so the browser cannot reach them directly from an HTTPS page.

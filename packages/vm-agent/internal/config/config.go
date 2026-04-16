@@ -142,6 +142,9 @@ type Config struct {
 
 	// Persistence settings - configurable per constitution principle XI
 	PersistenceDBPath string // SQLite database path for session state persistence
+	EventStoreDBPath  string // SQLite database path for persistent event logs
+	MetricsDBPath     string // SQLite database path for resource metrics snapshots
+	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
 
 	// Git integration settings - configurable per constitution principle XI
 	GitExecTimeout           time.Duration // Timeout for git commands via docker exec (default: 30s)
@@ -329,6 +332,9 @@ func Load() (*Config, error) {
 
 		// Persistence settings
 		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),
+		EventStoreDBPath:  getEnv("EVENTSTORE_DB_PATH", "/var/lib/vm-agent/events.db"),
+		MetricsDBPath:     getEnv("METRICS_DB_PATH", "/var/lib/vm-agent/metrics.db"),
+		MetricsInterval:   getEnvDuration("METRICS_INTERVAL", time.Minute),
 
 		// Git integration settings - configurable per constitution principle XI
 		GitExecTimeout:           getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),

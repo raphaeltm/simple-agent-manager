@@ -21,6 +21,7 @@ import {
   getNodeLogsFromNode,
   getNodeSystemInfoFromNode,
   listNodeEventsOnNode,
+  nodeAgentRawRequest,
   stopWorkspaceOnNode,
 } from '../services/node-agent';
 import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
@@ -462,6 +463,78 @@ nodesRoutes.get('/:id/logs/stream', async (c) => {
     method: 'GET',
     headers,
   });
+});
+
+/**
+ * GET /:id/events/export — Download the raw SQLite event database from the VM Agent.
+ * Streams the binary file through to the browser as an attachment download.
+ */
+nodesRoutes.get('/:id/events/export', async (c) => {
+  const nodeId = c.req.param('id');
+  const userId = getUserId(c);
+  const node = await requireNodeOwnership(c, nodeId);
+
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+  if (node.status !== 'running') {
+    throw errors.badRequest('Node is not running');
+  }
+
+  try {
+    const response = await nodeAgentRawRequest(nodeId, c.env, '/events/export', userId);
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`VM agent returned ${response.status}: ${body}`);
+    }
+
+    return new Response(response.body, {
+      status: 200,
+      headers: {
+        'Content-Type': response.headers.get('Content-Type') || 'application/x-sqlite3',
+        'Content-Disposition': response.headers.get('Content-Disposition') || `attachment; filename="events-${nodeId}.db"`,
+        'Content-Length': response.headers.get('Content-Length') || '',
+      },
+    });
+  } catch {
+    throw errors.badRequest('Could not download events database — node agent may be unreachable');
+  }
+});
+
+/**
+ * GET /:id/metrics/export — Download the raw SQLite metrics database from the VM Agent.
+ * Streams the binary file through to the browser as an attachment download.
+ */
+nodesRoutes.get('/:id/metrics/export', async (c) => {
+  const nodeId = c.req.param('id');
+  const userId = getUserId(c);
+  const node = await requireNodeOwnership(c, nodeId);
+
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+  if (node.status !== 'running') {
+    throw errors.badRequest('Node is not running');
+  }
+
+  try {
+    const response = await nodeAgentRawRequest(nodeId, c.env, '/metrics/export', userId);
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`VM agent returned ${response.status}: ${body}`);
+    }
+
+    return new Response(response.body, {
+      status: 200,
+      headers: {
+        'Content-Type': response.headers.get('Content-Type') || 'application/x-sqlite3',
+        'Content-Disposition': response.headers.get('Content-Disposition') || `attachment; filename="metrics-${nodeId}.db"`,
+        'Content-Length': response.headers.get('Content-Length') || '',
+      },
+    });
+  } catch {
+    throw errors.badRequest('Could not download metrics database — node agent may be unreachable');
+  }
 });
 
 /**

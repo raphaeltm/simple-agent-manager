@@ -24,11 +24,13 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/errorreport"
+	"github.com/workspace/vm-agent/internal/eventstore"
 	"github.com/workspace/vm-agent/internal/logreader"
 	"github.com/workspace/vm-agent/internal/messagereport"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/ports"
 	"github.com/workspace/vm-agent/internal/pty"
+	"github.com/workspace/vm-agent/internal/resourcemon"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
@@ -55,6 +57,8 @@ type Server struct {
 	eventMu             sync.RWMutex
 	nodeEvents          []EventRecord
 	workspaceEvents     map[string][]EventRecord
+	eventStore          *eventstore.Store
+	resourceMonitor     *resourcemon.Monitor
 	agentSessions       *agentsessions.Manager
 	acpConfig           acp.GatewayConfig
 	sessionHostMu       sync.Mutex
@@ -363,6 +367,18 @@ func New(cfg *config.Config) (*Server, error) {
 		CacheTTL:       cfg.SysInfoCacheTTL,
 	})
 
+	// Open persistent event store (SQLite-backed, survives restarts).
+	evStore, err := eventstore.New(cfg.EventStoreDBPath)
+	if err != nil {
+		slog.Error("Failed to open event store; falling back to in-memory only", "error", err)
+	}
+
+	// Start resource monitor (1-minute snapshots of CPU/memory/disk).
+	resMon, err := resourcemon.New(cfg.MetricsDBPath, cfg.MetricsInterval)
+	if err != nil {
+		slog.Error("Failed to start resource monitor", "error", err)
+	}
+
 	s := &Server{
 		config:              cfg,
 		jwtValidator:        jwtValidator,
@@ -372,6 +388,8 @@ func New(cfg *config.Config) (*Server, error) {
 		workspaces:          make(map[string]*WorkspaceRuntime),
 		nodeEvents:          make([]EventRecord, 0, 512),
 		workspaceEvents:     make(map[string][]EventRecord),
+		eventStore:          evStore,
+		resourceMonitor:     resMon,
 		agentSessions:       agentsessions.NewManager(),
 		acpConfig:           acpGatewayConfig,
 		sessionHosts:        make(map[string]*acp.SessionHost),
@@ -789,6 +807,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /workspaces/{workspaceId}/worktrees", s.handleRemoveWorktree)
 
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
+	mux.HandleFunc("GET /events/export", s.handleExportEvents)
+	mux.HandleFunc("GET /metrics/export", s.handleExportMetrics)
 	mux.HandleFunc("GET /system-info", s.handleSystemInfo)
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("GET /logs/stream", s.handleLogStream)
