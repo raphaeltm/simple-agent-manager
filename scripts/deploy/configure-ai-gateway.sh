@@ -29,7 +29,14 @@ RESPONSE=$(curl -s -w "\n%{http_code}" \
   -X POST "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai-gateway/gateways" \
   -H "Authorization: Bearer ${CF_API_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d "{\"id\": \"${GATEWAY_ID}\"}")
+  -d "{
+    \"id\": \"${GATEWAY_ID}\",
+    \"collect_logs\": true,
+    \"cache_ttl\": 0,
+    \"cache_invalidate_on_update\": true,
+    \"rate_limiting_interval\": 0,
+    \"rate_limiting_limit\": 0
+  }")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
