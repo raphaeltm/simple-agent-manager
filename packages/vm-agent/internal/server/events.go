@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -128,6 +129,10 @@ func (s *Server) handleExportEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "event store not available")
 		return
 	}
+	// Checkpoint WAL so the main .db file contains all data.
+	if err := s.eventStore.Checkpoint(); err != nil {
+		slog.Warn("eventstore: checkpoint before export failed", "error", err)
+	}
 	serveDBFile(w, r, s.eventStore.DBPath(), fmt.Sprintf("events-%s.db", s.config.NodeID))
 }
 
@@ -139,6 +144,10 @@ func (s *Server) handleExportMetrics(w http.ResponseWriter, r *http.Request) {
 	if s.resourceMonitor == nil {
 		writeError(w, http.StatusServiceUnavailable, "resource monitor not available")
 		return
+	}
+	// Checkpoint WAL so the main .db file contains all data.
+	if err := s.resourceMonitor.Checkpoint(); err != nil {
+		slog.Warn("resourcemon: checkpoint before export failed", "error", err)
 	}
 	serveDBFile(w, r, s.resourceMonitor.DBPath(), fmt.Sprintf("metrics-%s.db", s.config.NodeID))
 }

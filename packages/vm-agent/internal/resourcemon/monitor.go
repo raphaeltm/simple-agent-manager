@@ -208,6 +208,13 @@ func parseMemInfoKB(line string) uint64 {
 	return kb * 1024 // convert KB to bytes
 }
 
+// Checkpoint forces a WAL checkpoint so the main database file contains all data.
+// Must be called before serving the database file for download.
+func (m *Monitor) Checkpoint() error {
+	_, err := m.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	return err
+}
+
 // DBPath returns the filesystem path to the SQLite database file.
 func (m *Monitor) DBPath() string {
 	return m.dbPath

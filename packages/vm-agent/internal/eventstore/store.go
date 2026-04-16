@@ -165,6 +165,13 @@ func (s *Store) trimOlderThan(d time.Duration) (int64, error) {
 	return result.RowsAffected()
 }
 
+// Checkpoint forces a WAL checkpoint so the main database file contains all data.
+// Must be called before serving the database file for download.
+func (s *Store) Checkpoint() error {
+	_, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	return err
+}
+
 // DBPath returns the filesystem path to the SQLite database file.
 func (s *Store) DBPath() string {
 	return s.dbPath
