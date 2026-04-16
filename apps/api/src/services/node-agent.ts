@@ -5,7 +5,7 @@ import { recordNodeRoutingMetric } from './telemetry';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 
-const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 600_000;
+const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000; // 15 min — cloud-init takes 8-12 min on Hetzner
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
 
 function getNodeBackendBaseUrl(nodeId: string, env: Env): string {

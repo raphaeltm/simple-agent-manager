@@ -32,6 +32,12 @@ runcmd:
   - usermod -aG docker workspace
   - logger -t sam-boot "PHASE END: docker"
 
+  # Start base image pre-pull in the BACKGROUND immediately after Docker starts.
+  # This runs concurrently with firewall setup, Node.js install, and CLI install,
+  # saving 3-5 minutes compared to doing it sequentially.
+  - logger -t sam-boot "PHASE START: image-prepull (background)"
+  - docker pull mcr.microsoft.com/devcontainers/base:ubuntu > /tmp/image-pull.log 2>&1 &
+
   # Set up OS-level firewall before VM agent starts
   - logger -t sam-boot "PHASE START: firewall"
   - echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
@@ -53,6 +59,12 @@ runcmd:
   - mkdir -p /etc/systemd/journald.conf.d
   - systemctl restart systemd-journald
 
+  # Wait for background image pull to finish before Docker restart.
+  # Docker restart kills in-progress pulls, so we must wait.
+  - logger -t sam-boot "PHASE START: image-prepull-wait"
+  - wait || true
+  - logger -t sam-boot "PHASE END: image-prepull-wait"
+
   # Restart Docker to pick up journald log driver and DNS configuration.
   - logger -t sam-boot "PHASE START: docker-restart"
   - systemctl restart docker
@@ -64,12 +76,6 @@ runcmd:
 
   # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
   - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
-
-  # Pre-pull the default devcontainer base image so it is cached when the
-  # vm-agent builds a workspace (~270 MB compressed).
-  - logger -t sam-boot "PHASE START: image-prepull"
-  - docker pull mcr.microsoft.com/devcontainers/base:ubuntu || logger -t sam-boot "WARNING: base image pre-pull failed (non-fatal)"
-  - logger -t sam-boot "PHASE END: image-prepull"
 
   # Download and start vm-agent LAST. All prerequisites (Docker, Node.js,
   # devcontainer CLI, firewall, TLS, base image) are ready.
