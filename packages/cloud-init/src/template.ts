@@ -81,9 +81,6 @@ runcmd:
   - apt-get install -y nodejs
   - npm install -g @devcontainers/cli || true
 
-  # Pre-pull Neko browser sidecar image (optional, controlled by NEKO_PRE_PULL)
-  {{ neko_pre_pull_cmd }}
-
   # Apply journald configuration and restart to pick up new limits
   - mkdir -p /etc/systemd/journald.conf.d
   - systemctl restart systemd-journald

@@ -143,8 +143,6 @@ export async function provisionNode(
       originCaCert: env.ORIGIN_CA_CERT,
       originCaKey: env.ORIGIN_CA_KEY,
       vmAgentPort: env.VM_AGENT_PORT,
-      nekoImage: env.NEKO_IMAGE,
-      nekoPrePull: env.NEKO_PRE_PULL !== 'false',
     });
 
     if (!validateCloudInitSize(cloudInit)) {

@@ -22,16 +22,6 @@ vi.mock('../../src/lib/api', async (importOriginal) => {
   };
 });
 
-// Mock useBrowserSidecar hook
-vi.mock('../../src/hooks/useBrowserSidecar', () => ({
-  useBrowserSidecar: () => ({
-    status: null,
-    isLoading: false,
-    error: null,
-    start: vi.fn(),
-  }),
-}));
-
 import { FORK_MESSAGE_TEMPLATE, ForkDialog } from '../../src/components/project/ForkDialog';
 import { RetryDialog } from '../../src/components/project/RetryDialog';
 import { SessionHeader } from '../../src/components/project-message-view/SessionHeader';

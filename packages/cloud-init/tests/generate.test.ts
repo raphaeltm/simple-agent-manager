@@ -647,58 +647,6 @@ describe('generateCloudInit', () => {
     });
   });
 
-  describe('Neko browser sidecar pre-pull', () => {
-    it('includes default Neko image pre-pull by default', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest'");
-    });
-
-    it('uses custom Neko image when specified', () => {
-      const config = generateCloudInit(baseVariables({
-        nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
-      }));
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
-      expect(runcmdStr).not.toContain('google-chrome');
-    });
-
-    it('skips Neko pre-pull when nekoPrePull is false', () => {
-      const config = generateCloudInit(baseVariables({
-        nekoPrePull: false,
-      }));
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).not.toContain('docker pull ghcr.io/m1k1o/neko');
-      // The comment "# Neko pre-pull disabled" is in the raw YAML but stripped by parser
-      expect(config).toContain('Neko pre-pull disabled');
-    });
-
-    it('pre-pull command includes || true for fault tolerance', () => {
-      const config = generateCloudInit(baseVariables());
-      expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest' || true");
-    });
-
-    it('config with Neko pre-pull stays within 32KB limit', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-        nekoImage: 'ghcr.io/m1k1o/neko/google-chrome:latest',
-        nekoPrePull: true,
-      }));
-
-      expect(validateCloudInitSize(config)).toBe(true);
-    });
-  });
-
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {
       const config = generateCloudInit(baseVariables({
@@ -771,7 +719,6 @@ describe('validateCloudInitVariables', () => {
         taskId: 'task-ghi-789',
         taskMode: 'conversation',
         vmAgentPort: '8443',
-        nekoImage: 'ghcr.io/m1k1o/neko/google-chrome:latest',
         cfIpFetchTimeout: '30',
         logJournalMaxUse: '1G',
         logJournalKeepFree: '2G',
@@ -797,12 +744,6 @@ describe('validateCloudInitVariables', () => {
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '65535' }))).not.toThrow();
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8080' }))).not.toThrow();
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8443' }))).not.toThrow();
-    });
-
-    it('accepts Docker image with SHA256 digest', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nekoImage: 'ghcr.io/m1k1o/neko/google-chrome@sha256:abcdef1234567890',
-      }))).not.toThrow();
     });
 
     it('accepts all valid journald time units', () => {
@@ -863,18 +804,6 @@ describe('validateCloudInitVariables', () => {
       expect(() => validateCloudInitVariables(baseVariables({
         hostname: 'valid host',
       }))).toThrow('hostname');
-    });
-
-    it('rejects nekoImage with shell injection', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nekoImage: 'image; rm -rf /',
-      }))).toThrow('nekoImage');
-    });
-
-    it('rejects nekoImage with command substitution', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nekoImage: '$(malicious)',
-      }))).toThrow('nekoImage');
     });
 
     it('rejects callbackToken with shell metacharacters', () => {
@@ -1039,11 +968,6 @@ describe('validateCloudInitVariables', () => {
       }
     });
 
-    it('rejects nekoImage starting with hyphen', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nekoImage: '-malicious',
-      }))).toThrow('nekoImage');
-    });
   });
 
   describe('generateCloudInit calls validation', () => {
@@ -1056,20 +980,6 @@ describe('validateCloudInitVariables', () => {
     it('succeeds with valid variables', () => {
       const config = generateCloudInit(baseVariables());
       expect(config).toContain('hostname: sam-test-node');
-    });
-  });
-
-  describe('buildNekoPrePullCmd single-quotes image', () => {
-    it('default image is single-quoted in output', () => {
-      const config = generateCloudInit(baseVariables());
-      expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest'");
-    });
-
-    it('custom image is single-quoted in output', () => {
-      const config = generateCloudInit(baseVariables({
-        nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
-      }));
-      expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
     });
   });
 
@@ -1410,27 +1320,3 @@ describe('integrated size validation in generateCloudInit', () => {
   });
 });
 
-describe('buildNekoPrePullCmd defense-in-depth', () => {
-  it('rejects unsafe docker image via top-level validation', () => {
-    // The defense-in-depth assertion inside buildNekoPrePullCmd (SAFE_DOCKER_IMAGE_RE check)
-    // cannot be tested independently through the public API because generateCloudInit
-    // always runs validateCloudInitVariables first, which catches the same invalid images.
-    // The inner check protects against future refactors that might separate validation
-    // from generation. This test verifies the outer layer catches unsafe images.
-    expect(() => generateCloudInit(baseVariables({
-      nekoImage: '; rm -rf /',
-    }))).toThrow('nekoImage');
-  });
-
-  it('default image is correctly single-quoted in output', () => {
-    const config = generateCloudInit(baseVariables());
-    expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest'");
-  });
-
-  it('custom valid image is correctly single-quoted in output', () => {
-    const config = generateCloudInit(baseVariables({
-      nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
-    }));
-    expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
-  });
-});

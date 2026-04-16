@@ -155,7 +155,7 @@ app.use('*', async (c, next) => {
     log.info('ws_proxy_invalid_subdomain', { hostname, reason: parsed.error });
     return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
   }
-  const { workspaceId, targetPort, sidecar } = parsed;
+  const { workspaceId, targetPort } = parsed;
 
   // Look up workspace routing metadata from D1.
   const db = drizzle(c.env.DATABASE, { schema });
@@ -192,7 +192,6 @@ app.use('*', async (c, next) => {
     nodeId: workspace.nodeId || workspaceId,
     backendHostname,
     targetPort,
-    sidecar,
     method: c.req.raw.method,
     path: url.pathname,
   });
@@ -207,25 +206,6 @@ app.use('*', async (c, next) => {
   vmUrl.protocol = `${vmAgentProtocol}:`;
   vmUrl.hostname = backendHostname;
   vmUrl.port = vmAgentPort;
-
-  // Route sidecar alias requests to the VM agent's sidecar proxy endpoint.
-  // ws-{id}--browser.example.com/foo → {backend}/workspaces/{id}/browser/proxy/foo
-  if (sidecar !== null) {
-    const subPath = url.pathname === '/' ? '' : url.pathname;
-    vmUrl.pathname = `/workspaces/${workspaceId}/${sidecar}/proxy${subPath}`;
-
-    try {
-      const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
-      vmUrl.searchParams.set('token', token);
-    } catch (err) {
-      log.error('sidecar_proxy_token_error', {
-        workspaceId,
-        sidecar,
-        ...serializeError(err),
-      });
-      return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate sidecar proxy token' }, 500);
-    }
-  }
 
   // Route port-specific requests to the VM agent's port proxy endpoint.
   // ws-{id}--3000.example.com/foo → {backend}/workspaces/{id}/ports/3000/foo
