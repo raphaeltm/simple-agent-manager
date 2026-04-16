@@ -1,14 +1,15 @@
 /**
- * AI inference proxy — transparent pass-through to Cloudflare AI Gateway.
+ * AI inference proxy — routes requests through Cloudflare AI Gateway.
  *
- * The AI Gateway provides an OpenAI-compatible endpoint that natively supports
- * tools, streaming, and all chat completion features. This proxy handles
- * SAM-specific concerns (auth, rate limiting, token budgets) and forwards
- * requests transparently — no format translation needed.
+ * The AI Gateway provides an OpenAI-compatible endpoint for Workers AI models.
+ * This proxy handles SAM-specific concerns (auth, rate limiting, token budgets)
+ * and strips model-specific artifacts (e.g., <think> reasoning tags) from
+ * streaming responses before forwarding to OpenCode.
  *
  * Auth: Bearer token in Authorization header (workspace callback token).
  * Rate limit: per-user RPM via KV.
  * Token budget: per-user daily input/output token limits via KV.
+ * Metadata: cf-aig-metadata header for AI Gateway analytics/monitoring.
  *
  * Mount point: app.route('/ai/v1', aiProxyRoutes) in index.ts.
  */
@@ -18,6 +19,7 @@ import {
   DEFAULT_AI_PROXY_MODEL,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
+  DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -71,6 +73,172 @@ function buildUpstreamUrl(env: Env): string {
   }
   // Fallback: Workers AI OpenAI-compatible REST API (no gateway needed)
   return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
+}
+
+// =============================================================================
+// <think> tag stripping — Qwen3 and similar models wrap reasoning in
+// <think>...</think> tags which produce empty visible content when passed
+// through transparently. These helpers strip thinking content from both
+// streaming (SSE) and non-streaming responses.
+// =============================================================================
+
+/** Regex to match <think>...</think> blocks (including across newlines). */
+const THINK_TAG_RE = /<think>[\s\S]*?<\/think>/g;
+
+/**
+ * Strip <think>...</think> content from a string.
+ * Handles both complete tags and trailing unclosed tags.
+ */
+function stripThinkTags(text: string): string {
+  // Strip complete <think>...</think> blocks
+  let result = text.replace(THINK_TAG_RE, '');
+  // Strip unclosed <think> tag and everything after it (partial streaming chunk)
+  const openIdx = result.indexOf('<think>');
+  if (openIdx !== -1) {
+    result = result.slice(0, openIdx);
+  }
+  return result;
+}
+
+/**
+ * Strip <think> tags from a non-streaming chat completion response body.
+ * Returns the modified JSON string, or the original if parsing fails.
+ */
+function stripThinkTagsFromResponse(bodyText: string): string {
+  try {
+    const data = JSON.parse(bodyText);
+    if (data.choices && Array.isArray(data.choices)) {
+      for (const choice of data.choices) {
+        if (choice.message && typeof choice.message.content === 'string') {
+          choice.message.content = stripThinkTags(choice.message.content).trim();
+        }
+      }
+    }
+    return JSON.stringify(data);
+  } catch {
+    return bodyText;
+  }
+}
+
+/**
+ * State machine for stripping <think> tags from an SSE stream.
+ *
+ * Processes `data: {json}` lines from the AI Gateway, removes thinking
+ * content from `choices[].delta.content`, and suppresses chunks that
+ * become empty after stripping. Passes non-data lines (comments, blank
+ * lines, `data: [DONE]`) through unchanged.
+ */
+class ThinkTagStripper {
+  private insideThink = false;
+  private buffer = '';
+
+  /** Process a single SSE data payload. Returns the (possibly modified) line, or null to suppress. */
+  processLine(line: string): string | null {
+    // Pass through non-data lines unchanged
+    if (!line.startsWith('data: ')) return line;
+
+    const payload = line.slice(6).trim();
+    if (payload === '[DONE]') return line;
+
+    try {
+      const data = JSON.parse(payload);
+      if (!data.choices?.[0]?.delta) return line;
+
+      const delta = data.choices[0].delta;
+      if (typeof delta.content !== 'string') return line;
+
+      const content = delta.content;
+
+      // Process the content character by character for state tracking
+      let output = '';
+      for (let i = 0; i < content.length; i++) {
+        if (!this.insideThink) {
+          this.buffer += content[i];
+          // Check if buffer ends with <think>
+          if (this.buffer.endsWith('<think>')) {
+            // Remove the <think> tag from output and enter thinking mode
+            output = output.slice(0, -(('<think>'.length) - 1));
+            this.buffer = '';
+            this.insideThink = true;
+          } else {
+            output += content[i];
+            // Keep buffer bounded — only need enough to detect <think>
+            if (this.buffer.length > 10) {
+              this.buffer = this.buffer.slice(-7);
+            }
+          }
+        } else {
+          this.buffer += content[i];
+          // Check if buffer ends with </think>
+          if (this.buffer.endsWith('</think>')) {
+            this.buffer = '';
+            this.insideThink = false;
+          } else if (this.buffer.length > 10) {
+            // Keep buffer bounded — only need enough to detect </think>
+            this.buffer = this.buffer.slice(-8);
+          }
+        }
+      }
+
+      // If the chunk is entirely thinking content, suppress it
+      if (output.length === 0 && content.length > 0) {
+        return null;
+      }
+
+      // Update the content and re-serialize
+      if (output !== delta.content) {
+        delta.content = output;
+        return `data: ${JSON.stringify(data)}`;
+      }
+
+      return line;
+    } catch {
+      // If JSON parsing fails, pass through unchanged
+      return line;
+    }
+  }
+}
+
+/**
+ * Create a TransformStream that strips <think> tags from an SSE stream.
+ * Each SSE event is processed through the ThinkTagStripper state machine.
+ */
+function createThinkTagStrippingStream(): TransformStream<Uint8Array, Uint8Array> {
+  const stripper = new ThinkTagStripper();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let remainder = '';
+
+  return new TransformStream({
+    transform(chunk, controller) {
+      const text = remainder + decoder.decode(chunk, { stream: true });
+      const lines = text.split('\n');
+
+      // Last element may be incomplete — save it for the next chunk
+      remainder = lines.pop() || '';
+
+      const outputLines: string[] = [];
+      for (const line of lines) {
+        const result = stripper.processLine(line);
+        if (result !== null) {
+          outputLines.push(result);
+        }
+      }
+
+      if (outputLines.length > 0) {
+        controller.enqueue(encoder.encode(outputLines.join('\n') + '\n'));
+      }
+    },
+    flush(controller) {
+      // Process any remaining data
+      if (remainder) {
+        const result = stripper.processLine(remainder);
+        if (result !== null) {
+          controller.enqueue(encoder.encode(result + '\n'));
+        }
+      }
+    },
+  });
 }
 
 /**
@@ -245,7 +413,14 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     gatewayUrl,
   });
 
+  // --- Timeout guard for upstream request ---
+  const streamTimeoutMs = parseInt(c.env.AI_PROXY_STREAM_TIMEOUT_MS || '', 10)
+    || DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS;
+
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), streamTimeoutMs);
+
     const gatewayResponse = await fetch(gatewayUrl, {
       method: 'POST',
       headers: {
@@ -254,7 +429,10 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         'cf-aig-metadata': aigMetadata,
       },
       body: JSON.stringify(gatewayBody),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!gatewayResponse.ok) {
       const errorText = await gatewayResponse.text();
@@ -274,8 +452,6 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       }, gatewayResponse.status as 500);
     }
 
-    // Pass through the response transparently — including streaming SSE.
-    // The Gateway already returns proper OpenAI-format responses.
     log.info('ai_proxy.gateway_response', {
       userId,
       workspaceId,
@@ -296,17 +472,47 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       responseHeaders.set('X-Accel-Buffering', 'no');
     }
 
+    // --- Response transformation: strip <think> tags from model output ---
+    // Some models (Qwen3, etc.) wrap reasoning in <think>...</think> tags.
+    // These produce empty visible content when passed through to OpenCode.
+    if (body.stream && gatewayResponse.body) {
+      // Streaming: pipe through a TransformStream that strips thinking tags from SSE chunks
+      const strippedStream = gatewayResponse.body.pipeThrough(createThinkTagStrippingStream());
+      return new Response(strippedStream, {
+        status: gatewayResponse.status,
+        headers: responseHeaders,
+      });
+    }
+
+    if (!body.stream) {
+      // Non-streaming: parse response, strip thinking tags, re-serialize
+      const responseText = await gatewayResponse.text();
+      const strippedText = stripThinkTagsFromResponse(responseText);
+      return new Response(strippedText, {
+        status: gatewayResponse.status,
+        headers: responseHeaders,
+      });
+    }
+
+    // Fallback: pass through unchanged (no body on streaming response — shouldn't happen)
     return new Response(gatewayResponse.body, {
       status: gatewayResponse.status,
       headers: responseHeaders,
     });
   } catch (err) {
+    const isTimeout = err instanceof DOMException && err.name === 'AbortError';
     log.error('ai_proxy.gateway_fetch_error', {
       userId,
       workspaceId,
       modelId,
-      error: err instanceof Error ? err.message : String(err),
+      error: isTimeout ? `Request timed out after ${streamTimeoutMs}ms` : (err instanceof Error ? err.message : String(err)),
+      isTimeout,
     });
+    if (isTimeout) {
+      return c.json({
+        error: { message: `AI Gateway request timed out after ${streamTimeoutMs / 1000}s`, type: 'timeout_error' },
+      }, 504);
+    }
     return c.json({
       error: { message: 'Failed to reach AI Gateway. Please try again.', type: 'server_error' },
     }, 502);
@@ -330,5 +536,5 @@ aiProxyRoutes.get('/models', async (c) => {
   return c.json({ object: 'list', data: models });
 });
 
-// Export resolveModelId for testing
-export { aiProxyRoutes, resolveModelId };
+// Export for testing
+export { aiProxyRoutes, createThinkTagStrippingStream, resolveModelId, stripThinkTags, stripThinkTagsFromResponse };

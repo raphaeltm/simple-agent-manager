@@ -121,7 +121,7 @@ export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
 /** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var. */
 export const DEFAULT_AI_PROXY_ALLOWED_MODELS =
-  '@cf/meta/llama-4-scout-17b-16e-instruct,@cf/qwen/qwen3-30b-a3b-fp8,@cf/google/gemma-3-12b-it';
+  '@cf/meta/llama-4-scout-17b-16e-instruct,@cf/qwen/qwen3-30b-a3b-fp8,@cf/google/gemma-3-12b-it,@cf/qwen/qwen2.5-coder-32b-instruct';
 
 /** Default daily input token limit per user. Override via AI_PROXY_DAILY_INPUT_TOKEN_LIMIT env var. */
 export const DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT = 500_000;
