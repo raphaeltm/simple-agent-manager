@@ -472,6 +472,11 @@ func (s *Server) SetBootLog(reporter acp.BootLogReporter) {
 // For the boot-time bootstrap path, use the server's configured WorkspaceID.
 // Wire this into the bootlog.Reporter via SetBroadcaster() to enable real-time
 // log delivery during bootstrap/provisioning.
+// GetEventStore returns the event store for external use (e.g., provisioning logging).
+func (s *Server) GetEventStore() *eventstore.Store {
+	return s.eventStore
+}
+
 func (s *Server) GetBootLogBroadcaster() *BootLogBroadcaster {
 	if s.config.WorkspaceID == "" || s.bootLogBroadcasters == nil {
 		return nil

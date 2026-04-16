@@ -9,10 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"fmt"
+
 	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/logging"
+	"github.com/workspace/vm-agent/internal/provision"
 	"github.com/workspace/vm-agent/internal/server"
 )
 
@@ -55,13 +58,37 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start server in goroutine — HTTP is available immediately
+	// Start server in goroutine — HTTP is available immediately.
+	// This means /health responds right away, allowing the control plane
+	// to detect the agent within seconds of boot.
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.Start(); err != nil {
 			errCh <- err
 		}
 	}()
+
+	// Run system provisioning (firewall, Node.js, devcontainer CLI, etc.)
+	// BEFORE workspace bootstrap. This replaces the slow cloud-init runcmd
+	// steps — the agent is already running and heartbeating while this happens.
+	provisionCtx, provisionCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	provisionStatus, provisionErr := provision.Run(provisionCtx, provision.Config{
+		VMAgentPort:      fmt.Sprintf("%d", cfg.Port),
+		CFIPFetchTimeout: "10",
+	}, srv.GetEventStore())
+	provisionCancel()
+
+	if provisionErr != nil {
+		slog.Error("System provisioning failed", "error", provisionErr,
+			"phase", provisionStatus.Phase,
+			"completedSteps", countCompleted(provisionStatus.Steps))
+		// Don't exit — the agent should keep running for diagnostics.
+		// Bootstrap will likely fail (no devcontainer CLI), but the agent
+		// stays up so we can download logs and debug.
+	} else {
+		slog.Info("System provisioning completed",
+			"duration", provisionStatus.CompletedAt.Sub(provisionStatus.StartedAt).Round(time.Millisecond))
+	}
 
 	// Run bootstrap (blocks until workspace is provisioned).
 	// The server is already serving /health and /boot-log/ws during this time.
@@ -96,4 +123,14 @@ func main() {
 	}
 
 	slog.Info("VM Agent stopped")
+}
+
+func countCompleted(steps []provision.Step) int {
+	n := 0
+	for _, s := range steps {
+		if s.Status == "completed" {
+			n++
+		}
+	}
+	return n
 }

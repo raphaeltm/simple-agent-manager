@@ -1,0 +1,338 @@
+// Package provision handles system-level provisioning that was previously done
+// by cloud-init. By running these steps inside the vm-agent, we get:
+//   - Immediate heartbeats (agent starts in ~30s instead of 8-12 min)
+//   - Full observability via the eventstore (every step is logged + downloadable)
+//   - Better error handling (retries, fallbacks, structured logging)
+package provision
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/workspace/vm-agent/internal/eventstore"
+)
+
+// Status tracks the progress of system provisioning.
+type Status struct {
+	mu          sync.RWMutex
+	Phase       string    `json:"phase"`
+	StartedAt   time.Time `json:"startedAt"`
+	CompletedAt time.Time `json:"completedAt,omitempty"`
+	Error       string    `json:"error,omitempty"`
+	Steps       []Step    `json:"steps"`
+}
+
+// Step represents one provisioning step.
+type Step struct {
+	Name        string    `json:"name"`
+	Status      string    `json:"status"` // pending, running, completed, failed, skipped
+	StartedAt   time.Time `json:"startedAt,omitempty"`
+	CompletedAt time.Time `json:"completedAt,omitempty"`
+	DurationMs  int64     `json:"durationMs,omitempty"`
+	Error       string    `json:"error,omitempty"`
+}
+
+func (s *Status) setStep(name, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.Steps {
+		if s.Steps[i].Name == name {
+			s.Steps[i].Status = status
+			if status == "running" {
+				s.Steps[i].StartedAt = time.Now()
+			}
+			if status == "completed" || status == "failed" {
+				s.Steps[i].CompletedAt = time.Now()
+				if !s.Steps[i].StartedAt.IsZero() {
+					s.Steps[i].DurationMs = time.Since(s.Steps[i].StartedAt).Milliseconds()
+				}
+			}
+			return
+		}
+	}
+}
+
+func (s *Status) setStepError(name, errMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.Steps {
+		if s.Steps[i].Name == name {
+			s.Steps[i].Error = errMsg
+			return
+		}
+	}
+}
+
+// GetStatus returns a snapshot of the current provisioning status.
+func (s *Status) GetStatus() Status {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cp := *s
+	cp.Steps = make([]Step, len(s.Steps))
+	copy(cp.Steps, s.Steps)
+	return cp
+}
+
+// Config holds provisioning configuration.
+type Config struct {
+	// VMAgentPort is the port the vm-agent listens on (for firewall rules).
+	VMAgentPort string
+	// CFIPFetchTimeout is the timeout in seconds for fetching Cloudflare IPs.
+	CFIPFetchTimeout string
+	// SkipFirewall skips firewall setup (for testing).
+	SkipFirewall bool
+	// SkipNodeJS skips Node.js installation (if already present).
+	SkipNodeJS bool
+}
+
+// Run executes all system provisioning steps. It is safe to call from a goroutine.
+// Each step is logged to the eventstore for observability.
+func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error) {
+	status := &Status{
+		Phase:     "running",
+		StartedAt: time.Now(),
+		Steps: []Step{
+			{Name: "firewall", Status: "pending"},
+			{Name: "tls-permissions", Status: "pending"},
+			{Name: "nodejs-install", Status: "pending"},
+			{Name: "devcontainer-cli", Status: "pending"},
+			{Name: "image-prepull", Status: "pending"},
+			{Name: "journald-config", Status: "pending"},
+			{Name: "docker-restart", Status: "pending"},
+			{Name: "metadata-block", Status: "pending"},
+		},
+	}
+
+	logStep := func(name, stepStatus, msg string) {
+		slog.Info("provision: "+msg, "step", name, "status", stepStatus)
+		if es != nil {
+			es.Append(eventstore.EventRecord{
+				Level:   "info",
+				Type:    "provision." + name,
+				Message: msg,
+				Detail: map[string]interface{}{
+					"step":   name,
+					"status": stepStatus,
+				},
+			})
+		}
+	}
+
+	runStep := func(name string, fn func(context.Context) error) error {
+		status.setStep(name, "running")
+		logStep(name, "started", "Starting "+name)
+		start := time.Now()
+
+		if err := fn(ctx); err != nil {
+			status.setStep(name, "failed")
+			status.setStepError(name, err.Error())
+			logStep(name, "failed", fmt.Sprintf("%s failed after %s: %s", name, time.Since(start).Round(time.Millisecond), err))
+			return fmt.Errorf("provision step %s failed: %w", name, err)
+		}
+
+		status.setStep(name, "completed")
+		logStep(name, "completed", fmt.Sprintf("%s completed in %s", name, time.Since(start).Round(time.Millisecond)))
+		return nil
+	}
+
+	// Step 1: Firewall (needed for Cloudflare-only access to vm-agent port)
+	if !cfg.SkipFirewall {
+		if err := runStep("firewall", func(ctx context.Context) error {
+			return installFirewall(ctx, cfg.VMAgentPort, cfg.CFIPFetchTimeout)
+		}); err != nil {
+			// Firewall failure is non-fatal — agent can still function, just less secure
+			slog.Warn("Firewall setup failed, continuing without firewall", "error", err)
+		}
+	} else {
+		status.setStep("firewall", "skipped")
+	}
+
+	// Step 2: TLS key permissions
+	if err := runStep("tls-permissions", func(_ context.Context) error {
+		return hardenTLSPermissions()
+	}); err != nil {
+		slog.Warn("TLS permission hardening failed, continuing", "error", err)
+	}
+
+	// Step 3: Node.js install (needed for devcontainer CLI)
+	if !cfg.SkipNodeJS {
+		if err := runStep("nodejs-install", func(ctx context.Context) error {
+			return installNodeJS(ctx)
+		}); err != nil {
+			// Node.js failure is fatal — devcontainer CLI needs it
+			status.Phase = "failed"
+			status.Error = err.Error()
+			return status, err
+		}
+	} else {
+		status.setStep("nodejs-install", "skipped")
+	}
+
+	// Step 4: devcontainer CLI
+	if err := runStep("devcontainer-cli", func(ctx context.Context) error {
+		return installDevcontainerCLI(ctx)
+	}); err != nil {
+		status.Phase = "failed"
+		status.Error = err.Error()
+		return status, err
+	}
+
+	// Step 5: Base image pre-pull (background — don't block)
+	var pullWg sync.WaitGroup
+	pullWg.Add(1)
+	go func() {
+		defer pullWg.Done()
+		status.setStep("image-prepull", "running")
+		logStep("image-prepull", "started", "Starting base image pre-pull (background)")
+		start := time.Now()
+		if err := pullBaseImage(ctx); err != nil {
+			status.setStep("image-prepull", "failed")
+			status.setStepError("image-prepull", err.Error())
+			logStep("image-prepull", "failed", fmt.Sprintf("Image pre-pull failed after %s: %s", time.Since(start).Round(time.Millisecond), err))
+		} else {
+			status.setStep("image-prepull", "completed")
+			logStep("image-prepull", "completed", fmt.Sprintf("Image pre-pull completed in %s", time.Since(start).Round(time.Millisecond)))
+		}
+	}()
+
+	// Step 6: Journald config
+	if err := runStep("journald-config", func(_ context.Context) error {
+		return restartJournald()
+	}); err != nil {
+		slog.Warn("Journald restart failed, continuing", "error", err)
+	}
+
+	// Wait for image pull before Docker restart (restart kills in-progress pulls)
+	pullWg.Wait()
+
+	// Step 7: Docker restart (picks up journald log driver + DNS config)
+	if err := runStep("docker-restart", func(ctx context.Context) error {
+		return restartDocker(ctx)
+	}); err != nil {
+		slog.Warn("Docker restart failed, continuing", "error", err)
+	}
+
+	// Step 8: Metadata block service
+	if err := runStep("metadata-block", func(ctx context.Context) error {
+		return enableMetadataBlock(ctx)
+	}); err != nil {
+		slog.Warn("Metadata block setup failed, continuing", "error", err)
+	}
+
+	status.Phase = "completed"
+	status.CompletedAt = time.Now()
+	totalDuration := time.Since(status.StartedAt).Round(time.Millisecond)
+	logStep("all", "completed", fmt.Sprintf("System provisioning completed in %s", totalDuration))
+
+	return status, nil
+}
+
+// runCommand executes a shell command and returns combined output on failure.
+func runCommand(ctx context.Context, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// runShell executes a shell command string.
+func runShell(ctx context.Context, script string) error {
+	cmd := exec.CommandContext(ctx, "bash", "-c", script)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func installFirewall(ctx context.Context, vmAgentPort, cfIPFetchTimeout string) error {
+	// Install iptables-persistent
+	if err := runShell(ctx, `echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections && `+
+		`echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections && `+
+		`DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent`); err != nil {
+		return fmt.Errorf("iptables-persistent install failed: %w", err)
+	}
+
+	// Run the firewall setup script (written by cloud-init write_files)
+	if _, err := os.Stat("/etc/sam/firewall/setup-firewall.sh"); err == nil {
+		if err := runCommand(ctx, "/etc/sam/firewall/setup-firewall.sh"); err != nil {
+			return fmt.Errorf("firewall setup script failed: %w", err)
+		}
+	} else {
+		slog.Warn("Firewall script not found, skipping", "path", "/etc/sam/firewall/setup-firewall.sh")
+	}
+
+	return nil
+}
+
+func hardenTLSPermissions() error {
+	keyPath := "/etc/sam/tls/origin-ca-key.pem"
+	if _, err := os.Stat(keyPath); err != nil {
+		return nil // No key file, nothing to do
+	}
+	if err := os.Chmod(keyPath, 0600); err != nil {
+		return fmt.Errorf("chmod failed: %w", err)
+	}
+	// chown to root:root
+	if err := os.Chown(keyPath, 0, 0); err != nil {
+		return fmt.Errorf("chown failed: %w", err)
+	}
+	return nil
+}
+
+func installNodeJS(ctx context.Context) error {
+	// Check if already installed
+	if path, err := exec.LookPath("node"); err == nil {
+		out, _ := exec.CommandContext(ctx, path, "--version").Output()
+		slog.Info("Node.js already installed", "version", strings.TrimSpace(string(out)))
+		return nil
+	}
+
+	if err := runShell(ctx, "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"); err != nil {
+		return fmt.Errorf("nodesource setup failed: %w", err)
+	}
+	if err := runShell(ctx, "apt-get install -y nodejs"); err != nil {
+		return fmt.Errorf("nodejs install failed: %w", err)
+	}
+	return nil
+}
+
+func installDevcontainerCLI(ctx context.Context) error {
+	// Check if already installed
+	if _, err := exec.LookPath("devcontainer"); err == nil {
+		slog.Info("devcontainer CLI already installed")
+		return nil
+	}
+
+	if err := runShell(ctx, "npm install -g @devcontainers/cli"); err != nil {
+		return fmt.Errorf("devcontainer CLI install failed: %w", err)
+	}
+	return nil
+}
+
+func pullBaseImage(ctx context.Context) error {
+	return runShell(ctx, "docker pull mcr.microsoft.com/devcontainers/base:ubuntu")
+}
+
+func restartJournald() error {
+	if err := os.MkdirAll("/etc/systemd/journald.conf.d", 0755); err != nil {
+		return err
+	}
+	cmd := exec.Command("systemctl", "restart", "systemd-journald")
+	return cmd.Run()
+}
+
+func restartDocker(ctx context.Context) error {
+	return runCommand(ctx, "systemctl", "restart", "docker")
+}
+
+func enableMetadataBlock(ctx context.Context) error {
+	if err := runCommand(ctx, "systemctl", "daemon-reload"); err != nil {
+		return err
+	}
+	return runCommand(ctx, "systemctl", "enable", "sam-metadata-block.service")
+}
