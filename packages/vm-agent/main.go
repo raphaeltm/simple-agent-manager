@@ -90,6 +90,12 @@ func main() {
 			"duration", provisionStatus.CompletedAt.Sub(provisionStatus.StartedAt).Round(time.Millisecond))
 	}
 
+	// Send node-ready callback AFTER provisioning. This tells the control plane
+	// to start dispatching workspace creation. If we send it earlier (e.g. when
+	// the HTTP server starts), the control plane creates workspaces before Docker
+	// is installed, causing "docker: executable file not found" failures.
+	srv.SendNodeReady()
+
 	// Run bootstrap (blocks until workspace is provisioned).
 	// The server is already serving /health and /boot-log/ws during this time.
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
