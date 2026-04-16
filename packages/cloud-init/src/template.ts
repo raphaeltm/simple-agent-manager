@@ -36,6 +36,34 @@ runcmd:
   - DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
   - /etc/sam/firewall/setup-firewall.sh
 
+  # Install Node.js and devcontainer CLI BEFORE vm-agent starts.
+  # The vm-agent's bootstrap calls waitForCommand("devcontainer") and will
+  # stall until the CLI is available. Installing it first avoids the wait.
+  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g @devcontainers/cli || true
+
+  # Apply journald configuration and restart to pick up new limits
+  - mkdir -p /etc/systemd/journald.conf.d
+  - systemctl restart systemd-journald
+
+  # Restart Docker to pick up journald log driver and DNS configuration.
+  # This MUST happen BEFORE the vm-agent starts. Previously the agent started
+  # first, began a devcontainer build, only to have Docker restart kill the
+  # build mid-flight, wasting the entire first build cycle.
+  - systemctl restart docker
+
+  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
+  # Docker recreates DOCKER-USER on start, so iptables-persistent alone is not enough.
+  - systemctl daemon-reload
+  - systemctl enable sam-metadata-block.service
+
+  # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
+  - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
+
+  # Download and start vm-agent LAST. All prerequisites (Docker final config,
+  # Node.js, devcontainer CLI, firewall, TLS) are ready. The agent no longer
+  # needs to wait for the devcontainer CLI or survive a Docker restart.
   - |
     ARCH=$(uname -m)
     case $ARCH in
@@ -50,7 +78,6 @@ runcmd:
     [Unit]
     Description=VM Agent
     After=network.target docker.service
-    Requires=docker.service
 
     [Service]
     Type=simple
@@ -76,25 +103,6 @@ runcmd:
     systemctl daemon-reload
     systemctl enable vm-agent
     systemctl start vm-agent
-
-  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  - apt-get install -y nodejs
-  - npm install -g @devcontainers/cli || true
-
-  # Apply journald configuration and restart to pick up new limits
-  - mkdir -p /etc/systemd/journald.conf.d
-  - systemctl restart systemd-journald
-
-  # Restart Docker to pick up journald log driver and DNS configuration
-  - systemctl restart docker
-
-  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
-  # Docker recreates DOCKER-USER on start, so iptables-persistent alone is not enough.
-  - systemctl daemon-reload
-  - systemctl enable sam-metadata-block.service
-
-  # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
-  - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
 
 write_files:
   - path: /etc/systemd/journald.conf.d/sam.conf
