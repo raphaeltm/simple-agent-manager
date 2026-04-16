@@ -30,9 +30,6 @@ import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../mi
 import { checkTokenBudget } from '../services/ai-token-budget';
 import { verifyCallbackToken } from '../services/jwt';
 
-/** Default AI Gateway ID. */
-const DEFAULT_AI_GATEWAY_ID = 'sam';
-
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 
 /** Parse allowed models from env or use defaults, normalizing prefixes. */
