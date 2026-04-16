@@ -26,19 +26,22 @@ packages:
   - vim
 
 runcmd:
+  # =====================================================================
+  # PHASE 1: Docker + Firewall + VM Agent (critical path — get heartbeat ASAP)
+  # =====================================================================
+  # The vm-agent MUST start as early as possible so the control plane sees
+  # a heartbeat and can proceed with workspace creation. Everything the
+  # agent needs is: Docker running + firewall allowing Cloudflare traffic.
+  # Node.js, devcontainer CLI, image pulls, and Docker restart are NOT
+  # needed for the agent to start — they run in Phase 2.
+  # =====================================================================
+
   - logger -t sam-boot "PHASE START: docker"
   - systemctl enable docker
   - systemctl start docker
   - usermod -aG docker workspace
   - logger -t sam-boot "PHASE END: docker"
 
-  # Start base image pre-pull in the BACKGROUND immediately after Docker starts.
-  # This runs concurrently with firewall setup, Node.js install, and CLI install,
-  # saving 3-5 minutes compared to doing it sequentially.
-  - logger -t sam-boot "PHASE START: image-prepull (background)"
-  - docker pull mcr.microsoft.com/devcontainers/base:ubuntu > /tmp/image-pull.log 2>&1 &
-
-  # Set up OS-level firewall before VM agent starts
   - logger -t sam-boot "PHASE START: firewall"
   - echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
   - echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
@@ -46,38 +49,9 @@ runcmd:
   - /etc/sam/firewall/setup-firewall.sh
   - logger -t sam-boot "PHASE END: firewall"
 
-  # Install Node.js and devcontainer CLI BEFORE vm-agent starts.
-  - logger -t sam-boot "PHASE START: nodejs-install"
-  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  - apt-get install -y nodejs
-  - logger -t sam-boot "PHASE END: nodejs-install"
-  - logger -t sam-boot "PHASE START: devcontainer-cli-install"
-  - npm install -g @devcontainers/cli || true
-  - logger -t sam-boot "PHASE END: devcontainer-cli-install"
-
-  # Apply journald configuration and restart to pick up new limits
-  - mkdir -p /etc/systemd/journald.conf.d
-  - systemctl restart systemd-journald
-
-  # Wait for background image pull to finish before Docker restart.
-  # Docker restart kills in-progress pulls, so we must wait.
-  - logger -t sam-boot "PHASE START: image-prepull-wait"
-  - wait || true
-  - logger -t sam-boot "PHASE END: image-prepull-wait"
-
-  # Restart Docker to pick up journald log driver and DNS configuration.
-  - logger -t sam-boot "PHASE START: docker-restart"
-  - systemctl restart docker
-  - logger -t sam-boot "PHASE END: docker-restart"
-
-  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
-  - systemctl daemon-reload
-  - systemctl enable sam-metadata-block.service
-
-  # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
+  # Defense-in-depth: enforce TLS key permissions before agent starts
   - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
 
-  # Download and start vm-agent LAST.
   - logger -t sam-boot "PHASE START: vm-agent-download"
   - |
     ARCH=$(uname -m)
@@ -121,6 +95,50 @@ runcmd:
     systemctl enable vm-agent
     systemctl start vm-agent
   - logger -t sam-boot "PHASE END: vm-agent-start"
+
+  # =====================================================================
+  # PHASE 2: Tooling + Docker config (runs AFTER agent is up)
+  # =====================================================================
+  # The vm-agent is now running and heartbeating. These steps prepare
+  # the environment for workspace creation (devcontainer builds).
+  # The vm-agent's bootstrap code polls for `devcontainer` CLI availability,
+  # so it's safe for these to install while the agent is already running.
+  # =====================================================================
+
+  - logger -t sam-boot "PHASE START: nodejs-install"
+  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  - apt-get install -y nodejs
+  - logger -t sam-boot "PHASE END: nodejs-install"
+
+  - logger -t sam-boot "PHASE START: devcontainer-cli-install"
+  - npm install -g @devcontainers/cli || true
+  - logger -t sam-boot "PHASE END: devcontainer-cli-install"
+
+  # Pre-pull base image in background while journald/Docker restart happen
+  - logger -t sam-boot "PHASE START: image-prepull (background)"
+  - docker pull mcr.microsoft.com/devcontainers/base:ubuntu > /tmp/image-pull.log 2>&1 &
+
+  # Apply journald configuration and restart to pick up new limits
+  - mkdir -p /etc/systemd/journald.conf.d
+  - systemctl restart systemd-journald
+
+  # Wait for background image pull to finish before Docker restart.
+  # Docker restart kills in-progress pulls, so we must wait.
+  - logger -t sam-boot "PHASE START: image-prepull-wait"
+  - wait || true
+  - logger -t sam-boot "PHASE END: image-prepull-wait"
+
+  # Restart Docker to pick up journald log driver and DNS configuration.
+  # NOTE: vm-agent survives this restart because it does NOT have
+  # Requires=docker.service — it only has After=docker.service.
+  - logger -t sam-boot "PHASE START: docker-restart"
+  - systemctl restart docker
+  - logger -t sam-boot "PHASE END: docker-restart"
+
+  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
+  - systemctl daemon-reload
+  - systemctl enable sam-metadata-block.service
+
   - logger -t sam-boot "ALL PHASES COMPLETE"
 
 write_files:
