@@ -224,6 +224,16 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   const gatewayBody = { ...body, model: modelId };
   const gatewayUrl = buildUpstreamUrl(c.env);
 
+  // Attach per-user metadata for AI Gateway analytics (max 5 fields).
+  // Enables per-user token usage tracking, cost attribution, and log filtering.
+  const aigMetadata = JSON.stringify({
+    userId,
+    workspaceId,
+    modelId,
+    stream: !!body.stream,
+    hasTools: !!body.tools,
+  });
+
   log.info('ai_proxy.gateway_forward', {
     userId,
     workspaceId,
@@ -241,6 +251,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       headers: {
         'Authorization': `Bearer ${c.env.CF_API_TOKEN}`,
         'Content-Type': 'application/json',
+        'cf-aig-metadata': aigMetadata,
       },
       body: JSON.stringify(gatewayBody),
     });
@@ -272,6 +283,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       status: gatewayResponse.status,
       contentType: gatewayResponse.headers.get('content-type'),
       cfRay: gatewayResponse.headers.get('cf-ray'),
+      aigLogId: gatewayResponse.headers.get('cf-aig-log-id'),
     });
 
     // Build response headers — preserve content-type and streaming headers from Gateway
@@ -316,83 +328,6 @@ aiProxyRoutes.get('/models', async (c) => {
   }));
 
   return c.json({ object: 'list', data: models });
-});
-
-/**
- * POST /test/chat/completions — Unauthenticated test endpoint for AI Gateway.
- *
- * PROTOTYPE ONLY — skips auth, rate limiting, and token budgets.
- * Just forwards to the AI Gateway and returns the response.
- * MUST be removed before merging to main.
- */
-aiProxyRoutes.post('/test/chat/completions', async (c) => {
-  if (c.env.AI_PROXY_ENABLED === 'false') {
-    return c.json({ error: { message: 'AI proxy is disabled', type: 'service_unavailable' } }, 503);
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = await c.req.json() as Record<string, unknown>;
-  } catch {
-    return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
-  }
-
-  const modelId = resolveModelId(body.model as string | undefined, c.env);
-  const gatewayBody = { ...body, model: modelId };
-  const gatewayUrl = buildUpstreamUrl(c.env);
-
-  log.info('ai_proxy.test_forward', {
-    modelId,
-    messageCount: Array.isArray(body.messages) ? body.messages.length : 0,
-    hasTools: !!body.tools,
-    stream: !!body.stream,
-    gatewayUrl,
-  });
-
-  try {
-    const gatewayResponse = await fetch(gatewayUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${c.env.CF_API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(gatewayBody),
-    });
-
-    if (!gatewayResponse.ok) {
-      const errorText = await gatewayResponse.text();
-      log.error('ai_proxy.test_gateway_error', {
-        status: gatewayResponse.status,
-        error: errorText.slice(0, 500),
-        cfRay: gatewayResponse.headers.get('cf-ray'),
-      });
-      return new Response(errorText, {
-        status: gatewayResponse.status,
-        headers: { 'Content-Type': gatewayResponse.headers.get('content-type') || 'application/json' },
-      });
-    }
-
-    const responseHeaders = new Headers();
-    const contentType = gatewayResponse.headers.get('content-type');
-    if (contentType) responseHeaders.set('Content-Type', contentType);
-    if (body.stream) {
-      responseHeaders.set('Cache-Control', 'no-cache');
-      responseHeaders.set('Connection', 'keep-alive');
-      responseHeaders.set('X-Accel-Buffering', 'no');
-    }
-
-    return new Response(gatewayResponse.body, {
-      status: gatewayResponse.status,
-      headers: responseHeaders,
-    });
-  } catch (err) {
-    log.error('ai_proxy.test_gateway_fetch_error', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return c.json({
-      error: { message: `Gateway fetch error: ${err instanceof Error ? err.message : String(err)}`, type: 'server_error' },
-    }, 502);
-  }
 });
 
 // Export resolveModelId for testing
