@@ -64,10 +64,10 @@ describe('provisionNode empty IP guard', () => {
 });
 
 describe('heartbeat IP backfill', () => {
-  const file = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
+  const file = readFileSync(resolve(process.cwd(), 'src/routes/node-lifecycle.ts'), 'utf8');
   const heartbeatSection = file.slice(
-    file.indexOf("nodesRoutes.post('/:id/heartbeat'"),
-    file.indexOf("nodesRoutes.post('/:id/errors'")
+    file.indexOf("nodeLifecycleRoutes.post('/:id/heartbeat'"),
+    file.indexOf("nodeLifecycleRoutes.post('/:id/errors'")
   );
 
   it('checks if node has no IP address stored', () => {
@@ -125,7 +125,7 @@ describe('heartbeat IP backfill', () => {
   });
 
   it('imports updateDNSRecord and createNodeBackendDNSRecord', () => {
-    const imports = file.slice(0, file.indexOf('const nodesRoutes'));
+    const imports = file.slice(0, file.indexOf('const nodeLifecycleRoutes'));
     expect(imports).toContain('updateDNSRecord');
     expect(imports).toContain('createNodeBackendDNSRecord');
   });
