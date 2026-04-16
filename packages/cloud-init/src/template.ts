@@ -45,12 +45,51 @@ runcmd:
     curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}"
     chmod +x /usr/local/bin/vm-agent
 
+  # Install Node.js and devcontainer CLI BEFORE starting the VM agent.
+  # The VM agent needs the devcontainer CLI available to build workspaces.
+  # Installing these first eliminates the race where the agent starts provisioning
+  # while cloud-init is still installing dependencies.
+  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g @devcontainers/cli || true
+
+  # Apply journald configuration and restart to pick up new limits
+  - mkdir -p /etc/systemd/journald.conf.d
+  - systemctl restart systemd-journald
+
+  # Restart Docker to pick up journald log driver and DNS configuration.
+  # This MUST happen before the VM agent starts — previously it ran after,
+  # which killed the agent mid-provisioning (Requires=docker.service).
+  - systemctl restart docker
+
+  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
+  # Docker recreates DOCKER-USER on start, so iptables-persistent alone is not enough.
+  - systemctl daemon-reload
+  - systemctl enable sam-metadata-block.service
+
+  # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
+  - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
+
+  # Download and install the VM agent binary
+  - |
+    ARCH=$(uname -m)
+    case $ARCH in
+      x86_64) ARCH="amd64" ;;
+      aarch64) ARCH="arm64" ;;
+    esac
+    curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}"
+    chmod +x /usr/local/bin/vm-agent
+
+  # Start the VM agent LAST — after all dependencies (Docker, Node.js,
+  # devcontainer CLI) are installed and Docker has been restarted.
+  # This eliminates the race condition where the agent starts provisioning
+  # before cloud-init finishes, only to have Docker restart kill the agent
+  # and interrupt in-progress devcontainer builds.
   - |
     cat > /etc/systemd/system/vm-agent.service << 'UNIT'
     [Unit]
     Description=VM Agent
     After=network.target docker.service
-    Requires=docker.service
 
     [Service]
     Type=simple
@@ -76,28 +115,6 @@ runcmd:
     systemctl daemon-reload
     systemctl enable vm-agent
     systemctl start vm-agent
-
-  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  - apt-get install -y nodejs
-  - npm install -g @devcontainers/cli || true
-
-  # Pre-pull Neko browser sidecar image (optional, controlled by NEKO_PRE_PULL)
-  {{ neko_pre_pull_cmd }}
-
-  # Apply journald configuration and restart to pick up new limits
-  - mkdir -p /etc/systemd/journald.conf.d
-  - systemctl restart systemd-journald
-
-  # Restart Docker to pick up journald log driver and DNS configuration
-  - systemctl restart docker
-
-  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
-  # Docker recreates DOCKER-USER on start, so iptables-persistent alone is not enough.
-  - systemctl daemon-reload
-  - systemctl enable sam-metadata-block.service
-
-  # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
-  - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
 
 write_files:
   - path: /etc/systemd/journald.conf.d/sam.conf

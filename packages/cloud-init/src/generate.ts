@@ -8,9 +8,6 @@ const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 /** Valid hostname: alphanumeric, hyphens, dots */
 const SAFE_HOSTNAME_RE = /^[a-zA-Z0-9.-]+$/;
 
-/** Valid Docker image reference: registry/repo:tag@sha256:digest */
-const SAFE_DOCKER_IMAGE_RE = /^[a-zA-Z0-9][a-zA-Z0-9./:@_-]*$/;
-
 /** Numeric positive integer */
 const NUMERIC_RE = /^[0-9]+$/;
 
@@ -69,11 +66,6 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     const port = Number(variables.vmAgentPort);
     if (!NUMERIC_RE.test(variables.vmAgentPort) || port < 1 || port > 65535) {
       errors.push(`vmAgentPort: must be numeric 1-65535 (got ${JSON.stringify(variables.vmAgentPort)})`);
-    }
-  }
-  if (variables.nekoImage !== undefined && variables.nekoImage !== '') {
-    if (!SAFE_DOCKER_IMAGE_RE.test(variables.nekoImage)) {
-      errors.push(`nekoImage: must match ${SAFE_DOCKER_IMAGE_RE} (got ${JSON.stringify(variables.nekoImage)})`);
     }
   }
   if (variables.cfIpFetchTimeout !== undefined && variables.cfIpFetchTimeout !== '') {
@@ -170,10 +162,6 @@ export interface CloudInitVariables {
   vmAgentPort?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
-  /** Docker image for Neko browser sidecar (default: ghcr.io/m1k1o/neko/google-chrome:latest) */
-  nekoImage?: string;
-  /** Whether to pre-pull the Neko browser image during cloud-init (default: true) */
-  nekoPrePull?: boolean;
 }
 
 /**
@@ -216,7 +204,6 @@ export function generateCloudInit(
     '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
-    '{{ neko_pre_pull_cmd }}': buildNekoPrePullCmd(variables),
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.
@@ -259,23 +246,6 @@ export function indentForYamlBlock(content: string, indent: number): string {
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Build the cloud-init runcmd entry for Neko image pre-pull.
- * Returns an empty comment line if pre-pull is disabled.
- */
-function buildNekoPrePullCmd(variables: CloudInitVariables): string {
-  const prePull = variables.nekoPrePull ?? true;
-  if (!prePull) {
-    return '# Neko pre-pull disabled';
-  }
-  const image = variables.nekoImage ?? 'ghcr.io/m1k1o/neko/google-chrome:latest';
-  // Defense-in-depth: validate image name independently of top-level validation
-  if (!SAFE_DOCKER_IMAGE_RE.test(image)) {
-    throw new Error(`buildNekoPrePullCmd: unsafe Docker image reference: ${JSON.stringify(image)}`);
-  }
-  return `- docker pull '${image}' || true`;
 }
 
 /** Hetzner hard user-data size limit (32KB). */
