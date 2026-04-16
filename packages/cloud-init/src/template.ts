@@ -26,22 +26,30 @@ packages:
   - vim
 
 runcmd:
+  - logger -t sam-boot "PHASE START: docker"
   - systemctl enable docker
   - systemctl start docker
   - usermod -aG docker workspace
+  - logger -t sam-boot "PHASE END: docker"
 
   # Set up OS-level firewall before VM agent starts
+  - logger -t sam-boot "PHASE START: firewall"
   - echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
   - echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
   - DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
   - /etc/sam/firewall/setup-firewall.sh
+  - logger -t sam-boot "PHASE END: firewall"
 
   # Install Node.js and devcontainer CLI BEFORE vm-agent starts.
   # The vm-agent's bootstrap calls waitForCommand("devcontainer") and will
   # stall until the CLI is available. Installing it first avoids the wait.
+  - logger -t sam-boot "PHASE START: nodejs-install"
   - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   - apt-get install -y nodejs
+  - logger -t sam-boot "PHASE END: nodejs-install"
+  - logger -t sam-boot "PHASE START: devcontainer-cli-install"
   - npm install -g @devcontainers/cli || true
+  - logger -t sam-boot "PHASE END: devcontainer-cli-install"
 
   # Apply journald configuration and restart to pick up new limits
   - mkdir -p /etc/systemd/journald.conf.d
@@ -51,7 +59,9 @@ runcmd:
   # This MUST happen BEFORE the vm-agent starts. Previously the agent started
   # first, began a devcontainer build, only to have Docker restart kill the
   # build mid-flight, wasting the entire first build cycle.
+  - logger -t sam-boot "PHASE START: docker-restart"
   - systemctl restart docker
+  - logger -t sam-boot "PHASE END: docker-restart"
 
   # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
   # Docker recreates DOCKER-USER on start, so iptables-persistent alone is not enough.
@@ -61,9 +71,17 @@ runcmd:
   # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
   - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
 
+  # Pre-pull the default devcontainer base image so it is cached when the
+  # vm-agent builds a workspace. Without this, every first workspace on a
+  # node pays the full image download time (~270 MB compressed).
+  - logger -t sam-boot "PHASE START: image-prepull"
+  - docker pull mcr.microsoft.com/devcontainers/base:ubuntu || logger -t sam-boot "WARNING: base image pre-pull failed (non-fatal)"
+  - logger -t sam-boot "PHASE END: image-prepull"
+
   # Download and start vm-agent LAST. All prerequisites (Docker final config,
   # Node.js, devcontainer CLI, firewall, TLS) are ready. The agent no longer
   # needs to wait for the devcontainer CLI or survive a Docker restart.
+  - logger -t sam-boot "PHASE START: vm-agent-download"
   - |
     ARCH=$(uname -m)
     case $ARCH in
@@ -72,7 +90,9 @@ runcmd:
     esac
     curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}"
     chmod +x /usr/local/bin/vm-agent
+  - logger -t sam-boot "PHASE END: vm-agent-download"
 
+  - logger -t sam-boot "PHASE START: vm-agent-start"
   - |
     cat > /etc/systemd/system/vm-agent.service << 'UNIT'
     [Unit]
@@ -103,6 +123,8 @@ runcmd:
     systemctl daemon-reload
     systemctl enable vm-agent
     systemctl start vm-agent
+  - logger -t sam-boot "PHASE END: vm-agent-start"
+  - logger -t sam-boot "ALL PHASES COMPLETE"
 
 write_files:
   - path: /etc/systemd/journald.conf.d/sam.conf
