@@ -3,7 +3,6 @@ import { Activity, Download } from 'lucide-react';
 import { type FC, useCallback, useState } from 'react';
 
 import { downloadNodeEvents, downloadNodeMetrics } from '../../lib/api/nodes';
-
 import { Section } from './Section';
 import { SectionHeader } from './SectionHeader';
 
