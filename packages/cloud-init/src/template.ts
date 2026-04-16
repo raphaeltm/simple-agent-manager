@@ -11,6 +11,11 @@
  */
 export const CLOUD_INIT_TEMPLATE = `#cloud-config
 
+# Skip default apt-get update/upgrade — the vm-agent handles package installs.
+# Without this, cloud-init blocks runcmd for 5-10 min on apt operations.
+package_update: false
+package_upgrade: false
+
 hostname: {{ hostname }}
 
 users:
@@ -35,14 +40,18 @@ runcmd:
       x86_64) ARCH="amd64" ;;
       aarch64) ARCH="arm64" ;;
     esac
-    curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}"
+    logger -t sam-boot "Downloading vm-agent for arch=$ARCH"
+    curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}" 2>&1 | logger -t sam-boot
     chmod +x /usr/local/bin/vm-agent
+    logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
   - logger -t sam-boot "PHASE END: vm-agent-download"
 
   - logger -t sam-boot "PHASE START: vm-agent-start"
+  - logger -t sam-boot "Unit file exists=$(test -f /etc/systemd/system/vm-agent.service && echo yes || echo no)"
   - systemctl daemon-reload
   - systemctl enable vm-agent
   - systemctl start vm-agent
+  - logger -t sam-boot "vm-agent service status=$(systemctl is-active vm-agent 2>&1)"
   - logger -t sam-boot "PHASE END: vm-agent-start"
   - logger -t sam-boot "ALL PHASES COMPLETE"
 
