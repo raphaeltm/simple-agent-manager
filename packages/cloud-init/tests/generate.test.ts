@@ -406,31 +406,9 @@ describe('generateCloudInit', () => {
       expect(cronJob.content).toContain('/etc/sam/firewall/setup-firewall.sh');
     });
 
-    it('runcmd includes iptables-persistent install and firewall setup', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.join('\n');
-      expect(runcmdStr).toContain('iptables-persistent');
-      expect(runcmdStr).toContain('/etc/sam/firewall/setup-firewall.sh');
-    });
-
-    it('firewall setup runs before VM agent start in runcmd order', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const firewallCmdIdx = runcmd.findIndex((cmd: string) =>
-        typeof cmd === 'string' && cmd.includes('setup-firewall.sh')
-      );
-      const agentStartIdx = runcmd.findIndex((cmd: string) =>
-        typeof cmd === 'string' && cmd.includes('systemctl start vm-agent')
-      );
-      expect(firewallCmdIdx).toBeGreaterThan(-1);
-      expect(agentStartIdx).toBeGreaterThan(-1);
-      expect(firewallCmdIdx).toBeLessThan(agentStartIdx);
-    });
+    // NOTE: Firewall install and setup are now handled by the vm-agent's
+    // provision package, not cloud-init runcmd. The firewall script is still
+    // written to disk via write_files for the agent to execute.
 
     it('firewall script uses custom vmAgentPort override', () => {
       const config = generateCloudInit(baseVariables({ vmAgentPort: '9999' }));
@@ -486,16 +464,7 @@ describe('generateCloudInit', () => {
       expect(firewallScript.content).toContain('ip6tables -P INPUT DROP');
     });
 
-    it('runcmd includes debconf preseed before iptables-persistent install', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain('debconf-set-selections');
-      expect(runcmdStr).toContain('iptables-persistent/autosave_v4');
-      expect(runcmdStr).toContain('iptables-persistent/autosave_v6');
-    });
+    // NOTE: debconf preseed is now handled by vm-agent provision package.
 
     it('config with firewall stays within 32KB Hetzner limit', () => {
       const config = generateCloudInit(baseVariables({
@@ -611,41 +580,10 @@ describe('generateCloudInit', () => {
       expect(content).toContain('RemainAfterExit=yes');
     });
 
-    it('runcmd enables sam-metadata-block service', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain('systemctl enable sam-metadata-block.service');
-    });
+    // NOTE: metadata block service enable is now handled by vm-agent provision package.
   });
 
-  describe('TLS key permission hardening', () => {
-    it('runcmd includes chmod/chown for TLS key as defense-in-depth', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }));
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain('chmod 600 /etc/sam/tls/origin-ca-key.pem');
-      expect(runcmdStr).toContain('chown root:root /etc/sam/tls/origin-ca-key.pem');
-    });
-
-    it('TLS key hardening runcmd includes test -f guard and || true fallback', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      // Guard: only runs chmod/chown if file exists; || true prevents script abort
-      expect(runcmdStr).toContain('test -f /etc/sam/tls/origin-ca-key.pem');
-      expect(runcmdStr).toMatch(/test -f.*origin-ca-key\.pem.*\|\| true/);
-    });
-  });
+  // TLS key permission hardening is now handled by vm-agent provision package.
 
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {

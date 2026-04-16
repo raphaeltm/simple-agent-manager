@@ -89,6 +89,8 @@ type Config struct {
 	SkipFirewall bool
 	// SkipNodeJS skips Node.js installation (if already present).
 	SkipNodeJS bool
+	// SkipDocker skips Docker installation (for testing).
+	SkipDocker bool
 }
 
 // Run executes all system provisioning steps. It is safe to call from a goroutine.
@@ -98,6 +100,8 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		Phase:     "running",
 		StartedAt: time.Now(),
 		Steps: []Step{
+			{Name: "packages", Status: "pending"},
+			{Name: "docker", Status: "pending"},
 			{Name: "firewall", Status: "pending"},
 			{Name: "tls-permissions", Status: "pending"},
 			{Name: "nodejs-install", Status: "pending"},
@@ -141,26 +145,46 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		return nil
 	}
 
-	// Step 1: Firewall (needed for Cloudflare-only access to vm-agent port)
+	// Step 1: Install basic packages (git, jq, etc.)
+	if err := runStep("packages", func(ctx context.Context) error {
+		return installPackages(ctx)
+	}); err != nil {
+		slog.Warn("Package installation failed, continuing", "error", err)
+	}
+
+	// Step 2: Docker install + start (needed for devcontainers)
+	if !cfg.SkipDocker {
+		if err := runStep("docker", func(ctx context.Context) error {
+			return installDocker(ctx)
+		}); err != nil {
+			// Docker failure is fatal — everything depends on it
+			status.Phase = "failed"
+			status.Error = err.Error()
+			return status, err
+		}
+	} else {
+		status.setStep("docker", "skipped")
+	}
+
+	// Step 3: Firewall (needed for Cloudflare-only access to vm-agent port)
 	if !cfg.SkipFirewall {
 		if err := runStep("firewall", func(ctx context.Context) error {
 			return installFirewall(ctx, cfg.VMAgentPort, cfg.CFIPFetchTimeout)
 		}); err != nil {
-			// Firewall failure is non-fatal — agent can still function, just less secure
 			slog.Warn("Firewall setup failed, continuing without firewall", "error", err)
 		}
 	} else {
 		status.setStep("firewall", "skipped")
 	}
 
-	// Step 2: TLS key permissions
+	// Step 4: TLS key permissions
 	if err := runStep("tls-permissions", func(_ context.Context) error {
 		return hardenTLSPermissions()
 	}); err != nil {
 		slog.Warn("TLS permission hardening failed, continuing", "error", err)
 	}
 
-	// Step 3: Node.js install (needed for devcontainer CLI)
+	// Step 5: Node.js install (needed for devcontainer CLI)
 	if !cfg.SkipNodeJS {
 		if err := runStep("nodejs-install", func(ctx context.Context) error {
 			return installNodeJS(ctx)
@@ -174,7 +198,7 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		status.setStep("nodejs-install", "skipped")
 	}
 
-	// Step 4: devcontainer CLI
+	// Step 6: devcontainer CLI
 	if err := runStep("devcontainer-cli", func(ctx context.Context) error {
 		return installDevcontainerCLI(ctx)
 	}); err != nil {
@@ -183,7 +207,7 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		return status, err
 	}
 
-	// Step 5: Base image pre-pull (background — don't block)
+	// Step 7: Base image pre-pull (background — don't block)
 	var pullWg sync.WaitGroup
 	pullWg.Add(1)
 	go func() {
@@ -201,7 +225,7 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		}
 	}()
 
-	// Step 6: Journald config
+	// Step 8: Journald config
 	if err := runStep("journald-config", func(_ context.Context) error {
 		return restartJournald()
 	}); err != nil {
@@ -211,14 +235,14 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 	// Wait for image pull before Docker restart (restart kills in-progress pulls)
 	pullWg.Wait()
 
-	// Step 7: Docker restart (picks up journald log driver + DNS config)
+	// Step 9: Docker restart (picks up journald log driver + DNS config)
 	if err := runStep("docker-restart", func(ctx context.Context) error {
 		return restartDocker(ctx)
 	}); err != nil {
 		slog.Warn("Docker restart failed, continuing", "error", err)
 	}
 
-	// Step 8: Metadata block service
+	// Step 10: Metadata block service
 	if err := runStep("metadata-block", func(ctx context.Context) error {
 		return enableMetadataBlock(ctx)
 	}); err != nil {
@@ -247,6 +271,41 @@ func runShell(ctx context.Context, script string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func installPackages(ctx context.Context) error {
+	// Install basic utilities needed for provisioning and workspace operations.
+	// Docker is handled separately in installDocker().
+	return runShell(ctx, "DEBIAN_FRONTEND=noninteractive apt-get update -qq && "+
+		"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git curl wget jq htop vim")
+}
+
+func installDocker(ctx context.Context) error {
+	// Check if already installed
+	if _, err := exec.LookPath("docker"); err == nil {
+		slog.Info("Docker already installed")
+		// Just make sure it's running
+		_ = runCommand(ctx, "systemctl", "enable", "docker")
+		_ = runCommand(ctx, "systemctl", "start", "docker")
+		return nil
+	}
+
+	if err := runShell(ctx, "DEBIAN_FRONTEND=noninteractive apt-get update -qq && "+
+		"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io docker-compose"); err != nil {
+		return fmt.Errorf("docker install failed: %w", err)
+	}
+
+	if err := runCommand(ctx, "systemctl", "enable", "docker"); err != nil {
+		return fmt.Errorf("docker enable failed: %w", err)
+	}
+	if err := runCommand(ctx, "systemctl", "start", "docker"); err != nil {
+		return fmt.Errorf("docker start failed: %w", err)
+	}
+
+	// Add workspace user to docker group
+	_ = runCommand(ctx, "usermod", "-aG", "docker", "workspace")
+
+	return nil
 }
 
 func installFirewall(ctx context.Context, vmAgentPort, cfIPFetchTimeout string) error {
