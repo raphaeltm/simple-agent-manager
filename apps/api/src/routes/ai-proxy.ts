@@ -61,10 +61,19 @@ function resolveModelId(model: string | undefined, env: Env): string {
   return normalizeModelId(model);
 }
 
-/** Build the AI Gateway URL for Workers AI chat completions. */
-function buildGatewayUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID || DEFAULT_AI_GATEWAY_ID;
-  return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
+/**
+ * Build the upstream URL for Workers AI chat completions.
+ *
+ * When AI_GATEWAY_ID is set, routes through the AI Gateway for caching,
+ * logging, and analytics. Otherwise falls back to the Workers AI REST API.
+ */
+function buildUpstreamUrl(env: Env): string {
+  const gatewayId = env.AI_GATEWAY_ID;
+  if (gatewayId) {
+    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
+  }
+  // Fallback: Workers AI OpenAI-compatible REST API (no gateway needed)
+  return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
 }
 
 /**
@@ -216,7 +225,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   // Set the resolved model in the body and forward everything else as-is.
   // The Gateway handles tools, tool_choice, streaming, temperature, etc. natively.
   const gatewayBody = { ...body, model: modelId };
-  const gatewayUrl = buildGatewayUrl(c.env);
+  const gatewayUrl = buildUpstreamUrl(c.env);
 
   log.info('ai_proxy.gateway_forward', {
     userId,
@@ -333,7 +342,7 @@ aiProxyRoutes.post('/test/chat/completions', async (c) => {
 
   const modelId = resolveModelId(body.model as string | undefined, c.env);
   const gatewayBody = { ...body, model: modelId };
-  const gatewayUrl = buildGatewayUrl(c.env);
+  const gatewayUrl = buildUpstreamUrl(c.env);
 
   log.info('ai_proxy.test_forward', {
     modelId,
