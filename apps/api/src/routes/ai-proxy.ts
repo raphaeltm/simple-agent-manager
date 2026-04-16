@@ -259,11 +259,12 @@ function estimateInputTokens(messages: Array<{ role: string; content: unknown }>
 }
 
 /**
- * POST /chat/completions — Transparent proxy to Cloudflare AI Gateway.
+ * POST /chat/completions — Proxy to Cloudflare AI Gateway with think-tag stripping.
  *
  * Accepts the full OpenAI chat completions format (messages, tools, tool_choice,
- * stream, temperature, etc.) and forwards it to the AI Gateway. The response is
- * streamed back without modification.
+ * stream, temperature, etc.) and forwards it to the AI Gateway. Streaming responses
+ * are piped through ThinkTagStripper to remove model reasoning artifacts.
+ * Non-streaming responses have think tags stripped via regex.
  */
 aiProxyRoutes.post('/chat/completions', async (c) => {
   // Kill switch
