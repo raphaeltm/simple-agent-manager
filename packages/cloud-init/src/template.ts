@@ -32,6 +32,12 @@ runcmd:
   - usermod -aG docker workspace
   - logger -t sam-boot "PHASE END: docker"
 
+  # Start base image pre-pull in the BACKGROUND immediately after Docker starts.
+  # This runs concurrently with firewall setup, Node.js install, and CLI install,
+  # saving 3-5 minutes compared to doing it sequentially.
+  - logger -t sam-boot "PHASE START: image-prepull (background)"
+  - docker pull mcr.microsoft.com/devcontainers/base:ubuntu > /tmp/image-pull.log 2>&1 &
+
   # Set up OS-level firewall before VM agent starts
   - logger -t sam-boot "PHASE START: firewall"
   - echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
@@ -41,8 +47,6 @@ runcmd:
   - logger -t sam-boot "PHASE END: firewall"
 
   # Install Node.js and devcontainer CLI BEFORE vm-agent starts.
-  # The vm-agent's bootstrap calls waitForCommand("devcontainer") and will
-  # stall until the CLI is available. Installing it first avoids the wait.
   - logger -t sam-boot "PHASE START: nodejs-install"
   - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   - apt-get install -y nodejs
@@ -55,32 +59,25 @@ runcmd:
   - mkdir -p /etc/systemd/journald.conf.d
   - systemctl restart systemd-journald
 
+  # Wait for background image pull to finish before Docker restart.
+  # Docker restart kills in-progress pulls, so we must wait.
+  - logger -t sam-boot "PHASE START: image-prepull-wait"
+  - wait || true
+  - logger -t sam-boot "PHASE END: image-prepull-wait"
+
   # Restart Docker to pick up journald log driver and DNS configuration.
-  # This MUST happen BEFORE the vm-agent starts. Previously the agent started
-  # first, began a devcontainer build, only to have Docker restart kill the
-  # build mid-flight, wasting the entire first build cycle.
   - logger -t sam-boot "PHASE START: docker-restart"
   - systemctl restart docker
   - logger -t sam-boot "PHASE END: docker-restart"
 
   # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
-  # Docker recreates DOCKER-USER on start, so iptables-persistent alone is not enough.
   - systemctl daemon-reload
   - systemctl enable sam-metadata-block.service
 
   # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
   - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
 
-  # Pre-pull the default devcontainer base image so it is cached when the
-  # vm-agent builds a workspace. Without this, every first workspace on a
-  # node pays the full image download time (~270 MB compressed).
-  - logger -t sam-boot "PHASE START: image-prepull"
-  - docker pull mcr.microsoft.com/devcontainers/base:ubuntu || logger -t sam-boot "WARNING: base image pre-pull failed (non-fatal)"
-  - logger -t sam-boot "PHASE END: image-prepull"
-
-  # Download and start vm-agent LAST. All prerequisites (Docker final config,
-  # Node.js, devcontainer CLI, firewall, TLS) are ready. The agent no longer
-  # needs to wait for the devcontainer CLI or survive a Docker restart.
+  # Download and start vm-agent LAST.
   - logger -t sam-boot "PHASE START: vm-agent-download"
   - |
     ARCH=$(uname -m)
