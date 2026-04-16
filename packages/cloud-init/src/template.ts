@@ -26,16 +26,60 @@ packages:
   - vim
 
 runcmd:
+  - logger -t sam-boot "PHASE START: docker"
   - systemctl enable docker
   - systemctl start docker
   - usermod -aG docker workspace
+  - logger -t sam-boot "PHASE END: docker"
+
+  # Start base image pre-pull in the BACKGROUND immediately after Docker starts.
+  # This runs concurrently with firewall setup, Node.js install, and CLI install,
+  # saving 3-5 minutes compared to doing it sequentially.
+  - logger -t sam-boot "PHASE START: image-prepull (background)"
+  - docker pull mcr.microsoft.com/devcontainers/base:ubuntu > /tmp/image-pull.log 2>&1 &
 
   # Set up OS-level firewall before VM agent starts
+  - logger -t sam-boot "PHASE START: firewall"
   - echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
   - echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
   - DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
   - /etc/sam/firewall/setup-firewall.sh
+  - logger -t sam-boot "PHASE END: firewall"
 
+  # Install Node.js and devcontainer CLI BEFORE vm-agent starts.
+  - logger -t sam-boot "PHASE START: nodejs-install"
+  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  - apt-get install -y nodejs
+  - logger -t sam-boot "PHASE END: nodejs-install"
+  - logger -t sam-boot "PHASE START: devcontainer-cli-install"
+  - npm install -g @devcontainers/cli || true
+  - logger -t sam-boot "PHASE END: devcontainer-cli-install"
+
+  # Apply journald configuration and restart to pick up new limits
+  - mkdir -p /etc/systemd/journald.conf.d
+  - systemctl restart systemd-journald
+
+  # Wait for background image pull to finish before Docker restart.
+  # Docker restart kills in-progress pulls, so we must wait.
+  - logger -t sam-boot "PHASE START: image-prepull-wait"
+  - wait || true
+  - logger -t sam-boot "PHASE END: image-prepull-wait"
+
+  # Restart Docker to pick up journald log driver and DNS configuration.
+  - logger -t sam-boot "PHASE START: docker-restart"
+  - systemctl restart docker
+  - logger -t sam-boot "PHASE END: docker-restart"
+
+  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
+  - systemctl daemon-reload
+  - systemctl enable sam-metadata-block.service
+
+  # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
+  - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
+
+  # Download and start vm-agent LAST. All prerequisites (Docker, Node.js,
+  # devcontainer CLI, firewall, TLS, base image) are ready.
+  - logger -t sam-boot "PHASE START: vm-agent-download"
   - |
     ARCH=$(uname -m)
     case $ARCH in
@@ -44,13 +88,14 @@ runcmd:
     esac
     curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}"
     chmod +x /usr/local/bin/vm-agent
+  - logger -t sam-boot "PHASE END: vm-agent-download"
 
+  - logger -t sam-boot "PHASE START: vm-agent-start"
   - |
     cat > /etc/systemd/system/vm-agent.service << 'UNIT'
     [Unit]
     Description=VM Agent
     After=network.target docker.service
-    Requires=docker.service
 
     [Service]
     Type=simple
@@ -76,28 +121,8 @@ runcmd:
     systemctl daemon-reload
     systemctl enable vm-agent
     systemctl start vm-agent
-
-  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  - apt-get install -y nodejs
-  - npm install -g @devcontainers/cli || true
-
-  # Pre-pull Neko browser sidecar image (optional, controlled by NEKO_PRE_PULL)
-  {{ neko_pre_pull_cmd }}
-
-  # Apply journald configuration and restart to pick up new limits
-  - mkdir -p /etc/systemd/journald.conf.d
-  - systemctl restart systemd-journald
-
-  # Restart Docker to pick up journald log driver and DNS configuration
-  - systemctl restart docker
-
-  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
-  # Docker recreates DOCKER-USER on start, so iptables-persistent alone is not enough.
-  - systemctl daemon-reload
-  - systemctl enable sam-metadata-block.service
-
-  # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
-  - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
+  - logger -t sam-boot "PHASE END: vm-agent-start"
+  - logger -t sam-boot "ALL PHASES COMPLETE"
 
 write_files:
   - path: /etc/systemd/journald.conf.d/sam.conf
