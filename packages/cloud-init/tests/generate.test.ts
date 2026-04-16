@@ -197,6 +197,41 @@ describe('generateCloudInit', () => {
       expect(serviceSection).toContain('Environment=PROJECT_ID=proj-123');
       expect(serviceSection).toContain('Environment=CHAT_SESSION_ID=sess-456');
     });
+
+    it('systemd unit file is in write_files, not a heredoc in runcmd', () => {
+      // Regression test: the systemd unit file MUST be in write_files, not created
+      // via a bash heredoc in runcmd. Heredocs inside cloud-init YAML block scalars
+      // have indented closing delimiters, which bash treats as content (not terminators).
+      // This caused the agent to never start on real VMs.
+      const config = generateCloudInit(baseVariables());
+      const yamlContent = config.replace(/^#cloud-config\n/, '');
+      const parsed = YAML.parse(yamlContent);
+
+      // Unit file must exist in write_files
+      const unitFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+      );
+      expect(unitFile).toBeDefined();
+      expect(unitFile.content).toContain('[Unit]');
+      expect(unitFile.content).toContain('[Service]');
+      expect(unitFile.content).toContain('ExecStart=/usr/local/bin/vm-agent');
+
+      // Unit file content must NOT have leading spaces on section headers
+      // (cloud-init strips YAML block indentation, so the content should be clean)
+      const lines = unitFile.content.split('\n');
+      const sectionHeaders = lines.filter((l: string) => l.match(/^\s*\[/));
+      for (const header of sectionHeaders) {
+        expect(header).toBe(header.trimStart());
+      }
+
+      // runcmd must NOT contain any heredoc (cat << or cat <<-)
+      const runcmdSection = config.split('runcmd:')[1]?.split('write_files:')[0] ?? '';
+      expect(runcmdSection).not.toContain('<<');
+      expect(runcmdSection).not.toContain('cat >');
+
+      // runcmd MUST contain systemctl start
+      expect(runcmdSection).toContain('systemctl start vm-agent');
+    });
   });
 
   describe('TLS certificate injection', () => {

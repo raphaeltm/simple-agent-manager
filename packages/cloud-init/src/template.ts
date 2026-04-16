@@ -40,40 +40,41 @@ runcmd:
   - logger -t sam-boot "PHASE END: vm-agent-download"
 
   - logger -t sam-boot "PHASE START: vm-agent-start"
-  - |
-    cat > /etc/systemd/system/vm-agent.service << 'UNIT'
-    [Unit]
-    Description=VM Agent
-    After=network.target
-
-    [Service]
-    Type=simple
-    User=root
-    Environment=NODE_ID={{ node_id }}
-    Environment=CONTROL_PLANE_URL={{ control_plane_url }}
-    Environment=JWKS_ENDPOINT={{ jwks_url }}
-    Environment=CALLBACK_TOKEN={{ callback_token }}
-    Environment=PROJECT_ID={{ project_id }}
-    Environment=CHAT_SESSION_ID={{ chat_session_id }}
-    Environment=TASK_ID={{ task_id }}
-    Environment=TASK_MODE={{ task_mode }}
-    Environment=VM_AGENT_PORT={{ vm_agent_port }}
-    Environment=TLS_CERT_PATH={{ tls_cert_path }}
-    Environment=TLS_KEY_PATH={{ tls_key_path }}
-    ExecStart=/usr/local/bin/vm-agent
-    Restart=always
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-    UNIT
-    systemctl daemon-reload
-    systemctl enable vm-agent
-    systemctl start vm-agent
+  - systemctl daemon-reload
+  - systemctl enable vm-agent
+  - systemctl start vm-agent
   - logger -t sam-boot "PHASE END: vm-agent-start"
   - logger -t sam-boot "ALL PHASES COMPLETE"
 
 write_files:
+  - path: /etc/systemd/system/vm-agent.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=VM Agent
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      Environment=NODE_ID={{ node_id }}
+      Environment=CONTROL_PLANE_URL={{ control_plane_url }}
+      Environment=JWKS_ENDPOINT={{ jwks_url }}
+      Environment=CALLBACK_TOKEN={{ callback_token }}
+      Environment=PROJECT_ID={{ project_id }}
+      Environment=CHAT_SESSION_ID={{ chat_session_id }}
+      Environment=TASK_ID={{ task_id }}
+      Environment=TASK_MODE={{ task_mode }}
+      Environment=VM_AGENT_PORT={{ vm_agent_port }}
+      Environment=TLS_CERT_PATH={{ tls_cert_path }}
+      Environment=TLS_KEY_PATH={{ tls_key_path }}
+      ExecStart=/usr/local/bin/vm-agent
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+
   - path: /etc/workspace/config.json
     content: |
       {
