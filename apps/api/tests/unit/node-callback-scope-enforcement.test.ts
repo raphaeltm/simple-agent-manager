@@ -87,6 +87,10 @@ vi.mock('../../src/services/limits', () => ({
   getRuntimeLimits: vi.fn().mockReturnValue({ maxNodesPerUser: 10, nodeHeartbeatStaleSeconds: 180 }),
 }));
 
+vi.mock('../../src/services/project-data', () => ({
+  updateNodeHeartbeats: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../src/middleware/node-auth', () => ({
   requireNodeOwnership: vi.fn().mockResolvedValue({
     id: 'node-test',
@@ -98,8 +102,10 @@ vi.mock('../../src/middleware/node-auth', () => ({
 
 async function createTestApp() {
   const { nodesRoutes } = await import('../../src/routes/nodes');
+  const { nodeLifecycleRoutes } = await import('../../src/routes/node-lifecycle');
   const app = new Hono();
   app.route('/api/nodes', nodesRoutes);
+  app.route('/api/nodes', nodeLifecycleRoutes);
   app.onError((err, c) => {
     if (err instanceof AppError) {
       return c.json(err.toJSON(), err.statusCode as 401 | 403 | 404 | 500);

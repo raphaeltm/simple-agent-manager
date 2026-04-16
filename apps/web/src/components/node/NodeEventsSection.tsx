@@ -1,7 +1,8 @@
 import type { Event } from '@simple-agent-manager/shared';
-import { Activity } from 'lucide-react';
-import type { FC } from 'react';
+import { Activity, Download } from 'lucide-react';
+import { type FC, useCallback, useState } from 'react';
 
+import { downloadNodeEvents, downloadNodeMetrics } from '../../lib/api/nodes';
 import { Section } from './Section';
 import { SectionHeader } from './SectionHeader';
 
@@ -10,6 +11,7 @@ interface NodeEventsSectionProps {
   error?: string | null;
   onRetry?: () => void;
   nodeStatus?: string;
+  nodeId?: string;
 }
 
 function formatEventTime(iso: string): string {
@@ -29,7 +31,36 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
   error,
   onRetry,
   nodeStatus,
+  nodeId,
 }) => {
+  const [downloading, setDownloading] = useState<'events' | 'metrics' | null>(null);
+
+  const handleDownloadEvents = useCallback(async () => {
+    if (!nodeId || downloading) return;
+    setDownloading('events');
+    try {
+      await downloadNodeEvents(nodeId);
+    } catch {
+      // Best-effort download — error is visible from browser download UI
+    } finally {
+      setDownloading(null);
+    }
+  }, [nodeId, downloading]);
+
+  const handleDownloadMetrics = useCallback(async () => {
+    if (!nodeId || downloading) return;
+    setDownloading('metrics');
+    try {
+      await downloadNodeMetrics(nodeId);
+    } catch {
+      // Best-effort download
+    } finally {
+      setDownloading(null);
+    }
+  }, [nodeId, downloading]);
+
+  const isRunning = nodeStatus === 'running';
+
   return (
     <Section>
       <SectionHeader
@@ -37,6 +68,40 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
         iconBg="rgba(159, 183, 174, 0.15)"
         title="Events"
         description={`${events.length} recent event${events.length !== 1 ? 's' : ''}`}
+        actions={
+          isRunning && nodeId ? (
+            <div className="flex gap-1">
+              <button
+                onClick={handleDownloadEvents}
+                disabled={downloading !== null}
+                className="flex items-center gap-1 px-2 py-1 rounded-sm bg-transparent cursor-pointer disabled:opacity-50"
+                style={{
+                  fontSize: 'var(--sam-type-caption-size)',
+                  border: '1px solid var(--sam-color-border-default)',
+                  color: 'var(--sam-color-fg-muted)',
+                }}
+                title="Download events database"
+              >
+                <Download size={12} />
+                {downloading === 'events' ? 'Downloading...' : 'Events DB'}
+              </button>
+              <button
+                onClick={handleDownloadMetrics}
+                disabled={downloading !== null}
+                className="flex items-center gap-1 px-2 py-1 rounded-sm bg-transparent cursor-pointer disabled:opacity-50"
+                style={{
+                  fontSize: 'var(--sam-type-caption-size)',
+                  border: '1px solid var(--sam-color-border-default)',
+                  color: 'var(--sam-color-fg-muted)',
+                }}
+                title="Download metrics database"
+              >
+                <Download size={12} />
+                {downloading === 'metrics' ? 'Downloading...' : 'Metrics DB'}
+              </button>
+            </div>
+          ) : undefined
+        }
       />
 
       {nodeStatus && nodeStatus !== 'running' ? (

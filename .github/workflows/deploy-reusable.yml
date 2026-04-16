@@ -255,6 +255,14 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
 
+      - name: Configure AI Gateway
+        if: ${{ inputs.dry_run != true }}
+        run: bash scripts/deploy/configure-ai-gateway.sh
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AI_GATEWAY_ID: ${{ vars.RESOURCE_PREFIX || 'sam' }}
+
       - name: Check First Deploy Status
         id: first_deploy
         if: ${{ inputs.dry_run != true }}

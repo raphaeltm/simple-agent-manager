@@ -142,6 +142,9 @@ type Config struct {
 
 	// Persistence settings - configurable per constitution principle XI
 	PersistenceDBPath string // SQLite database path for session state persistence
+	EventStoreDBPath  string // SQLite database path for persistent event logs
+	MetricsDBPath     string // SQLite database path for resource metrics snapshots
+	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
 
 	// Git integration settings - configurable per constitution principle XI
 	GitExecTimeout           time.Duration // Timeout for git commands via docker exec (default: 30s)
@@ -195,33 +198,6 @@ type Config struct {
 	PortScanExclude      string        // Comma-separated ports to exclude (env: PORT_SCAN_EXCLUDE, default: "22,2375,2376,8443")
 	PortScanEphemeralMin int           // Min ephemeral port to exclude (env: PORT_SCAN_EPHEMERAL_MIN, default: 32768)
 	PortProxyCacheTTL    time.Duration // Bridge IP cache TTL (env: PORT_PROXY_CACHE_TTL, default: 30s)
-
-	// Neko browser sidecar settings - configurable per constitution principle XI
-	NekoImage             string        // Docker image for Neko browser (env: NEKO_IMAGE, default: ghcr.io/m1k1o/neko/google-chrome:latest)
-	NekoScreenResolution  string        // Default screen resolution (env: NEKO_SCREEN_RESOLUTION, default: 1920x1080)
-	NekoMaxFPS            int           // Max WebRTC framerate (env: NEKO_MAX_FPS, default: 30)
-	NekoWebRTCPort        int           // HTTP port for Neko web client (env: NEKO_WEBRTC_PORT, default: 6080)
-	NekoSocatPollInterval time.Duration // Interval for port scan / socat sync (env: NEKO_SOCAT_POLL_INTERVAL, default: 5s)
-	NekoMinRAMMB          int           // Minimum free RAM to start sidecar in MB (env: NEKO_MIN_RAM_MB, default: 2048)
-	NekoEnableAudio       bool          // Enable audio streaming (env: NEKO_ENABLE_AUDIO, default: true)
-	NekoTCPFallback       bool          // Use TCP fallback for WebRTC (env: NEKO_TCP_FALLBACK, default: true)
-	NekoMuxPort           int           // Single port for WebRTC UDP/TCP mux (env: NEKO_MUX_PORT, default: 59000)
-	NekoNAT1TO1           string        // Public IP for WebRTC NAT traversal (env: NEKO_NAT1TO1, default: auto-detect)
-	NekoPassword          string        // Neko viewer password (env: NEKO_PASSWORD, default: random hex via crypto/rand)
-	NekoPasswordAdmin     string        // Neko admin password (env: NEKO_PASSWORD_ADMIN, default: random hex via crypto/rand)
-	NekoShmSize           string        // Shared memory size for Chrome (env: NEKO_SHM_SIZE, default: 2g)
-	NekoBrowserStartTimeout time.Duration // Timeout for browser sidecar start (env: NEKO_BROWSER_START_TIMEOUT, default: 60s)
-	NekoBrowserStopTimeout  time.Duration // Timeout for browser sidecar stop (env: NEKO_BROWSER_STOP_TIMEOUT, default: 30s)
-	NekoMemoryLimit         string        // Docker memory limit for Neko container (env: NEKO_MEMORY_LIMIT, default: 4g)
-	NekoCPULimit            string        // Docker CPU limit for Neko container (env: NEKO_CPU_LIMIT, default: 2)
-	NekoPidsLimit           int           // Docker PID limit for Neko container (env: NEKO_PIDS_LIMIT, default: 512)
-	NekoSocatMinPort        int           // Minimum port for socat forwarding (env: NEKO_SOCAT_MIN_PORT, default: 1024)
-	NekoSocatMaxPort        int           // Maximum port for socat forwarding (env: NEKO_SOCAT_MAX_PORT, default: 65535)
-	NekoViewportMinWidth    int           // Min viewport width for validation (env: NEKO_VIEWPORT_MIN_WIDTH, default: 320)
-	NekoViewportMaxWidth    int           // Max viewport width for validation (env: NEKO_VIEWPORT_MAX_WIDTH, default: 7680)
-	NekoViewportMinHeight   int           // Min viewport height for validation (env: NEKO_VIEWPORT_MIN_HEIGHT, default: 240)
-	NekoViewportMaxHeight   int           // Max viewport height for validation (env: NEKO_VIEWPORT_MAX_HEIGHT, default: 4320)
-	NekoViewportMaxDPR      int           // Max device pixel ratio for validation (env: NEKO_VIEWPORT_MAX_DPR, default: 4)
 
 	// Resource diagnostics thresholds - configurable per constitution principle XI
 	DiagCPUSaturationThreshold float64 // Load per core above which build is "CPU saturated" (env: DIAG_CPU_SATURATION_THRESHOLD, default: 2.0)
@@ -356,6 +332,9 @@ func Load() (*Config, error) {
 
 		// Persistence settings
 		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),
+		EventStoreDBPath:  getEnv("EVENTSTORE_DB_PATH", "/var/lib/vm-agent/events.db"),
+		MetricsDBPath:     getEnv("METRICS_DB_PATH", "/var/lib/vm-agent/metrics.db"),
+		MetricsInterval:   getEnvDuration("METRICS_INTERVAL", time.Minute),
 
 		// Git integration settings - configurable per constitution principle XI
 		GitExecTimeout:           getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),
@@ -408,33 +387,6 @@ func Load() (*Config, error) {
 		PortScanExclude:      getEnv("PORT_SCAN_EXCLUDE", "22,2375,2376,8443"),
 		PortScanEphemeralMin: getEnvInt("PORT_SCAN_EPHEMERAL_MIN", 32768),
 		PortProxyCacheTTL:    getEnvDuration("PORT_PROXY_CACHE_TTL", 30*time.Second),
-
-		// Neko browser sidecar settings - configurable per constitution principle XI
-		NekoImage:               getEnv("NEKO_IMAGE", "ghcr.io/m1k1o/neko/google-chrome:latest"),
-		NekoScreenResolution:    getEnv("NEKO_SCREEN_RESOLUTION", "1920x1080"),
-		NekoMaxFPS:              getEnvInt("NEKO_MAX_FPS", 30),
-		NekoWebRTCPort:          getEnvInt("NEKO_WEBRTC_PORT", 6080),
-		NekoSocatPollInterval:   getEnvDuration("NEKO_SOCAT_POLL_INTERVAL", 5*time.Second),
-		NekoMinRAMMB:            getEnvInt("NEKO_MIN_RAM_MB", 2048),
-		NekoEnableAudio:         getEnvBool("NEKO_ENABLE_AUDIO", true),
-		NekoTCPFallback:         getEnvBool("NEKO_TCP_FALLBACK", true),
-		NekoMuxPort:             getEnvInt("NEKO_MUX_PORT", 59000),
-		NekoNAT1TO1:             getEnv("NEKO_NAT1TO1", ""),
-		NekoPassword:            getEnvOrGenerate("NEKO_PASSWORD", 16),
-		NekoPasswordAdmin:       getEnvOrGenerate("NEKO_PASSWORD_ADMIN", 16),
-		NekoShmSize:             getEnv("NEKO_SHM_SIZE", "2g"),
-		NekoBrowserStartTimeout: getEnvDuration("NEKO_BROWSER_START_TIMEOUT", 60*time.Second),
-		NekoBrowserStopTimeout:  getEnvDuration("NEKO_BROWSER_STOP_TIMEOUT", 30*time.Second),
-		NekoMemoryLimit:         getEnv("NEKO_MEMORY_LIMIT", "4g"),
-		NekoCPULimit:            getEnv("NEKO_CPU_LIMIT", "2"),
-		NekoPidsLimit:           getEnvInt("NEKO_PIDS_LIMIT", 512),
-		NekoSocatMinPort:        getEnvInt("NEKO_SOCAT_MIN_PORT", 1024),
-		NekoSocatMaxPort:        getEnvInt("NEKO_SOCAT_MAX_PORT", 65535),
-		NekoViewportMinWidth:    getEnvInt("NEKO_VIEWPORT_MIN_WIDTH", 320),
-		NekoViewportMaxWidth:    getEnvInt("NEKO_VIEWPORT_MAX_WIDTH", 7680),
-		NekoViewportMinHeight:   getEnvInt("NEKO_VIEWPORT_MIN_HEIGHT", 240),
-		NekoViewportMaxHeight:   getEnvInt("NEKO_VIEWPORT_MAX_HEIGHT", 4320),
-		NekoViewportMaxDPR:      getEnvInt("NEKO_VIEWPORT_MAX_DPR", 4),
 
 		DiagCPUSaturationThreshold: getEnvFloat("DIAG_CPU_SATURATION_THRESHOLD", 2.0),
 		DiagMemExhaustedThreshold:  getEnvFloat("DIAG_MEM_EXHAUSTED_THRESHOLD", 90),

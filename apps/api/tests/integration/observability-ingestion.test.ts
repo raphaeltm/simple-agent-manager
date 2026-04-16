@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('observability error ingestion pipeline', () => {
   const clientErrorsRoute = readFileSync(resolve(process.cwd(), 'src/routes/client-errors.ts'), 'utf8');
-  const nodesRoute = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
+  const nodesRoute = readFileSync(resolve(process.cwd(), 'src/routes/node-lifecycle.ts'), 'utf8');
   const loggerFile = readFileSync(resolve(process.cwd(), 'src/lib/logger.ts'), 'utf8');
   const observabilityService = readFileSync(resolve(process.cwd(), 'src/services/observability.ts'), 'utf8');
   const observabilitySchema = readFileSync(resolve(process.cwd(), 'src/db/observability-schema.ts'), 'utf8');

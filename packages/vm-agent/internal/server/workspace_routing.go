@@ -12,6 +12,7 @@ import (
 
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/container"
+	"github.com/workspace/vm-agent/internal/eventstore"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
 )
@@ -547,6 +548,12 @@ func (s *Server) appendNodeEvent(workspaceID, level, eventType, message string, 
 		CreatedAt:   now,
 	}
 
+	// Persist to SQLite (durable, survives restarts, downloadable).
+	if s.eventStore != nil {
+		s.eventStore.Append(eventstore.EventRecord(event))
+	}
+
+	// Also keep in-memory for backward-compat with existing API response format.
 	s.eventMu.Lock()
 	defer s.eventMu.Unlock()
 

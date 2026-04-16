@@ -21,15 +21,16 @@ import (
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/auth"
-	"github.com/workspace/vm-agent/internal/browser"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/errorreport"
+	"github.com/workspace/vm-agent/internal/eventstore"
 	"github.com/workspace/vm-agent/internal/logreader"
 	"github.com/workspace/vm-agent/internal/messagereport"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/ports"
 	"github.com/workspace/vm-agent/internal/pty"
+	"github.com/workspace/vm-agent/internal/resourcemon"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
@@ -56,6 +57,8 @@ type Server struct {
 	eventMu             sync.RWMutex
 	nodeEvents          []EventRecord
 	workspaceEvents     map[string][]EventRecord
+	eventStore          *eventstore.Store
+	resourceMonitor     *resourcemon.Monitor
 	agentSessions       *agentsessions.Manager
 	acpConfig           acp.GatewayConfig
 	sessionHostMu       sync.Mutex
@@ -74,7 +77,6 @@ type Server struct {
 	portScannerMu       sync.RWMutex
 	portScanners        map[string]*ports.Scanner
 	portDiscoveries     map[string]*container.Discovery // per-workspace container discovery
-	browserManager      *browser.Manager                // Neko browser sidecar manager
 	bootstrapComplete   atomic.Bool
 	callbackTokenMu     sync.RWMutex
 	callbackToken       string
@@ -365,6 +367,18 @@ func New(cfg *config.Config) (*Server, error) {
 		CacheTTL:       cfg.SysInfoCacheTTL,
 	})
 
+	// Open persistent event store (SQLite-backed, survives restarts).
+	evStore, err := eventstore.New(cfg.EventStoreDBPath)
+	if err != nil {
+		slog.Error("Failed to open event store; falling back to in-memory only", "error", err)
+	}
+
+	// Start resource monitor (1-minute snapshots of CPU/memory/disk).
+	resMon, err := resourcemon.New(cfg.MetricsDBPath, cfg.MetricsInterval)
+	if err != nil {
+		slog.Error("Failed to start resource monitor", "error", err)
+	}
+
 	s := &Server{
 		config:              cfg,
 		jwtValidator:        jwtValidator,
@@ -374,6 +388,8 @@ func New(cfg *config.Config) (*Server, error) {
 		workspaces:          make(map[string]*WorkspaceRuntime),
 		nodeEvents:          make([]EventRecord, 0, 512),
 		workspaceEvents:     make(map[string][]EventRecord),
+		eventStore:          evStore,
+		resourceMonitor:     resMon,
 		agentSessions:       agentsessions.NewManager(),
 		acpConfig:           acpGatewayConfig,
 		sessionHosts:        make(map[string]*acp.SessionHost),
@@ -388,7 +404,6 @@ func New(cfg *config.Config) (*Server, error) {
 		containerDiscovery:  containerDiscoveryInstance,
 		portScanners:        make(map[string]*ports.Scanner),
 		portDiscoveries:     make(map[string]*container.Discovery),
-		browserManager:      browser.NewManager(cfg, browser.NewCLIDockerExecutor()),
 		callbackToken:       cfg.CallbackToken,
 		httpClient:          &http.Client{Timeout: cfg.HTTPCallbackTimeout},
 		done:                make(chan struct{}),
@@ -457,6 +472,11 @@ func (s *Server) SetBootLog(reporter acp.BootLogReporter) {
 // For the boot-time bootstrap path, use the server's configured WorkspaceID.
 // Wire this into the bootlog.Reporter via SetBroadcaster() to enable real-time
 // log delivery during bootstrap/provisioning.
+// GetEventStore returns the event store for external use (e.g., provisioning logging).
+func (s *Server) GetEventStore() *eventstore.Store {
+	return s.eventStore
+}
+
 func (s *Server) GetBootLogBroadcaster() *BootLogBroadcaster {
 	if s.config.WorkspaceID == "" || s.bootLogBroadcasters == nil {
 		return nil
@@ -665,11 +685,6 @@ func (s *Server) Start() error {
 	// Start error reporter background flush
 	s.errorReporter.Start()
 
-	// Recover orphaned Neko browser containers from a previous agent process.
-	if s.browserManager != nil {
-		s.browserManager.RecoverOrphanedContainers(context.Background())
-	}
-
 	if s.config.TLSEnabled {
 		slog.Info("Starting VM Agent with TLS", "addr", s.httpServer.Addr, "cert", s.config.TLSCertPath, "key", s.config.TLSKeyPath)
 		return s.httpServer.ListenAndServeTLS(s.config.TLSCertPath, s.config.TLSKeyPath)
@@ -715,11 +730,6 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	// Stop all port scanners
 	s.stopAllPortScanners()
-
-	// Cleanup all browser sidecars
-	if s.browserManager != nil {
-		s.browserManager.Cleanup(ctx)
-	}
 
 	// Close JWT validator
 	s.jwtValidator.Close()
@@ -802,21 +812,14 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /workspaces/{workspaceId}/worktrees", s.handleRemoveWorktree)
 
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
+	mux.HandleFunc("GET /events/export", s.handleExportEvents)
+	mux.HandleFunc("GET /metrics/export", s.handleExportMetrics)
 	mux.HandleFunc("GET /system-info", s.handleSystemInfo)
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("GET /logs/stream", s.handleLogStream)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports", s.handleListWorkspacePorts)
 	mux.HandleFunc("/workspaces/{workspaceId}/ports/{port}/{path...}", s.handleWorkspacePortProxy)
 	mux.HandleFunc("/workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
-
-	// Browser sidecar (Neko) - browser-authenticated via workspace session/token
-	mux.HandleFunc("POST /workspaces/{workspaceId}/browser", s.handleStartBrowser)
-	mux.HandleFunc("GET /workspaces/{workspaceId}/browser", s.handleGetBrowserStatus)
-	mux.HandleFunc("DELETE /workspaces/{workspaceId}/browser", s.handleStopBrowser)
-	mux.HandleFunc("GET /workspaces/{workspaceId}/browser/ports", s.handleGetBrowserPorts)
-	// Browser sidecar proxy — handles ws-{id}--browser.{domain} subdomain traffic
-	mux.HandleFunc("/workspaces/{workspaceId}/browser/proxy/{path...}", s.handleBrowserProxy)
-	mux.HandleFunc("/workspaces/{workspaceId}/browser/proxy", s.handleBrowserProxy)
 
 	// MCP workspace tools (proxied from sam-mcp via API Worker)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/workspace-info", s.handleMcpWorkspaceInfo)

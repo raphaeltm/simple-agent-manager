@@ -298,6 +298,7 @@ export function Node() {
             error={eventsError}
             onRetry={handleRetryEvents}
             nodeStatus={node.status}
+            nodeId={node.id}
           />
         </div>
       )}

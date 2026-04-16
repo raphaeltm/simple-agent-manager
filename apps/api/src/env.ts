@@ -363,10 +363,6 @@ export interface Env {
   GA4_FETCH_TIMEOUT_MS?: string;                  // Timeout for GA4 API fetch (default: 30000)
   // File proxy configuration (chat file browser)
   FILE_PROXY_TIMEOUT_MS?: string;                  // Timeout for VM agent file proxy requests (default: 15000)
-  BROWSER_PROXY_TIMEOUT_MS?: string;               // Timeout for browser sidecar proxy requests (default: 30000)
-  // Neko browser sidecar cloud-init configuration
-  NEKO_IMAGE?: string;                             // Docker image for Neko browser sidecar (default: ghcr.io/m1k1o/neko/google-chrome:latest)
-  NEKO_PRE_PULL?: string;                          // Pre-pull Neko image during cloud-init: "true" or "false" (default: "true")
   FILE_PROXY_MAX_RESPONSE_BYTES?: string;          // Max response body size from VM agent file proxy (default: 2097152 = 2MB)
   FILE_RAW_PROXY_MAX_BYTES?: string;              // Max response size for raw binary file proxy (default: 52428800 = 50MB)
   // File upload/download configuration
@@ -425,7 +421,7 @@ export interface Env {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string;    // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string;       // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string;       // Max stale executions to recover per sweep (default: 100)
-  // AI Inference Proxy (Workers AI gateway for trial users)
+  // AI Inference Proxy (Cloudflare AI Gateway for trial users)
   AI_PROXY_ENABLED?: string;                         // Kill switch: "false" to disable (default: enabled)
   AI_PROXY_DEFAULT_MODEL?: string;                   // Default Workers AI model (default: @cf/meta/llama-4-scout-17b-16e-instruct)
   AI_PROXY_ALLOWED_MODELS?: string;                  // Comma-separated allowed models
@@ -435,4 +431,5 @@ export interface Env {
   AI_PROXY_RATE_LIMIT_RPM?: string;                  // Requests per minute per user (default: 30)
   AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
+  AI_GATEWAY_ID?: string;                            // Cloudflare AI Gateway ID (default: sam)
 }
