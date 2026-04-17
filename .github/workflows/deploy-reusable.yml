@@ -43,7 +43,6 @@ jobs:
           HAS_GH_APP_ID: ${{ secrets.GH_APP_ID != '' }}
           HAS_GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY != '' }}
           HAS_GH_APP_SLUG: ${{ secrets.GH_APP_SLUG != '' }}
-          HAS_CF_ORIGIN_CA_KEY: ${{ secrets.CF_ORIGIN_CA_KEY != '' }}
         run: |
           MISSING=""
 
@@ -82,9 +81,6 @@ jobs:
           fi
           if [ "$HAS_GH_APP_SLUG" != "true" ]; then
             MISSING="$MISSING\n  - secrets.GH_APP_SLUG"
-          fi
-          if [ "$HAS_CF_ORIGIN_CA_KEY" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.CF_ORIGIN_CA_KEY (Cloudflare Origin CA Key — required for Origin CA certificates)"
           fi
 
           if [ -n "$MISSING" ]; then
@@ -211,7 +207,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_API_USER_SERVICE_KEY: ${{ secrets.CF_ORIGIN_CA_KEY }}
 
       - name: Pulumi Up
         if: ${{ inputs.dry_run != true }}
@@ -222,7 +217,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_API_USER_SERVICE_KEY: ${{ secrets.CF_ORIGIN_CA_KEY }}
 
       # ========================================
       # Phase 2: Configuration
