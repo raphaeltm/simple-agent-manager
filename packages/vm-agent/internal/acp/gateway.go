@@ -1114,7 +1114,14 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 				apiKey = overrides.PlatformAPIKey
 			}
 		}
-		modelAlias := sanitizeModelAlias(model)
+		// For platform provider, preserve the vendor prefix in the model alias
+		// (e.g. "meta/llama-4-scout-17b-16e-instruct") so the AI proxy can
+		// reconstruct the full Workers AI model ID (@cf/meta/...).
+		// sanitizeModelAlias would strip "meta/" leaving just the model name,
+		// causing the proxy to resolve @cf/llama-4-... instead of @cf/meta/llama-4-...
+		// OpenCode splits "sam-platform/meta/llama-4-..." on the first "/" to get
+		// provider "sam-platform" and model "meta/llama-4-...", which is correct.
+		modelAlias := model // preserve vendor prefix (e.g. "meta/llama-4-scout-17b-16e-instruct")
 		config["model"] = "sam-platform/" + modelAlias
 		config["provider"] = map[string]interface{}{
 			"sam-platform": map[string]interface{}{
@@ -1224,14 +1231,44 @@ func opencodeProviderNeedsNpmPackage(provider string) string {
 	}
 }
 
-// preInstallOpencodeProviderDeps installs the npm package required by a custom
-// OpenCode provider into ~/.cache/opencode/node_modules/ — the exact location
-// where OpenCode resolves provider packages at runtime.
-//
-// OpenCode normally uses Bun to auto-install provider packages into this cache
-// directory, but our containers only ship Node.js/npm. Without pre-installation,
-// the provider silently fails and OpenCode returns end_turn with no content.
+// ensureBunInstalled checks if Bun is available in the container and installs
+// it if missing. OpenCode uses Bun to manage and load custom provider packages
+// at runtime — without Bun, custom providers fail silently even if the npm
+// package is pre-installed in the cache directory.
+func ensureBunInstalled(ctx context.Context, containerID string) error {
+	// Check if bun is already available
+	checkArgs := []string{"exec", containerID, "which", "bun"}
+	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
+	if err := checkCmd.Run(); err == nil {
+		return nil // bun already installed
+	}
+
+	// Install bun as root — the official install script puts it in ~/.bun/bin
+	// but we want it globally accessible, so install to /usr/local/bin.
+	installScript := `curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash`
+	installArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", installScript}
+	installCmd := exec.CommandContext(ctx, "docker", installArgs...)
+	output, err := installCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("install bun: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	slog.Info("Installed Bun for OpenCode custom provider support", "container", containerID)
+	return nil
+}
+
+// preInstallOpencodeProviderDeps ensures the container has Bun (required by
+// OpenCode for custom provider package management) and pre-installs the npm
+// package into ~/.cache/opencode/node_modules/ as a fallback in case OpenCode's
+// own Bun-based install encounters issues.
 func preInstallOpencodeProviderDeps(ctx context.Context, containerID, user, npmPackage string) error {
+	// Ensure Bun is available — OpenCode needs it to load custom provider packages.
+	if err := ensureBunInstalled(ctx, containerID); err != nil {
+		slog.Warn("Failed to install Bun (OpenCode custom providers may fail silently)",
+			"error", err, "container", containerID)
+		// Continue anyway — try npm pre-install as fallback
+	}
+
 	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
 	if err != nil {
 		homeDir = "/root"
@@ -1243,11 +1280,16 @@ func preInstallOpencodeProviderDeps(ctx context.Context, containerID, user, npmP
 		return fmt.Errorf("create opencode cache dir: %w", err)
 	}
 
-	// Install the package into the cache directory so OpenCode finds it
-	// at ~/.cache/opencode/node_modules/@ai-sdk/openai-compatible
-	_, stderr, err := execInContainer(ctx, containerID, user, cacheDir, "npm", "install", "--save", npmPackage)
+	// Pre-install using Bun first (matches what OpenCode expects), fall back to npm.
+	_, stderr, err := execInContainer(ctx, containerID, user, cacheDir, "bun", "install", npmPackage)
 	if err != nil {
-		return fmt.Errorf("npm install %s in cache dir: %w: %s", npmPackage, err, stderr)
+		slog.Warn("Bun install failed, falling back to npm",
+			"package", npmPackage, "error", err, "stderr", stderr)
+		// Fallback: use npm to install into the same directory
+		_, stderr, err = execInContainer(ctx, containerID, user, cacheDir, "npm", "install", "--save", npmPackage)
+		if err != nil {
+			return fmt.Errorf("npm install %s in cache dir: %w: %s", npmPackage, err, stderr)
+		}
 	}
 
 	slog.Info("Pre-installed OpenCode provider dependency",
