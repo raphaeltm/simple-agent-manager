@@ -2,7 +2,7 @@ import type { Event } from '@simple-agent-manager/shared';
 import { Activity, Download } from 'lucide-react';
 import { type FC, useCallback, useState } from 'react';
 
-import { downloadNodeEvents, downloadNodeMetrics } from '../../lib/api/nodes';
+import { downloadNodeDebugPackage, downloadNodeEvents, downloadNodeMetrics } from '../../lib/api/nodes';
 import { Section } from './Section';
 import { SectionHeader } from './SectionHeader';
 
@@ -33,7 +33,7 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
   nodeStatus,
   nodeId,
 }) => {
-  const [downloading, setDownloading] = useState<'events' | 'metrics' | null>(null);
+  const [downloading, setDownloading] = useState<'events' | 'metrics' | 'debug' | null>(null);
 
   const handleDownloadEvents = useCallback(async () => {
     if (!nodeId || downloading) return;
@@ -59,6 +59,18 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
     }
   }, [nodeId, downloading]);
 
+  const handleDownloadDebugPackage = useCallback(async () => {
+    if (!nodeId || downloading) return;
+    setDownloading('debug');
+    try {
+      await downloadNodeDebugPackage(nodeId);
+    } catch {
+      // Best-effort download
+    } finally {
+      setDownloading(null);
+    }
+  }, [nodeId, downloading]);
+
   const isRunning = nodeStatus === 'running';
 
   return (
@@ -70,7 +82,22 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
         description={`${events.length} recent event${events.length !== 1 ? 's' : ''}`}
         actions={
           isRunning && nodeId ? (
-            <div className="flex gap-1">
+            <div className="flex gap-1 flex-wrap">
+              <button
+                onClick={handleDownloadDebugPackage}
+                disabled={downloading !== null}
+                className="flex items-center gap-1 px-2 py-1 rounded-sm cursor-pointer disabled:opacity-50"
+                style={{
+                  fontSize: 'var(--sam-type-caption-size)',
+                  border: '1px solid var(--sam-color-accent-emphasis)',
+                  color: 'var(--sam-color-accent-fg)',
+                  background: 'var(--sam-color-accent-subtle)',
+                }}
+                title="Download all logs, metrics, events, and system info as a tar.gz archive"
+              >
+                <Download size={12} />
+                {downloading === 'debug' ? 'Packaging...' : 'Debug Package'}
+              </button>
               <button
                 onClick={handleDownloadEvents}
                 disabled={downloading !== null}
