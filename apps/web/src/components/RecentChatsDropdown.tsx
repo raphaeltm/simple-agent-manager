@@ -29,7 +29,9 @@ export function RecentChatsDropdown() {
     if (isMobile) {
       setPanelStyle({ top: rect.bottom + 8 });
     } else {
-      setPanelStyle({ top: rect.bottom + 8, left: rect.left });
+      const panelWidth = 340;
+      const clampedLeft = Math.min(rect.left, window.innerWidth - panelWidth - 8);
+      setPanelStyle({ top: rect.bottom + 8, left: Math.max(8, clampedLeft) });
     }
   }, [isOpen]);
 
@@ -80,7 +82,9 @@ export function RecentChatsDropdown() {
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
         aria-label={`Recent chats${activeCount > 0 ? ` (${activeCount} active)` : ''}`}
-        className="relative flex items-center justify-center w-9 h-9 bg-transparent border-none text-fg-muted cursor-pointer hover:text-fg-primary transition-colors"
+        aria-expanded={isOpen}
+        aria-haspopup="true"
+        className="relative flex items-center justify-center w-11 h-11 bg-transparent border-none text-fg-muted cursor-pointer hover:text-fg-primary transition-colors"
       >
         <MessageSquare size={18} />
         {activeCount > 0 && (
@@ -95,7 +99,7 @@ export function RecentChatsDropdown() {
         createPortal(
           <div
             ref={panelRef}
-            role="dialog"
+            role="menu"
             aria-label="Recent chats"
             style={panelStyle}
             className="fixed inset-x-4 sm:inset-x-auto sm:w-[340px] max-h-[calc(100vh-5rem)] sm:max-h-[480px] bg-surface border border-border-default rounded-lg shadow-lg flex flex-col z-[100] overflow-hidden"
@@ -111,7 +115,7 @@ export function RecentChatsDropdown() {
             </div>
 
             {/* Chat List */}
-            <div className="flex-1 overflow-y-auto" role="list" aria-label="Recent chat sessions">
+            <div className="flex-1 overflow-y-auto" aria-label="Recent chat sessions">
               {loading && chats.length === 0 ? (
                 <div className="flex items-center justify-center py-8 text-fg-muted">
                   <Loader2 size={18} className="animate-spin" />
@@ -121,7 +125,7 @@ export function RecentChatsDropdown() {
                   <span className="mb-2">{error}</span>
                   <button
                     onClick={() => refresh()}
-                    className="text-xs text-accent bg-transparent border-none cursor-pointer hover:underline"
+                    className="text-xs text-accent bg-transparent border-none cursor-pointer hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                   >
                     Retry
                   </button>
@@ -145,7 +149,7 @@ export function RecentChatsDropdown() {
                   return (
                     <button
                       key={chat.id}
-                      role="listitem"
+                      role="menuitem"
                       onClick={() => handleChatClick(chat.projectId, chat.id)}
                       aria-label={`${topic}, ${chat.projectName}, ${stateLabel}, ${formatRelativeTime(lastActivity)}`}
                       className="flex items-center gap-3 w-full px-4 py-2.5 min-h-[44px] bg-transparent border-none border-b border-border-default text-left cursor-pointer hover:bg-surface-hover transition-colors duration-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
@@ -185,7 +189,7 @@ export function RecentChatsDropdown() {
               <div className="border-t border-border-default">
                 <button
                   onClick={handleViewAll}
-                  className="w-full py-2.5 text-xs text-accent font-medium bg-transparent border-none cursor-pointer hover:bg-surface-hover transition-colors"
+                  className="w-full min-h-[44px] py-2.5 text-xs text-accent font-medium bg-transparent border-none cursor-pointer hover:bg-surface-hover transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                 >
                   View all chats
                 </button>

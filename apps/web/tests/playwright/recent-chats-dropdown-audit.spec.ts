@@ -192,7 +192,7 @@ async function screenshot(page: Page, name: string) {
 async function openDropdown(page: Page) {
   const btn = page.getByLabel(/Recent chats/);
   await btn.click();
-  const dialog = page.locator('[aria-label="Recent chats"][role="dialog"]');
+  const dialog = page.locator('[aria-label="Recent chats"][role="menu"]');
   await dialog.waitFor({ state: 'visible', timeout: 3000 });
   await page.waitForTimeout(300);
   return dialog;
@@ -210,11 +210,16 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
     await page.goto('/chats');
     await page.waitForTimeout(800);
 
-    // Badge should be visible with count
+    // Button should be visible
     const btn = page.getByLabel(/Recent chats/);
     await expect(btn).toBeVisible();
 
+    // Open dropdown first (triggers data fetch), then verify badge
     const dialog = await openDropdown(page);
+
+    // Badge should now be visible with active count (data loaded)
+    const badge = page.getByLabel(/Recent chats \(\d+ active\)/).locator('span');
+    await expect(badge.first()).toBeVisible();
     await screenshot(page, 'recent-chats-normal-mobile');
 
     // Verify no horizontal overflow
@@ -318,12 +323,27 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
     await page.waitForTimeout(800);
 
     await openDropdown(page);
-    const dialogLocator = page.locator('[aria-label="Recent chats"][role="dialog"]');
+    const dialogLocator = page.locator('[aria-label="Recent chats"][role="menu"]');
     await expect(dialogLocator).toBeVisible();
 
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
     await expect(dialogLocator).not.toBeVisible();
+  });
+
+  test('close on click outside', async ({ page }) => {
+    await setupApiMocks(page, { sessions: NORMAL_SESSIONS });
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
+
+    await openDropdown(page);
+    const menuLocator = page.locator('[aria-label="Recent chats"][role="menu"]');
+    await expect(menuLocator).toBeVisible();
+
+    // Click outside the dropdown
+    await page.mouse.click(10, 10);
+    await page.waitForTimeout(300);
+    await expect(menuLocator).not.toBeVisible();
   });
 
   test('clicking a chat navigates away', async ({ page }) => {
@@ -338,7 +358,7 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
     await page.waitForTimeout(300);
 
     // Should have navigated — dropdown should be closed
-    await expect(page.locator('[aria-label="Recent chats"][role="dialog"]')).not.toBeVisible();
+    await expect(page.locator('[aria-label="Recent chats"][role="menu"]')).not.toBeVisible();
     // URL should reflect the chat navigation
     expect(page.url()).toContain('/projects/proj-1/chat/s1');
   });
