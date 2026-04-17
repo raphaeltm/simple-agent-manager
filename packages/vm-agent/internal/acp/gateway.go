@@ -1091,8 +1091,17 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 		}
 	}
 
+	slog.Info("buildOpencodeConfig: input",
+		"provider", provider,
+		"rawModel", model,
+		"hasOverrides", overrides != nil)
+
 	// Strip @cf/ prefix from Workers AI model IDs for openai-compatible providers.
 	model = stripCFPrefix(model)
+
+	slog.Info("buildOpencodeConfig: after stripCFPrefix",
+		"model", model,
+		"provider", provider)
 
 	config := map[string]interface{}{}
 
@@ -1138,6 +1147,11 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 				},
 			},
 		}
+		slog.Info("buildOpencodeConfig: platform provider configured",
+			"modelAlias", modelAlias,
+			"fullModelKey", "sam-platform/"+modelAlias,
+			"baseURL", baseURL,
+			"apiKeyLen", len(apiKey))
 	case "scaleway":
 		// Scaleway is a built-in OpenCode provider with pre-registered models.
 		config["model"] = model
@@ -1253,10 +1267,19 @@ func preInstallOpencodeProviderDeps(ctx context.Context, containerID, user, npmP
 
 	// Install the package into the cache directory so OpenCode finds it
 	// at ~/.cache/opencode/node_modules/@ai-sdk/openai-compatible
-	_, stderr, err := execInContainer(ctx, containerID, user, cacheDir, "npm", "install", "--save", npmPackage)
+	slog.Info("preInstallOpencodeProviderDeps: running npm install",
+		"package", npmPackage,
+		"cacheDir", cacheDir,
+		"containerID", containerID,
+		"user", user)
+	stdout, stderr, err := execInContainer(ctx, containerID, user, cacheDir, "npm", "install", "--save", npmPackage)
 	if err != nil {
 		return fmt.Errorf("npm install %s in cache dir: %w: %s", npmPackage, err, stderr)
 	}
+	slog.Info("preInstallOpencodeProviderDeps: npm install complete",
+		"package", npmPackage,
+		"stdout", string(stdout),
+		"stderr", string(stderr))
 
 	slog.Info("Pre-installed OpenCode provider dependency",
 		"package", npmPackage,

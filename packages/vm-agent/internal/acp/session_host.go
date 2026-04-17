@@ -458,10 +458,32 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 		h.reportAgentError(agentType, "agent_key_fetch", errMsg, err.Error())
 		return
 	}
+	hasInferenceConfig := cred.inferenceConfig != nil
+	inferenceModel := ""
+	inferenceBaseURL := ""
+	inferenceAPIKeySource := ""
+	if hasInferenceConfig {
+		inferenceModel = cred.inferenceConfig.Model
+		inferenceBaseURL = cred.inferenceConfig.BaseURL
+		inferenceAPIKeySource = cred.inferenceConfig.APIKeySource
+	}
 	h.reportLifecycle("info", "Agent credential fetched", map[string]interface{}{
-		"agentType":      agentType,
-		"credentialKind": cred.credentialKind,
+		"agentType":             agentType,
+		"credentialKind":        cred.credentialKind,
+		"hasInferenceConfig":    hasInferenceConfig,
+		"inferenceModel":        inferenceModel,
+		"inferenceBaseURL":      inferenceBaseURL,
+		"inferenceAPIKeySource": inferenceAPIKeySource,
 	})
+	slog.Info("Agent credential details",
+		"agentType", agentType,
+		"credentialKind", cred.credentialKind,
+		"hasInferenceConfig", hasInferenceConfig,
+		"inferenceModel", inferenceModel,
+		"inferenceBaseURL", inferenceBaseURL,
+		"inferenceAPIKeySource", inferenceAPIKeySource,
+		"credentialLen", len(cred.credential),
+		"workspaceId", h.config.WorkspaceID)
 
 	// Ensure the ACP adapter binary is installed
 	info := getAgentCommandInfo(agentType, cred.credentialKind)
@@ -481,7 +503,17 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 	// Fetch user's agent settings (non-blocking)
 	settings := h.fetchAgentSettings(ctx, agentType)
 	if settings != nil {
-		slog.Info("Agent settings loaded", "model", settings.Model, "permissionMode", settings.PermissionMode)
+		slog.Info("Agent settings loaded",
+			"model", settings.Model,
+			"permissionMode", settings.PermissionMode,
+			"opencodeProvider", settings.OpencodeProvider,
+			"opencodeBaseURL", settings.OpencodeBaseURL,
+			"agentType", agentType,
+			"workspaceId", h.config.WorkspaceID)
+	} else {
+		slog.Info("No agent settings found, using defaults",
+			"agentType", agentType,
+			"workspaceId", h.config.WorkspaceID)
 	}
 
 	// Apply profile overrides from the control plane (take precedence over fetched settings)
@@ -972,6 +1004,9 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		slog.Info("Platform AI proxy credential injected",
 			"baseURL", cred.inferenceConfig.BaseURL,
 			"model", cred.inferenceConfig.Model,
+			"settingsModel", settings.Model,
+			"settingsProvider", settings.OpencodeProvider,
+			"callbackTokenLen", len(h.config.CallbackToken),
 			"workspaceId", h.config.WorkspaceID)
 	} else {
 		envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
@@ -1017,7 +1052,18 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 			if settings != nil && settings.OpencodeProvider != "" {
 				provider = settings.OpencodeProvider
 			}
-			slog.Info("OpenCode config injected", "provider", provider, "model", opencodeConfig["model"])
+			// Log the full config for debugging (redact API key)
+			redactedConfig := make(map[string]interface{})
+			for k, v := range opencodeConfig {
+				redactedConfig[k] = v
+			}
+			redactedJSON, _ := json.Marshal(redactedConfig)
+			slog.Info("OpenCode config injected",
+				"provider", provider,
+				"model", opencodeConfig["model"],
+				"configLen", len(configJSON),
+				"config", string(redactedJSON),
+				"workspaceId", h.config.WorkspaceID)
 
 			// Pre-install the npm package required by custom providers.
 			// OpenCode uses Bun for auto-installation, but our containers only
@@ -2179,7 +2225,13 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		slog.Warn("Agent settings returned non-OK status, using defaults", "statusCode", resp.StatusCode)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		slog.Warn("Agent settings returned non-OK status, using defaults",
+			"statusCode", resp.StatusCode,
+			"responseBody", string(respBody),
+			"url", url,
+			"workspaceId", h.config.WorkspaceID,
+			"agentType", agentType)
 		return nil
 	}
 
@@ -2189,7 +2241,13 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 		return nil
 	}
 
-	slog.Info("Fetched agent settings from control plane", "model", result.Model, "permissionMode", result.PermissionMode)
+	slog.Info("Fetched agent settings from control plane",
+		"model", result.Model,
+		"permissionMode", result.PermissionMode,
+		"opencodeProvider", result.OpencodeProvider,
+		"opencodeBaseURL", result.OpencodeBaseURL,
+		"workspaceId", h.config.WorkspaceID,
+		"agentType", agentType)
 	return &result
 }
 
