@@ -149,7 +149,7 @@ async function setupApiMocks(
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
 
-    if (url.includes('/api/auth/session')) {
+    if (url.includes('/api/auth/get-session')) {
       return route.fulfill({ json: MOCK_USER });
     }
 
@@ -158,6 +158,9 @@ async function setupApiMocks(
     }
 
     if (url.includes('/api/projects') && !url.includes('/sessions')) {
+      if (options.error) {
+        return route.fulfill({ status: 500, json: { error: 'Server error' } });
+      }
       if (options.noProjects) {
         return route.fulfill({ json: { projects: [], total: 0 } });
       }
@@ -167,9 +170,6 @@ async function setupApiMocks(
     }
 
     if (url.includes('/sessions')) {
-      if (options.error) {
-        return route.fulfill({ status: 500, json: { error: 'Server error' } });
-      }
       const projMatch = url.match(/projects\/([^/]+)\/sessions/);
       const projId = projMatch?.[1] ?? 'proj-1';
       const sessions = options.sessions?.[projId] ?? [];
@@ -188,12 +188,14 @@ async function screenshot(page: Page, name: string) {
   });
 }
 
+/** Opens the Recent Chats dropdown and returns a locator scoped to the dialog panel. */
 async function openDropdown(page: Page) {
   const btn = page.getByLabel(/Recent chats/);
   await btn.click();
-  // Wait for the dropdown panel to appear
-  await page.waitForSelector('[aria-label="Recent chats"][role="dialog"]', { timeout: 3000 });
+  const dialog = page.locator('[aria-label="Recent chats"][role="dialog"]');
+  await dialog.waitFor({ state: 'visible', timeout: 3000 });
   await page.waitForTimeout(300);
+  return dialog;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,14 +207,14 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
 
   test('normal data — dropdown shows recent chats', async ({ page }) => {
     await setupApiMocks(page, { sessions: NORMAL_SESSIONS });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
     // Badge should be visible with count
     const btn = page.getByLabel(/Recent chats/);
     await expect(btn).toBeVisible();
 
-    await openDropdown(page);
+    const dialog = await openDropdown(page);
     await screenshot(page, 'recent-chats-normal-mobile');
 
     // Verify no horizontal overflow
@@ -221,17 +223,17 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
     );
     expect(overflow).toBe(false);
 
-    // Verify chat items are visible
-    await expect(page.getByText('Fix authentication flow')).toBeVisible();
-    await expect(page.getByText('Refactor component library')).toBeVisible();
-    await expect(page.getByText('Backend API')).toBeVisible();
-    await expect(page.getByText('Frontend App')).toBeVisible();
+    // Verify chat items are visible within the dropdown (scoped)
+    await expect(dialog.getByText('Fix authentication flow')).toBeVisible();
+    await expect(dialog.getByText('Refactor component library')).toBeVisible();
+    await expect(dialog.getByText('Backend API').first()).toBeVisible();
+    await expect(dialog.getByText('Frontend App').first()).toBeVisible();
   });
 
   test('long text wraps correctly', async ({ page }) => {
     await setupApiMocks(page, { sessions: LONG_TEXT_SESSIONS });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
     await openDropdown(page);
     await screenshot(page, 'recent-chats-long-text-mobile');
@@ -244,14 +246,15 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
 
   test('empty state — no active chats', async ({ page }) => {
     await setupApiMocks(page, { sessions: { 'proj-1': [], 'proj-2': [], 'proj-3': [] } });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
-    await openDropdown(page);
+    const dialog = await openDropdown(page);
     await screenshot(page, 'recent-chats-empty-mobile');
 
-    await expect(page.getByText('No active chats')).toBeVisible();
-    await expect(page.getByText('Start a conversation in any project')).toBeVisible();
+    // Scope to dialog to avoid matching the Chats page empty state
+    await expect(dialog.getByText('No active chats')).toBeVisible();
+    await expect(dialog.getByText('Start a conversation in any project')).toBeVisible();
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,
@@ -261,14 +264,14 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
 
   test('many items — scroll behavior', async ({ page }) => {
     await setupApiMocks(page, { sessions: MANY_SESSIONS });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
-    await openDropdown(page);
+    const dialog = await openDropdown(page);
     await screenshot(page, 'recent-chats-many-items-mobile');
 
-    // Should show the "View all chats" footer
-    await expect(page.getByText('View all chats')).toBeVisible();
+    // Should show the "View all chats" footer within the dropdown
+    await expect(dialog.getByText('View all chats')).toBeVisible();
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,
@@ -278,14 +281,14 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
 
   test('error state', async ({ page }) => {
     await setupApiMocks(page, { error: true });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
-    await openDropdown(page);
+    const dialog = await openDropdown(page);
     await screenshot(page, 'recent-chats-error-mobile');
 
-    await expect(page.getByText('Failed to load chats')).toBeVisible();
-    await expect(page.getByText('Retry')).toBeVisible();
+    await expect(dialog.getByText('Failed to load chats')).toBeVisible();
+    await expect(dialog.getByText('Retry')).toBeVisible();
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,
@@ -295,13 +298,13 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
 
   test('no projects — empty state', async ({ page }) => {
     await setupApiMocks(page, { noProjects: true });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
-    await openDropdown(page);
+    const dialog = await openDropdown(page);
     await screenshot(page, 'recent-chats-no-projects-mobile');
 
-    await expect(page.getByText('No active chats')).toBeVisible();
+    await expect(dialog.getByText('No active chats')).toBeVisible();
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,
@@ -311,26 +314,27 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
 
   test('close on escape', async ({ page }) => {
     await setupApiMocks(page, { sessions: NORMAL_SESSIONS });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
     await openDropdown(page);
-    await expect(page.locator('[aria-label="Recent chats"][role="dialog"]')).toBeVisible();
+    const dialogLocator = page.locator('[aria-label="Recent chats"][role="dialog"]');
+    await expect(dialogLocator).toBeVisible();
 
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
-    await expect(page.locator('[aria-label="Recent chats"][role="dialog"]')).not.toBeVisible();
+    await expect(dialogLocator).not.toBeVisible();
   });
 
   test('clicking a chat navigates away', async ({ page }) => {
     await setupApiMocks(page, { sessions: NORMAL_SESSIONS });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
-    await openDropdown(page);
+    const dialog = await openDropdown(page);
 
-    // Click the first chat item
-    await page.getByText('Fix authentication flow').click();
+    // Click the first chat item within the dropdown dialog
+    await dialog.getByText('Fix authentication flow').click();
     await page.waitForTimeout(300);
 
     // Should have navigated — dropdown should be closed
@@ -349,20 +353,20 @@ test.describe('Recent Chats Dropdown — Desktop', () => {
 
   test('normal data — dropdown in sidebar', async ({ page }) => {
     await setupApiMocks(page, { sessions: NORMAL_SESSIONS });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
-    await openDropdown(page);
+    const dialog = await openDropdown(page);
     await screenshot(page, 'recent-chats-normal-desktop');
 
-    await expect(page.getByText('Fix authentication flow')).toBeVisible();
-    await expect(page.getByText('Recent Chats')).toBeVisible();
+    await expect(dialog.getByText('Fix authentication flow')).toBeVisible();
+    await expect(dialog.getByText('Recent Chats')).toBeVisible();
   });
 
   test('long text', async ({ page }) => {
     await setupApiMocks(page, { sessions: LONG_TEXT_SESSIONS });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
     await openDropdown(page);
     await screenshot(page, 'recent-chats-long-text-desktop');
@@ -375,23 +379,23 @@ test.describe('Recent Chats Dropdown — Desktop', () => {
 
   test('empty state', async ({ page }) => {
     await setupApiMocks(page, { sessions: { 'proj-1': [], 'proj-2': [], 'proj-3': [] } });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
-    await openDropdown(page);
+    const dialog = await openDropdown(page);
     await screenshot(page, 'recent-chats-empty-desktop');
 
-    await expect(page.getByText('No active chats')).toBeVisible();
+    await expect(dialog.getByText('No active chats')).toBeVisible();
   });
 
   test('many items', async ({ page }) => {
     await setupApiMocks(page, { sessions: MANY_SESSIONS });
-    await page.goto('/');
-    await page.waitForTimeout(500);
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
 
-    await openDropdown(page);
+    const dialog = await openDropdown(page);
     await screenshot(page, 'recent-chats-many-items-desktop');
 
-    await expect(page.getByText('View all chats')).toBeVisible();
+    await expect(dialog.getByText('View all chats')).toBeVisible();
   });
 });

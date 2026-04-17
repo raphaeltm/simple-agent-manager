@@ -29,7 +29,7 @@ export function RecentChatsDropdown() {
     if (isMobile) {
       setPanelStyle({ top: rect.bottom + 8 });
     } else {
-      setPanelStyle({ top: rect.bottom + 8, right: Math.max(16, window.innerWidth - rect.right) });
+      setPanelStyle({ top: rect.bottom + 8, left: rect.left });
     }
   }, [isOpen]);
 
