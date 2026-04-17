@@ -516,4 +516,40 @@ nodesRoutes.get('/:id/metrics/export', async (c) => {
   }
 });
 
+/**
+ * GET /:id/debug-package — Download a tar.gz archive with all diagnostic data
+ * from the VM Agent: logs (cloud-init, journald, Docker), metrics DB, events DB,
+ * system info, boot events, and system state snapshots.
+ */
+nodesRoutes.get('/:id/debug-package', async (c) => {
+  const nodeId = c.req.param('id');
+  const userId = getUserId(c);
+  const node = await requireNodeOwnership(c, nodeId);
+
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+  if (node.status !== 'running') {
+    throw errors.badRequest('Node is not running');
+  }
+
+  try {
+    const response = await nodeAgentRawRequest(nodeId, c.env, '/debug-package', userId);
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`VM agent returned ${response.status}: ${body}`);
+    }
+
+    return new Response(response.body, {
+      status: 200,
+      headers: {
+        'Content-Type': response.headers.get('Content-Type') || 'application/gzip',
+        'Content-Disposition': response.headers.get('Content-Disposition') || `attachment; filename="debug-${nodeId}.tar.gz"`,
+      },
+    });
+  } catch {
+    throw errors.badRequest('Could not download debug package — node agent may be unreachable');
+  }
+});
+
 export { nodesRoutes };

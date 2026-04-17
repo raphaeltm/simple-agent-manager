@@ -811,6 +811,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/worktrees", s.handleCreateWorktree)
 	mux.HandleFunc("DELETE /workspaces/{workspaceId}/worktrees", s.handleRemoveWorktree)
 
+	mux.HandleFunc("GET /debug-package", s.handleDebugPackage)
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /events/export", s.handleExportEvents)
 	mux.HandleFunc("GET /metrics/export", s.handleExportMetrics)
