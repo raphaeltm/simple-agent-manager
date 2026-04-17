@@ -12,6 +12,7 @@ import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
 import { extractProjectId, GLOBAL_NAV_ITEMS, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { NotificationCenter } from './NotificationCenter';
+import { RecentChatsDropdown } from './RecentChatsDropdown';
 
 interface AppShellContextValue {
   setProjectName: (name: string | undefined) => void;
@@ -140,6 +141,7 @@ export function AppShell({ children }: AppShellProps) {
             >
               <Search size={18} />
             </button>
+            <RecentChatsDropdown />
             <NotificationCenter />
             <button
               onClick={() => setDrawerOpen(true)}
@@ -187,7 +189,10 @@ export function AppShell({ children }: AppShellProps) {
       <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 overflow-y-auto" style={{ gridRow: '1' }}>
         <div className="p-4 border-b border-border-default flex items-center justify-between">
           <img src="/sam-head.png" alt="SAM" className="h-6 w-6 object-contain" />
-          <NotificationCenter />
+          <div className="flex items-center gap-1">
+            <RecentChatsDropdown />
+            <NotificationCenter />
+          </div>
         </div>
         {/* Command palette trigger */}
         <button

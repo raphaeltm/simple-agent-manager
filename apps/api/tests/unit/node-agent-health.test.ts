@@ -21,12 +21,12 @@ import {
 // =============================================================================
 
 describe('getNodeAgentReadyTimeoutMs', () => {
-  it('returns default 600000ms when env var is undefined', () => {
-    expect(getNodeAgentReadyTimeoutMs({})).toBe(600000);
+  it('returns default 900000ms when env var is undefined', () => {
+    expect(getNodeAgentReadyTimeoutMs({})).toBe(900000);
   });
 
   it('returns default when env var is empty string', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '' })).toBe(600000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '' })).toBe(900000);
   });
 
   it('parses valid integer from env var', () => {
@@ -34,23 +34,23 @@ describe('getNodeAgentReadyTimeoutMs', () => {
   });
 
   it('returns default for non-numeric string', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'abc' })).toBe(600000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'abc' })).toBe(900000);
   });
 
   it('returns default for zero', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '0' })).toBe(600000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '0' })).toBe(900000);
   });
 
   it('returns default for negative number', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '-5000' })).toBe(600000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '-5000' })).toBe(900000);
   });
 
   it('returns default for NaN', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'NaN' })).toBe(600000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'NaN' })).toBe(900000);
   });
 
   it('returns default for Infinity', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'Infinity' })).toBe(600000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'Infinity' })).toBe(900000);
   });
 
   it('parses small timeout value', () => {
@@ -58,7 +58,7 @@ describe('getNodeAgentReadyTimeoutMs', () => {
   });
 
   it('parses very large timeout value', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '600000' })).toBe(600000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '900000' })).toBe(900000);
   });
 });
 

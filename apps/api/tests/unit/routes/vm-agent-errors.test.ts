@@ -75,6 +75,15 @@ vi.mock('../../../src/services/telemetry', () => ({
   recordNodeRoutingMetric: vi.fn(),
 }));
 
+vi.mock('../../../src/services/dns', () => ({
+  createNodeBackendDNSRecord: vi.fn(),
+  updateDNSRecord: vi.fn(),
+}));
+
+vi.mock('../../../src/services/project-data', () => ({
+  updateNodeHeartbeats: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Mock observability service
 const mockPersistErrorBatch = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../../src/services/observability', () => ({
@@ -83,7 +92,7 @@ vi.mock('../../../src/services/observability', () => ({
 }));
 
 // Import after mocking
-import { nodesRoutes } from '../../../src/routes/nodes';
+import { nodeLifecycleRoutes } from '../../../src/routes/node-lifecycle';
 
 describe('VM Agent Errors Route', () => {
   let app: Hono<{ Bindings: Env }>;
@@ -102,7 +111,7 @@ describe('VM Agent Errors Route', () => {
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
     });
 
-    app.route('/api/nodes', nodesRoutes);
+    app.route('/api/nodes', nodeLifecycleRoutes);
   });
 
   function createEnv(overrides: Partial<Env> = {}): Env {

@@ -1,11 +1,10 @@
 import type { DetectedPort, NodeResponse, TaskDetailResponse, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
-import { Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Loader2, MapPin, Monitor, RotateCcw, Server } from 'lucide-react';
+import { Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, MapPin, RotateCcw, Server } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
-import { useBrowserSidecar } from '../../hooks/useBrowserSidecar';
 import type { ChatSessionResponse } from '../../lib/api';
 import { deleteWorkspace, getProjectTask, updateProjectTaskStatus } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
@@ -78,45 +77,6 @@ export function SessionHeader({
       if (detail.trigger) setTriggerDetail(detail);
     }).catch(() => { /* best-effort */ });
   }, [expanded, session.taskId, projectId]);
-
-  // Browser sidecar — always initialize the hook (React rules of hooks), but only
-  // render the button when the workspace exists and session is active.
-  const browserEnabled = !!(session.workspaceId && sessionState === 'active');
-  const browser = useBrowserSidecar({ projectId, sessionId: session.id });
-
-  const handleOpenBrowser = useCallback(() => {
-    if (browser.status?.status === 'running') {
-      // Already running — open the auto-login URL in a new tab
-      const url = browser.status.autoLoginUrl || browser.status.url;
-      if (url) window.open(url, '_blank', 'noopener,noreferrer');
-    }
-  }, [browser.status]);
-
-  const handleStartAndOpen = useCallback(async () => {
-    // Open a blank window immediately in the user gesture context to avoid
-    // mobile popup blockers. We'll set the URL once the API responds.
-    const newWindow = window.open('about:blank', '_blank');
-
-    const firstPort = detectedPorts.length > 0
-      ? detectedPorts.slice().sort((a, b) => a.port - b.port)[0]
-      : null;
-    const result = await browser.start({
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      devicePixelRatio: window.devicePixelRatio || 1,
-      isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
-      userAgent: navigator.userAgent,
-      startURL: firstPort ? `http://localhost:${firstPort.port}` : undefined,
-    });
-
-    const url = result?.autoLoginUrl || result?.url;
-    if (url && newWindow && !newWindow.closed) {
-      newWindow.location.href = url;
-    } else {
-      // Close the blank tab if start failed or returned no URL
-      newWindow?.close();
-    }
-  }, [browser, detectedPorts]);
 
   const hasDetails = !!(
     taskEmbed?.outputBranch ||
@@ -363,22 +323,6 @@ export function SessionHeader({
                     Git
                   </Button>
                 )}
-                {browserEnabled && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={browser.status?.status === 'running' ? 'Open remote browser' : 'Start remote browser'}
-                    onClick={browser.status?.status === 'running' ? handleOpenBrowser : handleStartAndOpen}
-                    disabled={browser.isLoading}
-                  >
-                    {browser.isLoading ? (
-                      <Loader2 size={14} className="mr-1 animate-spin" />
-                    ) : (
-                      <Monitor size={14} className="mr-1" />
-                    )}
-                    Browser
-                  </Button>
-                )}
                 <a
                   href={`/workspaces/${session.workspaceId}`}
                   aria-label="Open workspace"
@@ -405,13 +349,6 @@ export function SessionHeader({
               </Button>
             )}
           </div>
-
-          {/* Inline error for browser sidecar failures */}
-          {browser.error && (
-            <div className="flex items-center gap-2 px-1 py-1">
-              <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>Browser: {browser.error}</span>
-            </div>
-          )}
 
           {/* Inline error for mark-complete failures */}
           {completeError && (

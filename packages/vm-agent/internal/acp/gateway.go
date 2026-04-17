@@ -1063,6 +1063,14 @@ func getOpencodeDefault(envKey, fallback string) string {
 
 // buildOpencodeConfig creates the OPENCODE_CONFIG_CONTENT JSON structure
 // based on the provider selected in agent settings.
+//
+// OpenCode requires custom (non-built-in) providers to include:
+//   - "npm": the AI SDK package name (e.g. "@ai-sdk/openai-compatible")
+//   - "models": a map registering model aliases so OpenCode recognises them
+//   - model field: formatted as "providerID/modelAlias"
+//
+// Built-in providers (scaleway, anthropic) have pre-registered models and
+// don't need the npm/models keys.
 func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} {
 	provider := "scaleway" // default provider
 	model := getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
@@ -1079,24 +1087,34 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 	// Strip @cf/ prefix from Workers AI model IDs for openai-compatible providers.
 	model = stripCFPrefix(model)
 
-	config := map[string]interface{}{
-		"model": model,
-	}
+	config := map[string]interface{}{}
 
 	scalewayBaseURL := getOpencodeDefault("OPENCODE_SCALEWAY_BASE_URL", DefaultScalewayBaseURL)
 
 	switch provider {
 	case "platform":
-		// SAM Platform (Workers AI) — no API key needed, uses platform AI
+		// SAM Platform (Workers AI) — uses a custom "sam-platform" provider ID.
+		// OpenCode requires npm + models keys for non-built-in providers.
+		modelAlias := sanitizeModelAlias(model)
+		config["model"] = "sam-platform/" + modelAlias
 		config["provider"] = map[string]interface{}{
-			"openai-compatible": map[string]interface{}{
+			"sam-platform": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "SAM Platform",
 				"options": map[string]interface{}{
 					"baseURL": "{env:OPENCODE_PLATFORM_BASE_URL}",
 					"apiKey":  "{env:OPENCODE_PLATFORM_API_KEY}",
 				},
+				"models": map[string]interface{}{
+					modelAlias: map[string]interface{}{
+						"name": model,
+					},
+				},
 			},
 		}
 	case "scaleway":
+		// Scaleway is a built-in OpenCode provider with pre-registered models.
+		config["model"] = model
 		config["provider"] = map[string]interface{}{
 			"scaleway": map[string]interface{}{
 				"options": map[string]interface{}{
@@ -1106,17 +1124,28 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 			},
 		}
 	case "google-vertex":
-		// Uses Google's Gemini API (generativelanguage.googleapis.com) via its OpenAI-compatible endpoint.
-		// Named "google-vertex" in the UI for user familiarity; actual Vertex AI would need different auth.
+		// Uses Google's Gemini API via its OpenAI-compatible endpoint.
+		// Named "google-vertex" in the UI; uses custom provider with npm + models.
+		modelAlias := sanitizeModelAlias(model)
+		config["model"] = "google-vertex/" + modelAlias
 		config["provider"] = map[string]interface{}{
-			"openai-compatible": map[string]interface{}{
+			"google-vertex": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "Google Gemini",
 				"options": map[string]interface{}{
 					"baseURL": getOpencodeDefault("OPENCODE_GOOGLE_VERTEX_BASE_URL", DefaultGoogleVertexBaseURL),
 					"apiKey":  "{env:GOOGLE_API_KEY}",
 				},
+				"models": map[string]interface{}{
+					modelAlias: map[string]interface{}{
+						"name": model,
+					},
+				},
 			},
 		}
 	case "anthropic":
+		// Anthropic is a built-in OpenCode provider.
+		config["model"] = model
 		config["provider"] = map[string]interface{}{
 			"anthropic": map[string]interface{}{
 				"options": map[string]interface{}{
@@ -1129,16 +1158,26 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 		if settings != nil && settings.OpencodeBaseURL != "" {
 			baseURL = settings.OpencodeBaseURL
 		}
+		modelAlias := sanitizeModelAlias(model)
+		config["model"] = "custom/" + modelAlias
 		config["provider"] = map[string]interface{}{
-			"openai-compatible": map[string]interface{}{
+			"custom": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "Custom Provider",
 				"options": map[string]interface{}{
 					"baseURL": baseURL,
 					"apiKey":  "{env:OPENCODE_API_KEY}",
 				},
+				"models": map[string]interface{}{
+					modelAlias: map[string]interface{}{
+						"name": model,
+					},
+				},
 			},
 		}
 	default:
-		// Unknown provider — fallback to scaleway
+		// Unknown provider — fallback to scaleway (built-in).
+		config["model"] = model
 		config["provider"] = map[string]interface{}{
 			"scaleway": map[string]interface{}{
 				"options": map[string]interface{}{
@@ -1150,6 +1189,18 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 	}
 
 	return config
+}
+
+// sanitizeModelAlias creates a clean model alias from a full model ID.
+// Strips provider prefixes (e.g. "meta/llama-4" → "llama-4") and replaces
+// characters that could break JSON or OpenCode's provider/model split.
+func sanitizeModelAlias(model string) string {
+	// If model has a provider prefix like "meta/llama-4-scout", take the last segment.
+	// The provider prefix conflicts with OpenCode's "providerID/modelAlias" format.
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	return model
 }
 
 // writeVibeConfigToContainer writes a .vibe/config.toml into the container

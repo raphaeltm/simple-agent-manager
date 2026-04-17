@@ -238,68 +238,6 @@ export interface PortsResponse {
 // =============================================================================
 // Browser Sidecar (Neko)
 // =============================================================================
-
-/**
- * Known sidecar aliases for named subdomain routing.
- * Used in ws-{id}--{alias}.{domain} patterns to route to sidecar containers
- * instead of DevContainer ports.
- */
-export const SIDECAR_ALIASES = ['browser'] as const;
-export type SidecarAlias = (typeof SIDECAR_ALIASES)[number];
-
-/** Check if a string is a valid sidecar alias. */
-export function isSidecarAlias(value: string): value is SidecarAlias {
-  return (SIDECAR_ALIASES as readonly string[]).includes(value);
-}
-
-/** Status of the Neko browser sidecar container. */
-export type BrowserSidecarStatus = 'off' | 'starting' | 'running' | 'stopping' | 'error';
-
-/** Request body for POST /workspaces/{id}/browser — start browser sidecar. */
-export interface StartBrowserSidecarRequest {
-  /** Viewport width in pixels (e.g. 1920). Overrides NEKO_SCREEN_RESOLUTION. */
-  viewportWidth?: number;
-  /** Viewport height in pixels (e.g. 1080). Overrides NEKO_SCREEN_RESOLUTION. */
-  viewportHeight?: number;
-  /** Device pixel ratio for mobile emulation (e.g. 2 for Retina). */
-  devicePixelRatio?: number;
-  /** Whether the client is a touch device — enables Chrome mobile emulation flags. */
-  isTouchDevice?: boolean;
-  /** Enable audio streaming (overrides NEKO_ENABLE_AUDIO). */
-  enableAudio?: boolean;
-}
-
-/** Response from GET /workspaces/{id}/browser — sidecar status. */
-export interface BrowserSidecarResponse {
-  status: BrowserSidecarStatus;
-  /** Neko WebRTC HTTP port on the workspace network (typically 8080). */
-  nekoPort?: number;
-  /** Full URL for accessing the Neko client via SAM port proxy. */
-  url?: string;
-  /** Neko container name for diagnostics. */
-  containerName?: string;
-  /** Error message if status is 'error'. */
-  error?: string;
-  /** Active socat forwarders. */
-  ports?: BrowserSidecarPortInfo[];
-}
-
-/** Info about a single socat port forwarder running inside the Neko container. */
-export interface BrowserSidecarPortInfo {
-  /** Port number being forwarded (e.g. 3000). */
-  port: number;
-  /** Target host inside the Docker network (the DevContainer name). */
-  targetHost: string;
-  /** Whether the socat process is currently active. */
-  active: boolean;
-}
-
-/** Response from GET /workspaces/{id}/browser/ports — list active forwarders. */
-export interface BrowserSidecarPortsResponse {
-  ports: BrowserSidecarPortInfo[];
-}
-
-// =============================================================================
 // Bootstrap Token (Secure Credential Delivery)
 // =============================================================================
 

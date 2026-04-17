@@ -15,7 +15,6 @@ func TestIsValidContainerID(t *testing.T) {
 		// Valid Docker container names
 		{"container-123", true},
 		{"my_container.name", true},
-		{"neko-ws-1", true},
 		{"devcontainer-ws-1", true},
 		// Invalid
 		{"", false},

@@ -696,32 +696,6 @@ func TestGetEnvOrGenerateWeakPassword(t *testing.T) {
 	// Warning is logged but we verify the value is still returned
 }
 
-func TestNekoPasswordsAreRandom(t *testing.T) {
-	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
-	t.Setenv("WORKSPACE_ID", "ws-123")
-	// Use t.Setenv with empty string to safely unset for test duration
-	t.Setenv("NEKO_PASSWORD", "")
-	t.Setenv("NEKO_PASSWORD_ADMIN", "")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-
-	if cfg.NekoPassword == "neko" {
-		t.Fatal("NekoPassword should not be 'neko' — expected random default")
-	}
-	if cfg.NekoPasswordAdmin == "admin" {
-		t.Fatal("NekoPasswordAdmin should not be 'admin' — expected random default")
-	}
-	if len(cfg.NekoPassword) != 32 {
-		t.Fatalf("NekoPassword length = %d, want 32 (hex)", len(cfg.NekoPassword))
-	}
-	if cfg.NekoPassword == cfg.NekoPasswordAdmin {
-		t.Fatal("NekoPassword and NekoPasswordAdmin should be different")
-	}
-}
-
 // --- Env parse warning tests ---
 
 func TestGetEnvIntWarnsOnBadValue(t *testing.T) {

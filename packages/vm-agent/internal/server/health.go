@@ -51,8 +51,12 @@ func (s *Server) startNodeHealthReporter() {
 		return
 	}
 
+	// Only start heartbeats here — NOT the ready callback.
+	// The ready callback must be sent AFTER provisioning completes
+	// (called explicitly from main.go via SendNodeReady).
+	// Otherwise the control plane dispatches workspace creation
+	// before Docker/Node.js are installed.
 	go func() {
-		s.sendNodeReady()
 		ticker := time.NewTicker(s.config.HeartbeatInterval)
 		defer ticker.Stop()
 
@@ -65,6 +69,12 @@ func (s *Server) startNodeHealthReporter() {
 			}
 		}
 	}()
+}
+
+// SendNodeReady sends the one-time node-ready callback to the control plane.
+// Call this AFTER system provisioning completes — not during server start.
+func (s *Server) SendNodeReady() {
+	s.sendNodeReady()
 }
 
 func (s *Server) sendNodeReady() {

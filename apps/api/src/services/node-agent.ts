@@ -5,7 +5,7 @@ import { recordNodeRoutingMetric } from './telemetry';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 
-const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 600_000;
+const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000; // 15 min — cloud-init takes 8-12 min on Hetzner
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
 
 function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
@@ -485,6 +485,28 @@ export async function getNodeLogsFromNode(
     method: 'GET',
     userId,
   });
+}
+
+/**
+ * Raw binary proxy to a VM agent endpoint.
+ * Returns the raw Response (not parsed as JSON) so callers can stream the body.
+ * Used for downloading SQLite database files (events, metrics).
+ */
+export async function nodeAgentRawRequest(
+  nodeId: string,
+  env: Env,
+  path: string,
+  userId: string
+): Promise<Response> {
+  const { token } = await signNodeManagementToken(userId, nodeId, null, env);
+  const url = `${getNodeBackendBaseUrl(nodeId, env)}${path}`;
+  const headers = new Headers();
+  headers.set('Authorization', `Bearer ${token}`);
+  headers.set('X-SAM-Node-Id', nodeId);
+
+  const DEFAULT_EXPORT_TIMEOUT_MS = 60_000;
+  const timeoutMs = getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_EXPORT_TIMEOUT_MS);
+  return fetchWithTimeout(url, { method: 'GET', headers }, timeoutMs);
 }
 
 export async function rebuildWorkspaceOnNode(

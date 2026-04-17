@@ -13,10 +13,8 @@ For the fastest deployment experience, use the automated GitHub Actions workflow
 ### Prerequisites (One-Time Setup)
 
 1. **Fork this repository**
-2. **Have a domain configured in Cloudflare** with nameservers pointing to Cloudflare
-3. **Create a Cloudflare API Token** with these permissions:
-   - Account: D1, Workers KV Storage, Workers R2 Storage, Workers Scripts, Cloudflare Pages (Edit), Workers Observability (Read)
-   - Zone: DNS (Edit), Workers Routes (Edit), Zone (Read)
+2. **Have a domain on Cloudflare** (nameservers already pointed to Cloudflare — see [Cloudflare Setup](#cloudflare-setup) if not yet done)
+3. **Create a Cloudflare API Token** — see the [detailed permissions table](#step-4-create-api-token-with-required-permissions) below
 4. **Note your Account ID and Zone ID** from the Cloudflare dashboard (domain overview, right sidebar)
 5. **Create an R2 API Token** (separate from above - for Pulumi state storage):
    - Go to Cloudflare Dashboard → R2 → **Manage R2 API Tokens**
@@ -90,6 +88,12 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `GH_APP_PRIVATE_KEY` | GitHub App private key (raw PEM or base64 encoded — both work) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
 
+**Optional secrets** (TLS — usually not needed):
+
+| Secret | Description |
+|--------|-------------|
+| `CF_ORIGIN_CA_KEY` | **Deprecated fallback.** Cloudflare Origin CA Key — only needed if your `CF_API_TOKEN` lacks the `Zone > SSL and Certificates > Edit` permission and you can't update it. The Origin CA Key is deprecated by Cloudflare (removal Sept 2026). Prefer adding the SSL permission to your API token instead. |
+
 **Optional secrets** (purpose-specific security overrides — recommended for production):
 
 | Secret | Description |
@@ -125,7 +129,7 @@ For the full list of GCP configuration variables, see the [GCP Setup Guide](./gc
 | `GCP_DEPLOY_SERVICE_ACCOUNT_ID` | `sam-deployer` | Service account for deployment operations |
 | `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS` | `600` | Identity token lifetime in seconds |
 
-> **Naming Convention**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets. Google OAuth secrets use `GOOGLE_*` directly (no prefix mapping needed).
+> **⚠️ Naming Convention — read this before troubleshooting "missing secret" errors**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub Actions reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets. If you see `GITHUB_CLIENT_ID` in code or `.env` files, that's the Worker-side name — use `GH_CLIENT_ID` in GitHub Environment secrets. Google OAuth secrets use `GOOGLE_*` directly (no prefix mapping needed).
 
 > **Note**: Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) and TLS certificates (`ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`) are **automatically generated and persisted** via Pulumi state in R2. No manual intervention required—keys are created on first deployment and reused automatically on subsequent deployments.
 
@@ -164,7 +168,7 @@ For more control or troubleshooting, continue with the manual setup below.
 2. [Cloudflare Setup](#cloudflare-setup)
 3. [GitHub Setup](#github-setup)
 4. [Project Setup](#project-setup)
-5. [Building & Deployment](#building--deployment)
+5. [Manual Building & Deployment (Optional)](#manual-building--deployment-optional)
 6. [DNS Configuration](#dns-configuration)
 7. [Verification](#verification)
 8. [Maintenance](#maintenance)
@@ -185,7 +189,7 @@ Before starting, ensure you have the following ready.
 | **GitHub** | Authentication, repository access | Free tier | [github.com](https://github.com/signup) |
 | **Domain Registrar** | Your workspace domain | Any | (you likely already have one) |
 
-**Note**: Hetzner Cloud accounts are created per-user. Users provide their own Hetzner API token to create workspaces, so you don't need a shared Hetzner account.
+**Note on cloud providers**: SAM uses a Bring-Your-Own-Cloud (BYOC) model. Each user provides their own Hetzner (or other provider) API token through the Settings UI to create workspaces. You do **not** need a shared cloud provider account for the platform itself — Cloudflare is the only infrastructure the platform operator manages.
 
 ### Required Tools
 
@@ -199,7 +203,7 @@ node --version  # Should be v20.x or higher
 npm install -g pnpm
 pnpm --version  # Should be 9.x or higher
 
-# Go 1.22+ (required for VM Agent compilation)
+# Go 1.22+ (needed to compile the VM Agent — the binary that runs on each workspace VM)
 go version  # Should be go1.22.x or higher
 
 # Git
@@ -281,19 +285,20 @@ SAM needs a Cloudflare API token with specific permissions:
 
 **Token name**: `simple-agent-manager`
 
-**Permissions** (add all of these):
+**Permissions** — add all of these. Each row maps to a single permission in the Cloudflare UI: select the **Scope** (Account or Zone), then the **Category** group, then the specific **Permission** and **Access Level**.
 
-| Permission Type | Resource | Access Level |
-|-----------------|----------|--------------|
-| **Account** | Cloudflare Workers:D1 | Edit |
-| **Account** | Workers KV Storage | Edit |
-| **Account** | Workers R2 Storage | Edit |
-| **Account** | Workers Scripts | Edit |
-| **Account** | Workers Observability | Read |
-| **Account** | Cloudflare Pages | Edit |
-| **Zone** | DNS | Edit |
-| **Zone** | Workers Routes | Edit |
-| **Zone** | Zone | Read |
+| Scope | Category | Permission | Access Level |
+|-------|----------|------------|--------------|
+| Account | Developer Platform | D1 | Edit |
+| Account | Developer Platform | Workers KV Storage | Edit |
+| Account | Developer Platform | Workers R2 Storage | Edit |
+| Account | Developer Platform | Workers Scripts | Edit |
+| Account | Developer Platform | Workers Observability | Read |
+| Account | Developer Platform | Pages | Edit |
+| Zone | Developer Platform | Workers Routes | Edit |
+| Zone | SSL & Certificates | SSL and Certificates | Edit |
+| Zone | DNS & Zone | DNS | Edit |
+| Zone | DNS & Zone | Zone | Read |
 
 **Zone Resources**: Select **Include** → **Specific zone** → *your domain*
 
@@ -549,11 +554,9 @@ crons = ["*/5 * * * *"]
 
 ---
 
-## Building & Deployment
+## Manual Building & Deployment (Optional)
 
-> **Recommended**: Use the [Quick Start (Automated Deployment)](#quick-start-automated-deployment) for the easiest deployment experience. The GitHub Actions workflow handles all build, deploy, and configuration steps automatically.
-
-The manual steps below are provided for local development, custom deployments, or troubleshooting.
+> **Most users should skip this section.** The [Quick Start (Automated Deployment)](#quick-start-automated-deployment) handles all build, deploy, and configuration steps automatically via GitHub Actions. The manual steps below are only needed for local development, custom deployments, or troubleshooting.
 
 <details>
 <summary>Manual Deployment Steps</summary>
@@ -1095,4 +1098,4 @@ VMs are billed hourly until they are explicitly stopped or deleted.
 
 ---
 
-*Last updated: February 2026*
+*Last updated: 2026-04-14*

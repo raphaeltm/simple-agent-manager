@@ -194,6 +194,8 @@ function generateApiWorkerEnv(
       PAGES_PROJECT_NAME: outputs.pagesName,
       R2_BUCKET_NAME: outputs.r2Name,
       ...(process.env.REQUIRE_APPROVAL ? { REQUIRE_APPROVAL: process.env.REQUIRE_APPROVAL } : {}),
+      // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
+      AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
     },
 
     // Dynamic bindings from Pulumi outputs

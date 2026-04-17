@@ -609,6 +609,11 @@ export async function getRelevantKnowledge(env: Env, projectId: string, context:
   return stub.getRelevantKnowledge(context, limit);
 }
 
+export async function getAllHighConfidenceKnowledge(env: Env, projectId: string, minConfidence: number, limit: number) {
+  const stub = await getStub(env, projectId);
+  return stub.getAllHighConfidenceKnowledge(minConfidence, limit);
+}
+
 export async function createKnowledgeRelation(
   env: Env, projectId: string, sourceEntityId: string, targetEntityId: string, relationType: string, description: string | null,
 ) {
