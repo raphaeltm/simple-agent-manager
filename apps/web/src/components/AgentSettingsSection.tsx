@@ -10,6 +10,7 @@ import {
   AGENT_PERMISSION_MODE_LABELS,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
+  PLATFORM_AI_MODELS,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
@@ -167,6 +168,7 @@ function AgentSettingsCard({
             value={opencodeProvider}
             onChange={(e) => {
               const val = e.target.value as OpenCodeProvider | '';
+              const prev = opencodeProvider;
               setOpencodeProvider(val);
               // Clear base URL when switching away from providers that need it
               if (val !== 'custom' && val !== 'openai-compatible') {
@@ -175,6 +177,10 @@ function AgentSettingsCard({
               // Clear provider name when switching away from custom
               if (val !== 'custom') {
                 setOpencodeProviderName('');
+              }
+              // Clear model when switching to/from platform (dropdown vs text input)
+              if ((val === 'platform') !== (prev === 'platform')) {
+                setModel('');
               }
             }}
             className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
@@ -237,17 +243,36 @@ function AgentSettingsCard({
       <div className="mb-4">
         <label htmlFor={`model-input-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Model</label>
         <div className="text-xs text-fg-muted mb-2">
-          Leave empty to use the default model. Model availability depends on your API key or subscription.
+          {isOpenCode && selectedProvider === 'platform'
+            ? 'Select a model from the available Workers AI models.'
+            : 'Leave empty to use the default model. Model availability depends on your API key or subscription.'}
         </div>
-        <input
-          id={`model-input-${agent.id}`}
-          type="text"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder={modelPlaceholder}
-          className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
-          data-testid={`model-input-${agent.id}`}
-        />
+        {isOpenCode && selectedProvider === 'platform' ? (
+          <select
+            id={`model-input-${agent.id}`}
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            data-testid={`model-input-${agent.id}`}
+          >
+            <option value="">Default ({PLATFORM_AI_MODELS.find((m) => m.isDefault)?.label ?? 'auto'})</option>
+            {PLATFORM_AI_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={`model-input-${agent.id}`}
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder={modelPlaceholder}
+            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            data-testid={`model-input-${agent.id}`}
+          />
+        )}
       </div>
 
       {/* Permission mode */}
