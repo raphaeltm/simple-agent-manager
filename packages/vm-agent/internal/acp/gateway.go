@@ -1191,6 +1191,50 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 	return config
 }
 
+// opencodeProviderNeedsNpmPackage returns the npm package name that a given
+// OpenCode provider requires, or "" if the provider is built-in.
+// OpenCode uses Bun to auto-install npm packages for custom providers, but
+// our containers only have Node.js/npm. Without pre-installation, the provider
+// silently fails and OpenCode returns end_turn with no content.
+func opencodeProviderNeedsNpmPackage(provider string) string {
+	switch provider {
+	case "platform", "google-vertex", "openai-compatible", "custom":
+		return "@ai-sdk/openai-compatible"
+	default:
+		return ""
+	}
+}
+
+// preInstallOpencodeProviderDeps installs the npm package required by a custom
+// OpenCode provider into the OpenCode config directory (~/.config/opencode/).
+// This is necessary because OpenCode uses Bun for package installation, but our
+// containers only ship Node.js/npm. Without this step, the @ai-sdk/openai-compatible
+// package never gets installed and the provider silently fails.
+func preInstallOpencodeProviderDeps(ctx context.Context, containerID, user, npmPackage string) error {
+	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	if err != nil {
+		homeDir = "/root"
+	}
+	configDir := path.Join(homeDir, ".config", "opencode")
+
+	// Create the config directory if it doesn't exist
+	if _, _, err := execInContainer(ctx, containerID, user, "", "mkdir", "-p", configDir); err != nil {
+		return fmt.Errorf("create opencode config dir: %w", err)
+	}
+
+	// Install the package into the config directory using npm
+	_, stderr, err := execInContainer(ctx, containerID, user, configDir, "npm", "install", "--save", npmPackage)
+	if err != nil {
+		return fmt.Errorf("npm install %s: %w: %s", npmPackage, err, stderr)
+	}
+
+	slog.Info("Pre-installed OpenCode provider dependency",
+		"package", npmPackage,
+		"configDir", configDir,
+		"container", containerID)
+	return nil
+}
+
 // sanitizeModelAlias creates a clean model alias from a full model ID.
 // Strips provider prefixes (e.g. "meta/llama-4" → "llama-4") and replaces
 // characters that could break JSON or OpenCode's provider/model split.

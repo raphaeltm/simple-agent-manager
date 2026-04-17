@@ -1008,6 +1008,18 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 				provider = settings.OpencodeProvider
 			}
 			slog.Info("OpenCode config injected", "provider", provider, "model", opencodeConfig["model"])
+
+			// Pre-install the npm package required by custom providers.
+			// OpenCode uses Bun for auto-installation, but our containers only
+			// have Node.js/npm — without this, the provider silently fails.
+			if npmPkg := opencodeProviderNeedsNpmPackage(provider); npmPkg != "" {
+				if err := preInstallOpencodeProviderDeps(ctx, containerID, h.config.ContainerUser, npmPkg); err != nil {
+					slog.Warn("Failed to pre-install OpenCode provider dependency (agent may fail silently)",
+						"package", npmPkg,
+						"provider", provider,
+						"error", err)
+				}
+			}
 		}
 	}
 
