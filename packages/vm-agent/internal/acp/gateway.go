@@ -1071,7 +1071,14 @@ func getOpencodeDefault(envKey, fallback string) string {
 //
 // Built-in providers (scaleway, anthropic) have pre-registered models and
 // don't need the npm/models keys.
-func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} {
+// opencodeConfigOverrides holds optional direct values to embed in the config
+// instead of using {env:...} references.
+type opencodeConfigOverrides struct {
+	PlatformBaseURL string // if non-empty, embedded directly instead of {env:OPENCODE_PLATFORM_BASE_URL}
+	PlatformAPIKey  string // if non-empty, embedded directly instead of {env:OPENCODE_PLATFORM_API_KEY}
+}
+
+func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConfigOverrides) map[string]interface{} {
 	provider := "scaleway" // default provider
 	model := getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
 
@@ -1095,6 +1102,18 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 	case "platform":
 		// SAM Platform (Workers AI) — uses a custom "sam-platform" provider ID.
 		// OpenCode requires npm + models keys for non-built-in providers.
+		// Embed actual values directly rather than {env:} references because
+		// OPENCODE_CONFIG_CONTENT may not support variable interpolation.
+		baseURL := "{env:OPENCODE_PLATFORM_BASE_URL}"
+		apiKey := "{env:OPENCODE_PLATFORM_API_KEY}"
+		if overrides != nil {
+			if overrides.PlatformBaseURL != "" {
+				baseURL = overrides.PlatformBaseURL
+			}
+			if overrides.PlatformAPIKey != "" {
+				apiKey = overrides.PlatformAPIKey
+			}
+		}
 		modelAlias := sanitizeModelAlias(model)
 		config["model"] = "sam-platform/" + modelAlias
 		config["provider"] = map[string]interface{}{
@@ -1102,8 +1121,8 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 				"npm":  "@ai-sdk/openai-compatible",
 				"name": "SAM Platform",
 				"options": map[string]interface{}{
-					"baseURL": "{env:OPENCODE_PLATFORM_BASE_URL}",
-					"apiKey":  "{env:OPENCODE_PLATFORM_API_KEY}",
+					"baseURL": baseURL,
+					"apiKey":  apiKey,
 				},
 				"models": map[string]interface{}{
 					modelAlias: map[string]interface{}{

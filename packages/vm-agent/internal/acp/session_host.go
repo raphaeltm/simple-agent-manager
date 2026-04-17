@@ -997,7 +997,17 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	// Uses the env var (highest priority config source) to inject provider and model
 	// settings without overwriting any repo-level .opencode.json.
 	if agentType == "opencode" {
-		opencodeConfig := buildOpencodeConfig(settings)
+		// Pass actual credential values for platform provider so they're embedded
+		// directly in the config JSON. OPENCODE_CONFIG_CONTENT may not support
+		// {env:} variable interpolation that file-based configs use.
+		var overrides *opencodeConfigOverrides
+		if cred.inferenceConfig != nil && cred.inferenceConfig.APIKeySource == "callback-token" {
+			overrides = &opencodeConfigOverrides{
+				PlatformBaseURL: cred.inferenceConfig.BaseURL,
+				PlatformAPIKey:  h.config.CallbackToken,
+			}
+		}
+		opencodeConfig := buildOpencodeConfig(settings, overrides)
 		configJSON, err := json.Marshal(opencodeConfig)
 		if err != nil {
 			slog.Error("opencode: failed to marshal config", "error", err)
