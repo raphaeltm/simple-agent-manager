@@ -32,6 +32,86 @@ import { verifyCallbackToken } from '../services/jwt';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 
+/** DeepSeek R1 model ID — emits <think> tags inline in content instead of using reasoning_content. */
+const DEEPSEEK_R1_MODEL = '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b';
+
+/** Check if a model requires think-tag stripping. */
+function needsThinkTagStripping(modelId: string): boolean {
+  return modelId === DEEPSEEK_R1_MODEL;
+}
+
+/** Strip <think>...</think> blocks from text content (sync responses). */
+function stripThinkTags(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+}
+
+/**
+ * Create a TransformStream that strips <think>...</think> tags from SSE streaming responses.
+ * Buffers partial think tags across chunk boundaries to handle splits mid-tag.
+ */
+function createThinkTagStrippingStream(): TransformStream<Uint8Array, Uint8Array> {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+
+  return new TransformStream({
+    transform(chunk, controller) {
+      const text = decoder.decode(chunk, { stream: true });
+      // Process each SSE line individually
+      const lines = text.split('\n');
+      const outputLines: string[] = [];
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ') || line === 'data: [DONE]') {
+          outputLines.push(line);
+          continue;
+        }
+
+        // Parse the SSE data payload
+        const jsonStr = line.slice(6);
+        try {
+          const data = JSON.parse(jsonStr);
+          if (data.choices?.[0]?.delta?.content) {
+            data.choices[0].delta.content = stripThinkTags(data.choices[0].delta.content);
+            // Skip chunks that become empty after stripping
+            if (!data.choices[0].delta.content && !data.choices[0].finish_reason) {
+              continue;
+            }
+          }
+          outputLines.push(`data: ${JSON.stringify(data)}`);
+        } catch {
+          // Not valid JSON — pass through as-is
+          outputLines.push(line);
+        }
+      }
+
+      const output = outputLines.join('\n');
+      if (output) {
+        controller.enqueue(encoder.encode(output));
+      }
+    },
+  });
+}
+
+/**
+ * Strip think tags from a non-streaming JSON response body.
+ * Returns the modified Response with cleaned content.
+ */
+async function stripThinkTagsFromJsonResponse(response: Response): Promise<Response> {
+  const body = await response.json() as Record<string, unknown>;
+  const choices = body.choices as Array<{ message?: { content?: string } }> | undefined;
+  if (choices) {
+    for (const choice of choices) {
+      if (typeof choice.message?.content === 'string') {
+        choice.message.content = stripThinkTags(choice.message.content);
+      }
+    }
+  }
+  return new Response(JSON.stringify(body), {
+    status: response.status,
+    headers: response.headers,
+  });
+}
+
 /** Parse allowed models from env or use defaults, normalizing prefixes. */
 function getAllowedModels(env: Env): Set<string> {
   const raw = env.AI_PROXY_ALLOWED_MODELS || DEFAULT_AI_PROXY_ALLOWED_MODELS;
@@ -124,10 +204,10 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   const workspaceId = tokenPayload.workspace;
 
-  // --- Resolve workspaceId → userId ---
+  // --- Resolve workspaceId → userId + projectId ---
   const db = drizzle(c.env.DATABASE, { schema });
   const workspace = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .get();
@@ -138,6 +218,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   }
 
   const userId = workspace.userId;
+  const projectId = workspace.projectId;
 
   // --- Rate limit: per-user RPM ---
   const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
@@ -179,6 +260,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   }
 
   // --- Resolve and validate model ---
+  const requestModel = (body.model as string | undefined) ?? '';
   const modelId = resolveModelId(body.model as string | undefined, c.env);
   const allowedModels = getAllowedModels(c.env);
   if (!allowedModels.has(modelId)) {
@@ -224,14 +306,14 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   const gatewayBody = { ...body, model: modelId };
   const gatewayUrl = buildUpstreamUrl(c.env);
 
-  // Attach per-user metadata for AI Gateway analytics (max 5 fields).
+  // Attach per-user/project metadata for AI Gateway analytics.
   // Enables per-user token usage tracking, cost attribution, and log filtering.
+  // The gateway returns tokens_in, tokens_out, cost per request — this tags with identity.
   const aigMetadata = JSON.stringify({
     userId,
-    workspaceId,
-    modelId,
-    stream: !!body.stream,
-    hasTools: !!body.tools,
+    projectId: projectId ?? null,
+    requestModel,
+    resolvedModel: modelId,
   });
 
   log.info('ai_proxy.gateway_forward', {
@@ -296,6 +378,29 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       responseHeaders.set('X-Accel-Buffering', 'no');
     }
 
+    const shouldStripThinkTags = needsThinkTagStripping(modelId);
+
+    // For streaming responses with think-tag models, pipe through stripping transform
+    if (body.stream && shouldStripThinkTags && gatewayResponse.body) {
+      const strippingStream = createThinkTagStrippingStream();
+      const transformedBody = gatewayResponse.body.pipeThrough(strippingStream);
+      return new Response(transformedBody, {
+        status: gatewayResponse.status,
+        headers: responseHeaders,
+      });
+    }
+
+    // For non-streaming responses with think-tag models, strip from JSON body
+    if (!body.stream && shouldStripThinkTags) {
+      const cleaned = await stripThinkTagsFromJsonResponse(
+        new Response(gatewayResponse.body, {
+          status: gatewayResponse.status,
+          headers: responseHeaders,
+        }),
+      );
+      return cleaned;
+    }
+
     return new Response(gatewayResponse.body, {
       status: gatewayResponse.status,
       headers: responseHeaders,
@@ -331,4 +436,4 @@ aiProxyRoutes.get('/models', async (c) => {
 });
 
 // Export resolveModelId for testing
-export { aiProxyRoutes, resolveModelId };
+export { aiProxyRoutes, needsThinkTagStripping, resolveModelId, stripThinkTags };

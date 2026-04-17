@@ -119,9 +119,17 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
  * causing empty visible content in streaming. Llama 4 Scout works reliably without this issue. */
 export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
-/** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var. */
-export const DEFAULT_AI_PROXY_ALLOWED_MODELS =
-  '@cf/meta/llama-4-scout-17b-16e-instruct,@cf/qwen/qwen3-30b-a3b-fp8,@cf/google/gemma-3-12b-it';
+/** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var.
+ * Only includes models verified to support OpenAI-compatible tool/function calling.
+ * DeepSeek R1 intentionally excluded — reasoning model, too slow/expensive for agent use.
+ * Qwen2.5 Coder excluded — emits XML <tools> tags instead of proper function calling. */
+export const DEFAULT_AI_PROXY_ALLOWED_MODELS = [
+  '@cf/meta/llama-4-scout-17b-16e-instruct',
+  '@cf/qwen/qwen3-30b-a3b-fp8',
+  '@cf/openai/gpt-oss-120b',
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+  '@cf/google/gemma-3-12b-it',
+].join(',');
 
 /** Default daily input token limit per user. Override via AI_PROXY_DAILY_INPUT_TOKEN_LIMIT env var. */
 export const DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT = 500_000;
