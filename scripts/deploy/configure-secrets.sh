@@ -194,6 +194,7 @@ fi
 STALE_SECRETS=(
   "AI_PROXY_DEFAULT_MODEL"   # Migrated to wrangler.toml [vars] — code defaults in shared/constants/ai-services.ts
   "AI_PROXY_ENABLED"         # Migrated to wrangler.toml [vars]
+  "AI_PROXY_ALLOWED_MODELS"  # Migrated to code default in shared/constants/ai-services.ts — secret shadows the bundled constant
 )
 
 echo ""
