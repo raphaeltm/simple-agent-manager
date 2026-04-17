@@ -1515,10 +1515,10 @@ func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName, credHelperHo
 	configJSON := fmt.Sprintf(`{
   "name": "Default Workspace",
   "image": %q,
+  "privileged": true,
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   }%s%s%s
 }
 `, image, remoteUserLine, mountLines, credLines)
