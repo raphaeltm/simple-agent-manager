@@ -1206,31 +1206,34 @@ func opencodeProviderNeedsNpmPackage(provider string) string {
 }
 
 // preInstallOpencodeProviderDeps installs the npm package required by a custom
-// OpenCode provider into the OpenCode config directory (~/.config/opencode/).
-// This is necessary because OpenCode uses Bun for package installation, but our
-// containers only ship Node.js/npm. Without this step, the @ai-sdk/openai-compatible
-// package never gets installed and the provider silently fails.
+// OpenCode provider into ~/.cache/opencode/node_modules/ — the exact location
+// where OpenCode resolves provider packages at runtime.
+//
+// OpenCode normally uses Bun to auto-install provider packages into this cache
+// directory, but our containers only ship Node.js/npm. Without pre-installation,
+// the provider silently fails and OpenCode returns end_turn with no content.
 func preInstallOpencodeProviderDeps(ctx context.Context, containerID, user, npmPackage string) error {
 	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
 	if err != nil {
 		homeDir = "/root"
 	}
-	configDir := path.Join(homeDir, ".config", "opencode")
+	cacheDir := path.Join(homeDir, ".cache", "opencode")
 
-	// Create the config directory if it doesn't exist
-	if _, _, err := execInContainer(ctx, containerID, user, "", "mkdir", "-p", configDir); err != nil {
-		return fmt.Errorf("create opencode config dir: %w", err)
+	// Create the cache directory structure that OpenCode expects
+	if _, _, err := execInContainer(ctx, containerID, user, "", "mkdir", "-p", cacheDir); err != nil {
+		return fmt.Errorf("create opencode cache dir: %w", err)
 	}
 
-	// Install the package into the config directory using npm
-	_, stderr, err := execInContainer(ctx, containerID, user, configDir, "npm", "install", "--save", npmPackage)
+	// Install the package into the cache directory so OpenCode finds it
+	// at ~/.cache/opencode/node_modules/@ai-sdk/openai-compatible
+	_, stderr, err := execInContainer(ctx, containerID, user, cacheDir, "npm", "install", "--save", npmPackage)
 	if err != nil {
-		return fmt.Errorf("npm install %s: %w: %s", npmPackage, err, stderr)
+		return fmt.Errorf("npm install %s in cache dir: %w: %s", npmPackage, err, stderr)
 	}
 
 	slog.Info("Pre-installed OpenCode provider dependency",
 		"package", npmPackage,
-		"configDir", configDir,
+		"cacheDir", cacheDir,
 		"container", containerID)
 	return nil
 }
