@@ -816,7 +816,10 @@ func TestControlPlaneTransportTuning(t *testing.T) {
 // Not t.Parallel — we're exercising the shared transport.
 func TestCloseIdleControlPlaneConnectionsFlushesPool(t *testing.T) {
 	var connCount int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	// NewUnstartedServer + explicit Start so ConnState is wired before any
+	// client can connect — avoids a data race between our goroutine writing
+	// srv.Config.ConnState and the server goroutine reading it on accept.
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
@@ -824,6 +827,7 @@ func TestCloseIdleControlPlaneConnectionsFlushesPool(t *testing.T) {
 			atomic.AddInt64(&connCount, 1)
 		}
 	}
+	srv.Start()
 	t.Cleanup(srv.Close)
 
 	client := NewControlPlaneClient(5 * time.Second)

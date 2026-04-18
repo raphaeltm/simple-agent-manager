@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/config"
 	_ "modernc.org/sqlite"
 )
 
@@ -95,7 +96,7 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 	r := &Reporter{
 		cfg:         cfg,
 		db:          db,
-		client:      &http.Client{Timeout: cfg.HTTPTimeout},
+		client:      config.NewControlPlaneClient(cfg.HTTPTimeout),
 		workspaceID: cfg.WorkspaceID,
 		sessionID:   cfg.SessionID,
 		stopC:       make(chan struct{}),

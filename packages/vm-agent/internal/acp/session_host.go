@@ -20,6 +20,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
@@ -223,7 +224,7 @@ func (h *SessionHost) httpClient() *http.Client {
 	if h.config.HTTPClient != nil {
 		return h.config.HTTPClient
 	}
-	return &http.Client{Timeout: defaultControlPlaneHTTPTimeout}
+	return config.NewControlPlaneClient(defaultControlPlaneHTTPTimeout)
 }
 
 // Status returns the current status of the SessionHost.

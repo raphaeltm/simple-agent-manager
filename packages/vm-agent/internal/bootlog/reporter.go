@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // Broadcaster is an interface for local real-time delivery of boot log entries.
@@ -43,7 +45,7 @@ func New(controlPlaneURL, workspaceID string) *Reporter {
 	return &Reporter{
 		controlPlaneURL: strings.TrimRight(controlPlaneURL, "/"),
 		workspaceID:     workspaceID,
-		client:          &http.Client{Timeout: 10 * time.Second},
+		client:          config.NewControlPlaneClient(10 * time.Second),
 	}
 }
 

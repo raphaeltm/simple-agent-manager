@@ -397,15 +397,17 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       const content = firewallScript.content;
-      expect(content).toContain('iptables -A INPUT -i lo -j ACCEPT');
-      expect(content).toContain('iptables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
-      expect(content).toContain('iptables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      // Trusted interfaces are INSERTed (-I) at position 1 so they take priority
+      // over the port-level DROP rules.
+      expect(content).toContain('iptables -I INPUT 1 -i lo -j ACCEPT');
+      expect(content).toContain('iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain('iptables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
       // No conntrack ESTABLISHED,RELATED dependency — policy ACCEPT means
       // outbound reply packets don't need a state entry to come back.
       expect(content).not.toContain('conntrack --ctstate ESTABLISHED,RELATED');
     });
 
-    it('firewall script ends with a targeted DROP rule for VM_AGENT_PORT', () => {
+    it('firewall script installs targeted DROP rules for VM_AGENT_PORT (TCP and UDP) and SSH', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -413,15 +415,37 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       const content: string = firewallScript.content;
-      // Final catch-all drops non-CF traffic to the VM agent port only.
+      // TCP drop on agent port (primary rule)
       expect(content).toContain('iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
       expect(content).toContain('ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
-      // The targeted DROP must come AFTER the CF ACCEPT rules. Find positions
-      // in the script to verify ordering for at least one CF fallback CIDR.
-      const acceptIdx = content.indexOf('iptables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      // UDP drop on agent port (blocks ICMP-unreachable-based port fingerprinting)
+      expect(content).toContain('iptables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP');
+      expect(content).toContain('ip6tables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP');
+      // SSH defense-in-depth — Hetzner cloud firewall is primary gate, but
+      // explicit DROP protects against Hetzner-firewall misconfig.
+      expect(content).toContain('iptables -A INPUT -p tcp --dport 22 -j DROP');
+      expect(content).toContain('ip6tables -A INPUT -p tcp --dport 22 -j DROP');
+    });
+
+    it('firewall script installs DROP rules before ACCEPT inserts (race-window eliminated)', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      // After -F INPUT flush, the DROP on the agent port must appear before
+      // any CF ACCEPT INSERTs. This closes the window where the port would
+      // be reachable between policy-ACCEPT and final DROP rule installation.
+      const flushIdx = content.indexOf('iptables -F INPUT');
       const dropIdx = content.indexOf('iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
-      expect(acceptIdx).toBeGreaterThan(-1);
-      expect(dropIdx).toBeGreaterThan(acceptIdx);
+      const cfInsertIdx = content.indexOf(
+        'iptables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
+      );
+      expect(flushIdx).toBeGreaterThan(-1);
+      expect(dropIdx).toBeGreaterThan(flushIdx);
+      expect(cfInsertIdx).toBeGreaterThan(dropIdx);
     });
 
     it('firewall script fetches Cloudflare IPs with fallback defaults', () => {
@@ -491,9 +515,14 @@ describe('generateCloudInit', () => {
       // No unrestricted ACCEPT rules
       expect(content).not.toMatch(/iptables -A INPUT -j ACCEPT/);
       expect(content).not.toMatch(/ip6tables -A INPUT -j ACCEPT/);
-      // No explicit SSH allowance
-      expect(content).not.toMatch(/--dport 22\b/);
-      expect(content).not.toMatch(/--dport ssh\b/);
+      // No ACCEPT rule for SSH (port 22) — Hetzner cloud firewall gates SSH.
+      // The host firewall DROPs port 22 as defense-in-depth, so `--dport 22`
+      // DOES appear in a DROP rule; the forbidden pattern is an ACCEPT on 22.
+      expect(content).not.toMatch(/--dport 22\b[^\n]*-j ACCEPT/);
+      expect(content).not.toMatch(/--dport ssh\b[^\n]*-j ACCEPT/);
+      // Defense-in-depth DROP for SSH must be present on both families.
+      expect(content).toMatch(/iptables -A INPUT -p tcp --dport 22 -j DROP/);
+      expect(content).toMatch(/ip6tables -A INPUT -p tcp --dport 22 -j DROP/);
     });
 
     it('IPv6 firewall rules mirror IPv4 structure', () => {
@@ -504,9 +533,11 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       const content: string = firewallScript.content;
-      expect(content).toContain('ip6tables -A INPUT -i lo -j ACCEPT');
-      expect(content).toContain('ip6tables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
-      expect(content).toContain('ip6tables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      // Trusted-interface ACCEPTs are INSERTED at position 1 so they take
+      // priority over the targeted DROP rules appended earlier.
+      expect(content).toContain('ip6tables -I INPUT 1 -i lo -j ACCEPT');
+      expect(content).toContain('ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain('ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
       // Policy stays ACCEPT; targeted DROP on VM_AGENT_PORT does the restriction.
       expect(content).toContain('ip6tables -P INPUT ACCEPT');
       expect(content).toContain('ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
