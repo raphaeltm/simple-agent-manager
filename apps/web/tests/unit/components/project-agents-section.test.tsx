@@ -174,4 +174,80 @@ describe('ProjectAgentsSection', () => {
       expect(screen.getByText('Boom')).toBeInTheDocument();
     });
   });
+
+  it('calls deleteProjectAgentCredential when the Remove button is clicked on a project override', async () => {
+    mocks.listProjectAgentCredentials.mockResolvedValue({
+      credentials: [
+        {
+          id: 'proj-cred-claude',
+          agentType: 'claude-code',
+          credentialKind: 'api-key',
+          maskedKey: 'sk-****proj',
+          isActive: true,
+          createdAt: '2026-04-01T00:00:00Z',
+          updatedAt: '2026-04-01T00:00:00Z',
+        },
+      ],
+    });
+    mocks.deleteProjectAgentCredential.mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    try {
+      render(
+        <ProjectAgentsSection
+          projectId="proj-1"
+          initialAgentDefaults={null}
+          onUpdated={vi.fn()}
+        />,
+      );
+      await waitFor(() => {
+        expect(screen.getByTestId('project-agent-card-claude-code')).toBeInTheDocument();
+      });
+
+      const card = screen.getByTestId('project-agent-card-claude-code');
+      const removeButton = await waitFor(() => {
+        const btn = card.querySelector('button.text-danger') as HTMLButtonElement | null;
+        expect(btn).not.toBeNull();
+        return btn!;
+      });
+
+      fireEvent.click(removeButton);
+
+      await waitFor(() => {
+        expect(mocks.deleteProjectAgentCredential).toHaveBeenCalledWith(
+          'proj-1',
+          'claude-code',
+          'api-key',
+        );
+      });
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
+  it('displays an error alert when Save Override fails', async () => {
+    mocks.updateProject.mockRejectedValue(new Error('Network save failed'));
+
+    render(
+      <ProjectAgentsSection
+        projectId="proj-1"
+        initialAgentDefaults={null}
+        onUpdated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-agent-permission-select-claude-code')).toBeInTheDocument();
+    });
+
+    fireEvent.change(
+      screen.getByTestId('project-agent-permission-select-claude-code'),
+      { target: { value: 'acceptEdits' } },
+    );
+    fireEvent.click(screen.getByTestId('project-agent-save-claude-code'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Network save failed')).toBeInTheDocument();
+    });
+  });
 });

@@ -22,7 +22,10 @@ import { useEffect, useState } from 'react';
 import { AgentKeyCard } from './AgentKeyCard';
 import { ModelSelect } from './ModelSelect';
 
-const SUCCESS_BANNER_MS = 3000;
+const DEFAULT_SUCCESS_BANNER_MS = 3000;
+const SUCCESS_BANNER_MS = Number(
+  import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS,
+);
 
 const FORM_CONTROL =
   'w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring box-border';

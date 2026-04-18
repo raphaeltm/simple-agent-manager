@@ -23,7 +23,10 @@ import { useEffect, useState } from 'react';
 
 import { ModelSelect } from './ModelSelect';
 
-const SUCCESS_BANNER_DURATION_MS = 3000;
+const DEFAULT_SUCCESS_BANNER_MS = 3000;
+const SUCCESS_BANNER_MS = Number(
+  import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS,
+);
 
 export interface AgentSettingsCardProps {
   agent: AgentInfo;
@@ -98,7 +101,7 @@ export function AgentSettingsCard({
 
       await onSave(agent.id, data);
       setSuccess(true);
-      setTimeout(() => setSuccess(false), SUCCESS_BANNER_DURATION_MS);
+      setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -118,7 +121,7 @@ export function AgentSettingsCard({
       setOpencodeBaseUrl('');
       setOpencodeProviderName('');
       setSuccess(true);
-      setTimeout(() => setSuccess(false), SUCCESS_BANNER_DURATION_MS);
+      setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reset settings');
     } finally {
