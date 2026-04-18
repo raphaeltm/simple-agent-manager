@@ -1071,6 +1071,7 @@ func getOpencodeDefault(envKey, fallback string) string {
 //
 // Built-in providers (scaleway, anthropic) have pre-registered models and
 // don't need the npm/models keys.
+
 // opencodeConfigOverrides holds optional direct values to embed in the config
 // instead of using {env:...} references.
 type opencodeConfigOverrides struct {
@@ -1091,7 +1092,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 		}
 	}
 
-	slog.Info("buildOpencodeConfig: input",
+	slog.Debug("buildOpencodeConfig: input",
 		"provider", provider,
 		"rawModel", model,
 		"hasOverrides", overrides != nil)
@@ -1099,7 +1100,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 	// Strip @cf/ prefix from Workers AI model IDs for openai-compatible providers.
 	model = stripCFPrefix(model)
 
-	slog.Info("buildOpencodeConfig: after stripCFPrefix",
+	slog.Debug("buildOpencodeConfig: after stripCFPrefix",
 		"model", model,
 		"provider", provider)
 
@@ -1254,6 +1255,10 @@ func opencodeProviderNeedsNpmPackage(provider string) string {
 // with Bun's module resolver. Without pre-installation, OpenCode's embedded Bun
 // would auto-install the package, but this can fail in network-restricted environments.
 func preInstallOpencodeProviderDeps(ctx context.Context, containerID, user, npmPackage string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
 	if err != nil {
 		homeDir = "/root"
@@ -1266,25 +1271,23 @@ func preInstallOpencodeProviderDeps(ctx context.Context, containerID, user, npmP
 	}
 
 	// Install the package into the cache directory so OpenCode finds it
-	// at ~/.cache/opencode/node_modules/@ai-sdk/openai-compatible
-	slog.Info("preInstallOpencodeProviderDeps: running npm install",
-		"package", npmPackage,
-		"cacheDir", cacheDir,
-		"containerID", containerID,
-		"user", user)
-	stdout, stderr, err := execInContainer(ctx, containerID, user, cacheDir, "npm", "install", "--save", npmPackage)
-	if err != nil {
-		return fmt.Errorf("npm install %s in cache dir: %w: %s", npmPackage, err, stderr)
-	}
-	slog.Info("preInstallOpencodeProviderDeps: npm install complete",
-		"package", npmPackage,
-		"stdout", string(stdout),
-		"stderr", string(stderr))
-
-	slog.Info("Pre-installed OpenCode provider dependency",
+	// at ~/.cache/opencode/node_modules/@ai-sdk/openai-compatible.
+	// Use --no-save to avoid writing package.json/package-lock.json that
+	// could conflict with OpenCode's own package management.
+	slog.Info("Pre-installing OpenCode provider dependency",
 		"package", npmPackage,
 		"cacheDir", cacheDir,
 		"container", containerID)
+	stdout, stderr, err := execInContainer(ctx, containerID, user, cacheDir, "npm", "install", "--no-save", npmPackage)
+	if err != nil {
+		return fmt.Errorf("npm install %s in cache dir: %w: %s", npmPackage, err, stderr)
+	}
+	slog.Info("Pre-installed OpenCode provider dependency",
+		"package", npmPackage,
+		"cacheDir", cacheDir,
+		"container", containerID,
+		"stdoutLen", len(stdout),
+		"stderrLen", len(stderr))
 	return nil
 }
 

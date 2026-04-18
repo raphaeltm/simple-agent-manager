@@ -475,7 +475,7 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 		"inferenceBaseURL":      inferenceBaseURL,
 		"inferenceAPIKeySource": inferenceAPIKeySource,
 	})
-	slog.Info("Agent credential details",
+	slog.Debug("Agent credential details",
 		"agentType", agentType,
 		"credentialKind", cred.credentialKind,
 		"hasInferenceConfig", hasInferenceConfig,
