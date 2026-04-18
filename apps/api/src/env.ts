@@ -20,6 +20,7 @@ export interface Env {
   NOTIFICATION: DurableObjectNamespace;
   CODEX_REFRESH_LOCK: DurableObjectNamespace;
   TRIAL_COUNTER: DurableObjectNamespace;
+  TRIAL_EVENT_BUS: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -460,4 +461,15 @@ export interface Env {
   TRIAL_WAITLIST_PURGE_DAYS?: string;                // Days after reset_date before notified waitlist rows are purged (default: 30)
   TRIAL_CRON_ROLLOVER_CRON?: string;                 // Cron expression used by the monthly rollover audit (default: 0 3 1 * *)
   TRIAL_CRON_WAITLIST_CLEANUP?: string;              // Cron expression used by the daily waitlist cleanup (default: 0 4 * * *)
+  TRIAL_SSE_HEARTBEAT_MS?: string;                   // SSE comment heartbeat cadence (default: 15000)
+  TRIAL_SSE_POLL_TIMEOUT_MS?: string;                // Long-poll timeout per DO fetch (default: 15000)
+  TRIAL_SSE_MAX_DURATION_MS?: string;                // Hard cap on a single SSE connection (default: 1800000 = 30 min)
+  /** Deployment mode — "staging" | "production". Chooses trial agent + model. */
+  ENVIRONMENT?: string;
+  /** Anthropic API key scoped for trial runs (production mode only). */
+  ANTHROPIC_API_KEY_TRIAL?: string;
+  /** Override for default trial model (production mode default: claude-sonnet-4-6). */
+  TRIAL_MODEL?: string;
+  /** Override for default trial LLM provider ("anthropic" | "workers-ai"). */
+  TRIAL_LLM_PROVIDER?: string;
 }
