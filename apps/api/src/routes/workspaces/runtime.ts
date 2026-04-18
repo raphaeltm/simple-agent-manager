@@ -16,6 +16,7 @@ import { appendBootLog } from '../../services/boot-log';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken } from '../../services/github-app';
 import { persistError } from '../../services/observability';
+import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
@@ -245,7 +246,10 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
   const db = drizzle(c.env.DATABASE, { schema });
 
   const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+    })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -255,6 +259,7 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     throw errors.notFound('Workspace');
   }
 
+  // Fetch user-level agent settings (existing behaviour).
   const settingsRows = await db
     .select()
     .from(schema.agentSettings)
@@ -265,24 +270,29 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
       )
     )
     .limit(1);
+  const userRow = settingsRows[0];
 
-  const row = settingsRows[0];
-  if (!row) {
-    return c.json({
-      model: null,
-      permissionMode: null,
-      opencodeProvider: null,
-      opencodeBaseUrl: null,
-      opencodeProviderName: null,
-    });
+  // Fetch project-level agent defaults for this agent type (multi-level config override).
+  let projectDefaults = { model: null as string | null, permissionMode: null as string | null };
+  if (workspace.projectId) {
+    const projectRows = await db
+      .select({ agentDefaults: schema.projects.agentDefaults })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, workspace.projectId))
+      .limit(1);
+    if (projectRows[0]) {
+      projectDefaults = resolveProjectAgentDefault(projectRows[0].agentDefaults, body.agentType);
+    }
   }
 
+  // Resolution: project.agentDefaults[agentType] > user agent_settings > null.
+  // OpenCode-specific provider/baseUrl stay user-scoped (phase 1 does not include them).
   return c.json({
-    model: row.model,
-    permissionMode: row.permissionMode,
-    opencodeProvider: row.opencodeProvider ?? null,
-    opencodeBaseUrl: row.opencodeBaseUrl ?? null,
-    opencodeProviderName: row.opencodeProviderName ?? null,
+    model: projectDefaults.model ?? userRow?.model ?? null,
+    permissionMode: projectDefaults.permissionMode ?? userRow?.permissionMode ?? null,
+    opencodeProvider: userRow?.opencodeProvider ?? null,
+    opencodeBaseUrl: userRow?.opencodeBaseUrl ?? null,
+    opencodeProviderName: userRow?.opencodeProviderName ?? null,
   });
 });
 runtimeRoutes.get('/:id/runtime', async (c) => {
