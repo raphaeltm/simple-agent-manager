@@ -7,6 +7,8 @@ package provision
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,6 +20,15 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/eventstore"
 )
+
+// eventID returns a random hex ID for eventstore primary keys.
+// Using an empty ID collides with INSERT OR IGNORE and silently drops
+// subsequent events, which masked phase timings on the first staging test.
+func eventID() string {
+	buf := make([]byte, 8)
+	_, _ = rand.Read(buf)
+	return hex.EncodeToString(buf)
+}
 
 // Status tracks the progress of system provisioning.
 type Status struct {
@@ -125,10 +136,12 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 				detail["durationMs"] = durationMs
 			}
 			es.Append(eventstore.EventRecord{
-				Level:   "info",
-				Type:    "provision." + name,
-				Message: msg,
-				Detail:  detail,
+				ID:        eventID(),
+				Level:     "info",
+				Type:      "provision." + name,
+				Message:   msg,
+				Detail:    detail,
+				CreatedAt: time.Now().UTC().Format(time.RFC3339),
 			})
 		}
 	}

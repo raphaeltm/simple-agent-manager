@@ -79,6 +79,37 @@ func TestListByTypePrefix_RespectsLimit(t *testing.T) {
 	}
 }
 
+// TestAppend_EmptyIDCollidesUnderInsertOrIgnore documents the INSERT OR IGNORE
+// behavior: callers MUST set a unique ID. Before the fix, provision.go called
+// Append with ID="", so after the first event all subsequent events with the
+// same empty primary key were silently dropped. This test pins the contract so
+// future refactors don't regress.
+func TestAppend_EmptyIDCollidesUnderInsertOrIgnore(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().UTC()
+	// Two events with the same (empty) ID — second must NOT appear.
+	s.Append(EventRecord{ID: "", Type: "provision.a", Level: "info", Message: "first", CreatedAt: now.Format(time.RFC3339)})
+	s.Append(EventRecord{ID: "", Type: "provision.b", Level: "info", Message: "second", CreatedAt: now.Add(1 * time.Second).Format(time.RFC3339)})
+	got, err := s.ListByTypePrefix("provision.", 0)
+	if err != nil {
+		t.Fatalf("ListByTypePrefix: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("empty-ID Append collided as expected, but got %d rows (want 1): %+v", len(got), got)
+	}
+	if got[0].Message != "first" {
+		t.Errorf("expected first event to survive INSERT OR IGNORE; got %q", got[0].Message)
+	}
+
+	// With unique IDs, both land.
+	s.Append(EventRecord{ID: "u1", Type: "provision.x", Level: "info", Message: "x1", CreatedAt: now.Format(time.RFC3339)})
+	s.Append(EventRecord{ID: "u2", Type: "provision.x", Level: "info", Message: "x2", CreatedAt: now.Add(1 * time.Second).Format(time.RFC3339)})
+	xs, _ := s.ListByTypePrefix("provision.x", 0)
+	if len(xs) != 2 {
+		t.Fatalf("unique IDs must persist; got %d rows: %+v", len(xs), xs)
+	}
+}
+
 func TestListByTypePrefix_PreservesDetail(t *testing.T) {
 	s := newTestStore(t)
 	now := time.Now().UTC().Format(time.RFC3339)
