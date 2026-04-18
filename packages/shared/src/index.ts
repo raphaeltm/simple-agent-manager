@@ -4,6 +4,9 @@ export * from './types';
 // Agents
 export * from './agents';
 
+// Model Catalog
+export * from './model-catalog';
+
 // Constants
 export * from './constants';
 

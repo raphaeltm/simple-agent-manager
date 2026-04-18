@@ -113,7 +113,8 @@ describe('AgentSettingsSection', () => {
 
     await waitFor(() => {
       const modelInput = screen.getByTestId('model-input-claude-code') as HTMLInputElement;
-      expect(modelInput.value).toBe('claude-opus-4-6');
+      // ModelSelect shows display format when not focused: "Name (id)"
+      expect(modelInput.value).toBe('Claude Opus 4.6 (claude-opus-4-6)');
     });
 
     // Check that acceptEdits radio is selected

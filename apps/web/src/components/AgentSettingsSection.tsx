@@ -17,6 +17,7 @@ import { Alert, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
 import { deleteAgentSettings, getAgentSettings, listAgents, saveAgentSettings } from '../lib/api';
+import { ModelSelect } from './ModelSelect';
 
 const SUCCESS_BANNER_DURATION_MS = 3000;
 
@@ -268,13 +269,12 @@ function AgentSettingsCard({
             ))}
           </select>
         ) : (
-          <input
+          <ModelSelect
             id={`model-input-${agent.id}`}
-            type="text"
+            agentType={agent.id}
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={setModel}
             placeholder={modelPlaceholder}
-            className={formControlClass}
             data-testid={`model-input-${agent.id}`}
           />
         )}
