@@ -22,6 +22,12 @@ interface RefreshRequestPayload {
   refreshToken: string;
   /** The userId to look up credentials for. */
   userId: string;
+  /**
+   * Optional projectId — when set, the DO prefers the project-scoped credential
+   * row, falling back to the user-scoped row. This preserves scope when rotating
+   * OAuth tokens so a project-scoped credential doesn't collapse to user-scoped.
+   */
+  projectId?: string | null;
 }
 
 interface CodexRefreshEnv {
@@ -87,7 +93,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
   private async handleRefresh(request: Request, signal: AbortSignal): Promise<Response> {
     const payload: RefreshRequestPayload = await request.json();
-    const { refreshToken, userId } = payload;
+    const { refreshToken, userId, projectId } = payload;
 
     if (!refreshToken || !userId) {
       return new Response(
@@ -99,8 +105,8 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // Derive encryption key from DO env (not from caller).
     const encryptionKey = getCredentialEncryptionKey(this.env);
 
-    // Look up the stored credential.
-    const credential = await this.getStoredCredential(userId);
+    // Look up the stored credential — prefer project-scoped when projectId is set.
+    const credential = await this.getStoredCredential(userId, projectId ?? null);
     if (!credential) {
       return new Response(
         JSON.stringify({ error: 'refresh_token_invalidated' }),
@@ -291,15 +297,36 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
   /**
    * Look up the active openai-codex oauth-token credential for the given user.
+   * When projectId is provided, prefers the project-scoped row so scope is preserved
+   * across rotation. Falls back to the user-scoped row when no project match exists.
    */
   private async getStoredCredential(
-    userId: string
+    userId: string,
+    projectId: string | null
   ): Promise<{ id: string; encryptedToken: string; iv: string } | null> {
     const db = this.env.DATABASE;
+
+    if (projectId) {
+      const projectResult = await db
+        .prepare(
+          `SELECT id, encrypted_token, iv FROM credentials
+           WHERE user_id = ? AND project_id = ? AND credential_type = 'agent-api-key'
+             AND agent_type = 'openai-codex' AND credential_kind = 'oauth-token'
+             AND is_active = 1
+           LIMIT 1`
+        )
+        .bind(userId, projectId)
+        .first<{ id: string; encrypted_token: string; iv: string }>();
+
+      if (projectResult) {
+        return { id: projectResult.id, encryptedToken: projectResult.encrypted_token, iv: projectResult.iv };
+      }
+    }
+
     const result = await db
       .prepare(
         `SELECT id, encrypted_token, iv FROM credentials
-         WHERE user_id = ? AND credential_type = 'agent-api-key'
+         WHERE user_id = ? AND project_id IS NULL AND credential_type = 'agent-api-key'
            AND agent_type = 'openai-codex' AND credential_kind = 'oauth-token'
            AND is_active = 1
          LIMIT 1`

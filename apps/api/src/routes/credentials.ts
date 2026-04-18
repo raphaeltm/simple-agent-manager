@@ -1,7 +1,7 @@
 import { createProvider } from '@simple-agent-manager/providers';
 import type { AgentCredentialInfo, AgentType, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource } from '@simple-agent-manager/shared';
 import { CREDENTIAL_PROVIDERS, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
-import { and,eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -237,6 +237,7 @@ credentialsRoutes.get('/agent', async (c) => {
     .where(
       and(
         eq(schema.credentials.userId, userId),
+        isNull(schema.credentials.projectId),
         eq(schema.credentials.credentialType, 'agent-api-key')
       )
     );
@@ -310,13 +311,14 @@ credentialsRoutes.put('/agent', jsonValidator(SaveAgentCredentialSchema), async 
   // Encrypt the credential
   const { ciphertext, iv } = await encrypt(credential, getCredentialEncryptionKey(c.env));
 
-  // Check if a credential of this type already exists
+  // Check if a credential of this type already exists (user-scoped only — project_id IS NULL)
   const existing = await db
     .select()
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.userId, userId),
+        isNull(schema.credentials.projectId),
         eq(schema.credentials.credentialType, 'agent-api-key'),
         eq(schema.credentials.agentType, body.agentType),
         eq(schema.credentials.credentialKind, credentialKind)
@@ -326,7 +328,9 @@ credentialsRoutes.put('/agent', jsonValidator(SaveAgentCredentialSchema), async 
 
   const now = new Date().toISOString();
 
-  // If auto-activating, deactivate other credentials for this agent
+  // If auto-activating, deactivate other user-scoped credentials for this agent.
+  // Project-scoped rows (project_id IS NOT NULL) are deliberately untouched to preserve
+  // per-project overrides.
   if (autoActivate) {
     await db
       .update(schema.credentials)
@@ -334,6 +338,7 @@ credentialsRoutes.put('/agent', jsonValidator(SaveAgentCredentialSchema), async 
       .where(
         and(
           eq(schema.credentials.userId, userId),
+          isNull(schema.credentials.projectId),
           eq(schema.credentials.credentialType, 'agent-api-key'),
           eq(schema.credentials.agentType, body.agentType)
         )
@@ -421,14 +426,18 @@ credentialsRoutes.post('/agent/:agentType/toggle', jsonValidator(CredentialKindB
   // Use D1 batch for atomic multi-statement execution.
   // Both statements execute in a single implicit transaction,
   // preventing race conditions between deactivate and activate.
+  // Scope guards (project_id IS NULL) prevent toggling user-scoped credentials from
+  // touching project-scoped overrides.
   const deactivateStmt = c.env.DATABASE.prepare(
     `UPDATE credentials SET is_active = 0
-     WHERE user_id = ? AND credential_type = 'agent-api-key' AND agent_type = ?`
+     WHERE user_id = ? AND project_id IS NULL
+       AND credential_type = 'agent-api-key' AND agent_type = ?`
   ).bind(userId, agentType);
 
   const activateStmt = c.env.DATABASE.prepare(
     `UPDATE credentials SET is_active = 1, updated_at = ?
-     WHERE user_id = ? AND credential_type = 'agent-api-key'
+     WHERE user_id = ? AND project_id IS NULL
+       AND credential_type = 'agent-api-key'
        AND agent_type = ? AND credential_kind = ?`
   ).bind(now, userId, agentType, body.credentialKind);
 
@@ -459,13 +468,14 @@ credentialsRoutes.delete('/agent/:agentType/:credentialKind', async (c) => {
     throw errors.badRequest('Invalid credential kind');
   }
 
-  // Check if this is the active credential
+  // Check if this is the active credential (user-scoped only — project_id IS NULL)
   const existing = await db
     .select()
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.userId, userId),
+        isNull(schema.credentials.projectId),
         eq(schema.credentials.credentialType, 'agent-api-key'),
         eq(schema.credentials.agentType, agentType),
         eq(schema.credentials.credentialKind, credentialKind)
@@ -483,7 +493,7 @@ credentialsRoutes.delete('/agent/:agentType/:credentialKind', async (c) => {
     .delete(schema.credentials)
     .where(eq(schema.credentials.id, toDelete.id));
 
-  // If it was active, auto-activate another credential if available
+  // If it was active, auto-activate another user-scoped credential (not project-scoped)
   if (toDelete.isActive) {
     const remaining = await db
       .select()
@@ -491,6 +501,7 @@ credentialsRoutes.delete('/agent/:agentType/:credentialKind', async (c) => {
       .where(
         and(
           eq(schema.credentials.userId, userId),
+          isNull(schema.credentials.projectId),
           eq(schema.credentials.credentialType, 'agent-api-key'),
           eq(schema.credentials.agentType, agentType)
         )
@@ -520,11 +531,13 @@ credentialsRoutes.delete('/agent/:agentType', async (c) => {
     throw errors.badRequest('Invalid agent type');
   }
 
+  // User-scoped only — does not cascade-delete project-scoped overrides.
   const result = await db
     .delete(schema.credentials)
     .where(
       and(
         eq(schema.credentials.userId, userId),
+        isNull(schema.credentials.projectId),
         eq(schema.credentials.credentialType, 'agent-api-key'),
         eq(schema.credentials.agentType, agentType)
       )
@@ -541,21 +554,54 @@ credentialsRoutes.delete('/agent/:agentType', async (c) => {
 /**
  * Helper function to get a decrypted agent credential for internal use.
  * Returns the active credential (API key or OAuth token) and its type.
- * Falls back to platform credentials when no user credential is found.
+ *
+ * Resolution order:
+ *   1. Project-scoped credential (when projectId is provided)
+ *   2. User-scoped credential
+ *   3. Platform credential
  */
 export async function getDecryptedAgentKey(
   db: ReturnType<typeof drizzle>,
   userId: string,
   agentType: string,
-  encryptionKey: string
+  encryptionKey: string,
+  projectId?: string | null
 ): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null> {
-  // 1. Try user's own credential first
-  const creds = await db
+  // 1. Try project-scoped credential first (most specific)
+  if (projectId) {
+    const projectCreds = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.projectId, projectId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, agentType),
+          eq(schema.credentials.isActive, true)
+        )
+      )
+      .limit(1);
+
+    const projectCred = projectCreds[0];
+    if (projectCred) {
+      const credential = await decrypt(projectCred.encryptedToken, projectCred.iv, encryptionKey);
+      return {
+        credential,
+        credentialKind: projectCred.credentialKind as CredentialKind,
+        credentialSource: 'project',
+      };
+    }
+  }
+
+  // 2. Fall back to user-scoped credential (project_id IS NULL)
+  const userCreds = await db
     .select()
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.userId, userId),
+        isNull(schema.credentials.projectId),
         eq(schema.credentials.credentialType, 'agent-api-key'),
         eq(schema.credentials.agentType, agentType),
         eq(schema.credentials.isActive, true)
@@ -563,7 +609,7 @@ export async function getDecryptedAgentKey(
     )
     .limit(1);
 
-  const foundCred = creds[0];
+  const foundCred = userCreds[0];
   if (foundCred) {
     const credential = await decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
     return {
@@ -573,7 +619,7 @@ export async function getDecryptedAgentKey(
     };
   }
 
-  // 2. Fall back to platform credential
+  // 3. Fall back to platform credential
   const platformCred = await getPlatformAgentCredential(db, agentType, encryptionKey);
   if (platformCred) {
     return {

@@ -128,7 +128,7 @@ export interface SetupProjectDeploymentRequest {
 // =============================================================================
 
 export type PlatformCredentialType = 'cloud-provider' | 'agent-api-key';
-export type CredentialSource = 'user' | 'platform';
+export type CredentialSource = 'user' | 'project' | 'platform';
 
 export interface PlatformCredential {
   id: string;
