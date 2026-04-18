@@ -20,6 +20,10 @@ env:
 jobs:
   deploy:
     name: Build & Deploy
+    # Guard: only run on the canonical repository, not on forks. The marketing
+    # site is product-specific to simple-agent-manager.org and should not deploy
+    # to a fork's domain even if they have Cloudflare secrets configured.
+    if: github.repository == 'raphaeltm/simple-agent-manager'
     runs-on: ubuntu-latest
     environment: production
     permissions:
