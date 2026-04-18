@@ -262,25 +262,29 @@ describe('Project agent defaults — agent-settings callback merges project → 
   });
 });
 
-describe('Project agent defaults — UI section', () => {
-  const component = webSrc('components/ProjectAgentDefaultsSection.tsx');
+describe('Project agent defaults — UI section (unified)', () => {
+  // The dedicated ProjectAgentDefaultsSection component was merged into the
+  // unified ProjectAgentCard + ProjectAgentsSection pair. Behavioral tests
+  // live in apps/web/tests/unit/components/project-agents-section.test.tsx;
+  // here we only assert the structural wiring to the new unified section.
+  const card = webSrc('components/ProjectAgentCard.tsx');
+  const section = webSrc('components/ProjectAgentsSection.tsx');
   const page = webSrc('pages/ProjectSettings.tsx');
 
-  it('ProjectAgentDefaultsSection imports ModelSelect for model combobox reuse', () => {
-    expect(component).toContain("from './ModelSelect'");
+  it('ProjectAgentCard imports ModelSelect for model combobox reuse', () => {
+    expect(card).toContain("from './ModelSelect'");
   });
 
-  it('ProjectAgentDefaultsSection renders permission mode select with all valid modes', () => {
-    expect(component).toContain('VALID_PERMISSION_MODES');
-    expect(component).toContain('Inherit from user settings');
+  it('ProjectAgentCard renders permission mode select with all valid modes', () => {
+    expect(card).toContain('VALID_PERMISSION_MODES');
+    expect(card).toContain('Inherit from user settings');
   });
 
-  it('ProjectAgentDefaultsSection calls updateProject with agentDefaults payload', () => {
-    expect(component).toContain('updateProject(projectId, { agentDefaults:');
+  it('ProjectAgentsSection calls updateProject with agentDefaults payload', () => {
+    expect(section).toContain('updateProject(projectId, { agentDefaults:');
   });
 
-  it('ProjectSettings page renders ProjectAgentDefaultsSection', () => {
-    expect(page).toContain('ProjectAgentDefaultsSection');
-    expect(page).toContain('Project Agent Defaults');
+  it('ProjectSettings page renders ProjectAgentsSection', () => {
+    expect(page).toContain('ProjectAgentsSection');
   });
 });
