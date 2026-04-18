@@ -157,13 +157,18 @@ binding = "AI"
 # because they break Vitest — Cloudflare issue #9343).
 
 # Cron triggers:
-# - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery
+# - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery,
+#   trial expiry sweep
 # - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
-# NOTE: The daily cron string "0 3 * * *" is matched exactly in index.ts:scheduled()
-# to distinguish the daily forward job from the 5-minute sweep. If you change it here,
-# update the comparison in the scheduled handler too.
+# - Daily at 04:00 UTC: trial waitlist purge (rows with notified_at older than
+#   TRIAL_WAITLIST_PURGE_DAYS). Configurable via TRIAL_CRON_WAITLIST_CLEANUP.
+# - Monthly on the 1st at 03:00 UTC: trial counter rollover audit (prune DO rows beyond
+#   TRIAL_COUNTER_KEEP_MONTHS). Configurable via TRIAL_CRON_ROLLOVER_CRON.
+# NOTE: Cron strings are matched exactly in index.ts:scheduled() to dispatch between
+# the different jobs. If you change them here, update the comparisons in the scheduled
+# handler (or the corresponding TRIAL_CRON_* env vars).
 [triggers]
-crons = ["*/5 * * * *", "0 3 * * *"]
+crons = ["*/5 * * * *", "0 3 * * *", "0 4 * * *", "0 3 1 * *"]
 
 # Secrets (set via wrangler secret put):
 # - GITHUB_CLIENT_ID

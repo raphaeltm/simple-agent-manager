@@ -71,6 +71,9 @@ import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
+import { runTrialExpireSweep } from './scheduled/trial-expire';
+import { runTrialRolloverAudit } from './scheduled/trial-rollover';
+import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken } from './services/jwt';
@@ -432,20 +435,35 @@ export default {
 
   /**
    * Scheduled (cron) handler for background tasks.
-   * Two cron schedules:
-   * - Every 5 minutes: operational cleanup (provisioning, nodes, tasks, observability)
+   * Cron schedules:
+   * - Every 5 minutes: operational cleanup (provisioning, nodes, tasks, observability, trial expiry)
    * - Daily at 03:00 UTC: analytics event forwarding to external platforms
+   * - Daily at 04:00 UTC (configurable via TRIAL_CRON_WAITLIST_CLEANUP): trial waitlist purge
+   * - Monthly at 03:00 UTC on the 1st (configurable via TRIAL_CRON_ROLLOVER_CRON): trial counter rollover audit
    */
   async scheduled(
     controller: ScheduledController,
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
+    const rolloverCron = env.TRIAL_CRON_ROLLOVER_CRON ?? '0 3 1 * *';
+    const waitlistCleanupCron = env.TRIAL_CRON_WAITLIST_CLEANUP ?? '0 4 * * *';
+
     const isDailyForward = controller.cron === '0 3 * * *';
+    const isTrialRollover = controller.cron === rolloverCron;
+    const isTrialWaitlistCleanup = controller.cron === waitlistCleanupCron;
+
+    const cronType = isDailyForward
+      ? 'daily-forward'
+      : isTrialRollover
+        ? 'trial-rollover'
+        : isTrialWaitlistCleanup
+          ? 'trial-waitlist-cleanup'
+          : 'sweep';
 
     log.info('cron.started', {
       cron: controller.cron,
-      type: isDailyForward ? 'daily-forward' : 'sweep',
+      type: cronType,
     });
 
     // Daily analytics forwarding (Phase 4) — use ctx.waitUntil to keep the
@@ -461,6 +479,33 @@ export default {
           forwardSegmentSent: forward.segment.sent,
           forwardGA4Sent: forward.ga4.sent,
           forwardCursorUpdated: forward.cursorUpdated,
+        });
+      })());
+      return;
+    }
+
+    // Monthly trial counter rollover audit (prune old DO counter rows, verify month-key drift).
+    if (isTrialRollover) {
+      ctx.waitUntil((async () => {
+        const rollover = await runTrialRolloverAudit(env);
+        log.info('cron.completed', {
+          cron: controller.cron,
+          type: 'trial-rollover',
+          trialRolloverMonthKey: rollover.monthKey,
+          trialRolloverPruned: rollover.pruned,
+        });
+      })());
+      return;
+    }
+
+    // Daily trial waitlist cleanup (purge notified-and-aged rows).
+    if (isTrialWaitlistCleanup) {
+      ctx.waitUntil((async () => {
+        const waitlist = await runTrialWaitlistCleanup(env);
+        log.info('cron.completed', {
+          cron: controller.cron,
+          type: 'trial-waitlist-cleanup',
+          trialWaitlistPurged: waitlist.purged,
         });
       })());
       return;
@@ -492,6 +537,10 @@ export default {
     // Close orphaned compute_usage records
     const computeUsageClosed = await runComputeUsageCleanup(env);
 
+    // Expire stale pending/ready trial rows (cap slot is NOT refunded — it was
+    // consumed for the month).
+    const trialExpire = await runTrialExpireSweep(env);
+
     log.info('cron.completed', {
       cron: controller.cron,
       type: 'sweep',
@@ -520,6 +569,7 @@ export default {
       triggerExecRetentionPurged: triggerCleanup.retentionPurged,
       triggerExecCleanupErrors: triggerCleanup.errors,
       computeUsageOrphansClosed: computeUsageClosed,
+      trialExpired: trialExpire.expired,
     });
   },
 };

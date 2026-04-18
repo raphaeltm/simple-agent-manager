@@ -1336,3 +1336,59 @@ export const trialWaitlist = sqliteTable(
 
 export type TrialWaitlistRow = typeof trialWaitlist.$inferSelect;
 export type NewTrialWaitlistRow = typeof trialWaitlist.$inferInsert;
+
+// =============================================================================
+// Trial Onboarding — Trial records
+// =============================================================================
+
+/**
+ * Anonymous trial records. One row per trial lifecycle, created on
+ * POST /api/trial/create before the project row is provisioned. The
+ * orchestrator populates `projectId` once provisioning completes.
+ *
+ * Status state machine:
+ *   pending -> ready | failed | expired
+ *   ready   -> claimed | expired
+ *   failed  -> (terminal)
+ *   expired -> (terminal; reaped by retention cron)
+ *   claimed -> (terminal; project.user_id now points to the claimant)
+ *
+ * `monthKey` mirrors the TrialCounter DO keyspace ('YYYY-MM' UTC) and is
+ * used for decrement-on-failure and for the monthly rollover audit.
+ */
+export const trials = sqliteTable(
+  'trials',
+  {
+    id: text('id').primaryKey(),
+    fingerprint: text('fingerprint').notNull(),
+    repoUrl: text('repo_url').notNull(),
+    repoOwner: text('repo_owner').notNull(),
+    repoName: text('repo_name').notNull(),
+    monthKey: text('month_key').notNull(),
+    status: text('status').notNull().default('pending'),
+    projectId: text('project_id'),
+    claimedByUserId: text('claimed_by_user_id'),
+    createdAt: integer('created_at').notNull(), // epoch ms
+    expiresAt: integer('expires_at').notNull(), // epoch ms
+    claimedAt: integer('claimed_at'), // epoch ms, nullable
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+  },
+  (table) => ({
+    fingerprintIdx: index('idx_trials_fingerprint').on(
+      table.fingerprint,
+      table.createdAt
+    ),
+    statusExpiryIdx: index('idx_trials_status_expiry').on(
+      table.status,
+      table.expiresAt
+    ),
+    monthKeyStatusIdx: index('idx_trials_month_key_status').on(
+      table.monthKey,
+      table.status
+    ),
+  })
+);
+
+export type TrialRow = typeof trials.$inferSelect;
+export type NewTrialRow = typeof trials.$inferInsert;

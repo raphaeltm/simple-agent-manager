@@ -454,4 +454,10 @@ export interface Env {
   TRIAL_DEFAULT_WORKSPACE_PROFILE?: string;          // Workspace profile (default: lightweight)
   TRIALS_ENABLED_KV_KEY?: string;                    // KV key read by kill-switch (default: trials:enabled)
   TRIAL_KILL_SWITCH_CACHE_MS?: string;               // Kill-switch cache TTL in ms (default: 30000)
+  TRIAL_REPO_MAX_KB?: string;                        // Max GitHub repo size in KB (default: 512000 = 500 MB)
+  TRIAL_GITHUB_TIMEOUT_MS?: string;                  // Timeout for GitHub repo metadata probe (default: 5000)
+  TRIAL_COUNTER_KEEP_MONTHS?: string;                // Months of counter rows to retain in DO (default: 3)
+  TRIAL_WAITLIST_PURGE_DAYS?: string;                // Days after reset_date before notified waitlist rows are purged (default: 30)
+  TRIAL_CRON_ROLLOVER_CRON?: string;                 // Cron expression used by the monthly rollover audit (default: 0 3 1 * *)
+  TRIAL_CRON_WAITLIST_CLEANUP?: string;              // Cron expression used by the daily waitlist cleanup (default: 0 4 * * *)
 }
