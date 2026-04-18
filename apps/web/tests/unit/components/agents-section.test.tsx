@@ -144,4 +144,45 @@ describe('AgentsSection', () => {
       expect(screen.getByText('Network error')).toBeInTheDocument();
     });
   });
+
+  it('calls deleteAgentCredential when the Remove button is clicked on an active credential', async () => {
+    mocks.listAgentCredentials.mockResolvedValue({
+      credentials: [
+        {
+          id: 'cred-claude',
+          agentType: 'claude-code',
+          credentialKind: 'api-key',
+          maskedKey: 'sk-****abcd',
+          isActive: true,
+          createdAt: '2026-04-01T00:00:00Z',
+          updatedAt: '2026-04-01T00:00:00Z',
+        },
+      ],
+    });
+    mocks.deleteAgentCredential.mockResolvedValue(undefined);
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    try {
+      render(<AgentsSection />);
+      await waitFor(() => {
+        expect(screen.getByTestId('agent-card-claude-code')).toBeInTheDocument();
+      });
+
+      const card = screen.getByTestId('agent-card-claude-code');
+      const removeButton = await waitFor(() => {
+        const btn = card.querySelector('button.text-danger') as HTMLButtonElement | null;
+        expect(btn).not.toBeNull();
+        return btn!;
+      });
+
+      fireEvent.click(removeButton);
+
+      await waitFor(() => {
+        expect(mocks.deleteAgentCredential).toHaveBeenCalledWith('claude-code');
+      });
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
 });
