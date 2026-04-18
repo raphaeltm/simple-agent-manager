@@ -36,7 +36,7 @@ eventsRoutes.get('/:trialId/events', async (c) => {
 
   // Resolve trial record
   const record = await readTrial(c.env, trialId);
-  if (!record) throw errors.notFound('Trial not found or expired');
+  if (!record) throw errors.notFound('Trial');
 
   // Fingerprint auth — fail closed
   const secret = c.env.TRIAL_CLAIM_TOKEN_SECRET;

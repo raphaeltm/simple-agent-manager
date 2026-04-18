@@ -25,6 +25,7 @@ import {
   type TrialCreateResponse,
   type TrialErrorCode,
 } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import * as v from 'valibot';
@@ -51,6 +52,7 @@ import {
   resolveWorkspaceTtlMs,
 } from '../../services/trial/helpers';
 import { isTrialsEnabled } from '../../services/trial/kill-switch';
+import { writeTrial } from '../../services/trial/trial-store';
 
 const createRoutes = new Hono<{ Bindings: Env }>();
 
@@ -303,6 +305,47 @@ createRoutes.post('/create', async (c) => {
         trialId,
         error: decErr instanceof Error ? decErr.message : String(decErr),
       });
+    }
+    return errorResponse(
+      'trials_disabled',
+      'Trial creation failed — please retry shortly',
+      500
+    );
+  }
+
+  // Mirror the trial record into KV so Track B readers (SSE events, claim,
+  // orchestrator) can find it. D1 remains the durable store of record; KV is
+  // the fast-path lookup by trialId/fingerprint. projectId is '' here — Track B
+  // rewrites the record once the project row exists.
+  try {
+    await writeTrial(env, {
+      trialId,
+      projectId: '',
+      fingerprint: fingerprintUuid,
+      workspaceId: null,
+      repoUrl: repo.canonical,
+      createdAt: now,
+      expiresAt,
+      claimed: false,
+    });
+  } catch (err) {
+    log.error('trial.create.kv_write_failed', {
+      trialId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // Release the counter slot + roll back D1 so we don't leak state.
+    try {
+      await db.delete(schema.trials).where(eq(schema.trials.id, trialId)).run();
+    } catch {
+      // best-effort rollback — D1 row is already written, and the cron sweep
+      // will eventually expire it via expiresAt.
+    }
+    try {
+      await (
+        counter as unknown as { decrement(monthKey: string): Promise<number> }
+      ).decrement(monthKey);
+    } catch {
+      // best-effort
     }
     return errorResponse(
       'trials_disabled',

@@ -77,6 +77,14 @@ function makeEnv(options: {
         decrement: options.decrementFn ?? vi.fn(async () => 0),
       })),
     },
+    // Trial-store KV mirror — Track B readers (SSE events, claim) look trials
+    // up by trialId in KV. Minimal stub that accepts puts and returns null on
+    // reads, which is enough for the create-path tests.
+    KV: {
+      put: vi.fn(async () => undefined),
+      get: vi.fn(async () => null),
+      delete: vi.fn(async () => undefined),
+    },
   } as unknown as Env;
 }
 
@@ -340,6 +348,24 @@ describe('POST /api/trial/create', () => {
     expect(inserted.repoUrl).toBe('https://github.com/alice/repo');
     expect(inserted.repoOwner).toBe('alice');
     expect(inserted.repoName).toBe('repo');
+
+    // KV mirror: trial record MUST be written to KV so Track B readers
+    // (SSE /events, /claim) can resolve it by trialId. Regression guard —
+    // skipping this write caused every SSE connection to 404 (see commit
+    // history).
+    const kvPut = env.KV.put as unknown as ReturnType<typeof vi.fn>;
+    const trialKeyPut = kvPut.mock.calls.find(
+      (call) => typeof call[0] === 'string' && call[0].startsWith('trial:')
+    );
+    expect(trialKeyPut).toBeTruthy();
+    const stored = JSON.parse(trialKeyPut![1] as string) as {
+      trialId: string;
+      fingerprint: string;
+      projectId: string;
+    };
+    expect(stored.trialId).toBe(body.trialId);
+    expect(stored.projectId).toBe(''); // populated by Track B orchestrator later
+    expect(stored.fingerprint).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('decrements counter slot when D1 insert fails (no burn)', async () => {

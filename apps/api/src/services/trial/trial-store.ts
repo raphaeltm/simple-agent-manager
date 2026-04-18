@@ -98,15 +98,23 @@ export async function writeTrial(env: Env, record: TrialRecord): Promise<void> {
   const nowSec = Math.floor(Date.now() / 1000);
   const ttlSec = Math.max(60, Math.floor(record.expiresAt / 1000) - nowSec);
   const json = JSON.stringify(record);
-  await Promise.all([
+  const writes: Promise<void>[] = [
     env.KV.put(trialKey(record.trialId), json, { expirationTtl: ttlSec }),
-    env.KV.put(trialByProjectKey(record.projectId), record.trialId, {
-      expirationTtl: ttlSec,
-    }),
     env.KV.put(trialByFingerprintKey(record.fingerprint), record.trialId, {
       expirationTtl: ttlSec,
     }),
-  ]);
+  ];
+  // Only index by project when a real projectId exists. Track A creates the
+  // trial before provisioning the project, so the first write carries an empty
+  // projectId — we'd otherwise collide all pending trials on `trial-by-project:`.
+  if (record.projectId) {
+    writes.push(
+      env.KV.put(trialByProjectKey(record.projectId), record.trialId, {
+        expirationTtl: ttlSec,
+      })
+    );
+  }
+  await Promise.all(writes);
 }
 
 /** Mark a trial as claimed (idempotent). */
