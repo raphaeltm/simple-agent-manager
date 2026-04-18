@@ -333,36 +333,51 @@ credentialsRoutes.put('/agent', (c, next) => rateLimitCredentialUpdate(c.env)(c,
 
   const now = new Date().toISOString();
 
-  // If auto-activating, deactivate other user-scoped credentials for this agent.
-  // Project-scoped rows (project_id IS NOT NULL) are deliberately untouched to preserve
-  // per-project overrides.
-  if (autoActivate) {
-    await db
-      .update(schema.credentials)
-      .set({ isActive: false })
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          isNull(schema.credentials.projectId),
-          eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, body.agentType)
-        )
+  const existingCred = existing[0];
+
+  // Atomicity (cloudflare-specialist review): when autoActivate is true, deactivate
+  // + upsert must execute as a single D1 batch. Two separate statements leave a
+  // microsecond window where a concurrent read sees zero active credentials for
+  // the user/agent pair.
+  //
+  // Scope guard: the deactivate statement has `project_id IS NULL` so it only
+  // affects user-scoped rows — per-project overrides are never touched.
+  const upsertStmt = existingCred
+    ? c.env.DATABASE.prepare(
+        `UPDATE credentials
+         SET encrypted_token = ?, iv = ?, is_active = ?, updated_at = ?
+         WHERE id = ?`
+      ).bind(ciphertext, iv, autoActivate ? 1 : 0, now, existingCred.id)
+    : c.env.DATABASE.prepare(
+        `INSERT INTO credentials (
+           id, user_id, project_id, provider, credential_type, agent_type,
+           credential_kind, is_active, encrypted_token, iv, created_at, updated_at
+         ) VALUES (?, ?, NULL, ?, 'agent-api-key', ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        ulid(),
+        userId,
+        agentDef.provider,
+        body.agentType,
+        credentialKind,
+        autoActivate ? 1 : 0,
+        ciphertext,
+        iv,
+        now,
+        now
       );
+
+  if (autoActivate) {
+    const deactivateStmt = c.env.DATABASE.prepare(
+      `UPDATE credentials SET is_active = 0
+       WHERE user_id = ? AND project_id IS NULL
+         AND credential_type = 'agent-api-key' AND agent_type = ?`
+    ).bind(userId, body.agentType);
+    await c.env.DATABASE.batch([deactivateStmt, upsertStmt]);
+  } else {
+    await upsertStmt.run();
   }
 
-  const existingCred = existing[0];
   if (existingCred) {
-    // Update existing credential
-    await db
-      .update(schema.credentials)
-      .set({
-        encryptedToken: ciphertext,
-        iv,
-        isActive: autoActivate,
-        updatedAt: now,
-      })
-      .where(eq(schema.credentials.id, existingCred.id));
-
     const maskedKey = maskCredential(credential);
     const response: AgentCredentialInfo = {
       agentType: body.agentType,
@@ -377,22 +392,6 @@ credentialsRoutes.put('/agent', (c, next) => rateLimitCredentialUpdate(c.env)(c,
 
     return c.json(response);
   }
-
-  // Create new credential
-  const id = ulid();
-  await db.insert(schema.credentials).values({
-    id,
-    userId,
-    provider: agentDef.provider,
-    credentialType: 'agent-api-key',
-    agentType: body.agentType,
-    credentialKind,
-    isActive: autoActivate,
-    encryptedToken: ciphertext,
-    iv,
-    createdAt: now,
-    updatedAt: now,
-  });
 
   const maskedKey = maskCredential(credential);
   const response: AgentCredentialInfo = {

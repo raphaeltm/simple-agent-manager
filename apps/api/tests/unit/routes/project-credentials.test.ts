@@ -84,8 +84,21 @@ describe('Project Credentials Routes', () => {
     put: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockResolvedValue(undefined),
   };
+  // PUT autoActivate path now uses `c.env.DATABASE.batch([...])` for atomicity.
+  // See cloudflare-specialist review — raw D1 prepared statements bypass drizzle.
+  const preparedStmt = {
+    bind: vi.fn().mockReturnThis(),
+    run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+  };
+  const database = {
+    prepare: vi.fn().mockReturnValue(preparedStmt),
+    batch: vi.fn().mockResolvedValue([
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+    ]),
+  };
   const env: Env = {
-    DATABASE: {} as unknown as Env['DATABASE'],
+    DATABASE: database as unknown as Env['DATABASE'],
     ENCRYPTION_KEY: 'test-key',
     KV: kv as unknown as Env['KV'],
   } as Env;
@@ -243,12 +256,17 @@ describe('Project Credentials Routes', () => {
       expect(json.scope).toBe('project');
       expect(json.projectId).toBe('proj-1');
 
-      // Verify insert includes projectId
-      expect(mockDB.insert).toHaveBeenCalled();
-      const insertedValues = mockDB.values.mock.calls[0]?.[0];
-      expect(insertedValues.projectId).toBe('proj-1');
-      expect(insertedValues.userId).toBe('test-user-id');
-      expect(insertedValues.credentialType).toBe('agent-api-key');
+      // Verify insert statement was prepared against raw DATABASE (atomic batch path).
+      // Insert SQL must include all required columns with project_id as positional arg.
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const insertSql = prepareCalls.find((sql) => sql.includes('INSERT INTO credentials'));
+      expect(insertSql).toBeDefined();
+      expect(insertSql).toContain('project_id');
+      expect(insertSql).toContain("'agent-api-key'");
+      // The prepared statement was bound with the correct positional values — userId, projectId, etc.
+      expect(preparedStmt.bind).toHaveBeenCalled();
+      const bindArgs = preparedStmt.bind.mock.calls.find((c) => c.includes('test-user-id') && c.includes('proj-1'));
+      expect(bindArgs).toBeDefined();
     });
 
     it('when autoActivate is true, only deactivates project-scoped rows (user-scoped rows untouched)', async () => {
@@ -271,8 +289,15 @@ describe('Project Credentials Routes', () => {
         env,
       );
       expect(res.status).toBe(201);
-      // Deactivate call should have been made (update chain) — just verify it happened
-      expect(mockDB.update).toHaveBeenCalled();
+      // Atomic deactivate+upsert batch should have run.
+      expect(database.batch).toHaveBeenCalled();
+      // Deactivate SQL must scope to project_id = ? — NOT user-scoped (project_id IS NULL).
+      // This is the key scope-guard: project autoActivate must not touch user-scoped rows.
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const deactivateSql = prepareCalls.find((sql) => sql.includes('UPDATE credentials SET is_active = 0'));
+      expect(deactivateSql).toBeDefined();
+      expect(deactivateSql).toContain('project_id = ?');
+      expect(deactivateSql).not.toContain('project_id IS NULL');
     });
   });
 

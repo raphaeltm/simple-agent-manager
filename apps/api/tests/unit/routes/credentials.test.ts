@@ -29,8 +29,24 @@ function makeTestEnv(): Env {
     put: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockResolvedValue(undefined),
   };
+  // PUT autoActivate path uses `c.env.DATABASE.prepare().bind().run()` + `.batch()`
+  // for atomic deactivate+upsert (cloudflare-specialist review). The drizzle mock
+  // is insufficient here because raw D1 prepared statements go through DATABASE
+  // directly, not through drizzle. Provide a minimal stub that satisfies the
+  // fluent `.prepare(sql).bind(...).run()` chain and `.batch([...])`.
+  const preparedStmt = {
+    bind: vi.fn().mockReturnThis(),
+    run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+  };
+  const database = {
+    prepare: vi.fn().mockReturnValue(preparedStmt),
+    batch: vi.fn().mockResolvedValue([
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+    ]),
+  };
   return {
-    DATABASE: {} as Env['DATABASE'],
+    DATABASE: database as unknown as Env['DATABASE'],
     ENCRYPTION_KEY: 'test-key',
     KV: kv as unknown as Env['KV'],
   } as Env;
@@ -122,11 +138,6 @@ describe('Credentials Routes - OAuth Support', () => {
       // Mock existing API key credential
       mockDB.limit.mockResolvedValueOnce([]);
 
-      // Need to reset and re-mock for the update transaction
-      mockDB.where.mockReturnThis();
-      mockDB.update.mockReturnThis();
-      mockDB.set.mockReturnThis();
-
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
@@ -134,17 +145,24 @@ describe('Credentials Routes - OAuth Support', () => {
         autoActivate: true,
       };
 
+      const env = makeTestEnv();
       const res = await app.request('/api/credentials/agent', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, makeTestEnv());
+      }, env);
 
       expect(res.status).toBe(201);
 
-      // Verify update was called to deactivate other credentials
-      expect(mockDB.update).toHaveBeenCalled();
-      expect(mockDB.set).toHaveBeenCalledWith({ isActive: false });
+      // Autoactivate path now uses atomic DATABASE.batch([deactivate, upsert]).
+      // Verify a deactivate statement was prepared with project_id IS NULL scope guard
+      // (user-scoped deactivate must not affect project-scoped rows).
+      const database = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn>; batch: ReturnType<typeof vi.fn> };
+      expect(database.batch).toHaveBeenCalled();
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const deactivateSql = prepareCalls.find((sql) => sql.includes('UPDATE credentials SET is_active = 0'));
+      expect(deactivateSql).toBeDefined();
+      expect(deactivateSql).toContain('project_id IS NULL');
     });
 
     it('should save API key when credentialKind is not specified (defaults to api-key)', async () => {
@@ -284,17 +302,22 @@ describe('Credentials Routes - OAuth Support', () => {
         autoActivate: true,
       };
 
+      const env = makeTestEnv();
       const res = await app.request('/api/credentials/agent', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, makeTestEnv());
+      }, env);
 
       expect(res.status).toBe(200); // Update returns 200, not 201
 
-      // Verify update was called on existing credential
-      expect(mockDB.update).toHaveBeenCalled();
-      expect(mockDB.insert).not.toHaveBeenCalled();
+      // Existing-credential path now prepares an UPDATE (not INSERT) via raw DATABASE.
+      const database = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> };
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const updateSql = prepareCalls.find((sql) => sql.includes('UPDATE credentials') && sql.includes('encrypted_token'));
+      expect(updateSql).toBeDefined();
+      const insertSql = prepareCalls.find((sql) => sql.includes('INSERT INTO credentials'));
+      expect(insertSql).toBeUndefined();
     });
   });
 });

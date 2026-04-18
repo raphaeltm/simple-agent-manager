@@ -866,9 +866,9 @@ The proxy intercepts Codex refresh requests and serializes them per user via a D
 | `CODEX_REFRESH_UPSTREAM_URL` | OpenAI token endpoint | `https://auth.openai.com/oauth/token` |
 | `CODEX_REFRESH_UPSTREAM_TIMEOUT_MS` | Upstream request timeout | `10000` (10s) |
 | `CODEX_CLIENT_ID` | OpenAI OAuth client ID | `app_EMoamEEZ73f0CkXaXp7hrann` |
-| `RATE_LIMIT_CODEX_REFRESH` | Max refresh requests per hour per workspace | `30` |
+| `RATE_LIMIT_CODEX_REFRESH_PER_HOUR` | Max refresh requests per hour per user (enforced atomically via CodexRefreshLock DO ctx.storage) | `30` |
 | `RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS` | Rate limit window in seconds | `3600` (1 hour) |
-| `CODEX_EXPECTED_SCOPES` | Comma-separated expected scopes for upstream validation (warning only) | Not set (accepts all) |
+| `CODEX_EXPECTED_SCOPES` | Comma-separated allowlist of OAuth scopes the upstream may return. Unexpected scopes block the refresh with 502 and the previous token remains valid. Empty string disables validation. | `openid,profile,email,offline_access` |
 
 ### Rotating Security Keys
 
