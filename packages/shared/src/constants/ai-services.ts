@@ -119,9 +119,37 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
  * causing empty visible content in streaming. Llama 4 Scout works reliably without this issue. */
 export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
+/** Platform AI model metadata for UI dropdowns and allowed-model derivation. */
+export interface PlatformAIModel {
+  /** Full Workers AI model ID (e.g. @cf/meta/llama-4-scout-17b-16e-instruct) */
+  id: string;
+  /** Human-friendly display label */
+  label: string;
+  /** Whether this is the default model */
+  isDefault?: boolean;
+}
+
+/** Models available through the SAM Platform AI proxy (Workers AI).
+ * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
+ * string and the UI dropdown both derive from this list. */
+export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
+  {
+    id: '@cf/meta/llama-4-scout-17b-16e-instruct',
+    label: 'Llama 4 Scout 17B',
+    isDefault: true,
+  },
+  {
+    id: '@cf/qwen/qwen3-30b-a3b-fp8',
+    label: 'Qwen 3 30B',
+  },
+  {
+    id: '@cf/google/gemma-3-12b-it',
+    label: 'Gemma 3 12B',
+  },
+];
+
 /** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var. */
-export const DEFAULT_AI_PROXY_ALLOWED_MODELS =
-  '@cf/meta/llama-4-scout-17b-16e-instruct,@cf/qwen/qwen3-30b-a3b-fp8,@cf/google/gemma-3-12b-it';
+export const DEFAULT_AI_PROXY_ALLOWED_MODELS = PLATFORM_AI_MODELS.map((m) => m.id).join(',');
 
 /** Default daily input token limit per user. Override via AI_PROXY_DAILY_INPUT_TOKEN_LIMIT env var. */
 export const DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT = 500_000;

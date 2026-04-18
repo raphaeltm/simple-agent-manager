@@ -10,6 +10,7 @@ import {
   AGENT_PERMISSION_MODE_LABELS,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
+  PLATFORM_AI_MODELS,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
@@ -51,6 +52,11 @@ function AgentSettingsCard({
   const selectedProvider = opencodeProvider || null;
   const providerMeta = selectedProvider ? OPENCODE_PROVIDERS[selectedProvider] : null;
   const showBaseUrl = selectedProvider === 'custom' || selectedProvider === 'openai-compatible';
+
+  // Shared class string for all form inputs and selects — provides consistent styling
+  // and restores a visible focus indicator after outline-none removes the browser default.
+  const formControlClass =
+    'w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring box-border';
 
   // Sync state when settings prop changes
   useEffect(() => {
@@ -167,6 +173,7 @@ function AgentSettingsCard({
             value={opencodeProvider}
             onChange={(e) => {
               const val = e.target.value as OpenCodeProvider | '';
+              const prev = opencodeProvider;
               setOpencodeProvider(val);
               // Clear base URL when switching away from providers that need it
               if (val !== 'custom' && val !== 'openai-compatible') {
@@ -176,8 +183,12 @@ function AgentSettingsCard({
               if (val !== 'custom') {
                 setOpencodeProviderName('');
               }
+              // Clear model when switching to/from platform (dropdown vs text input)
+              if ((val === 'platform') !== (prev === 'platform')) {
+                setModel('');
+              }
             }}
-            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            className={formControlClass}
             data-testid="opencode-provider-select"
           >
             <option value="">Default (auto-detect)</option>
@@ -208,7 +219,7 @@ function AgentSettingsCard({
             value={opencodeBaseUrl}
             onChange={(e) => setOpencodeBaseUrl(e.target.value)}
             placeholder="https://api.example.com/v1"
-            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            className={formControlClass}
             data-testid="opencode-base-url-input"
           />
         </div>
@@ -227,7 +238,7 @@ function AgentSettingsCard({
             value={opencodeProviderName}
             onChange={(e) => setOpencodeProviderName(e.target.value)}
             placeholder="e.g. My Custom Provider"
-            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            className={formControlClass}
             data-testid="opencode-provider-name-input"
           />
         </div>
@@ -237,17 +248,36 @@ function AgentSettingsCard({
       <div className="mb-4">
         <label htmlFor={`model-input-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Model</label>
         <div className="text-xs text-fg-muted mb-2">
-          Leave empty to use the default model. Model availability depends on your API key or subscription.
+          {isOpenCode && selectedProvider === 'platform'
+            ? 'Select a model from the available Workers AI models.'
+            : 'Leave empty to use the default model. Model availability depends on your API key or subscription.'}
         </div>
-        <input
-          id={`model-input-${agent.id}`}
-          type="text"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder={modelPlaceholder}
-          className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
-          data-testid={`model-input-${agent.id}`}
-        />
+        {isOpenCode && selectedProvider === 'platform' ? (
+          <select
+            id={`model-input-${agent.id}`}
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className={formControlClass}
+            data-testid={`model-input-${agent.id}`}
+          >
+            <option value="">Default ({PLATFORM_AI_MODELS.find((m) => m.isDefault)?.label ?? 'auto'})</option>
+            {PLATFORM_AI_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={`model-input-${agent.id}`}
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder={modelPlaceholder}
+            className={formControlClass}
+            data-testid={`model-input-${agent.id}`}
+          />
+        )}
       </div>
 
       {/* Permission mode */}
@@ -283,7 +313,7 @@ function AgentSettingsCard({
         <button
           onClick={handleSave}
           disabled={saving || resetting || !hasChanges}
-          className={`py-2 px-4 rounded-md border-none bg-accent text-fg-on-accent text-sm font-medium cursor-pointer min-h-[40px] ${
+          className={`py-2 px-4 rounded-md border-none bg-accent text-fg-on-accent text-sm font-medium cursor-pointer min-h-[44px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
             saving || resetting || !hasChanges ? 'opacity-50' : 'opacity-100'
           }`}
           data-testid={`save-settings-${agent.id}`}
@@ -293,7 +323,7 @@ function AgentSettingsCard({
         <button
           onClick={handleReset}
           disabled={saving || resetting}
-          className={`py-2 px-4 rounded-md border border-border-default bg-transparent text-fg-muted text-sm font-medium cursor-pointer min-h-[40px] ${
+          className={`py-2 px-4 rounded-md border border-border-default bg-transparent text-fg-muted text-sm font-medium cursor-pointer min-h-[44px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
             saving || resetting ? 'opacity-60' : 'opacity-100'
           }`}
           data-testid={`reset-settings-${agent.id}`}

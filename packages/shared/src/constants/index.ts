@@ -194,6 +194,8 @@ export {
   DEFAULT_TTS_SUMMARY_THRESHOLD,
   DEFAULT_TTS_TIMEOUT_MS,
   MAX_CONTEXT_SUMMARY_BYTES,
+  PLATFORM_AI_MODELS,
+  type PlatformAIModel,
 } from './ai-services';
 
 // Agent Settings
