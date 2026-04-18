@@ -1052,17 +1052,10 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 			if settings != nil && settings.OpencodeProvider != "" {
 				provider = settings.OpencodeProvider
 			}
-			// Log the full config for debugging (redact API key)
-			redactedConfig := make(map[string]interface{})
-			for k, v := range opencodeConfig {
-				redactedConfig[k] = v
-			}
-			redactedJSON, _ := json.Marshal(redactedConfig)
 			slog.Info("OpenCode config injected",
 				"provider", provider,
 				"model", opencodeConfig["model"],
 				"configLen", len(configJSON),
-				"config", string(redactedJSON),
 				"workspaceId", h.config.WorkspaceID)
 
 			// Pre-install the npm package required by custom providers.
