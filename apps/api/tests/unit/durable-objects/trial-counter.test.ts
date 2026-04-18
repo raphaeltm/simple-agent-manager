@@ -202,4 +202,127 @@ describe('TrialCounter DO', () => {
     // 2 increments + 1 decrement = 3 transactionSync invocations.
     expect(ctx.storage.transactionSync).toHaveBeenCalledTimes(3);
   });
+
+  describe('tryIncrement', () => {
+    it('returns { allowed, count } on success', async () => {
+      const { instance } = createDO();
+      const r = await instance.tryIncrement('2026-04', 3);
+      expect(r).toEqual({ allowed: true, count: 1 });
+    });
+
+    it('returns { allowed: false, count } when at cap', async () => {
+      const { instance } = createDO();
+      await instance.tryIncrement('2026-04', 1);
+      const blocked = await instance.tryIncrement('2026-04', 1);
+      expect(blocked).toEqual({ allowed: false, count: 1 });
+    });
+
+    it('shares storage with increment (same underlying counter)', async () => {
+      const { instance } = createDO();
+      await instance.increment('2026-04', 10);
+      const r = await instance.tryIncrement('2026-04', 10);
+      expect(r).toEqual({ allowed: true, count: 2 });
+    });
+  });
+
+  describe('prune', () => {
+    it('deletes rows older than keepMonthKey and returns count', async () => {
+      // Extend the fake SQL with range predicate support for prune().
+      const { instance, ctx } = createDO();
+      // Seed several months.
+      await instance.increment('2026-01', 10);
+      await instance.increment('2026-02', 10);
+      await instance.increment('2026-03', 10);
+      await instance.increment('2026-04', 10);
+
+      // Patch the fake exec to handle DELETE/COUNT with month_key < ?
+      const rows = ctx._sql._rows;
+      ctx._sql.exec.mockImplementation((query: string, ...args: unknown[]) => {
+        const q = query.trim().toLowerCase();
+        if (q.startsWith('select count(*)')) {
+          const keep = args[0] as string;
+          const c = [...rows.keys()].filter((k) => k < keep).length;
+          return { toArray: () => [{ c }] };
+        }
+        if (q.startsWith('delete from trial_counter where month_key <')) {
+          const keep = args[0] as string;
+          for (const k of [...rows.keys()]) if (k < keep) rows.delete(k);
+          return { toArray: () => [] };
+        }
+        if (q.startsWith('select count')) {
+          // unused — handled above
+          return { toArray: () => [] };
+        }
+        return { toArray: () => [] };
+      });
+
+      const deleted = await instance.prune('2026-03');
+      expect(deleted).toBe(2);
+      expect(rows.has('2026-01')).toBe(false);
+      expect(rows.has('2026-02')).toBe(false);
+      expect(rows.has('2026-03')).toBe(true);
+      expect(rows.has('2026-04')).toBe(true);
+    });
+  });
+
+  describe('fetch HTTP surface', () => {
+    it('GET /state returns current counter', async () => {
+      const { instance } = createDO();
+      await instance.increment('2026-04', 10);
+      const res = await instance.fetch(
+        new Request('https://do/state?monthKey=2026-04')
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ monthKey: '2026-04', count: 1 });
+    });
+
+    it('GET /state without monthKey returns 400', async () => {
+      const { instance } = createDO();
+      const res = await instance.fetch(new Request('https://do/state'));
+      expect(res.status).toBe(400);
+    });
+
+    it('POST /tryIncrement returns { allowed, count }', async () => {
+      const { instance } = createDO();
+      const res = await instance.fetch(
+        new Request('https://do/tryIncrement', {
+          method: 'POST',
+          body: JSON.stringify({ monthKey: '2026-04', cap: 2 }),
+        })
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ allowed: true, count: 1 });
+    });
+
+    it('POST /tryIncrement without body returns 400', async () => {
+      const { instance } = createDO();
+      const res = await instance.fetch(
+        new Request('https://do/tryIncrement', {
+          method: 'POST',
+          body: JSON.stringify({}),
+        })
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it('POST /decrement returns { count }', async () => {
+      const { instance } = createDO();
+      await instance.increment('2026-04', 10);
+      await instance.increment('2026-04', 10);
+      const res = await instance.fetch(
+        new Request('https://do/decrement', {
+          method: 'POST',
+          body: JSON.stringify({ monthKey: '2026-04' }),
+        })
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ count: 1 });
+    });
+
+    it('unknown path returns 404', async () => {
+      const { instance } = createDO();
+      const res = await instance.fetch(new Request('https://do/nope'));
+      expect(res.status).toBe(404);
+    });
+  });
 });
