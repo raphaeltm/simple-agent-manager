@@ -415,10 +415,10 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
           echo "Enabling trials kill-switch on staging (KV trials:enabled=true)"
+          # `wrangler kv key put` writes to remote by default; --remote is not a valid flag here.
           pnpm exec wrangler kv key put "trials:enabled" "true" \
             --binding KV \
-            --env staging \
-            --remote
+            --env staging
 
       - name: Configure Worker Secrets
         if: ${{ inputs.dry_run != true }}
