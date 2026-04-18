@@ -2,8 +2,10 @@ package bootlog
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -143,6 +145,111 @@ func (b *panicOnCallBroadcaster) Broadcast(step, status, message string, detail 
 		return
 	}
 	panic("should not reach here in nil test")
+}
+
+func TestPhaseEmitsStartAndCompletedWithDuration(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var entries []logEntry
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var e logEntry
+		if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
+			t.Errorf("failed to decode: %v", err)
+		}
+		mu.Lock()
+		entries = append(entries, e)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	r := New(server.URL, "ws-xyz")
+	r.SetToken("token")
+
+	err := r.Phase("docker_install", func() error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].Step != "docker_install" || entries[0].Status != "started" {
+		t.Fatalf("first entry = %+v, want started for docker_install", entries[0])
+	}
+	if entries[1].Step != "docker_install" || entries[1].Status != "completed" {
+		t.Fatalf("second entry = %+v, want completed for docker_install", entries[1])
+	}
+	if !strings.HasPrefix(entries[1].Detail, "duration_ms=") {
+		t.Fatalf("expected duration_ms= detail, got %q", entries[1].Detail)
+	}
+}
+
+func TestPhasePropagatesErrorAndEmitsFailed(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var entries []logEntry
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var e logEntry
+		_ = json.NewDecoder(r.Body).Decode(&e)
+		mu.Lock()
+		entries = append(entries, e)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	r := New(server.URL, "ws-xyz")
+	r.SetToken("token")
+
+	sentinel := errors.New("boom")
+	err := r.Phase("firewall", func() error {
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected sentinel error, got %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[1].Status != "failed" {
+		t.Fatalf("expected failed status, got %q", entries[1].Status)
+	}
+	if entries[1].Message != "boom" {
+		t.Fatalf("expected message=boom, got %q", entries[1].Message)
+	}
+	if !strings.HasPrefix(entries[1].Detail, "duration_ms=") {
+		t.Fatalf("expected duration_ms= detail, got %q", entries[1].Detail)
+	}
+}
+
+func TestPhaseNilSafe(t *testing.T) {
+	t.Parallel()
+	var r *Reporter
+	called := false
+	err := r.Phase("step", func() error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected fn to be invoked even on nil receiver")
+	}
 }
 
 func TestLogHandlesServerError(t *testing.T) {

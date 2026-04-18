@@ -5,8 +5,17 @@
 /** Default Hetzner datacenter. Override via HETZNER_DATACENTER env var. */
 export const DEFAULT_HETZNER_DATACENTER = 'fsn1';
 
-/** Default Hetzner image. Override via HETZNER_IMAGE env var. */
-export const DEFAULT_HETZNER_IMAGE = 'ubuntu-24.04';
+/**
+ * Default Hetzner image. Override via HETZNER_BASE_IMAGE env var (Worker-side)
+ * or HETZNER_IMAGE env var (legacy/direct provider usage).
+ *
+ * `docker-ce` is Hetzner's first-party marketplace app image that ships Ubuntu
+ * 24.04 LTS with Docker CE preinstalled. Using it skips the `apt-get install
+ * docker.io` step during provisioning. The vm-agent's provision step detects
+ * existing docker installations (`exec.LookPath("docker")`) and skips the apt
+ * path, so switching back to `ubuntu-24.04` is a safe zero-code rollback.
+ */
+export const DEFAULT_HETZNER_IMAGE = 'docker-ce';
 
 /** Backwards compatibility alias - use DEFAULT_HETZNER_IMAGE */
 export const HETZNER_IMAGE = DEFAULT_HETZNER_IMAGE;

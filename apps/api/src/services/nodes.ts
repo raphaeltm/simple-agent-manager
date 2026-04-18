@@ -151,11 +151,19 @@ export async function provisionNode(
 
     const provider = providerResult.provider;
 
+    // HETZNER_BASE_IMAGE env var provides an emergency rollback from the
+     // `docker-ce` marketplace image back to a plain Ubuntu image without
+     // requiring a code change. Only applied for Hetzner; other providers
+     // use their own image resolution logic.
+    const baseImageOverride =
+      targetProvider === 'hetzner' ? env.HETZNER_BASE_IMAGE : undefined;
+
     const vm = await provider.createVM({
       name: `node-${node.id.toLowerCase()}`,
       size: node.vmSize as 'small' | 'medium' | 'large',
       location: node.vmLocation,
       userData: cloudInit,
+      ...(baseImageOverride ? { image: baseImageOverride } : {}),
       labels: {
         node: node.id.toLowerCase(),
         managed: 'simple-agent-manager',

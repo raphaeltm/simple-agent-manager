@@ -114,35 +114,41 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		},
 	}
 
-	logStep := func(name, stepStatus, msg string) {
+	logStep := func(name, stepStatus, msg string, durationMs int64) {
 		slog.Info("provision: "+msg, "step", name, "status", stepStatus)
 		if es != nil {
+			detail := map[string]interface{}{
+				"step":   name,
+				"status": stepStatus,
+			}
+			if durationMs > 0 {
+				detail["durationMs"] = durationMs
+			}
 			es.Append(eventstore.EventRecord{
 				Level:   "info",
 				Type:    "provision." + name,
 				Message: msg,
-				Detail: map[string]interface{}{
-					"step":   name,
-					"status": stepStatus,
-				},
+				Detail:  detail,
 			})
 		}
 	}
 
 	runStep := func(name string, fn func(context.Context) error) error {
 		status.setStep(name, "running")
-		logStep(name, "started", "Starting "+name)
+		logStep(name, "started", "Starting "+name, 0)
 		start := time.Now()
 
 		if err := fn(ctx); err != nil {
+			duration := time.Since(start).Milliseconds()
 			status.setStep(name, "failed")
 			status.setStepError(name, err.Error())
-			logStep(name, "failed", fmt.Sprintf("%s failed after %s: %s", name, time.Since(start).Round(time.Millisecond), err))
+			logStep(name, "failed", fmt.Sprintf("%s failed after %s: %s", name, time.Since(start).Round(time.Millisecond), err), duration)
 			return fmt.Errorf("provision step %s failed: %w", name, err)
 		}
 
+		duration := time.Since(start).Milliseconds()
 		status.setStep(name, "completed")
-		logStep(name, "completed", fmt.Sprintf("%s completed in %s", name, time.Since(start).Round(time.Millisecond)))
+		logStep(name, "completed", fmt.Sprintf("%s completed in %s", name, time.Since(start).Round(time.Millisecond)), duration)
 		return nil
 	}
 
