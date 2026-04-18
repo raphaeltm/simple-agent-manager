@@ -95,8 +95,19 @@ write_files:
     content: |
       #!/bin/bash
       # SAM Firewall — restricts VM agent port to Cloudflare IPs only.
+      #
+      # Policy: INPUT chain stays ACCEPT. A single targeted DROP rule is
+      # appended LAST for tcp dport VM_AGENT_PORT so only the explicit CF
+      # ACCEPT rules (and loopback / docker bridges) can reach the agent port.
+      # Outbound connections and their replies are unaffected — we do NOT rely
+      # on conntrack to let reply packets back in, because conntrack state is
+      # invalidated by Docker install + restart + veth churn and the resulting
+      # silent drops caused a sustained ~6-minute "Cloudflare API unreachable"
+      # window on every fresh boot.
       set -euo pipefail
-      trap 'iptables -P INPUT DROP 2>/dev/null; ip6tables -P INPUT DROP 2>/dev/null' EXIT
+      # NOTE: intentionally no EXIT trap that clamps policy to DROP. A failed
+      # script must not lock the box out — the previous trap caused total
+      # blackouts when any earlier step errored before ACCEPT rules were added.
 
       VM_AGENT_PORT="{{ vm_agent_port }}"
       CF_IPV4_URL="https://www.cloudflare.com/ips-v4"
@@ -135,9 +146,10 @@ write_files:
         CF_IPV6="$FALLBACK_IPV6"
       }
 
+      # IPv4: policy ACCEPT + targeted DROP on VM_AGENT_PORT for non-CF sources.
+      iptables -P INPUT ACCEPT
       iptables -F INPUT
       iptables -A INPUT -i lo -j ACCEPT
-      iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
       iptables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       iptables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
 
@@ -145,11 +157,14 @@ write_files:
         [ -n "$cidr" ] && iptables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       done <<< "$CF_IPV4"
 
-      iptables -P INPUT DROP
+      # Final catch-all: drop any remaining traffic to VM_AGENT_PORT.
+      # Outbound traffic (other ports) is unaffected because policy is ACCEPT.
+      iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
 
+      # IPv6: same pattern.
+      ip6tables -P INPUT ACCEPT
       ip6tables -F INPUT
       ip6tables -A INPUT -i lo -j ACCEPT
-      ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
       ip6tables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       ip6tables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
 
@@ -157,7 +172,7 @@ write_files:
         [ -n "$cidr" ] && ip6tables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       done <<< "$CF_IPV6"
 
-      ip6tables -P INPUT DROP
+      ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
 
       DOCKER_USER_WAIT=0
       while ! iptables -L DOCKER-USER -n >/dev/null 2>&1; do

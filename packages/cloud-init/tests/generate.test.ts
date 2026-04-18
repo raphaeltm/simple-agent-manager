@@ -358,8 +358,12 @@ describe('generateCloudInit', () => {
       expect(firewallScript).toBeDefined();
       expect(firewallScript.permissions).toBe('0755');
       expect(firewallScript.content).toContain('#!/bin/bash');
-      expect(firewallScript.content).toContain('iptables -P INPUT DROP');
-      expect(firewallScript.content).toContain('ip6tables -P INPUT DROP');
+      // Policy stays ACCEPT — we rely on explicit per-port DROP rules so
+      // outbound reply packets never depend on conntrack state.
+      expect(firewallScript.content).toContain('iptables -P INPUT ACCEPT');
+      expect(firewallScript.content).toContain('ip6tables -P INPUT ACCEPT');
+      expect(firewallScript.content).not.toContain('iptables -P INPUT DROP');
+      expect(firewallScript.content).not.toContain('ip6tables -P INPUT DROP');
     });
 
     it('firewall script contains correct VM agent port (TLS mode)', () => {
@@ -385,7 +389,7 @@ describe('generateCloudInit', () => {
       expect(firewallScript.content).toContain('VM_AGENT_PORT="8080"');
     });
 
-    it('firewall script allows loopback, established, and Docker bridge traffic', () => {
+    it('firewall script allows loopback and Docker bridge traffic', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -394,9 +398,30 @@ describe('generateCloudInit', () => {
       );
       const content = firewallScript.content;
       expect(content).toContain('iptables -A INPUT -i lo -j ACCEPT');
-      expect(content).toContain('iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
       expect(content).toContain('iptables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
       expect(content).toContain('iptables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      // No conntrack ESTABLISHED,RELATED dependency — policy ACCEPT means
+      // outbound reply packets don't need a state entry to come back.
+      expect(content).not.toContain('conntrack --ctstate ESTABLISHED,RELATED');
+    });
+
+    it('firewall script ends with a targeted DROP rule for VM_AGENT_PORT', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      // Final catch-all drops non-CF traffic to the VM agent port only.
+      expect(content).toContain('iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
+      expect(content).toContain('ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
+      // The targeted DROP must come AFTER the CF ACCEPT rules. Find positions
+      // in the script to verify ordering for at least one CF fallback CIDR.
+      const acceptIdx = content.indexOf('iptables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      const dropIdx = content.indexOf('iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
+      expect(acceptIdx).toBeGreaterThan(-1);
+      expect(dropIdx).toBeGreaterThan(acceptIdx);
     });
 
     it('firewall script fetches Cloudflare IPs with fallback defaults', () => {
@@ -480,23 +505,28 @@ describe('generateCloudInit', () => {
       );
       const content: string = firewallScript.content;
       expect(content).toContain('ip6tables -A INPUT -i lo -j ACCEPT');
-      expect(content).toContain('ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
       expect(content).toContain('ip6tables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
       expect(content).toContain('ip6tables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
-      expect(content).toContain('ip6tables -P INPUT DROP');
+      // Policy stays ACCEPT; targeted DROP on VM_AGENT_PORT does the restriction.
+      expect(content).toContain('ip6tables -P INPUT ACCEPT');
+      expect(content).toContain('ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
+      expect(content).not.toContain('ip6tables -P INPUT DROP');
     });
 
-    it('firewall script uses set -euo pipefail with EXIT trap for DROP policy', () => {
+    it('firewall script uses set -euo pipefail and does NOT clamp policy to DROP on exit', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
       const firewallScript = parsed.write_files.find(
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
-      expect(firewallScript.content).toContain('set -euo pipefail');
-      // EXIT trap ensures DROP policy even if script aborts mid-execution
-      expect(firewallScript.content).toContain("trap 'iptables -P INPUT DROP");
-      expect(firewallScript.content).toContain('ip6tables -P INPUT DROP');
+      const content: string = firewallScript.content;
+      expect(content).toContain('set -euo pipefail');
+      // The previous implementation had `trap 'iptables -P INPUT DROP ...' EXIT`
+      // which could leave the box in total blackout if the script errored
+      // before ACCEPT rules were added. That landmine MUST not be present.
+      expect(content).not.toMatch(/trap\s+'[^']*iptables[^']*-P\s+INPUT\s+DROP/);
+      expect(content).not.toMatch(/trap\s+'[^']*ip6tables[^']*-P\s+INPUT\s+DROP/);
     });
 
     // NOTE: debconf preseed is now handled by vm-agent provision package.
