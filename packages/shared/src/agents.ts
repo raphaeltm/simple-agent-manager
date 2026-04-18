@@ -166,6 +166,14 @@ export interface AgentCredentialInfo {
   label?: string; // e.g., "Pro/Max Subscription" for OAuth
   createdAt: string;
   updatedAt: string;
+  /**
+   * Credential scope:
+   * - "user" — applies to all of this user's workspaces (default, legacy behavior)
+   * - "project" — scoped to a specific project, overrides the user credential for that project
+   */
+  scope?: 'user' | 'project';
+  /** Project ID when scope === 'project'. Undefined for user-scoped credentials. */
+  projectId?: string;
 }
 
 /** Request body for PUT /api/credentials/agent */

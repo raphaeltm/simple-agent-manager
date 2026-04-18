@@ -1,5 +1,5 @@
 import { type BootstrapTokenData, DEFAULT_AI_PROXY_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -36,7 +36,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   const db = drizzle(c.env.DATABASE, { schema });
 
   const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -51,7 +51,8 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     db,
     workspace.userId,
     body.agentType,
-    encryptionKey
+    encryptionKey,
+    workspace.projectId
   );
 
   // Cloud provider credential fallback: if no dedicated agent key, check if the agent
@@ -168,9 +169,9 @@ runtimeRoutes.post('/:id/agent-credential-sync', jsonValidator(AgentCredentialSy
 
   const db = drizzle(c.env.DATABASE, { schema });
 
-  // Look up the workspace to get the user ID.
+  // Look up the workspace to get the user ID and project ID.
   const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -180,22 +181,44 @@ runtimeRoutes.post('/:id/agent-credential-sync', jsonValidator(AgentCredentialSy
     throw errors.notFound('Workspace');
   }
 
-  // Find the existing active credential to update.
-  const existingCreds = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, workspace.userId),
-        eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, agentType),
-        eq(schema.credentials.credentialKind, credentialKind),
-        eq(schema.credentials.isActive, true)
+  // Find the existing active credential to update. Prefer project-scoped match
+  // when the workspace is in a project; fall back to user-scoped. This preserves
+  // the scope that was originally used to inject the credential for the session.
+  let existing: typeof schema.credentials.$inferSelect | undefined;
+  if (workspace.projectId) {
+    const projectMatch = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, workspace.userId),
+          eq(schema.credentials.projectId, workspace.projectId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, agentType),
+          eq(schema.credentials.credentialKind, credentialKind),
+          eq(schema.credentials.isActive, true)
+        )
       )
-    )
-    .limit(1);
-
-  const existing = existingCreds[0];
+      .limit(1);
+    existing = projectMatch[0];
+  }
+  if (!existing) {
+    const userMatch = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, workspace.userId),
+          isNull(schema.credentials.projectId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, agentType),
+          eq(schema.credentials.credentialKind, credentialKind),
+          eq(schema.credentials.isActive, true)
+        )
+      )
+      .limit(1);
+    existing = userMatch[0];
+  }
   if (!existing) {
     // No credential found — the user may have deleted it while the session was active.
     return c.json({ success: false, reason: 'credential_not_found' });

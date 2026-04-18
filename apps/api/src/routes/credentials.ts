@@ -1,7 +1,7 @@
 import { createProvider } from '@simple-agent-manager/providers';
 import type { AgentCredentialInfo, AgentType, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource } from '@simple-agent-manager/shared';
 import { CREDENTIAL_PROVIDERS, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
-import { and,eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -541,21 +541,54 @@ credentialsRoutes.delete('/agent/:agentType', async (c) => {
 /**
  * Helper function to get a decrypted agent credential for internal use.
  * Returns the active credential (API key or OAuth token) and its type.
- * Falls back to platform credentials when no user credential is found.
+ *
+ * Resolution order:
+ *   1. Project-scoped credential (when projectId is provided)
+ *   2. User-scoped credential
+ *   3. Platform credential
  */
 export async function getDecryptedAgentKey(
   db: ReturnType<typeof drizzle>,
   userId: string,
   agentType: string,
-  encryptionKey: string
+  encryptionKey: string,
+  projectId?: string | null
 ): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null> {
-  // 1. Try user's own credential first
-  const creds = await db
+  // 1. Try project-scoped credential first (most specific)
+  if (projectId) {
+    const projectCreds = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.projectId, projectId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, agentType),
+          eq(schema.credentials.isActive, true)
+        )
+      )
+      .limit(1);
+
+    const projectCred = projectCreds[0];
+    if (projectCred) {
+      const credential = await decrypt(projectCred.encryptedToken, projectCred.iv, encryptionKey);
+      return {
+        credential,
+        credentialKind: projectCred.credentialKind as CredentialKind,
+        credentialSource: 'user',
+      };
+    }
+  }
+
+  // 2. Fall back to user-scoped credential (project_id IS NULL)
+  const userCreds = await db
     .select()
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.userId, userId),
+        isNull(schema.credentials.projectId),
         eq(schema.credentials.credentialType, 'agent-api-key'),
         eq(schema.credentials.agentType, agentType),
         eq(schema.credentials.isActive, true)
@@ -563,7 +596,7 @@ export async function getDecryptedAgentKey(
     )
     .limit(1);
 
-  const foundCred = creds[0];
+  const foundCred = userCreds[0];
   if (foundCred) {
     const credential = await decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
     return {
@@ -573,7 +606,7 @@ export async function getDecryptedAgentKey(
     };
   }
 
-  // 2. Fall back to platform credential
+  // 3. Fall back to platform credential
   const platformCred = await getPlatformAgentCredential(db, agentType, encryptionKey);
   if (platformCred) {
     return {

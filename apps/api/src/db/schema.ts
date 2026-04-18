@@ -167,6 +167,11 @@ export const credentials = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }), // User deletion removes all their credentials
+    /**
+     * Null for user-scoped credentials (legacy, default). Set to project id for project-scoped
+     * overrides — resolution picks project-scoped first, falls back to user-scoped.
+     */
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
     provider: text('provider').notNull(),
     credentialType: text('credential_type').notNull().default('cloud-provider'),
     /** Null for cloud-provider credentials; set to 'claude-code' | 'openai-codex' for agent keys. */
@@ -185,11 +190,14 @@ export const credentials = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    userAgentKind: uniqueIndex('idx_credentials_user_agent_kind')
+    userAgentKindUserScope: uniqueIndex('idx_credentials_user_agent_kind_user_scope')
       .on(table.userId, table.agentType, table.credentialKind)
-      .where(sql`credential_type = 'agent-api-key'`),
+      .where(sql`credential_type = 'agent-api-key' AND project_id IS NULL`),
+    userAgentKindProjectScope: uniqueIndex('idx_credentials_user_agent_kind_project_scope')
+      .on(table.userId, table.projectId, table.agentType, table.credentialKind)
+      .where(sql`credential_type = 'agent-api-key' AND project_id IS NOT NULL`),
     activeCredential: index('idx_credentials_active')
-      .on(table.userId, table.agentType, table.isActive)
+      .on(table.userId, table.projectId, table.agentType, table.isActive)
       .where(sql`credential_type = 'agent-api-key' AND is_active = 1`),
   })
 );

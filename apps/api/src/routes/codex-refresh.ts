@@ -92,10 +92,10 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
     return c.json({ error: 'invalid_request', message: 'Missing grant_type or refresh_token' }, 400);
   }
 
-  // Look up workspace to get userId.
+  // Look up workspace to get userId and projectId.
   const db = drizzle(c.env.DATABASE, { schema });
   const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -107,14 +107,17 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   }
 
   const userId = workspace.userId;
+  const projectId = workspace.projectId;
 
   log.info('codex_refresh.request_received', {
     workspaceId,
     userId,
+    projectId,
   });
 
   // Forward to CodexRefreshLock DO keyed by userId for serialized refresh.
   // The DO derives the encryption key from its own env — no need to forward it.
+  // projectId is forwarded so the DO updates the correct scoped credential row.
   const doId = c.env.CODEX_REFRESH_LOCK.idFromName(userId);
   const stub = c.env.CODEX_REFRESH_LOCK.get(doId);
 
@@ -124,6 +127,7 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
     body: JSON.stringify({
       refreshToken: body.refresh_token,
       userId,
+      projectId,
     }),
   });
 
