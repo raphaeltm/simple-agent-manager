@@ -89,6 +89,7 @@ export type {
   CreateProjectRequest,
   ListProjectsResponse,
   Project,
+  ProjectAgentDefaults,
   ProjectDetail,
   ProjectDetailResponse,
   ProjectRuntimeConfigResponse,

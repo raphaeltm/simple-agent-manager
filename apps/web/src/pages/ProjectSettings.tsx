@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
+import { ProjectAgentDefaultsSection } from '../components/ProjectAgentDefaultsSection';
 import { ScalingSettings } from '../components/ScalingSettings';
 import { useToast } from '../hooks/useToast';
 import {
@@ -383,6 +384,29 @@ export function ProjectSettings() {
           <div className="text-xs text-fg-muted">
             No default set — tasks will use the platform default (OpenCode).
           </div>
+        )}
+      </section>
+
+      {/* Per-agent-type project defaults (model + permission mode).
+          Resolution chain: task > profile > project.agentDefaults > user settings > platform default. */}
+      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
+        <div>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">
+            Project Agent Defaults
+          </h2>
+          <p className="m-0 mt-1 text-xs text-fg-muted">
+            Per-agent-type model and permission mode overrides for this project. Empty fields fall
+            through to your user-level agent settings.
+          </p>
+        </div>
+        {projectId && (
+          <ProjectAgentDefaultsSection
+            projectId={projectId}
+            initialAgentDefaults={project?.agentDefaults ?? null}
+            onUpdated={() => {
+              void reload();
+            }}
+          />
         )}
       </section>
 

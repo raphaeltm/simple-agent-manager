@@ -251,6 +251,10 @@ export const projects = sqliteTable(
     defaultDevcontainerConfigName: text('default_devcontainer_config_name'),
     defaultProvider: text('default_provider'),
     defaultLocation: text('default_location'),
+    /** Per-agent-type model + permission mode overrides.
+     *  JSON: Record<AgentType, { model?: string | null, permissionMode?: string | null }>
+     *  Null/missing for an agent type = fall through to user-level agent_settings. */
+    agentDefaults: text('agent_defaults'),
     workspaceIdleTimeoutMs: integer('workspace_idle_timeout_ms'),
     nodeIdleTimeoutMs: integer('node_idle_timeout_ms'),
     // Per-project scaling parameters (null = use platform default from env).

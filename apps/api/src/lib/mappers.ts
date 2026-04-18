@@ -11,6 +11,7 @@
 import type {
   AgentSession,
   Project,
+  ProjectAgentDefaults,
   ProjectSummary,
   Task,
   TaskDependency,
@@ -19,6 +20,23 @@ import type {
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE,isTaskExecutionStep } from '@simple-agent-manager/shared';
+
+/**
+ * Parse the project.agentDefaults JSON column. Returns null if unset or invalid.
+ * We intentionally do NOT re-validate contents here — validation happens at write time.
+ */
+function parseAgentDefaults(raw: string | null): ProjectAgentDefaults | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as ProjectAgentDefaults;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 import type * as schema from '../db/schema';
 import { getWorkspaceUrl } from '../services/dns';
@@ -79,6 +97,7 @@ export function toProjectResponse(project: schema.Project): Project {
     defaultDevcontainerConfigName: project.defaultDevcontainerConfigName ?? null,
     defaultProvider: (project.defaultProvider as Project['defaultProvider']) ?? null,
     defaultLocation: project.defaultLocation ?? null,
+    agentDefaults: parseAgentDefaults(project.agentDefaults),
     workspaceIdleTimeoutMs: project.workspaceIdleTimeoutMs ?? null,
     nodeIdleTimeoutMs: project.nodeIdleTimeoutMs ?? null,
     taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
