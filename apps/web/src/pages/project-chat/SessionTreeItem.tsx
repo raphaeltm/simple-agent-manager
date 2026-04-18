@@ -17,8 +17,8 @@ const MAX_VISUAL_DEPTH = 5;
  * Recursive renderer for a SessionTreeNode. Each level of children is
  * visually enclosed by a left rail (green, dimmed), matching the legacy
  * TaskGroup visual language. Context-anchor rows (ancestors lifted in from
- * stale data) are rendered with reduced opacity and labeled as such for
- * assistive tech.
+ * stale data) are rendered with a distinct slate-tone Context badge and an
+ * `aria-label` on the select button that names them as stopped ancestors.
  */
 export function SessionTreeItem({
   node,
@@ -51,11 +51,15 @@ export function SessionTreeItem({
 
   // Default expanded for top-level parent groups, context anchors, and when a
   // descendant matches the current search. Deep levels collapsed by default.
+  // NOTE: Use `||` (not `??`) for the boolean cascade — `hasMatchingDescendant`
+  // resolves to `false` (not `undefined`) when there is no active search, and
+  // `??` would short-circuit there and never consider later fallbacks.
   const initialExpanded =
-    defaultExpanded ??
-    hasMatchingDescendant ??
-    node.isContextAnchor ??
-    (node.depth === 0 && hasChildren);
+    defaultExpanded !== undefined
+      ? defaultExpanded
+      : hasMatchingDescendant ||
+        node.isContextAnchor ||
+        (node.depth === 0 && hasChildren);
 
   const [userToggled, setUserToggled] = useState(false);
   const [expanded, setExpanded] = useState(initialExpanded);
@@ -81,34 +85,35 @@ export function SessionTreeItem({
     ? getBlockedByTitle(node.session, taskInfoMap)
     : undefined;
 
-  const anchorLabel = node.isContextAnchor ? ' — context only (stale)' : '';
+  // Accessible annotation for the row's select-button — communicates that a
+  // context-anchor row is a stopped ancestor, not a primary active session.
+  const anchorAriaLabel = node.isContextAnchor
+    ? `${node.session.topic || `Chat ${node.session.id.slice(0, 8)}`} — stopped ancestor, click to open`
+    : undefined;
+
+  const isSelected = selectedSessionId === node.session.id;
 
   return (
-    <div
-      style={{
-        // Context anchors dim to signal they're stale pass-through context.
-        opacity: node.isContextAnchor ? 0.55 : 1,
-      }}
-    >
+    <div>
       <div
-        aria-label={
-          node.isContextAnchor
-            ? `${node.session.topic || node.session.id}${anchorLabel}`
-            : undefined
-        }
         style={{
-          background:
-            selectedSessionId === node.session.id
-              ? 'var(--sam-color-bg-inset, #0d1816)'
-              : node.depth > 0
-                ? 'rgba(22,163,74,0.03)'
-                : 'transparent',
+          background: isSelected
+            ? 'var(--sam-color-bg-inset, #0d1816)'
+            : node.depth > 0
+              ? 'rgba(22,163,74,0.03)'
+              : 'transparent',
           borderBottom:
             node.depth === 0
               ? '1px solid var(--sam-color-border-default, #29423b)'
               : undefined,
         }}
-        className="transition-colors hover:!bg-[var(--sam-color-bg-surface-hover)]"
+        // Hover override must not erase the selected-state background — only
+        // apply the hover bg when the row is not currently selected.
+        className={
+          isSelected
+            ? 'transition-colors'
+            : 'transition-colors hover:bg-[var(--sam-color-bg-surface-hover)]'
+        }
       >
         <div className="flex items-stretch">
           {/* Expand/collapse affordance — only when has children */}
@@ -129,52 +134,58 @@ export function SessionTreeItem({
               }
               className="shrink-0 bg-transparent border-none cursor-pointer flex items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sam-color-focus-ring)]"
               style={{
-                width: 22,
+                // 44px wide meets WCAG 2.5.5 minimum touch target on mobile.
+                width: 44,
                 minHeight: 44,
                 color: 'var(--sam-color-fg-muted)',
                 padding: 0,
               }}
             >
-              {effectiveExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {effectiveExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             </button>
           ) : (
-            <span style={{ width: 22 }} aria-hidden="true" />
+            <span style={{ width: 44 }} aria-hidden="true" />
           )}
 
           <div className="flex-1 min-w-0">
             <SessionItem
               session={node.session}
-              isSelected={selectedSessionId === node.session.id}
+              isSelected={isSelected}
               onSelect={onSelect}
               onFork={onFork}
               ideaTitle={ideaTitle}
               variant={variant}
+              ariaLabel={anchorAriaLabel}
               badge={
                 <>
                   {node.isContextAnchor && (
                     <span
                       className="inline-flex items-center gap-0.5"
-                      title="Ancestor of an active chat — shown for context"
+                      title="Stopped ancestor — click to open"
                       style={{
-                        fontSize: 9,
-                        color: 'var(--sam-color-fg-muted)',
-                        background: 'rgba(255,255,255,0.04)',
-                        padding: '0 5px',
+                        // Color meets WCAG AA contrast against the inset
+                        // background (~5.2:1 for 11px bold); replaces raw
+                        // opacity-based dimming which failed 4.5:1.
+                        fontSize: 11,
+                        color: '#94a3b8',
+                        background: 'rgba(148,163,184,0.14)',
+                        padding: '1px 6px',
                         borderRadius: 9999,
                         fontWeight: 600,
                         textTransform: 'uppercase',
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      <EyeOff size={8} /> Context
+                      <EyeOff size={10} aria-hidden="true" /> Context
                     </span>
                   )}
                   {node.depth >= MAX_VISUAL_DEPTH && (
                     <span
                       title={`Nested ${node.depth + 1} levels deep`}
+                      aria-label={`Nesting level ${node.depth + 1}`}
                       style={{
                         background: 'rgba(245,158,11,0.15)',
-                        color: '#f59e0b',
+                        color: '#fbbf24',
                         padding: '0 5px',
                         borderRadius: 9999,
                         fontSize: 10,
@@ -189,7 +200,7 @@ export function SessionTreeItem({
                     <span
                       style={{
                         background: 'rgba(59,130,246,0.15)',
-                        color: '#60a5fa',
+                        color: '#93c5fd',
                         padding: '0 5px',
                         borderRadius: 9999,
                         fontSize: 10,
@@ -199,7 +210,7 @@ export function SessionTreeItem({
                       }}
                       title={`${node.totalDescendants} descendant session${node.totalDescendants !== 1 ? 's' : ''}`}
                     >
-                      {node.totalDescendants} {node.children.length === node.totalDescendants ? 'SUB' : 'NESTED'}
+                      {node.totalDescendants} sub
                     </span>
                   )}
                 </>

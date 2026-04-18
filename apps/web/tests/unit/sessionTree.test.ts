@@ -373,3 +373,77 @@ describe('treeHasMatchingDescendant', () => {
     expect(treeHasMatchingDescendant(roots[0]!, 'match', tasks)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: root ordering with anchors, and self-referential cycles
+// (review findings 1a, 6a)
+// ---------------------------------------------------------------------------
+
+describe('buildSessionTree — root ordering with multiple anchor roots', () => {
+  it('orders anchor roots by position of their first visible descendant', () => {
+    // Two independent parent→child pairs. Parents are NOT in visibleSessions
+    // (stale) — they must be lifted as anchors from allSessions. The visible
+    // children appear in an explicit order; each anchor root must take the
+    // position of its earliest-visible descendant.
+    const tasks = new Map<string, TaskInfo>([
+      ['tpA', makeTaskInfo({ id: 'tpA', parentTaskId: null })],
+      ['tcA', makeTaskInfo({ id: 'tcA', parentTaskId: 'tpA' })],
+      ['tpB', makeTaskInfo({ id: 'tpB', parentTaskId: null })],
+      ['tcB', makeTaskInfo({ id: 'tcB', parentTaskId: 'tpB' })],
+    ]);
+    const parentA = makeSession({ id: 'pA', taskId: 'tpA', topic: 'Stale A' });
+    const childA = makeSession({ id: 'cA', taskId: 'tcA', topic: 'Active A' });
+    const parentB = makeSession({ id: 'pB', taskId: 'tpB', topic: 'Stale B' });
+    const childB = makeSession({ id: 'cB', taskId: 'tcB', topic: 'Active B' });
+
+    // Visible order: childB first, then childA. Expect anchor B root to
+    // appear BEFORE anchor A root, even though parentA would normally be
+    // earlier by creation order.
+    const roots = buildSessionTree([childB, childA], tasks, {
+      allSessions: [parentA, childA, parentB, childB],
+    });
+
+    expect(roots).toHaveLength(2);
+    expect(roots[0]!.session.id).toBe('pB');
+    expect(roots[1]!.session.id).toBe('pA');
+    expect(roots[0]!.isContextAnchor).toBe(true);
+    expect(roots[1]!.isContextAnchor).toBe(true);
+  });
+});
+
+describe('buildSessionTree — self-referential cycle safety', () => {
+  it('handles a task whose parentTaskId references itself without infinite loop', () => {
+    // parentTaskId === id is a degenerate input that the upward walk and the
+    // parent-attachment loop must both tolerate. Without cycle guards,
+    // sortChildren would recurse forever.
+    const tasks = new Map<string, TaskInfo>([
+      ['tSelf', makeTaskInfo({ id: 'tSelf', parentTaskId: 'tSelf' })],
+    ]);
+    const session = makeSession({ id: 'sSelf', taskId: 'tSelf', topic: 'Self loop' });
+
+    // This must return within the default test timeout (no hang).
+    const roots = buildSessionTree([session], tasks, { allSessions: [session] });
+
+    // Self-referential nodes are promoted to roots rather than dropped.
+    expect(roots).toHaveLength(1);
+    expect(roots[0]!.session.id).toBe('sSelf');
+    expect(roots[0]!.children).toEqual([]);
+  });
+
+  it('handles a two-node mutual-parent cycle without infinite loop', () => {
+    const tasks = new Map<string, TaskInfo>([
+      ['tA', makeTaskInfo({ id: 'tA', parentTaskId: 'tB' })],
+      ['tB', makeTaskInfo({ id: 'tB', parentTaskId: 'tA' })],
+    ]);
+    const a = makeSession({ id: 'sA', taskId: 'tA' });
+    const b = makeSession({ id: 'sB', taskId: 'tB' });
+
+    const roots = buildSessionTree([a, b], tasks);
+
+    // At least one must become a root; the cycle must be broken somewhere.
+    // The function MUST complete (no stack overflow, no hang).
+    const ids = collectIds(roots);
+    expect(ids).toContain('sA');
+    expect(ids).toContain('sB');
+  });
+});
