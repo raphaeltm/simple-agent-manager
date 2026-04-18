@@ -151,9 +151,30 @@ async function setupApiMocks(
       return respond(200, { projects: [] });
     }
 
-    // Credentials — API returns array, not object
+    // Legacy credentials listing (unused by unified agents UI but kept for safety)
     if (path === '/api/credentials') {
       return respond(200, []);
+    }
+
+    // Agent credentials (unified user-scope cards)
+    if (path === '/api/credentials/agent') {
+      if (method === 'PUT') {
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        return respond(200, {
+          id: `cred-${body.agentType}`,
+          agentType: body.agentType,
+          credentialKind: body.credentialKind ?? 'api-key',
+          maskedKey: 'sk-****mock',
+          isActive: true,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return respond(200, { credentials: [] });
+    }
+    if (path.match(/^\/api\/credentials\/agent\/[^/]+(\/[^/]+)?$/)) {
+      if (method === 'DELETE') return respond(200, {});
+      return respond(200, {});
     }
 
     // GitHub
@@ -202,7 +223,7 @@ async function takeScreenshot(page: Page, name: string) {
 }
 
 async function navigateToAgentConfig(page: Page) {
-  await page.goto('/settings/agent-config');
+  await page.goto('/settings/agents');
   await page.waitForTimeout(1000);
 }
 
@@ -210,7 +231,23 @@ async function navigateToAgentConfig(page: Page) {
 // AGENT SETTINGS — Mobile (375x667, default from config)
 // ===========================================================================
 
-test.describe('AgentSettingsSection — Mobile', () => {
+test.describe('Unified Agent Cards — Mobile', () => {
+  test('unified card: shows Connection + Configuration sections together', async ({ page }) => {
+    await setupApiMocks(page, {
+      agents: [MOCK_AGENT_CLAUDE],
+      settingsMap: {},
+    });
+    await navigateToAgentConfig(page);
+    await page.waitForSelector('[data-testid="agent-card-claude-code"]');
+    await takeScreenshot(page, 'agent-card-mobile-unified-connection-configuration');
+    await assertNoOverflow(page);
+
+    // Both section headers must be visible within the card
+    const card = page.getByTestId('agent-card-claude-code');
+    await expect(card.getByText('Connection', { exact: true })).toBeVisible();
+    await expect(card.getByText('Configuration', { exact: true })).toBeVisible();
+  });
+
   test('empty state: no agents configured', async ({ page }) => {
     await setupApiMocks(page, { agents: [] });
     await navigateToAgentConfig(page);
@@ -224,7 +261,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       settingsMap: {},
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
     await takeScreenshot(page, 'agent-settings-mobile-opencode-default');
     await assertNoOverflow(page);
 
@@ -248,7 +285,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
     await takeScreenshot(page, 'agent-settings-mobile-platform-provider');
     await assertNoOverflow(page);
 
@@ -270,7 +307,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     // Start: scaleway provider, text input with value
     const modelBefore = page.getByTestId('model-input-opencode');
@@ -299,7 +336,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     // Start: platform provider, select with a value
     const modelBefore = page.getByTestId('model-input-opencode');
@@ -326,7 +363,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       settingsMap: {},
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-claude-code"]');
+    await page.waitForSelector('[data-testid="agent-card-claude-code"]');
     await takeScreenshot(page, 'agent-settings-mobile-claude-code');
     await assertNoOverflow(page);
 
@@ -348,8 +385,8 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
-    await page.waitForSelector('[data-testid="agent-settings-claude-code"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-claude-code"]');
     await takeScreenshot(page, 'agent-settings-mobile-multiple-agents');
     await assertNoOverflow(page);
   });
@@ -367,7 +404,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
     await takeScreenshot(page, 'agent-settings-mobile-custom-provider');
     await assertNoOverflow(page);
 
@@ -396,7 +433,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     const modelSelect = page.getByTestId('model-input-opencode');
     await expect(modelSelect).toBeVisible();
@@ -424,7 +461,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     // The <label> htmlFor must match the model control's id
     const labelFor = await page.evaluate(() => {
@@ -443,7 +480,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       settingsMap: {},
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     const labelFor = await page.evaluate(() => {
       const allLabels = Array.from(document.querySelectorAll('label'));
@@ -463,7 +500,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     // Verify the model select has the correct focus-visible Tailwind classes applied.
     // outline-none removes the browser default; focus-visible:outline restores a custom
@@ -491,7 +528,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     const modelSelect = page.getByTestId('model-input-opencode');
     await expect(modelSelect).toBeVisible();
@@ -509,7 +546,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     const saveButton = page.getByTestId('save-settings-opencode');
     await expect(saveButton).toBeVisible();
@@ -527,7 +564,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
     await takeScreenshot(page, 'agent-settings-mobile-bypass-warning');
     await assertNoOverflow(page);
 
@@ -548,7 +585,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     const defaultOptionText = await page.getByTestId('model-input-opencode').evaluate((el) => {
       const select = el as HTMLSelectElement;
@@ -571,7 +608,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
     await takeScreenshot(page, 'agent-settings-mobile-openai-compatible');
     await assertNoOverflow(page);
 
@@ -587,7 +624,7 @@ test.describe('AgentSettingsSection — Mobile', () => {
 // AGENT SETTINGS — Desktop (1280x800)
 // ===========================================================================
 
-test.describe('AgentSettingsSection — Desktop', () => {
+test.describe('Unified Agent Cards — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('platform provider renders correctly on desktop', async ({ page }) => {
@@ -598,7 +635,7 @@ test.describe('AgentSettingsSection — Desktop', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
     await takeScreenshot(page, 'agent-settings-desktop-platform-provider');
     await assertNoOverflow(page);
 
@@ -617,7 +654,7 @@ test.describe('AgentSettingsSection — Desktop', () => {
         },
       });
       await navigateToAgentConfig(page);
-      await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+      await page.waitForSelector('[data-testid="agent-card-opencode"]');
       await takeScreenshot(page, `agent-settings-desktop-provider-${provider}`);
       await assertNoOverflow(page);
     }
@@ -631,7 +668,7 @@ test.describe('AgentSettingsSection — Desktop', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
     await takeScreenshot(page, 'agent-settings-desktop-multiple-agents');
     await assertNoOverflow(page);
   });
@@ -644,7 +681,7 @@ test.describe('AgentSettingsSection — Desktop', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     const labelFor = await page.evaluate(() => {
       const allLabels = Array.from(document.querySelectorAll('label'));
@@ -664,7 +701,7 @@ test.describe('AgentSettingsSection — Desktop', () => {
       },
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-settings-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
 
     const labelFor = await page.evaluate(() => {
       const allLabels = Array.from(document.querySelectorAll('label'));
