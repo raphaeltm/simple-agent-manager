@@ -82,6 +82,112 @@ describe('Project Credentials Routes', () => {
     ENCRYPTION_KEY: 'test-key',
   } as Env;
 
+  describe('GET /:id/credentials', () => {
+    it('rejects read when project is not owned by user (returns 404)', async () => {
+      // requireOwnedProject: ownership check fails
+      mockDB.limit.mockResolvedValueOnce([]);
+
+      const res = await app.request(
+        '/api/projects/other-users-project/credentials',
+        { method: 'GET' },
+        env,
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it('returns an empty credentials array when no project-scoped credentials exist', async () => {
+      // ownership check succeeds
+      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
+      // credentials query: where() resolves with no rows (2nd where call)
+      mockDB.where
+        .mockReturnValueOnce(mockDB) // 1st call: ownership where() → chain continues into limit()
+        .mockResolvedValueOnce([]);  // 2nd call: credentials where() awaited directly
+
+      const res = await app.request(
+        '/api/projects/proj-1/credentials',
+        { method: 'GET' },
+        env,
+      );
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { credentials: unknown[] };
+      expect(json.credentials).toEqual([]);
+    });
+
+    it('returns project-scoped credentials with scope="project" and the requested projectId', async () => {
+      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
+      mockDB.where
+        .mockReturnValueOnce(mockDB)
+        .mockResolvedValueOnce([
+          {
+            agentType: 'claude-code',
+            provider: null,
+            credentialKind: 'api-key',
+            isActive: 1,
+            encryptedToken: 'enc',
+            iv: 'iv',
+            createdAt: 1000,
+            updatedAt: 1000,
+          },
+        ]);
+
+      const res = await app.request(
+        '/api/projects/proj-1/credentials',
+        { method: 'GET' },
+        env,
+      );
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        credentials: Array<{
+          scope: string;
+          projectId: string;
+          maskedKey: string;
+          credentialKind: string;
+          agentType: string;
+          label?: string;
+        }>;
+      };
+      expect(json.credentials).toHaveLength(1);
+      expect(json.credentials[0].scope).toBe('project');
+      expect(json.credentials[0].projectId).toBe('proj-1');
+      expect(json.credentials[0].agentType).toBe('claude-code');
+      expect(json.credentials[0].credentialKind).toBe('api-key');
+      // decrypt() mocked to return 'sk-ant-live-value' → last 4 chars are 'alue'
+      expect(json.credentials[0].maskedKey).toBe('...alue');
+      // api-key credentials have no special label
+      expect(json.credentials[0].label).toBeUndefined();
+    });
+
+    it('adds a "Pro/Max Subscription" label for claude-code OAuth tokens', async () => {
+      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
+      mockDB.where
+        .mockReturnValueOnce(mockDB)
+        .mockResolvedValueOnce([
+          {
+            agentType: 'claude-code',
+            provider: null,
+            credentialKind: 'oauth-token',
+            isActive: 1,
+            encryptedToken: 'enc',
+            iv: 'iv',
+            createdAt: 1000,
+            updatedAt: 1000,
+          },
+        ]);
+
+      const res = await app.request(
+        '/api/projects/proj-1/credentials',
+        { method: 'GET' },
+        env,
+      );
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        credentials: Array<{ label?: string; credentialKind: string }>;
+      };
+      expect(json.credentials[0].credentialKind).toBe('oauth-token');
+      expect(json.credentials[0].label).toBe('Pro/Max Subscription');
+    });
+  });
+
   describe('PUT /:id/credentials', () => {
     it('rejects write when project is not owned by user (returns 404)', async () => {
       // requireOwnedProject: project lookup returns no rows

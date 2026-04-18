@@ -121,6 +121,7 @@ export function ProjectAgentCredentialsSection({ projectId }: ProjectAgentCreden
               credentials={hasOverride ? projectAgentCreds : null}
               onSave={handleSave}
               onDelete={handleDelete}
+              scope="project"
             />
             {!hasOverride && hasUserFallback && (
               <div className="text-xs text-fg-muted pl-3">
@@ -131,8 +132,9 @@ export function ProjectAgentCredentialsSection({ projectId }: ProjectAgentCreden
             )}
             {!hasOverride && !hasUserFallback && (
               <div className="text-xs text-fg-muted pl-3">
-                No user credential set. Add one above to override the platform default for this
-                project.
+                No user-level credential set for this agent. Adding one here creates a
+                project-scoped credential. To set a default across all your projects, use
+                Settings → Agents.
               </div>
             )}
           </div>

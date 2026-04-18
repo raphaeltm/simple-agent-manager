@@ -35,8 +35,8 @@ const { verifyCallbackToken } = await import('../../../src/services/jwt');
 const { checkCodexRefreshRateLimit } = await import('../../../src/middleware/rate-limit');
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mockDrizzleWithWorkspace(userId: string | null): any {
-  const rows = userId ? [{ userId }] : [];
+function mockDrizzleWithWorkspace(userId: string | null, projectId: string | null = null): any {
+  const rows = userId ? [{ userId, projectId }] : [];
   return {
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
@@ -265,8 +265,27 @@ describe('POST /api/auth/codex-refresh', () => {
     );
     expect(doRequestBody.refreshToken).toBe('rt_test_refresh_token');
     expect(doRequestBody.userId).toBe('user-abc');
+    // projectId is forwarded so the DO updates the correct scoped row.
+    // User-scoped workspace forwards projectId=null (default mock).
+    expect(doRequestBody.projectId).toBeNull();
     // encryptionKey is NOT in the DO request — DO derives it from its own env
     expect(doRequestBody.encryptionKey).toBeUndefined();
+  });
+
+  it('forwards projectId to DO when workspace belongs to a project (project-scoped refresh)', async () => {
+    vi.mocked(drizzle).mockReturnValue(mockDrizzleWithWorkspace('user-abc', 'proj-xyz'));
+
+    const res = await postRefresh(validBody);
+    expect(res.status).toBe(200);
+
+    expect(mockDoFetch).toHaveBeenCalledTimes(1);
+    const doRequestBody = JSON.parse(
+      await (mockDoFetch.mock.calls[0][0] as Request).text(),
+    );
+    // Critical: the projectId from the workspace row must reach the DO so the DO
+    // updates the project-scoped credential, not the user-scoped one.
+    expect(doRequestBody.projectId).toBe('proj-xyz');
+    expect(doRequestBody.userId).toBe('user-abc');
   });
 
   it('forwards DO error responses (401) back to Codex', async () => {

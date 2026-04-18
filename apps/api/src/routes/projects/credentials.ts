@@ -21,7 +21,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
-import { getUserId } from '../../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
@@ -29,6 +29,11 @@ import { decrypt, encrypt } from '../../services/encryption';
 import { CredentialValidator } from '../../services/validation';
 
 const projectCredentialsRoutes = new Hono<{ Bindings: Env }>();
+
+// Defence-in-depth: apply auth on the sub-router as well, so it remains safe
+// if mounted independently (e.g., test harness). Parent `projectsRoutes` also
+// applies these, but duplicated middleware is idempotent.
+projectCredentialsRoutes.use('/*', requireAuth(), requireApproved());
 
 /**
  * GET /api/projects/:id/credentials — list agent credentials scoped to this project.
