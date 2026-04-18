@@ -162,3 +162,23 @@ export type TrialEvent =
   | TrialIdeaEvent
   | TrialReadyEvent
   | TrialErrorEvent;
+
+// ---------------------------------------------------------------------------
+// UI-facing idea shape (derived from TrialIdeaEvent)
+// ---------------------------------------------------------------------------
+
+/**
+ * A discovery-phase idea surfaced to the trial visitor as a suggestion chip.
+ * Built by the `/try/:trialId` page from `trial.idea` SSE events.
+ *
+ * The `prompt` is the text pre-filled into the chat textarea when the chip is
+ * clicked — typically the same as `summary`, but callers may override (e.g.
+ * to prepend template scaffolding or merge idea metadata).
+ */
+export interface TrialIdea {
+  id: string;
+  title: string;
+  summary: string;
+  /** Text inserted into the chat textarea when this chip is clicked. */
+  prompt: string;
+}
