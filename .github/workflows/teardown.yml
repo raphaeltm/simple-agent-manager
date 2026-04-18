@@ -3,15 +3,32 @@ name: Teardown
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Environment to tear down'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
       confirm:
         description: 'Type DELETE to confirm teardown'
         required: true
         type: string
       keep_data:
-        description: 'Preserve database (D1) during teardown'
+        description: 'Preserve D1 databases during teardown'
         required: false
         type: boolean
         default: false
+      dry_run:
+        description: 'List resources without deleting (preview mode)'
+        required: false
+        type: boolean
+        default: false
+      include_marketing:
+        description: 'Also tear down marketing site (www) resources'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -21,17 +38,47 @@ env:
 
 jobs:
   teardown:
-    name: Teardown Cloudflare Resources
+    name: Teardown Cloudflare Resources (${{ inputs.environment }}${{ inputs.dry_run && ' — DRY RUN' || '' }})
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ inputs.environment }}
     if: ${{ github.event.inputs.confirm == 'DELETE' }}
 
     steps:
-      - name: Validate Confirmation
-        if: ${{ inputs.confirm != 'DELETE' }}
+      # ================================================================
+      # Phase 0: Setup
+      # ================================================================
+      - name: Resolve Resource Names
+        id: names
         run: |
-          echo "::error::Confirmation required. Type 'DELETE' to confirm teardown."
-          exit 1
+          PREFIX="${{ vars.RESOURCE_PREFIX || 'sam' }}"
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            STACK="prod"
+          else
+            STACK="staging"
+          fi
+          BASE_DOMAIN="${{ vars.BASE_DOMAIN }}"
+          if [ -z "$BASE_DOMAIN" ]; then
+            echo "::error::BASE_DOMAIN is not set in environment variables."
+            exit 1
+          fi
+
+          echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+          echo "stack=$STACK" >> "$GITHUB_OUTPUT"
+          echo "base_domain=$BASE_DOMAIN" >> "$GITHUB_OUTPUT"
+          echo "api_worker=${PREFIX}-api-${STACK}" >> "$GITHUB_OUTPUT"
+          echo "tail_worker=${PREFIX}-tail-worker-${STACK}" >> "$GITHUB_OUTPUT"
+          echo "pages_project=${PREFIX}-web-${STACK}" >> "$GITHUB_OUTPUT"
+          echo "www_project=${PREFIX}-www" >> "$GITHUB_OUTPUT"
+          echo "ai_gateway=${{ vars.AI_GATEWAY_ID || 'sam' }}" >> "$GITHUB_OUTPUT"
+
+          echo "### Resource Names"
+          echo "- Stack: $STACK"
+          echo "- API Worker: ${PREFIX}-api-${STACK}"
+          echo "- Tail Worker: ${PREFIX}-tail-worker-${STACK}"
+          echo "- Pages Project: ${PREFIX}-web-${STACK}"
+          echo "- WWW Project: ${PREFIX}-www"
+          echo "- AI Gateway: ${{ vars.AI_GATEWAY_ID || 'sam' }}"
+          echo "- Base Domain: $BASE_DOMAIN"
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -50,104 +97,690 @@ jobs:
 
       - name: Install Pulumi CLI
         uses: pulumi/actions@8582a9e8cc630786854029b4e09281acd6794b58 # v6.6.1
-        with:
-          command: version
 
       - name: Login to Pulumi R2 Backend
+        id: pulumi_login
+        continue-on-error: true
         run: |
           BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
           R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
           pulumi login "s3://${BUCKET_NAME}?endpoint=${R2_ENDPOINT}&region=auto"
+          echo "status=ok" >> "$GITHUB_OUTPUT"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
       - name: Select Pulumi Stack
+        id: pulumi_stack
+        continue-on-error: true
         working-directory: infra
         run: |
-          STACK_NAME="prod"
-          pulumi stack select $STACK_NAME
+          STACK="${{ steps.names.outputs.stack }}"
+          if pulumi stack select "$STACK" 2>/dev/null; then
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+            echo "Pulumi stack '$STACK' selected."
+          else
+            echo "status=not_found" >> "$GITHUB_OUTPUT"
+            echo "::warning::Pulumi stack '$STACK' not found. Pulumi phases will be skipped."
+          fi
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
-      - name: Preview Destroy
-        working-directory: infra
-        run: |
-          echo "📋 Resources to be destroyed:"
-          pulumi preview --diff --target-dependents
+      # ================================================================
+      # Phase 1: Delete Workers (not managed by Pulumi)
+      # ================================================================
+      - name: Delete Tail Worker
+        id: delete_tail_worker
+        continue-on-error: true
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-
-      - name: Pulumi Destroy
-        working-directory: infra
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
-          DESTROY_ARGS="--yes"
+          WORKER_NAME="${{ steps.names.outputs.tail_worker }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
 
-          # If keeping data, protect the D1 database from deletion
-          if [ "${{ inputs.keep_data }}" = "true" ]; then
-            echo "⚠️ Keeping data: D1 database will be preserved"
-            # Target everything except the database
-            DESTROY_ARGS="$DESTROY_ARGS --target 'urn:pulumi:*::sam-infra::cloudflare:index/workersKvNamespace:WorkersKvNamespace::*'"
-            DESTROY_ARGS="$DESTROY_ARGS --target 'urn:pulumi:*::sam-infra::cloudflare:index/r2Bucket:R2Bucket::*'"
-            DESTROY_ARGS="$DESTROY_ARGS --target 'urn:pulumi:*::sam-infra::cloudflare:index/record:Record::*'"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            # Check if worker exists
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              "$API/accounts/$CF_ACCOUNT_ID/workers/services/$WORKER_NAME" \
+              -H "$AUTH")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "DRY RUN: Would delete Tail Worker '$WORKER_NAME' (exists)"
+              echo "status=dry_run_exists" >> "$GITHUB_OUTPUT"
+            else
+              echo "DRY RUN: Tail Worker '$WORKER_NAME' not found (HTTP $HTTP_CODE)"
+              echo "status=dry_run_not_found" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
           fi
 
-          pulumi destroy $DESTROY_ARGS
+          echo "Deleting Tail Worker: $WORKER_NAME"
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "$API/accounts/$CF_ACCOUNT_ID/workers/services/$WORKER_NAME" \
+            -X DELETE \
+            -H "$AUTH")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if echo "$BODY" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "Tail Worker deleted."
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          elif [ "$HTTP_CODE" = "404" ]; then
+            echo "Tail Worker not found (already deleted)."
+            echo "status=not_found" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Failed to delete Tail Worker (HTTP $HTTP_CODE): $BODY"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Delete API Worker
+        id: delete_api_worker
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          WORKER_NAME="${{ steps.names.outputs.api_worker }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              "$API/accounts/$CF_ACCOUNT_ID/workers/services/$WORKER_NAME" \
+              -H "$AUTH")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "DRY RUN: Would delete API Worker '$WORKER_NAME' (exists)"
+              echo "status=dry_run_exists" >> "$GITHUB_OUTPUT"
+            else
+              echo "DRY RUN: API Worker '$WORKER_NAME' not found (HTTP $HTTP_CODE)"
+              echo "status=dry_run_not_found" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          echo "Deleting API Worker: $WORKER_NAME"
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "$API/accounts/$CF_ACCOUNT_ID/workers/services/$WORKER_NAME" \
+            -X DELETE \
+            -H "$AUTH")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if echo "$BODY" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "API Worker deleted."
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          elif [ "$HTTP_CODE" = "404" ]; then
+            echo "API Worker not found (already deleted)."
+            echo "status=not_found" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Failed to delete API Worker (HTTP $HTTP_CODE): $BODY"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ================================================================
+      # Phase 2: Clean Up Workspace DNS Records (runtime-created ws-*)
+      # ================================================================
+      - name: Delete Workspace DNS Records
+        id: delete_ws_dns
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          BASE_DOMAIN="${{ steps.names.outputs.base_domain }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+          DRY_RUN="${{ inputs.dry_run }}"
+          DELETED=0
+          FAILED=0
+          FOUND=0
+          PAGE=1
+
+          echo "Searching for workspace DNS records (ws-*.${BASE_DOMAIN})..."
+
+          while true; do
+            RESPONSE=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=A&per_page=100&page=$PAGE" \
+              -H "$AUTH")
+
+            if [ $? -ne 0 ]; then
+              echo "::warning::Failed to list DNS records (page $PAGE)"
+              echo "status=failed" >> "$GITHUB_OUTPUT"
+              echo "count=0" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            # Extract ws-* records (filter client-side since CF API doesn't support prefix matching)
+            WS_IDS=$(echo "$RESPONSE" | jq -r ".result[] | select(.name | test(\"^ws-.*\\.${BASE_DOMAIN}$\")) | .id + \" \" + .name")
+
+            if [ -n "$WS_IDS" ]; then
+              echo "$WS_IDS" | while IFS=' ' read -r RECORD_ID RECORD_NAME; do
+                FOUND=$((FOUND + 1))
+                if [ "$DRY_RUN" = "true" ]; then
+                  echo "  DRY RUN: Would delete $RECORD_NAME ($RECORD_ID)"
+                else
+                  DEL_RESP=$(curl -s -w "\n%{http_code}" \
+                    "$API/zones/$CF_ZONE_ID/dns_records/$RECORD_ID" \
+                    -X DELETE \
+                    -H "$AUTH")
+                  DEL_CODE=$(echo "$DEL_RESP" | tail -1)
+                  DEL_BODY=$(echo "$DEL_RESP" | sed '$d')
+                  if echo "$DEL_BODY" | jq -e '.success == true' > /dev/null 2>&1 || [ "$DEL_CODE" = "404" ]; then
+                    echo "  Deleted: $RECORD_NAME"
+                    DELETED=$((DELETED + 1))
+                  else
+                    echo "  Failed: $RECORD_NAME (HTTP $DEL_CODE)"
+                    FAILED=$((FAILED + 1))
+                  fi
+                fi
+              done
+            fi
+
+            # Check if there are more pages
+            TOTAL_PAGES=$(echo "$RESPONSE" | jq -r '.result_info.total_pages // 1')
+            if [ "$PAGE" -ge "$TOTAL_PAGES" ]; then
+              break
+            fi
+            PAGE=$((PAGE + 1))
+          done
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "DRY RUN: Found workspace DNS records to delete"
+            echo "status=dry_run" >> "$GITHUB_OUTPUT"
+          elif [ "$FAILED" -gt 0 ]; then
+            echo "Deleted $DELETED, failed $FAILED workspace DNS records."
+            echo "status=partial" >> "$GITHUB_OUTPUT"
+          elif [ "$DELETED" -gt 0 ]; then
+            echo "Deleted $DELETED workspace DNS records."
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          else
+            echo "No workspace DNS records found."
+            echo "status=not_found" >> "$GITHUB_OUTPUT"
+          fi
+          echo "count=$DELETED" >> "$GITHUB_OUTPUT"
+
+      # ================================================================
+      # Phase 3: Delete Marketing Site Resources
+      # ================================================================
+      - name: Delete Apex Redirect Page Rule
+        id: delete_page_rule
+        if: ${{ inputs.include_marketing }}
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          BASE_DOMAIN="${{ steps.names.outputs.base_domain }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          echo "Looking for Page Rule matching ${BASE_DOMAIN}/*..."
+          RULE_ID=$(curl -sf "$API/zones/$CF_ZONE_ID/pagerules?status=active" \
+            -H "$AUTH" | jq -r --arg pattern "${BASE_DOMAIN}/*" \
+            '.result[] | select(.targets[0].constraint.value == $pattern) | .id' 2>/dev/null)
+
+          if [ -z "$RULE_ID" ] || [ "$RULE_ID" = "null" ]; then
+            echo "No matching Page Rule found."
+            echo "status=not_found" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "DRY RUN: Would delete Page Rule $RULE_ID (${BASE_DOMAIN}/*)"
+            echo "status=dry_run_exists" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Deleting Page Rule: $RULE_ID"
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "$API/zones/$CF_ZONE_ID/pagerules/$RULE_ID" \
+            -X DELETE \
+            -H "$AUTH")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if echo "$BODY" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "Page Rule deleted."
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          elif [ "$HTTP_CODE" = "404" ]; then
+            echo "Page Rule not found (already deleted)."
+            echo "status=not_found" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Failed to delete Page Rule (HTTP $HTTP_CODE): $BODY"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Remove WWW Custom Domain from Pages
+        id: delete_www_domain
+        if: ${{ inputs.include_marketing }}
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          WWW_DOMAIN="www.${{ steps.names.outputs.base_domain }}"
+          WWW_PROJECT="${{ steps.names.outputs.www_project }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              "$API/accounts/$CF_ACCOUNT_ID/pages/projects/$WWW_PROJECT/domains/$WWW_DOMAIN" \
+              -H "$AUTH")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "DRY RUN: Would remove custom domain $WWW_DOMAIN from $WWW_PROJECT"
+              echo "status=dry_run_exists" >> "$GITHUB_OUTPUT"
+            else
+              echo "DRY RUN: Custom domain $WWW_DOMAIN not found (HTTP $HTTP_CODE)"
+              echo "status=dry_run_not_found" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          echo "Removing custom domain $WWW_DOMAIN from $WWW_PROJECT..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "$API/accounts/$CF_ACCOUNT_ID/pages/projects/$WWW_PROJECT/domains/$WWW_DOMAIN" \
+            -X DELETE \
+            -H "$AUTH")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if echo "$BODY" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "Custom domain removed."
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          elif [ "$HTTP_CODE" = "404" ]; then
+            echo "Custom domain not found (already removed)."
+            echo "status=not_found" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Failed to remove custom domain (HTTP $HTTP_CODE): $BODY"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Delete Marketing DNS Records
+        id: delete_www_dns
+        if: ${{ inputs.include_marketing }}
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          BASE_DOMAIN="${{ steps.names.outputs.base_domain }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+          DRY_RUN="${{ inputs.dry_run }}"
+          WWW_STATUS="not_found"
+          APEX_STATUS="not_found"
+
+          # --- Remove www CNAME ---
+          echo "=== Checking CNAME record for www.$BASE_DOMAIN ==="
+          RECORD_ID=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=www.$BASE_DOMAIN" \
+            -H "$AUTH" | jq -r '.result[0].id // empty' 2>/dev/null)
+
+          if [ -n "$RECORD_ID" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "DRY RUN: Would delete www CNAME ($RECORD_ID)"
+              WWW_STATUS="dry_run_exists"
+            else
+              echo "Deleting www CNAME: $RECORD_ID"
+              DEL_RESP=$(curl -s -w "\n%{http_code}" \
+                "$API/zones/$CF_ZONE_ID/dns_records/$RECORD_ID" \
+                -X DELETE -H "$AUTH")
+              DEL_CODE=$(echo "$DEL_RESP" | tail -1)
+              DEL_BODY=$(echo "$DEL_RESP" | sed '$d')
+              if echo "$DEL_BODY" | jq -e '.success == true' > /dev/null 2>&1 || [ "$DEL_CODE" = "404" ]; then
+                echo "www CNAME deleted."
+                WWW_STATUS="deleted"
+              else
+                echo "::warning::Failed to delete www CNAME (HTTP $DEL_CODE)"
+                WWW_STATUS="failed"
+              fi
+            fi
+          else
+            echo "No www CNAME record found."
+          fi
+
+          # --- Remove apex A record ---
+          echo ""
+          echo "=== Checking A record for $BASE_DOMAIN ==="
+          RECORD_ID=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=A&name=$BASE_DOMAIN" \
+            -H "$AUTH" | jq -r '.result[] | select(.content == "192.0.2.1") | .id' 2>/dev/null)
+
+          if [ -n "$RECORD_ID" ] && [ "$RECORD_ID" != "null" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "DRY RUN: Would delete apex A record ($RECORD_ID)"
+              APEX_STATUS="dry_run_exists"
+            else
+              echo "Deleting apex A record: $RECORD_ID"
+              DEL_RESP=$(curl -s -w "\n%{http_code}" \
+                "$API/zones/$CF_ZONE_ID/dns_records/$RECORD_ID" \
+                -X DELETE -H "$AUTH")
+              DEL_CODE=$(echo "$DEL_RESP" | tail -1)
+              DEL_BODY=$(echo "$DEL_RESP" | sed '$d')
+              if echo "$DEL_BODY" | jq -e '.success == true' > /dev/null 2>&1 || [ "$DEL_CODE" = "404" ]; then
+                echo "Apex A record deleted."
+                APEX_STATUS="deleted"
+              else
+                echo "::warning::Failed to delete apex A record (HTTP $DEL_CODE)"
+                APEX_STATUS="failed"
+              fi
+            fi
+          else
+            echo "No apex A record found (or not pointing to 192.0.2.1)."
+          fi
+
+          echo "www_status=$WWW_STATUS" >> "$GITHUB_OUTPUT"
+          echo "apex_status=$APEX_STATUS" >> "$GITHUB_OUTPUT"
+
+      - name: Delete Marketing Pages Project
+        id: delete_www_pages
+        if: ${{ inputs.include_marketing }}
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          WWW_PROJECT="${{ steps.names.outputs.www_project }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              "$API/accounts/$CF_ACCOUNT_ID/pages/projects/$WWW_PROJECT" \
+              -H "$AUTH")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "DRY RUN: Would delete Pages project '$WWW_PROJECT'"
+              echo "status=dry_run_exists" >> "$GITHUB_OUTPUT"
+            else
+              echo "DRY RUN: Pages project '$WWW_PROJECT' not found (HTTP $HTTP_CODE)"
+              echo "status=dry_run_not_found" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          echo "Deleting Pages project: $WWW_PROJECT"
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "$API/accounts/$CF_ACCOUNT_ID/pages/projects/$WWW_PROJECT" \
+            -X DELETE \
+            -H "$AUTH")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if echo "$BODY" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "Pages project deleted."
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          elif [ "$HTTP_CODE" = "404" ]; then
+            echo "Pages project not found (already deleted)."
+            echo "status=not_found" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Failed to delete Pages project (HTTP $HTTP_CODE): $BODY"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ================================================================
+      # Phase 4: Delete AI Gateway
+      # ================================================================
+      - name: Delete AI Gateway
+        id: delete_ai_gateway
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          GATEWAY_ID="${{ steps.names.outputs.ai_gateway }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              "$API/accounts/$CF_ACCOUNT_ID/ai-gateway/gateways/$GATEWAY_ID" \
+              -H "$AUTH")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "DRY RUN: Would delete AI Gateway '$GATEWAY_ID'"
+              echo "status=dry_run_exists" >> "$GITHUB_OUTPUT"
+            else
+              echo "DRY RUN: AI Gateway '$GATEWAY_ID' not found (HTTP $HTTP_CODE)"
+              echo "status=dry_run_not_found" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          echo "Deleting AI Gateway: $GATEWAY_ID"
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "$API/accounts/$CF_ACCOUNT_ID/ai-gateway/gateways/$GATEWAY_ID" \
+            -X DELETE \
+            -H "$AUTH")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if echo "$BODY" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "AI Gateway deleted."
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          elif [ "$HTTP_CODE" = "404" ]; then
+            echo "AI Gateway not found (already deleted)."
+            echo "status=not_found" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Failed to delete AI Gateway (HTTP $HTTP_CODE): $BODY"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ================================================================
+      # Phase 5: Pulumi Destroy
+      # ================================================================
+      - name: Unprotect Pulumi Resources
+        id: unprotect
+        if: ${{ steps.pulumi_stack.outputs.status == 'ok' && inputs.dry_run != true }}
+        continue-on-error: true
+        working-directory: infra
+        run: |
+          echo "Scanning for protected Pulumi resources..."
+
+          # Get all URNs from the stack
+          URNS=$(pulumi stack --show-urns 2>/dev/null | grep -oP 'urn:pulumi:\S+' || true)
+
+          if [ -z "$URNS" ]; then
+            echo "No URNs found in stack."
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          UNPROTECTED=0
+
+          # Unprotect RandomId (encryption key) and PrivateKey (JWT, Origin CA) resources
+          for URN in $URNS; do
+            if echo "$URN" | grep -qE 'RandomId|PrivateKey'; then
+              if [ "${{ inputs.keep_data }}" = "true" ]; then
+                # When keeping data, also keep the encryption/JWT keys (needed for re-deploy)
+                echo "  Keeping protected: $URN (keep_data=true)"
+                continue
+              fi
+              echo "  Unprotecting: $URN"
+              pulumi state unprotect "$URN" --yes 2>/dev/null || true
+              UNPROTECTED=$((UNPROTECTED + 1))
+            fi
+          done
+
+          echo "Unprotected $UNPROTECTED resources."
+          echo "status=ok" >> "$GITHUB_OUTPUT"
+          echo "count=$UNPROTECTED" >> "$GITHUB_OUTPUT"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Pulumi Destroy
+        id: pulumi_destroy
+        if: ${{ steps.pulumi_stack.outputs.status == 'ok' }}
+        continue-on-error: true
+        working-directory: infra
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "DRY RUN: Previewing Pulumi destroy..."
+            pulumi preview --diff 2>&1 || true
+            echo "status=dry_run" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ inputs.keep_data }}" = "true" ]; then
+            echo "keep_data=true: Preserving D1 databases and security keys."
+
+            # Get all URNs, filter out D1Database, RandomId, and PrivateKey resources
+            ALL_URNS=$(pulumi stack --show-urns 2>/dev/null | grep -oP 'urn:pulumi:\S+' || true)
+            TARGET_URNS=""
+
+            for URN in $ALL_URNS; do
+              # Skip D1 databases
+              if echo "$URN" | grep -q 'D1Database'; then
+                echo "  Preserving: $URN"
+                continue
+              fi
+              # Skip security keys (still protected)
+              if echo "$URN" | grep -qE 'RandomId|PrivateKey'; then
+                echo "  Preserving: $URN"
+                continue
+              fi
+              # Skip the Pulumi stack resource itself
+              if echo "$URN" | grep -q 'pulumi:pulumi:Stack'; then
+                continue
+              fi
+              TARGET_URNS="$TARGET_URNS --target $URN"
+            done
+
+            if [ -z "$TARGET_URNS" ]; then
+              echo "No resources to destroy (all preserved)."
+              echo "status=skipped" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "Destroying targeted resources..."
+            eval pulumi destroy --yes --target-dependents $TARGET_URNS
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          else
+            echo "Full destroy..."
+            pulumi destroy --yes
+            echo "status=deleted" >> "$GITHUB_OUTPUT"
+          fi
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
-      - name: Remove Pulumi Stack (if full teardown)
-        if: ${{ !inputs.keep_data }}
+      # ================================================================
+      # Phase 6: Stack Cleanup
+      # ================================================================
+      - name: Remove Pulumi Stack
+        id: remove_stack
+        if: ${{ !inputs.keep_data && !inputs.dry_run && steps.pulumi_stack.outputs.status == 'ok' }}
+        continue-on-error: true
         working-directory: infra
         run: |
-          STACK_NAME="prod"
-          pulumi stack rm $STACK_NAME --yes || true
+          STACK="${{ steps.names.outputs.stack }}"
+          echo "Removing Pulumi stack: $STACK"
+          pulumi stack rm "$STACK" --yes --force 2>/dev/null || true
+          echo "status=removed" >> "$GITHUB_OUTPUT"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
+      # ================================================================
+      # Phase 7: Job Summary
+      # ================================================================
       - name: Write Job Summary
         if: always()
         run: |
+          ENV="${{ inputs.environment }}"
+          DRY_RUN="${{ inputs.dry_run }}"
+          KEEP_DATA="${{ inputs.keep_data }}"
+          INCLUDE_MKT="${{ inputs.include_marketing }}"
           BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "## Teardown Complete 🧹" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Environment:** production" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Removed Resources" >> $GITHUB_STEP_SUMMARY
-            if [ "${{ inputs.keep_data }}" = "true" ]; then
-              echo "- ~~D1 Database~~ (preserved)" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "- D1 Database" >> $GITHUB_STEP_SUMMARY
-            fi
-            echo "- KV Namespace" >> $GITHUB_STEP_SUMMARY
-            echo "- R2 Bucket" >> $GITHUB_STEP_SUMMARY
-            echo "- DNS Records (api, app, wildcard)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Note" >> $GITHUB_STEP_SUMMARY
-            echo "The Pulumi state bucket (\`${BUCKET_NAME}\`) was **NOT** deleted." >> $GITHUB_STEP_SUMMARY
-            echo "Delete it manually in the Cloudflare dashboard if no longer needed." >> $GITHUB_STEP_SUMMARY
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "## Teardown Preview (Dry Run) — $ENV" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "## Teardown Failed ❌" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Environment:** production" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Troubleshooting" >> $GITHUB_STEP_SUMMARY
-            echo "- Verify PULUMI_CONFIG_PASSPHRASE matches the one used during deployment" >> $GITHUB_STEP_SUMMARY
-            echo "- Check that R2 credentials are correct" >> $GITHUB_STEP_SUMMARY
-            echo "- Ensure the Pulumi stack exists" >> $GITHUB_STEP_SUMMARY
+            echo "## Teardown Results — $ENV" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Category | Resource | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|----------|--------|" >> "$GITHUB_STEP_SUMMARY"
+
+          # Helper to format status
+          fmt() {
+            case "$1" in
+              deleted) echo "Deleted" ;;
+              not_found) echo "Not Found" ;;
+              failed) echo "**FAILED**" ;;
+              skipped) echo "Skipped" ;;
+              partial) echo "Partial" ;;
+              removed) echo "Removed" ;;
+              dry_run*) echo "Would Delete" ;;
+              preserved) echo "Preserved" ;;
+              *) echo "$1" ;;
+            esac
+          }
+
+          # Workers
+          echo "| Workers | Tail Worker (\`${{ steps.names.outputs.tail_worker }}\`) | $(fmt "${{ steps.delete_tail_worker.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Workers | API Worker (\`${{ steps.names.outputs.api_worker }}\`) | $(fmt "${{ steps.delete_api_worker.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+
+          # Workspace DNS
+          echo "| DNS | Workspace records (\`ws-*\`) | $(fmt "${{ steps.delete_ws_dns.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+
+          # Marketing site
+          if [ "$INCLUDE_MKT" = "true" ]; then
+            echo "| Marketing | Page Rule (\`${{ steps.names.outputs.base_domain }}/*\`) | $(fmt "${{ steps.delete_page_rule.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Marketing | Custom Domain (\`www.${{ steps.names.outputs.base_domain }}\`) | $(fmt "${{ steps.delete_www_domain.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Marketing | DNS (www CNAME) | $(fmt "${{ steps.delete_www_dns.outputs.www_status }}") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Marketing | DNS (apex A) | $(fmt "${{ steps.delete_www_dns.outputs.apex_status }}") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Marketing | Pages Project (\`${{ steps.names.outputs.www_project }}\`) | $(fmt "${{ steps.delete_www_pages.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Marketing | *(skipped — include_marketing=false)* | Skipped |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # AI Gateway
+          echo "| AI | Gateway (\`${{ steps.names.outputs.ai_gateway }}\`) | $(fmt "${{ steps.delete_ai_gateway.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+
+          # Pulumi
+          PULUMI_STATUS="${{ steps.pulumi_stack.outputs.status }}"
+          if [ "$PULUMI_STATUS" = "not_found" ]; then
+            echo "| Pulumi | All Pulumi-managed resources | Stack Not Found (skipped) |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            DESTROY_STATUS="${{ steps.pulumi_destroy.outputs.status }}"
+            if [ "$KEEP_DATA" = "true" ]; then
+              echo "| Pulumi | D1 Databases | Preserved |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| Pulumi | Security Keys (encryption, JWT) | Preserved |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| Pulumi | Other resources (KV, R2, DNS, Pages, Origin CA) | $(fmt "$DESTROY_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| Pulumi | All resources (D1, KV, R2, DNS, Pages, Origin CA, Keys) | $(fmt "$DESTROY_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            STACK_STATUS="${{ steps.remove_stack.outputs.status }}"
+            if [ -n "$STACK_STATUS" ]; then
+              echo "| Pulumi | Stack (\`${{ steps.names.outputs.stack }}\`) | $(fmt "$STACK_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Not Removed (manual cleanup if needed)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Pulumi state R2 bucket** (\`${BUCKET_NAME}\`) — contains encrypted state for re-deploys. Delete manually in Cloudflare dashboard if no longer needed." >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Hetzner VMs** — user-provisioned VMs are not managed by this workflow. Delete via Hetzner console or your cloud provider." >> "$GITHUB_STEP_SUMMARY"
+          echo "- **GitHub environment secrets** — stored in GitHub Settings, not Cloudflare. Remove via Settings > Environments." >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Cloudflare account and zone** — the DNS zone, account, and subscription are not deleted." >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Workers.dev subdomain** — account-level setting, not deleted. Remove manually in Cloudflare dashboard if needed." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Troubleshooting section if any failures
+          if echo "${{ steps.delete_tail_worker.outputs.status }} ${{ steps.delete_api_worker.outputs.status }} ${{ steps.delete_ws_dns.outputs.status }} ${{ steps.delete_page_rule.outputs.status }} ${{ steps.delete_www_domain.outputs.status }} ${{ steps.delete_www_pages.outputs.status }} ${{ steps.delete_ai_gateway.outputs.status }} ${{ steps.pulumi_destroy.outputs.status }}" | grep -q "failed"; then
+            echo "### Troubleshooting" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Some resources failed to delete. Check the step logs above for details." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Verify \`CF_API_TOKEN\` has sufficient permissions (Workers, Pages, DNS, AI Gateway)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Verify \`PULUMI_CONFIG_PASSPHRASE\` matches the one used during deployment" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Check that R2 credentials (\`R2_ACCESS_KEY_ID\`, \`R2_SECRET_ACCESS_KEY\`) are correct" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Some resources may need manual deletion in the Cloudflare dashboard" >> "$GITHUB_STEP_SUMMARY"
           fi
 
   # Confirmation job that runs first if confirm != DELETE
@@ -159,8 +792,8 @@ jobs:
       - name: Confirmation Required
         run: |
           echo "::error::Teardown requires confirmation. Type 'DELETE' in the confirm field."
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Teardown Cancelled ⚠️" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "You must type \`DELETE\` in the confirmation field to proceed with teardown." >> $GITHUB_STEP_SUMMARY
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Teardown Cancelled" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "You must type \`DELETE\` in the confirmation field to proceed with teardown." >> "$GITHUB_STEP_SUMMARY"
           exit 1
