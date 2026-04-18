@@ -6,6 +6,7 @@ export { NotificationService } from './durable-objects/notification';
 export { ProjectData } from './durable-objects/project-data';
 export { TaskRunner } from './durable-objects/task-runner';
 export { TrialCounter } from './durable-objects/trial-counter';
+export { TrialEventBus } from './durable-objects/trial-event-bus';
 export type { Env } from './env';
 
 import { eq } from 'drizzle-orm';

@@ -20,6 +20,7 @@ export interface Env {
   NOTIFICATION: DurableObjectNamespace;
   CODEX_REFRESH_LOCK: DurableObjectNamespace;
   TRIAL_COUNTER: DurableObjectNamespace;
+  TRIAL_EVENT_BUS: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -454,4 +455,15 @@ export interface Env {
   TRIAL_DEFAULT_WORKSPACE_PROFILE?: string;          // Workspace profile (default: lightweight)
   TRIALS_ENABLED_KV_KEY?: string;                    // KV key read by kill-switch (default: trials:enabled)
   TRIAL_KILL_SWITCH_CACHE_MS?: string;               // Kill-switch cache TTL in ms (default: 30000)
+  TRIAL_SSE_HEARTBEAT_MS?: string;                   // SSE comment heartbeat cadence (default: 15000)
+  TRIAL_SSE_POLL_TIMEOUT_MS?: string;                // Long-poll timeout per DO fetch (default: 15000)
+  TRIAL_SSE_MAX_DURATION_MS?: string;                // Hard cap on a single SSE connection (default: 1800000 = 30 min)
+  /** Deployment mode — "staging" | "production". Chooses trial agent + model. */
+  ENVIRONMENT?: string;
+  /** Anthropic API key scoped for trial runs (production mode only). */
+  ANTHROPIC_API_KEY_TRIAL?: string;
+  /** Override for default trial model (production mode default: claude-sonnet-4-6). */
+  TRIAL_MODEL?: string;
+  /** Override for default trial LLM provider ("anthropic" | "workers-ai"). */
+  TRIAL_LLM_PROVIDER?: string;
 }
