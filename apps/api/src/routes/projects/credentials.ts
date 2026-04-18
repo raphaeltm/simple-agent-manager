@@ -19,11 +19,13 @@ import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { maskCredential } from '../../lib/credential-mask';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
+import { rateLimitCredentialUpdate } from '../../middleware/rate-limit';
 import { jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
 import { decrypt, encrypt } from '../../services/encryption';
 import { CredentialValidator } from '../../services/validation';
@@ -71,7 +73,7 @@ projectCredentialsRoutes.get('/:id/credentials', async (c) => {
       .filter((cred) => cred.agentType != null)
       .map(async (cred) => {
         const plaintext = await decrypt(cred.encryptedToken, cred.iv, getCredentialEncryptionKey(c.env));
-        const maskedKey = `...${plaintext.slice(-4)}`;
+        const maskedKey = maskCredential(plaintext);
         let label: string | undefined;
         if (cred.credentialKind === 'oauth-token' && cred.agentType) {
           const agentDef = getAgentDefinition(cred.agentType as AgentType);
@@ -99,8 +101,11 @@ projectCredentialsRoutes.get('/:id/credentials', async (c) => {
 
 /**
  * PUT /api/projects/:id/credentials — save or update a project-scoped agent credential.
+ *
+ * Rate-limited per-user (default 30/hour via rateLimitCredentialUpdate) to match the
+ * user-scoped PUT protection — prevents spam encrypt+write operations (MEDIUM #7).
  */
-projectCredentialsRoutes.put('/:id/credentials', jsonValidator(SaveAgentCredentialSchema), async (c) => {
+projectCredentialsRoutes.put('/:id/credentials', (c, next) => rateLimitCredentialUpdate(c.env)(c, next), jsonValidator(SaveAgentCredentialSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -147,36 +152,56 @@ projectCredentialsRoutes.put('/:id/credentials', jsonValidator(SaveAgentCredenti
 
   const now = new Date().toISOString();
 
-  // When auto-activating, deactivate other project-scoped credentials for this agent.
-  // User-scoped credentials are NOT affected — they remain active at user scope so
-  // other projects can continue to inherit them.
-  if (autoActivate) {
-    await db
-      .update(schema.credentials)
-      .set({ isActive: false })
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          eq(schema.credentials.projectId, projectId),
-          eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, body.agentType)
-        )
+  const existingCred = existing[0];
+  // Derive mask from the plaintext that was just encrypted — matches GET/list which
+  // masks from decrypted plaintext (LOW #9 consistency).
+  const maskedKey = maskCredential(credential);
+
+  // Atomicity (cloudflare-specialist review): batch deactivate + upsert as a
+  // single D1 transaction when autoActivate is true. Two separate statements
+  // open a microsecond window where concurrent reads see zero active
+  // credentials for this (user, project, agentType) tuple.
+  //
+  // Scope guard: deactivate has `project_id = ?` so only this project's rows
+  // are touched — user-scoped credentials remain active so OTHER projects
+  // inheriting at user scope are unaffected.
+  const upsertStmt = existingCred
+    ? c.env.DATABASE.prepare(
+        `UPDATE credentials
+         SET encrypted_token = ?, iv = ?, is_active = ?, updated_at = ?
+         WHERE id = ?`
+      ).bind(ciphertext, iv, autoActivate ? 1 : 0, now, existingCred.id)
+    : c.env.DATABASE.prepare(
+        `INSERT INTO credentials (
+           id, user_id, project_id, provider, credential_type, agent_type,
+           credential_kind, is_active, encrypted_token, iv, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'agent-api-key', ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        ulid(),
+        userId,
+        projectId,
+        agentDef.provider,
+        body.agentType,
+        credentialKind,
+        autoActivate ? 1 : 0,
+        ciphertext,
+        iv,
+        now,
+        now
       );
+
+  if (autoActivate) {
+    const deactivateStmt = c.env.DATABASE.prepare(
+      `UPDATE credentials SET is_active = 0
+       WHERE user_id = ? AND project_id = ?
+         AND credential_type = 'agent-api-key' AND agent_type = ?`
+    ).bind(userId, projectId, body.agentType);
+    await c.env.DATABASE.batch([deactivateStmt, upsertStmt]);
+  } else {
+    await upsertStmt.run();
   }
 
-  const existingCred = existing[0];
-  const maskedKey = `...${credential.slice(-4)}`;
   if (existingCred) {
-    await db
-      .update(schema.credentials)
-      .set({
-        encryptedToken: ciphertext,
-        iv,
-        isActive: autoActivate,
-        updatedAt: now,
-      })
-      .where(eq(schema.credentials.id, existingCred.id));
-
     const response: AgentCredentialInfo = {
       agentType: body.agentType,
       provider: agentDef.provider,
@@ -191,22 +216,6 @@ projectCredentialsRoutes.put('/:id/credentials', jsonValidator(SaveAgentCredenti
     };
     return c.json(response);
   }
-
-  const id = ulid();
-  await db.insert(schema.credentials).values({
-    id,
-    userId,
-    projectId,
-    provider: agentDef.provider,
-    credentialType: 'agent-api-key',
-    agentType: body.agentType,
-    credentialKind,
-    isActive: autoActivate,
-    encryptedToken: ciphertext,
-    iv,
-    createdAt: now,
-    updatedAt: now,
-  });
 
   const response: AgentCredentialInfo = {
     agentType: body.agentType,

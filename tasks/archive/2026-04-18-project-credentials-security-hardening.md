@@ -156,22 +156,57 @@ Once CRITICAL #1 and HIGH #2 fixes land, add regression tests for each path.
 
 ## Acceptance Criteria
 
-- [ ] CRITICAL #1: stale path returns no `refresh_token` (and ideally no `access_token` either)
-- [ ] HIGH #2: inactive project-scoped row no longer falls back to user-scoped row on refresh
-- [ ] HIGH #3: `project-auth.test.ts` replaced with behavioral test
-- [ ] HIGH #4: `maskCredential()` helper applied at all 5 sites with minimum-length guard
-- [ ] MEDIUM #5: Codex refresh rate limit moved to DO state
-- [ ] MEDIUM #6: scope validation active by default, unexpected scopes block
-- [ ] MEDIUM #7: project credential PUT has `rateLimitCredentialUpdate`
-- [ ] MEDIUM #8: cross-user IDOR has behavioral test (unit or integration)
-- [ ] LOW #11: `CodexRefreshLock` unit tests cover stale/fresh/project/user paths
-- [ ] All fixes verified on staging with two-account isolation test
+- [x] CRITICAL #1: stale path returns no `refresh_token` (commit fd6c3ccc, codex-refresh-lock.ts lines 207-225; test `codex-refresh-lock.test.ts:245`)
+- [x] HIGH #2: inactive project-scoped row no longer falls back to user-scoped row on refresh (commit fd6c3ccc, `getStoredCredential` lines 443-470; test `codex-refresh-lock.test.ts:408`)
+- [x] HIGH #3: `project-auth.test.ts` replaced with behavioral test (commit fd6c3ccc, 192-line behavioral test file)
+- [x] HIGH #4: `maskCredential()` helper applied at all sites with minimum-length guard (commit ad4648be at 5 sites; post-review commit applies `maskCredential()` at the 6th site `admin-platform-credentials.ts:226`; unit test `tests/unit/lib/credential-mask.test.ts` covers short/long/null/empty inputs)
+- [x] MEDIUM #5: Codex refresh rate limit moved to DO `ctx.storage` (commit fd6c3ccc, `enforceRateLimit()` in DO; tests `codex-refresh-lock.test.ts:499-598`)
+- [x] MEDIUM #6: scope validation active by default, unexpected scopes block with 502 (commit fd6c3ccc, `validateUpstreamScopes`; tests `codex-refresh-lock.test.ts:605-760`)
+- [x] MEDIUM #7: project credential PUT has `rateLimitCredentialUpdate` (commit ad4648be middleware chain; behavioral 429 test added in `project-credentials.test.ts`)
+- [x] MEDIUM #8: cross-user IDOR has defence-in-depth behavioral test (commit fd6c3ccc, `project-auth.test.ts:92-104`)
+- [x] LOW #11: `CodexRefreshLock` unit tests cover stale/fresh/project/user paths (commit fd6c3ccc, 26 tests, 735-line test file)
+- [x] All fixes verified on staging with two-account isolation test (Phase 6 staging verification — see PR description for evidence)
+
+## Additional Findings Discovered During Implementation
+
+These findings were surfaced during the Phase 5 specialist review cycle and fixed in the same PR (no deferrals per user directive):
+
+### NEW HIGH — `getDecryptedAgentKey` inactive-fallback (runtime credential path)
+
+**Discovered by**: security-auditor re-review (post-commit fd6c3ccc)
+**Fixed in**: commit `d4b5d850`
+**Summary**: The HIGH #2 class bug existed on the runtime credential delivery path as well (not only the `CodexRefreshLock` DO). `getDecryptedAgentKey` in `apps/api/src/routes/credentials.ts` was also falling back to the user-scoped row when the project-scoped row was inactive, enabling the same silent credential-rotation bug.
+**Test**: `tests/unit/routes/project-credentials.test.ts:455` — "returns null (blocks user fallback) when project row exists but is inactive".
+
+### NEW MEDIUM — Dead `checkCodexRefreshRateLimit` function + unused `CODEX_REFRESH` env entry
+
+**Discovered by**: security-auditor re-review
+**Fixed in**: commit `d4b5d850`
+**Summary**: After the rate-limit relocation to DO storage (MEDIUM #5), the KV-based `checkCodexRefreshRateLimit` helper in `middleware/rate-limit.ts` and its associated `RATE_LIMIT_CODEX_REFRESH` entry in `DEFAULT_RATE_LIMITS` were orphaned. Dead code is load-bearing in security contexts — an operator reading the middleware file would assume KV is still the rate-limit store.
+
+### NEW LOW — masking scope drift at admin platform credential route
+
+**Discovered by**: task-completion-validator re-run
+**Fixed in**: commit addressing admin-platform-credentials.ts:226
+**Summary**: `apps/api/src/routes/admin-platform-credentials.ts:226` was a 6th `slice(-4)` site not listed in the original finding #4 scope. Admin-only and low risk (short platform credentials like service account keys would be fully exposed in the `maskedKey` response). Applied `maskCredential()` for consistency.
+
+### Cloudflare-specialist — env var rename for consistency
+
+**Discovered by**: cloudflare-specialist review
+**Fixed in**: commit `05ff8d0e`
+**Summary**: `RATE_LIMIT_CODEX_REFRESH` was renamed to `RATE_LIMIT_CODEX_REFRESH_PER_HOUR` across `env.ts`, `env.example`, documentation, and tests. The name makes the unit explicit and aligns with the rate-limit configuration convention used elsewhere (`RATE_LIMIT_CREDENTIAL_UPDATE`, `RATE_LIMIT_WORKSPACE_CREATE`).
+
+### Cloudflare-specialist — atomic `DATABASE.batch()` for autoActivate deactivate+upsert
+
+**Discovered by**: cloudflare-specialist review
+**Fixed in**: commit `05ff8d0e`
+**Summary**: The `autoActivate: true` path on both `PUT /api/credentials/agent` (user-scoped) and `PUT /api/projects/:id/credentials` (project-scoped) was using two separate drizzle statements. Under concurrency, a second write landing between the deactivate and upsert could leave two rows active. Replaced with raw `c.env.DATABASE.batch([deactivate, upsert])` for atomicity. Separate scope guards (`project_id IS NULL` for user-scoped; `project_id = ?` for project-scoped) ensure the two PUTs never cross-deactivate each other's rows.
 
 ## References
 
 - Rule 02 (quality gates): source-contract tests prohibited
 - Rule 25 (review merge gate): CRITICAL/HIGH should block merge — this post-merge rerun expands scope
-- Post-mortem to cite when fixing: `docs/notes/2026-03-31-pr568-premature-merge-postmortem.md`
-- Related backlog: `tasks/backlog/2026-04-18-credentials-miniflare-integration-tests.md`
-- Related backlog: `tasks/backlog/2026-04-18-project-credentials-missing-tests.md`
-- Source PR: https://github.com/raphaeltm/simple-agent-manager/pull/753
+- Rule 28 (new): `.claude/rules/28-credential-resolution-fallback-tests.md` — credential resolution fallback test requirements
+- Post-mortem for this PR: `docs/notes/2026-04-18-project-credentials-security-hardening-postmortem.md`
+- Related prior post-mortem: `docs/notes/2026-03-31-pr568-premature-merge-postmortem.md`
+- Source PR (that introduced findings): https://github.com/raphaeltm/simple-agent-manager/pull/753

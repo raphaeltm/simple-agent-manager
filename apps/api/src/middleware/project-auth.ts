@@ -6,6 +6,27 @@ import { errors } from './error';
 
 export type AppDb = ReturnType<typeof drizzle<typeof schema>>;
 
+/**
+ * Defence-in-depth identity check. The query WHERE clause already filters on
+ * `userId`, so in normal operation a row is only returned when it belongs to
+ * the caller. This extra check guards against future regressions where the
+ * WHERE clause might be weakened (typo, refactor, or ORM bug) — if for any
+ * reason a row with a mismatched `userId` reaches us, we reject it as
+ * `notFound` rather than treating it as a valid match.
+ *
+ * MEDIUM #8: explicit post-query check for cross-user IDOR defence-in-depth.
+ */
+function assertOwnership<T extends { userId: string }>(
+  row: T | undefined,
+  userId: string,
+  resource: string
+): T {
+  if (!row || row.userId !== userId) {
+    throw errors.notFound(resource);
+  }
+  return row;
+}
+
 export async function requireOwnedProject(
   db: AppDb,
   projectId: string,
@@ -17,12 +38,7 @@ export async function requireOwnedProject(
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
     .limit(1);
 
-  const project = rows[0];
-  if (!project) {
-    throw errors.notFound('Project');
-  }
-
-  return project;
+  return assertOwnership(rows[0], userId, 'Project');
 }
 
 export async function requireOwnedTask(
@@ -43,11 +59,11 @@ export async function requireOwnedTask(
     )
     .limit(1);
 
+  // Task has an additional projectId invariant beyond userId.
   const task = rows[0];
-  if (!task) {
+  if (!task || task.userId !== userId || task.projectId !== projectId) {
     throw errors.notFound('Task');
   }
-
   return task;
 }
 
@@ -62,10 +78,5 @@ export async function requireOwnedWorkspace(
     .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
     .limit(1);
 
-  const workspace = rows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-
-  return workspace;
+  return assertOwnership(rows[0], userId, 'Workspace');
 }

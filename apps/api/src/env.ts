@@ -64,7 +64,14 @@ export interface Env {
   RATE_LIMIT_ANONYMOUS?: string;
   RATE_LIMIT_IDENTITY_TOKEN?: string;
   RATE_LIMIT_IDENTITY_TOKEN_WINDOW_SECONDS?: string;
-  RATE_LIMIT_CODEX_REFRESH?: string;
+  /**
+   * Max Codex refresh requests per user per window. Defaults to 30. Enforced
+   * atomically by CodexRefreshLock DO using ctx.storage (not KV). See
+   * {@link CodexRefreshEnv} in codex-refresh-lock.ts for the authoritative
+   * declaration — this is a Worker-level re-export so operators can configure
+   * the variable via wrangler.toml / `wrangler secret put`.
+   */
+  RATE_LIMIT_CODEX_REFRESH_PER_HOUR?: string;
   RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS?: string;
   IDENTITY_TOKEN_CACHE_BUFFER_SECONDS?: string;
   IDENTITY_TOKEN_CACHE_MIN_TTL_SECONDS?: string;
@@ -305,7 +312,7 @@ export interface Env {
   CODEX_REFRESH_UPSTREAM_URL?: string;             // OpenAI token endpoint (default: https://auth.openai.com/oauth/token)
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string;      // Upstream request timeout (default: 10000)
   CODEX_CLIENT_ID?: string;                        // OpenAI OAuth client_id (default: app_EMoamEEZ73f0CkXaXp7hrann)
-  CODEX_EXPECTED_SCOPES?: string;                  // Comma-separated expected scopes for upstream validation (warning log only)
+  CODEX_EXPECTED_SCOPES?: string;                  // Comma-separated scope allowlist; unset = default allowlist enforced (openid,profile,email,offline_access); empty string disables validation; unexpected scopes block refresh with 502 (MEDIUM #6)
   // Google OAuth (for GCP OIDC integration)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

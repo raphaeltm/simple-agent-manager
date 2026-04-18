@@ -77,9 +77,30 @@ describe('Project Credentials Routes', () => {
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
   });
 
+  // Rate-limit middleware on PUT /:id/credentials calls KV.get / KV.put; stub
+  // returns "first call in window" so every request is allowed.
+  const kv = {
+    get: vi.fn().mockResolvedValue(null),
+    put: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+  };
+  // PUT autoActivate path now uses `c.env.DATABASE.batch([...])` for atomicity.
+  // See cloudflare-specialist review — raw D1 prepared statements bypass drizzle.
+  const preparedStmt = {
+    bind: vi.fn().mockReturnThis(),
+    run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+  };
+  const database = {
+    prepare: vi.fn().mockReturnValue(preparedStmt),
+    batch: vi.fn().mockResolvedValue([
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+    ]),
+  };
   const env: Env = {
-    DATABASE: {} as unknown as Env['DATABASE'],
+    DATABASE: database as unknown as Env['DATABASE'],
     ENCRYPTION_KEY: 'test-key',
+    KV: kv as unknown as Env['KV'],
   } as Env;
 
   describe('GET /:id/credentials', () => {
@@ -235,12 +256,17 @@ describe('Project Credentials Routes', () => {
       expect(json.scope).toBe('project');
       expect(json.projectId).toBe('proj-1');
 
-      // Verify insert includes projectId
-      expect(mockDB.insert).toHaveBeenCalled();
-      const insertedValues = mockDB.values.mock.calls[0]?.[0];
-      expect(insertedValues.projectId).toBe('proj-1');
-      expect(insertedValues.userId).toBe('test-user-id');
-      expect(insertedValues.credentialType).toBe('agent-api-key');
+      // Verify insert statement was prepared against raw DATABASE (atomic batch path).
+      // Insert SQL must include all required columns with project_id as positional arg.
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const insertSql = prepareCalls.find((sql) => sql.includes('INSERT INTO credentials'));
+      expect(insertSql).toBeDefined();
+      expect(insertSql).toContain('project_id');
+      expect(insertSql).toContain("'agent-api-key'");
+      // The prepared statement was bound with the correct positional values — userId, projectId, etc.
+      expect(preparedStmt.bind).toHaveBeenCalled();
+      const bindArgs = preparedStmt.bind.mock.calls.find((c) => c.includes('test-user-id') && c.includes('proj-1'));
+      expect(bindArgs).toBeDefined();
     });
 
     it('when autoActivate is true, only deactivates project-scoped rows (user-scoped rows untouched)', async () => {
@@ -263,8 +289,69 @@ describe('Project Credentials Routes', () => {
         env,
       );
       expect(res.status).toBe(201);
-      // Deactivate call should have been made (update chain) — just verify it happened
-      expect(mockDB.update).toHaveBeenCalled();
+      // Atomic deactivate+upsert batch should have run.
+      expect(database.batch).toHaveBeenCalled();
+      // Deactivate SQL must scope to project_id = ? — NOT user-scoped (project_id IS NULL).
+      // This is the key scope-guard: project autoActivate must not touch user-scoped rows.
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const deactivateSql = prepareCalls.find((sql) => sql.includes('UPDATE credentials SET is_active = 0'));
+      expect(deactivateSql).toBeDefined();
+      expect(deactivateSql).toContain('project_id = ?');
+      expect(deactivateSql).not.toContain('project_id IS NULL');
+    });
+
+    // Regression: MEDIUM #7 — project PUT must apply rateLimitCredentialUpdate.
+    // If the middleware is removed from this route, this test will fail because
+    // the request would pass through to 201 Created instead of being rejected
+    // with 429. The KV stub is overridden for this test only to simulate a
+    // previously-recorded count at the rate limit ceiling.
+    it('returns 429 when CREDENTIAL_UPDATE rate limit is exceeded (MEDIUM #7)', async () => {
+      // Seed KV to return a record at the current limit for any credential-update key.
+      // The rate-limit middleware uses a unary windowStart that we cannot easily
+      // synchronize with, so we match on key prefix and always return count >= 30.
+      const cappedKv = {
+        get: vi.fn().mockImplementation(async (key: string, type?: string) => {
+          if (typeof key === 'string' && key.startsWith('ratelimit:credential-update:')) {
+            const windowStart = Math.floor(Math.floor(Date.now() / 1000) / 3600) * 3600;
+            // Match the RateLimitEntry shape returned by KV.get(..., 'json').
+            if (type === 'json') {
+              return { count: 30, windowStart };
+            }
+          }
+          return null;
+        }),
+        put: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined),
+      };
+      const cappedEnv: Env = {
+        ...env,
+        KV: cappedKv as unknown as Env['KV'],
+      } as Env;
+
+      // Reset the shared database.batch mock so we can prove this specific
+      // request did NOT reach the write path.
+      database.batch.mockClear();
+
+      const body: SaveAgentCredentialRequest = {
+        agentType: 'claude-code',
+        credentialKind: 'api-key',
+        credential: 'sk-ant-api03-some-valid-looking-key-1234567890',
+      };
+      const res = await app.request(
+        '/api/projects/proj-1/credentials',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        cappedEnv,
+      );
+
+      expect(res.status).toBe(429);
+      // Retry-After is set by the middleware on rate-limit breach.
+      expect(res.headers.get('Retry-After')).not.toBeNull();
+      // No DB write path should have been reached for this request.
+      expect(database.batch).not.toHaveBeenCalled();
     });
   });
 
@@ -315,7 +402,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
   });
 
   it('returns project-scoped credential when projectId is provided and project row exists', async () => {
-    // First query: project-scoped lookup returns a credential
+    // First query: project-scoped lookup returns an active credential
     mockDB.limit
       .mockResolvedValueOnce([
         {
@@ -325,6 +412,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
           encryptedToken: 'enc',
           iv: 'iv',
           credentialKind: 'api-key',
+          isActive: true,
         },
       ]);
 
@@ -411,6 +499,46 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'test-key',
       'p1',
     );
+    expect(result).toBeNull();
+  });
+
+  // Regression: HIGH #2 (runtime path). An inactive project-scoped row must NOT
+  // silently fall through to the user-scoped credential — doing so would leak
+  // a user-wide credential into project execution when the user had explicitly
+  // deactivated it at project scope.
+  it('returns null (blocks user fallback) when project row exists but is inactive', async () => {
+    mockDB.limit.mockResolvedValueOnce([
+      {
+        id: 'c-inactive',
+        userId: 'u1',
+        projectId: 'p1',
+        encryptedToken: 'enc',
+        iv: 'iv',
+        credentialKind: 'oauth-token',
+        isActive: false,
+      },
+    ]);
+    // Even if a user-scoped row exists, it must not be returned.
+    mockDB.limit.mockResolvedValueOnce([
+      {
+        id: 'c-user',
+        userId: 'u1',
+        projectId: null,
+        encryptedToken: 'enc',
+        iv: 'iv',
+        credentialKind: 'oauth-token',
+        isActive: true,
+      },
+    ]);
+
+    const result = await getDecryptedAgentKey(
+      mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
+      'u1',
+      'claude-code',
+      'test-key',
+      'p1',
+    );
+
     expect(result).toBeNull();
   });
 });

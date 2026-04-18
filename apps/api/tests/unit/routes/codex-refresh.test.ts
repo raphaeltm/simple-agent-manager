@@ -26,13 +26,10 @@ vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(),
 }));
 
-// Mock rate limiting
-vi.mock('../../../src/middleware/rate-limit', () => ({
-  checkCodexRefreshRateLimit: vi.fn(),
-}));
+// Note: rate limiting now lives inside the CodexRefreshLock DO (MEDIUM #5).
+// We simulate rate-limited responses by having the DO's fetch mock return 429.
 
 const { verifyCallbackToken } = await import('../../../src/services/jwt');
-const { checkCodexRefreshRateLimit } = await import('../../../src/middleware/rate-limit');
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mockDrizzleWithWorkspace(userId: string | null, projectId: string | null = null): any {
@@ -111,13 +108,6 @@ describe('POST /api/auth/codex-refresh', () => {
 
     // Drizzle: default returns workspace with userId
     vi.mocked(drizzle).mockReturnValue(mockDrizzleWithWorkspace('user-abc'));
-
-    // Rate limit: default allows requests
-    vi.mocked(checkCodexRefreshRateLimit).mockResolvedValue({
-      allowed: true,
-      remaining: 29,
-      resetAt: Math.floor(Date.now() / 1000) + 3600,
-    });
 
     // DO: default returns success
     mockDoFetch = vi.fn().mockResolvedValue(
@@ -316,14 +306,16 @@ describe('POST /api/auth/codex-refresh', () => {
     expect(json.error).toBe('upstream_error');
   });
 
-  it('returns cached tokens from DO when refresh_token is stale (already refreshed by another workspace)', async () => {
-    // Simulate the stale token case: DO returns 200 with cached tokens
-    // (meaning the request's refresh_token didn't match stored, so no upstream call was made)
+  it('forwards access_token + id_token from DO when refresh_token is stale (CRITICAL #1)', async () => {
+    // Simulate the stale token case: DO returns 200 with access + id token
+    // but intentionally OMITS refresh_token — the caller did not prove possession
+    // of a current refresh token, so we must not hand one out.
     mockDoFetch.mockResolvedValue(
       new Response(JSON.stringify({
         access_token: 'cached-access',
-        refresh_token: 'already-refreshed-token',
         id_token: 'cached-id',
+        // refresh_token intentionally omitted (CRITICAL #1 fix)
+        stale: true,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     );
 
@@ -331,56 +323,57 @@ describe('POST /api/auth/codex-refresh', () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.access_token).toBe('cached-access');
-    expect(json.refresh_token).toBe('already-refreshed-token');
     expect(json.id_token).toBe('cached-id');
+    // CRITICAL #1 regression guard: the stale-token response from the DO must
+    // NOT contain refresh_token. The route forwards the DO's body verbatim,
+    // so verifying here locks in the end-to-end contract.
+    expect(json.refresh_token).toBeUndefined();
+    expect(json.stale).toBe(true);
 
     // Verify the DO was still called (not short-circuited before reaching DO)
     expect(mockDoFetch).toHaveBeenCalledTimes(1);
   });
 
   // -----------------------------------------------------------------------
-  // Rate limiting
+  // Rate limiting (MEDIUM #5 — enforced atomically in the DO, propagated to caller)
   // -----------------------------------------------------------------------
 
-  it('returns 429 when rate limit is exceeded', async () => {
-    const resetAt = Math.floor(Date.now() / 1000) + 1800;
-    vi.mocked(checkCodexRefreshRateLimit).mockResolvedValue({
-      allowed: false,
-      remaining: 0,
-      resetAt,
-    });
+  it('returns 429 with Retry-After when the DO reports rate limit exceeded', async () => {
+    mockDoFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: 'rate_limit_exceeded', message: 'Too many refresh requests' }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': '1800',
+          },
+        },
+      ),
+    );
 
     const res = await postRefresh(validBody);
     expect(res.status).toBe(429);
     const json = await res.json();
     expect(json.error).toBe('rate_limit_exceeded');
-    expect(res.headers.get('Retry-After')).toBeTruthy();
+    // The route must forward Retry-After so clients can honour the window.
+    expect(res.headers.get('Retry-After')).toBe('1800');
   });
 
-  it('passes workspaceId from token to rate limiter', async () => {
+  it('keys rate limiting per-user via DO idFromName(userId)', async () => {
     vi.mocked(verifyCallbackToken).mockResolvedValue({
       workspace: 'ws-specific-id',
       type: 'callback',
       scope: 'workspace',
     });
+    vi.mocked(drizzle).mockReturnValue(mockDrizzleWithWorkspace('user-specific-id'));
 
     await postRefresh(validBody);
 
-    expect(checkCodexRefreshRateLimit).toHaveBeenCalledWith(
-      expect.anything(),
-      'ws-specific-id',
-    );
-  });
-
-  it('does not forward to DO when rate limited', async () => {
-    vi.mocked(checkCodexRefreshRateLimit).mockResolvedValue({
-      allowed: false,
-      remaining: 0,
-      resetAt: Math.floor(Date.now() / 1000) + 3600,
-    });
-
-    await postRefresh(validBody);
-    expect(mockDoFetch).not.toHaveBeenCalled();
+    // Rate limit state now lives in the per-user DO instance. Verifying the DO
+    // is keyed by userId is the closest contract to "the rate limiter saw this
+    // user" after the move away from the KV-based middleware.
+    expect(mockIdFromName).toHaveBeenCalledWith('user-specific-id');
   });
 
   // -----------------------------------------------------------------------
