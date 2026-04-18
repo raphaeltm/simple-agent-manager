@@ -19,11 +19,13 @@ import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { maskCredential } from '../../lib/credential-mask';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
+import { rateLimitCredentialUpdate } from '../../middleware/rate-limit';
 import { jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
 import { decrypt, encrypt } from '../../services/encryption';
 import { CredentialValidator } from '../../services/validation';
@@ -71,7 +73,7 @@ projectCredentialsRoutes.get('/:id/credentials', async (c) => {
       .filter((cred) => cred.agentType != null)
       .map(async (cred) => {
         const plaintext = await decrypt(cred.encryptedToken, cred.iv, getCredentialEncryptionKey(c.env));
-        const maskedKey = `...${plaintext.slice(-4)}`;
+        const maskedKey = maskCredential(plaintext);
         let label: string | undefined;
         if (cred.credentialKind === 'oauth-token' && cred.agentType) {
           const agentDef = getAgentDefinition(cred.agentType as AgentType);
@@ -99,8 +101,11 @@ projectCredentialsRoutes.get('/:id/credentials', async (c) => {
 
 /**
  * PUT /api/projects/:id/credentials — save or update a project-scoped agent credential.
+ *
+ * Rate-limited per-user (default 30/hour via rateLimitCredentialUpdate) to match the
+ * user-scoped PUT protection — prevents spam encrypt+write operations (MEDIUM #7).
  */
-projectCredentialsRoutes.put('/:id/credentials', jsonValidator(SaveAgentCredentialSchema), async (c) => {
+projectCredentialsRoutes.put('/:id/credentials', (c, next) => rateLimitCredentialUpdate(c.env)(c, next), jsonValidator(SaveAgentCredentialSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -165,7 +170,9 @@ projectCredentialsRoutes.put('/:id/credentials', jsonValidator(SaveAgentCredenti
   }
 
   const existingCred = existing[0];
-  const maskedKey = `...${credential.slice(-4)}`;
+  // Derive mask from the plaintext that was just encrypted — matches GET/list which
+  // masks from decrypted plaintext (LOW #9 consistency).
+  const maskedKey = maskCredential(credential);
   if (existingCred) {
     await db
       .update(schema.credentials)

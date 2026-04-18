@@ -7,11 +7,13 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { maskCredential } from '../lib/credential-mask';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { rateLimitCredentialUpdate } from '../middleware/rate-limit';
 import { CreateCredentialSchema, CredentialKindBodySchema,jsonValidator, SaveAgentCredentialSchema } from '../schemas';
 import { decrypt, encrypt } from '../services/encryption';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
@@ -246,9 +248,9 @@ credentialsRoutes.get('/agent', async (c) => {
     creds
       .filter((cred) => cred.agentType != null)
       .map(async (cred) => {
-        // Decrypt to get last 4 chars for masking
+        // Decrypt to get last 4 chars for masking (guards short credentials via maskCredential)
         const plaintext = await decrypt(cred.encryptedToken, cred.iv, getCredentialEncryptionKey(c.env));
-        const maskedKey = `...${plaintext.slice(-4)}`;
+        const maskedKey = maskCredential(plaintext);
 
         // Determine label based on credential kind
         let label: string | undefined;
@@ -277,8 +279,11 @@ credentialsRoutes.get('/agent', async (c) => {
 
 /**
  * PUT /api/credentials/agent - Save or update an agent API key or OAuth token
+ *
+ * Rate-limited per-user (default 30/hour via rateLimitCredentialUpdate) to prevent
+ * an authenticated user from spamming encrypt+write operations.
  */
-credentialsRoutes.put('/agent', jsonValidator(SaveAgentCredentialSchema), async (c) => {
+credentialsRoutes.put('/agent', (c, next) => rateLimitCredentialUpdate(c.env)(c, next), jsonValidator(SaveAgentCredentialSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
@@ -358,7 +363,7 @@ credentialsRoutes.put('/agent', jsonValidator(SaveAgentCredentialSchema), async 
       })
       .where(eq(schema.credentials.id, existingCred.id));
 
-    const maskedKey = `...${credential.slice(-4)}`;
+    const maskedKey = maskCredential(credential);
     const response: AgentCredentialInfo = {
       agentType: body.agentType,
       provider: agentDef.provider,
@@ -389,7 +394,7 @@ credentialsRoutes.put('/agent', jsonValidator(SaveAgentCredentialSchema), async 
     updatedAt: now,
   });
 
-  const maskedKey = `...${credential.slice(-4)}`;
+  const maskedKey = maskCredential(credential);
   const response: AgentCredentialInfo = {
     agentType: body.agentType,
     provider: agentDef.provider,
