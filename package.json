@@ -52,7 +52,7 @@
     "@types/iarna__toml": "2.0.5",
     "@types/node": "catalog:",
     "eslint-plugin-jsx-a11y": "6.10.2",
-    "eslint-plugin-simple-import-sort": "12.1.1",
+    "eslint-plugin-simple-import-sort": "13.0.0",
     "husky": "9.1.7",
     "lint-staged": "15.5.2",
     "prettier": "3.8.1",
