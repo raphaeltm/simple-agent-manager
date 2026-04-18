@@ -321,6 +321,62 @@ Input validation: `agentType` is validated against `AGENT_CATALOG` via `isValidA
 - Sync errors are logged but do not fail the session teardown (best-effort)
 - Uses `callbackretry` exponential backoff for transient HTTP failures
 
+## Project-Scoped Credential Overrides
+
+Agent credentials (API keys and OAuth tokens) can be overridden at the **project level**. This allows a single user to run parallel projects with different credentials — for example, different Anthropic API keys billed to different clients, or a Claude Max OAuth token for personal projects alongside an API key for work projects.
+
+### Schema
+
+The `credentials` table includes a nullable `project_id` column referencing `projects.id` (migration 0042):
+
+```sql
+ALTER TABLE credentials ADD COLUMN project_id TEXT
+  REFERENCES projects(id) ON DELETE CASCADE;
+
+-- Two partial unique indexes enforce scope-aware uniqueness
+CREATE UNIQUE INDEX credentials_user_scope_idx ON credentials(
+  user_id, credential_type, provider, credential_kind
+) WHERE project_id IS NULL;
+
+CREATE UNIQUE INDEX credentials_project_scope_idx ON credentials(
+  user_id, project_id, credential_type, provider, credential_kind
+) WHERE project_id IS NOT NULL;
+```
+
+A user may hold both a user-scoped credential (`project_id IS NULL`) and a project-scoped credential for the same `agentType + credentialKind`. Resolution always prefers the more specific match.
+
+### Resolution Order
+
+`getDecryptedAgentKey(db, userId, agentType, key, projectId?)` in `apps/api/src/routes/credentials.ts` resolves in order:
+
+1. **Project** (if `projectId` is provided and a project-scoped row exists)
+2. **User** (row with `project_id IS NULL`)
+3. **Platform** (entries in `platform_credentials`)
+4. **null** (no credential available — agent start fails)
+
+The workspace runtime callback in `apps/api/src/routes/workspaces/runtime.ts` fetches the workspace's `projectId` and forwards it to the resolver so VMs receive the correct scoped credential.
+
+### OAuth Refresh (Codex) Preserves Scope
+
+The `CodexRefreshLock` Durable Object (`apps/api/src/durable-objects/codex-refresh-lock.ts`) accepts a `projectId` field and looks up the matching scoped row before rotating. The refreshed token is written back to the same row, preserving the scope.
+
+### API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/projects/:id/credentials` | List project-scoped credentials for a project |
+| PUT | `/api/projects/:id/credentials` | Create/update a project-scoped credential |
+| DELETE | `/api/projects/:id/credentials/:agentType/:credentialKind` | Remove a project-scoped credential (falls back to user credential) |
+
+All guarded by `requireOwnedProject` — cross-user access returns **404** (not 403) to avoid confirming the existence of other users' projects.
+
+### Isolation Guarantees
+
+- Every query filters by `userId = auth.userId AND project_id = :id` (isolation at the query layer, not only at the ownership check)
+- Cross-user writes fail because `requireOwnedProject` rejects the request before the write is attempted
+- `ON DELETE CASCADE` from `projects.id` removes all project-scoped credentials when a project is deleted
+- `autoActivate` only deactivates other project-scoped rows for that project — user-scoped rows are untouched
+
 ## Related Documentation
 
 - [Secrets Taxonomy](./secrets-taxonomy.md) - Full breakdown of all secrets

@@ -87,7 +87,7 @@ Mirror schema but keyed on `projectId + userId + agentType + credentialKind`.
 
 ### Docs
 - [x] Update `docs/architecture/credential-security.md` with the project-scope tier
-- [ ] Changelog / CLAUDE.md Recent Changes entry (Phase 4)
+- [x] Changelog / CLAUDE.md Recent Changes entry
 
 ## Acceptance Criteria
 
