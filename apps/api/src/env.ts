@@ -19,6 +19,7 @@ export interface Env {
   TASK_RUNNER: DurableObjectNamespace;
   NOTIFICATION: DurableObjectNamespace;
   CODEX_REFRESH_LOCK: DurableObjectNamespace;
+  TRIAL_COUNTER: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -442,4 +443,15 @@ export interface Env {
   AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
   AI_GATEWAY_ID?: string;                            // Cloudflare AI Gateway ID (default: sam)
+  // Trial Onboarding (zero-friction URL-to-workspace)
+  TRIAL_CLAIM_TOKEN_SECRET?: string;                 // Secret: HMAC key for sam_trial_claim / sam_trial_fingerprint cookies
+  TRIAL_MONTHLY_CAP?: string;                        // Global cap per calendar month (default: 1500)
+  TRIAL_WORKSPACE_TTL_MS?: string;                   // Trial workspace lifetime in ms (default: 1200000 = 20 min)
+  TRIAL_DATA_RETENTION_HOURS?: string;               // Hours to retain trial project data post-expiry (default: 168 = 7d)
+  TRIAL_ANONYMOUS_USER_ID?: string;                  // Sentinel user id (default: system_anonymous_trials)
+  TRIAL_AGENT_TYPE_STAGING?: string;                 // Agent used for trials in staging (default: opencode)
+  TRIAL_AGENT_TYPE_PRODUCTION?: string;              // Agent used for trials in production (default: claude-code)
+  TRIAL_DEFAULT_WORKSPACE_PROFILE?: string;          // Workspace profile (default: lightweight)
+  TRIALS_ENABLED_KV_KEY?: string;                    // KV key read by kill-switch (default: trials:enabled)
+  TRIAL_KILL_SWITCH_CACHE_MS?: string;               // Kill-switch cache TTL in ms (default: 30000)
 }

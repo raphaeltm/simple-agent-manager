@@ -43,6 +43,16 @@ MAX_TRIGGERS_PER_PROJECT = "10"
 CRON_MIN_INTERVAL_MINUTES = "15"
 CRON_TEMPLATE_MAX_LENGTH = "8000"
 TRIGGER_NAME_MAX_LENGTH = "100"
+# Trial Onboarding (zero-friction URL-to-workspace)
+# See docs/guides/trial-configuration.md for the full tunable list.
+TRIAL_MONTHLY_CAP = "1500"
+TRIAL_WORKSPACE_TTL_MS = "1200000"           # 20 min
+TRIAL_DATA_RETENTION_HOURS = "168"           # 7 days
+TRIAL_ANONYMOUS_USER_ID = "system_anonymous_trials"
+TRIAL_AGENT_TYPE_STAGING = "opencode"
+TRIAL_AGENT_TYPE_PRODUCTION = "claude-code"
+TRIAL_DEFAULT_WORKSPACE_PROFILE = "lightweight"
+TRIALS_ENABLED_KV_KEY = "trials:enabled"
 
 # D1 Database
 [[d1_databases]]
@@ -99,6 +109,11 @@ class_name = "NotificationService"
 name = "CODEX_REFRESH_LOCK"
 class_name = "CodexRefreshLock"
 
+# Durable Object for trial-onboarding monthly cap counter (singleton; keyed by YYYY-MM)
+[[durable_objects.bindings]]
+name = "TRIAL_COUNTER"
+class_name = "TrialCounter"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -122,6 +137,10 @@ new_sqlite_classes = ["NotificationService"]
 [[migrations]]
 tag = "v6"
 new_classes = ["CodexRefreshLock"]  # Intentionally stateless: uses D1 for credential storage, no per-instance SQLite needed
+
+[[migrations]]
+tag = "v7"
+new_sqlite_classes = ["TrialCounter"]
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
@@ -168,3 +187,4 @@ crons = ["*/5 * * * *", "0 3 * * *"]
 # - GA4_API_SECRET (optional — Google Analytics 4 API secret, enables GA4 forwarding; NOTE: GA4 Measurement Protocol requires api_secret as a query parameter — ensure outbound request URLs are not logged)
 # - R2_ACCESS_KEY_ID (optional — R2 S3-compatible API token key ID, enables task attachment presigned uploads)
 # - R2_SECRET_ACCESS_KEY (optional — R2 S3-compatible API token secret, enables task attachment presigned uploads)
+# - TRIAL_CLAIM_TOKEN_SECRET (required when trials are enabled — HMAC secret for sam_trial_claim / sam_trial_fingerprint cookies. 32+ bytes base64.)

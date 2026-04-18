@@ -870,6 +870,10 @@ The proxy intercepts Codex refresh requests and serializes them per user via a D
 | `RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS` | Rate limit window in seconds | `3600` (1 hour) |
 | `CODEX_EXPECTED_SCOPES` | Comma-separated allowlist of OAuth scopes the upstream may return. Unexpected scopes block the refresh with 502 and the previous token remains valid. Empty string disables validation. | `openid,profile,email,offline_access` |
 
+### Trial Onboarding
+
+If you want to expose the zero-friction `/try` URL-to-workspace flow on your deployment, see [`trial-configuration.md`](./trial-configuration.md) for the required `TRIAL_CLAIM_TOKEN_SECRET` secret, tunable env vars (monthly cap, workspace TTL, data retention), and the KV-backed kill switch.
+
 ### Rotating Security Keys
 
 Security keys are managed by Pulumi and normally don't need rotation. If you need to rotate keys:

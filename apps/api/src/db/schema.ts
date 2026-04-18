@@ -1303,3 +1303,36 @@ export const userQuotas = sqliteTable('user_quotas', {
 });
 
 export type UserQuotaRow = typeof userQuotas.$inferSelect;
+
+// =============================================================================
+// Trial Onboarding — Waitlist
+// =============================================================================
+
+/**
+ * Cap-exceeded trial signups. One row per (email, resetDate). The monthly
+ * notifier cron marks `notifiedAt` when the reset window opens and an email
+ * is sent. See docs/guides/trial-configuration.md.
+ */
+export const trialWaitlist = sqliteTable(
+  'trial_waitlist',
+  {
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    submittedAt: integer('submitted_at').notNull(), // epoch ms
+    resetDate: text('reset_date').notNull(), // 'YYYY-MM-01' UTC
+    notifiedAt: integer('notified_at'), // epoch ms, nullable
+  },
+  (table) => ({
+    emailResetIdx: uniqueIndex('idx_trial_waitlist_email_reset').on(
+      table.email,
+      table.resetDate
+    ),
+    resetNotifyIdx: index('idx_trial_waitlist_reset_notify').on(
+      table.resetDate,
+      table.notifiedAt
+    ),
+  })
+);
+
+export type TrialWaitlistRow = typeof trialWaitlist.$inferSelect;
+export type NewTrialWaitlistRow = typeof trialWaitlist.$inferInsert;

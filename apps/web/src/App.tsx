@@ -46,6 +46,8 @@ import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
 import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { TaskDetail } from './pages/TaskDetail';
+import { Try } from './pages/Try';
+import { TryDiscovery } from './pages/TryDiscovery';
 import { UiStandards } from './pages/UiStandards';
 import { Workspace } from './pages/workspace';
 import { Workspaces } from './pages/Workspaces';
@@ -71,6 +73,8 @@ export default function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Landing />} />
+          <Route path="/try" element={<Try />} />
+          <Route path="/try/:trialId" element={<TryDiscovery />} />
 
           {/* Protected routes with AppShell (persistent navigation) */}
           <Route element={<ProtectedLayout />}>
