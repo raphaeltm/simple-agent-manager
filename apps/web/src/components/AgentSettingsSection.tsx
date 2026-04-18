@@ -53,6 +53,11 @@ function AgentSettingsCard({
   const providerMeta = selectedProvider ? OPENCODE_PROVIDERS[selectedProvider] : null;
   const showBaseUrl = selectedProvider === 'custom' || selectedProvider === 'openai-compatible';
 
+  // Shared class string for all form inputs and selects — provides consistent styling
+  // and restores a visible focus indicator after outline-none removes the browser default.
+  const formControlClass =
+    'w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring box-border';
+
   // Sync state when settings prop changes
   useEffect(() => {
     setModel(settings?.model ?? '');
@@ -183,7 +188,7 @@ function AgentSettingsCard({
                 setModel('');
               }
             }}
-            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            className={formControlClass}
             data-testid="opencode-provider-select"
           >
             <option value="">Default (auto-detect)</option>
@@ -214,7 +219,7 @@ function AgentSettingsCard({
             value={opencodeBaseUrl}
             onChange={(e) => setOpencodeBaseUrl(e.target.value)}
             placeholder="https://api.example.com/v1"
-            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            className={formControlClass}
             data-testid="opencode-base-url-input"
           />
         </div>
@@ -233,7 +238,7 @@ function AgentSettingsCard({
             value={opencodeProviderName}
             onChange={(e) => setOpencodeProviderName(e.target.value)}
             placeholder="e.g. My Custom Provider"
-            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            className={formControlClass}
             data-testid="opencode-provider-name-input"
           />
         </div>
@@ -252,7 +257,7 @@ function AgentSettingsCard({
             id={`model-input-${agent.id}`}
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            className={formControlClass}
             data-testid={`model-input-${agent.id}`}
           >
             <option value="">Default ({PLATFORM_AI_MODELS.find((m) => m.isDefault)?.label ?? 'auto'})</option>
@@ -269,7 +274,7 @@ function AgentSettingsCard({
             value={model}
             onChange={(e) => setModel(e.target.value)}
             placeholder={modelPlaceholder}
-            className="w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border"
+            className={formControlClass}
             data-testid={`model-input-${agent.id}`}
           />
         )}
@@ -308,7 +313,7 @@ function AgentSettingsCard({
         <button
           onClick={handleSave}
           disabled={saving || resetting || !hasChanges}
-          className={`py-2 px-4 rounded-md border-none bg-accent text-fg-on-accent text-sm font-medium cursor-pointer min-h-[40px] ${
+          className={`py-2 px-4 rounded-md border-none bg-accent text-fg-on-accent text-sm font-medium cursor-pointer min-h-[44px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
             saving || resetting || !hasChanges ? 'opacity-50' : 'opacity-100'
           }`}
           data-testid={`save-settings-${agent.id}`}
@@ -318,7 +323,7 @@ function AgentSettingsCard({
         <button
           onClick={handleReset}
           disabled={saving || resetting}
-          className={`py-2 px-4 rounded-md border border-border-default bg-transparent text-fg-muted text-sm font-medium cursor-pointer min-h-[40px] ${
+          className={`py-2 px-4 rounded-md border border-border-default bg-transparent text-fg-muted text-sm font-medium cursor-pointer min-h-[44px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
             saving || resetting ? 'opacity-60' : 'opacity-100'
           }`}
           data-testid={`reset-settings-${agent.id}`}
