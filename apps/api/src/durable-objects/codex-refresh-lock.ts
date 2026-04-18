@@ -10,6 +10,21 @@
  * Trust boundary: the route handler (`codex-refresh.ts`) verifies the JWT callback token
  * and resolves userId from D1 before forwarding to this DO. The DO trusts the caller-supplied
  * userId — it does not re-verify auth.
+ *
+ * Security notes:
+ *  - Stale-refresh branch (CRITICAL #1): NEVER returns `refresh_token`. A caller that submits
+ *    a non-matching refresh token did not prove possession of the current one, so we must not
+ *    hand it out. We do return the short-lived `access_token` so a legitimate concurrent caller
+ *    can continue operating without a full re-auth.
+ *  - Project vs user fallback (HIGH #2): if `projectId` is supplied AND any project-scoped row
+ *    exists for (userId, projectId) — active OR inactive — we do NOT fall back to the
+ *    user-scoped row. An inactive project row means the user explicitly deactivated
+ *    project-scope in favor of something else; rotating the user-scoped row would affect
+ *    every other project inheriting it.
+ *  - Rate limiting (MEDIUM #5): token-bucket state is held in DO storage (strongly consistent,
+ *    atomic increments). KV read-modify-write is not safe for enforcement under concurrency.
+ *  - Scope validation (MEDIUM #6): enabled by default with a conservative allowlist of Codex
+ *    OAuth scopes. Unexpected scopes block the refresh with 502 instead of a warn-only log.
  */
 import { DurableObject } from 'cloudflare:workers';
 
@@ -24,8 +39,8 @@ interface RefreshRequestPayload {
   userId: string;
   /**
    * Optional projectId — when set, the DO prefers the project-scoped credential
-   * row, falling back to the user-scoped row. This preserves scope when rotating
-   * OAuth tokens so a project-scoped credential doesn't collapse to user-scoped.
+   * row. Preserves scope when rotating OAuth tokens so a project-scoped credential
+   * doesn't collapse to user-scoped.
    */
   projectId?: string | null;
 }
@@ -38,7 +53,19 @@ interface CodexRefreshEnv {
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string;
   CODEX_REFRESH_LOCK_TIMEOUT_MS?: string;
   CODEX_CLIENT_ID?: string;
+  /**
+   * Comma-separated OAuth scopes that the Codex refresh upstream is allowed to return.
+   * Empty string disables scope validation. Unset uses DEFAULT_EXPECTED_SCOPES.
+   */
   CODEX_EXPECTED_SCOPES?: string;
+  /**
+   * Rate limit: max refresh requests per user per window. Defaults to 30.
+   */
+  RATE_LIMIT_CODEX_REFRESH_PER_HOUR?: string;
+  /**
+   * Rate limit window in seconds. Defaults to 3600 (1 hour).
+   */
+  RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS?: string;
 }
 
 const DEFAULT_UPSTREAM_URL = 'https://auth.openai.com/oauth/token';
@@ -50,6 +77,25 @@ const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
  * This is a public client_id registered with OpenAI — not a secret.
  */
 const DEFAULT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+/**
+ * Default expected scopes for the Codex OAuth refresh flow. OpenAI's Codex
+ * OAuth grants typically include `openid profile email offline_access` — any
+ * upstream response containing additional/unknown scopes is treated as a
+ * potential scope escalation or provider drift and blocked with 502.
+ *
+ * Override via CODEX_EXPECTED_SCOPES (comma-separated). Setting the env var
+ * to an empty string disables validation.
+ */
+const DEFAULT_EXPECTED_SCOPES = 'openid,profile,email,offline_access';
+const DEFAULT_RATE_LIMIT = 30;
+const DEFAULT_RATE_WINDOW_SECONDS = 3600;
+
+interface RateLimitState {
+  /** Start of the current window in unix seconds. */
+  windowStart: number;
+  /** Count of requests in the current window. */
+  count: number;
+}
 
 export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   /**
@@ -102,6 +148,24 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       );
     }
 
+    // Atomic per-user rate limit (MEDIUM #5) — DO state is strongly consistent,
+    // so increments cannot race the way KV read-modify-write can.
+    const rateLimitResult = await this.enforceRateLimit();
+    if (!rateLimitResult.allowed) {
+      const retryAfter = Math.max(1, rateLimitResult.resetAt - Math.floor(Date.now() / 1000));
+      log.warn('codex_refresh.rate_limited', { userId });
+      return new Response(
+        JSON.stringify({ error: 'rate_limit_exceeded', message: 'Too many refresh requests' }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': retryAfter.toString(),
+          },
+        }
+      );
+    }
+
     // Derive encryption key from DO env (not from caller).
     const encryptionKey = getCredentialEncryptionKey(this.env);
 
@@ -140,13 +204,22 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     const storedRefreshToken = tokens?.refresh_token;
 
     if (refreshToken !== storedRefreshToken) {
-      // Stale token — another workspace already refreshed.
-      // Return the latest tokens from DB.
+      // CRITICAL #1 fix: stale token path.
+      // Another workspace (owned by the same user) rotated the refresh token
+      // before this caller's request arrived. The caller did NOT prove possession
+      // of the current refresh token, so we MUST NOT return it — doing so would
+      // allow any workspace with a stolen/expired refresh token to obtain the
+      // current rotating credential.
+      //
+      // We still return the short-lived `access_token` and `id_token` so a
+      // concurrent legitimate caller can continue operating. The caller can
+      // obtain a new refresh token only via a full re-auth flow.
       return new Response(
         JSON.stringify({
           access_token: tokens?.access_token ?? null,
-          refresh_token: storedRefreshToken ?? null,
           id_token: tokens?.id_token ?? null,
+          // refresh_token intentionally omitted (CRITICAL #1)
+          stale: true,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       );
@@ -217,9 +290,17 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // Parse new tokens from OpenAI response.
     const newTokens: Record<string, unknown> = await upstreamResponse.json();
 
-    // Scope validation — warn (not block) when upstream returns unexpected scopes.
-    // This catches scope escalation or drift without breaking legacy tokens.
-    this.validateUpstreamScopes(newTokens, userId);
+    // Scope validation (MEDIUM #6) — block instead of warn-only when upstream returns
+    // unexpected scopes. A scope change signals either provider drift or an escalation
+    // attempt; either way we refuse to store the new tokens and return 502 so the
+    // caller stays on the previous (validated) credential.
+    const scopeResult = this.validateUpstreamScopes(newTokens, userId);
+    if (!scopeResult.ok) {
+      return new Response(
+        JSON.stringify({ error: 'upstream_unexpected_scope', message: scopeResult.reason }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Update the stored auth.json with new tokens.
     if (!storedAuth.tokens || typeof storedAuth.tokens !== 'object') {
@@ -253,52 +334,105 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   }
 
   /**
-   * Validate scopes in the upstream token response.
-   * Logs a warning if unexpected scopes are present — does NOT block the refresh.
-   * This catches scope escalation or drift without breaking backward compatibility
-   * with legacy tokens that may not include a scope field.
+   * Atomically increment the per-user rate limit counter in DO storage.
+   * Returns `{ allowed: false }` once the configured limit for the current
+   * window is exceeded.
    */
-  private validateUpstreamScopes(tokens: Record<string, unknown>, userId: string): void {
+  private async enforceRateLimit(): Promise<{ allowed: boolean; resetAt: number }> {
+    const limit = parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_PER_HOUR || '', 10) || DEFAULT_RATE_LIMIT;
+    const windowSeconds = parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS || '', 10) || DEFAULT_RATE_WINDOW_SECONDS;
+    const now = Math.floor(Date.now() / 1000);
+    const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
+    const resetAt = currentWindowStart + windowSeconds;
+
+    const stored = (await this.ctx.storage.get<RateLimitState>('rate-limit')) ?? null;
+    const state: RateLimitState =
+      stored && stored.windowStart === currentWindowStart
+        ? stored
+        : { windowStart: currentWindowStart, count: 0 };
+
+    if (state.count >= limit) {
+      return { allowed: false, resetAt };
+    }
+
+    state.count += 1;
+    await this.ctx.storage.put('rate-limit', state);
+    return { allowed: true, resetAt };
+  }
+
+  /**
+   * Validate scopes in the upstream token response.
+   *
+   * Default behavior (MEDIUM #6 fix): enforce a conservative allowlist derived from
+   * known Codex OAuth flow scopes. Unexpected scopes cause the refresh to fail with
+   * 502 — the previous token remains valid so the caller can continue operating
+   * until an admin investigates.
+   *
+   * Override with CODEX_EXPECTED_SCOPES (comma-separated). Empty string disables
+   * validation entirely (escape hatch for provider rollouts that add new scopes).
+   */
+  private validateUpstreamScopes(
+    tokens: Record<string, unknown>,
+    userId: string
+  ): { ok: true } | { ok: false; reason: string } {
     const scope = tokens.scope;
     if (scope === undefined || scope === null) {
       // No scope in response — common for legacy tokens. Nothing to validate.
-      return;
+      return { ok: true };
     }
 
     if (typeof scope !== 'string') {
-      log.warn('codex_refresh.scope_validation', {
+      log.warn('codex_refresh.scope_validation_nonstring', {
         userId,
         scopeType: typeof scope,
-        message: 'Non-string scope in upstream response',
       });
-      return;
+      return { ok: false, reason: 'Upstream scope is not a string' };
     }
 
-    // Parse expected scopes from env (comma-separated) or use empty set (accept all).
+    // Read configured scopes. Distinguish "env var unset" (use default) from
+    // "env var set to empty string" (validation disabled).
     const expectedScopesEnv = this.env.CODEX_EXPECTED_SCOPES;
-    if (!expectedScopesEnv) {
-      // No expected scopes configured — skip validation (accept all).
-      return;
+    const rawScopes =
+      expectedScopesEnv === undefined
+        ? DEFAULT_EXPECTED_SCOPES
+        : expectedScopesEnv;
+    if (rawScopes === '') {
+      // Explicitly disabled.
+      return { ok: true };
     }
 
-    const expectedScopes = new Set(expectedScopesEnv.split(',').map(s => s.trim()).filter(Boolean));
+    const expectedScopes = new Set(rawScopes.split(',').map((s) => s.trim()).filter(Boolean));
     const returnedScopes = scope.split(' ').filter(Boolean);
-    const unexpected = returnedScopes.filter(s => !expectedScopes.has(s));
+    const unexpected = returnedScopes.filter((s) => !expectedScopes.has(s));
 
     if (unexpected.length > 0) {
-      log.warn('codex_refresh.unexpected_scopes', {
+      log.warn('codex_refresh.unexpected_scopes_blocked', {
         userId,
         expectedScopes: [...expectedScopes].join(','),
         returnedScopes: returnedScopes.join(' '),
         unexpectedScopes: unexpected.join(','),
       });
+      return {
+        ok: false,
+        reason: `Upstream returned unexpected scope(s): ${unexpected.join(',')}`,
+      };
     }
+
+    return { ok: true };
   }
 
   /**
    * Look up the active openai-codex oauth-token credential for the given user.
-   * When projectId is provided, prefers the project-scoped row so scope is preserved
-   * across rotation. Falls back to the user-scoped row when no project match exists.
+   *
+   * HIGH #2 fix: when `projectId` is supplied, we look for a project-scoped row first.
+   *  - Active project row found → use it.
+   *  - Inactive project row found (or any row exists for the project) → return null.
+   *    We do NOT fall back to user-scoped, because an inactive row indicates the user
+   *    explicitly deactivated this credential (e.g., via `autoActivate: true` on
+   *    another project row). Rotating the user-scoped row would change the credential
+   *    for every other project inheriting it.
+   *  - No project row at all → fall back to the user-scoped row (preserves the
+   *    inheritance model — a project without its own override inherits the user default).
    */
   private async getStoredCredential(
     userId: string,
@@ -307,19 +441,32 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     const db = this.env.DATABASE;
 
     if (projectId) {
-      const projectResult = await db
+      // Fetch ANY project-scoped row (active or inactive) to decide fallback behavior.
+      const projectAny = await db
         .prepare(
-          `SELECT id, encrypted_token, iv FROM credentials
+          `SELECT id, encrypted_token, iv, is_active FROM credentials
            WHERE user_id = ? AND project_id = ? AND credential_type = 'agent-api-key'
              AND agent_type = 'openai-codex' AND credential_kind = 'oauth-token'
-             AND is_active = 1
            LIMIT 1`
         )
         .bind(userId, projectId)
-        .first<{ id: string; encrypted_token: string; iv: string }>();
+        .first<{ id: string; encrypted_token: string; iv: string; is_active: number }>();
 
-      if (projectResult) {
-        return { id: projectResult.id, encryptedToken: projectResult.encrypted_token, iv: projectResult.iv };
+      if (projectAny) {
+        if (projectAny.is_active === 1) {
+          return {
+            id: projectAny.id,
+            encryptedToken: projectAny.encrypted_token,
+            iv: projectAny.iv,
+          };
+        }
+        // Project-scoped row exists but is inactive — do NOT fall back.
+        // User explicitly deactivated; refusing forces re-auth at project scope.
+        log.warn('codex_refresh.inactive_project_credential_no_fallback', {
+          userId,
+          projectId,
+        });
+        return null;
       }
     }
 
