@@ -136,7 +136,7 @@ Both project-scoped and user-scoped Codex refresh paths were exercised on stagin
 
 ## References
 
-- Task file: `tasks/active/2026-04-18-project-credentials-security-hardening.md`
+- Task file: `tasks/archive/2026-04-18-project-credentials-security-hardening.md`
 - Rule 02 (quality gates): source-contract tests banned
 - Rule 11 (fail-fast patterns): identity validation at boundaries
 - Rule 25 (review merge gate): CRITICAL/HIGH block merge
