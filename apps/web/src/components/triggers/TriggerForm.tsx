@@ -3,6 +3,7 @@
  * Follows SettingsDrawer pattern (min(560px, 95vw)).
  */
 import type {
+  AgentProfile,
   CreateTriggerRequest,
   TriggerResponse,
   UpdateTriggerRequest,
@@ -18,7 +19,7 @@ import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
-import { createTrigger, updateTrigger } from '../../lib/api';
+import { createTrigger, listAgentProfiles, updateTrigger } from '../../lib/api';
 import { useProjectContext } from '../../pages/ProjectContext';
 import { SchedulePicker } from './SchedulePicker';
 
@@ -82,9 +83,18 @@ export const TriggerForm: FC<TriggerFormProps> = ({
   const [maxConcurrent, setMaxConcurrent] = useState(1);
   const [vmSizeOverride, setVmSizeOverride] = useState('');
   const [taskMode, setTaskMode] = useState<'task' | 'conversation'>('task');
+  const [agentProfileId, setAgentProfileId] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [, setCronDescription] = useState('');
+
+  // Agent profiles for the dropdown
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  useEffect(() => {
+    if (open && projectId) {
+      void listAgentProfiles(projectId).then(setProfiles).catch(() => setProfiles([]));
+    }
+  }, [open, projectId]);
 
   // Reset form when trigger changes or panel opens
   useEffect(() => {
@@ -99,6 +109,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
         setMaxConcurrent(editTrigger.maxConcurrent);
         setVmSizeOverride(editTrigger.vmSizeOverride ?? '');
         setTaskMode(editTrigger.taskMode);
+        setAgentProfileId(editTrigger.agentProfileId ?? '');
         setAdvancedOpen(false);
       } else {
         setName('');
@@ -110,6 +121,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
         setMaxConcurrent(1);
         setVmSizeOverride('');
         setTaskMode('task');
+        setAgentProfileId('');
         setAdvancedOpen(false);
       }
     }
@@ -158,6 +170,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
           maxConcurrent,
           vmSizeOverride: vmSizeOverride || null,
           taskMode,
+          agentProfileId: agentProfileId || null,
         };
         await updateTrigger(projectId, editTrigger.id, data);
         toast.success('Trigger updated');
@@ -173,6 +186,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
           maxConcurrent,
           vmSizeOverride: vmSizeOverride || undefined,
           taskMode,
+          agentProfileId: agentProfileId || undefined,
         };
         await createTrigger(projectId, data);
         toast.success('Trigger created');
@@ -354,6 +368,26 @@ export const TriggerForm: FC<TriggerFormProps> = ({
                     onChange={(e) => setMaxConcurrent(Math.min(DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT, Math.max(1, parseInt(e.target.value, 10) || 1)))}
                     className={`w-20 px-2 py-1.5 rounded-md border border-border-default bg-surface text-fg-primary text-sm ${FOCUS_RING}`}
                   />
+                </div>
+
+                {/* Agent Profile */}
+                <div>
+                  <label htmlFor="agent-profile" className="block text-sm text-fg-primary mb-1">
+                    Agent Profile
+                  </label>
+                  <select
+                    id="agent-profile"
+                    value={agentProfileId}
+                    onChange={(e) => setAgentProfileId(e.target.value)}
+                    className={`px-2 py-1.5 rounded-md border border-border-default bg-surface text-fg-primary text-sm ${FOCUS_RING}`}
+                  >
+                    <option value="">Project default</option>
+                    {profiles.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}{p.model ? ` (${p.model})` : ''}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* VM size */}

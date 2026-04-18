@@ -3,6 +3,8 @@ import { AGENT_CATALOG, AGENT_PERMISSION_MODE_LABELS,VALID_PERMISSION_MODES } fr
 import { Button, Dialog,Input } from '@simple-agent-manager/ui';
 import { type FC, useEffect,useState } from 'react';
 
+import { ModelSelect } from '../ModelSelect';
+
 /** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
 const DEFAULT_AGENT_TYPE = AGENT_CATALOG[0]!.id;
 
@@ -180,7 +182,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
             <span className="text-sm text-fg-muted">Agent Type</span>
             <select
               value={agentType}
-              onChange={(e) => setAgentType(e.target.value)}
+              onChange={(e) => { setAgentType(e.target.value); setModel(''); }}
               disabled={saving}
               className={selectClasses}
             >
@@ -193,15 +195,16 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
           </label>
 
           {/* Model */}
-          <label className="grid gap-1.5">
+          <div className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Model</span>
-            <Input
+            <ModelSelect
+              agentType={agentType}
               value={model}
-              onChange={(e) => setModel(e.currentTarget.value)}
-              placeholder="e.g. claude-opus-4-6"
+              onChange={setModel}
               disabled={saving}
+              placeholder="Select or type a model..."
             />
-          </label>
+          </div>
 
           {/* Permission Mode */}
           <label className="grid gap-1.5">
