@@ -323,7 +323,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
   });
 
   it('returns project-scoped credential when projectId is provided and project row exists', async () => {
-    // First query: project-scoped lookup returns a credential
+    // First query: project-scoped lookup returns an active credential
     mockDB.limit
       .mockResolvedValueOnce([
         {
@@ -333,6 +333,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
           encryptedToken: 'enc',
           iv: 'iv',
           credentialKind: 'api-key',
+          isActive: true,
         },
       ]);
 
@@ -419,6 +420,46 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'test-key',
       'p1',
     );
+    expect(result).toBeNull();
+  });
+
+  // Regression: HIGH #2 (runtime path). An inactive project-scoped row must NOT
+  // silently fall through to the user-scoped credential — doing so would leak
+  // a user-wide credential into project execution when the user had explicitly
+  // deactivated it at project scope.
+  it('returns null (blocks user fallback) when project row exists but is inactive', async () => {
+    mockDB.limit.mockResolvedValueOnce([
+      {
+        id: 'c-inactive',
+        userId: 'u1',
+        projectId: 'p1',
+        encryptedToken: 'enc',
+        iv: 'iv',
+        credentialKind: 'oauth-token',
+        isActive: false,
+      },
+    ]);
+    // Even if a user-scoped row exists, it must not be returned.
+    mockDB.limit.mockResolvedValueOnce([
+      {
+        id: 'c-user',
+        userId: 'u1',
+        projectId: null,
+        encryptedToken: 'enc',
+        iv: 'iv',
+        credentialKind: 'oauth-token',
+        isActive: true,
+      },
+    ]);
+
+    const result = await getDecryptedAgentKey(
+      mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
+      'u1',
+      'claude-code',
+      'test-key',
+      'p1',
+    );
+
     expect(result).toBeNull();
   });
 });

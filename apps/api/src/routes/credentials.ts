@@ -572,7 +572,12 @@ export async function getDecryptedAgentKey(
   encryptionKey: string,
   projectId?: string | null
 ): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null> {
-  // 1. Try project-scoped credential first (most specific)
+  // 1. Try project-scoped credential first (most specific).
+  //    SECURITY (HIGH #2, runtime path): We must NOT fall through to the user-scoped
+  //    credential when an explicitly provisioned project row exists but is inactive.
+  //    Falling through would silently cross scope boundaries and leak user-scoped
+  //    credentials into project execution. Query ANY row (active or inactive) first;
+  //    block fallback when the row exists but is inactive.
   if (projectId) {
     const projectCreds = await db
       .select()
@@ -582,20 +587,29 @@ export async function getDecryptedAgentKey(
           eq(schema.credentials.userId, userId),
           eq(schema.credentials.projectId, projectId),
           eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, agentType),
-          eq(schema.credentials.isActive, true)
+          eq(schema.credentials.agentType, agentType)
         )
       )
       .limit(1);
 
     const projectCred = projectCreds[0];
     if (projectCred) {
-      const credential = await decrypt(projectCred.encryptedToken, projectCred.iv, encryptionKey);
-      return {
-        credential,
-        credentialKind: projectCred.credentialKind as CredentialKind,
-        credentialSource: 'project',
-      };
+      if (projectCred.isActive) {
+        const credential = await decrypt(
+          projectCred.encryptedToken,
+          projectCred.iv,
+          encryptionKey
+        );
+        return {
+          credential,
+          credentialKind: projectCred.credentialKind as CredentialKind,
+          credentialSource: 'project',
+        };
+      }
+      // Project-scoped row exists but is inactive — refuse to fall through.
+      // User explicitly deactivated; caller must re-activate or delete the row
+      // to opt back into user-scoped inheritance.
+      return null;
     }
   }
 
