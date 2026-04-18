@@ -46,6 +46,7 @@ import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
 import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { TaskDetail } from './pages/TaskDetail';
+import { TrialChatGateHarness } from './pages/TrialChatGateHarness';
 import { Try } from './pages/Try';
 import { TryDiscovery } from './pages/TryDiscovery';
 import { UiStandards } from './pages/UiStandards';
@@ -75,6 +76,8 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/try" element={<Try />} />
           <Route path="/try/:trialId" element={<TryDiscovery />} />
+          {/* Harness for Playwright audits — mounts trial components with mock data */}
+          <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
 
           {/* Protected routes with AppShell (persistent navigation) */}
           <Route element={<ProtectedLayout />}>
