@@ -32,12 +32,24 @@ For project-scope overrides, the Scaleway fallback block is correctly suppressed
 
 **Fix**: Extract top-level sections (general info, deployment, scaling, agent defaults, agent credentials, danger zone) into sibling components under `apps/web/src/components/project-settings/`. Keep `ProjectSettings.tsx` as a thin composition + data-loading orchestrator.
 
+### Finding 3: `docs/architecture/credential-security.md` partial-index SQL block doesn't match migration
+
+The architecture doc (`docs/architecture/credential-security.md:337-344`) shows example SQL for the partial unique indexes that does not match what migration 0042 actually creates. Per `.claude/rules/01-doc-sync.md`, code is the source of truth and stale docs mislead future maintainers.
+
+**Mismatch**:
+- Index names: doc uses `credentials_user_scope_idx` / `credentials_project_scope_idx`; migration uses `idx_credentials_user_agent_kind_user_scope` / `idx_credentials_user_agent_kind_project_scope`
+- Column lists: doc shows `credential_type, provider`; migration uses `agent_type` (no `provider`)
+- WHERE predicate: migration also filters `credential_type = 'agent-api-key'`, doc does not
+
+**Fix**: Replace the SQL block in `credential-security.md:337-344` with a verbatim copy (or minimal rewrite that preserves fidelity) of `apps/api/src/db/migrations/0042_project_scoped_credentials.sql:11-17`.
+
 ## Acceptance Criteria
 
 - [ ] `opencodeProvider` forwarded to `AgentKeyCard` in `ProjectAgentCredentialsSection`
 - [ ] OpenCode project override shows correct provider-matched key label and help text
 - [ ] `ProjectSettings.tsx` under 500 lines after extraction
 - [ ] Extracted child components import cleanly; no orphaned state/props
+- [ ] `credential-security.md` partial-index SQL matches migration 0042 verbatim
 - [ ] Existing tests pass; new Playwright audit (once filed) covers both user and project scopes
 
 ## References
