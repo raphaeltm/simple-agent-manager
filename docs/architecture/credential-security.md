@@ -349,10 +349,12 @@ A user may hold both a user-scoped credential (`project_id IS NULL`) and a proje
 
 `getDecryptedAgentKey(db, userId, agentType, key, projectId?)` in `apps/api/src/routes/credentials.ts` resolves in order:
 
-1. **Project** (if `projectId` is provided and a project-scoped row exists)
-2. **User** (row with `project_id IS NULL`)
+1. **Project** (if `projectId` is provided and an **active** project-scoped row exists)
+2. **User** (row with `project_id IS NULL` and `is_active = 1`)
 3. **Platform** (entries in `platform_credentials`)
 4. **null** (no credential available — agent start fails)
+
+**Inactive project row blocks fallback (HIGH #2 invariant).** If a project-scoped row exists but has `is_active = 0`, resolution returns `null` — it does **NOT** fall through to the user-scoped tier. This prevents implicit credential rotation of the user-scoped row when the project-scoped row has been deactivated (e.g., via `autoActivate: true` on another project). The same guard applies in both credential-resolution paths: `getDecryptedAgentKey` (runtime credential delivery) and `CodexRefreshLock.getStoredCredential` (OAuth refresh). See `.claude/rules/28-credential-resolution-fallback-tests.md` for the mandatory behavioral tests covering every branch.
 
 The workspace runtime callback in `apps/api/src/routes/workspaces/runtime.ts` fetches the workspace's `projectId` and forwards it to the resolver so VMs receive the correct scoped credential.
 

@@ -299,6 +299,60 @@ describe('Project Credentials Routes', () => {
       expect(deactivateSql).toContain('project_id = ?');
       expect(deactivateSql).not.toContain('project_id IS NULL');
     });
+
+    // Regression: MEDIUM #7 — project PUT must apply rateLimitCredentialUpdate.
+    // If the middleware is removed from this route, this test will fail because
+    // the request would pass through to 201 Created instead of being rejected
+    // with 429. The KV stub is overridden for this test only to simulate a
+    // previously-recorded count at the rate limit ceiling.
+    it('returns 429 when CREDENTIAL_UPDATE rate limit is exceeded (MEDIUM #7)', async () => {
+      // Seed KV to return a record at the current limit for any credential-update key.
+      // The rate-limit middleware uses a unary windowStart that we cannot easily
+      // synchronize with, so we match on key prefix and always return count >= 30.
+      const cappedKv = {
+        get: vi.fn().mockImplementation(async (key: string, type?: string) => {
+          if (typeof key === 'string' && key.startsWith('ratelimit:credential-update:')) {
+            const windowStart = Math.floor(Math.floor(Date.now() / 1000) / 3600) * 3600;
+            // Match the RateLimitEntry shape returned by KV.get(..., 'json').
+            if (type === 'json') {
+              return { count: 30, windowStart };
+            }
+          }
+          return null;
+        }),
+        put: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined),
+      };
+      const cappedEnv: Env = {
+        ...env,
+        KV: cappedKv as unknown as Env['KV'],
+      } as Env;
+
+      // Reset the shared database.batch mock so we can prove this specific
+      // request did NOT reach the write path.
+      database.batch.mockClear();
+
+      const body: SaveAgentCredentialRequest = {
+        agentType: 'claude-code',
+        credentialKind: 'api-key',
+        credential: 'sk-ant-api03-some-valid-looking-key-1234567890',
+      };
+      const res = await app.request(
+        '/api/projects/proj-1/credentials',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        cappedEnv,
+      );
+
+      expect(res.status).toBe(429);
+      // Retry-After is set by the middleware on rate-limit breach.
+      expect(res.headers.get('Retry-After')).not.toBeNull();
+      // No DB write path should have been reached for this request.
+      expect(database.batch).not.toHaveBeenCalled();
+    });
   });
 
   describe('DELETE /:id/credentials/:agentType/:credentialKind', () => {

@@ -56,6 +56,10 @@ Every new button, link, form, or interactive element MUST ship with at least one
 
 A test that only checks the element exists in the DOM is insufficient. The test must exercise what happens when the user interacts with it.
 
+### Credential Resolution Test Requirements
+
+For any function that resolves credentials from a `(userId, projectId?)` tuple — or that compares a caller-supplied credential against a stored one — behavioral tests MUST cover every branch of the resolution (active project → active user → platform → null) AND the "inactive project row does NOT fall through" invariant. See `.claude/rules/28-credential-resolution-fallback-tests.md` for the exact required test matrix. Credential-resolution source-contract tests (`readFileSync` + `toContain`) are explicitly prohibited for this class of code.
+
 ## Regression Test Requirements (Mandatory for Bug Fixes)
 
 When fixing a bug, you MUST write **two categories of tests**:
