@@ -202,7 +202,7 @@ describe('HetznerProvider', () => {
       await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
     });
 
-    it('should use default image when not specified', async () => {
+    it('should use docker-ce marketplace image by default', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({
           server: createMockServer({ id: 1, name: 'test', status: 'initializing' }),
@@ -210,6 +210,19 @@ describe('HetznerProvider', () => {
       );
 
       await provider.createVM(vmConfig);
+
+      const body = JSON.parse(((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit).body as string);
+      expect(body.image).toBe('docker-ce');
+    });
+
+    it('should honor explicit image override (e.g. rollback to ubuntu-24.04)', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          server: createMockServer({ id: 1, name: 'test', status: 'initializing' }),
+        }), { status: 200 }),
+      );
+
+      await provider.createVM({ ...vmConfig, image: 'ubuntu-24.04' });
 
       const body = JSON.parse(((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit).body as string);
       expect(body.image).toBe('ubuntu-24.04');

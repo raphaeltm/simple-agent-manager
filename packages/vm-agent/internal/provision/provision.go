@@ -7,6 +7,8 @@ package provision
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,6 +20,15 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/eventstore"
 )
+
+// eventID returns a random hex ID for eventstore primary keys.
+// Using an empty ID collides with INSERT OR IGNORE and silently drops
+// subsequent events, which masked phase timings on the first staging test.
+func eventID() string {
+	buf := make([]byte, 8)
+	_, _ = rand.Read(buf)
+	return hex.EncodeToString(buf)
+}
 
 // Status tracks the progress of system provisioning.
 type Status struct {
@@ -114,35 +125,43 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		},
 	}
 
-	logStep := func(name, stepStatus, msg string) {
+	logStep := func(name, stepStatus, msg string, durationMs int64) {
 		slog.Info("provision: "+msg, "step", name, "status", stepStatus)
 		if es != nil {
+			detail := map[string]interface{}{
+				"step":   name,
+				"status": stepStatus,
+			}
+			if durationMs > 0 {
+				detail["durationMs"] = durationMs
+			}
 			es.Append(eventstore.EventRecord{
-				Level:   "info",
-				Type:    "provision." + name,
-				Message: msg,
-				Detail: map[string]interface{}{
-					"step":   name,
-					"status": stepStatus,
-				},
+				ID:        eventID(),
+				Level:     "info",
+				Type:      "provision." + name,
+				Message:   msg,
+				Detail:    detail,
+				CreatedAt: time.Now().UTC().Format(time.RFC3339),
 			})
 		}
 	}
 
 	runStep := func(name string, fn func(context.Context) error) error {
 		status.setStep(name, "running")
-		logStep(name, "started", "Starting "+name)
+		logStep(name, "started", "Starting "+name, 0)
 		start := time.Now()
 
 		if err := fn(ctx); err != nil {
+			elapsed := time.Since(start)
 			status.setStep(name, "failed")
 			status.setStepError(name, err.Error())
-			logStep(name, "failed", fmt.Sprintf("%s failed after %s: %s", name, time.Since(start).Round(time.Millisecond), err))
+			logStep(name, "failed", fmt.Sprintf("%s failed after %s: %s", name, elapsed.Round(time.Millisecond), err), elapsed.Milliseconds())
 			return fmt.Errorf("provision step %s failed: %w", name, err)
 		}
 
+		elapsed := time.Since(start)
 		status.setStep(name, "completed")
-		logStep(name, "completed", fmt.Sprintf("%s completed in %s", name, time.Since(start).Round(time.Millisecond)))
+		logStep(name, "completed", fmt.Sprintf("%s completed in %s", name, elapsed.Round(time.Millisecond)), elapsed.Milliseconds())
 		return nil
 	}
 
@@ -218,15 +237,17 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 	go func() {
 		defer pullWg.Done()
 		status.setStep("image-prepull", "running")
-		logStep("image-prepull", "started", "Starting base image pre-pull (background)")
+		logStep("image-prepull", "started", "Starting base image pre-pull (background)", 0)
 		start := time.Now()
 		if err := pullBaseImage(ctx); err != nil {
+			elapsed := time.Since(start)
 			status.setStep("image-prepull", "failed")
 			status.setStepError("image-prepull", err.Error())
-			logStep("image-prepull", "failed", fmt.Sprintf("Image pre-pull failed after %s: %s", time.Since(start).Round(time.Millisecond), err))
+			logStep("image-prepull", "failed", fmt.Sprintf("Image pre-pull failed after %s: %s", elapsed.Round(time.Millisecond), err), elapsed.Milliseconds())
 		} else {
+			elapsed := time.Since(start)
 			status.setStep("image-prepull", "completed")
-			logStep("image-prepull", "completed", fmt.Sprintf("Image pre-pull completed in %s", time.Since(start).Round(time.Millisecond)))
+			logStep("image-prepull", "completed", fmt.Sprintf("Image pre-pull completed in %s", elapsed.Round(time.Millisecond)), elapsed.Milliseconds())
 		}
 	}()
 
@@ -260,8 +281,8 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 
 	status.Phase = "completed"
 	status.CompletedAt = time.Now()
-	totalDuration := time.Since(status.StartedAt).Round(time.Millisecond)
-	logStep("all", "completed", fmt.Sprintf("System provisioning completed in %s", totalDuration))
+	totalElapsed := time.Since(status.StartedAt)
+	logStep("all", "completed", fmt.Sprintf("System provisioning completed in %s", totalElapsed.Round(time.Millisecond)), totalElapsed.Milliseconds())
 
 	return status, nil
 }

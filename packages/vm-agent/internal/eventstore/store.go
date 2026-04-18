@@ -82,6 +82,7 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
 		CREATE INDEX IF NOT EXISTS idx_events_workspace ON events(workspace_id, created_at);
 		CREATE INDEX IF NOT EXISTS idx_events_level ON events(level, created_at);
+		CREATE INDEX IF NOT EXISTS idx_events_type_created ON events(type, created_at);
 	`)
 	return err
 }
@@ -131,6 +132,24 @@ func (s *Store) ListWorkspace(workspaceID string, limit int) ([]EventRecord, err
 		`SELECT id, node_id, workspace_id, level, type, message, detail, created_at
 		 FROM events WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?`,
 		workspaceID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEvents(rows)
+}
+
+// ListByTypePrefix returns events whose type starts with the given prefix, oldest first.
+// Used by the debug package to surface provisioning step timings in chronological order.
+func (s *Store) ListByTypePrefix(prefix string, limit int) ([]EventRecord, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.Query(
+		`SELECT id, node_id, workspace_id, level, type, message, detail, created_at
+		 FROM events WHERE type LIKE ? ORDER BY created_at ASC LIMIT ?`,
+		prefix+"%", limit,
 	)
 	if err != nil {
 		return nil, err

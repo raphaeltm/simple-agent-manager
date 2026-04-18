@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/eventstore"
 	"github.com/workspace/vm-agent/internal/logreader"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
@@ -108,6 +110,13 @@ func (s *Server) handleDebugPackage(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("debug-package: resourcemon checkpoint failed", "error", err)
 		}
 		addFileToTar(tw, s.resourceMonitor.DBPath(), fmt.Sprintf("metrics-%s.db", nodeID))
+	}
+
+	// 9b. Provisioning timings — human-readable extraction from the eventstore
+	if s.eventStore != nil {
+		if content := buildProvisioningTimings(s.eventStore); content != "" {
+			addStringToTar(tw, "provisioning-timings.txt", content)
+		}
 	}
 
 	// 10. Boot log entries
@@ -254,6 +263,120 @@ func addJSONToTar(tw *tar.Writer, archiveName string, data interface{}) {
 	}
 	if _, err := tw.Write(b); err != nil {
 		slog.Warn("debug-package: failed to write JSON to tar", "name", archiveName, "error", err)
+	}
+}
+
+// buildProvisioningTimings extracts provision step events from the eventstore
+// and returns a human-readable table showing per-step start/completion times
+// and durations, plus a total wall-clock summary.
+//
+// Returns "" if no provision events are present (e.g., agent restarted after
+// provisioning so the in-memory history has rolled). Returns an error message
+// embedded in the content on query failure so the debug package still surfaces
+// the problem rather than silently dropping the file.
+func buildProvisioningTimings(es *eventstore.Store) string {
+	events, err := es.ListByTypePrefix("provision.", 1000)
+	if err != nil {
+		return fmt.Sprintf("error querying provision events: %v\n", err)
+	}
+	if len(events) == 0 {
+		return ""
+	}
+
+	// Group events by step name. Each step may have a "started" event and a
+	// "completed"/"failed" event.
+	type stepTiming struct {
+		name       string
+		status     string
+		startedAt  string
+		endedAt    string
+		durationMs int64
+	}
+	steps := make(map[string]*stepTiming)
+	order := []string{}
+
+	for _, e := range events {
+		// Type format: "provision.<stepName>"
+		stepName := strings.TrimPrefix(e.Type, "provision.")
+		if stepName == "" {
+			continue
+		}
+		st, ok := steps[stepName]
+		if !ok {
+			st = &stepTiming{name: stepName}
+			steps[stepName] = st
+			order = append(order, stepName)
+		}
+		status, _ := e.Detail["status"].(string)
+		switch status {
+		case "started":
+			if st.startedAt == "" {
+				st.startedAt = e.CreatedAt
+			}
+		case "completed", "failed", "skipped":
+			st.status = status
+			st.endedAt = e.CreatedAt
+			if d, ok := e.Detail["durationMs"].(float64); ok {
+				st.durationMs = int64(d)
+			}
+		}
+	}
+
+	// `order` already reflects chronological order of first appearance
+	// because ListByTypePrefix returns events ASC by created_at.
+
+	var b strings.Builder
+	fmt.Fprintln(&b, "Provisioning step timings (extracted from eventstore)")
+	fmt.Fprintln(&b, "===================================================")
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "%-24s %-10s %-26s %-26s %12s\n", "STEP", "STATUS", "STARTED_AT", "ENDED_AT", "DURATION_MS")
+	fmt.Fprintln(&b, strings.Repeat("-", 104))
+
+	var total int64
+	var firstStart, lastEnd time.Time
+	for _, name := range order {
+		st := steps[name]
+		fmt.Fprintf(&b, "%-24s %-10s %-26s %-26s %12d\n",
+			st.name, st.status, st.startedAt, st.endedAt, st.durationMs)
+		total += st.durationMs
+		// Parse timestamps as time.Time to avoid subtle lexicographic bugs
+		// when mixed timezone offsets or formats are present.
+		if ft, err := time.Parse(time.RFC3339, st.startedAt); err == nil {
+			if firstStart.IsZero() || ft.Before(firstStart) {
+				firstStart = ft
+			}
+		}
+		if lt, err := time.Parse(time.RFC3339, st.endedAt); err == nil {
+			if lt.After(lastEnd) {
+				lastEnd = lt
+			}
+		}
+	}
+
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "Sum of per-step durations:   %d ms (%.2f s)\n", total, float64(total)/1000.0)
+	if !firstStart.IsZero() && !lastEnd.IsZero() {
+		wall := lastEnd.Sub(firstStart).Milliseconds()
+		fmt.Fprintf(&b, "Wall-clock (first→last):     %d ms (%.2f s)\n", wall, float64(wall)/1000.0)
+	}
+	return b.String()
+}
+
+// addStringToTar writes a string as a regular file entry in the tar archive.
+func addStringToTar(tw *tar.Writer, archiveName, content string) {
+	data := []byte(content)
+	header := &tar.Header{
+		Name:    archiveName,
+		Size:    int64(len(data)),
+		Mode:    0644,
+		ModTime: time.Now(),
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		slog.Warn("debug-package: failed to write tar header", "name", archiveName, "error", err)
+		return
+	}
+	if _, err := tw.Write(data); err != nil {
+		slog.Warn("debug-package: failed to write string to tar", "name", archiveName, "error", err)
 	}
 }
 

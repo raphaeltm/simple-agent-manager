@@ -67,6 +67,30 @@ func (r *Reporter) SetBroadcaster(b Broadcaster) {
 	r.broadcaster = b
 }
 
+// Phase wraps an operation with started/completed (or failed) log entries,
+// measuring wall-clock duration and emitting it in the detail field as
+// "duration_ms=...". The error returned by fn is propagated unchanged.
+//
+// Nil-safe: a nil *Reporter simply invokes fn with no logging.
+func (r *Reporter) Phase(step string, fn func() error) error {
+	if r == nil {
+		return fn()
+	}
+
+	r.Log(step, "started", "")
+	start := time.Now()
+	err := fn()
+	durationMs := time.Since(start).Milliseconds()
+	detail := fmt.Sprintf("duration_ms=%d", durationMs)
+
+	if err != nil {
+		r.Log(step, "failed", err.Error(), detail)
+		return err
+	}
+	r.Log(step, "completed", "", detail)
+	return nil
+}
+
 // Log sends a boot log entry to the control plane. It also broadcasts locally
 // to any connected WebSocket clients via the broadcaster (if set).
 //

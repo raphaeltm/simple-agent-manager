@@ -150,6 +150,9 @@ export interface Env {
   LOG_JOURNAL_MAX_RETENTION?: string;
   // Docker daemon DNS servers (comma-separated quoted IPs, default: "1.1.1.1", "8.8.8.8")
   DOCKER_DNS_SERVERS?: string;
+  // Hetzner base image override (e.g., "ubuntu-24.04" to roll back from the
+  // default "docker-ce" marketplace image). Only applies to Hetzner nodes.
+  HETZNER_BASE_IMAGE?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;
