@@ -10,8 +10,7 @@ import { SettingsContext } from './SettingsContext';
 const BASE_TABS = [
   { id: 'cloud-provider', label: 'Cloud Provider', path: 'cloud-provider' },
   { id: 'github', label: 'GitHub', path: 'github' },
-  { id: 'agent-keys', label: 'Agent Keys', path: 'agent-keys' },
-  { id: 'agent-config', label: 'Agent Config', path: 'agent-config' },
+  { id: 'agents', label: 'Agents', path: 'agents' },
   { id: 'notifications', label: 'Notifications', path: 'notifications' },
   { id: 'usage', label: 'Usage', path: 'usage' },
 ];

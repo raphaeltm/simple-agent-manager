@@ -18,12 +18,18 @@ interface AgentKeyCardProps {
    * does not carry the active provider).
    */
   scope?: 'user' | 'project';
+  /**
+   * When true, render only the credential body (no outer border, no agent header or
+   * status badge). Used when the card is embedded inside a larger unified AgentCard
+   * that already shows the agent name/status in its own header.
+   */
+  embedded?: boolean;
 }
 
 /**
  * Card for managing a single agent's credentials (API key and/or OAuth token).
  */
-export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodeProvider, scope = 'user' }: AgentKeyCardProps) {
+export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodeProvider, scope = 'user', embedded = false }: AgentKeyCardProps) {
   const [credential, setCredential] = useState('');
   const [credentialKind, setCredentialKind] = useState<CredentialKind>('api-key');
   const [loading, setLoading] = useState(false);
@@ -98,27 +104,8 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
     }
   };
 
-  return (
-    <div className="border border-border-default rounded-md p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h3 className="text-sm font-medium text-fg-primary">{agent.name}</h3>
-          <p className="text-xs text-fg-muted">{agent.description}</p>
-        </div>
-        <StatusBadge
-          status={hasAnyCredential || usesScalewayFallback || isOpenCodePlatform ? 'connected' : 'disconnected'}
-          label={
-            isOpenCodePlatform
-              ? 'Platform AI'
-              : hasAnyCredential
-                ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
-                : usesScalewayFallback
-                  ? 'Using Scaleway Cloud Key'
-                  : 'Not Configured'
-          }
-        />
-      </div>
-
+  const body = (
+    <>
       {isOpenCodePlatform && !showForm && (
         <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
           <div className="flex flex-col gap-1">
@@ -284,6 +271,34 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
           </div>
         </form>
       )}
+    </>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <div className="border border-border-default rounded-md p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="text-sm font-medium text-fg-primary">{agent.name}</h3>
+          <p className="text-xs text-fg-muted">{agent.description}</p>
+        </div>
+        <StatusBadge
+          status={hasAnyCredential || usesScalewayFallback || isOpenCodePlatform ? 'connected' : 'disconnected'}
+          label={
+            isOpenCodePlatform
+              ? 'Platform AI'
+              : hasAnyCredential
+                ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
+                : usesScalewayFallback
+                  ? 'Using Scaleway Cloud Key'
+                  : 'Not Configured'
+          }
+        />
+      </div>
+      {body}
     </div>
   );
 }

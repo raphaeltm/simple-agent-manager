@@ -1,3 +1,8 @@
+/**
+ * Per-agent settings body — model selection, permission mode, and (for OpenCode)
+ * provider / base URL / provider-name fields. Supports both the standalone
+ * "card" layout and an `embedded` mode used by the unified AgentCard.
+ */
 import type {
   AgentInfo,
   AgentPermissionMode,
@@ -13,28 +18,39 @@ import {
   PLATFORM_AI_MODELS,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
-import { Alert, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { Alert } from '@simple-agent-manager/ui';
+import { useEffect, useState } from 'react';
 
-import { deleteAgentSettings, getAgentSettings, listAgents, saveAgentSettings } from '../lib/api';
 import { ModelSelect } from './ModelSelect';
 
-const SUCCESS_BANNER_DURATION_MS = 3000;
+const DEFAULT_SUCCESS_BANNER_MS = 3000;
+const SUCCESS_BANNER_MS = Number(
+  import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS,
+);
 
-/**
- * Per-agent settings card for model selection and permission mode.
- */
-function AgentSettingsCard({
-  agent,
-  settings,
-  onSave,
-  onReset,
-}: {
+export interface AgentSettingsCardProps {
   agent: AgentInfo;
   settings: AgentSettingsResponse | null;
   onSave: (agentType: AgentType, data: SaveAgentSettingsRequest) => Promise<void>;
   onReset: (agentType: AgentType) => Promise<void>;
-}) {
+  /**
+   * When true, render only the configuration body (no outer border, no agent name
+   * header). Used when the card is embedded inside a larger unified AgentCard that
+   * already shows the agent name and status.
+   */
+  embedded?: boolean;
+}
+
+/**
+ * Per-agent settings card for model selection and permission mode.
+ */
+export function AgentSettingsCard({
+  agent,
+  settings,
+  onSave,
+  onReset,
+  embedded = false,
+}: AgentSettingsCardProps) {
   const [model, setModel] = useState(settings?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
     settings?.permissionMode ?? 'default'
@@ -54,8 +70,6 @@ function AgentSettingsCard({
   const providerMeta = selectedProvider ? OPENCODE_PROVIDERS[selectedProvider] : null;
   const showBaseUrl = selectedProvider === 'custom' || selectedProvider === 'openai-compatible';
 
-  // Shared class string for all form inputs and selects — provides consistent styling
-  // and restores a visible focus indicator after outline-none removes the browser default.
   const formControlClass =
     'w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring box-border';
 
@@ -87,7 +101,7 @@ function AgentSettingsCard({
 
       await onSave(agent.id, data);
       setSuccess(true);
-      setTimeout(() => setSuccess(false), SUCCESS_BANNER_DURATION_MS);
+      setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -107,7 +121,7 @@ function AgentSettingsCard({
       setOpencodeBaseUrl('');
       setOpencodeProviderName('');
       setSuccess(true);
-      setTimeout(() => setSuccess(false), SUCCESS_BANNER_DURATION_MS);
+      setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reset settings');
     } finally {
@@ -144,12 +158,8 @@ function AgentSettingsCard({
     return false;
   })();
 
-  return (
-    <div className="p-4 rounded-md border border-border-default bg-inset" data-testid={`agent-settings-${agent.id}`}>
-      <div className="mb-2 font-semibold text-base text-fg-primary">
-        {agent.name}
-      </div>
-
+  const body = (
+    <>
       {error && (
         <div className="mb-3">
           <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
@@ -176,15 +186,12 @@ function AgentSettingsCard({
               const val = e.target.value as OpenCodeProvider | '';
               const prev = opencodeProvider;
               setOpencodeProvider(val);
-              // Clear base URL when switching away from providers that need it
               if (val !== 'custom' && val !== 'openai-compatible') {
                 setOpencodeBaseUrl('');
               }
-              // Clear provider name when switching away from custom
               if (val !== 'custom') {
                 setOpencodeProviderName('');
               }
-              // Clear model when switching to/from platform (dropdown vs text input)
               if ((val === 'platform') !== (prev === 'platform')) {
                 setModel('');
               }
@@ -207,7 +214,6 @@ function AgentSettingsCard({
         </div>
       )}
 
-      {/* Base URL (for custom/openai-compatible) */}
       {isOpenCode && showBaseUrl && (
         <div className="mb-4">
           <label htmlFor={`opencode-base-url-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Base URL</label>
@@ -226,7 +232,6 @@ function AgentSettingsCard({
         </div>
       )}
 
-      {/* Custom provider name */}
       {isOpenCode && selectedProvider === 'custom' && (
         <div className="mb-4">
           <label htmlFor={`opencode-provider-name-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Provider Name</label>
@@ -245,7 +250,6 @@ function AgentSettingsCard({
         </div>
       )}
 
-      {/* Model selection */}
       <div className="mb-4">
         <label htmlFor={`model-input-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Model</label>
         <div className="text-xs text-fg-muted mb-2">
@@ -280,7 +284,6 @@ function AgentSettingsCard({
         )}
       </div>
 
-      {/* Permission mode */}
       <div className="mb-4" role="group" aria-labelledby={`permission-mode-label-${agent.id}`}>
         <div id={`permission-mode-label-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1">Permission Mode</div>
         <div className="text-xs text-fg-muted mb-2">
@@ -308,7 +311,6 @@ function AgentSettingsCard({
         )}
       </div>
 
-      {/* Action buttons */}
       <div className="flex gap-3 flex-wrap">
         <button
           onClick={handleSave}
@@ -331,95 +333,19 @@ function AgentSettingsCard({
           {resetting ? 'Resetting...' : 'Reset to Defaults'}
         </button>
       </div>
-    </div>
+    </>
   );
-}
 
-/**
- * Section that displays agent settings cards for all configured agents.
- */
-export function AgentSettingsSection() {
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [settingsMap, setSettingsMap] = useState<Record<string, AgentSettingsResponse>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      const agentResult = await listAgents();
-      setAgents(agentResult.agents);
-
-      // Fetch settings for each agent type
-      const settingsEntries = await Promise.all(
-        agentResult.agents.map(async (agent) => {
-          try {
-            const s = await getAgentSettings(agent.id);
-            return [agent.id, s] as const;
-          } catch {
-            return [agent.id, null] as const;
-          }
-        })
-      );
-
-      const map: Record<string, AgentSettingsResponse> = {};
-      for (const [agentType, s] of settingsEntries) {
-        if (s) {
-          map[agentType] = s;
-        }
-      }
-      setSettingsMap(map);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load agent settings');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const handleSave = async (
-    agentType: AgentType,
-    data: SaveAgentSettingsRequest
-  ) => {
-    const result = await saveAgentSettings(agentType, data);
-    setSettingsMap((prev) => ({ ...prev, [agentType]: result }));
-  };
-
-  const handleReset = async (agentType: AgentType) => {
-    await deleteAgentSettings(agentType);
-    setSettingsMap((prev) => {
-      const next = { ...prev };
-      delete next[agentType];
-      return next;
-    });
-  };
-
-  if (loading && agents.length === 0) {
-    return (
-      <div className="flex justify-center p-4">
-        <Spinner size="md" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return <Alert variant="error">{error}</Alert>;
+  if (embedded) {
+    return body;
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {agents.map((agent) => (
-        <AgentSettingsCard
-          key={agent.id}
-          agent={agent}
-          settings={settingsMap[agent.id] ?? null}
-          onSave={handleSave}
-          onReset={handleReset}
-        />
-      ))}
+    <div className="p-4 rounded-md border border-border-default bg-inset" data-testid={`agent-settings-${agent.id}`}>
+      <div className="mb-2 font-semibold text-base text-fg-primary">
+        {agent.name}
+      </div>
+      {body}
     </div>
   );
 }

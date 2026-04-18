@@ -48,8 +48,8 @@ Mistral Vibe is installed via `uv` (Python package manager) and requires Python 
 ## Configuring Agent Credentials
 
 1. Go to **Settings** in the SAM web UI
-2. Navigate to the **Credentials** section
-3. Add your API key for each agent you want to use
+2. Open the **Agents** tab
+3. Add your API key (or OAuth token) for each agent you want to use. Connection and configuration for each agent are grouped together on a single card.
 4. Keys are encrypted at rest using AES-256-GCM
 
 You can configure credentials for multiple agents simultaneously and switch between them per project.

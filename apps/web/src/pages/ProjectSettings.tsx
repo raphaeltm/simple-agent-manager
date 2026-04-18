@@ -10,8 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
-import { ProjectAgentCredentialsSection } from '../components/ProjectAgentCredentialsSection';
-import { ProjectAgentDefaultsSection } from '../components/ProjectAgentDefaultsSection';
+import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { ScalingSettings } from '../components/ScalingSettings';
 import { useToast } from '../hooks/useToast';
 import {
@@ -388,20 +387,21 @@ export function ProjectSettings() {
         )}
       </section>
 
-      {/* Per-agent-type project defaults (model + permission mode).
-          Resolution chain: task > profile > project.agentDefaults > user settings > platform default. */}
+      {/* Unified per-agent project overrides — credential override + model/permission
+          override live in a single card per agent. Resolution chain:
+          task > profile > project.agentDefaults > user settings > platform default. */}
       <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
         <div>
           <h2 className="sam-type-section-heading m-0 text-fg-primary">
-            Project Agent Defaults
+            Agents
           </h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
-            Per-agent-type model and permission mode overrides for this project. Empty fields fall
-            through to your user-level agent settings.
+            Per-agent credential and configuration overrides for this project. Empty fields fall
+            through to your user-level settings.
           </p>
         </div>
         {projectId && (
-          <ProjectAgentDefaultsSection
+          <ProjectAgentsSection
             projectId={projectId}
             initialAgentDefaults={project?.agentDefaults ?? null}
             onUpdated={() => {
@@ -657,20 +657,6 @@ export function ProjectSettings() {
             </div>
           </div>
         )}
-      </section>
-
-      {/* Agent Credentials (project-scoped overrides) */}
-      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
-        <div>
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">
-            Agent Credentials
-          </h2>
-          <p className="m-0 mt-1 text-xs text-fg-muted">
-            Override your user-level agent credentials for this project only. Useful when parallel
-            projects need different API keys or OAuth tokens.
-          </p>
-        </div>
-        <ProjectAgentCredentialsSection projectId={projectId} />
       </section>
 
       {/* Deploy to Cloud */}

@@ -1,33 +1,67 @@
-import type { AgentCredentialInfo, AgentInfo, AgentType, CredentialKind, OpenCodeProvider, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
+import type {
+  AgentCredentialInfo,
+  AgentInfo,
+  AgentSettingsResponse,
+  AgentType,
+  CredentialKind,
+  SaveAgentCredentialRequest,
+  SaveAgentSettingsRequest,
+} from '@simple-agent-manager/shared';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
-import { deleteAgentCredential, getAgentSettings, listAgentCredentials, listAgents, saveAgentCredential } from '../lib/api';
-import { AgentKeyCard } from './AgentKeyCard';
+import {
+  deleteAgentCredential,
+  deleteAgentSettings,
+  getAgentSettings,
+  listAgentCredentials,
+  listAgents,
+  saveAgentCredential,
+  saveAgentSettings,
+} from '../lib/api';
+import { AgentCard } from './AgentCard';
 
 /**
- * Section for managing all agent API keys.
+ * Unified user-scope agents section — renders one AgentCard per agent,
+ * combining credential status/form and configuration fields in a single card.
+ * Replaces the former AgentKeysSection + AgentSettingsSection pair.
  */
-export function AgentKeysSection() {
+export function AgentsSection() {
   const toast = useToast();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [credentials, setCredentials] = useState<AgentCredentialInfo[]>([]);
-  const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider | null>(null);
+  const [settingsMap, setSettingsMap] = useState<Record<string, AgentSettingsResponse>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      const [agentResult, credResult, opencodeSettings] = await Promise.all([
+      const [agentResult, credResult] = await Promise.all([
         listAgents(),
         listAgentCredentials(),
-        getAgentSettings('opencode').catch(() => null),
       ]);
       setAgents(agentResult.agents);
       setCredentials(credResult.credentials);
-      setOpencodeProvider((opencodeSettings?.opencodeProvider as OpenCodeProvider) ?? null);
+
+      const settingsEntries = await Promise.all(
+        agentResult.agents.map(async (agent) => {
+          try {
+            const s = await getAgentSettings(agent.id);
+            return [agent.id, s] as const;
+          } catch {
+            return [agent.id, null] as const;
+          }
+        })
+      );
+      const map: Record<string, AgentSettingsResponse> = {};
+      for (const [agentType, s] of settingsEntries) {
+        if (s) {
+          map[agentType] = s;
+        }
+      }
+      setSettingsMap(map);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load agent data');
     } finally {
@@ -39,11 +73,10 @@ export function AgentKeysSection() {
     loadData();
   }, [loadData]);
 
-  const handleSave = async (request: SaveAgentCredentialRequest) => {
+  const handleSaveCredential = async (request: SaveAgentCredentialRequest) => {
     const result = await saveAgentCredential(request);
     toast.success('Agent credential saved');
     setCredentials((prev) => {
-      // Remove old credential of the same type and kind
       const filtered = prev.filter((c) =>
         !(c.agentType === request.agentType && c.credentialKind === request.credentialKind)
       );
@@ -54,25 +87,35 @@ export function AgentKeysSection() {
     );
   };
 
-  const handleDelete = async (agentType: AgentType, credentialKind: CredentialKind) => {
-    // For now, we'll delete all credentials for the agent
-    // In Phase 4, we'll implement credential-specific deletion
+  const handleDeleteCredential = async (agentType: AgentType, credentialKind: CredentialKind) => {
     await deleteAgentCredential(agentType);
     toast.success('Agent credential removed');
     setCredentials((prev) => prev.filter((c) =>
       !(c.agentType === agentType && c.credentialKind === credentialKind)
     ));
 
-    // Check if any credentials remain for this agent
     const hasRemainingCreds = credentials.some(c =>
       c.agentType === agentType && c.credentialKind !== credentialKind
     );
-
     if (!hasRemainingCreds) {
       setAgents((prev) =>
         prev.map((a) => a.id === agentType ? { ...a, configured: false } : a)
       );
     }
+  };
+
+  const handleSaveSettings = async (agentType: AgentType, data: SaveAgentSettingsRequest) => {
+    const result = await saveAgentSettings(agentType, data);
+    setSettingsMap((prev) => ({ ...prev, [agentType]: result }));
+  };
+
+  const handleResetSettings = async (agentType: AgentType) => {
+    await deleteAgentSettings(agentType);
+    setSettingsMap((prev) => {
+      const next = { ...prev };
+      delete next[agentType];
+      return next;
+    });
   };
 
   if (loading && agents.length === 0) {
@@ -98,18 +141,19 @@ export function AgentKeysSection() {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       {agents.map((agent) => {
-        // Filter credentials for this agent
         const agentCredentials = credentials.filter((c) => c.agentType === agent.id);
         return (
-          <AgentKeyCard
+          <AgentCard
             key={agent.id}
             agent={agent}
             credentials={agentCredentials.length > 0 ? agentCredentials : null}
-            onSave={handleSave}
-            onDelete={handleDelete}
-            opencodeProvider={agent.id === 'opencode' ? opencodeProvider : undefined}
+            settings={settingsMap[agent.id] ?? null}
+            onSaveCredential={handleSaveCredential}
+            onDeleteCredential={handleDeleteCredential}
+            onSaveSettings={handleSaveSettings}
+            onResetSettings={handleResetSettings}
           />
         );
       })}
