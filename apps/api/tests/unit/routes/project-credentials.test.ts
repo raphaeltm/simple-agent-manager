@@ -233,6 +233,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
     expect(result).not.toBeNull();
     expect(result?.credential).toBe('sk-ant-live-value');
     expect(result?.credentialKind).toBe('api-key');
+    expect(result?.credentialSource).toBe('project');
   });
 
   it('falls back to user-scoped credential when project has no override', async () => {
