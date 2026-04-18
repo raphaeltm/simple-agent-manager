@@ -1,9 +1,13 @@
 package config
 
 import (
-	"path/filepath"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -747,5 +751,118 @@ func TestNewControlPlaneClientNegativeTimeout(t *testing.T) {
 	client := NewControlPlaneClient(-5 * time.Second)
 	if client.Timeout != 30*time.Second {
 		t.Fatalf("client.Timeout = %v, want 30s (default)", client.Timeout)
+	}
+}
+
+// TestNewControlPlaneClientUsesSharedTransport verifies that every client
+// returned from NewControlPlaneClient points at the same package-shared
+// *http.Transport, so CloseIdleControlPlaneConnections can flush all of them
+// in a single call.
+//
+// Not t.Parallel — we inspect the shared transport.
+func TestNewControlPlaneClientUsesSharedTransport(t *testing.T) {
+	a := NewControlPlaneClient(10 * time.Second)
+	b := NewControlPlaneClient(20 * time.Second)
+
+	if a.Transport == nil {
+		t.Fatalf("client.Transport is nil — expected shared *http.Transport")
+	}
+	if a.Transport != b.Transport {
+		t.Fatalf("clients returned different Transports (%p vs %p); expected shared transport", a.Transport, b.Transport)
+	}
+	if a.Transport != controlPlaneTransport {
+		t.Fatalf("client.Transport (%p) is not the package-shared transport (%p)", a.Transport, controlPlaneTransport)
+	}
+}
+
+// TestControlPlaneTransportTuning locks in the tuned transport fields so a
+// regression can't silently revert to the default transport's 90s
+// IdleConnTimeout (which caused pooled dead sockets to extend boot outages).
+func TestControlPlaneTransportTuning(t *testing.T) {
+	tr := controlPlaneTransport
+
+	if tr.MaxIdleConns != 10 {
+		t.Errorf("MaxIdleConns = %d, want 10", tr.MaxIdleConns)
+	}
+	if tr.MaxIdleConnsPerHost != 2 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 2", tr.MaxIdleConnsPerHost)
+	}
+	if tr.IdleConnTimeout != 30*time.Second {
+		t.Errorf("IdleConnTimeout = %v, want 30s", tr.IdleConnTimeout)
+	}
+	if tr.TLSHandshakeTimeout != 10*time.Second {
+		t.Errorf("TLSHandshakeTimeout = %v, want 10s", tr.TLSHandshakeTimeout)
+	}
+	if tr.ResponseHeaderTimeout != 10*time.Second {
+		t.Errorf("ResponseHeaderTimeout = %v, want 10s", tr.ResponseHeaderTimeout)
+	}
+	if tr.ExpectContinueTimeout != 1*time.Second {
+		t.Errorf("ExpectContinueTimeout = %v, want 1s", tr.ExpectContinueTimeout)
+	}
+	if !tr.ForceAttemptHTTP2 {
+		t.Errorf("ForceAttemptHTTP2 = false, want true")
+	}
+	if tr.DialContext == nil {
+		t.Errorf("DialContext is nil, want a dialer with 5s timeout")
+	}
+}
+
+// TestCloseIdleControlPlaneConnectionsFlushesPool verifies that calling
+// CloseIdleControlPlaneConnections actually closes pooled keep-alive sockets.
+// We observe this by counting distinct TCP connections the test server sees:
+// without a flush, keep-alive reuses the same socket; after a flush, a new
+// socket is dialed.
+//
+// Not t.Parallel — we're exercising the shared transport.
+func TestCloseIdleControlPlaneConnectionsFlushesPool(t *testing.T) {
+	var connCount int64
+	// NewUnstartedServer + explicit Start so ConnState is wired before any
+	// client can connect — avoids a data race between our goroutine writing
+	// srv.Config.ConnState and the server goroutine reading it on accept.
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			atomic.AddInt64(&connCount, 1)
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	client := NewControlPlaneClient(5 * time.Second)
+
+	// Request 1 — opens a fresh TCP connection and returns it to the pool.
+	resp1, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("request 1: %v", err)
+	}
+	resp1.Body.Close()
+
+	// Request 2 — should reuse the pooled connection.
+	resp2, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("request 2: %v", err)
+	}
+	resp2.Body.Close()
+
+	beforeFlush := atomic.LoadInt64(&connCount)
+	if beforeFlush != 1 {
+		t.Fatalf("expected 1 connection before flush (keep-alive reuse), got %d", beforeFlush)
+	}
+
+	// Flush the pool — pooled socket should be closed.
+	CloseIdleControlPlaneConnections()
+
+	// Request 3 — must dial a fresh TCP connection.
+	resp3, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("request 3: %v", err)
+	}
+	resp3.Body.Close()
+
+	afterFlush := atomic.LoadInt64(&connCount)
+	if afterFlush != 2 {
+		t.Fatalf("expected 2 total connections after flush (pool was purged), got %d", afterFlush)
 	}
 }

@@ -100,7 +100,7 @@ func (s *Server) controlPlaneHTTPClient(timeout time.Duration) *http.Client {
 		}
 	}
 
-	return &http.Client{Timeout: timeout}
+	return config.NewControlPlaneClient(timeout)
 }
 
 type WorkspaceRuntime struct {
@@ -405,7 +405,7 @@ func New(cfg *config.Config) (*Server, error) {
 		portScanners:        make(map[string]*ports.Scanner),
 		portDiscoveries:     make(map[string]*container.Discovery),
 		callbackToken:       cfg.CallbackToken,
-		httpClient:          &http.Client{Timeout: cfg.HTTPCallbackTimeout},
+		httpClient:          config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 		done:                make(chan struct{}),
 	}
 

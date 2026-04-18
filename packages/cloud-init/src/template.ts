@@ -95,8 +95,19 @@ write_files:
     content: |
       #!/bin/bash
       # SAM Firewall — restricts VM agent port to Cloudflare IPs only.
+      #
+      # Policy: INPUT chain stays ACCEPT. A single targeted DROP rule is
+      # appended LAST for tcp dport VM_AGENT_PORT so only the explicit CF
+      # ACCEPT rules (and loopback / docker bridges) can reach the agent port.
+      # Outbound connections and their replies are unaffected — we do NOT rely
+      # on conntrack to let reply packets back in, because conntrack state is
+      # invalidated by Docker install + restart + veth churn and the resulting
+      # silent drops caused a sustained ~6-minute "Cloudflare API unreachable"
+      # window on every fresh boot.
       set -euo pipefail
-      trap 'iptables -P INPUT DROP 2>/dev/null; ip6tables -P INPUT DROP 2>/dev/null' EXIT
+      # NOTE: intentionally no EXIT trap that clamps policy to DROP. A failed
+      # script must not lock the box out — the previous trap caused total
+      # blackouts when any earlier step errored before ACCEPT rules were added.
 
       VM_AGENT_PORT="{{ vm_agent_port }}"
       CF_IPV4_URL="https://www.cloudflare.com/ips-v4"
@@ -135,29 +146,54 @@ write_files:
         CF_IPV6="$FALLBACK_IPV6"
       }
 
+      # IPv4: policy ACCEPT so outbound reply packets are never dropped when
+      # conntrack state is invalidated (the root cause of the 6-minute Cloudflare
+      # blackout after Docker install + restart). Restriction is via targeted
+      # DROP rules on specific ports. The Hetzner cloud firewall remains the
+      # primary ingress gate; iptables is defense in depth against misconfig.
+      #
+      # Rule installation order (critical): install DROPs FIRST (so the agent
+      # port is never unprotected during a re-apply), then INSERT ACCEPT rules
+      # at position 1 so they take precedence. INSERT order is reverse of
+      # final priority — last -I becomes rule #1.
+      iptables -P INPUT ACCEPT
       iptables -F INPUT
-      iptables -A INPUT -i lo -j ACCEPT
-      iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-      iptables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
-      iptables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
 
+      # Catch-all DROPs installed FIRST. TCP+UDP on the agent port blocks both
+      # service traffic and port-fingerprinting via ICMP unreachable replies.
+      # TCP :22 defense-in-depth against sshd exposure — Hetzner console works
+      # without iptables SSH access for operator emergencies.
+      iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
+      iptables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
+      iptables -A INPUT -p tcp --dport 22 -j DROP
+
+      # INSERT CF ACCEPT rules for VM_AGENT_PORT at top of chain.
       while IFS= read -r cidr; do
-        [ -n "$cidr" ] && iptables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+        [ -n "$cidr" ] && iptables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       done <<< "$CF_IPV4"
 
-      iptables -P INPUT DROP
+      # INSERT trusted-interface ACCEPTs (lo last so it is rule #1 — loopback
+      # traffic, including localhost-to-sshd for operator tooling, is never
+      # filtered by the port-22 DROP above).
+      iptables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      iptables -I INPUT 1 -i lo -j ACCEPT
 
+      # IPv6: same pattern.
+      ip6tables -P INPUT ACCEPT
       ip6tables -F INPUT
-      ip6tables -A INPUT -i lo -j ACCEPT
-      ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-      ip6tables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
-      ip6tables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+
+      ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
+      ip6tables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
+      ip6tables -A INPUT -p tcp --dport 22 -j DROP
 
       while IFS= read -r cidr; do
-        [ -n "$cidr" ] && ip6tables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+        [ -n "$cidr" ] && ip6tables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       done <<< "$CF_IPV6"
 
-      ip6tables -P INPUT DROP
+      ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      ip6tables -I INPUT 1 -i lo -j ACCEPT
 
       DOCKER_USER_WAIT=0
       while ! iptables -L DOCKER-USER -n >/dev/null 2>&1; do

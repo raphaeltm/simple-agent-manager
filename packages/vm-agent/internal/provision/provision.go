@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/eventstore"
 )
 
@@ -173,6 +174,10 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		}); err != nil {
 			slog.Warn("Firewall setup failed, continuing without firewall", "error", err)
 		}
+		// Flush any pooled control-plane sockets: firewall install can break
+		// in-flight connections without closing them, leaving dead sockets
+		// in the Go transport pool for up to IdleConnTimeout (30s post-fix).
+		config.CloseIdleControlPlaneConnections()
 	} else {
 		status.setStep("firewall", "skipped")
 	}
@@ -241,6 +246,10 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 	}); err != nil {
 		slog.Warn("Docker restart failed, continuing", "error", err)
 	}
+	// Flush any pooled control-plane sockets: Docker restart recreates the
+	// docker0/veth bridges and invalidates nf_conntrack entries, which can
+	// silently break pooled TCP connections to the control plane.
+	config.CloseIdleControlPlaneConnections()
 
 	// Step 10: Metadata block service
 	if err := runStep("metadata-block", func(ctx context.Context) error {
