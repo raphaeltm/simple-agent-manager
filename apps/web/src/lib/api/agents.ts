@@ -53,6 +53,39 @@ export async function deleteAgentCredential(agentType: string): Promise<void> {
   });
 }
 
+// =============================================================================
+// Project-Scoped Agent Credentials (Phase 2 of multi-level config override)
+// =============================================================================
+
+export async function listProjectAgentCredentials(
+  projectId: string,
+): Promise<{ credentials: AgentCredentialInfo[] }> {
+  return request<{ credentials: AgentCredentialInfo[] }>(
+    `/api/projects/${projectId}/credentials`,
+  );
+}
+
+export async function saveProjectAgentCredential(
+  projectId: string,
+  data: SaveAgentCredentialRequest,
+): Promise<AgentCredentialInfo> {
+  return request<AgentCredentialInfo>(`/api/projects/${projectId}/credentials`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteProjectAgentCredential(
+  projectId: string,
+  agentType: string,
+  credentialKind: string,
+): Promise<void> {
+  return request<void>(
+    `/api/projects/${projectId}/credentials/${agentType}/${credentialKind}`,
+    { method: 'DELETE' },
+  );
+}
+
 /**
  * Get the full URL for the voice transcription API endpoint.
  * Used by the VoiceButton component to send audio for transcription.

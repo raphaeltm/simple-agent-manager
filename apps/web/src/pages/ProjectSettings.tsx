@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
+import { ProjectAgentCredentialsSection } from '../components/ProjectAgentCredentialsSection';
 import { ProjectAgentDefaultsSection } from '../components/ProjectAgentDefaultsSection';
 import { ScalingSettings } from '../components/ScalingSettings';
 import { useToast } from '../hooks/useToast';
@@ -656,6 +657,20 @@ export function ProjectSettings() {
             </div>
           </div>
         )}
+      </section>
+
+      {/* Agent Credentials (project-scoped overrides) */}
+      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
+        <div>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">
+            Agent Credentials
+          </h2>
+          <p className="m-0 mt-1 text-xs text-fg-muted">
+            Override your user-level agent credentials for this project only. Useful when parallel
+            projects need different API keys or OAuth tokens.
+          </p>
+        </div>
+        <ProjectAgentCredentialsSection projectId={projectId} />
       </section>
 
       {/* Deploy to Cloud */}

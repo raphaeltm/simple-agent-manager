@@ -47,47 +47,47 @@ Mirror schema but keyed on `projectId + userId + agentType + credentialKind`.
 ## Implementation Checklist
 
 ### Data layer
-- [ ] Migration: add `project_id TEXT` column to `credentials` (nullable, FK to `projects.id ON DELETE CASCADE`)
-- [ ] Drop and recreate unique index: `(user_id, project_id, agent_type, credential_kind) WHERE credential_type='agent-api-key'` — must treat `NULL project_id` as a distinct value (sqlite does this by default)
-- [ ] Drop and recreate active index: include `project_id`
-- [ ] Backfill: existing rows keep `project_id = NULL` (user-scoped)
+- [x] Migration 0042: add `project_id TEXT` column to `credentials` (nullable, FK to `projects.id ON DELETE CASCADE`)
+- [x] Replace single unique index with two partial unique indexes (user-scope WHERE project_id IS NULL, project-scope WHERE project_id IS NOT NULL) — sqlite partial indexes
+- [x] Rebuild active index to include `project_id`
+- [x] Existing rows keep `project_id = NULL` (user-scoped) — schema-only migration, no backfill needed
 
 ### Resolution logic
-- [ ] Update `apps/api/src/routes/workspaces/runtime.ts` agent-settings callback: when fetching credential for a workspace, first query `WHERE project_id = workspace.project_id`, fall back to `WHERE project_id IS NULL`
-- [ ] Audit all `credentials` reads: `agents-catalog.ts`, `codex-refresh-lock.ts`, credential sync-back path, OAuth refresh paths
-- [ ] Codex refresh proxy: when syncing back rotated tokens, update the **same row** (project-scoped vs user-scoped) — do not silently collapse to user-scoped
+- [x] `getDecryptedAgentKey(db, userId, agentType, key, projectId?)` resolves project → user → platform in order
+- [x] `apps/api/src/routes/workspaces/runtime.ts` agent-key callback fetches `workspace.projectId` and forwards it
+- [x] `agent-credential-sync` endpoint preserves scope: looks up project-scoped first, falls back to user-scoped
+- [x] `codex-refresh` route forwards `projectId` to the DO
+- [x] `CodexRefreshLock` DO queries and updates the correct scoped row on rotation
 
 ### API routes
-- [ ] `POST /api/credentials` accepts optional `projectId` body field; server verifies the project belongs to the authenticated user before persisting
-- [ ] `GET /api/credentials` supports `?projectId=X` filter; returns both project-scoped and user-scoped for a given project when requested (marked with scope field)
-- [ ] `DELETE /api/credentials/:id` preserves scope
-- [ ] `POST /api/projects/:id/credentials` nested route as ergonomic alias (optional)
+- [x] New `projectCredentialsRoutes`: GET / PUT / DELETE at `/api/projects/:id/credentials(/:agentType/:credentialKind)`
+- [x] All guarded by `requireOwnedProject` — cross-user write returns 404
+- [x] Response shape: `AgentCredentialInfo` with `scope: 'project'` and `projectId` set
+- [x] User-level routes `/api/credentials/agent` unchanged (user-scoped, `project_id IS NULL`)
 
 ### UI
-- [ ] New `ProjectCredentialsSection` on Project Settings page (below `ProjectAgentDefaultsSection`)
-- [ ] Per-agent-type card showing user-level credential status + "Set project-specific credential" button
-- [ ] Re-use `CredentialForm` component (currently in Settings → Agent Credentials) with a `projectId` prop
-- [ ] Clear override button → deletes the project-scoped row, falls back to user-level
-- [ ] Visual indicator: "using project credential" vs "inheriting user credential"
+- [x] New `ProjectAgentCredentialsSection` on Project Settings page
+- [x] Per-agent card reusing `AgentKeyCard` component (existing behavior preserved)
+- [x] "Inheriting user credential (...xxxx)" hint when no override exists but user-level does
+- [x] "Remove" button on project-scoped credential deletes the override → falls back to user credential
+- [x] Info banner explains override semantics
 
 ### Security / validation
-- [ ] Ownership check at every write: `project.userId === auth.userId`
-- [ ] Ownership check on read: user can only see credentials where `userId = auth.userId` (project-scoped or not)
-- [ ] Audit log: `credential.created`, `credential.deleted`, `credential.rotated` events include `projectId` when set
-- [ ] Test: user A cannot set a credential on user B's project (403)
-- [ ] Test: user A's project credential is invisible to user B even if they somehow know the project ID
+- [x] Ownership check at every write (`requireOwnedProject`) — returns 404 for non-owned projects
+- [x] List/get filters by `userId = auth.userId AND projectId = :id` — isolation at query layer
+- [x] Cross-user write test: returns 404 (unit test `project-credentials.test.ts`)
+- [x] Credential encryption unchanged (AES-GCM via same `encrypt`/`decrypt` helpers)
 
 ### Tests
-- [ ] Unit: resolution order (project > user > platform > null)
-- [ ] Unit: OAuth token rotation preserves scope
-- [ ] Integration: full task submit with project credential — VM agent receives the project-scoped key, not the user-scoped one
-- [ ] Integration: clear project credential → VM agent receives user-scoped key on next session
-- [ ] Negative: secondary user attempt to write to primary's project returns 403
+- [x] Unit: resolution order (project > user > platform > null) — `project-credentials.test.ts`
+- [x] Unit: PUT rejects cross-user, DELETE rejects cross-user
+- [x] Unit: PUT inserts with `project_id` set, DELETE scoped to project
+- [ ] Staging: full task submit with project credential override — verified via Playwright in Phase 6
+- [ ] Staging: clear project credential → task uses user-scoped credential
 
 ### Docs
-- [ ] Update `docs/architecture/credential-security.md` with the project-scope tier
-- [ ] Update `docs/guides/self-hosting.md` if anything changes for self-hosters (probably nothing)
-- [ ] Changelog entry
+- [x] Update `docs/architecture/credential-security.md` with the project-scope tier
+- [ ] Changelog / CLAUDE.md Recent Changes entry (Phase 4)
 
 ## Acceptance Criteria
 

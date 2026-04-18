@@ -56,6 +56,7 @@ export {
   deleteAgentCredentialByKind,
   deleteAgentProfile,
   deleteAgentSettings,
+  deleteProjectAgentCredential,
   getAgentSettings,
   getAnalyticsApiUrl,
   getClientErrorsApiUrl,
@@ -64,8 +65,10 @@ export {
   listAgentCredentials,
   listAgentProfiles,
   listAgents,
+  listProjectAgentCredentials,
   saveAgentCredential,
   saveAgentSettings,
+  saveProjectAgentCredential,
   toggleAgentCredential,
   updateAgentProfile,
 } from './agents';
