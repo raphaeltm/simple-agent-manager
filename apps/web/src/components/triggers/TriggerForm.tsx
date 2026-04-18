@@ -201,7 +201,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
     }
   }, [
     name, description, cronExpression, cronTimezone, promptTemplate,
-    skipIfRunning, maxConcurrent, vmSizeOverride, taskMode,
+    skipIfRunning, maxConcurrent, vmSizeOverride, taskMode, agentProfileId,
     isEdit, editTrigger, projectId, toast, onSaved, onClose,
   ]);
 
@@ -379,7 +379,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
                     id="agent-profile"
                     value={agentProfileId}
                     onChange={(e) => setAgentProfileId(e.target.value)}
-                    className={`px-2 py-1.5 rounded-md border border-border-default bg-surface text-fg-primary text-sm ${FOCUS_RING}`}
+                    className={`w-full px-2 py-1.5 rounded-md border border-border-default bg-surface text-fg-primary text-sm ${FOCUS_RING}`}
                   >
                     <option value="">Project default</option>
                     {profiles.map((p) => (

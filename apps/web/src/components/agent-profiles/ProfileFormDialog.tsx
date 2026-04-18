@@ -196,8 +196,9 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
           {/* Model */}
           <div className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">Model</span>
+            <label htmlFor="profile-model" className="text-sm text-fg-muted">Model</label>
             <ModelSelect
+              id="profile-model"
               agentType={agentType}
               value={model}
               onChange={setModel}
