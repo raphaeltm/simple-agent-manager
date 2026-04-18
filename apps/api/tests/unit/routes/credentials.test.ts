@@ -21,6 +21,21 @@ vi.mock('../../../src/services/encryption', () => ({
   decrypt: vi.fn().mockResolvedValue('decrypted-credential'),
 }));
 
+function makeTestEnv(): Env {
+  // Rate-limit middleware on PUT /agent calls KV.get / KV.put; provide a no-op stub
+  // that returns "first call in window" so every request is allowed.
+  const kv = {
+    get: vi.fn().mockResolvedValue(null),
+    put: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    DATABASE: {} as Env['DATABASE'],
+    ENCRYPTION_KEY: 'test-key',
+    KV: kv as unknown as Env['KV'],
+  } as Env;
+}
+
 describe('Credentials Routes - OAuth Support', () => {
   let app: Hono<{ Bindings: Env }>;
   let mockDB: any;
@@ -71,10 +86,7 @@ describe('Credentials Routes - OAuth Support', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, {
-        DATABASE: {} as any,
-        ENCRYPTION_KEY: 'test-key',
-      } as Env);
+      }, makeTestEnv());
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -96,10 +108,7 @@ describe('Credentials Routes - OAuth Support', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, {
-        DATABASE: {} as any,
-        ENCRYPTION_KEY: 'test-key',
-      } as Env);
+      }, makeTestEnv());
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -129,10 +138,7 @@ describe('Credentials Routes - OAuth Support', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, {
-        DATABASE: {} as any,
-        ENCRYPTION_KEY: 'test-key',
-      } as Env);
+      }, makeTestEnv());
 
       expect(res.status).toBe(201);
 
@@ -152,10 +158,7 @@ describe('Credentials Routes - OAuth Support', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, {
-        DATABASE: {} as any,
-        ENCRYPTION_KEY: 'test-key',
-      } as Env);
+      }, makeTestEnv());
 
       expect(res.status).toBe(201);
     });
@@ -171,10 +174,7 @@ describe('Credentials Routes - OAuth Support', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, {
-        DATABASE: {} as any,
-        ENCRYPTION_KEY: 'test-key',
-      } as Env);
+      }, makeTestEnv());
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -192,10 +192,7 @@ describe('Credentials Routes - OAuth Support', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, {
-        DATABASE: {} as any,
-        ENCRYPTION_KEY: 'test-key',
-      } as Env);
+      }, makeTestEnv());
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -232,10 +229,7 @@ describe('Credentials Routes - OAuth Support', () => {
 
       const res = await app.request('/api/credentials/agent', {
         method: 'GET',
-      }, {
-        DATABASE: {} as any,
-        ENCRYPTION_KEY: 'test-key',
-      } as Env);
+      }, makeTestEnv());
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -264,10 +258,7 @@ describe('Credentials Routes - OAuth Support', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, {
-        DATABASE: {} as any,
-        ENCRYPTION_KEY: 'test-key',
-      } as Env);
+      }, makeTestEnv());
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -297,10 +288,7 @@ describe('Credentials Routes - OAuth Support', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      }, {
-        DATABASE: {} as any,
-        ENCRYPTION_KEY: 'test-key',
-      } as Env);
+      }, makeTestEnv());
 
       expect(res.status).toBe(200); // Update returns 200, not 201
 

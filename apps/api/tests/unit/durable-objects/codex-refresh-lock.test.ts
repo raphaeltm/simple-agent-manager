@@ -354,10 +354,6 @@ describe('CodexRefreshLock', () => {
       });
 
       // Route by number of bind args: project query binds 2 args, user query binds 1.
-      const bind = vi.fn((...args: unknown[]) => {
-        if (args.length === 2) return projectBind(...args);
-        return userBind(...args);
-      });
       const runUpdate = vi.fn().mockResolvedValue({});
       const prepare = vi.fn((sql: string) => {
         if (sql.includes('UPDATE credentials')) {

@@ -14,8 +14,8 @@
 import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { requireOwnedProject, requireOwnedTask, requireOwnedWorkspace } from '../../../src/middleware/project-auth';
 import type { AppDb } from '../../../src/middleware/project-auth';
+import { requireOwnedProject, requireOwnedTask, requireOwnedWorkspace } from '../../../src/middleware/project-auth';
 
 /**
  * In-memory drizzle-compatible stub. Tests seed a dataset of rows; the stub filters

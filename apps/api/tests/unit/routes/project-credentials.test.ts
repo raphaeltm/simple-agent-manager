@@ -77,9 +77,17 @@ describe('Project Credentials Routes', () => {
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
   });
 
+  // Rate-limit middleware on PUT /:id/credentials calls KV.get / KV.put; stub
+  // returns "first call in window" so every request is allowed.
+  const kv = {
+    get: vi.fn().mockResolvedValue(null),
+    put: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+  };
   const env: Env = {
     DATABASE: {} as unknown as Env['DATABASE'],
     ENCRYPTION_KEY: 'test-key',
+    KV: kv as unknown as Env['KV'],
   } as Env;
 
   describe('GET /:id/credentials', () => {
