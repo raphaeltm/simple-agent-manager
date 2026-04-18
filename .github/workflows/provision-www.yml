@@ -15,6 +15,10 @@ env:
 jobs:
   provision:
     name: Provision Cloudflare Pages + DNS
+    # Guard: only run on the canonical repository, not on forks. Provisions
+    # DNS records and Cloudflare Pages project for simple-agent-manager.org;
+    # forks should not provision marketing site infrastructure.
+    if: github.repository == 'raphaeltm/simple-agent-manager'
     runs-on: ubuntu-latest
     environment: production
     permissions:

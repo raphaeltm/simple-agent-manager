@@ -21,7 +21,9 @@ jobs:
     name: Teardown Cloudflare Pages + DNS
     runs-on: ubuntu-latest
     environment: production
-    if: ${{ github.event.inputs.confirm == 'DELETE' }}
+    # Guard: only run on the canonical repository, not on forks. Teardown
+    # affects production marketing site infrastructure for simple-agent-manager.org.
+    if: ${{ github.event.inputs.confirm == 'DELETE' && github.repository == 'raphaeltm/simple-agent-manager' }}
     permissions:
       contents: read
     steps:
