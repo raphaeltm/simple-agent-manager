@@ -238,6 +238,7 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
+          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
 
       - name: Configure R2 CORS
         if: ${{ inputs.dry_run != true }}
@@ -362,6 +363,7 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
+          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
 
       - name: Re-deploy API Worker (with tail_consumers)
         if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}

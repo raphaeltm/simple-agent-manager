@@ -48,6 +48,7 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `REQUIRE_APPROVAL` | Require admin approval for new users. First user becomes superadmin. | _(unset — all users active)_ |
+| `HETZNER_BASE_IMAGE` | Hetzner VM base image. Set to `ubuntu-24.04` for emergency rollback from the faster `docker-ce` marketplace default. | `docker-ce` |
 
 **Optional runtime-config limit variables** (GitHub Environment variables):
 

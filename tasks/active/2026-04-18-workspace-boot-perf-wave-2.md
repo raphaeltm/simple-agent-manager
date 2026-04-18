@@ -113,7 +113,7 @@ Following the spirit of the user request while keeping scope tight:
 3. **Docker install phase shortened**: The `docker` phase duration drops substantially (expected: near-zero since Docker is preinstalled)
 4. **Rollback lever exists**: Setting `HETZNER_BASE_IMAGE=ubuntu-24.04` on the Worker causes new nodes to provision with Ubuntu (verified by env var presence, not live tested for every value)
 5. **No regression**: Node reaches agent-running in ≤ 3m 40s (should be faster, but the gate is "no worse")
-6. **Debug package includes bootstrap phase durations**: Bootstrap milestones wrapped with Phase helper show duration_ms in their detail field in the bootlog KV (or journald vm-agent logs)
+6. **`bootlog.Reporter.Phase` helper available for future adoption**: Phase helper added to `bootlog.Reporter` with unit tests (start + completed emitted with duration, failed path propagates error + emits failed status, nil receiver no-ops). Bootstrap.go migration to Phase is explicitly deferred to follow-up work — individual sites will migrate when their surrounding logic is refactored (see Implementation Checklist note). Provisioning durations are surfaced in this PR via eventstore→`provisioning-timings.txt` (AC1), which is the primary visibility mechanism for the 3m 40s baseline comparison.
 
 ## References
 

@@ -139,16 +139,16 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		start := time.Now()
 
 		if err := fn(ctx); err != nil {
-			duration := time.Since(start).Milliseconds()
+			elapsed := time.Since(start)
 			status.setStep(name, "failed")
 			status.setStepError(name, err.Error())
-			logStep(name, "failed", fmt.Sprintf("%s failed after %s: %s", name, time.Since(start).Round(time.Millisecond), err), duration)
+			logStep(name, "failed", fmt.Sprintf("%s failed after %s: %s", name, elapsed.Round(time.Millisecond), err), elapsed.Milliseconds())
 			return fmt.Errorf("provision step %s failed: %w", name, err)
 		}
 
-		duration := time.Since(start).Milliseconds()
+		elapsed := time.Since(start)
 		status.setStep(name, "completed")
-		logStep(name, "completed", fmt.Sprintf("%s completed in %s", name, time.Since(start).Round(time.Millisecond)), duration)
+		logStep(name, "completed", fmt.Sprintf("%s completed in %s", name, elapsed.Round(time.Millisecond)), elapsed.Milliseconds())
 		return nil
 	}
 
@@ -224,15 +224,17 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 	go func() {
 		defer pullWg.Done()
 		status.setStep("image-prepull", "running")
-		logStep("image-prepull", "started", "Starting base image pre-pull (background)")
+		logStep("image-prepull", "started", "Starting base image pre-pull (background)", 0)
 		start := time.Now()
 		if err := pullBaseImage(ctx); err != nil {
+			elapsed := time.Since(start)
 			status.setStep("image-prepull", "failed")
 			status.setStepError("image-prepull", err.Error())
-			logStep("image-prepull", "failed", fmt.Sprintf("Image pre-pull failed after %s: %s", time.Since(start).Round(time.Millisecond), err))
+			logStep("image-prepull", "failed", fmt.Sprintf("Image pre-pull failed after %s: %s", elapsed.Round(time.Millisecond), err), elapsed.Milliseconds())
 		} else {
+			elapsed := time.Since(start)
 			status.setStep("image-prepull", "completed")
-			logStep("image-prepull", "completed", fmt.Sprintf("Image pre-pull completed in %s", time.Since(start).Round(time.Millisecond)))
+			logStep("image-prepull", "completed", fmt.Sprintf("Image pre-pull completed in %s", elapsed.Round(time.Millisecond)), elapsed.Milliseconds())
 		}
 	}()
 
@@ -266,8 +268,8 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 
 	status.Phase = "completed"
 	status.CompletedAt = time.Now()
-	totalDuration := time.Since(status.StartedAt).Round(time.Millisecond)
-	logStep("all", "completed", fmt.Sprintf("System provisioning completed in %s", totalDuration))
+	totalElapsed := time.Since(status.StartedAt)
+	logStep("all", "completed", fmt.Sprintf("System provisioning completed in %s", totalElapsed.Round(time.Millisecond)), totalElapsed.Milliseconds())
 
 	return status, nil
 }

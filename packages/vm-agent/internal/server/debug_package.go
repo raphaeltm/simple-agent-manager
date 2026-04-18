@@ -333,29 +333,31 @@ func buildProvisioningTimings(es *eventstore.Store) string {
 	fmt.Fprintln(&b, strings.Repeat("-", 104))
 
 	var total int64
-	var firstStart, lastEnd string
+	var firstStart, lastEnd time.Time
 	for _, name := range order {
 		st := steps[name]
 		fmt.Fprintf(&b, "%-24s %-10s %-26s %-26s %12d\n",
 			st.name, st.status, st.startedAt, st.endedAt, st.durationMs)
 		total += st.durationMs
-		if firstStart == "" || st.startedAt < firstStart {
-			firstStart = st.startedAt
+		// Parse timestamps as time.Time to avoid subtle lexicographic bugs
+		// when mixed timezone offsets or formats are present.
+		if ft, err := time.Parse(time.RFC3339, st.startedAt); err == nil {
+			if firstStart.IsZero() || ft.Before(firstStart) {
+				firstStart = ft
+			}
 		}
-		if st.endedAt > lastEnd {
-			lastEnd = st.endedAt
+		if lt, err := time.Parse(time.RFC3339, st.endedAt); err == nil {
+			if lt.After(lastEnd) {
+				lastEnd = lt
+			}
 		}
 	}
 
 	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "Sum of per-step durations:   %d ms (%.2f s)\n", total, float64(total)/1000.0)
-	if firstStart != "" && lastEnd != "" {
-		if ft, err1 := time.Parse(time.RFC3339, firstStart); err1 == nil {
-			if lt, err2 := time.Parse(time.RFC3339, lastEnd); err2 == nil {
-				wall := lt.Sub(ft).Milliseconds()
-				fmt.Fprintf(&b, "Wall-clock (first→last):     %d ms (%.2f s)\n", wall, float64(wall)/1000.0)
-			}
-		}
+	if !firstStart.IsZero() && !lastEnd.IsZero() {
+		wall := lastEnd.Sub(firstStart).Milliseconds()
+		fmt.Fprintf(&b, "Wall-clock (first→last):     %d ms (%.2f s)\n", wall, float64(wall)/1000.0)
 	}
 	return b.String()
 }

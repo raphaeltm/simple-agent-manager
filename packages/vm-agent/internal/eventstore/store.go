@@ -82,6 +82,7 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
 		CREATE INDEX IF NOT EXISTS idx_events_workspace ON events(workspace_id, created_at);
 		CREATE INDEX IF NOT EXISTS idx_events_level ON events(level, created_at);
+		CREATE INDEX IF NOT EXISTS idx_events_type_created ON events(type, created_at);
 	`)
 	return err
 }
