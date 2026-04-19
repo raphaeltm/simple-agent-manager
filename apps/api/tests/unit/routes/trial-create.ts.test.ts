@@ -513,14 +513,19 @@ describe('POST /api/trial/create', () => {
     expect(insertMock).not.toHaveBeenCalled();
   });
 
-  it('reuses existing fingerprint UUID from cookie', async () => {
+  it('reuses existing fingerprint UUID from a validly-signed cookie', async () => {
     vi.stubGlobal('fetch', okGithubFetch());
     const { app, env } = makeApp(makeEnv({}));
 
-    // Mint a cookie that contains a UUID prefix (signature verification is
-    // NOT required for reuse — the route just extracts the prefix).
+    // Mint a fingerprint cookie whose HMAC was produced with the same SECRET
+    // the route uses to verify it. Only validly-signed cookies are trusted —
+    // see the "forged cookie" test below.
+    const { signFingerprint } = await import(
+      '../../../src/services/trial/cookies'
+    );
     const existingUuid = '11111111-2222-3333-4444-555555555555';
-    const cookie = `sam_trial_fingerprint=${existingUuid}.someSignatureHere`;
+    const signed = await signFingerprint(existingUuid, SECRET);
+    const cookie = `sam_trial_fingerprint=${signed}`;
 
     const res = await callCreate(
       app,
@@ -533,5 +538,38 @@ describe('POST /api/trial/create', () => {
     // The inserted row should carry the reused UUID.
     const inserted = valuesMock.mock.calls[0]?.[0] as { fingerprint: string };
     expect(inserted.fingerprint).toBe(existingUuid);
+  });
+
+  // SECURITY regression: a forged fingerprint cookie (no signature, invalid
+  // signature, or signature minted with a different secret) MUST NOT be
+  // trusted. If an attacker learns a victim's fingerprint UUID (from logs,
+  // a captured cookie, or a prior trial row) and submits `<victimUuid>.abc`
+  // to POST /api/trial/create, the route would — if it only split on `.` —
+  // overwrite the `trial-by-fingerprint:<victimUuid>` KV index to point at
+  // the attacker's trial. The OAuth hook would then redirect the victim to
+  // the attacker-chosen repo. See the 2026-04-19 security review HIGH #1.
+  it('rejects a forged fingerprint cookie and mints a fresh UUID', async () => {
+    vi.stubGlobal('fetch', okGithubFetch());
+    const { app, env } = makeApp(makeEnv({}));
+
+    const victimUuid = '11111111-2222-3333-4444-555555555555';
+    // Attacker crafts a cookie with the victim's UUID but an invalid HMAC.
+    const cookie = `sam_trial_fingerprint=${victimUuid}.invalidSignature`;
+
+    const res = await callCreate(
+      app,
+      env,
+      { repoUrl: 'https://github.com/alice/repo' },
+      cookie
+    );
+    expect(res.status).toBe(201);
+
+    // The inserted row MUST NOT reuse the victim's UUID.
+    const inserted = valuesMock.mock.calls[0]?.[0] as { fingerprint: string };
+    expect(inserted.fingerprint).not.toBe(victimUuid);
+    // And it should be a fresh, well-formed UUID (crypto.randomUUID format).
+    expect(inserted.fingerprint).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
   });
 });

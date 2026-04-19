@@ -41,6 +41,7 @@ import {
   signClaimToken,
   signFingerprint,
   type TrialClaimPayload,
+  verifyFingerprint,
 } from '../../services/trial/cookies';
 import { emitGithubKnowledgeEvents } from '../../services/trial/github-knowledge';
 import {
@@ -269,14 +270,22 @@ createRoutes.post('/create', async (c) => {
   // Determine (or mint) the visitor fingerprint. The same anonymous visitor
   // reuses the same fingerprint across multiple trials within the 7d cookie
   // lifetime, which makes support/abuse investigations tractable.
+  //
+  // SECURITY: the fingerprint cookie MUST be HMAC-verified before we trust its
+  // UUID. If we only split on the last dot and accept whatever's to the left,
+  // an attacker who learns a victim's fingerprint UUID (e.g. from logs, the
+  // victim's browser, or a prior trial row) can forge `<victimUuid>.<anything>`
+  // and overwrite the `trial-by-fingerprint:<victimUuid>` KV index to point at
+  // their own trial — the next OAuth-hook lookup then redirects the victim to
+  // the attacker's trial. Always call verifyFingerprint() and fall back to a
+  // fresh UUID on invalid/missing signature.
   const existingFp = readCookie(
     c.req.header('cookie') ?? null,
     TRIAL_COOKIE_FINGERPRINT_NAME
   );
   let fingerprintUuid: string | null = null;
   if (existingFp) {
-    const dot = existingFp.lastIndexOf('.');
-    if (dot > 0) fingerprintUuid = existingFp.slice(0, dot);
+    fingerprintUuid = await verifyFingerprint(existingFp, secret);
   }
   if (!fingerprintUuid) fingerprintUuid = crypto.randomUUID();
 
