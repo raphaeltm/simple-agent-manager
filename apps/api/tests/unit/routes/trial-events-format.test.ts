@@ -1,50 +1,54 @@
 /**
- * Regression test for `formatSse()` — SSE frame serialization helper.
+ * Regression tests for `formatSse()` — SSE frame serialization helper.
  *
- * Guards against SSE-frame injection: if a future caller ever bypasses the
- * `TrialEvent` discriminated union (e.g. via `as never` casts or dynamic
- * event names), CR/LF in the event name MUST be stripped so an attacker
- * cannot inject an extra `event:` / `data:` line into the stream.
+ * Two invariants are guarded here:
+ *
+ *   1. The frame MUST be an unnamed ("message") SSE event — i.e. no `event:`
+ *      line. Browser EventSource consumers only invoke `onmessage` for the
+ *      default event; named events require per-type `addEventListener()`
+ *      registrations. Emitting named events caused the "zero trial.* events
+ *      on staging" incident (2026-04-19) where bytes arrived on the wire but
+ *      the frontend's `onmessage` handler never fired. See
+ *      `docs/notes/2026-04-19-trial-sse-named-events-postmortem.md`.
+ *
+ *   2. Data is JSON-encoded, so embedded newlines in payload strings are
+ *      escaped — an SSE-frame-injection defence. The `TrialEvent` discriminated
+ *      union exposed at the call site additionally narrows the `type` field
+ *      to a safe set of literals.
  */
 import { describe, expect, it } from 'vitest';
 
 import { formatSse } from '../../../src/routes/trial/events';
 
 describe('formatSse()', () => {
-  it('produces a stable single-event frame on the happy path', () => {
+  it('produces an unnamed SSE frame so EventSource.onmessage fires', () => {
     const frame = formatSse('trial.ready', { type: 'trial.ready', at: 123 });
-    expect(frame).toBe(
-      'event: trial.ready\ndata: {"type":"trial.ready","at":123}\n\n'
-    );
-  });
-
-  it('strips CR and LF from the event name to prevent frame injection', () => {
-    // Attacker-controlled event name tries to smuggle a second event into the
-    // same frame. The CR/LF MUST be removed before the `event:` line is written.
-    const hostile = 'trial.knowledge\r\nevent: trial.error\ndata: {"pwn":true}\r\n';
-    const frame = formatSse(hostile, { ok: 1 });
-
-    // The frame must have exactly one `event:` line and one `data:` line,
-    // followed by the terminating blank line — i.e. three newlines total.
-    const lines = frame.split('\n');
-    // Expected shape: ['event: ...', 'data: {...}', '', '']
-    expect(lines).toHaveLength(4);
-    expect(lines[0]?.startsWith('event: ')).toBe(true);
-    expect(lines[1]?.startsWith('data: ')).toBe(true);
-    expect(lines[2]).toBe('');
-    expect(lines[3]).toBe('');
-
-    // No CR/LF survives inside the event name.
-    expect(lines[0]).not.toContain('\r');
-    // And crucially, the word `error` is now part of the event name, not a
-    // separate injected event line.
-    const eventMatches = frame.match(/^event: /gm) ?? [];
-    expect(eventMatches).toHaveLength(1);
+    expect(frame).toBe('data: {"type":"trial.ready","at":123}\n\n');
+    // No `event:` line — otherwise the client has to register listeners
+    // per event type and `onmessage` silently never fires.
+    expect(frame).not.toContain('event:');
   });
 
   it('json-encodes the data payload (newlines inside strings are escaped)', () => {
     const frame = formatSse('trial.log', { msg: 'line1\nline2' });
-    // JSON.stringify escapes the embedded newline to \n (literal backslash n).
-    expect(frame).toBe('event: trial.log\ndata: {"msg":"line1\\nline2"}\n\n');
+    // JSON.stringify escapes the embedded newline to \n (literal backslash n),
+    // preventing the payload from terminating the SSE frame early.
+    expect(frame).toBe('data: {"msg":"line1\\nline2"}\n\n');
+  });
+
+  it('frame shape is exactly one data line plus the blank terminator', () => {
+    const frame = formatSse('trial.knowledge', {
+      type: 'trial.knowledge',
+      key: 'description',
+      value: 'hello',
+    });
+    const lines = frame.split('\n');
+    // ['data: {...}', '', '']
+    expect(lines).toHaveLength(3);
+    expect(lines[0]?.startsWith('data: ')).toBe(true);
+    expect(lines[1]).toBe('');
+    expect(lines[2]).toBe('');
+    const dataLines = frame.match(/^data: /gm) ?? [];
+    expect(dataLines).toHaveLength(1);
   });
 });

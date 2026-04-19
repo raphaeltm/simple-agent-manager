@@ -361,7 +361,10 @@ describe('POST /api/trial/create', () => {
     };
     expect(body.trialId).toMatch(/^trial_/);
     expect(body.projectId).toBe(''); // populated by Track B later
-    expect(body.eventsUrl).toContain('/api/trial/events?trialId=');
+    // Events URL must match the actual SSE route (path segment, not query
+    // param). Frontend clients that rely on the response field would break if
+    // this drifts from the Hono route shape.
+    expect(body.eventsUrl).toBe(`/api/trial/${body.trialId}/events`);
     expect(body.expiresAt).toBeGreaterThan(Date.now());
 
     // Two Set-Cookie headers should be present (fingerprint + claim).

@@ -24,6 +24,7 @@ import type { TrialEvent } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 
 interface BufferedEvent {
   cursor: number;
@@ -70,7 +71,12 @@ export class TrialEventBus extends DurableObject<Env> {
   // -------------------------------------------------------------------------
 
   private async handleAppend(req: Request): Promise<Response> {
+    log.info('trial_event_bus.handleAppend.enter', {
+      closed: this.closed,
+      bufferLen: this.buffer.length,
+    });
     if (this.closed) {
+      log.warn('trial_event_bus.handleAppend.rejected_closed', {});
       return new Response(
         JSON.stringify({ error: 'closed' }),
         { status: 409, headers: { 'content-type': 'application/json' } }
@@ -84,6 +90,11 @@ export class TrialEventBus extends DurableObject<Env> {
     }
     const cursor = this.nextCursor++;
     this.buffer.push({ cursor, event });
+    log.info('trial_event_bus.handleAppend.stored', {
+      cursor,
+      type: event.type,
+      waiters: this.waiters.size,
+    });
     if (this.buffer.length > MAX_BUFFERED_EVENTS) {
       // Drop oldest events — SSE consumers MUST keep up.
       this.buffer.splice(0, this.buffer.length - MAX_BUFFERED_EVENTS);

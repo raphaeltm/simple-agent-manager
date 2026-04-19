@@ -194,7 +194,10 @@ describe('GET /api/trial/:trialId/events — happy path', () => {
     // Drain the stream and assert the SSE frame shape.
     const body = await resp.text();
     expect(body).toContain(': connected');
-    expect(body).toContain('event: trial.ready');
+    // SSE frames are UNNAMED ("message") events so EventSource.onmessage
+    // fires on the client. See
+    // docs/notes/2026-04-19-trial-sse-named-events-postmortem.md.
+    expect(body).not.toContain('event: trial.ready');
     expect(body).toContain('"type":"trial.ready"');
   });
 });

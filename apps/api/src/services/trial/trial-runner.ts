@@ -176,6 +176,7 @@ export async function emitTrialEvent(
   trialId: string,
   event: TrialEvent
 ): Promise<void> {
+  log.info('trial_event_bus.emit_begin', { trialId, type: event.type });
   try {
     const id = env.TRIAL_EVENT_BUS.idFromName(trialId);
     const stub = env.TRIAL_EVENT_BUS.get(id);
@@ -190,12 +191,19 @@ export async function emitTrialEvent(
         type: event.type,
         status: resp.status,
       });
+    } else {
+      log.info('trial_event_bus.emit_ok', {
+        trialId,
+        type: event.type,
+        status: resp.status,
+      });
     }
   } catch (err) {
     log.warn('trial_event_bus.append_error', {
       trialId,
       type: event.type,
       error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
     });
   }
 }
