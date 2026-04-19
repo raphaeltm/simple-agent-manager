@@ -119,6 +119,11 @@ class_name = "TrialCounter"
 name = "TRIAL_EVENT_BUS"
 class_name = "TrialEventBus"
 
+# Durable Object for alarm-driven trial provisioning (one DO per trialId)
+[[durable_objects.bindings]]
+name = "TRIAL_ORCHESTRATOR"
+class_name = "TrialOrchestrator"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -150,6 +155,10 @@ new_sqlite_classes = ["TrialCounter"]
 [[migrations]]
 tag = "v8"
 new_classes = ["TrialEventBus"]  # In-memory only — no SQLite storage needed for short-lived trial streams
+
+[[migrations]]
+tag = "v9"
+new_classes = ["TrialOrchestrator"]  # Alarm-driven trial provisioning; persists state via ctx.storage.put()
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

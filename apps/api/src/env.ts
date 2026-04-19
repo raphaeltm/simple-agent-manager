@@ -21,6 +21,7 @@ export interface Env {
   CODEX_REFRESH_LOCK: DurableObjectNamespace;
   TRIAL_COUNTER: DurableObjectNamespace;
   TRIAL_EVENT_BUS: DurableObjectNamespace;
+  TRIAL_ORCHESTRATOR: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -472,4 +473,18 @@ export interface Env {
   TRIAL_MODEL?: string;
   /** Override for default trial LLM provider ("anthropic" | "workers-ai"). */
   TRIAL_LLM_PROVIDER?: string;
+  // TrialOrchestrator DO (alarm-driven trial provisioning)
+  TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS?: string;
+  TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES?: string;
+  TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS?: string;
+  TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS?: string;
+  TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS?: string;
+  TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS?: string;
+  TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS?: string;
+  TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS?: string;
+  // Fast-path GitHub knowledge probes (fired from POST /api/trial/create)
+  TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS?: string;
+  TRIAL_KNOWLEDGE_MAX_EVENTS?: string;
+  /** Sentinel GitHub installation id used for anonymous trial projects. */
+  TRIAL_ANONYMOUS_INSTALLATION_ID?: string;
 }
