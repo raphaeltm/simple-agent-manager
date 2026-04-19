@@ -63,7 +63,11 @@ function makeEnv(options: {
   decrementFn?: (monthKey: string) => Promise<number>;
   secret?: string | undefined;
   cap?: string;
+  orchestratorStart?: (input: unknown) => Promise<void>;
 }): Env {
+  const orchestratorStartFn =
+    options.orchestratorStart ?? vi.fn(async () => {});
+  const orchestratorStub = { start: orchestratorStartFn };
   return {
     TRIAL_CLAIM_TOKEN_SECRET: 'secret' in options ? options.secret : SECRET,
     TRIAL_MONTHLY_CAP: options.cap,
@@ -75,6 +79,16 @@ function makeEnv(options: {
           options.tryIncrementFn ??
           vi.fn(async () => ({ allowed: true, count: 1 })),
         decrement: options.decrementFn ?? vi.fn(async () => 0),
+      })),
+    },
+    TRIAL_ORCHESTRATOR: {
+      idFromName: vi.fn(() => 'orchestrator-do-id'),
+      get: vi.fn(() => orchestratorStub),
+    },
+    TRIAL_EVENT_BUS: {
+      idFromName: vi.fn(() => 'event-bus-do-id'),
+      get: vi.fn(() => ({
+        fetch: vi.fn(async () => new Response('ok')),
       })),
     },
     // Trial-store KV mirror — Track B readers (SSE events, claim) look trials
@@ -101,7 +115,8 @@ async function callCreate(
   app: Hono<{ Bindings: Env }>,
   env: Env,
   body: unknown,
-  cookie?: string
+  cookie?: string,
+  executionCtx?: ExecutionContext
 ) {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (cookie) headers.cookie = cookie;
@@ -111,8 +126,24 @@ async function callCreate(
       headers,
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
-    env
+    env,
+    executionCtx
   );
+}
+
+/** Minimal ExecutionContext stub that synchronously awaits every waitUntil
+ *  promise so assertions can observe side effects after `callCreate` resolves. */
+function makeExecutionCtx(): ExecutionContext & { waitUntilPromises: Promise<unknown>[] } {
+  const promises: Promise<unknown>[] = [];
+  const ctx: ExecutionContext & { waitUntilPromises: Promise<unknown>[] } = {
+    waitUntil: (p: Promise<unknown>) => {
+      promises.push(p);
+    },
+    passThroughOnException: () => {},
+    props: {},
+    waitUntilPromises: promises,
+  } as unknown as ExecutionContext & { waitUntilPromises: Promise<unknown>[] };
+  return ctx;
 }
 
 function okGithubFetch(overrides: Partial<{ size: number; private: boolean }> = {}) {
@@ -381,14 +412,120 @@ describe('POST /api/trial/create', () => {
     expect(decrementFn).toHaveBeenCalledTimes(1);
   });
 
-  it('reuses existing fingerprint UUID from cookie', async () => {
+  it('dispatches TrialOrchestrator.start() with repo owner/name/canonical URL via waitUntil', async () => {
+    vi.stubGlobal('fetch', okGithubFetch());
+    const startFn = vi.fn(async () => {});
+    const env = makeEnv({ orchestratorStart: startFn });
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/trial', createRoutes);
+    const ctx = makeExecutionCtx();
+
+    const res = await callCreate(
+      app,
+      env,
+      { repoUrl: 'https://github.com/alice/repo' },
+      undefined,
+      ctx
+    );
+    expect(res.status).toBe(201);
+
+    // waitUntil should have been called at least twice (orchestrator + knowledge).
+    expect(ctx.waitUntilPromises.length).toBeGreaterThanOrEqual(2);
+    // Drain waitUntil promises so the orchestrator.start() call is observable.
+    await Promise.all(ctx.waitUntilPromises.map((p) => p.catch(() => {})));
+
+    expect(startFn).toHaveBeenCalledTimes(1);
+    const arg = startFn.mock.calls[0]?.[0] as {
+      trialId: string;
+      repoUrl: string;
+      repoOwner: string;
+      repoName: string;
+    };
+    expect(arg.trialId).toMatch(/^trial_/);
+    expect(arg.repoOwner).toBe('alice');
+    expect(arg.repoName).toBe('repo');
+    expect(arg.repoUrl).toBe('https://github.com/alice/repo');
+  });
+
+  it('still returns 201 when TrialOrchestrator.start() rejects (fire-and-forget)', async () => {
+    vi.stubGlobal('fetch', okGithubFetch());
+    const startFn = vi.fn().mockRejectedValue(new Error('DO unavailable'));
+    const env = makeEnv({ orchestratorStart: startFn });
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/trial', createRoutes);
+    const ctx = makeExecutionCtx();
+
+    const res = await callCreate(
+      app,
+      env,
+      { repoUrl: 'https://github.com/alice/repo' },
+      undefined,
+      ctx
+    );
+    // Response status must remain 201 — orchestrator failure is non-blocking.
+    expect(res.status).toBe(201);
+    // Drain waitUntil promises so the rejection is observable but swallowed.
+    await Promise.all(ctx.waitUntilPromises.map((p) => p.catch(() => {})));
+    expect(startFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('rate-limits per IP when KV shows the window count is at the limit', async () => {
+    // Regression guard for the HIGH security-auditor finding: `POST /create`
+    // must enforce a per-IP rate limit before the kill-switch + DO dispatch.
+    // We override KV.get so the middleware sees an already-exhausted bucket
+    // and returns 429 without touching the orchestrator.
+    vi.stubGlobal('fetch', okGithubFetch());
+    const env = makeEnv({});
+    const exhaustedWindow = {
+      count: 999_999,
+      windowStart: Math.floor(Date.now() / 1000 / 3600) * 3600,
+    };
+    (env.KV.get as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (key: string) =>
+        key.startsWith('ratelimit:trial-create:') ? exhaustedWindow : null
+    );
+    const app = new Hono<{ Bindings: Env }>();
+    // Mirror the global error handler from apps/api/src/index.ts so AppError
+    // (thrown by the rate-limit middleware) serializes to its real statusCode.
+    const { AppError } = await import('../../../src/middleware/error');
+    type AppErrorJson = { error: string; message: string; details?: unknown };
+    app.onError((err, c) => {
+      if (err instanceof AppError) {
+        return c.json(err.toJSON() as AppErrorJson, err.statusCode as 429);
+      }
+      return c.json({ error: 'INTERNAL_ERROR', message: 'err' }, 500);
+    });
+    app.route('/api/trial', createRoutes);
+
+    const res = await app.fetch(
+      new Request('https://api.test/api/trial/create', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'CF-Connecting-IP': '203.0.113.7',
+        },
+        body: JSON.stringify({ repoUrl: 'https://github.com/alice/repo' }),
+      }),
+      env
+    );
+    expect(res.status).toBe(429);
+    // DO must NOT have been called when rate limit blocks the request.
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('reuses existing fingerprint UUID from a validly-signed cookie', async () => {
     vi.stubGlobal('fetch', okGithubFetch());
     const { app, env } = makeApp(makeEnv({}));
 
-    // Mint a cookie that contains a UUID prefix (signature verification is
-    // NOT required for reuse — the route just extracts the prefix).
+    // Mint a fingerprint cookie whose HMAC was produced with the same SECRET
+    // the route uses to verify it. Only validly-signed cookies are trusted —
+    // see the "forged cookie" test below.
+    const { signFingerprint } = await import(
+      '../../../src/services/trial/cookies'
+    );
     const existingUuid = '11111111-2222-3333-4444-555555555555';
-    const cookie = `sam_trial_fingerprint=${existingUuid}.someSignatureHere`;
+    const signed = await signFingerprint(existingUuid, SECRET);
+    const cookie = `sam_trial_fingerprint=${signed}`;
 
     const res = await callCreate(
       app,
@@ -401,5 +538,38 @@ describe('POST /api/trial/create', () => {
     // The inserted row should carry the reused UUID.
     const inserted = valuesMock.mock.calls[0]?.[0] as { fingerprint: string };
     expect(inserted.fingerprint).toBe(existingUuid);
+  });
+
+  // SECURITY regression: a forged fingerprint cookie (no signature, invalid
+  // signature, or signature minted with a different secret) MUST NOT be
+  // trusted. If an attacker learns a victim's fingerprint UUID (from logs,
+  // a captured cookie, or a prior trial row) and submits `<victimUuid>.abc`
+  // to POST /api/trial/create, the route would — if it only split on `.` —
+  // overwrite the `trial-by-fingerprint:<victimUuid>` KV index to point at
+  // the attacker's trial. The OAuth hook would then redirect the victim to
+  // the attacker-chosen repo. See the 2026-04-19 security review HIGH #1.
+  it('rejects a forged fingerprint cookie and mints a fresh UUID', async () => {
+    vi.stubGlobal('fetch', okGithubFetch());
+    const { app, env } = makeApp(makeEnv({}));
+
+    const victimUuid = '11111111-2222-3333-4444-555555555555';
+    // Attacker crafts a cookie with the victim's UUID but an invalid HMAC.
+    const cookie = `sam_trial_fingerprint=${victimUuid}.invalidSignature`;
+
+    const res = await callCreate(
+      app,
+      env,
+      { repoUrl: 'https://github.com/alice/repo' },
+      cookie
+    );
+    expect(res.status).toBe(201);
+
+    // The inserted row MUST NOT reuse the victim's UUID.
+    const inserted = valuesMock.mock.calls[0]?.[0] as { fingerprint: string };
+    expect(inserted.fingerprint).not.toBe(victimUuid);
+    // And it should be a fresh, well-formed UUID (crypto.randomUUID format).
+    expect(inserted.fingerprint).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
   });
 });

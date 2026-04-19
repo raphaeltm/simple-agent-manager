@@ -34,13 +34,16 @@ import * as schema from '../../db/schema';
 import type { TrialCounterTryIncrementResult } from '../../durable-objects/trial-counter';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { rateLimitTrialCreate } from '../../middleware/rate-limit';
 import {
   buildClaimCookie,
   buildFingerprintCookie,
   signClaimToken,
   signFingerprint,
   type TrialClaimPayload,
+  verifyFingerprint,
 } from '../../services/trial/cookies';
+import { emitGithubKnowledgeEvents } from '../../services/trial/github-knowledge';
 import {
   currentMonthKey,
   getTrialCounterStub,
@@ -141,6 +144,13 @@ function randomId(prefix: string): string {
   // crypto.randomUUID is available in Workers/modern Node.
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '')}`;
 }
+
+// Per-IP rate limit (outermost gate, before kill-switch + DO dispatch).
+// Default: 10 trial creates per IP per hour (see RATE_LIMIT_TRIAL_CREATE).
+createRoutes.use('/create', async (c, next) => {
+  const limiter = rateLimitTrialCreate(c.env);
+  return limiter(c, next);
+});
 
 createRoutes.post('/create', async (c) => {
   const env = c.env;
@@ -260,14 +270,22 @@ createRoutes.post('/create', async (c) => {
   // Determine (or mint) the visitor fingerprint. The same anonymous visitor
   // reuses the same fingerprint across multiple trials within the 7d cookie
   // lifetime, which makes support/abuse investigations tractable.
+  //
+  // SECURITY: the fingerprint cookie MUST be HMAC-verified before we trust its
+  // UUID. If we only split on the last dot and accept whatever's to the left,
+  // an attacker who learns a victim's fingerprint UUID (e.g. from logs, the
+  // victim's browser, or a prior trial row) can forge `<victimUuid>.<anything>`
+  // and overwrite the `trial-by-fingerprint:<victimUuid>` KV index to point at
+  // their own trial — the next OAuth-hook lookup then redirects the victim to
+  // the attacker's trial. Always call verifyFingerprint() and fall back to a
+  // fresh UUID on invalid/missing signature.
   const existingFp = readCookie(
     c.req.header('cookie') ?? null,
     TRIAL_COOKIE_FINGERPRINT_NAME
   );
   let fingerprintUuid: string | null = null;
   if (existingFp) {
-    const dot = existingFp.lastIndexOf('.');
-    if (dot > 0) fingerprintUuid = existingFp.slice(0, dot);
+    fingerprintUuid = await verifyFingerprint(existingFp, secret);
   }
   if (!fingerprintUuid) fingerprintUuid = crypto.randomUUID();
 
@@ -398,6 +416,60 @@ createRoutes.post('/create', async (c) => {
     repo: repo.canonical,
     // fingerprint deliberately omitted from structured logs — it's PII-adjacent
   });
+
+  // -- 7. Fire-and-forget orchestrator dispatch + GitHub knowledge probes ----
+  // Both tasks run via waitUntil so the HTTP response returns immediately
+  // (<100ms) while provisioning and the fast knowledge probes continue in the
+  // background. Errors are swallowed inside the helpers so a failure here
+  // never causes the response to hang.
+  //
+  // c.executionCtx may be absent in unit tests that construct Hono apps
+  // without a real Worker executionCtx. Hono throws on access when it's
+  // missing, so we guard with try/catch rather than a simple null check.
+  let exec: ExecutionContext | undefined;
+  try {
+    exec = c.executionCtx;
+  } catch {
+    exec = undefined;
+  }
+  const orchestratorTask = (async () => {
+    try {
+      const id = env.TRIAL_ORCHESTRATOR.idFromName(trialId);
+      const stub = env.TRIAL_ORCHESTRATOR.get(id);
+      await (
+        stub as unknown as {
+          start(input: {
+            trialId: string;
+            repoUrl: string;
+            repoOwner: string;
+            repoName: string;
+          }): Promise<void>;
+        }
+      ).start({
+        trialId,
+        repoUrl: repo.canonical,
+        repoOwner: repo.owner,
+        repoName: repo.name,
+      });
+    } catch (err) {
+      log.error('trial.create.orchestrator_dispatch_failed', {
+        trialId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  })();
+  const knowledgeTask = emitGithubKnowledgeEvents(env, trialId, {
+    owner: repo.owner,
+    name: repo.name,
+  });
+  if (exec) {
+    exec.waitUntil(orchestratorTask);
+    exec.waitUntil(knowledgeTask);
+  } else {
+    // Prevent unhandled-rejection warnings in tests without swallowing logs.
+    void orchestratorTask.catch(() => {});
+    void knowledgeTask.catch(() => {});
+  }
 
   return new Response(JSON.stringify(respBody), {
     status: 201,
