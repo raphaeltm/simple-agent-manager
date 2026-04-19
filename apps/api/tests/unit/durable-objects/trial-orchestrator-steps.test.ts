@@ -31,6 +31,12 @@ vi.mock('../../../src/services/trial/trial-runner', () => ({
   emitTrialEvent: emitTrialEventMock,
   emitTrialEventForProject: vi.fn(async () => {}),
   startDiscoveryAgent: startDiscoveryAgentMock,
+  resolveTrialRunnerConfig: vi.fn(() => ({
+    mode: 'staging' as const,
+    agentType: 'opencode',
+    model: '@cf/meta/llama-4-scout-17b-16e-instruct',
+    provider: 'workers-ai' as const,
+  })),
 }));
 
 vi.mock('../../../src/services/trial/trial-store', () => ({
@@ -41,6 +47,18 @@ vi.mock('../../../src/services/trial/trial-store', () => ({
 
 vi.mock('../../../src/services/project-data', () => ({
   linkSessionToWorkspace: vi.fn(async () => {}),
+  transitionAcpSession: vi.fn(async () => {}),
+}));
+
+vi.mock('../../../src/services/node-agent', () => ({
+  createAgentSessionOnNode: vi.fn(async () => {}),
+  startAgentSessionOnNode: vi.fn(async () => {}),
+  createWorkspaceOnNode: vi.fn(async () => {}),
+}));
+
+vi.mock('../../../src/services/mcp-token', () => ({
+  generateMcpToken: vi.fn(() => 'mcp_tok_idempotent'),
+  storeMcpToken: vi.fn(async () => {}),
 }));
 
 // Mock services/nodes so handleNodeProvisioning doesn't reach real provider code.
@@ -181,10 +199,10 @@ describe('handleDiscoveryAgentStart', () => {
     vi.clearAllMocks();
   });
 
-  it('throws a permanent error when projectId or workspaceId is missing', async () => {
+  it('throws a permanent error when projectId, workspaceId, or nodeId is missing', async () => {
     const ctx = makeCtx();
     const rc = makeRc(ctx, []);
-    const state = makeState({ projectId: null, workspaceId: null });
+    const state = makeState({ projectId: null, workspaceId: null, nodeId: null });
 
     let caught: Error & { permanent?: boolean } = new Error('never');
     try {
@@ -192,21 +210,27 @@ describe('handleDiscoveryAgentStart', () => {
     } catch (err) {
       caught = err as Error & { permanent?: boolean };
     }
-    expect(caught.message).toMatch(/projectId and workspaceId/);
+    expect(caught.message).toMatch(/projectId, workspaceId, and nodeId/);
     expect(caught.permanent).toBe(true);
     // startDiscoveryAgent must NOT have been called.
     expect(startDiscoveryAgentMock).not.toHaveBeenCalled();
   });
 
-  it('is idempotent: already-linked session skips startDiscoveryAgent and advances to running', async () => {
+  it('is idempotent: already-booted session skips all VM calls and advances to running', async () => {
     const ctx = makeCtx();
     const advanced: string[] = [];
     const rc = makeRc(ctx, advanced);
     const state = makeState({
       projectId: 'proj_X',
       workspaceId: 'ws_X',
+      nodeId: 'node_X',
       chatSessionId: 'cs_X',
       acpSessionId: 'acp_X',
+      mcpToken: 'mcp_tok_X',
+      agentSessionCreatedOnVm: true,
+      agentStartedOnVm: true,
+      acpAssignedOnVm: true,
+      acpRunningOnVm: true,
     });
     await handleDiscoveryAgentStart(state, rc);
     expect(startDiscoveryAgentMock).not.toHaveBeenCalled();
