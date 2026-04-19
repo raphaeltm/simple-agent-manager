@@ -137,12 +137,19 @@ export class TrialOrchestrator extends DurableObject<Env> {
   }
 
   /**
-   * Public status accessor for debugging / tests. Redacts nothing — the DO
-   * doesn't store raw secrets (the agent-session MCP token lives on the
-   * workspace record, not here).
+   * Public status accessor for debugging / tests. The DO now stores an
+   * `mcpToken` (minted for the discovery agent in `handleDiscoveryAgentStart`)
+   * which is a live bearer credential — it must be redacted before leaving
+   * the DO boundary so any debug endpoint that surfaces status cannot
+   * inadvertently leak the token.
    */
   async getStatus(): Promise<TrialOrchestratorState | null> {
-    return this.getState();
+    const state = await this.getState();
+    if (!state) return null;
+    return {
+      ...state,
+      mcpToken: state.mcpToken ? '[redacted]' : null,
+    };
   }
 
   // =========================================================================

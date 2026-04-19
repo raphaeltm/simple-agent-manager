@@ -197,7 +197,14 @@ export async function handleProjectCreation(
   // without breaking main-default repos when GitHub is unreachable.
   const defaultBranch = state.defaultBranch
     ?? (await fetchDefaultBranch(state.repoOwner, state.repoName, rc.env));
-  state.defaultBranch = defaultBranch;
+  // Persist the resolved branch BEFORE the D1 insert so a crash between here
+  // and the project persist (line ~222) does not cause a retry to re-probe
+  // GitHub and potentially resolve a different value than what is about to
+  // land in the D1 projects row.
+  if (state.defaultBranch !== defaultBranch) {
+    state.defaultBranch = defaultBranch;
+    await rc.ctx.storage.put('state', state);
+  }
 
   // Normalize the repo name for uniqueness. Two trials on the same repo are
   // expected — scope uniqueness by trialId so collisions are impossible.
