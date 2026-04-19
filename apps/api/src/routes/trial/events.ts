@@ -179,10 +179,14 @@ function parseIntSafe(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-function formatSse(eventName: string, data: unknown): string {
+export function formatSse(eventName: string, data: unknown): string {
   // Stable shape: one `event:` line, one `data:` line, blank terminator.
+  // Strip CR/LF from the event name to prevent SSE-frame injection if a
+  // future caller ever bypasses the TrialEvent discriminated union (e.g. via
+  // `as never` casts). Data is JSON-encoded which already escapes newlines.
+  const safeName = eventName.replace(/[\r\n]/g, '');
   const json = JSON.stringify(data);
-  return `event: ${eventName}\ndata: ${json}\n\n`;
+  return `event: ${safeName}\ndata: ${json}\n\n`;
 }
 
 function sleep(ms: number): Promise<void> {

@@ -34,6 +34,7 @@ import * as schema from '../../db/schema';
 import type { TrialCounterTryIncrementResult } from '../../durable-objects/trial-counter';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { rateLimitTrialCreate } from '../../middleware/rate-limit';
 import {
   buildClaimCookie,
   buildFingerprintCookie,
@@ -142,6 +143,13 @@ function randomId(prefix: string): string {
   // crypto.randomUUID is available in Workers/modern Node.
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '')}`;
 }
+
+// Per-IP rate limit (outermost gate, before kill-switch + DO dispatch).
+// Default: 10 trial creates per IP per hour (see RATE_LIMIT_TRIAL_CREATE).
+createRoutes.use('/create', async (c, next) => {
+  const limiter = rateLimitTrialCreate(c.env);
+  return limiter(c, next);
+});
 
 createRoutes.post('/create', async (c) => {
   const env = c.env;

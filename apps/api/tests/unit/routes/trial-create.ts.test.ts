@@ -469,6 +469,50 @@ describe('POST /api/trial/create', () => {
     expect(startFn).toHaveBeenCalledTimes(1);
   });
 
+  it('rate-limits per IP when KV shows the window count is at the limit', async () => {
+    // Regression guard for the HIGH security-auditor finding: `POST /create`
+    // must enforce a per-IP rate limit before the kill-switch + DO dispatch.
+    // We override KV.get so the middleware sees an already-exhausted bucket
+    // and returns 429 without touching the orchestrator.
+    vi.stubGlobal('fetch', okGithubFetch());
+    const env = makeEnv({});
+    const exhaustedWindow = {
+      count: 999_999,
+      windowStart: Math.floor(Date.now() / 1000 / 3600) * 3600,
+    };
+    (env.KV.get as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (key: string) =>
+        key.startsWith('ratelimit:trial-create:') ? exhaustedWindow : null
+    );
+    const app = new Hono<{ Bindings: Env }>();
+    // Mirror the global error handler from apps/api/src/index.ts so AppError
+    // (thrown by the rate-limit middleware) serializes to its real statusCode.
+    const { AppError } = await import('../../../src/middleware/error');
+    type AppErrorJson = { error: string; message: string; details?: unknown };
+    app.onError((err, c) => {
+      if (err instanceof AppError) {
+        return c.json(err.toJSON() as AppErrorJson, err.statusCode as 429);
+      }
+      return c.json({ error: 'INTERNAL_ERROR', message: 'err' }, 500);
+    });
+    app.route('/api/trial', createRoutes);
+
+    const res = await app.fetch(
+      new Request('https://api.test/api/trial/create', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'CF-Connecting-IP': '203.0.113.7',
+        },
+        body: JSON.stringify({ repoUrl: 'https://github.com/alice/repo' }),
+      }),
+      env
+    );
+    expect(res.status).toBe(429);
+    // DO must NOT have been called when rate limit blocks the request.
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
   it('reuses existing fingerprint UUID from cookie', async () => {
     vi.stubGlobal('fetch', okGithubFetch());
     const { app, env } = makeApp(makeEnv({}));
