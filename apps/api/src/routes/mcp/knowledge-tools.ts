@@ -75,6 +75,16 @@ export async function handleAddKnowledge(
     env, tokenData.projectId, entityId, observation, confidence, sourceType, sessionId,
   );
 
+  // Trial bridge — if this project is backing an anonymous trial, fan the
+  // observation out as a `trial.knowledge` SSE event. Non-trial projects
+  // short-circuit after a single KV lookup inside the helper.
+  try {
+    const { bridgeKnowledgeAdded } = await import('../../services/trial/bridge');
+    await bridgeKnowledgeAdded(env, tokenData.projectId, entityName, observation);
+  } catch {
+    // Bridge errors are already logged inside the helper; never block MCP.
+  }
+
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: JSON.stringify({
       added: true,
