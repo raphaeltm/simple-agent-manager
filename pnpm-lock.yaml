@@ -87,6 +87,9 @@ catalogs:
     typescript:
       specifier: 5.9.3
       version: 5.9.3
+    valibot:
+      specifier: 1.3.1
+      version: 1.3.1
     vite:
       specifier: 6.4.1
       version: 6.4.1
@@ -202,7 +205,7 @@ importers:
         specifier: 'catalog:'
         version: 4.21.0
       valibot:
-        specifier: 1.3.1
+        specifier: 'catalog:'
         version: 1.3.1(typescript@5.9.3)
       workers-ai-provider:
         specifier: 3.1.2
@@ -546,6 +549,9 @@ importers:
 
   packages/shared:
     dependencies:
+      valibot:
+        specifier: 'catalog:'
+        version: 1.3.1(typescript@5.9.3)
       zod:
         specifier: 'catalog:'
         version: 3.25.76

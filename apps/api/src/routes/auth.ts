@@ -4,6 +4,7 @@ import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
+import { maybeAttachTrialClaimCookie } from '../services/trial/oauth-hook';
 
 const authRoutes = new Hono<{ Bindings: Env }>();
 
@@ -24,7 +25,10 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
       const body = await response.clone().text();
       log.error('auth.better_auth_error', { status: response.status, body: body || '(empty body)' });
     }
-    return response;
+    // Trial claim hook: if this is a successful OAuth callback and the user
+    // has an active trial fingerprint cookie, attach a claim cookie + redirect
+    // to the trial landing page. No-op when no fingerprint is present.
+    return await maybeAttachTrialClaimCookie(c.env, c.req.raw, response);
   } catch (err) {
     log.error('auth.better_auth_exception', { error: err instanceof Error ? err.message : String(err) });
     return c.json({ error: 'AUTH_ERROR', message: 'Internal auth error' }, 500);

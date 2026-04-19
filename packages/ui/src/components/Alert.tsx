@@ -5,6 +5,7 @@ interface AlertProps {
   children: ReactNode;
   onDismiss?: () => void;
   className?: string;
+  'data-testid'?: string;
 }
 
 const variantClasses: Record<AlertProps['variant'], { container: string; dismiss: string }> = {
@@ -26,13 +27,20 @@ const variantClasses: Record<AlertProps['variant'], { container: string; dismiss
   },
 };
 
-export function Alert({ variant, children, onDismiss, className = '' }: AlertProps) {
+export function Alert({
+  variant,
+  children,
+  onDismiss,
+  className = '',
+  'data-testid': testId,
+}: AlertProps) {
   const v = variantClasses[variant];
 
   return (
     <div
       className={`flex items-center justify-between gap-3 rounded-md border p-4 text-sm ${v.container} ${className}`}
       role="alert"
+      data-testid={testId}
     >
       <div className="flex-1">{children}</div>
       {onDismiss && (

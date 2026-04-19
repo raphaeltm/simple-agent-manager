@@ -247,6 +247,22 @@ export async function handleCreateIdea(
     contentLength: content?.length ?? 0,
   });
 
+  // Trial bridge — surface freshly-created ideas as suggestion chips on the
+  // /try/:trialId page via the SSE stream. Non-trial projects no-op after a
+  // single KV lookup.
+  try {
+    const { bridgeIdeaCreated } = await import('../../services/trial/bridge');
+    await bridgeIdeaCreated(
+      env,
+      tokenData.projectId,
+      ideaId,
+      title,
+      (content ?? '').slice(0, 280),
+    );
+  } catch {
+    // Bridge errors are logged inside the helper; never block MCP.
+  }
+
   return jsonRpcSuccess(requestId, {
     content: [{
       type: 'text',

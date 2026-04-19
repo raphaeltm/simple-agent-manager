@@ -46,6 +46,11 @@ import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
 import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { TaskDetail } from './pages/TaskDetail';
+import { TrialChatGateHarness } from './pages/TrialChatGateHarness';
+import { Try } from './pages/Try';
+import { TryCapExceeded } from './pages/TryCapExceeded';
+import { TryDiscovery } from './pages/TryDiscovery';
+import { TryWaitlistThanks } from './pages/TryWaitlistThanks';
 import { UiStandards } from './pages/UiStandards';
 import { Workspace } from './pages/workspace';
 import { Workspaces } from './pages/Workspaces';
@@ -71,6 +76,12 @@ export default function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Landing />} />
+          <Route path="/try" element={<Try />} />
+          <Route path="/try/cap-exceeded" element={<TryCapExceeded />} />
+          <Route path="/try/waitlist/thanks" element={<TryWaitlistThanks />} />
+          <Route path="/try/:trialId" element={<TryDiscovery />} />
+          {/* Harness for Playwright audits — mounts trial components with mock data */}
+          <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
 
           {/* Protected routes with AppShell (persistent navigation) */}
           <Route element={<ProtectedLayout />}>

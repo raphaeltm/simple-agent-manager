@@ -37,6 +37,9 @@ export const DEFAULT_RATE_LIMITS = {
   CLIENT_ERRORS: 200,
   IDENTITY_TOKEN: 60,
   ANALYTICS_INGEST: 60,
+  // Tighter limit for anonymous trial creation: each call spawns a DO,
+  // fires ~4 GitHub API calls, and consumes a monthly trial slot.
+  TRIAL_CREATE: 10,
 } as const;
 
 /** Default time window (1 hour in seconds) */
@@ -233,6 +236,20 @@ export function rateLimitAnonymous(env: Env): MiddlewareHandler<{ Bindings: Env 
   return rateLimit({
     limit: getRateLimit(env, 'ANONYMOUS'),
     keyPrefix: 'anonymous',
+    useIp: true,
+  });
+}
+
+/**
+ * Per-IP rate limit for `POST /api/trial/create`. Tighter than the general
+ * anonymous bucket because each trial create allocates a Durable Object,
+ * makes ~4 outbound GitHub API calls, and consumes a monthly trial slot.
+ * Default: 10 requests per hour per IP.
+ */
+export function rateLimitTrialCreate(env: Env): MiddlewareHandler<{ Bindings: Env }> {
+  return rateLimit({
+    limit: getRateLimit(env, 'TRIAL_CREATE'),
+    keyPrefix: 'trial-create',
     useIp: true,
   });
 }
