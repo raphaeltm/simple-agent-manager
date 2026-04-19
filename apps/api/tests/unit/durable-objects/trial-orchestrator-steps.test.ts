@@ -107,6 +107,7 @@ function makeRc(ctx: ReturnType<typeof makeCtx>, advanced: string[]) {
     getWorkspaceReadyTimeoutMs: () => 180_000,
     getWorkspaceReadyPollIntervalMs: () => 5_000,
     getNodeReadyTimeoutMs: () => 180_000,
+    getHeartbeatSkewMs: () => 30_000,
   } as unknown as Parameters<typeof handleRunning>[1];
 }
 

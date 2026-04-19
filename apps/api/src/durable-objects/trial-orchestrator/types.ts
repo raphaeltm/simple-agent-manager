@@ -82,4 +82,5 @@ export interface TrialOrchestratorContext {
   getWorkspaceReadyPollIntervalMs: () => number;
   getNodeReadyTimeoutMs: () => number;
   getAgentReadyTimeoutMs: () => number;
+  getHeartbeatSkewMs: () => number;
 }

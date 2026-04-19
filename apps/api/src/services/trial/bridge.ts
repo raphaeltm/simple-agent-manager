@@ -38,10 +38,9 @@ export async function bridgeAcpSessionTransition(
     if (!record) return;
 
     if (toStatus === 'running') {
-      const baseDomain = env.BASE_DOMAIN || 'workspaces.example.com';
       const workspaceUrl =
         opts.workspaceUrl ??
-        (record.workspaceId ? `https://ws-${record.workspaceId}.${baseDomain}` : '');
+        (record.workspaceId ? `https://ws-${record.workspaceId}.${env.BASE_DOMAIN}` : '');
       await emitTrialEventForProject(env, projectId, {
         type: 'trial.ready',
         trialId: record.trialId,

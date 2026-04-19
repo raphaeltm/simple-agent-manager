@@ -319,7 +319,8 @@ export async function handleNodeAgentReady(
     const heartbeatTime = new Date(node.last_heartbeat_at).getTime();
     // Require a heartbeat after we started waiting — otherwise a stale warm
     // node's heartbeat from a previous boot would satisfy this check.
-    if (heartbeatTime > state.nodeAgentReadyStartedAt - 30_000) {
+    const skewMs = rc.getHeartbeatSkewMs();
+    if (heartbeatTime > state.nodeAgentReadyStartedAt - skewMs) {
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }

@@ -32,6 +32,13 @@ export const DEFAULT_TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS = 60_000;
 /** Max time to wait for a freshly provisioned node to come online. */
 export const DEFAULT_TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS = 180_000;
 
+/**
+ * Clock-skew tolerance window applied when checking whether a VM agent
+ * heartbeat arrived after the orchestrator started waiting for the agent.
+ * Heartbeats older than `waitStart - skew` are ignored.
+ */
+export const DEFAULT_TRIAL_ORCHESTRATOR_HEARTBEAT_SKEW_MS = 30_000;
+
 // ----- GitHub knowledge probes (fast-path, fired from create.ts) -----
 
 /** Per-request timeout for unauthenticated GitHub API probes during trial start. */

@@ -27,6 +27,7 @@
  */
 import {
   DEFAULT_TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS,
+  DEFAULT_TRIAL_ORCHESTRATOR_HEARTBEAT_SKEW_MS,
   DEFAULT_TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS,
   DEFAULT_TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS,
   DEFAULT_TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS,
@@ -277,6 +278,7 @@ export class TrialOrchestrator extends DurableObject<Env> {
       getWorkspaceReadyPollIntervalMs: () => this.getWorkspaceReadyPollIntervalMs(),
       getNodeReadyTimeoutMs: () => this.getNodeReadyTimeoutMs(),
       getAgentReadyTimeoutMs: () => this.getAgentReadyTimeoutMs(),
+      getHeartbeatSkewMs: () => this.getHeartbeatSkewMs(),
     };
   }
 
@@ -345,6 +347,13 @@ export class TrialOrchestrator extends DurableObject<Env> {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS,
       DEFAULT_TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS,
+    );
+  }
+
+  private getHeartbeatSkewMs(): number {
+    return parseEnvInt(
+      this.env.TRIAL_ORCHESTRATOR_HEARTBEAT_SKEW_MS,
+      DEFAULT_TRIAL_ORCHESTRATOR_HEARTBEAT_SKEW_MS,
     );
   }
 }
