@@ -34,22 +34,51 @@ retry UI.
 - Backend was last touched in PR #760 (Wave-1 TrialOrchestrator + knowledge
   fast-path wire-up).
 
+## Root cause (2026-04-19)
+
+The SSE serializer in `apps/api/src/routes/trial/events.ts` emitted **named**
+SSE frames (`event: trial.knowledge\ndata: {...}`) but the frontend
+subscribes via `source.onmessage`, which only fires for the default
+("message") event. Named events require `source.addEventListener(<name>,
+...)`. Result: bytes arrive on the socket, the browser's SSE state machine
+parses them, but nothing is listening for the custom event name, so the
+frames are silently discarded.
+
+Curl-based triage missed this for weeks because curl shows the raw byte
+stream — `event: trial.knowledge` and `data: …` both visible — which looks
+correct whether or not the browser's `onmessage` will ever fire.
+
+Separately: `POST /api/trial/create` returned
+`eventsUrl: /api/trial/events?trialId=…` (query-param), while the real
+route is `/api/trial/:trialId/events` (path segment). The frontend builds
+its own URL so end-users were not affected, but the response-field
+contract was wrong and its unit test locked in the wrong shape.
+
+Full write-up: `docs/notes/2026-04-19-trial-sse-named-events-postmortem.md`.
+
 ## Acceptance Criteria
 
-- [ ] On staging, `POST /api/trial/create` followed by an SSE subscription
-      receives at least one `trial.knowledge` event within
-      `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS` (default 5s).
-- [ ] On staging, the orchestrator emits `trial.progress` events for
-      `creating_workspace` / `provisioning_vm` / etc. within 60s.
-- [ ] Either `trial.ready` or `trial.error` arrives within
-      `TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS` (default 5 min).
-- [ ] Add a capability test that publishes via `TrialEventBus.publish` and
-      asserts the SSE endpoint streams the JSON payload (catches the
-      bus → endpoint break that unit tests miss).
-- [ ] Investigate whether `c.executionCtx.waitUntil` is actually awaiting
-      these tasks on the staging Worker bundle (check `wrangler tail`
-      for `trial.create.orchestrator_dispatch_failed` and
-      `trial.knowledge.error` log lines).
+- [x] `formatSse()` emits unnamed SSE frames so that
+      `EventSource.onmessage` fires on every `trial.*` event.
+- [x] Unit test `trial-events-format.test.ts` now asserts the frame has no
+      `event:` line and carries a rationale comment pointing at the
+      post-mortem.
+- [x] Fixed `eventsUrl` response shape in `create.ts` to match the real
+      route; unit test now asserts exact equality
+      (`/api/trial/${trialId}/events`) instead of a substring match.
+- [x] Capability test `tests/workers/trial-event-bus-sse.test.ts`: seeds a
+      trial in KV, appends events via the real `TrialEventBus` DO, opens
+      the SSE stream via `SELF.fetch`, reads the raw bytes, asserts no
+      `event:` line and round-trip JSON integrity.
+- [x] Post-mortem written at
+      `docs/notes/2026-04-19-trial-sse-named-events-postmortem.md`.
+- [x] Rule `13-staging-verification.md` updated: for browser-consumed
+      SSE/WebSocket streams, curl-only verification is explicitly banned
+      — only a real browser confirms dispatch to `onmessage`.
+- [ ] Staging verification via Playwright against `app.sammy.party`:
+      create a trial, capture the event stream, confirm ≥1
+      `trial.knowledge`, ≥1 `trial.progress`, and a terminal event.
+      Screenshots uploaded to library.
 
 ## References
 
