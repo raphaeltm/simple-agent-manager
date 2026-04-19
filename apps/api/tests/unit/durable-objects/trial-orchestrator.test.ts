@@ -46,6 +46,22 @@ vi.mock('../../../src/services/trial/trial-store', () => ({
   writeTrial: vi.fn(async () => {}),
 }));
 
+// Stub every step handler so alarm() dispatch can be controlled per-test.
+// Individual tests override these via `stepMocks.<handler>.mockImplementationOnce`.
+const { stepMocks } = vi.hoisted(() => ({
+  stepMocks: {
+    handleProjectCreation: vi.fn(async () => {}),
+    handleNodeSelection: vi.fn(async () => {}),
+    handleNodeProvisioning: vi.fn(async () => {}),
+    handleNodeAgentReady: vi.fn(async () => {}),
+    handleWorkspaceCreation: vi.fn(async () => {}),
+    handleWorkspaceReady: vi.fn(async () => {}),
+    handleDiscoveryAgentStart: vi.fn(async () => {}),
+    handleRunning: vi.fn(async () => {}),
+  },
+}));
+vi.mock('../../../src/durable-objects/trial-orchestrator/steps', () => stepMocks);
+
 const { TrialOrchestrator } = await import(
   '../../../src/durable-objects/trial-orchestrator'
 );
@@ -274,5 +290,137 @@ describe('TrialOrchestrator.alarm()', () => {
     expect(updated.currentStep).toBe('failed');
     expect(updated.completed).toBe(true);
     expect(updated.failureReason).toMatch(/timed out/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// alarm() step-error retry/backoff branches
+//
+// These exercise the catch block at index.ts:190–220, which is the only path
+// that exercises isTransientError(), retry counting, backoff scheduling, and
+// the permanent-error fallback via failTrial.
+// ---------------------------------------------------------------------------
+
+function makeRunningState(overrides: Partial<Record<string, unknown>> = {}) {
+  const now = Date.now();
+  return {
+    version: 1,
+    trialId: 'trial_retry',
+    repoUrl: '',
+    repoOwner: '',
+    repoName: '',
+    currentStep: 'project_creation',
+    projectId: null,
+    nodeId: null,
+    autoProvisionedNode: false,
+    workspaceId: null,
+    chatSessionId: null,
+    acpSessionId: null,
+    retryCount: 0,
+    createdAt: now,
+    lastStepAt: now,
+    nodeAgentReadyStartedAt: null,
+    workspaceReadyStartedAt: null,
+    completed: false,
+    failureReason: null,
+    ...overrides,
+  };
+}
+
+describe('TrialOrchestrator.alarm() — step error retry/backoff', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset each step mock to a successful no-op.
+    for (const fn of Object.values(stepMocks)) {
+      fn.mockReset();
+      fn.mockImplementation(async () => {});
+    }
+  });
+
+  it('transient error with retries remaining increments retryCount and schedules backoff (no failTrial)', async () => {
+    const storage: Storage = new Map();
+    storage.set('state', makeRunningState());
+    stepMocks.handleProjectCreation.mockRejectedValueOnce(
+      new Error('fetch failed — network timeout')
+    );
+    const ctx = makeCtx(storage);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, makeEnv());
+    await orch.alarm();
+
+    const updated = ctx._storage.get('state') as {
+      currentStep: string;
+      completed: boolean;
+      retryCount: number;
+    };
+    // State advances retry counter but does NOT complete.
+    expect(updated.currentStep).toBe('project_creation');
+    expect(updated.completed).toBe(false);
+    expect(updated.retryCount).toBe(1);
+    // A backoff alarm is scheduled.
+    expect(ctx._alarmTime()).not.toBeNull();
+    // No trial.error fired — retry path is internal.
+    const errorEmit = emitTrialEventMock.mock.calls.find(
+      (c) => (c[2] as { type: string }).type === 'trial.error'
+    );
+    expect(errorEmit).toBeUndefined();
+  });
+
+  it('permanent error fails the trial immediately regardless of retry budget', async () => {
+    const storage: Storage = new Map();
+    storage.set('state', makeRunningState({ retryCount: 0 }));
+    // Messages containing "invalid" classify as permanent per isTransientError.
+    stepMocks.handleProjectCreation.mockRejectedValueOnce(
+      new Error('invalid configuration: missing sentinel')
+    );
+    const ctx = makeCtx(storage);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, makeEnv());
+    await orch.alarm();
+
+    const updated = ctx._storage.get('state') as {
+      currentStep: string;
+      completed: boolean;
+      failureReason: string | null;
+    };
+    expect(updated.currentStep).toBe('failed');
+    expect(updated.completed).toBe(true);
+    expect(updated.failureReason).toMatch(/invalid/);
+
+    const errorEmit = emitTrialEventMock.mock.calls.find(
+      (c) => (c[2] as { type: string }).type === 'trial.error'
+    );
+    expect(errorEmit).toBeTruthy();
+  });
+
+  it('transient error with retries exhausted promotes to permanent failure', async () => {
+    const storage: Storage = new Map();
+    // Budget exhausted: retryCount already at the default max (5).
+    storage.set('state', makeRunningState({ retryCount: 99 }));
+    stepMocks.handleProjectCreation.mockRejectedValueOnce(
+      new Error('fetch failed — upstream 503')
+    );
+    const ctx = makeCtx(storage);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, makeEnv());
+    await orch.alarm();
+
+    const updated = ctx._storage.get('state') as {
+      currentStep: string;
+      completed: boolean;
+    };
+    expect(updated.currentStep).toBe('failed');
+    expect(updated.completed).toBe(true);
+  });
+
+  it('returns early when state has not been initialized (null-state guard)', async () => {
+    // No `state` key in storage — alarm fires before start() has run.
+    const ctx = makeCtx();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, makeEnv());
+    await orch.alarm();
+    // No events emitted, no step handler called, no alarm rescheduled.
+    expect(emitTrialEventMock).not.toHaveBeenCalled();
+    expect(stepMocks.handleProjectCreation).not.toHaveBeenCalled();
   });
 });
