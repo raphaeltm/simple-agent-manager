@@ -487,4 +487,8 @@ export interface Env {
   TRIAL_KNOWLEDGE_MAX_EVENTS?: string;
   /** Sentinel GitHub installation id used for anonymous trial projects. */
   TRIAL_ANONYMOUS_INSTALLATION_ID?: string;
+  /** Trial VM size override (default: DEFAULT_VM_SIZE from shared). */
+  TRIAL_VM_SIZE?: string;
+  /** Trial VM location override (default: DEFAULT_VM_LOCATION from shared). */
+  TRIAL_VM_LOCATION?: string;
 }
