@@ -391,7 +391,7 @@ createRoutes.post('/create', async (c) => {
   const respBody: TrialCreateResponse = {
     trialId,
     projectId: '', // populated once Track-B provisions the project row
-    eventsUrl: `/api/trial/events?trialId=${encodeURIComponent(trialId)}`,
+    eventsUrl: `/api/trial/${encodeURIComponent(trialId)}/events`,
     expiresAt,
   };
 

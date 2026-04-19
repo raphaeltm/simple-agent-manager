@@ -179,14 +179,18 @@ function parseIntSafe(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-export function formatSse(eventName: string, data: unknown): string {
-  // Stable shape: one `event:` line, one `data:` line, blank terminator.
-  // Strip CR/LF from the event name to prevent SSE-frame injection if a
-  // future caller ever bypasses the TrialEvent discriminated union (e.g. via
-  // `as never` casts). Data is JSON-encoded which already escapes newlines.
-  const safeName = eventName.replace(/[\r\n]/g, '');
+export function formatSse(_eventName: string, data: unknown): string {
+  // Emit as the default ("message") SSE event so that EventSource consumers
+  // receive the payload via `source.onmessage`. Using a named `event:` field
+  // would require the client to register `addEventListener(<type>, ...)` for
+  // every TrialEvent variant, and `onmessage` would silently never fire —
+  // the exact "zero events on staging" symptom that motivated this fix.
+  //
+  // The TrialEvent JSON payload itself carries a `type` discriminator, so
+  // dropping the `event:` line loses no information. Data is JSON-encoded
+  // which already escapes newlines, preventing SSE-frame injection.
   const json = JSON.stringify(data);
-  return `event: ${safeName}\ndata: ${json}\n\n`;
+  return `data: ${json}\n\n`;
 }
 
 function sleep(ms: number): Promise<void> {
