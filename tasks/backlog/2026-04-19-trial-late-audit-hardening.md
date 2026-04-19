@@ -60,8 +60,63 @@ After PR #760 merged, a late-arriving security audit returned with findings. Two
 - CRITICAL-1, HIGH-1 (stale; already fixed in PR #760)
 - HIGH-2 (KV rate-limiter atomicity): already deferred with documented rationale; superseded by general migration away from KV rate limiting
 
+## Additional Findings — Cloudflare Configuration Audit (task `ae38c1e0689c9261e`, 2026-04-19)
+
+A second late-arriving review (Cloudflare-focused) returned after PR #760 merged. None are actively user-impacting (staging verification observed 12 SSE events + 3-stage progression), but they are worth addressing before `sam/trial-onboarding-mvp` merges to `main`.
+
+### HIGH-CF-1 — `advanceToStep` sequencing: `put('state')` → `setAlarm(now)` without atomic pairing
+
+`apps/api/src/durable-objects/trial-orchestrator/index.ts:270-271`. If the DO evicts/crashes between `put` and `setAlarm`, state advances but no alarm is scheduled — trial hangs until an external nudge. Since `alarm()` re-reads state at the top of each handler, the safe mitigation is to swap the ordering so a crash re-runs the previous step rather than parking the machine silently.
+
+**Acceptance criteria**:
+- [ ] Swap to `setAlarm(now)` BEFORE `storage.put('state', ...)` at every call site where the two are paired
+- [ ] Add a regression test that asserts alarm scheduling survives simulated put failures
+
+### MEDIUM-CF-1 — SSE `ReadableStream.cancel()` leaks in-flight long-poll on client disconnect
+
+`apps/api/src/routes/trial/events.ts:143-145`. `cancel()` is a no-op comment; the `heartbeat` `setInterval` and in-flight `busStub.fetch()` keep running until the poll times out (up to 15s). Bounded leak, no correctness issue, but each disconnect wastes a DO request slot.
+
+**Acceptance criteria**:
+- [ ] Set `closed = true` inside `cancel()` and clear the heartbeat interval
+- [ ] Use `AbortController` to abort the in-flight DO fetch on cancel
+
+### MEDIUM-CF-2 — `eventsUrl` response field is malformed (latent — frontend bypasses it)
+
+`apps/api/src/routes/trial/create.ts:394` returns `eventsUrl: /api/trial/events?trialId=...` but the actual route is `GET /:trialId/events`. **Staging works** because the frontend (`apps/web/src/lib/trial-api.ts:154`) ignores `eventsUrl` and constructs `${API_URL}/api/trial/${trialId}/events` directly. But any future consumer that honors the advertised `eventsUrl` will hit 404.
+
+**Acceptance criteria**:
+- [ ] Either: update `eventsUrl` in `create.ts` to `https://api.${env.BASE_DOMAIN}/api/trial/${trialId}/events` (absolute, matches route)
+- [ ] Or: remove `eventsUrl` from the response shape entirely if the frontend is the only consumer
+- [ ] Add a test asserting the returned `eventsUrl` resolves to a live route
+
+### LOW-CF-1 — `trial.started` event emitted AFTER `setAlarm(now)` can race with subsequent step events on eviction
+
+`apps/api/src/durable-objects/trial-orchestrator/index.ts:107-119`. If the DO is evicted after `setAlarm` but before `safeEmitTrialEvent(trial.started)` completes, the started event is lost and the UI never shows the "warming up" → "started" transition. Not a data loss; step events still flow.
+
+**Acceptance criteria**:
+- [ ] Emit `trial.started` BEFORE `setAlarm(now)` in `start()`, or move emission to the first alarm handler where persistence is guaranteed
+
+### LOW-CF-2 — `TrialOrchestrator` wrangler migration uses `new_classes` (not `new_sqlite_classes`)
+
+Currently correct — the DO only uses `ctx.storage.put/get`, not `ctx.storage.sql`. Flagged as a maintenance trap because a future contributor adding `ctx.storage.sql` would silently get an uninitialized SQLite without bumping the migration.
+
+**Acceptance criteria**:
+- [ ] Add a comment to the `v9` migration block in `wrangler.toml` explicitly stating: "intentional: TrialOrchestrator is KV-only. If adding `ctx.storage.sql`, switch to `new_sqlite_classes` AND bump the migration version."
+
+### LOW-CF-3 — `TrialEventBus` is designed for single-viewer
+
+`apps/api/src/durable-objects/trial-event-bus.ts`. Waiters are independent (per-poll timers + resolve pairs), so multi-viewer works correctly, but it's not documented. Add a comment.
+
+**Acceptance criteria**:
+- [ ] Add a class-level doc comment noting the single-consumer design intent and confirming multi-consumer works because waiters are independent
+
+## Out of Scope (Cloudflare Audit)
+
+- MEDIUM-CF-3 (KV rate-limit race on `POST /api/trial/create`): already listed as HIGH-2 deferred above; same disposition — acknowledged tradeoff, atomic `TrialCounter` DO still protects the monthly cap from overshoot.
+
 ## References
 
 - Merged PR: #760
-- Audit task: `a35608e033ac4405a`
+- Security audit task: `a35608e033ac4405a`
+- Cloudflare audit task: `ae38c1e0689c9261e`
 - Disposition comment: see PR #760 conversation thread
