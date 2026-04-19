@@ -37,6 +37,14 @@ All findings are MINOR / MISSING severity. No CRITICAL or HIGH. The review ran a
 
 - [ ] Add `userId` assertion to the existing `storeMcpToken` data-argument check (currently skipped).
 
+### Design deviation — `handleWorkspaceCreation` silent fallback (from post-merge task-completion-validator review `a3dbf4bc16eefef2a`)
+
+- [ ] Decide between:
+  - **Option A** (matches original task plan): replace `const branch = state.defaultBranch ?? TRIAL_FALLBACK_BRANCH;` at `apps/api/src/durable-objects/trial-orchestrator/steps.ts:468` with a fail-loud guard — if `!state.defaultBranch`, throw `{ permanent: true }` with a diagnostic message. Add a test that exercises the guard.
+  - **Option B** (ratify the current behavior): keep the silent fallback but document the rationale inline and in the task file — argue that defence-in-depth against a corrupted/out-of-order state is worth surfacing `'main'` rather than a terminal error that would orphan the workspace row.
+
+Rationale for filing as backlog: current behavior is functionally safe (both staging repos verified end-to-end) and the fallback branch is the statistically common case. No runtime breakage today. But the implementation silently re-introduces the exact hardcoded-branch pattern this task was designed to eliminate, so future refactors should make a deliberate call.
+
 ## References
 
 - Review output: `/tmp/claude-1000/-workspaces-simple-agent-manager/f0d339c6-df20-4346-9a46-56359d6580eb/tasks/a9fe37c165e38c6a2.output`
