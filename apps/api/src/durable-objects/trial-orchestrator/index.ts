@@ -96,6 +96,12 @@ export class TrialOrchestrator extends DurableObject<Env> {
       workspaceId: null,
       chatSessionId: null,
       acpSessionId: null,
+      defaultBranch: null,
+      mcpToken: null,
+      agentSessionCreatedOnVm: false,
+      agentStartedOnVm: false,
+      acpAssignedOnVm: false,
+      acpRunningOnVm: false,
       retryCount: 0,
       createdAt: now,
       lastStepAt: now,
@@ -131,12 +137,19 @@ export class TrialOrchestrator extends DurableObject<Env> {
   }
 
   /**
-   * Public status accessor for debugging / tests. Redacts nothing — the DO
-   * doesn't store raw secrets (the agent-session MCP token lives on the
-   * workspace record, not here).
+   * Public status accessor for debugging / tests. The DO now stores an
+   * `mcpToken` (minted for the discovery agent in `handleDiscoveryAgentStart`)
+   * which is a live bearer credential — it must be redacted before leaving
+   * the DO boundary so any debug endpoint that surfaces status cannot
+   * inadvertently leak the token.
    */
   async getStatus(): Promise<TrialOrchestratorState | null> {
-    return this.getState();
+    const state = await this.getState();
+    if (!state) return null;
+    return {
+      ...state,
+      mcpToken: state.mcpToken ? '[redacted]' : null,
+    };
   }
 
   // =========================================================================
@@ -241,6 +254,25 @@ export class TrialOrchestrator extends DurableObject<Env> {
     reason: string,
     errorCode: string,
   ): Promise<void> {
+    // Revoke MCP token BEFORE marking state as failed so a leaked token from a
+    // botched/timed-out trial cannot continue hitting MCP endpoints for the
+    // remainder of its 4-hour TTL (DEFAULT_MCP_TOKEN_TTL_SECONDS). Mirrors the
+    // TaskRunner failure-path cleanup at
+    // `task-runner/state-machine.ts:265-275`. Best-effort — log-and-continue
+    // so a KV hiccup doesn't block the failure emission path.
+    if (state.mcpToken) {
+      try {
+        const { revokeMcpToken } = await import('../../services/mcp-token');
+        await revokeMcpToken(this.env.KV, state.mcpToken);
+      } catch (err) {
+        log.warn('trial_orchestrator_do.mcp_token_revoke_failed', {
+          trialId: state.trialId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      state.mcpToken = null;
+    }
+
     state.currentStep = 'failed';
     state.completed = true;
     state.failureReason = reason;

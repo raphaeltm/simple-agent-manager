@@ -295,11 +295,15 @@ export const projects = sqliteTable(
       table.userId,
       table.normalizedName
     ),
-    userInstallationRepoUnique: uniqueIndex('idx_projects_user_installation_repository').on(
-      table.userId,
-      table.installationId,
-      table.repository
-    ),
+    // Trial-onboarding sentinel owner is excluded from the uniqueness invariant:
+    // every anonymous trial inserts a row with the same (sentinel user, sentinel
+    // installation), so "one project per user+installation+repo" cannot hold for
+    // the sentinel. Isolation for trial rows is enforced by `projectId` scoping
+    // (see helpers.ts:resolveAnonymousUserId). The index still enforces
+    // uniqueness for real users. See migration 0046.
+    userInstallationRepoUnique: uniqueIndex('idx_projects_user_installation_repository')
+      .on(table.userId, table.installationId, table.repository)
+      .where(sql`user_id != 'system_anonymous_trials'`),
     userGithubRepoIdUnique: uniqueIndex('idx_projects_user_github_repo_id')
       .on(table.userId, table.githubRepoId)
       .where(sql`github_repo_id IS NOT NULL`),
