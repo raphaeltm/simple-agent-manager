@@ -65,11 +65,18 @@ export function TryDiscovery() {
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
   const closedRef = useRef(false);
+  // Dedup by composite key (`type:at`). Events can replay on SSE reconnect
+  // because the server may resend buffered events after the EventSource
+  // re-opens; without dedup, the feed would duplicate every replayed event.
+  const seenKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!trialId) return undefined;
 
     closedRef.current = false;
+    // Reset dedup state when the trial id changes — a different trial means
+    // a different event stream and previously-seen keys are no longer relevant.
+    seenKeysRef.current = new Set();
 
     const clearRetryTimer = () => {
       if (retryTimerRef.current !== null) {
@@ -104,6 +111,11 @@ export function TryDiscovery() {
         },
         onEvent: (event) => {
           if (closedRef.current) return;
+          // Composite key dedup — server may replay buffered events after
+          // an SSE reconnect. Drop duplicates before they reach the feed.
+          const key = eventDedupKey(event);
+          if (seenKeysRef.current.has(key)) return;
+          seenKeysRef.current.add(key);
           // Any event clears the slow-warn — momentum has resumed.
           clearSlowTimer();
           setIsSlow(false);
@@ -324,7 +336,7 @@ type FeedItem =
   | { kind: 'event'; key: string; event: Exclude<TrialEvent, TrialKnowledgeEvent | TrialErrorEvent> }
   | { kind: 'knowledge-group'; key: string; items: TrialKnowledgeEvent[] };
 
-function buildFeed(events: TrialEvent[]): FeedItem[] {
+export function buildFeed(events: TrialEvent[]): FeedItem[] {
   const out: FeedItem[] = [];
   let group: TrialKnowledgeEvent[] = [];
   let groupStartIdx = -1;
@@ -390,15 +402,16 @@ function DiscoveryHeader({ started, progressLatest, connection, ready }: HeaderP
   return (
     <header
       className="sticky top-0 -mx-4 px-4 py-3 bg-canvas/95 backdrop-blur-sm border-b border-border-default z-10"
-      role="banner"
+      role="region"
+      aria-label="Trial status"
     >
       <div className="flex items-start gap-3 justify-between">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1" title={repoName}>
           <Typography variant="title" as="h1" className="truncate">
             {ready ? (
-              <>Ready: <code className="font-mono text-base">{repoName}</code></>
+              <>Ready: <code className="font-mono">{repoName}</code></>
             ) : (
-              <>Exploring <code className="font-mono text-base">{repoName}</code>…</>
+              <>Exploring <code className="font-mono">{repoName}</code>…</>
             )}
           </Typography>
           {stageLabel ? (
@@ -438,6 +451,8 @@ function DiscoveryHeader({ started, progressLatest, connection, ready }: HeaderP
 
 function ConnectionBadge({ connection }: { connection: ConnectionState }) {
   const { status } = connection;
+  // Use both color AND a Unicode shape so the meaning is conveyed without
+  // relying on color alone (WCAG 1.4.1 Use of Color).
   const label =
     status === 'open'
       ? 'Live'
@@ -446,6 +461,8 @@ function ConnectionBadge({ connection }: { connection: ConnectionState }) {
         : status === 'retrying'
           ? 'Reconnecting'
           : 'Offline';
+  const shape =
+    status === 'open' ? '●' : status === 'failed' ? '✕' : status === 'retrying' ? '↺' : '○';
   const classes =
     status === 'open'
       ? 'bg-success-tint text-success-fg'
@@ -455,8 +472,9 @@ function ConnectionBadge({ connection }: { connection: ConnectionState }) {
   return (
     <span
       data-testid="trial-connection-badge"
-      className={`shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full border border-border-default ${classes}`}
+      className={`shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full border border-border-default inline-flex items-center gap-1 ${classes}`}
     >
+      <span aria-hidden="true">{shape}</span>
       {label}
     </span>
   );
@@ -532,7 +550,7 @@ function TerminalErrorPanel({ error }: { error: TrialErrorEvent }) {
           {isRetryable ? (
             <Link
               to="/try"
-              className="text-sm font-medium underline underline-offset-2"
+              className="inline-flex items-center min-h-[44px] text-sm font-medium underline underline-offset-2"
               data-testid="trial-error-retry"
             >
               Try again →
@@ -540,7 +558,7 @@ function TerminalErrorPanel({ error }: { error: TrialErrorEvent }) {
           ) : (
             <Link
               to="/try/cap-exceeded"
-              className="text-sm font-medium underline underline-offset-2"
+              className="inline-flex items-center min-h-[44px] text-sm font-medium underline underline-offset-2"
             >
               Join the waitlist →
             </Link>
@@ -645,7 +663,7 @@ function KnowledgeGroupCard({ items }: { items: TrialKnowledgeEvent[] }) {
                 onClick={() => setExpanded((v) => !v)}
                 aria-expanded={expanded}
                 data-testid="trial-knowledge-toggle"
-                className="mt-2 text-xs font-medium text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded min-h-6"
+                className="mt-2 inline-flex items-center text-xs font-medium text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded min-h-11 -mx-1 px-1"
               >
                 {expanded ? 'Show less' : `+${rest.length} more`}
               </button>
@@ -693,4 +711,15 @@ function IdeaCard({ event }: { event: TrialIdeaEvent }) {
 function extractRepoName(repoUrl: string): string {
   const match = /github\.com\/([^/]+\/[^/?#.]+)/i.exec(repoUrl);
   return match?.[1] ?? repoUrl;
+}
+
+/**
+ * Build a stable dedup key for any TrialEvent. Most events carry an `at`
+ * timestamp; `trial.started` carries `startedAt` instead. Combining the
+ * timestamp with the event type makes the key collision-resistant across
+ * the discriminated union.
+ */
+export function eventDedupKey(event: TrialEvent): string {
+  const ts = event.type === 'trial.started' ? event.startedAt : event.at;
+  return `${event.type}:${ts}`;
 }

@@ -286,9 +286,14 @@ test.describe('Trial — Mobile', () => {
   test('discovery — knowledge burst groups into a single card', async ({ page }) => {
     await setupTrialMocks(page, { events: 'knowledge_burst' });
     await page.goto('/try/trial_visual_001');
-    // Exactly one grouped card should render for the burst, with a toggle.
-    await expectAttached(page, page.getByTestId('trial-knowledge-group'));
-    await expectAttached(page, page.getByTestId('trial-knowledge-toggle'));
+    // The five-event burst MUST collapse to exactly one knowledge-group card —
+    // not five ungrouped cards. This is what guarantees the no-flicker UX.
+    await expect(page.getByTestId('trial-knowledge-group')).toHaveCount(1);
+    const toggle = page.getByTestId('trial-knowledge-toggle');
+    await expect(toggle).toHaveText(/\+4 more/);
+    // Toggle expands and reveals the four hidden observations.
+    await toggle.click();
+    await expect(toggle).toHaveText(/Show less/);
     await assertNoOverflow(page);
     await screenshot(page, 'trial-discovery-knowledge-burst-mobile');
   });
