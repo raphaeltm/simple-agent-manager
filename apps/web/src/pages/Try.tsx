@@ -34,7 +34,7 @@ export function Try() {
       return;
     }
     if (!CLIENT_SIDE_URL_CHECK.test(trimmed)) {
-      setError('That doesn’t look like a GitHub URL (expected https://github.com/owner/repo).');
+      setError('Hmm — that doesn’t look like a GitHub URL. Try https://github.com/owner/repo.');
       return;
     }
 
@@ -89,7 +89,11 @@ export function Try() {
         paddingBottom: 'max(2rem, env(safe-area-inset-bottom))',
       }}
     >
-      <main className="w-full max-w-[640px] flex flex-col gap-6" aria-labelledby="try-heading">
+      <main
+        className="w-full max-w-[640px] flex flex-col gap-6"
+        aria-labelledby="try-heading"
+        data-testid="trial-landing"
+      >
         <header className="text-center">
           <h1 id="try-heading" className="sam-type-page-title text-fg-primary m-0 mb-2">
             Explore any GitHub repo with an AI agent
@@ -124,7 +128,7 @@ export function Try() {
           />
 
           {error ? (
-            <Alert variant="error" className="text-sm">
+            <Alert variant="error" className="text-sm" data-testid="trial-landing-error">
               <span id="trial-repo-error">{error}</span>
             </Alert>
           ) : null}
