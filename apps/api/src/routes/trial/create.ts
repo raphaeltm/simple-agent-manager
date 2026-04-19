@@ -432,10 +432,16 @@ createRoutes.post('/create', async (c) => {
   } catch {
     exec = undefined;
   }
+  log.info('trial.create.dispatch_begin', {
+    trialId,
+    execCtxPresent: !!exec,
+  });
   const orchestratorTask = (async () => {
+    log.info('trial.create.orchestrator_task.enter', { trialId });
     try {
       const id = env.TRIAL_ORCHESTRATOR.idFromName(trialId);
       const stub = env.TRIAL_ORCHESTRATOR.get(id);
+      log.info('trial.create.orchestrator_task.stub_ready', { trialId });
       await (
         stub as unknown as {
           start(input: {
@@ -451,20 +457,35 @@ createRoutes.post('/create', async (c) => {
         repoOwner: repo.owner,
         repoName: repo.name,
       });
+      log.info('trial.create.orchestrator_task.start_returned', { trialId });
     } catch (err) {
       log.error('trial.create.orchestrator_dispatch_failed', {
         trialId,
         error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
       });
     }
   })();
-  const knowledgeTask = emitGithubKnowledgeEvents(env, trialId, {
-    owner: repo.owner,
-    name: repo.name,
-  });
+  const knowledgeTask = (async () => {
+    log.info('trial.create.knowledge_task.enter', { trialId });
+    try {
+      await emitGithubKnowledgeEvents(env, trialId, {
+        owner: repo.owner,
+        name: repo.name,
+      });
+      log.info('trial.create.knowledge_task.done', { trialId });
+    } catch (err) {
+      log.error('trial.create.knowledge_task.failed', {
+        trialId,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+    }
+  })();
   if (exec) {
     exec.waitUntil(orchestratorTask);
     exec.waitUntil(knowledgeTask);
+    log.info('trial.create.waitUntil_registered', { trialId });
   } else {
     // Prevent unhandled-rejection warnings in tests without swallowing logs.
     void orchestratorTask.catch(() => {});

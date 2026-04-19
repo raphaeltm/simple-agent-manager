@@ -72,6 +72,7 @@ export class TrialOrchestrator extends DurableObject<Env> {
    * already initialized the call is a no-op.
    */
   async start(input: StartTrialInput): Promise<void> {
+    log.info('trial_orchestrator_do.start.enter', { trialId: input.trialId });
     const existing = await this.getState();
     if (existing) {
       log.warn('trial_orchestrator_do.start.already_initialized', {
@@ -105,7 +106,9 @@ export class TrialOrchestrator extends DurableObject<Env> {
     };
 
     await this.ctx.storage.put('state', state);
+    log.info('trial_orchestrator_do.start.state_put', { trialId: input.trialId });
     await this.ctx.storage.setAlarm(now);
+    log.info('trial_orchestrator_do.start.alarm_set', { trialId: input.trialId });
 
     // Emit `trial.started` so the SSE stream's first real event confirms the
     // orchestrator picked up the trial. The frontend uses this to transition
@@ -116,6 +119,9 @@ export class TrialOrchestrator extends DurableObject<Env> {
       projectId: '', // project not yet created; filled in on `trial.ready`
       repoUrl: input.repoUrl,
       startedAt: now,
+    });
+    log.info('trial_orchestrator_do.start.trial_started_emitted', {
+      trialId: input.trialId,
     });
 
     log.info('trial_orchestrator_do.started', {
@@ -139,6 +145,11 @@ export class TrialOrchestrator extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     const state = await this.getState();
+    log.info('trial_orchestrator_do.alarm.enter', {
+      trialId: state?.trialId ?? null,
+      step: state?.currentStep ?? null,
+      completed: state?.completed ?? null,
+    });
     if (!state || state.completed) return;
 
     // Hard overall-timeout guard — independent of per-step retries.
