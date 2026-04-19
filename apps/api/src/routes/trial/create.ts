@@ -405,41 +405,54 @@ createRoutes.post('/create', async (c) => {
   // (<100ms) while provisioning and the fast knowledge probes continue in the
   // background. Errors are swallowed inside the helpers so a failure here
   // never causes the response to hang.
-  c.executionCtx.waitUntil(
-    (async () => {
-      try {
-        const id = env.TRIAL_ORCHESTRATOR.idFromName(trialId);
-        const stub = env.TRIAL_ORCHESTRATOR.get(id);
-        await (
-          stub as unknown as {
-            start(input: {
-              trialId: string;
-              repoUrl: string;
-              repoOwner: string;
-              repoName: string;
-            }): Promise<void>;
-          }
-        ).start({
-          trialId,
-          repoUrl: repo.canonical,
-          repoOwner: repo.owner,
-          repoName: repo.name,
-        });
-      } catch (err) {
-        log.error('trial.create.orchestrator_dispatch_failed', {
-          trialId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    })()
-  );
-
-  c.executionCtx.waitUntil(
-    emitGithubKnowledgeEvents(env, trialId, {
-      owner: repo.owner,
-      name: repo.name,
-    })
-  );
+  //
+  // c.executionCtx may be absent in unit tests that construct Hono apps
+  // without a real Worker executionCtx. Hono throws on access when it's
+  // missing, so we guard with try/catch rather than a simple null check.
+  let exec: ExecutionContext | undefined;
+  try {
+    exec = c.executionCtx;
+  } catch {
+    exec = undefined;
+  }
+  const orchestratorTask = (async () => {
+    try {
+      const id = env.TRIAL_ORCHESTRATOR.idFromName(trialId);
+      const stub = env.TRIAL_ORCHESTRATOR.get(id);
+      await (
+        stub as unknown as {
+          start(input: {
+            trialId: string;
+            repoUrl: string;
+            repoOwner: string;
+            repoName: string;
+          }): Promise<void>;
+        }
+      ).start({
+        trialId,
+        repoUrl: repo.canonical,
+        repoOwner: repo.owner,
+        repoName: repo.name,
+      });
+    } catch (err) {
+      log.error('trial.create.orchestrator_dispatch_failed', {
+        trialId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  })();
+  const knowledgeTask = emitGithubKnowledgeEvents(env, trialId, {
+    owner: repo.owner,
+    name: repo.name,
+  });
+  if (exec) {
+    exec.waitUntil(orchestratorTask);
+    exec.waitUntil(knowledgeTask);
+  } else {
+    // Prevent unhandled-rejection warnings in tests without swallowing logs.
+    void orchestratorTask.catch(() => {});
+    void knowledgeTask.catch(() => {});
+  }
 
   return new Response(JSON.stringify(respBody), {
     status: 201,

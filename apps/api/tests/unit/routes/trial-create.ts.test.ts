@@ -63,7 +63,11 @@ function makeEnv(options: {
   decrementFn?: (monthKey: string) => Promise<number>;
   secret?: string | undefined;
   cap?: string;
+  orchestratorStart?: (input: unknown) => Promise<void>;
 }): Env {
+  const orchestratorStartFn =
+    options.orchestratorStart ?? vi.fn(async () => {});
+  const orchestratorStub = { start: orchestratorStartFn };
   return {
     TRIAL_CLAIM_TOKEN_SECRET: 'secret' in options ? options.secret : SECRET,
     TRIAL_MONTHLY_CAP: options.cap,
@@ -75,6 +79,16 @@ function makeEnv(options: {
           options.tryIncrementFn ??
           vi.fn(async () => ({ allowed: true, count: 1 })),
         decrement: options.decrementFn ?? vi.fn(async () => 0),
+      })),
+    },
+    TRIAL_ORCHESTRATOR: {
+      idFromName: vi.fn(() => 'orchestrator-do-id'),
+      get: vi.fn(() => orchestratorStub),
+    },
+    TRIAL_EVENT_BUS: {
+      idFromName: vi.fn(() => 'event-bus-do-id'),
+      get: vi.fn(() => ({
+        fetch: vi.fn(async () => new Response('ok')),
       })),
     },
     // Trial-store KV mirror — Track B readers (SSE events, claim) look trials
@@ -101,7 +115,8 @@ async function callCreate(
   app: Hono<{ Bindings: Env }>,
   env: Env,
   body: unknown,
-  cookie?: string
+  cookie?: string,
+  executionCtx?: ExecutionContext
 ) {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (cookie) headers.cookie = cookie;
@@ -111,8 +126,24 @@ async function callCreate(
       headers,
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
-    env
+    env,
+    executionCtx
   );
+}
+
+/** Minimal ExecutionContext stub that synchronously awaits every waitUntil
+ *  promise so assertions can observe side effects after `callCreate` resolves. */
+function makeExecutionCtx(): ExecutionContext & { waitUntilPromises: Promise<unknown>[] } {
+  const promises: Promise<unknown>[] = [];
+  const ctx: ExecutionContext & { waitUntilPromises: Promise<unknown>[] } = {
+    waitUntil: (p: Promise<unknown>) => {
+      promises.push(p);
+    },
+    passThroughOnException: () => {},
+    props: {},
+    waitUntilPromises: promises,
+  } as unknown as ExecutionContext & { waitUntilPromises: Promise<unknown>[] };
+  return ctx;
 }
 
 function okGithubFetch(overrides: Partial<{ size: number; private: boolean }> = {}) {
@@ -379,6 +410,63 @@ describe('POST /api/trial/create', () => {
     });
     expect(res.status).toBe(500);
     expect(decrementFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('dispatches TrialOrchestrator.start() with repo owner/name/canonical URL via waitUntil', async () => {
+    vi.stubGlobal('fetch', okGithubFetch());
+    const startFn = vi.fn(async () => {});
+    const env = makeEnv({ orchestratorStart: startFn });
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/trial', createRoutes);
+    const ctx = makeExecutionCtx();
+
+    const res = await callCreate(
+      app,
+      env,
+      { repoUrl: 'https://github.com/alice/repo' },
+      undefined,
+      ctx
+    );
+    expect(res.status).toBe(201);
+
+    // waitUntil should have been called at least twice (orchestrator + knowledge).
+    expect(ctx.waitUntilPromises.length).toBeGreaterThanOrEqual(2);
+    // Drain waitUntil promises so the orchestrator.start() call is observable.
+    await Promise.all(ctx.waitUntilPromises.map((p) => p.catch(() => {})));
+
+    expect(startFn).toHaveBeenCalledTimes(1);
+    const arg = startFn.mock.calls[0]?.[0] as {
+      trialId: string;
+      repoUrl: string;
+      repoOwner: string;
+      repoName: string;
+    };
+    expect(arg.trialId).toMatch(/^trial_/);
+    expect(arg.repoOwner).toBe('alice');
+    expect(arg.repoName).toBe('repo');
+    expect(arg.repoUrl).toBe('https://github.com/alice/repo');
+  });
+
+  it('still returns 201 when TrialOrchestrator.start() rejects (fire-and-forget)', async () => {
+    vi.stubGlobal('fetch', okGithubFetch());
+    const startFn = vi.fn().mockRejectedValue(new Error('DO unavailable'));
+    const env = makeEnv({ orchestratorStart: startFn });
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/trial', createRoutes);
+    const ctx = makeExecutionCtx();
+
+    const res = await callCreate(
+      app,
+      env,
+      { repoUrl: 'https://github.com/alice/repo' },
+      undefined,
+      ctx
+    );
+    // Response status must remain 201 — orchestrator failure is non-blocking.
+    expect(res.status).toBe(201);
+    // Drain waitUntil promises so the rejection is observable but swallowed.
+    await Promise.all(ctx.waitUntilPromises.map((p) => p.catch(() => {})));
+    expect(startFn).toHaveBeenCalledTimes(1);
   });
 
   it('reuses existing fingerprint UUID from cookie', async () => {
