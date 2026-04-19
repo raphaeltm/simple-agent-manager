@@ -29,15 +29,14 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import { signCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
+import * as projectDataService from '../../services/project-data';
 import { startDiscoveryAgent } from '../../services/trial/trial-runner';
 import { readTrial, writeTrial } from '../../services/trial/trial-store';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
-import * as projectDataService from '../../services/project-data';
-import { signCallbackToken } from '../../services/jwt';
-
 import { verifyNodeAgentHealthy } from '../task-runner/node-steps';
 import {
   resolveAnonymousInstallationId,

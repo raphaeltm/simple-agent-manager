@@ -41,6 +41,7 @@ import {
   signFingerprint,
   type TrialClaimPayload,
 } from '../../services/trial/cookies';
+import { emitGithubKnowledgeEvents } from '../../services/trial/github-knowledge';
 import {
   currentMonthKey,
   getTrialCounterStub,
@@ -51,7 +52,6 @@ import {
   resolveRepoMaxKb,
   resolveWorkspaceTtlMs,
 } from '../../services/trial/helpers';
-import { emitGithubKnowledgeEvents } from '../../services/trial/github-knowledge';
 import { isTrialsEnabled } from '../../services/trial/kill-switch';
 import { writeTrial } from '../../services/trial/trial-store';
 
