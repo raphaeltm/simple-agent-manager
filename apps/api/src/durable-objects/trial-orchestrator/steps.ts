@@ -806,6 +806,16 @@ export async function handleDiscoveryAgentStart(
  * `transitionAcpSession`) is what actually emits `trial.ready` once the
  * discovery agent produces its first assistant turn. This handler simply
  * marks the DO state as completed so no further alarms fire.
+ *
+ * Note on mcpToken lifecycle: we intentionally DO NOT revoke `state.mcpToken`
+ * here. The orchestrator terminating at `running` means provisioning is done,
+ * but the discovery agent is still active inside the workspace for up to
+ * TRIAL_WORKSPACE_TTL_MS (default 20 min) and continues to need the token for
+ * `add_knowledge` / `create_idea` MCP calls. Revocation on failure happens in
+ * `TrialOrchestrator.failTrial()`; on success, the token is bounded by its KV
+ * TTL (DEFAULT_MCP_TOKEN_TTL_SECONDS = 4h) and by the workspace teardown at
+ * the end of the trial window. A future follow-up could shorten the token TTL
+ * to match the trial window for defence-in-depth.
  */
 export async function handleRunning(
   state: TrialOrchestratorState,

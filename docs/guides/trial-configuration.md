@@ -41,8 +41,8 @@ When `POST /api/trial/create` succeeds, two fire-and-forget background tasks are
 1. **`TrialOrchestrator` Durable Object** (alarm-driven state machine, one DO per `trialId`):
    - Creates a `projects` row owned by `TRIAL_ANONYMOUS_USER_ID`.
    - Provisions (or reuses) a warm node.
-   - Creates a trial workspace (lightweight devcontainer profile by default).
-   - Starts the discovery agent via the ACP session path.
+   - Creates a trial workspace (lightweight devcontainer profile by default). Probes GitHub for the repo's real default branch (`fetchDefaultBranch`, bounded by `TRIAL_GITHUB_TIMEOUT_MS`) and threads it into `projects.defaultBranch` + the workspace `git clone --branch`, falling back to `main` on any failure.
+   - Starts the discovery agent: registers an agent-session record on the VM agent (`createAgentSessionOnNode`), mints an MCP token in KV keyed on `trialId` as synthetic `taskId` so the agent can call knowledge tools, tells the VM agent to launch the agent subprocess with the discovery prompt (`startAgentSessionOnNode`), and drives the ACP session `pending → assigned → running` (the `running` transition triggers `trial.ready` via the ProjectData bridge).
    - Emits `trial.progress` events at each state transition.
    - Time-boxed to `TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS` (default 5 min). On expiry, emits `trial.error { error: 'timeout' }`.
    - Idempotent: `start()` is safe to call multiple times with the same input.

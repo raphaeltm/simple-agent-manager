@@ -46,6 +46,14 @@ vi.mock('../../../src/services/trial/trial-store', () => ({
   writeTrial: vi.fn(async () => {}),
 }));
 
+// Stub mcp-token service so failTrial's revocation path is observable.
+const { revokeMcpTokenMock } = vi.hoisted(() => ({
+  revokeMcpTokenMock: vi.fn(async () => {}),
+}));
+vi.mock('../../../src/services/mcp-token', () => ({
+  revokeMcpToken: revokeMcpTokenMock,
+}));
+
 // Stub every step handler so alarm() dispatch can be controlled per-test.
 // Individual tests override these via `stepMocks.<handler>.mockImplementationOnce`.
 const { stepMocks } = vi.hoisted(() => ({
@@ -422,5 +430,117 @@ describe('TrialOrchestrator.alarm() — step error retry/backoff', () => {
     // No events emitted, no step handler called, no alarm rescheduled.
     expect(emitTrialEventMock).not.toHaveBeenCalled();
     expect(stepMocks.handleProjectCreation).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Security boundary tests — MCP token lifecycle + redaction
+// Covers security-auditor HIGH findings from PR #760 follow-up review.
+// ---------------------------------------------------------------------------
+
+describe('TrialOrchestrator — MCP token security boundary', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const fn of Object.values(stepMocks)) {
+      fn.mockReset();
+      fn.mockImplementation(async () => {});
+    }
+    revokeMcpTokenMock.mockReset();
+    revokeMcpTokenMock.mockImplementation(async () => {});
+  });
+
+  it('failTrial revokes state.mcpToken and clears it from persisted state', async () => {
+    const storage: Storage = new Map();
+    storage.set(
+      'state',
+      makeRunningState({
+        mcpToken: 'tok_live_secret_xyz',
+        // Force permanent failure path so failTrial runs synchronously.
+        retryCount: 99,
+      }),
+    );
+    stepMocks.handleProjectCreation.mockRejectedValueOnce(
+      new Error('invalid configuration — forces failTrial'),
+    );
+    const ctx = makeCtx(storage);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, makeEnv());
+    await orch.alarm();
+
+    expect(revokeMcpTokenMock).toHaveBeenCalledTimes(1);
+    expect(revokeMcpTokenMock.mock.calls[0][1]).toBe('tok_live_secret_xyz');
+
+    // Post-revocation, state.mcpToken must be cleared so a later read cannot
+    // leak the now-dead token through getStatus or any other surface.
+    const updated = ctx._storage.get('state') as { mcpToken: string | null };
+    expect(updated.mcpToken).toBeNull();
+  });
+
+  it('failTrial tolerates revokeMcpToken errors and still emits trial.error', async () => {
+    const storage: Storage = new Map();
+    storage.set(
+      'state',
+      makeRunningState({
+        mcpToken: 'tok_live_flaky_kv',
+        retryCount: 99,
+      }),
+    );
+    stepMocks.handleProjectCreation.mockRejectedValueOnce(
+      new Error('invalid — forces failTrial'),
+    );
+    revokeMcpTokenMock.mockRejectedValueOnce(new Error('KV hiccup'));
+
+    const ctx = makeCtx(storage);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, makeEnv());
+    await orch.alarm();
+
+    // Failure emission must still happen even though revoke threw.
+    const errorEmit = emitTrialEventMock.mock.calls.find(
+      (c) => (c[2] as { type: string }).type === 'trial.error'
+    );
+    expect(errorEmit).toBeTruthy();
+    const updated = ctx._storage.get('state') as {
+      currentStep: string;
+      completed: boolean;
+    };
+    expect(updated.currentStep).toBe('failed');
+    expect(updated.completed).toBe(true);
+  });
+
+  it('getStatus() redacts mcpToken so debug surfaces cannot leak the bearer credential', async () => {
+    const storage: Storage = new Map();
+    storage.set(
+      'state',
+      makeRunningState({
+        mcpToken: 'tok_should_never_leak',
+        currentStep: 'running',
+        completed: true,
+      }),
+    );
+    const ctx = makeCtx(storage);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, makeEnv());
+    const status = await orch.getStatus();
+    expect(status).not.toBeNull();
+    expect(status!.mcpToken).toBe('[redacted]');
+    // Other state fields should pass through so getStatus stays useful for
+    // debugging (currentStep, completed).
+    expect(status!.currentStep).toBe('running');
+    expect(status!.completed).toBe(true);
+
+    // Defence-in-depth: raw storage still has the real token (revocation is
+    // the caller's responsibility) — the redaction is a response-shaping
+    // guard, not a state mutation.
+    const raw = ctx._storage.get('state') as { mcpToken: string | null };
+    expect(raw.mcpToken).toBe('tok_should_never_leak');
+  });
+
+  it('getStatus() returns null when state is uninitialized (no accidental leak)', async () => {
+    const ctx = makeCtx();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, makeEnv());
+    const status = await orch.getStatus();
+    expect(status).toBeNull();
   });
 });

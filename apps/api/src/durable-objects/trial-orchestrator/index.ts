@@ -254,6 +254,25 @@ export class TrialOrchestrator extends DurableObject<Env> {
     reason: string,
     errorCode: string,
   ): Promise<void> {
+    // Revoke MCP token BEFORE marking state as failed so a leaked token from a
+    // botched/timed-out trial cannot continue hitting MCP endpoints for the
+    // remainder of its 4-hour TTL (DEFAULT_MCP_TOKEN_TTL_SECONDS). Mirrors the
+    // TaskRunner failure-path cleanup at
+    // `task-runner/state-machine.ts:265-275`. Best-effort — log-and-continue
+    // so a KV hiccup doesn't block the failure emission path.
+    if (state.mcpToken) {
+      try {
+        const { revokeMcpToken } = await import('../../services/mcp-token');
+        await revokeMcpToken(this.env.KV, state.mcpToken);
+      } catch (err) {
+        log.warn('trial_orchestrator_do.mcp_token_revoke_failed', {
+          trialId: state.trialId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      state.mcpToken = null;
+    }
+
     state.currentStep = 'failed';
     state.completed = true;
     state.failureReason = reason;

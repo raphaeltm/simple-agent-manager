@@ -96,11 +96,11 @@ the call site behavior, and the name hides the gap.
 
 See commit `feat(trial): boot discovery agent on VM + detect real default branch`:
 
-1. `handleDiscoveryAgentStart` now runs the full 3-step VM boot pattern
-   (`createAgentSessionOnNode` → MCP token → `startAgentSessionOnNode`) and
-   drives the ACP session through `pending → assigned → running`. All five
-   steps are gated by explicit idempotency flags on DO state
-   (`agentSessionCreatedOnVm`, `agentStartedOnVm`, `acpAssignedOnVm`,
+1. `handleDiscoveryAgentStart` now runs the full 5-step VM boot sequence
+   (`createAgentSessionOnNode` → mint MCP token → `startAgentSessionOnNode`
+   → ACP `pending → assigned` → ACP `assigned → running`). Each step is
+   gated by an explicit idempotency flag on DO state (`mcpToken`,
+   `agentSessionCreatedOnVm`, `agentStartedOnVm`, `acpAssignedOnVm`,
    `acpRunningOnVm`) so a crash mid-flight re-enters without double-booking.
 2. `fetchDefaultBranch()` probes GitHub's public API with a 5s AbortController
    timeout and falls back to `'main'` on any failure. The result is

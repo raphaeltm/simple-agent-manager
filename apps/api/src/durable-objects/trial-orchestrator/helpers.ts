@@ -18,7 +18,20 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { emitTrialEvent } from '../../services/trial/trial-runner';
 
-/** Sentinel userId used for every anonymous trial project/workspace. */
+/**
+ * Sentinel userId used for every anonymous trial project/workspace.
+ *
+ * Security note: ALL in-flight trials share the same owning userId. This is
+ * intentional (we have no real user until `/claim` succeeds), but it means any
+ * per-user query scope (e.g., `WHERE userId = ?`) does NOT isolate one trial
+ * from another. Downstream code that acts on trial-owned rows MUST additionally
+ * scope by `projectId` (or trialId) to prevent one trial's logic from observing
+ * or mutating another trial's state. Platform-level IDOR enforcement lives in
+ * `requireOwnedProject` (`apps/api/src/middleware/require-owned-project.ts`)
+ * and is not bypassed by trial code — but trial-internal loops (e.g.,
+ * `handleNodeSelection` scanning all sentinel-owned nodes) rely on the D1
+ * query filtering by projectId/nodeId where applicable.
+ */
 export function resolveAnonymousUserId(env: Env): string {
   return env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
 }
