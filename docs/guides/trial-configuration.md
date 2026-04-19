@@ -75,8 +75,9 @@ ACP session notifications and MCP knowledge/idea tool calls are bridged into the
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS` | `5000` | Per-request timeout for each unauthenticated GitHub REST call. |
+| `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS` | `5000` | Per-request timeout for each unauthenticated GitHub REST call (fast-path knowledge probe). |
 | `TRIAL_KNOWLEDGE_MAX_EVENTS` | `10` | Upper bound on `trial.knowledge` events emitted by the fast-path probe. |
+| `TRIAL_GITHUB_TIMEOUT_MS` | `5000` | Per-request timeout for the default-branch probe in the TrialOrchestrator (`fetchDefaultBranch`). On timeout, 404, or network error the probe falls back to `main`. |
 
 ## Kill Switch
 
