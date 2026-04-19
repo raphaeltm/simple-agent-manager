@@ -18,12 +18,10 @@
  */
 
 import {
+  DEFAULT_TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
 } from '@simple-agent-manager/shared';
-
-/** Default trial workspace profile when TRIAL_DEFAULT_WORKSPACE_PROFILE is unset. */
-const DEFAULT_TRIAL_WORKSPACE_PROFILE = 'lightweight';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -31,14 +29,21 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { signCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
-import { createWorkspaceOnNode } from '../../services/node-agent';
+import { generateMcpToken, storeMcpToken } from '../../services/mcp-token';
+import {
+  createAgentSessionOnNode,
+  createWorkspaceOnNode,
+  startAgentSessionOnNode,
+} from '../../services/node-agent';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
+import { DISCOVERY_PROMPT } from '../../services/trial/discovery-prompt';
 import { startDiscoveryAgent } from '../../services/trial/trial-runner';
 import { readTrial, writeTrial } from '../../services/trial/trial-store';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
 import { verifyNodeAgentHealthy } from '../task-runner/node-steps';
 import {
+  parseEnvInt,
   resolveAnonymousInstallationId,
   resolveAnonymousUserId,
   safeEmitTrialEvent,
@@ -47,6 +52,11 @@ import type {
   TrialOrchestratorContext,
   TrialOrchestratorState,
 } from './types';
+
+/** Default trial workspace profile when TRIAL_DEFAULT_WORKSPACE_PROFILE is unset. */
+const DEFAULT_TRIAL_WORKSPACE_PROFILE = 'lightweight';
+/** Fallback branch when the GitHub default-branch probe fails or times out. */
+const TRIAL_FALLBACK_BRANCH = 'main';
 
 // ---------------------------------------------------------------------------
 // Helpers — trial KV upkeep
@@ -77,6 +87,71 @@ async function syncTrialRecord(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/**
+ * Probe the GitHub public API for the repo's default branch. Returns
+ * `TRIAL_FALLBACK_BRANCH` ('main') on any failure — timeout, 404, malformed
+ * JSON, etc. — so master-default repos work out of the box but a transient
+ * GitHub outage never breaks trial provisioning.
+ *
+ * Configurable via `TRIAL_GITHUB_TIMEOUT_MS` (default
+ * `DEFAULT_TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS`, 5s).
+ */
+async function fetchDefaultBranch(
+  owner: string,
+  repo: string,
+  env: TrialOrchestratorContext['env'],
+): Promise<string> {
+  const timeoutMs = parseEnvInt(
+    env.TRIAL_GITHUB_TIMEOUT_MS,
+    DEFAULT_TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS,
+  );
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: {
+        'user-agent': 'sam-trial-onboarding',
+        accept: 'application/vnd.github+json',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      log.warn('trial_orchestrator.default_branch_probe_http_error', {
+        owner,
+        repo,
+        status: res.status,
+      });
+      return TRIAL_FALLBACK_BRANCH;
+    }
+    const body = (await res.json()) as { default_branch?: unknown };
+    if (typeof body.default_branch === 'string' && body.default_branch.length > 0) {
+      return body.default_branch;
+    }
+    return TRIAL_FALLBACK_BRANCH;
+  } catch (err) {
+    log.warn('trial_orchestrator.default_branch_probe_failed', {
+      owner,
+      repo,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return TRIAL_FALLBACK_BRANCH;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Build the initial prompt for the discovery agent — the canonical discovery
+ * prompt prefixed with the repo slug. Trials have no task row in D1, so we
+ * deliberately do NOT ask the agent to call `get_instructions` (which requires
+ * a task row and would 500). The discovery prompt itself names the tools it
+ * needs (`add_knowledge`, `create_idea`).
+ */
+function buildDiscoveryInitialPrompt(repoOwner: string, repoName: string): string {
+  const header = `Repository under exploration: \`${repoOwner}/${repoName}\`\n\n`;
+  return `${header}${DISCOVERY_PROMPT}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +192,13 @@ export async function handleProjectCreation(
   const now = new Date().toISOString();
   const db = drizzle(rc.env.DATABASE, { schema });
 
+  // Probe GitHub for the real default branch — falls back to 'main' on any
+  // failure so master-default repos (e.g. octocat/Hello-World) clone correctly
+  // without breaking main-default repos when GitHub is unreachable.
+  const defaultBranch = state.defaultBranch
+    ?? (await fetchDefaultBranch(state.repoOwner, state.repoName, rc.env));
+  state.defaultBranch = defaultBranch;
+
   // Normalize the repo name for uniqueness. Two trials on the same repo are
   // expected — scope uniqueness by trialId so collisions are impossible.
   const rawName = `${state.repoOwner}/${state.repoName}`;
@@ -129,7 +211,7 @@ export async function handleProjectCreation(
     normalizedName,
     installationId,
     repository: `${state.repoOwner}/${state.repoName}`,
-    defaultBranch: 'main',
+    defaultBranch,
     description: 'Anonymous trial — repository exploration',
     createdBy: userId,
     createdAt: now,
@@ -376,6 +458,7 @@ export async function handleWorkspaceCreation(
   const profile = rc.env.TRIAL_DEFAULT_WORKSPACE_PROFILE ?? DEFAULT_TRIAL_WORKSPACE_PROFILE;
   const vmSize = (rc.env.TRIAL_VM_SIZE as never) ?? DEFAULT_VM_SIZE;
   const vmLocation = rc.env.TRIAL_VM_LOCATION ?? DEFAULT_VM_LOCATION;
+  const branch = state.defaultBranch ?? TRIAL_FALLBACK_BRANCH;
 
   await db.insert(schema.workspaces).values({
     id: workspaceId,
@@ -387,7 +470,7 @@ export async function handleWorkspaceCreation(
     displayName: unique.displayName,
     normalizedDisplayName: unique.normalizedDisplayName,
     repository,
-    branch: 'main',
+    branch,
     status: 'creating',
     vmSize,
     vmLocation,
@@ -405,7 +488,7 @@ export async function handleWorkspaceCreation(
   await createWorkspaceOnNode(state.nodeId, rc.env, userId, {
     workspaceId,
     repository,
-    branch: 'main',
+    branch,
     callbackToken,
     lightweight: profile === 'lightweight',
   });
@@ -491,64 +574,217 @@ export async function handleDiscoveryAgentStart(
     at: Date.now(),
   });
 
-  if (!state.projectId || !state.workspaceId) {
+  if (!state.projectId || !state.workspaceId || !state.nodeId) {
     throw Object.assign(
-      new Error('discovery_agent_start requires projectId and workspaceId'),
+      new Error('discovery_agent_start requires projectId, workspaceId, and nodeId'),
       { permanent: true },
     );
   }
 
-  // Idempotent — re-entering after a crash shouldn't double-create sessions.
-  if (state.acpSessionId && state.chatSessionId) {
-    await rc.advanceToStep(state, 'running');
-    return;
-  }
+  const userId = resolveAnonymousUserId(rc.env);
+  const projectId = state.projectId;
+  const workspaceId = state.workspaceId;
+  const nodeId = state.nodeId;
 
-  const agentReadyTimeoutMs = rc.getAgentReadyTimeoutMs();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), agentReadyTimeoutMs);
-  try {
+  // Step 1: create the chat + ACP session rows in ProjectData DO (idempotent
+  // via state.chatSessionId / state.acpSessionId flags).
+  let chatSessionId = state.chatSessionId;
+  let acpSessionId = state.acpSessionId;
+  let agentType: string | null = null;
+  if (!chatSessionId || !acpSessionId) {
     const res = await startDiscoveryAgent(rc.env, {
-      projectId: state.projectId,
-      workspaceId: state.workspaceId,
+      projectId,
+      workspaceId,
       sessionTopic: `${state.repoOwner}/${state.repoName}`,
     });
-    state.chatSessionId = res.chatSessionId;
-    state.acpSessionId = res.acpSessionId;
+    chatSessionId = res.chatSessionId;
+    acpSessionId = res.acpSessionId;
+    agentType = res.agentType;
+    state.chatSessionId = chatSessionId;
+    state.acpSessionId = acpSessionId;
     await rc.ctx.storage.put('state', state);
 
-    // Link session → workspace so downstream UI/DO lookups work the same way
-    // TaskRunner links them (ensureSessionLinked pattern).
+    // Link session → workspace (mirrors TaskRunner's ensureSessionLinked).
     try {
       await rc.env.DATABASE.prepare(
         `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
-      ).bind(res.chatSessionId, new Date().toISOString(), state.workspaceId).run();
+      ).bind(chatSessionId, new Date().toISOString(), workspaceId).run();
       await projectDataService.linkSessionToWorkspace(
         rc.env,
-        state.projectId,
-        res.chatSessionId,
-        state.workspaceId,
+        projectId,
+        chatSessionId,
+        workspaceId,
       );
     } catch (err) {
       log.warn('trial_orchestrator.session_link_failed', {
         trialId: state.trialId,
-        projectId: state.projectId,
-        chatSessionId: res.chatSessionId,
+        projectId,
+        chatSessionId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
 
-    log.info('trial_orchestrator.step.discovery_agent_started', {
+    log.info('trial_orchestrator.step.discovery_agent_session_created', {
       trialId: state.trialId,
-      projectId: state.projectId,
-      chatSessionId: res.chatSessionId,
-      acpSessionId: res.acpSessionId,
+      projectId,
+      chatSessionId,
+      acpSessionId,
       agentType: res.agentType,
       model: res.model,
       provider: res.provider,
     });
-  } finally {
-    clearTimeout(timer);
+  }
+
+  // If we re-entered after crash with both IDs but no agentType in scope,
+  // re-resolve so startAgentSessionOnNode below has what it needs.
+  if (!agentType) {
+    const { resolveTrialRunnerConfig } = await import('../../services/trial/trial-runner');
+    agentType = resolveTrialRunnerConfig(rc.env).agentType;
+  }
+
+  if (!acpSessionId || !chatSessionId) {
+    throw Object.assign(
+      new Error('discovery_agent_start lost session ids after creation'),
+      { permanent: true },
+    );
+  }
+  const resolvedAcpSessionId: string = acpSessionId;
+  const resolvedChatSessionId: string = chatSessionId;
+
+  // Step 2: register the agent-session record on the VM agent (idempotent).
+  if (!state.agentSessionCreatedOnVm) {
+    await createAgentSessionOnNode(
+      nodeId,
+      workspaceId,
+      resolvedAcpSessionId,
+      `Trial: ${state.repoOwner}/${state.repoName}`.slice(0, 60),
+      rc.env,
+      userId,
+      resolvedChatSessionId,
+      projectId,
+    );
+    state.agentSessionCreatedOnVm = true;
+    await rc.ctx.storage.put('state', state);
+    log.info('trial_orchestrator.step.agent_session_registered', {
+      trialId: state.trialId,
+      workspaceId,
+      acpSessionId,
+      nodeId,
+    });
+  }
+
+  // Step 3: mint + store the MCP token so the VM agent can call MCP tools
+  // (add_knowledge, create_idea) on behalf of this trial. Trials have no task
+  // row in D1, so we pass the trialId as the synthetic taskId — this keeps
+  // rate-limit keying (per-trial) and audit logging working without needing
+  // a schema change to McpTokenData.
+  if (!state.mcpToken) {
+    const token = generateMcpToken();
+    await storeMcpToken(
+      rc.env.KV,
+      token,
+      {
+        taskId: state.trialId,
+        projectId,
+        userId,
+        workspaceId,
+        createdAt: new Date().toISOString(),
+      },
+      rc.env,
+    );
+    state.mcpToken = token;
+    await rc.ctx.storage.put('state', state);
+    log.info('trial_orchestrator.step.mcp_token_created', {
+      trialId: state.trialId,
+      projectId,
+    });
+  }
+
+  // Step 4: tell the VM agent to actually launch the subprocess with the
+  // discovery prompt as the initial turn. This is the missing piece that made
+  // previous trials hang at 90% — without this call the ACP session stayed
+  // in 'pending' forever.
+  if (!state.agentStartedOnVm) {
+    if (!state.mcpToken) {
+      throw new Error('discovery_agent_start: mcpToken missing after step 3');
+    }
+    const initialPrompt = buildDiscoveryInitialPrompt(state.repoOwner, state.repoName);
+    const mcpServerUrl = `https://api.${rc.env.BASE_DOMAIN}/mcp`;
+    await startAgentSessionOnNode(
+      nodeId,
+      workspaceId,
+      resolvedAcpSessionId,
+      agentType,
+      initialPrompt,
+      rc.env,
+      userId,
+      { url: mcpServerUrl, token: state.mcpToken },
+    );
+    state.agentStartedOnVm = true;
+    await rc.ctx.storage.put('state', state);
+    log.info('trial_orchestrator.step.agent_subprocess_started', {
+      trialId: state.trialId,
+      workspaceId,
+      acpSessionId,
+      agentType,
+    });
+  }
+
+  // Step 5: drive the ACP session state machine pending → assigned → running.
+  // The trial flow has no UI claim and no VM-agent callback that moves the
+  // session forward on its own, so the orchestrator owns these transitions.
+  // The `running` transition is what the ACP bridge listens for to fire
+  // `trial.ready` (see apps/api/src/services/trial/bridge.ts).
+  if (!state.acpAssignedOnVm) {
+    try {
+      await projectDataService.transitionAcpSession(
+        rc.env,
+        projectId,
+        resolvedAcpSessionId,
+        'assigned',
+        {
+          actorType: 'system',
+          reason: 'trial_orchestrator.agent_subprocess_started',
+          workspaceId,
+          nodeId,
+        },
+      );
+      state.acpAssignedOnVm = true;
+      await rc.ctx.storage.put('state', state);
+    } catch (err) {
+      log.warn('trial_orchestrator.acp_assign_failed', {
+        trialId: state.trialId,
+        acpSessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  if (!state.acpRunningOnVm) {
+    try {
+      await projectDataService.transitionAcpSession(
+        rc.env,
+        projectId,
+        resolvedAcpSessionId,
+        'running',
+        {
+          actorType: 'system',
+          reason: 'trial_orchestrator.agent_subprocess_running',
+          workspaceId,
+          nodeId,
+        },
+      );
+      state.acpRunningOnVm = true;
+      await rc.ctx.storage.put('state', state);
+    } catch (err) {
+      log.warn('trial_orchestrator.acp_running_failed', {
+        trialId: state.trialId,
+        acpSessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   }
 
   await rc.advanceToStep(state, 'running');

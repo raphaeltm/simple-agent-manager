@@ -42,6 +42,26 @@ export interface TrialOrchestratorState {
   workspaceId: string | null;
   chatSessionId: string | null;
   acpSessionId: string | null;
+  /**
+   * Repo default branch detected via the GitHub public API during project_creation.
+   * Falls back to 'main' when the probe fails or times out. Threaded into both the
+   * `projects.default_branch` row and the workspace-side `git clone --branch` call.
+   */
+  defaultBranch: string | null;
+  /**
+   * MCP token generated for this trial's discovery agent so it can call MCP tools
+   * (`add_knowledge`, `create_idea`, etc.) via the api Worker. Stored in KV with
+   * a TTL by `storeMcpToken`.
+   */
+  mcpToken: string | null;
+  /** Idempotency flag — VM agent's agent-session record has been created. */
+  agentSessionCreatedOnVm: boolean;
+  /** Idempotency flag — VM agent was told to start the agent subprocess. */
+  agentStartedOnVm: boolean;
+  /** Idempotency flag — ACP session has been transitioned pending → assigned. */
+  acpAssignedOnVm: boolean;
+  /** Idempotency flag — ACP session has been transitioned assigned → running. */
+  acpRunningOnVm: boolean;
   // Timing / retry bookkeeping.
   retryCount: number;
   createdAt: number;
