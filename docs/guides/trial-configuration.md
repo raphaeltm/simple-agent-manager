@@ -4,7 +4,7 @@ SAM supports a zero-friction onboarding flow where visitors hit `/try` in the we
 
 This document covers the configuration knobs an operator turns when self-hosting trials.
 
-> **Wave 0 status:** This page describes the *foundation* shipped in Wave 0 (types, DB migration, routes stubs, DO skeleton). The live create / events / claim / waitlist handlers land in Wave 1. Operators can safely deploy Wave 0 without setting any trial secrets — trials remain disabled until the kill-switch is flipped on.
+> **Status:** The foundation (Wave 0 — types, DB migration, route stubs, DO skeleton), the live create / events / claim / waitlist handlers (Wave 1), and the `TrialOrchestrator` + GitHub-knowledge fast-path (Wave 1 track C) are all shipped. Trials remain disabled by default via the kill switch; operators opt in by flipping the KV flag (see below).
 
 ## Required Worker Secrets
 
@@ -33,6 +33,50 @@ These are declared in `apps/api/wrangler.toml` at the top level (no `[env.*]` se
 | `TRIAL_DEFAULT_WORKSPACE_PROFILE` | `lightweight` | Devcontainer profile (see `packages/cloud-init`) used for trial workspaces. |
 | `TRIALS_ENABLED_KV_KEY` | `trials:enabled` | KV key read by the kill-switch. |
 | `TRIAL_KILL_SWITCH_CACHE_MS` | `30000` (30 s) | In-memory cache TTL for the kill-switch lookup. Lower = faster propagation, higher = fewer KV reads. |
+
+## Orchestrator and Fast-Path Knowledge
+
+When `POST /api/trial/create` succeeds, two fire-and-forget background tasks are dispatched via `c.executionCtx.waitUntil` before the HTTP response returns. The user therefore gets `201` in under ~100 ms even though real provisioning continues in the background:
+
+1. **`TrialOrchestrator` Durable Object** (alarm-driven state machine, one DO per `trialId`):
+   - Creates a `projects` row owned by `TRIAL_ANONYMOUS_USER_ID`.
+   - Provisions (or reuses) a warm node.
+   - Creates a trial workspace (lightweight devcontainer profile by default).
+   - Starts the discovery agent via the ACP session path.
+   - Emits `trial.progress` events at each state transition.
+   - Time-boxed to `TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS` (default 5 min). On expiry, emits `trial.error { error: 'timeout' }`.
+   - Idempotent: `start()` is safe to call multiple times with the same input.
+
+2. **GitHub-API knowledge probes** (`emitGithubKnowledgeEvents`):
+   - Hits unauthenticated `/repos/:o/:n`, `/repos/:o/:n/languages`, and `/repos/:o/:n/readme` in parallel.
+   - Emits up to `TRIAL_KNOWLEDGE_MAX_EVENTS` `trial.knowledge` events covering description, primary language, stars, topics, license, language breakdown (by bytes), and the first README paragraph.
+   - Each request is `AbortController`-bounded by `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS`.
+   - All errors are swallowed — a GitHub rate-limit hit or 5xx produces zero events instead of failing the trial.
+
+ACP session notifications and MCP knowledge/idea tool calls are bridged into the SSE event stream by `apps/api/src/services/trial/bridge.ts`: when the discovery agent's ACP session transitions to `running`, a `trial.ready` event fires with the workspace URL; `add_knowledge` and `create_idea` MCP calls emit `trial.knowledge` and `trial.idea` events respectively. The bridge no-ops on non-trial projects (single KV read overhead).
+
+### Orchestrator tunables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS` | `300000` (5 min) | Hard cap on total trial provisioning time. Exceeding this emits `trial.error` with `error: 'timeout'`. |
+| `TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES` | `5` | Maximum transient-error retries per state-machine step. |
+| `TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS` | `1000` | Base delay for exponential backoff between retries. |
+| `TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS` | `60000` | Ceiling for exponential backoff delay. |
+| `TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS` | `180000` (3 min) | Max time to wait for a freshly provisioned node to report `running`. |
+| `TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS` | `60000` (1 min) | Max time to wait for the VM agent heartbeat post-node-ready. |
+| `TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS` | `180000` (3 min) | Max time to wait for the workspace to reach `running` status. |
+| `TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS` | `5000` | Polling cadence (via alarm self-reschedule) while waiting for workspace-ready. |
+| `TRIAL_VM_SIZE` | `DEFAULT_VM_SIZE` | Override VM size for trial workspaces. |
+| `TRIAL_VM_LOCATION` | `DEFAULT_VM_LOCATION` | Override VM location for trial workspaces. |
+| `TRIAL_ANONYMOUS_INSTALLATION_ID` | `system_anonymous_trials_installation` | Sentinel GitHub installation row that trial projects FK into. |
+
+### GitHub knowledge tunables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS` | `5000` | Per-request timeout for each unauthenticated GitHub REST call. |
+| `TRIAL_KNOWLEDGE_MAX_EVENTS` | `10` | Upper bound on `trial.knowledge` events emitted by the fast-path probe. |
 
 ## Kill Switch
 

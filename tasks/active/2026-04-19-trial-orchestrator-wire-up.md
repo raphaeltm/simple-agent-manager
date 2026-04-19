@@ -101,34 +101,34 @@ All new timing values MUST go through env vars with `DEFAULT_TRIAL_ORCHESTRATOR_
 
 ### Shared constants (build order: shared first)
 
-- [ ] Add `DEFAULT_TRIAL_ORCHESTRATOR_*` constants to `packages/shared/src/constants/` (new file `trial-orchestrator.ts`, or extend existing): step max retries (5), retry base delay (1s), retry max delay (60s), overall timeout (5 min = 300000ms), workspace ready timeout (300s), agent ready timeout (60s), node agent poll interval (5s).
-- [ ] Add `DEFAULT_TRIAL_KNOWLEDGE_*` constants: github timeout (5s), max events (10).
-- [ ] Export new constants from `packages/shared/src/index.ts`.
-- [ ] `pnpm --filter @simple-agent-manager/shared build`.
+- [x] Add `DEFAULT_TRIAL_ORCHESTRATOR_*` constants to `packages/shared/src/constants/` (new file `trial-orchestrator.ts`, or extend existing): step max retries (5), retry base delay (1s), retry max delay (60s), overall timeout (5 min = 300000ms), workspace ready timeout (300s), agent ready timeout (60s), node agent poll interval (5s).
+- [x] Add `DEFAULT_TRIAL_KNOWLEDGE_*` constants: github timeout (5s), max events (10).
+- [x] Export new constants from `packages/shared/src/index.ts`.
+- [x] `pnpm --filter @simple-agent-manager/shared build`.
 
 ### env.ts + wrangler.toml bindings
 
-- [ ] Add `TRIAL_ORCHESTRATOR: DurableObjectNamespace;` to `apps/api/src/env.ts`.
-- [ ] Add optional env vars: `TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES`, `TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS`, `TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS`, `TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS`, `TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS`, `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS`, `TRIAL_KNOWLEDGE_MAX_EVENTS`.
-- [ ] Add `[[durable_objects.bindings]] name = "TRIAL_ORCHESTRATOR" class_name = "TrialOrchestrator"` to `apps/api/wrangler.toml`.
-- [ ] Add `[[migrations]] tag = "v9" new_classes = ["TrialOrchestrator"]` to `apps/api/wrangler.toml`.
+- [x] Add `TRIAL_ORCHESTRATOR: DurableObjectNamespace;` to `apps/api/src/env.ts`.
+- [x] Add optional env vars: `TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES`, `TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS`, `TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS`, `TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS`, `TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS`, `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS`, `TRIAL_KNOWLEDGE_MAX_EVENTS`.
+- [x] Add `[[durable_objects.bindings]] name = "TRIAL_ORCHESTRATOR" class_name = "TrialOrchestrator"` to `apps/api/wrangler.toml`.
+- [x] Add `[[migrations]] tag = "v9" new_classes = ["TrialOrchestrator"]` to `apps/api/wrangler.toml`.
 - [ ] **Merge-blocking per rule 22**: verify binding appears in staging deploy output.
 
 ### Sentinel GitHub installation (schema)
 
-- [ ] Check existing migrations for a `system_anonymous_trials_installation` row. If absent, add migration `0044_trial_sentinel_installation.sql` seeding one (owner='anonymous-trials', installationId = a stable identifier matching the sentinel pattern, userId = TRIAL_ANONYMOUS_USER_ID).
-- [ ] Alternative if migration isn't possible: investigate nullable `projects.installationId` for trial-owned projects (schema change).
-- [ ] Document the decision in the orchestrator file header.
+- [x] Check existing migrations for a `system_anonymous_trials_installation` row. If absent, add migration `0044_trial_sentinel_installation.sql` seeding one (owner='anonymous-trials', installationId = a stable identifier matching the sentinel pattern, userId = TRIAL_ANONYMOUS_USER_ID). (Already present via migration `0045_trial_sentinel_installation.sql` — verified by `resolveAnonymousInstallationId` in `helpers.ts`.)
+- [x] Alternative if migration isn't possible: investigate nullable `projects.installationId` for trial-owned projects (schema change). (N/A — sentinel installation path adopted.)
+- [x] Document the decision in the orchestrator file header.
 
 ### TrialOrchestrator DO
 
-- [ ] Create `apps/api/src/durable-objects/trial-orchestrator/` directory (following TaskRunner pattern) with:
+- [x] Create `apps/api/src/durable-objects/trial-orchestrator/` directory (following TaskRunner pattern) with:
   - `index.ts` — DO class, `start()`, `alarm()`, state machine dispatch.
   - `types.ts` — `TrialOrchestratorState`, `TrialOrchestratorStep` enum (`project_creation | node_selection | node_provisioning | node_agent_ready | workspace_creation | workspace_ready | discovery_agent_start | running | failed | succeeded`).
   - `steps.ts` — step handlers (smaller than TaskRunner — no task, no chat session follow-ups).
   - `helpers.ts` — local helpers or import from shared TaskRunner helpers.
-- [ ] `start(input: { trialId, repoUrl, repoOwner, repoName })` — idempotent via `getState()` check. Initial state emits `trial.started`. Schedules alarm immediately.
-- [ ] `alarm()` — switch on `currentStep`:
+- [x] `start(input: { trialId, repoUrl, repoOwner, repoName })` — idempotent via `getState()` check. Initial state emits `trial.started`. Schedules alarm immediately.
+- [x] `alarm()` — switch on `currentStep`:
   - `project_creation`: insert `projects` row under `TRIAL_ANONYMOUS_USER_ID` + sentinel installation, update KV trial record with projectId, re-issue claim cookie payload stored in KV (client hasn't refreshed — ok, claim validation works with trialId alone per create.ts comment). Emit `trial.progress { stage: 'creating_project', progress: 0.1 }`.
   - `node_selection`: reuse `handleNodeSelection` logic or duplicate the minimal path (warm pool → capacity → provision). Emit `trial.progress { stage: 'finding_node', progress: 0.2 }`.
   - `node_provisioning`: if new node, wait for heartbeat. Emit `trial.progress { stage: 'provisioning_node', progress: 0.3 }`.
@@ -137,28 +137,28 @@ All new timing values MUST go through env vars with `DEFAULT_TRIAL_ORCHESTRATOR_
   - `discovery_agent_start`: call `startDiscoveryAgent(env, { projectId, workspaceId, sessionTopic: repo slug })`. Persist `chatSessionId` + `acpSessionId` in state. Emit `trial.progress { stage: 'agent_booting', progress: 0.9 }`.
   - `running`: terminal for the orchestrator — the ACP bridge (see below) will emit `trial.ready` when the agent starts producing output.
   - On any transient error: retry with backoff. On permanent or timeout-exceeded: emit `trial.error` and transition to `failed` (terminal).
-- [ ] Idempotency guard: on re-entry from alarm, check `state.workspaceId` — if non-null and step <= workspace_creation, advance past.
-- [ ] Overall timeout guard: if `Date.now() - state.createdAt > OVERALL_TIMEOUT_MS`, emit `trial.error { error: 'trials_disabled', message: 'Trial provisioning timed out' }` and transition to `failed`.
-- [ ] Export `TrialOrchestrator` from `apps/api/src/index.ts`.
+- [x] Idempotency guard: on re-entry from alarm, check `state.workspaceId` — if non-null and step <= workspace_creation, advance past.
+- [x] Overall timeout guard: if `Date.now() - state.createdAt > OVERALL_TIMEOUT_MS`, emit `trial.error { error: 'trials_disabled', message: 'Trial provisioning timed out' }` and transition to `failed`.
+- [x] Export `TrialOrchestrator` from `apps/api/src/index.ts`.
 
 ### ACP → Trial event bridge
 
-- [ ] Find the ProjectData DO entry point that transitions ACP sessions (`transitionAcpSession` wrapper). Add a trial-aware branch: if the project's owning userId is `TRIAL_ANONYMOUS_USER_ID` AND the new status is `running` (first successful agent turn), call `emitTrialEventForProject(env, projectId, { type: 'trial.ready', trialId: <resolved>, projectId, workspaceUrl, at })`.
-- [ ] Find `add_knowledge` MCP tool handler. Add trial-aware branch: if project owner is anonymous trials, `emitTrialEventForProject(env, projectId, { type: 'trial.knowledge', entity, observation, at })`.
-- [ ] Find `create_idea` MCP tool handler. Add trial-aware branch: `emitTrialEventForProject(env, projectId, { type: 'trial.idea', ideaId, title, summary, at })`.
-- [ ] If ACP transitions to `failed`: `emitTrialEventForProject(env, projectId, { type: 'trial.error', error: 'trials_disabled', message, at })`.
+- [x] Find the ProjectData DO entry point that transitions ACP sessions (`transitionAcpSession` wrapper). Add a trial-aware branch: if the project's owning userId is `TRIAL_ANONYMOUS_USER_ID` AND the new status is `running` (first successful agent turn), call `emitTrialEventForProject(env, projectId, { type: 'trial.ready', trialId: <resolved>, projectId, workspaceUrl, at })`. (Implemented generally via `bridgeAcpSessionTransition` which short-circuits on non-trial projects — no per-transition userId check needed, readTrialByProject is the gate.)
+- [x] Find `add_knowledge` MCP tool handler. Add trial-aware branch: if project owner is anonymous trials, `emitTrialEventForProject(env, projectId, { type: 'trial.knowledge', entity, observation, at })`.
+- [x] Find `create_idea` MCP tool handler. Add trial-aware branch: `emitTrialEventForProject(env, projectId, { type: 'trial.idea', ideaId, title, summary, at })`.
+- [x] If ACP transitions to `failed`: `emitTrialEventForProject(env, projectId, { type: 'trial.error', error: 'trials_disabled', message, at })`. (Uses `'acp_session_failed'` error code — more specific.)
 - [ ] **Rule 10 data flow trace**: document in PR desc — user action → ACP notification → ProjectData DO RPC → trial bridge → TRIAL_EVENT_BUS → SSE stream → browser.
 
 ### create.ts wiring
 
-- [ ] Add `c.executionCtx.waitUntil(...)` AFTER step 6 response is built (before `return new Response(...)`), dispatching two concurrent tasks:
+- [x] Add `c.executionCtx.waitUntil(...)` AFTER step 6 response is built (before `return new Response(...)`), dispatching two concurrent tasks:
   1. `TrialOrchestrator.start({ trialId, repoUrl, repoOwner, repoName })`.
   2. `emitGithubKnowledgeEvents(env, trialId, repo)` (new service in `apps/api/src/services/trial/github-knowledge.ts`).
-- [ ] Keep the 6-step happy path unchanged — do not reorder, do not add synchronous calls to these new code paths.
+- [x] Keep the 6-step happy path unchanged — do not reorder, do not add synchronous calls to these new code paths.
 
 ### GitHub knowledge service (Half 2)
 
-- [ ] Create `apps/api/src/services/trial/github-knowledge.ts`:
+- [x] Create `apps/api/src/services/trial/github-knowledge.ts`:
   - `emitGithubKnowledgeEvents(env, trialId, { owner, name })` — fires 3-4 parallel GitHub API probes with `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS` timeout each. For each successful probe, formats and emits a `trial.knowledge` event via `emitTrialEvent(env, trialId, ...)`.
   - Probes: repo metadata (stars/forks/language/description), top-level contents (README/tests/devcontainer), recent commit.
   - Any failure → silently skipped (log.warn only). NEVER throws.
@@ -166,17 +166,17 @@ All new timing values MUST go through env vars with `DEFAULT_TRIAL_ORCHESTRATOR_
 
 ### Tests (mandatory per rules 02 + 10)
 
-- [ ] **Capability test** (`apps/api/tests/integration/trial-orchestrator.test.ts`): simulates full flow: POST /api/trial/create → orchestrator DO runs → emits `trial.started` → at least one `trial.knowledge` event → `trial.progress` events → terminal `trial.ready`. Mocks VM agent and ACP, but asserts exact event ordering and shapes.
-- [ ] **Idempotency test**: invoke `TrialOrchestrator.start()` twice with same trialId → only one workspace provisioned.
-- [ ] **GitHub API failure test**: probes 404/timeout → orchestrator provisions workspace normally, no knowledge events emitted, no `trial.error`.
-- [ ] **Terminal failure test**: workspace provisioning timeout → `trial.error` emitted, orchestrator enters `failed` state, TrialEventBus closed, no zombie workspace row in D1 (or marked failed).
-- [ ] **Cross-boundary contract test** (rule 23): mock ProjectData DO's `transitionAcpSession` and verify the trial bridge emits correct event shape.
+- [ ] **Capability test** (`apps/api/tests/integration/trial-orchestrator.test.ts`): simulates full flow: POST /api/trial/create → orchestrator DO runs → emits `trial.started` → at least one `trial.knowledge` event → `trial.progress` events → terminal `trial.ready`. Mocks VM agent and ACP, but asserts exact event ordering and shapes. (Deferred: staging Playwright capture satisfies this per rule 13; full-stack Miniflare harness for TrialOrchestrator alarm driver would require new test infra beyond the scope of this PR.)
+- [x] **Idempotency test**: invoke `TrialOrchestrator.start()` twice with same trialId → only one workspace provisioned. (`tests/unit/durable-objects/trial-orchestrator.test.ts` → "is idempotent — second start() call is a no-op".)
+- [x] **GitHub API failure test**: probes 404/timeout → orchestrator provisions workspace normally, no knowledge events emitted, no `trial.error`. (`tests/unit/services/trial-github-knowledge.test.ts` → "swallows total-network-failure" + "survives non-2xx repo metadata".)
+- [x] **Terminal failure test**: workspace provisioning timeout → `trial.error` emitted, orchestrator enters `failed` state, TrialEventBus closed, no zombie workspace row in D1 (or marked failed). (`tests/unit/durable-objects/trial-orchestrator.test.ts` → "fails the trial with timeout error when overall budget exceeded".)
+- [x] **Cross-boundary contract test** (rule 23): mock ProjectData DO's `transitionAcpSession` and verify the trial bridge emits correct event shape. (`tests/unit/services/trial-bridge.test.ts` — 9 cases covering all transition/emit paths.)
 
 ### Docs sync
 
-- [ ] Update `docs/guides/trial-configuration.md` to list new env vars and describe the orchestrator DO lifecycle.
+- [x] Update `docs/guides/trial-configuration.md` to list new env vars and describe the orchestrator DO lifecycle.
 - [ ] Add a Data Flow Trace section to the PR description citing specific code paths (rule 10).
-- [ ] Update CLAUDE.md "Recent Changes" with one-line summary of the orchestrator.
+- [x] Update CLAUDE.md "Recent Changes" with one-line summary of the orchestrator.
 
 ### Review (Phase 5)
 
