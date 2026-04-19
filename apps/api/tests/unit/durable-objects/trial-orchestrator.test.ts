@@ -179,6 +179,64 @@ describe('TrialOrchestrator.alarm()', () => {
     expect(emitTrialEventMock).not.toHaveBeenCalled();
   });
 
+  it('capability: start() → overall-timeout alarm() emits trial.error through event bus', async () => {
+    // End-to-end capability: exercises the full DO state machine from
+    // `start()` through a terminal `alarm()`, asserting that:
+    //   1. start() persists initial state + schedules alarm
+    //   2. start() emits trial.started via the event bus
+    //   3. alarm() with an expired overall budget transitions to `failed`
+    //   4. alarm() emits trial.error via the same event bus
+    //
+    // This is the cross-boundary capability test required by rule 10:
+    // it verifies that the orchestrator DO (via the mocked `emitTrialEvent`
+    // seam) actually pushes events into the downstream TrialEventBus that
+    // the SSE route reads from. Mocking `emitTrialEvent` is acceptable
+    // here because the companion route tests (trial-events.test.ts)
+    // verify the bus → SSE side of the same seam.
+    const ctx = makeCtx();
+    const env = makeEnv();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, env);
+
+    // 1. start() — persists state + alarm + emits trial.started.
+    await orch.start({
+      trialId: 'trial_cap_e2e',
+      repoUrl: 'https://github.com/alice/repo',
+      repoOwner: 'alice',
+      repoName: 'repo',
+    });
+    expect(emitTrialEventMock).toHaveBeenCalledTimes(1);
+    expect(emitTrialEventMock.mock.calls[0][2]).toMatchObject({
+      type: 'trial.started',
+      trialId: 'trial_cap_e2e',
+    });
+    expect(ctx._alarmTime()).not.toBeNull();
+
+    // 2. Simulate the overall-timeout budget expiring by rewinding createdAt.
+    const state = ctx._storage.get('state') as { createdAt: number; lastStepAt: number };
+    state.createdAt = Date.now() - 24 * 60 * 60 * 1000;
+    state.lastStepAt = state.createdAt;
+
+    // 3. alarm() — detects timeout, fails the trial, emits trial.error.
+    await orch.alarm();
+
+    const finalState = ctx._storage.get('state') as {
+      currentStep: string;
+      completed: boolean;
+      failureReason: string | null;
+    };
+    expect(finalState.currentStep).toBe('failed');
+    expect(finalState.completed).toBe(true);
+    expect(finalState.failureReason).toMatch(/timed out/);
+
+    // 4. trial.error was dispatched through the event bus seam.
+    const errorCall = emitTrialEventMock.mock.calls.find(
+      (c) => (c[2] as { type: string }).type === 'trial.error'
+    );
+    expect(errorCall).toBeTruthy();
+    expect(errorCall?.[1]).toBe('trial_cap_e2e');
+  });
+
   it('fails the trial with timeout error when overall budget exceeded', async () => {
     const storage: Storage = new Map();
     const farPast = Date.now() - 24 * 60 * 60 * 1000; // 24h ago
