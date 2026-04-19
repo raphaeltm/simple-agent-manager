@@ -211,6 +211,7 @@ String containment tests on structured output create false confidence. The test 
 3. **Existing workflows MUST be confirmed working.** Navigate the dashboard, projects, settings. Verify no regressions — pages load, data displays, navigation works, no new console errors.
 4. **New feature/fix MUST be verified on staging.** The specific changes in the PR must work correctly on the live staging environment.
 5. **Evidence MUST be reported.** Include screenshots, API responses, or Playwright observations in the PR.
+6. **For browser-consumed streams (SSE / WebSocket), verification MUST use a real browser, not `curl`.** `curl` can confirm bytes arrive on the wire; only a browser confirms the client actually dispatches them to its handler. See `.claude/rules/13-staging-verification.md` for the full reasoning and the post-mortem that motivated this rule (`docs/notes/2026-04-19-trial-sse-named-events-postmortem.md`).
 
 ### No Exceptions
 

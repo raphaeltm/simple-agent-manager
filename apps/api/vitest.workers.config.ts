@@ -31,8 +31,16 @@ export default defineConfig({
           ADMIN_LOGS: {
             className: 'AdminLogs',
           },
+          TRIAL_COUNTER: {
+            className: 'TrialCounter',
+            useSQLite: true,
+          },
           TRIAL_EVENT_BUS: {
             className: 'TrialEventBus',
+          },
+          TRIAL_ORCHESTRATOR: {
+            className: 'TrialOrchestrator',
+            useSQLite: true,
           },
         },
         bindings: {

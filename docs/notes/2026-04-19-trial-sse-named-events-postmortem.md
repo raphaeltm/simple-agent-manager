@@ -139,7 +139,7 @@ line up, and the consumer had no way to signal the mismatch — a custom
 event dispatched to zero listeners produces no error.
 
 This is the same class of bug as the
-`tasks/active/2026-03-30-duplicate-settings-controls-postmortem.md`
+`docs/notes/2026-03-30-duplicate-settings-controls-postmortem.md`
 "duplicate settings controls" issue and the
 `docs/notes/2026-03-14-scaleway-node-creation-failure-postmortem.md`
 "UI input collected but never sent" issue: **the data path looks
@@ -186,7 +186,7 @@ handler was invoked. Adding a note to the follow-up process rule below.
 
 ## Follow-up
 
-- [ ] Add a short note to `.claude/rules/13-staging-verification.md`:
+- [x] Add a short note to `.claude/rules/13-staging-verification.md`:
       for any stream the browser consumes via EventSource /
       WebSocket, verification MUST be through a real browser, not
       `curl`. Curl confirms the byte stream; the browser confirms the
