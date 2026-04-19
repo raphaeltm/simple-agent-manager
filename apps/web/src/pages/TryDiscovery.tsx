@@ -173,7 +173,11 @@ export function TryDiscovery() {
   }
 
   const terminalError = view.error;
-  const showSkeleton = events.length === 0 && !terminalError;
+  // Show the stage skeleton until *substantive* progress arrives. A lone
+  // `trial.started` event is just an acknowledgement — the user still sees
+  // nothing happening, so keep the "Setting things up" roadmap visible.
+  const showSkeleton =
+    !terminalError && events.every((e) => e.type === 'trial.started');
 
   return (
     <div
