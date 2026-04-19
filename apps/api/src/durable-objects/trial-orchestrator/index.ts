@@ -106,6 +106,17 @@ export class TrialOrchestrator extends DurableObject<Env> {
     await this.ctx.storage.put('state', state);
     await this.ctx.storage.setAlarm(now);
 
+    // Emit `trial.started` so the SSE stream's first real event confirms the
+    // orchestrator picked up the trial. The frontend uses this to transition
+    // out of the "Warming up..." empty state.
+    await safeEmitTrialEvent(this.env, input.trialId, {
+      type: 'trial.started',
+      trialId: input.trialId,
+      projectId: '', // project not yet created; filled in on `trial.ready`
+      repoUrl: input.repoUrl,
+      startedAt: now,
+    });
+
     log.info('trial_orchestrator_do.started', {
       trialId: input.trialId,
       repoUrl: input.repoUrl,

@@ -108,6 +108,28 @@ describe('TrialOrchestrator.start()', () => {
     expect(ctx._alarmTime()).not.toBeNull();
   });
 
+  it('emits trial.started event so the SSE stream signals immediately', async () => {
+    const ctx = makeCtx();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orch = new TrialOrchestrator(ctx as any, makeEnv());
+    await orch.start({
+      trialId: 'trial_started_evt',
+      repoUrl: 'https://github.com/alice/repo',
+      repoOwner: 'alice',
+      repoName: 'repo',
+    });
+    expect(emitTrialEventMock).toHaveBeenCalledTimes(1);
+    const [env, trialId, event] = emitTrialEventMock.mock.calls[0];
+    expect(env).toBeTruthy();
+    expect(trialId).toBe('trial_started_evt');
+    expect(event).toMatchObject({
+      type: 'trial.started',
+      trialId: 'trial_started_evt',
+      repoUrl: 'https://github.com/alice/repo',
+    });
+    expect(typeof (event as { startedAt: number }).startedAt).toBe('number');
+  });
+
   it('is idempotent — second start() call is a no-op (no re-schedule)', async () => {
     const ctx = makeCtx();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
