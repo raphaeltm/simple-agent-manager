@@ -51,6 +51,7 @@ import {
   resolveRepoMaxKb,
   resolveWorkspaceTtlMs,
 } from '../../services/trial/helpers';
+import { emitGithubKnowledgeEvents } from '../../services/trial/github-knowledge';
 import { isTrialsEnabled } from '../../services/trial/kill-switch';
 import { writeTrial } from '../../services/trial/trial-store';
 
@@ -398,6 +399,47 @@ createRoutes.post('/create', async (c) => {
     repo: repo.canonical,
     // fingerprint deliberately omitted from structured logs — it's PII-adjacent
   });
+
+  // -- 7. Fire-and-forget orchestrator dispatch + GitHub knowledge probes ----
+  // Both tasks run via waitUntil so the HTTP response returns immediately
+  // (<100ms) while provisioning and the fast knowledge probes continue in the
+  // background. Errors are swallowed inside the helpers so a failure here
+  // never causes the response to hang.
+  c.executionCtx.waitUntil(
+    (async () => {
+      try {
+        const id = env.TRIAL_ORCHESTRATOR.idFromName(trialId);
+        const stub = env.TRIAL_ORCHESTRATOR.get(id);
+        await (
+          stub as unknown as {
+            start(input: {
+              trialId: string;
+              repoUrl: string;
+              repoOwner: string;
+              repoName: string;
+            }): Promise<void>;
+          }
+        ).start({
+          trialId,
+          repoUrl: repo.canonical,
+          repoOwner: repo.owner,
+          repoName: repo.name,
+        });
+      } catch (err) {
+        log.error('trial.create.orchestrator_dispatch_failed', {
+          trialId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })()
+  );
+
+  c.executionCtx.waitUntil(
+    emitGithubKnowledgeEvents(env, trialId, {
+      owner: repo.owner,
+      name: repo.name,
+    })
+  );
 
   return new Response(JSON.stringify(respBody), {
     status: 201,
