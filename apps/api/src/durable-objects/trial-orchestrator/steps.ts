@@ -269,15 +269,13 @@ export async function handleNodeProvisioning(
   // Kick provisioning. We omit taskContext — trial agents don't need the
   // VM message reporter wiring that TaskRunner uses for chat persistence,
   // because startDiscoveryAgent creates its own chat/ACP sessions later.
+  //
+  // Note: provisionNode() may return with the node in 'creating' status for
+  // async-IP providers (Scaleway) — the VM boots and gets its IP via the
+  // first heartbeat backfill. Do NOT synchronously require status='running'
+  // here; the next step (node_agent_ready) polls heartbeat freshness, which
+  // correctly waits for the VM to boot + heartbeat regardless of provider.
   await provisionNode(createdNode.id, rc.env);
-
-  const provisioned = await rc.env.DATABASE.prepare(
-    `SELECT status, error_message FROM nodes WHERE id = ?`
-  ).bind(createdNode.id).first<{ status: string; error_message: string | null }>();
-
-  if (!provisioned || provisioned.status !== 'running') {
-    throw new Error(provisioned?.error_message || 'Trial node provisioning failed');
-  }
 
   await rc.advanceToStep(state, 'node_agent_ready');
 }

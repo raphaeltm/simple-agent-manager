@@ -43,7 +43,23 @@ vi.mock('../../../src/services/project-data', () => ({
   linkSessionToWorkspace: vi.fn(async () => {}),
 }));
 
-const { handleRunning, handleDiscoveryAgentStart } = await import(
+// Mock services/nodes so handleNodeProvisioning doesn't reach real provider code.
+const { createNodeRecordMock, provisionNodeMock } = vi.hoisted(() => ({
+  createNodeRecordMock: vi.fn(),
+  provisionNodeMock: vi.fn(async () => {}),
+}));
+vi.mock('../../../src/services/nodes', () => ({
+  createNodeRecord: createNodeRecordMock,
+  provisionNode: provisionNodeMock,
+}));
+
+// getRuntimeLimits returns a small fixture — handleNodeProvisioning only reads
+// `nodeHeartbeatStaleSeconds` for the createNodeRecord call.
+vi.mock('../../../src/services/limits', () => ({
+  getRuntimeLimits: vi.fn(() => ({ nodeHeartbeatStaleSeconds: 120 })),
+}));
+
+const { handleRunning, handleDiscoveryAgentStart, handleNodeProvisioning } = await import(
   '../../../src/durable-objects/trial-orchestrator/steps'
 );
 
@@ -123,6 +139,40 @@ describe('handleRunning', () => {
     await handleRunning(state, rc);
     expect(state.completed).toBe(true);
     expect(ctx.storage.put).toHaveBeenCalledWith('state', state);
+  });
+});
+
+describe('handleNodeProvisioning', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createNodeRecordMock.mockResolvedValue({ id: 'node_new_123' });
+    provisionNodeMock.mockResolvedValue(undefined);
+  });
+
+  // Regression for the async-IP provider bug: provisionNode() returns while
+  // the node is still in 'creating' status for Scaleway/GCP (VM boots, IP
+  // arrives on first heartbeat). The step MUST advance to `node_agent_ready`
+  // unconditionally — the heartbeat polling in that step is what waits for
+  // the VM to come up. Synchronously requiring status='running' here would
+  // force every async-IP trial through the retry/backoff cycle until the
+  // heartbeat landed, wasting the retry budget and risking permanent failure.
+  it('advances to node_agent_ready even when provisionNode leaves status=creating', async () => {
+    const ctx = makeCtx();
+    const advanced: string[] = [];
+    const rc = makeRc(ctx, advanced);
+    const state = makeState({
+      currentStep: 'node_provisioning',
+      nodeId: null,
+      autoProvisionedNode: false,
+    });
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(createNodeRecordMock).toHaveBeenCalledTimes(1);
+    expect(provisionNodeMock).toHaveBeenCalledWith('node_new_123', expect.anything());
+    expect(state.nodeId).toBe('node_new_123');
+    expect(state.autoProvisionedNode).toBe(true);
+    expect(advanced).toEqual(['node_agent_ready']);
   });
 });
 

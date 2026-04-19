@@ -158,7 +158,7 @@ new_classes = ["TrialEventBus"]  # In-memory only — no SQLite storage needed f
 
 [[migrations]]
 tag = "v9"
-new_classes = ["TrialOrchestrator"]  # Alarm-driven trial provisioning; persists state via ctx.storage.put()
+new_sqlite_classes = ["TrialOrchestrator"]  # Alarm-driven trial provisioning; SQLite-backed per Cloudflare recommendation for new DO classes
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
