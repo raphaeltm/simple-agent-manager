@@ -112,19 +112,33 @@ export function ChatGate({
       data-testid="trial-chat-gate"
     >
       {ideas.length > 0 && (
-        <div
-          className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 scrollbar-thin"
-          role="list"
-          aria-label="Suggested prompts"
-          data-testid="trial-chat-gate-chips"
-        >
-          {ideas.map((idea) => (
-            <div role="listitem" key={idea.id}>
-              <SuggestionChip idea={idea} onSelect={handleChipSelect} disabled={isSending} />
-            </div>
-          ))}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-fg-muted px-1">
+            Try one of these to get started:
+          </p>
+          <div
+            className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 scrollbar-thin snap-x snap-mandatory"
+            role="list"
+            aria-label="Suggested prompts"
+            data-testid="trial-chat-gate-chips"
+          >
+            {ideas.map((idea) => (
+              <div role="listitem" key={idea.id} className="snap-start">
+                <SuggestionChip idea={idea} onSelect={handleChipSelect} disabled={isSending} />
+              </div>
+            ))}
+          </div>
         </div>
       )}
+
+      {!treatAsAuthenticated && draft.trim().length === 0 ? (
+        <p
+          className="text-xs text-fg-muted px-1"
+          data-testid="trial-chat-anonymous-hint"
+        >
+          Sign in with GitHub to save your trial and keep this conversation going.
+        </p>
+      ) : null}
 
       <div className="flex items-end gap-2">
         <label htmlFor="trial-chat-input" className="sr-only">
@@ -154,7 +168,8 @@ export function ChatGate({
           onClick={() => void handleSend()}
           disabled={!canSend}
           data-testid="trial-chat-send"
-          aria-label="Send message"
+          aria-label={isSending ? 'Sending message' : 'Send message'}
+          aria-busy={isSending}
           className="
             inline-flex items-center justify-center
             min-h-14 min-w-14 rounded-lg
@@ -162,19 +177,39 @@ export function ChatGate({
             hover:bg-accent-hover
             focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent
             disabled:opacity-40 disabled:cursor-not-allowed
-            transition-colors
+            transition-all duration-150
           "
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M4 12l16-8-6 16-3-7-7-1z"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="currentColor"
-            />
-          </svg>
+          {isSending ? (
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+              className="motion-safe:animate-spin"
+              data-testid="trial-chat-send-spinner"
+            >
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+              <path
+                d="M21 12a9 9 0 0 0-9-9"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          ) : (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M4 12l16-8-6 16-3-7-7-1z"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="currentColor"
+              />
+            </svg>
+          )}
         </button>
       </div>
 

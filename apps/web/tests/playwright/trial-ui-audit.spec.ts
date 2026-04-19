@@ -36,7 +36,7 @@ async function setupTrialMocks(
   page: Page,
   opts: {
     create?: CreateMockMode;
-    events?: 'empty' | 'streaming' | 'ready';
+    events?: 'empty' | 'streaming' | 'ready' | 'error' | 'knowledge_burst';
   } = {},
 ) {
   const { create = 'success', events = 'streaming' } = opts;
@@ -141,6 +141,32 @@ async function setupTrialMocks(
       at: now + 400,
     });
     push('trial.progress', { stage: 'Analyzing code…', progress: 0.7, at: now + 500 });
+  } else if (events === 'error') {
+    push('trial.started', {
+      trialId: 'trial_visual_001',
+      projectId: 'proj_visual_001',
+      repoUrl: 'https://github.com/acme/error-repo',
+      startedAt: now,
+    });
+    push('trial.error', {
+      error: 'repo_too_large',
+      message: 'This repo is too large to analyze in a trial.',
+      at: now + 100,
+    });
+  } else if (events === 'knowledge_burst') {
+    push('trial.started', {
+      trialId: 'trial_visual_001',
+      projectId: 'proj_visual_001',
+      repoUrl: 'https://github.com/acme/burst-repo',
+      startedAt: now,
+    });
+    // Five knowledge events emitted within the grouping window — should
+    // render as a single grouped card with a "+4 more" toggle.
+    push('trial.knowledge', { entity: 'Repo', observation: 'Description: a thing.', at: now + 10 });
+    push('trial.knowledge', { entity: 'Languages', observation: 'TypeScript, Go.', at: now + 20 });
+    push('trial.knowledge', { entity: 'Stars', observation: '12,345 stars.', at: now + 30 });
+    push('trial.knowledge', { entity: 'License', observation: 'MIT licensed.', at: now + 40 });
+    push('trial.knowledge', { entity: 'Topics', observation: 'cli, devtools, ai.', at: now + 50 });
   } else if (events === 'ready') {
     push('trial.started', {
       trialId: 'trial_visual_001',
@@ -242,8 +268,34 @@ test.describe('Trial — Mobile', () => {
     await page.goto('/try/trial_visual_001');
     // Header appears with repo name
     await expectAttached(page, page.getByText(/acme\/empty-repo/i));
+    // Stage skeleton timeline renders the canonical six steps as placeholders
+    await expectAttached(page, page.getByTestId('trial-stage-skeleton'));
     await assertNoOverflow(page);
     await screenshot(page, 'trial-discovery-empty-mobile');
+  });
+
+  test('discovery — terminal error renders retry CTA', async ({ page }) => {
+    await setupTrialMocks(page, { events: 'error' });
+    await page.goto('/try/trial_visual_001');
+    await expectAttached(page, page.getByTestId('trial-error-panel'));
+    await expectAttached(page, page.getByTestId('trial-error-retry'));
+    await assertNoOverflow(page);
+    await screenshot(page, 'trial-discovery-error-mobile');
+  });
+
+  test('discovery — knowledge burst groups into a single card', async ({ page }) => {
+    await setupTrialMocks(page, { events: 'knowledge_burst' });
+    await page.goto('/try/trial_visual_001');
+    // The five-event burst MUST collapse to exactly one knowledge-group card —
+    // not five ungrouped cards. This is what guarantees the no-flicker UX.
+    await expect(page.getByTestId('trial-knowledge-group')).toHaveCount(1);
+    const toggle = page.getByTestId('trial-knowledge-toggle');
+    await expect(toggle).toHaveText(/\+4 more/);
+    // Toggle expands and reveals the four hidden observations.
+    await toggle.click();
+    await expect(toggle).toHaveText(/Show less/);
+    await assertNoOverflow(page);
+    await screenshot(page, 'trial-discovery-knowledge-burst-mobile');
   });
 
   test('cap-exceeded — waitlist form', async ({ page }) => {

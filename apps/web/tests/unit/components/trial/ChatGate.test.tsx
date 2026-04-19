@@ -142,6 +142,41 @@ describe('ChatGate', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('quick send'));
   });
 
+  it('shows the spinner and disables the textarea while send is in-flight', async () => {
+    let resolveSubmit: (() => void) | undefined;
+    const onSubmit = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    );
+    render(
+      <ChatGate trialId="trial-1" ideas={ideas} onAuthenticatedSubmit={onSubmit} />,
+    );
+
+    const textarea = screen.getByTestId('trial-chat-input') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'pending send' } });
+
+    // Idle state: no spinner.
+    expect(screen.queryByTestId('trial-chat-send-spinner')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('trial-chat-send'));
+
+    // Sending state: spinner visible, textarea disabled, button aria-busy.
+    await waitFor(() =>
+      expect(screen.getByTestId('trial-chat-send-spinner')).toBeInTheDocument(),
+    );
+    expect(textarea).toBeDisabled();
+    expect(screen.getByTestId('trial-chat-send')).toHaveAttribute('aria-busy', 'true');
+
+    // Resolve the in-flight send and observe the spinner disappear.
+    resolveSubmit?.();
+    await waitFor(() =>
+      expect(screen.queryByTestId('trial-chat-send-spinner')).not.toBeInTheDocument(),
+    );
+    expect(textarea).not.toBeDisabled();
+  });
+
   it('draft persists across unmount/remount via localStorage', () => {
     const { unmount } = render(
       <ChatGate trialId="trial-1" ideas={ideas} onAuthenticatedSubmit={vi.fn()} />,
