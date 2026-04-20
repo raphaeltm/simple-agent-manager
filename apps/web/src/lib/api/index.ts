@@ -1,4 +1,4 @@
-export type { AdminErrorsFilter, AdminLogQueryParams } from './admin';
+export type { AdminErrorsFilter, AIProxyConfigResponse, AdminLogQueryParams } from './admin';
 export type {
   AnalyticsDauResponse,
   AnalyticsEventsResponse,
@@ -22,6 +22,7 @@ export {
   approveOrSuspendUser,
   changeUserRole,
   createPlatformCredential,
+  fetchAIProxyConfig,
   deletePlatformCredential,
   fetchAdminComputeUsage,
   fetchAdminDefaultQuota,
@@ -46,8 +47,10 @@ export {
   listPlatformCredentials,
   queryAdminLogs,
   removeAdminUserQuota,
+  resetAIProxyConfig,
   updateAdminDefaultQuota,
   updateAdminUserQuota,
+  updateAIProxyConfig,
   updatePlatformCredential,
 } from './admin';
 export {

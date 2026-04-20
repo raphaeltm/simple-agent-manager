@@ -435,9 +435,9 @@ export interface Env {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string;    // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string;       // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string;       // Max stale executions to recover per sweep (default: 100)
-  // AI Inference Proxy (Cloudflare AI Gateway for trial users)
+  // AI Inference Proxy (Cloudflare AI Gateway — Workers AI + Anthropic)
   AI_PROXY_ENABLED?: string;                         // Kill switch: "false" to disable (default: enabled)
-  AI_PROXY_DEFAULT_MODEL?: string;                   // Default Workers AI model (default: @cf/meta/llama-4-scout-17b-16e-instruct)
+  AI_PROXY_DEFAULT_MODEL?: string;                   // Default model (default: claude-haiku-4-5-20251001)
   AI_PROXY_ALLOWED_MODELS?: string;                  // Comma-separated allowed models
   AI_PROXY_DAILY_INPUT_TOKEN_LIMIT?: string;         // Per-user daily input token cap (default: 500000)
   AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT?: string;        // Per-user daily output token cap (default: 200000)

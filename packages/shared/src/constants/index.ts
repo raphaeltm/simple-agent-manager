@@ -194,6 +194,8 @@ export {
   DEFAULT_TTS_SUMMARY_THRESHOLD,
   DEFAULT_TTS_TIMEOUT_MS,
   MAX_CONTEXT_SUMMARY_BYTES,
+  AI_PROXY_DEFAULT_MODEL_KV_KEY,
+  type AIProxyConfig,
   PLATFORM_AI_MODELS,
   type PlatformAIModel,
 } from './ai-services';

@@ -59,12 +59,15 @@ When the user mentions **app, dashboard, projects, settings, or UI** → look in
 
 ## Development Approach
 
-**Cloudflare-first.** Local dev (`pnpm dev`) has significant limitations — no real OAuth, DNS, or VMs. For meaningful testing, deploy to staging. See `docs/guides/local-development.md`.
+**Local-first, Cloudflare-integrated.** Prove as much of a feature as you can locally before touching staging. Local iteration takes seconds; staging iteration takes minutes and burns VM quota. Staging is for things that genuinely require real infrastructure (OAuth callbacks, DNS, VM provisioning, edge TLS) — not for discovering whether your code compiles.
 
-1. Make changes locally — lint, typecheck
-2. Deploy to staging via GitHub Actions or `pnpm deploy:setup --environment staging`
-3. Test on Cloudflare — real D1, KV, Workers
-4. Merge to main — triggers production deployment
+1. **Prototype and test locally first** — unit tests, Miniflare integration tests, local Vite dev server, Playwright visual audits. Hybrid loops (local UI against staging API, or local API against staging VM agent) are encouraged. See `.claude/rules/29-local-first-debugging.md`.
+2. **Deploy to staging only when local verification is exhausted** — when the remaining work genuinely needs real OAuth, DNS, or VMs. Partial-feature staging deploys are fine for end-to-end plumbing while the rest is still developed locally.
+3. **Test on Cloudflare** — real D1, KV, Workers, VMs.
+4. **When something fails on staging, READ THE LOGS before changing any code** — `wrangler tail`, `/admin/logs`, `/admin/errors`, the Node detail page's log stream, `journalctl -u vm-agent` via SSH, `docker logs` for containers. Never guess-and-redeploy. See `.claude/rules/29-local-first-debugging.md` for the log location matrix.
+5. Merge to main — triggers production deployment.
+
+Full local-development guide: `docs/guides/local-development.md`.
 
 ## Deployment
 

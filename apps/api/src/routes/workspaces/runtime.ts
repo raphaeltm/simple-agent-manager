@@ -1,4 +1,4 @@
-import { type BootstrapTokenData, DEFAULT_AI_PROXY_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import { AI_PROXY_DEFAULT_MODEL_KV_KEY, type AIProxyConfig, type BootstrapTokenData, DEFAULT_AI_PROXY_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -78,7 +78,16 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   if (!credentialData && body.agentType === 'opencode' && aiProxyEnabled) {
     const baseDomain = c.env.BASE_DOMAIN;
     const proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
-    const defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
+
+    // Resolve default model: KV (admin-set) > env var > shared constant
+    let defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
+    try {
+      const kvConfig = await c.env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY);
+      if (kvConfig) {
+        const parsed: AIProxyConfig = JSON.parse(kvConfig);
+        if (parsed.defaultModel) defaultModel = parsed.defaultModel;
+      }
+    } catch { /* KV unavailable or corrupt data — use env/default */ }
 
     log.info('agent_key.ai_proxy_fallback', { workspaceId, userId: workspace.userId, proxyBaseUrl });
 
@@ -181,9 +190,14 @@ runtimeRoutes.post('/:id/agent-credential-sync', jsonValidator(AgentCredentialSy
     throw errors.notFound('Workspace');
   }
 
-  // Find the existing active credential to update. Prefer project-scoped match
-  // when the workspace is in a project; fall back to user-scoped. This preserves
-  // the scope that was originally used to inject the credential for the session.
+  // Find the existing credential row to update. Prefer project-scoped match
+  // when the workspace is in a project; fall back to user-scoped only when
+  // there is no project-scoped row at all.
+  //
+  // Match the same HIGH #2 invariant enforced by runtime credential delivery
+  // and CodexRefreshLock: if a project-scoped row exists but is inactive, do
+  // NOT fall through to the user-scoped row. That would silently collapse a
+  // project override back onto the user default during post-session refresh sync.
   let existing: typeof schema.credentials.$inferSelect | undefined;
   if (workspace.projectId) {
     const projectMatch = await db
@@ -195,12 +209,18 @@ runtimeRoutes.post('/:id/agent-credential-sync', jsonValidator(AgentCredentialSy
           eq(schema.credentials.projectId, workspace.projectId),
           eq(schema.credentials.credentialType, 'agent-api-key'),
           eq(schema.credentials.agentType, agentType),
-          eq(schema.credentials.credentialKind, credentialKind),
-          eq(schema.credentials.isActive, true)
+          eq(schema.credentials.credentialKind, credentialKind)
         )
       )
       .limit(1);
-    existing = projectMatch[0];
+    const projectCredential = projectMatch[0];
+    if (projectCredential) {
+      if (projectCredential.isActive) {
+        existing = projectCredential;
+      } else {
+        return c.json({ success: false, reason: 'credential_not_found' });
+      }
+    }
   }
   if (!existing) {
     const userMatch = await db

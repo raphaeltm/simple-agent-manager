@@ -9,6 +9,7 @@ import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 import { ToastProvider } from './hooks/useToast';
 import { AccountMap } from './pages/AccountMap';
 import { Admin } from './pages/Admin';
+import { AdminAIProxy } from './pages/AdminAIProxy';
 import { AdminAnalytics } from './pages/AdminAnalytics';
 import { AdminComputeQuotas } from './pages/AdminComputeQuotas';
 import { AdminComputeUsage } from './pages/AdminComputeUsage';
@@ -130,6 +131,7 @@ export default function App() {
               <Route index element={<Navigate to="users" replace />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="credentials" element={<AdminPlatformCredentials />} />
+              <Route path="ai-proxy" element={<AdminAIProxy />} />
               <Route path="usage" element={<AdminComputeUsage />} />
               <Route path="quotas" element={<AdminComputeQuotas />} />
               <Route path="errors" element={<AdminErrors />} />
