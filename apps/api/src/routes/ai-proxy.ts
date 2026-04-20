@@ -1,10 +1,9 @@
 /**
- * AI inference proxy — transparent pass-through to Cloudflare AI Gateway.
+ * AI inference proxy — routes to Workers AI or Anthropic via Cloudflare AI Gateway.
  *
- * The AI Gateway provides an OpenAI-compatible endpoint that natively supports
- * tools, streaming, and all chat completion features. This proxy handles
- * SAM-specific concerns (auth, rate limiting, token budgets) and forwards
- * requests transparently — no format translation needed.
+ * For Workers AI models (@cf/*): transparent pass-through (OpenAI-compatible format).
+ * For Anthropic models (claude-*): translates OpenAI format → Anthropic Messages API,
+ * forwards through AI Gateway's /anthropic path, translates response back.
  *
  * Auth: Bearer token in Authorization header (workspace callback token).
  * Rate limit: per-user RPM via KV.
@@ -27,10 +26,24 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
+import {
+  createAnthropicToOpenAIStream,
+  translateRequestToAnthropic,
+  translateResponseToOpenAI,
+} from '../services/ai-anthropic-translate';
 import { checkTokenBudget } from '../services/ai-token-budget';
 import { verifyCallbackToken } from '../services/jwt';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
+
+// =============================================================================
+// Model Routing
+// =============================================================================
+
+/** Check if a model ID is an Anthropic model (requires format translation). */
+function isAnthropicModel(modelId: string): boolean {
+  return modelId.startsWith('claude-');
+}
 
 /** Parse allowed models from env or use defaults, normalizing prefixes. */
 function getAllowedModels(env: Env): Set<string> {
@@ -38,12 +51,16 @@ function getAllowedModels(env: Env): Set<string> {
   return new Set(raw.split(',').map((m) => m.trim()).filter(Boolean).map((m) => normalizeModelId(m)));
 }
 
-/** Normalize model ID: ensure @cf/ prefix for Workers AI models. */
+/** Normalize model ID: ensure @cf/ prefix for Workers AI models, leave Anthropic models as-is. */
 function normalizeModelId(model: string): string {
   let resolved = model;
   // Strip workers-ai/ prefix that OpenCode may prepend
   if (resolved.startsWith('workers-ai/')) {
     resolved = resolved.slice('workers-ai/'.length);
+  }
+  // Anthropic models don't get the @cf/ prefix
+  if (isAnthropicModel(resolved)) {
+    return resolved;
   }
   // Add @cf/ prefix if missing — Workers AI requires the full @cf/ path.
   if (!resolved.startsWith('@cf/') && !resolved.startsWith('@hf/')) {
@@ -58,23 +75,35 @@ function resolveModelId(model: string | undefined, env: Env): string {
   return normalizeModelId(model);
 }
 
-/**
- * Build the upstream URL for Workers AI chat completions.
- *
- * When AI_GATEWAY_ID is set, routes through the AI Gateway for caching,
- * logging, and analytics. Otherwise falls back to the Workers AI REST API.
- */
-function buildUpstreamUrl(env: Env): string {
+// =============================================================================
+// Upstream URL Builders
+// =============================================================================
+
+/** Build upstream URL for Workers AI (OpenAI-compatible). */
+function buildWorkersAIUrl(env: Env): string {
   const gatewayId = env.AI_GATEWAY_ID;
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
   }
-  // Fallback: Workers AI OpenAI-compatible REST API (no gateway needed)
   return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
 }
 
+/** Build upstream URL for Anthropic Messages API via AI Gateway. */
+function buildAnthropicUrl(env: Env): string {
+  const gatewayId = env.AI_GATEWAY_ID;
+  if (gatewayId) {
+    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages`;
+  }
+  // Fallback: direct Anthropic API (no gateway monitoring)
+  return 'https://api.anthropic.com/v1/messages';
+}
+
+// =============================================================================
+// Input Token Estimation
+// =============================================================================
+
 /**
- * Estimate input tokens from messages (rough: 1 token ≈ 4 chars).
+ * Estimate input tokens from messages (rough: 1 token ~ 4 chars).
  * Handles both string and array content formats.
  */
 function estimateInputTokens(messages: Array<{ role: string; content: unknown }>): number {
@@ -90,12 +119,132 @@ function estimateInputTokens(messages: Array<{ role: string; content: unknown }>
   return Math.ceil(totalChars / 4);
 }
 
+// =============================================================================
+// Forwarding Functions
+// =============================================================================
+
+/** Forward request to Workers AI (transparent OpenAI-format pass-through). */
+async function forwardToWorkersAI(
+  env: Env,
+  body: Record<string, unknown>,
+  modelId: string,
+  aigMetadata: string,
+): Promise<Response> {
+  const gatewayUrl = buildWorkersAIUrl(env);
+  const gatewayBody = { ...body, model: modelId };
+
+  const response = await fetch(gatewayUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+      'Content-Type': 'application/json',
+      'cf-aig-metadata': aigMetadata,
+    },
+    body: JSON.stringify(gatewayBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    return new Response(JSON.stringify({
+      error: {
+        message: `AI Gateway error (${response.status}): ${errorText.slice(0, 200)}`,
+        type: 'server_error',
+      },
+    }), { status: response.status, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Pass through transparently
+  const responseHeaders = new Headers();
+  const contentType = response.headers.get('content-type');
+  if (contentType) responseHeaders.set('Content-Type', contentType);
+  if (body.stream) {
+    responseHeaders.set('Cache-Control', 'no-cache');
+    responseHeaders.set('Connection', 'keep-alive');
+    responseHeaders.set('X-Accel-Buffering', 'no');
+  }
+
+  return new Response(response.body, { status: response.status, headers: responseHeaders });
+}
+
+/** Forward request to Anthropic via AI Gateway (with format translation). */
+async function forwardToAnthropic(
+  env: Env,
+  body: Record<string, unknown>,
+  modelId: string,
+  aigMetadata: string,
+): Promise<Response> {
+  const anthropicApiKey = env.ANTHROPIC_API_KEY;
+  if (!anthropicApiKey) {
+    return new Response(JSON.stringify({
+      error: { message: 'Anthropic API key not configured', type: 'server_error' },
+    }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Translate OpenAI format → Anthropic Messages format
+  const anthropicRequest = translateRequestToAnthropic(body, modelId);
+  const gatewayUrl = buildAnthropicUrl(env);
+
+  const response = await fetch(gatewayUrl, {
+    method: 'POST',
+    headers: {
+      'x-api-key': anthropicApiKey,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+      'cf-aig-metadata': aigMetadata,
+    },
+    body: JSON.stringify(anthropicRequest),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    return new Response(JSON.stringify({
+      error: {
+        message: `Anthropic API error (${response.status}): ${errorText.slice(0, 200)}`,
+        type: 'server_error',
+      },
+    }), { status: response.status, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Non-streaming: translate response
+  if (!body.stream) {
+    const anthropicResponse = await response.json() as Record<string, unknown>;
+    const openAIResponse = translateResponseToOpenAI(anthropicResponse as never);
+    return new Response(JSON.stringify(openAIResponse), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Streaming: pipe through format translation transform
+  if (!response.body) {
+    return new Response(JSON.stringify({
+      error: { message: 'No response body from Anthropic', type: 'server_error' },
+    }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  const transformStream = createAnthropicToOpenAIStream(modelId);
+  const translatedBody = response.body.pipeThrough(transformStream);
+
+  return new Response(translatedBody, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
+// =============================================================================
+// Main Route Handler
+// =============================================================================
+
 /**
- * POST /chat/completions — Transparent proxy to Cloudflare AI Gateway.
+ * POST /chat/completions — Proxy to AI Gateway (Workers AI or Anthropic).
  *
- * Accepts the full OpenAI chat completions format (messages, tools, tool_choice,
- * stream, temperature, etc.) and forwards it to the AI Gateway. The response is
- * streamed back without modification.
+ * Accepts the full OpenAI chat completions format. For Anthropic models,
+ * performs format translation transparently.
  */
 aiProxyRoutes.post('/chat/completions', async (c) => {
   // Kill switch
@@ -165,7 +314,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     );
   }
 
-  // --- Parse request body (accept any valid JSON — Gateway handles validation) ---
+  // --- Parse request body ---
   let body: Record<string, unknown>;
   try {
     body = await c.req.json() as Record<string, unknown>;
@@ -218,14 +367,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     }, 400);
   }
 
-  // --- Forward to AI Gateway (transparent pass-through) ---
-  // Set the resolved model in the body and forward everything else as-is.
-  // The Gateway handles tools, tool_choice, streaming, temperature, etc. natively.
-  const gatewayBody = { ...body, model: modelId };
-  const gatewayUrl = buildUpstreamUrl(c.env);
-
-  // Attach per-user metadata for AI Gateway analytics (max 5 fields).
-  // Enables per-user token usage tracking, cost attribution, and log filtering.
+  // --- Per-user metadata for AI Gateway analytics ---
   const aigMetadata = JSON.stringify({
     userId,
     workspaceId,
@@ -234,81 +376,43 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     hasTools: !!body.tools,
   });
 
-  log.info('ai_proxy.gateway_forward', {
+  const isAnthropic = isAnthropicModel(modelId);
+
+  log.info('ai_proxy.forward', {
     userId,
     workspaceId,
     modelId,
+    provider: isAnthropic ? 'anthropic' : 'workers-ai',
     messageCount: (body.messages as unknown[]).length,
     hasTools: !!body.tools,
     stream: !!body.stream,
     estimatedInputTokens,
-    gatewayUrl,
   });
 
   try {
-    const gatewayResponse = await fetch(gatewayUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${c.env.CF_API_TOKEN}`,
-        'Content-Type': 'application/json',
-        'cf-aig-metadata': aigMetadata,
-      },
-      body: JSON.stringify(gatewayBody),
-    });
+    const response = isAnthropic
+      ? await forwardToAnthropic(c.env, body, modelId, aigMetadata)
+      : await forwardToWorkersAI(c.env, body, modelId, aigMetadata);
 
-    if (!gatewayResponse.ok) {
-      const errorText = await gatewayResponse.text();
-      log.error('ai_proxy.gateway_error', {
-        userId,
-        workspaceId,
-        modelId,
-        status: gatewayResponse.status,
-        error: errorText.slice(0, 500),
-        cfRay: gatewayResponse.headers.get('cf-ray'),
-      });
-      return c.json({
-        error: {
-          message: `AI Gateway error (${gatewayResponse.status}): ${errorText.slice(0, 200)}`,
-          type: 'server_error',
-        },
-      }, gatewayResponse.status as 500);
-    }
-
-    // Pass through the response transparently — including streaming SSE.
-    // The Gateway already returns proper OpenAI-format responses.
-    log.info('ai_proxy.gateway_response', {
+    log.info('ai_proxy.response', {
       userId,
       workspaceId,
       modelId,
-      status: gatewayResponse.status,
-      contentType: gatewayResponse.headers.get('content-type'),
-      cfRay: gatewayResponse.headers.get('cf-ray'),
-      aigLogId: gatewayResponse.headers.get('cf-aig-log-id'),
+      provider: isAnthropic ? 'anthropic' : 'workers-ai',
+      status: response.status,
     });
 
-    // Build response headers — preserve content-type and streaming headers from Gateway
-    const responseHeaders = new Headers();
-    const contentType = gatewayResponse.headers.get('content-type');
-    if (contentType) responseHeaders.set('Content-Type', contentType);
-    if (body.stream) {
-      responseHeaders.set('Cache-Control', 'no-cache');
-      responseHeaders.set('Connection', 'keep-alive');
-      responseHeaders.set('X-Accel-Buffering', 'no');
-    }
-
-    return new Response(gatewayResponse.body, {
-      status: gatewayResponse.status,
-      headers: responseHeaders,
-    });
+    return response;
   } catch (err) {
-    log.error('ai_proxy.gateway_fetch_error', {
+    log.error('ai_proxy.fetch_error', {
       userId,
       workspaceId,
       modelId,
+      provider: isAnthropic ? 'anthropic' : 'workers-ai',
       error: err instanceof Error ? err.message : String(err),
     });
     return c.json({
-      error: { message: 'Failed to reach AI Gateway. Please try again.', type: 'server_error' },
+      error: { message: 'Failed to reach upstream. Please try again.', type: 'server_error' },
     }, 502);
   }
 });
@@ -324,11 +428,11 @@ aiProxyRoutes.get('/models', async (c) => {
     id,
     object: 'model' as const,
     created: 0,
-    owned_by: 'cloudflare',
+    owned_by: isAnthropicModel(id) ? 'anthropic' : 'cloudflare',
   }));
 
   return c.json({ object: 'list', data: models });
 });
 
-// Export resolveModelId for testing
-export { aiProxyRoutes, resolveModelId };
+// Export for testing
+export { aiProxyRoutes, isAnthropicModel, resolveModelId };

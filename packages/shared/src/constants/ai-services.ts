@@ -114,37 +114,48 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
 // AI Inference Proxy (OpenAI-compatible Workers AI gateway)
 // =============================================================================
 
-/** Default Workers AI model for AI proxy inference. Override via AI_PROXY_DEFAULT_MODEL env var.
- * Note: Qwen3 models default to thinking mode which wraps responses in <think> tags,
- * causing empty visible content in streaming. Llama 4 Scout works reliably without this issue. */
-export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
+/** Default model for AI proxy inference. Override via AI_PROXY_DEFAULT_MODEL env var.
+ * Claude Haiku is the default — fast, capable, reliable tool calling.
+ * Requires ANTHROPIC_API_KEY to be configured. Falls back to Workers AI models if not set. */
+export const DEFAULT_AI_PROXY_MODEL = 'claude-haiku-4-5-20251001';
 
 /** Platform AI model metadata for UI dropdowns and allowed-model derivation. */
 export interface PlatformAIModel {
-  /** Full Workers AI model ID (e.g. @cf/meta/llama-4-scout-17b-16e-instruct) */
+  /** Model ID (Workers AI uses @cf/ prefix; Anthropic uses claude-* IDs) */
   id: string;
   /** Human-friendly display label */
   label: string;
   /** Whether this is the default model */
   isDefault?: boolean;
+  /** Provider for the model (determines routing in AI proxy) */
+  provider: 'workers-ai' | 'anthropic';
 }
 
-/** Models available through the SAM Platform AI proxy (Workers AI).
+/** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
- * string and the UI dropdown both derive from this list. */
+ * string and the UI dropdown both derive from this list.
+ * Includes both Workers AI (free, Cloudflare-hosted) and Anthropic (requires ANTHROPIC_API_KEY). */
 export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
+  {
+    id: 'claude-haiku-4-5-20251001',
+    label: 'Claude Haiku 4.5',
+    isDefault: true,
+    provider: 'anthropic',
+  },
   {
     id: '@cf/meta/llama-4-scout-17b-16e-instruct',
     label: 'Llama 4 Scout 17B',
-    isDefault: true,
+    provider: 'workers-ai',
   },
   {
     id: '@cf/qwen/qwen3-30b-a3b-fp8',
     label: 'Qwen 3 30B',
+    provider: 'workers-ai',
   },
   {
     id: '@cf/google/gemma-3-12b-it',
     label: 'Gemma 3 12B',
+    provider: 'workers-ai',
   },
 ];
 

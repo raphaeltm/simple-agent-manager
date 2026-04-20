@@ -183,6 +183,14 @@ else
   echo -e "${YELLOW}ℹ  Skipping SMOKE_TEST_AUTH_ENABLED (not set — smoke test token auth disabled)${NC}"
 fi
 
+# Configure Anthropic API key (optional — needed for Claude models in AI proxy)
+ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
+if [ -n "$ANTHROPIC_API_KEY" ]; then
+  set_worker_secret "ANTHROPIC_API_KEY" "$ANTHROPIC_API_KEY" "$ENVIRONMENT" "false"
+else
+  echo -e "${YELLOW}ℹ  Skipping ANTHROPIC_API_KEY (not set — Claude models in AI proxy disabled, will fall back to Workers AI)${NC}"
+fi
+
 # NOTE: Hetzner tokens are NOT platform secrets.
 # Users provide their own tokens through the Settings UI, stored encrypted per-user in the database.
 

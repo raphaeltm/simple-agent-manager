@@ -36,7 +36,7 @@ HETZNER_BASE_IMAGE = "docker-ce"
 TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS = "30000"
 # AI Inference Proxy (Cloudflare AI Gateway for trial/zero-config users)
 AI_PROXY_ENABLED = "true"
-AI_PROXY_DEFAULT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+AI_PROXY_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 AI_GATEWAY_ID = "sam"
 # Triggers (Event-Driven Agent Triggers)
 MAX_TRIGGERS_PER_PROJECT = "10"
