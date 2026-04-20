@@ -1,0 +1,160 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - img "SAM" [ref=e6]
+      - button "Notifications (31 unread)" [ref=e8] [cursor=pointer]:
+        - img [ref=e9]
+        - generic [ref=e12]: "31"
+    - button "Open command palette" [ref=e13] [cursor=pointer]:
+      - img [ref=e14]
+      - generic [ref=e17]: Search...
+      - generic [ref=e18]: Ctrl+K
+    - generic [ref=e20]:
+      - navigation "Project navigation" [ref=e21]:
+        - button "Show global navigation" [ref=e22] [cursor=pointer]:
+          - img [ref=e23]
+          - generic [ref=e25]: Back to Projects
+        - generic "elysia" [ref=e26]
+        - link "Chat" [ref=e27] [cursor=pointer]:
+          - /url: /projects/01KJVGMWX26SGQ5DX94GMTJRQN/chat
+          - img [ref=e28]
+          - text: Chat
+        - link "Library" [ref=e30] [cursor=pointer]:
+          - /url: /projects/01KJVGMWX26SGQ5DX94GMTJRQN/library
+          - img [ref=e31]
+          - text: Library
+        - link "Ideas" [ref=e33] [cursor=pointer]:
+          - /url: /projects/01KJVGMWX26SGQ5DX94GMTJRQN/ideas
+          - img [ref=e34]
+          - text: Ideas
+        - link "Knowledge" [ref=e36] [cursor=pointer]:
+          - /url: /projects/01KJVGMWX26SGQ5DX94GMTJRQN/knowledge
+          - img [ref=e37]
+          - text: Knowledge
+        - link "Notifications" [ref=e47] [cursor=pointer]:
+          - /url: /projects/01KJVGMWX26SGQ5DX94GMTJRQN/notifications
+          - img [ref=e48]
+          - text: Notifications
+        - link "Triggers" [ref=e51] [cursor=pointer]:
+          - /url: /projects/01KJVGMWX26SGQ5DX94GMTJRQN/triggers
+          - img [ref=e52]
+          - text: Triggers
+        - link "Profiles" [ref=e55] [cursor=pointer]:
+          - /url: /projects/01KJVGMWX26SGQ5DX94GMTJRQN/profiles
+          - img [ref=e56]
+          - text: Profiles
+        - link "Activity" [ref=e68] [cursor=pointer]:
+          - /url: /projects/01KJVGMWX26SGQ5DX94GMTJRQN/activity
+          - img [ref=e69]
+          - text: Activity
+        - link "Settings" [ref=e71] [cursor=pointer]:
+          - /url: /projects/01KJVGMWX26SGQ5DX94GMTJRQN/settings
+          - img [ref=e72]
+          - text: Settings
+      - navigation [ref=e75]:
+        - button [ref=e76] [cursor=pointer]:
+          - img [ref=e77]
+          - generic [ref=e79]: Back to elysia
+        - link [ref=e80] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e81]
+          - text: Home
+        - link [ref=e84] [cursor=pointer]:
+          - /url: /chats
+          - img [ref=e85]
+          - text: Chats
+        - link [ref=e87] [cursor=pointer]:
+          - /url: /projects
+          - img [ref=e88]
+          - text: Projects
+        - link [ref=e90] [cursor=pointer]:
+          - /url: /account-map
+          - img [ref=e91]
+          - text: Map
+        - link [ref=e93] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e94]
+          - text: Settings
+        - link [ref=e97] [cursor=pointer]:
+          - /url: /admin
+          - img [ref=e98]
+          - text: Admin
+        - button [ref=e101] [cursor=pointer]:
+          - img [ref=e102]
+          - text: Infrastructure
+    - generic [ref=e104]:
+      - img "serverspresentation2025" [ref=e105]
+      - generic [ref=e107]: serverspresentation2025
+      - button "Sign out" [ref=e108] [cursor=pointer]:
+        - img [ref=e109]
+  - main [ref=e111]:
+    - generic [ref=e113]:
+      - generic [ref=e114]:
+        - generic [ref=e115]:
+          - generic [ref=e116]: elysia
+          - button "Project status" [ref=e117] [cursor=pointer]:
+            - img [ref=e118]
+          - button "Automation triggers" [ref=e124] [cursor=pointer]:
+            - img [ref=e125]
+          - button "Project settings" [ref=e128] [cursor=pointer]:
+            - img [ref=e129]
+        - button "+ New Chat" [ref=e133] [cursor=pointer]
+        - generic [ref=e135]:
+          - img
+          - textbox "Search chats..." [ref=e136]
+        - navigation "Chat sessions" [ref=e137]:
+          - button "I am Gemma, a large language model created by the Gemma team at Google DeepMind. Create hello.txt... I am Gemma, a large language model created by the Gemma team at Google DeepMind. Create hello.txt... Active 3 msgs 6m ago" [ref=e139] [cursor=pointer]:
+            - 'generic "Idea: I am Gemma, a large language model created by the Gemma team at Google DeepMind. Create hello.txt..." [ref=e141]':
+              - img
+              - text: I am Gemma, a large language model created by the Gemma team at Google DeepMind. Create hello.txt...
+            - generic [ref=e145]: I am Gemma, a large language model created by the Gemma team at Google DeepMind. Create hello.txt...
+            - generic [ref=e146]:
+              - generic [ref=e147]: Active
+              - generic [ref=e148]: 3 msgs
+              - generic [ref=e149]: 6m ago
+          - button "Older (67)" [ref=e150] [cursor=pointer]:
+            - img [ref=e151]
+            - generic [ref=e153]: Older (67)
+      - generic [ref=e156]:
+        - generic [ref=e161]:
+          - generic: I am Gemma, a large language model created by the Gemma team at Google DeepMind. Create hello.txt...
+          - 'generic "Workspace profile: Lightweight" [ref=e162]': Lightweight
+          - link "4096" [ref=e164] [cursor=pointer]:
+            - /url: https://ws-01kpan8zpngxvsf7rjcmhvbbbw--4096.sammy.party
+            - img [ref=e165]
+            - text: "4096"
+          - generic [ref=e168]:
+            - button "Retry task" [ref=e169] [cursor=pointer]:
+              - img [ref=e170]
+            - button "Fork session" [ref=e173] [cursor=pointer]:
+              - img [ref=e174]
+          - generic [ref=e179]: Active
+          - button "Show session details" [ref=e181] [cursor=pointer]:
+            - img [ref=e182]
+        - log "Conversation" [ref=e184]:
+          - generic [ref=e192]:
+            - paragraph [ref=e193]: "Do these two things:"
+            - list [ref=e194]:
+              - listitem [ref=e195]:
+                - paragraph [ref=e196]: Tell me what AI model you are. State your model name and who made you.
+              - listitem [ref=e197]:
+                - paragraph [ref=e198]: "Create three files in the current directory:"
+                - list [ref=e199]:
+                  - listitem [ref=e200]: hello.txt with the content "Hello from the AI agent"
+                  - listitem [ref=e201]: info.md with a brief markdown document about yourself (2-3 sentences)
+                  - listitem [ref=e202]: test.json with a simple JSON object containing your model name and the current date
+            - paragraph [ref=e203]: Do both tasks in a single response.
+            - separator [ref=e204]
+            - paragraph [ref=e205]:
+              - text: "IMPORTANT: Before starting any work, you MUST call the"
+              - code [ref=e206]: get_instructions
+              - text: tool from the sam-mcp MCP server. This provides your task context, project information, output branch name, and instructions for reporting progress. Do not proceed until you have called this tool and read its response.
+          - button "Scroll to bottom" [active] [ref=e207] [cursor=pointer]:
+            - img [ref=e208]
+        - generic [ref=e214]:
+          - button "Attach files" [ref=e215] [cursor=pointer]:
+            - img [ref=e216]
+          - textbox "Send a message..." [ref=e218]
+          - button "Start voice input" [ref=e219] [cursor=pointer]:
+            - img [ref=e220]
+          - button "Send" [disabled] [ref=e223]

@@ -6,6 +6,7 @@ import type {
   UpdateProjectRequest,
 } from '@simple-agent-manager/shared';
 import {
+  AGENT_CATALOG,
   CREDENTIAL_PROVIDERS,
   DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
   DEVCONTAINER_CONFIG_NAME_REGEX,
@@ -17,6 +18,7 @@ import {
   MIN_NODE_IDLE_TIMEOUT_MS,
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
   SCALING_PARAMS,
+  VALID_PERMISSION_MODES,
   VALID_WORKSPACE_PROFILES,
 } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
@@ -556,6 +558,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
   const allFieldKeys: (keyof UpdateProjectRequest)[] = [
     'name', 'description', 'defaultBranch', 'defaultVmSize', 'defaultAgentType',
     'defaultWorkspaceProfile', 'defaultDevcontainerConfigName', 'defaultProvider', 'defaultLocation',
+    'agentDefaults',
     'workspaceIdleTimeoutMs', 'nodeIdleTimeoutMs',
     'taskExecutionTimeoutMs', 'maxConcurrentTasks', 'maxDispatchDepth', 'maxSubTasksPerTask',
     'warmNodeTimeoutMs', 'maxWorkspacesPerNode', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent',
@@ -618,6 +621,32 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     }
   }
 
+  // Validate agentDefaults: each key must be a valid agent type; each entry's permissionMode must be valid.
+  // A null value for the whole map clears all project-level agent defaults.
+  if (body.agentDefaults !== undefined && body.agentDefaults !== null) {
+    const validAgentTypes: Set<string> = new Set(AGENT_CATALOG.map((a) => a.id));
+    for (const [agentType, entry] of Object.entries(body.agentDefaults)) {
+      if (!validAgentTypes.has(agentType)) {
+        throw errors.badRequest(`agentDefaults: unknown agent type '${agentType}'`);
+      }
+      if (!entry || typeof entry !== 'object') {
+        throw errors.badRequest(`agentDefaults['${agentType}'] must be an object`);
+      }
+      if (
+        entry.permissionMode !== undefined &&
+        entry.permissionMode !== null &&
+        !VALID_PERMISSION_MODES.includes(entry.permissionMode)
+      ) {
+        throw errors.badRequest(
+          `agentDefaults['${agentType}'].permissionMode must be one of: ${VALID_PERMISSION_MODES.join(', ')}`
+        );
+      }
+      if (entry.model !== undefined && entry.model !== null && typeof entry.model !== 'string') {
+        throw errors.badRequest(`agentDefaults['${agentType}'].model must be a string or null`);
+      }
+    }
+  }
+
   // Validate per-project scaling parameters
   for (const param of SCALING_PARAMS) {
     const value = body[param.key as keyof UpdateProjectRequest] as number | null | undefined;
@@ -664,6 +693,19 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     throw errors.conflict('Project name must be unique per user');
   }
 
+  // Serialize agentDefaults for storage.
+  // undefined = leave existing column value unchanged
+  // null = clear (store null in DB)
+  // object = JSON.stringify
+  let agentDefaultsColumn: string | null | undefined;
+  if (body.agentDefaults === undefined) {
+    agentDefaultsColumn = undefined;
+  } else if (body.agentDefaults === null) {
+    agentDefaultsColumn = null;
+  } else {
+    agentDefaultsColumn = JSON.stringify(body.agentDefaults);
+  }
+
   await db
     .update(schema.projects)
     .set({
@@ -677,6 +719,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
       defaultDevcontainerConfigName: body.defaultDevcontainerConfigName === undefined ? existing.defaultDevcontainerConfigName : (body.defaultDevcontainerConfigName ?? null),
       defaultProvider: body.defaultProvider === undefined ? existing.defaultProvider : (body.defaultProvider ?? null),
       defaultLocation: body.defaultLocation === undefined ? existing.defaultLocation : (body.defaultLocation ?? null),
+      agentDefaults: agentDefaultsColumn === undefined ? existing.agentDefaults : agentDefaultsColumn,
       workspaceIdleTimeoutMs: body.workspaceIdleTimeoutMs === undefined ? existing.workspaceIdleTimeoutMs : (body.workspaceIdleTimeoutMs ?? null),
       nodeIdleTimeoutMs: body.nodeIdleTimeoutMs === undefined ? existing.nodeIdleTimeoutMs : (body.nodeIdleTimeoutMs ?? null),
       taskExecutionTimeoutMs: body.taskExecutionTimeoutMs === undefined ? existing.taskExecutionTimeoutMs : (body.taskExecutionTimeoutMs ?? null),

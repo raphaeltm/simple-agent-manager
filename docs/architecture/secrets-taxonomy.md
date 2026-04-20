@@ -244,7 +244,7 @@ Workspace callback tokens use a 24-hour lifetime because:
 3. **RS256 signature verification** — Tokens are signed with the platform's RSA-2048 private key and verified on every request (`verifyCallbackToken()`). Stolen tokens cannot be forged.
 4. **Workspace binding** — Each token is bound to a specific workspace ID. A leaked token can only refresh credentials for its own workspace's user.
 5. **Access logging** — Every refresh request is logged with workspaceId and userId (`codex-refresh.ts:99-102`), enabling audit trail and anomaly detection.
-6. **Rate limiting** — Per-workspace rate limiting prevents abuse via stolen tokens (default: 30 requests/hour, configurable via `RATE_LIMIT_CODEX_REFRESH`).
+6. **Rate limiting** — Per-user rate limiting prevents abuse via stolen tokens (default: 30 requests/hour, configurable via `RATE_LIMIT_CODEX_REFRESH_PER_HOUR`). Enforced atomically via `CodexRefreshLock` DO `ctx.storage` (the non-atomic KV-based `checkCodexRefreshRateLimit` was superseded and removed).
 7. **Kill switch** — The entire proxy can be disabled instantly via `CODEX_REFRESH_PROXY_ENABLED=false`.
 
 **Accepted because**: There is no alternative mechanism — Codex's refresh flow is hardcoded and cannot set HTTP headers. The mitigations above bound the blast radius of a leaked token to a single workspace's credentials, for the remaining token lifetime (max 24 hours, typically less due to auto-refresh).

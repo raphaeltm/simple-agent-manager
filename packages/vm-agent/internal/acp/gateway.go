@@ -1063,7 +1063,23 @@ func getOpencodeDefault(envKey, fallback string) string {
 
 // buildOpencodeConfig creates the OPENCODE_CONFIG_CONTENT JSON structure
 // based on the provider selected in agent settings.
-func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} {
+//
+// OpenCode requires custom (non-built-in) providers to include:
+//   - "npm": the AI SDK package name (e.g. "@ai-sdk/openai-compatible")
+//   - "models": a map registering model aliases so OpenCode recognises them
+//   - model field: formatted as "providerID/modelAlias"
+//
+// Built-in providers (scaleway, anthropic) have pre-registered models and
+// don't need the npm/models keys.
+
+// opencodeConfigOverrides holds optional direct values to embed in the config
+// instead of using {env:...} references.
+type opencodeConfigOverrides struct {
+	PlatformBaseURL string // if non-empty, embedded directly instead of {env:OPENCODE_PLATFORM_BASE_URL}
+	PlatformAPIKey  string // if non-empty, embedded directly instead of {env:OPENCODE_PLATFORM_API_KEY}
+}
+
+func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConfigOverrides) map[string]interface{} {
 	provider := "scaleway" // default provider
 	model := getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
 
@@ -1076,27 +1092,70 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 		}
 	}
 
+	slog.Debug("buildOpencodeConfig: input",
+		"provider", provider,
+		"rawModel", model,
+		"hasOverrides", overrides != nil)
+
 	// Strip @cf/ prefix from Workers AI model IDs for openai-compatible providers.
 	model = stripCFPrefix(model)
 
-	config := map[string]interface{}{
-		"model": model,
-	}
+	slog.Debug("buildOpencodeConfig: after stripCFPrefix",
+		"model", model,
+		"provider", provider)
+
+	config := map[string]interface{}{}
 
 	scalewayBaseURL := getOpencodeDefault("OPENCODE_SCALEWAY_BASE_URL", DefaultScalewayBaseURL)
 
 	switch provider {
 	case "platform":
-		// SAM Platform (Workers AI) — no API key needed, uses platform AI
+		// SAM Platform (Workers AI) — uses a custom "sam-platform" provider ID.
+		// OpenCode requires npm + models keys for non-built-in providers.
+		// Embed actual values directly rather than {env:} references because
+		// OPENCODE_CONFIG_CONTENT may not support variable interpolation.
+		baseURL := "{env:OPENCODE_PLATFORM_BASE_URL}"
+		apiKey := "{env:OPENCODE_PLATFORM_API_KEY}"
+		if overrides != nil {
+			if overrides.PlatformBaseURL != "" {
+				baseURL = overrides.PlatformBaseURL
+			}
+			if overrides.PlatformAPIKey != "" {
+				apiKey = overrides.PlatformAPIKey
+			}
+		}
+		// For platform provider, preserve the vendor prefix in the model alias
+		// (e.g. "meta/llama-4-scout-17b-16e-instruct") so the AI proxy can
+		// reconstruct the full Workers AI model ID (@cf/meta/...).
+		// sanitizeModelAlias would strip "meta/" leaving just the model name,
+		// causing the proxy to resolve @cf/llama-4-... instead of @cf/meta/llama-4-...
+		// OpenCode splits "sam-platform/meta/llama-4-..." on the first "/" to get
+		// provider "sam-platform" and model "meta/llama-4-...", which is correct.
+		modelAlias := model // preserve vendor prefix (e.g. "meta/llama-4-scout-17b-16e-instruct")
+		config["model"] = "sam-platform/" + modelAlias
 		config["provider"] = map[string]interface{}{
-			"openai-compatible": map[string]interface{}{
+			"sam-platform": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "SAM Platform",
 				"options": map[string]interface{}{
-					"baseURL": "{env:OPENCODE_PLATFORM_BASE_URL}",
-					"apiKey":  "{env:OPENCODE_PLATFORM_API_KEY}",
+					"baseURL": baseURL,
+					"apiKey":  apiKey,
+				},
+				"models": map[string]interface{}{
+					modelAlias: map[string]interface{}{
+						"name": model,
+					},
 				},
 			},
 		}
+		slog.Info("buildOpencodeConfig: platform provider configured",
+			"modelAlias", modelAlias,
+			"fullModelKey", "sam-platform/"+modelAlias,
+			"baseURL", baseURL,
+			"apiKeyLen", len(apiKey))
 	case "scaleway":
+		// Scaleway is a built-in OpenCode provider with pre-registered models.
+		config["model"] = model
 		config["provider"] = map[string]interface{}{
 			"scaleway": map[string]interface{}{
 				"options": map[string]interface{}{
@@ -1106,17 +1165,28 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 			},
 		}
 	case "google-vertex":
-		// Uses Google's Gemini API (generativelanguage.googleapis.com) via its OpenAI-compatible endpoint.
-		// Named "google-vertex" in the UI for user familiarity; actual Vertex AI would need different auth.
+		// Uses Google's Gemini API via its OpenAI-compatible endpoint.
+		// Named "google-vertex" in the UI; uses custom provider with npm + models.
+		modelAlias := sanitizeModelAlias(model)
+		config["model"] = "google-vertex/" + modelAlias
 		config["provider"] = map[string]interface{}{
-			"openai-compatible": map[string]interface{}{
+			"google-vertex": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "Google Gemini",
 				"options": map[string]interface{}{
 					"baseURL": getOpencodeDefault("OPENCODE_GOOGLE_VERTEX_BASE_URL", DefaultGoogleVertexBaseURL),
 					"apiKey":  "{env:GOOGLE_API_KEY}",
 				},
+				"models": map[string]interface{}{
+					modelAlias: map[string]interface{}{
+						"name": model,
+					},
+				},
 			},
 		}
 	case "anthropic":
+		// Anthropic is a built-in OpenCode provider.
+		config["model"] = model
 		config["provider"] = map[string]interface{}{
 			"anthropic": map[string]interface{}{
 				"options": map[string]interface{}{
@@ -1129,16 +1199,26 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 		if settings != nil && settings.OpencodeBaseURL != "" {
 			baseURL = settings.OpencodeBaseURL
 		}
+		modelAlias := sanitizeModelAlias(model)
+		config["model"] = "custom/" + modelAlias
 		config["provider"] = map[string]interface{}{
-			"openai-compatible": map[string]interface{}{
+			"custom": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "Custom Provider",
 				"options": map[string]interface{}{
 					"baseURL": baseURL,
 					"apiKey":  "{env:OPENCODE_API_KEY}",
 				},
+				"models": map[string]interface{}{
+					modelAlias: map[string]interface{}{
+						"name": model,
+					},
+				},
 			},
 		}
 	default:
-		// Unknown provider — fallback to scaleway
+		// Unknown provider — fallback to scaleway (built-in).
+		config["model"] = model
 		config["provider"] = map[string]interface{}{
 			"scaleway": map[string]interface{}{
 				"options": map[string]interface{}{
@@ -1150,6 +1230,77 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 	}
 
 	return config
+}
+
+// opencodeProviderNeedsNpmPackage returns the npm package name that a given
+// OpenCode provider requires, or "" if the provider is built-in.
+// OpenCode uses Bun to auto-install npm packages for custom providers, but
+// our containers only have Node.js/npm. Without pre-installation, the provider
+// silently fails and OpenCode returns end_turn with no content.
+func opencodeProviderNeedsNpmPackage(provider string) string {
+	switch provider {
+	case "platform", "google-vertex", "openai-compatible", "custom":
+		return "@ai-sdk/openai-compatible"
+	default:
+		return ""
+	}
+}
+
+// preInstallOpencodeProviderDeps installs the npm package required by a custom
+// OpenCode provider into ~/.cache/opencode/node_modules/ — the exact location
+// where OpenCode resolves provider packages at runtime.
+//
+// OpenCode v1.4.3 embeds Bun and uses it internally for provider package loading.
+// Pre-installing via npm is sufficient — the node_modules structure is compatible
+// with Bun's module resolver. Without pre-installation, OpenCode's embedded Bun
+// would auto-install the package, but this can fail in network-restricted environments.
+func preInstallOpencodeProviderDeps(ctx context.Context, containerID, user, npmPackage string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	if err != nil {
+		homeDir = "/root"
+	}
+	cacheDir := path.Join(homeDir, ".cache", "opencode")
+
+	// Create the cache directory structure that OpenCode expects
+	if _, _, err := execInContainer(ctx, containerID, user, "", "mkdir", "-p", cacheDir); err != nil {
+		return fmt.Errorf("create opencode cache dir: %w", err)
+	}
+
+	// Install the package into the cache directory so OpenCode finds it
+	// at ~/.cache/opencode/node_modules/@ai-sdk/openai-compatible.
+	// Use --no-save to avoid writing package.json/package-lock.json that
+	// could conflict with OpenCode's own package management.
+	slog.Info("Pre-installing OpenCode provider dependency",
+		"package", npmPackage,
+		"cacheDir", cacheDir,
+		"container", containerID)
+	stdout, stderr, err := execInContainer(ctx, containerID, user, cacheDir, "npm", "install", "--no-save", npmPackage)
+	if err != nil {
+		return fmt.Errorf("npm install %s in cache dir: %w: %s", npmPackage, err, stderr)
+	}
+	slog.Info("Pre-installed OpenCode provider dependency",
+		"package", npmPackage,
+		"cacheDir", cacheDir,
+		"container", containerID,
+		"stdoutLen", len(stdout),
+		"stderrLen", len(stderr))
+	return nil
+}
+
+// sanitizeModelAlias creates a clean model alias from a full model ID.
+// Strips provider prefixes (e.g. "meta/llama-4" → "llama-4") and replaces
+// characters that could break JSON or OpenCode's provider/model split.
+func sanitizeModelAlias(model string) string {
+	// If model has a provider prefix like "meta/llama-4-scout", take the last segment.
+	// The provider prefix conflicts with OpenCode's "providerID/modelAlias" format.
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	return model
 }
 
 // writeVibeConfigToContainer writes a .vibe/config.toml into the container

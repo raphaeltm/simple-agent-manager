@@ -39,8 +39,7 @@ import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
 import { Settings } from './pages/Settings';
-import { SettingsAgentConfig } from './pages/SettingsAgentConfig';
-import { SettingsAgentKeys } from './pages/SettingsAgentKeys';
+import { SettingsAgents } from './pages/SettingsAgents';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
 import { SettingsComputeUsage } from './pages/SettingsComputeUsage';
 import { SettingsGitHub } from './pages/SettingsGitHub';
@@ -107,8 +106,9 @@ export default function App() {
               <Route index element={<Navigate to="cloud-provider" replace />} />
               <Route path="cloud-provider" element={<SettingsCloudProvider />} />
               <Route path="github" element={<SettingsGitHub />} />
-              <Route path="agent-keys" element={<SettingsAgentKeys />} />
-              <Route path="agent-config" element={<SettingsAgentConfig />} />
+              <Route path="agents" element={<SettingsAgents />} />
+              <Route path="agent-keys" element={<Navigate to="../agents" replace />} />
+              <Route path="agent-config" element={<Navigate to="../agents" replace />} />
               <Route path="notifications" element={<SettingsNotifications />} />
               <Route path="usage" element={<SettingsComputeUsage />} />
               <Route path="smoke-test-tokens" element={<SettingsSmokeTestTokens />} />

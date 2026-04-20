@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -75,6 +76,19 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	return defaultValue
 }
 
+// getEnvFloat returns a float64 environment variable or a default.
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			return defaultValue
+		}
+		return f
+	}
+	return defaultValue
+}
+
 // getEnvStringSlice returns a slice from a comma-separated environment variable.
 func getEnvStringSlice(key string, defaultValue []string) []string {
 	if value := os.Getenv(key); value != "" {
@@ -116,14 +130,57 @@ func GenerateRandomPassword(byteLen int) string {
 	return hex.EncodeToString(b)
 }
 
+// controlPlaneTransport is a package-shared *http.Transport used by every
+// control-plane HTTP client the VM agent constructs. It is shared so that
+// CloseIdleControlPlaneConnections() can flush pooled sockets that have been
+// silently broken by network-disruptive provisioning steps (Docker install,
+// Docker restart, firewall install). Without flushing, Go's default
+// IdleConnTimeout of 90s would keep dead sockets in the pool and every new
+// request would hang until the per-request Timeout fires, extending boot
+// outages from seconds into multiple minutes.
+//
+// Values are tuned for a low-volume control-plane client that talks to a
+// single host (api.<base-domain>): small pool, short idle timeout, strict
+// sub-timeouts so a dead connection surfaces fast.
+var controlPlaneTransport = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	MaxIdleConns:          10,
+	MaxIdleConnsPerHost:   2,
+	IdleConnTimeout:       30 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ResponseHeaderTimeout: 10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+	ForceAttemptHTTP2:     true,
+}
+
 // NewControlPlaneClient returns an *http.Client with an explicit timeout
-// for outbound calls to the control plane. If timeout is 0 or negative,
-// a default of 30 seconds is used.
+// and the package-shared control-plane transport. If timeout is 0 or
+// negative, a default of 30 seconds is used.
+//
+// All control-plane HTTP clients MUST be constructed via this function so
+// that CloseIdleControlPlaneConnections can purge stale sockets from the
+// shared pool.
 func NewControlPlaneClient(timeout time.Duration) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return &http.Client{Timeout: timeout}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: controlPlaneTransport,
+	}
+}
+
+// CloseIdleControlPlaneConnections purges idle sockets from the shared
+// control-plane transport pool. Call this after steps that may invalidate
+// conntrack or veth state (Docker install/restart, firewall install) so
+// subsequent requests establish fresh TCP connections instead of hanging
+// on broken pooled sockets.
+func CloseIdleControlPlaneConnections() {
+	controlPlaneTransport.CloseIdleConnections()
 }
 
 // Validate checks the loaded configuration for semantic correctness.

@@ -17,6 +17,7 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { resolveAgentProfile } from '../../services/agent-profiles';
 import { generateBranchName } from '../../services/branch-name';
+import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
@@ -529,8 +530,14 @@ export async function handleDispatchTask(
       devcontainerConfigName: resolvedDevcontainerConfigName,
       cloudProvider: resolvedProvider,
       taskMode: resolvedTaskMode,
-      model: resolvedProfile?.model ?? null,
-      permissionMode: resolvedProfile?.permissionMode ?? null,
+      // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
+      // falls through to user agent_settings via callback, then platform default).
+      model:
+        resolvedProfile?.model ??
+        resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).model,
+      permissionMode:
+        resolvedProfile?.permissionMode ??
+        resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).permissionMode,
       // OpenCode settings: VM agent fetches user-level settings via callback
       opencodeProvider: null,
       opencodeBaseUrl: null,

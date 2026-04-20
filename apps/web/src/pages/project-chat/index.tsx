@@ -129,6 +129,7 @@ export function ProjectChat() {
             <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
               <SessionList
                 sessions={state.filteredRecent}
+                allSessions={state.sessions}
                 selectedSessionId={state.sessionId ?? null}
                 onSelect={state.handleSelect}
                 onFork={state.setForkSession}
@@ -149,6 +150,7 @@ export function ProjectChat() {
                   {state.effectiveShowStale && (
                     <SessionList
                       sessions={state.filteredStale}
+                      allSessions={state.sessions}
                       selectedSessionId={state.sessionId ?? null}
                       onSelect={state.handleSelect}
                       onFork={state.setForkSession}

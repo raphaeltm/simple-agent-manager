@@ -5,9 +5,10 @@ interface SectionHeaderProps {
   iconBg: string;
   title: string;
   description?: string;
+  actions?: ReactNode;
 }
 
-export const SectionHeader: FC<SectionHeaderProps> = ({ icon, iconBg, title, description }) => (
+export const SectionHeader: FC<SectionHeaderProps> = ({ icon, iconBg, title, description, actions }) => (
   <div className="flex items-center gap-3 mb-4">
     <div
       className="h-10 w-10 rounded-md flex items-center justify-center shrink-0"
@@ -15,7 +16,7 @@ export const SectionHeader: FC<SectionHeaderProps> = ({ icon, iconBg, title, des
     >
       {icon}
     </div>
-    <div>
+    <div className="flex-1 min-w-0">
       <div className="text-fg-primary" style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number }}>
         {title}
       </div>
@@ -25,5 +26,6 @@ export const SectionHeader: FC<SectionHeaderProps> = ({ icon, iconBg, title, des
         </div>
       )}
     </div>
+    {actions && <div className="shrink-0">{actions}</div>}
   </div>
 );

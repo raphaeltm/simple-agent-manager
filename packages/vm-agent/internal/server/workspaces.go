@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/persistence"
+	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
 func (s *Server) stopSessionHost(workspaceID, sessionID string) {
@@ -171,6 +173,71 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
+// resourceDiagnostics holds the result of a post-timeout resource check.
+type resourceDiagnostics struct {
+	Metrics      *sysinfo.QuickMetrics `json:"metrics"`
+	NumCPU       int                   `json:"numCpu"`
+	CPUPerCore   float64               `json:"cpuPerCore"`
+	CPUSaturated bool                  `json:"cpuSaturated"`
+	MemExhausted bool                  `json:"memExhausted"`
+	DiskFull     bool                  `json:"diskFull"`
+	Message      string                `json:"message"`
+}
+
+// buildTimeoutDiagnostics enriches a timeout error with resource usage information.
+// If the error is not a deadline exceeded or sysinfo collection fails, it returns
+// the original error message unchanged and nil diagnostics.
+func (s *Server) buildTimeoutDiagnostics(err error) (string, *resourceDiagnostics) {
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return err.Error(), nil
+	}
+
+	metrics, collectErr := s.sysInfoCollector.CollectQuick()
+	if collectErr != nil {
+		slog.Warn("Failed to collect resource diagnostics after timeout",
+			"error", collectErr,
+		)
+		return err.Error(), nil
+	}
+
+	numCPU := runtime.NumCPU()
+	cpuPerCore := 0.0
+	if numCPU > 0 {
+		cpuPerCore = metrics.CPULoadAvg1 / float64(numCPU)
+	}
+
+	diag := &resourceDiagnostics{
+		Metrics:      metrics,
+		NumCPU:       numCPU,
+		CPUPerCore:   cpuPerCore,
+		CPUSaturated: cpuPerCore > s.config.DiagCPUSaturationThreshold,
+		MemExhausted: metrics.MemoryPercent > s.config.DiagMemExhaustedThreshold,
+		DiskFull:     metrics.DiskPercent > s.config.DiagDiskFullThreshold,
+	}
+
+	var msg strings.Builder
+	fmt.Fprintf(&msg, "Workspace build timed out. Resource diagnostics: CPU load %.1f (%.1fx per core on %d cores), memory %.0f%% used, disk %.0f%% used.",
+		metrics.CPULoadAvg1, cpuPerCore, numCPU, metrics.MemoryPercent, metrics.DiskPercent)
+
+	var constraints []string
+	if diag.CPUSaturated {
+		constraints = append(constraints, "CPU")
+	}
+	if diag.MemExhausted {
+		constraints = append(constraints, "memory")
+	}
+	if diag.DiskFull {
+		constraints = append(constraints, "disk")
+	}
+
+	if len(constraints) > 0 {
+		fmt.Fprintf(&msg, " The VM appears %s constrained — try using a larger VM size for this project.", strings.Join(constraints, " and "))
+	}
+
+	diag.Message = msg.String()
+	return diag.Message, diag
+}
+
 func (s *Server) startWorkspaceProvision(
 	runtime *WorkspaceRuntime,
 	failureType string,
@@ -228,18 +295,25 @@ func (s *Server) startWorkspaceProvision(
 			// If the workspace was stopped/deleted while provisioning, skip.
 			s.casWorkspaceStatus(runtime.ID, []string{"creating"}, "error")
 
+			// Enrich timeout errors with resource diagnostics so the user
+			// knows whether the VM was under-resourced.
+			errorMsg, diag := s.buildTimeoutDiagnostics(err)
+
 			callbackToken := s.callbackTokenForWorkspace(runtime.ID)
 			if callbackToken != "" {
-				if callbackErr := s.notifyWorkspaceProvisioningFailed(context.Background(), runtime.ID, callbackToken, err.Error()); callbackErr != nil {
+				if callbackErr := s.notifyWorkspaceProvisioningFailed(context.Background(), runtime.ID, callbackToken, errorMsg); callbackErr != nil {
 					slog.Error("Provisioning-failed callback error", "workspace", runtime.ID, "error", callbackErr)
 				}
 			}
 
-			failureDetail := make(map[string]interface{}, len(detail)+1)
+			failureDetail := make(map[string]interface{}, len(detail)+2)
 			for key, value := range detail {
 				failureDetail[key] = value
 			}
-			failureDetail["error"] = err.Error()
+			failureDetail["error"] = errorMsg
+			if diag != nil {
+				failureDetail["resourceDiagnostics"] = diag
+			}
 
 			s.appendNodeEvent(runtime.ID, "error", failureType, failureMessage, failureDetail)
 			return
@@ -389,9 +463,6 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		s.stopSessionHost(workspaceID, session.ID)
 	}
 
-	// Stop browser sidecar if running — use background context so it isn't cancelled by client disconnect.
-	s.stopBrowserSidecarWithTimeout(workspaceID, s.config.NekoBrowserStopTimeout)
-
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)
 
@@ -498,9 +569,6 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.stopSessionHostsForWorkspace(workspaceID)
-
-	// Stop browser sidecar if running — use background context so it isn't cancelled by client disconnect.
-	s.stopBrowserSidecarWithTimeout(workspaceID, s.config.NekoBrowserStopTimeout)
 
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)

@@ -24,6 +24,7 @@ export function SessionItem({
   progressBar,
   blockedBadge,
   blockedByTitle,
+  ariaLabel,
 }: {
   session: ChatSessionResponse;
   isSelected: boolean;
@@ -39,6 +40,8 @@ export function SessionItem({
   blockedBadge?: boolean;
   /** Title of the task this item is blocked by. */
   blockedByTitle?: string;
+  /** Accessible label override for the select button (e.g., context-anchor annotation). */
+  ariaLabel?: string;
 }) {
   const state = getSessionState(session);
   const dotColor = blockedBadge ? 'var(--sam-color-danger, #ef4444)' : STATE_COLORS[state];
@@ -76,6 +79,7 @@ export function SessionItem({
       <button
         type="button"
         onClick={() => onSelect(session.id)}
+        aria-label={ariaLabel}
         className="block w-full text-left bg-transparent border-none cursor-pointer p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sam-color-focus-ring)]"
       >
         {/* Idea tag — only for default/parent variants */}

@@ -90,14 +90,15 @@ func parseEnvExportLines(content string) []string {
 // secretEnvNames are well-known secret environment variable names that must
 // not appear in docker exec command-line arguments (visible in /proc/*/cmdline).
 var secretEnvNames = map[string]bool{
-	"ANTHROPIC_API_KEY":       true,
-	"CLAUDE_CODE_OAUTH_TOKEN": true,
-	"OPENAI_API_KEY":          true,
-	"GH_TOKEN":                true,
+	"ANTHROPIC_API_KEY":        true,
+	"CLAUDE_CODE_OAUTH_TOKEN":  true,
+	"OPENAI_API_KEY":           true,
+	"GH_TOKEN":                 true,
 	"GEMINI_API_KEY":           true,
 	"MISTRAL_API_KEY":          true,
 	"SCW_SECRET_KEY":           true,
 	"OPENCODE_CONFIG_CONTENT":  true,
+	"OPENCODE_PLATFORM_API_KEY": true, // also matches _KEY substring, explicit for clarity
 }
 
 // secretEnvSubstrings are substrings in env var names that indicate a secret.

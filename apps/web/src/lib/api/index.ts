@@ -56,6 +56,7 @@ export {
   deleteAgentCredentialByKind,
   deleteAgentProfile,
   deleteAgentSettings,
+  deleteProjectAgentCredential,
   getAgentSettings,
   getAnalyticsApiUrl,
   getClientErrorsApiUrl,
@@ -64,8 +65,10 @@ export {
   listAgentCredentials,
   listAgentProfiles,
   listAgents,
+  listProjectAgentCredentials,
   saveAgentCredential,
   saveAgentSettings,
+  saveProjectAgentCredential,
   toggleAgentCredential,
   updateAgentProfile,
 } from './agents';
@@ -136,7 +139,6 @@ export {
   uploadLibraryFile,
 } from './library';
 export type {
-  BrowserSidecarStatusResponse,
   CachedCommandResponse,
   CreateSmokeTestTokenResponse,
   SmokeTestStatusResponse,
@@ -145,20 +147,12 @@ export type {
 } from './misc';
 export {
   createSmokeTestToken,
-  getBrowserSidecarPorts,
-  getBrowserSidecarStatus,
   getCachedCommands,
   getSmokeTestStatus,
   getTrialStatus,
-  getWorkspaceBrowserSidecarPorts,
-  getWorkspaceBrowserSidecarStatus,
   listSmokeTestTokens,
   revokeSmokeTestToken,
   saveCachedCommands,
-  startBrowserSidecar,
-  startWorkspaceBrowserSidecar,
-  stopBrowserSidecar,
-  stopWorkspaceBrowserSidecar,
 } from './misc';
 export {
   createNode,

@@ -84,7 +84,7 @@ jobs:
             MISSING="$MISSING\n  - secrets.GH_APP_SLUG"
           fi
           if [ "$HAS_CF_ORIGIN_CA_KEY" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.CF_ORIGIN_CA_KEY (Cloudflare Origin CA Key — required for Origin CA certificates)"
+            echo "::notice::CF_ORIGIN_CA_KEY not set — using CF_API_TOKEN for Origin CA certs. If Pulumi fails with error 1016, ensure your API token has Zone > SSL and Certificates > Edit permission."
           fi
 
           if [ -n "$MISSING" ]; then
@@ -120,7 +120,7 @@ jobs:
       # Phase 0: Setup
       # ========================================
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
@@ -238,6 +238,7 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
+          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
 
       - name: Configure R2 CORS
         if: ${{ inputs.dry_run != true }}
@@ -254,6 +255,14 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+
+      - name: Configure AI Gateway
+        if: ${{ inputs.dry_run != true }}
+        run: bash scripts/deploy/configure-ai-gateway.sh
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AI_GATEWAY_ID: ${{ vars.RESOURCE_PREFIX || 'sam' }}
 
       - name: Check First Deploy Status
         id: first_deploy
@@ -354,6 +363,7 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
+          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
 
       - name: Re-deploy API Worker (with tail_consumers)
         if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}

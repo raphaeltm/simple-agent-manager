@@ -784,12 +784,21 @@ func TestWriteDefaultDevcontainerConfig(t *testing.T) {
 	requiredFeatures := []string{
 		"ghcr.io/devcontainers/features/git:1",
 		"ghcr.io/devcontainers/features/github-cli:1",
-		"ghcr.io/devcontainers/features/docker-in-docker:2",
 	}
 	for _, key := range requiredFeatures {
 		if _, ok := features[key]; !ok {
 			t.Errorf("missing feature %q in parsed config; present keys: %v", key, features)
 		}
+	}
+
+	// docker-in-docker should NOT be present — replaced by privileged mode
+	if _, ok := features["ghcr.io/devcontainers/features/docker-in-docker:2"]; ok {
+		t.Errorf("docker-in-docker feature should not be present; privileged mode replaces it")
+	}
+
+	// Verify privileged mode is enabled (allows on-demand Docker installation)
+	if priv, _ := parsed["privileged"].(bool); !priv {
+		t.Errorf("expected privileged=true in config, got %v", parsed["privileged"])
 	}
 
 	// Verify image is correct

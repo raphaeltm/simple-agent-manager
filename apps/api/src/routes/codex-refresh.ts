@@ -16,7 +16,6 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { checkCodexRefreshRateLimit } from '../middleware/rate-limit';
 import { verifyCallbackToken } from '../services/jwt';
 
 const codexRefreshRoutes = new Hono<{ Bindings: Env }>();
@@ -69,16 +68,10 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
 
   const workspaceId = tokenPayload.workspace;
 
-  // Rate limit per workspace (prevents abuse via stolen callback tokens).
-  const rateLimitResult = await checkCodexRefreshRateLimit(c.env, workspaceId);
-  if (!rateLimitResult.allowed) {
-    const retryAfter = rateLimitResult.resetAt - Math.floor(Date.now() / 1000);
-    log.warn('codex_refresh.rate_limited', { workspaceId });
-    return c.json(
-      { error: 'rate_limit_exceeded', message: 'Too many refresh requests' },
-      { status: 429, headers: { 'Retry-After': Math.max(1, retryAfter).toString() } },
-    );
-  }
+  // Rate limiting is enforced atomically by CodexRefreshLock DO (keyed per-userId)
+  // using ctx.storage — the DO returns 429 with Retry-After when the window is exceeded.
+  // The earlier KV-based per-workspace check was non-atomic (read-modify-write race) and
+  // allowed concurrent refreshes past the limit under load (MEDIUM #5).
 
   // Parse the request body (Codex sends hardcoded format).
   let body: { client_id?: string; grant_type?: string; refresh_token?: string };
@@ -92,10 +85,10 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
     return c.json({ error: 'invalid_request', message: 'Missing grant_type or refresh_token' }, 400);
   }
 
-  // Look up workspace to get userId.
+  // Look up workspace to get userId and projectId.
   const db = drizzle(c.env.DATABASE, { schema });
   const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -107,14 +100,17 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   }
 
   const userId = workspace.userId;
+  const projectId = workspace.projectId;
 
   log.info('codex_refresh.request_received', {
     workspaceId,
     userId,
+    projectId,
   });
 
   // Forward to CodexRefreshLock DO keyed by userId for serialized refresh.
   // The DO derives the encryption key from its own env — no need to forward it.
+  // projectId is forwarded so the DO updates the correct scoped credential row.
   const doId = c.env.CODEX_REFRESH_LOCK.idFromName(userId);
   const stub = c.env.CODEX_REFRESH_LOCK.get(doId);
 
@@ -124,6 +120,7 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
     body: JSON.stringify({
       refreshToken: body.refresh_token,
       userId,
+      projectId,
     }),
   });
 
@@ -142,9 +139,16 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
     });
   }
 
+  // Forward status + body. Preserve Retry-After when the DO returns 429 so clients
+  // can honour the back-off window.
+  const outHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  const retryAfter = doResponse.headers.get('Retry-After');
+  if (retryAfter) {
+    outHeaders['Retry-After'] = retryAfter;
+  }
   return new Response(responseBody, {
     status: doResponse.status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: outHeaders,
   });
 });
 

@@ -10,12 +10,26 @@ interface AgentKeyCardProps {
   onDelete: (agentType: AgentType, credentialKind: CredentialKind) => Promise<void>;
   /** The currently selected OpenCode provider (from agent settings). Affects key labels. */
   opencodeProvider?: OpenCodeProvider | null;
+  /**
+   * Scope context for this card:
+   *   - 'user' (default): user-level credential — removal disables the agent until a new key is added.
+   *   - 'project': project-scoped override — removal falls back to the user-level credential.
+   * Affects delete confirmation copy and disables Scaleway-fallback display (project context
+   * does not carry the active provider).
+   */
+  scope?: 'user' | 'project';
+  /**
+   * When true, render only the credential body (no outer border, no agent header or
+   * status badge). Used when the card is embedded inside a larger unified AgentCard
+   * that already shows the agent name/status in its own header.
+   */
+  embedded?: boolean;
 }
 
 /**
  * Card for managing a single agent's credentials (API key and/or OAuth token).
  */
-export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodeProvider }: AgentKeyCardProps) {
+export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodeProvider, scope = 'user', embedded = false }: AgentKeyCardProps) {
   const [credential, setCredential] = useState('');
   const [credentialKind, setCredentialKind] = useState<CredentialKind>('api-key');
   const [loading, setLoading] = useState(false);
@@ -30,9 +44,14 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
   const activeCredential = credentials?.find(c => c.isActive);
   const hasAnyCredential = (credentials?.length ?? 0) > 0;
 
-  // OpenCode can use Scaleway cloud credential as fallback (only when using Scaleway provider)
-  const isOpenCodePlatform = agent.id === 'opencode' && opencodeProvider === 'platform';
-  const usesScalewayFallback = agent.fallbackCredentialSource === 'scaleway-cloud' && (!opencodeProvider || opencodeProvider === 'scaleway');
+  // OpenCode can use Scaleway cloud credential as fallback (only when using Scaleway provider).
+  // Project scope does not display provider-derived fallbacks — provider selection is user-scoped,
+  // so the project card would be unable to reason about it correctly.
+  const isOpenCodePlatform = scope === 'user' && agent.id === 'opencode' && opencodeProvider === 'platform';
+  const usesScalewayFallback =
+    scope === 'user' &&
+    agent.fallbackCredentialSource === 'scaleway-cloud' &&
+    (!opencodeProvider || opencodeProvider === 'scaleway');
 
   // Get provider-specific key label for OpenCode
   const opencodeKeyLabel = agent.id === 'opencode' && opencodeProvider
@@ -65,7 +84,11 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
 
   const handleDelete = async (kind: CredentialKind) => {
     const typeLabel = kind === 'oauth-token' ? 'OAuth token' : 'API key';
-    if (!confirm(`Remove the ${agent.name} ${typeLabel}? You won't be able to use this agent until you add a new credential.`)) {
+    const consequence =
+      scope === 'project'
+        ? 'This project will fall back to your user-level credential.'
+        : "You won't be able to use this agent until you add a new credential.";
+    if (!confirm(`Remove the ${agent.name} ${typeLabel}? ${consequence}`)) {
       return;
     }
 
@@ -81,27 +104,8 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
     }
   };
 
-  return (
-    <div className="border border-border-default rounded-md p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h3 className="text-sm font-medium text-fg-primary">{agent.name}</h3>
-          <p className="text-xs text-fg-muted">{agent.description}</p>
-        </div>
-        <StatusBadge
-          status={hasAnyCredential || usesScalewayFallback || isOpenCodePlatform ? 'connected' : 'disconnected'}
-          label={
-            isOpenCodePlatform
-              ? 'Platform AI'
-              : hasAnyCredential
-                ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
-                : usesScalewayFallback
-                  ? 'Using Scaleway Cloud Key'
-                  : 'Not Configured'
-          }
-        />
-      </div>
-
+  const body = (
+    <>
       {isOpenCodePlatform && !showForm && (
         <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
           <div className="flex flex-col gap-1">
@@ -267,6 +271,34 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
           </div>
         </form>
       )}
+    </>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <div className="border border-border-default rounded-md p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="text-sm font-medium text-fg-primary">{agent.name}</h3>
+          <p className="text-xs text-fg-muted">{agent.description}</p>
+        </div>
+        <StatusBadge
+          status={hasAnyCredential || usesScalewayFallback || isOpenCodePlatform ? 'connected' : 'disconnected'}
+          label={
+            isOpenCodePlatform
+              ? 'Platform AI'
+              : hasAnyCredential
+                ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
+                : usesScalewayFallback
+                  ? 'Using Scaleway Cloud Key'
+                  : 'Not Configured'
+          }
+        />
+      </div>
+      {body}
     </div>
   );
 }
