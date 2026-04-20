@@ -442,5 +442,4 @@ export interface Env {
   AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
   AI_GATEWAY_ID?: string;                            // Cloudflare AI Gateway ID (default: sam)
-  ANTHROPIC_API_KEY?: string;                        // Anthropic API key for Claude models via AI Gateway
 }

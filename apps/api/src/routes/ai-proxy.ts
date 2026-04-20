@@ -25,6 +25,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import {
   createAnthropicToOpenAIStream,
@@ -33,6 +34,7 @@ import {
 } from '../services/ai-anthropic-translate';
 import { checkTokenBudget } from '../services/ai-token-budget';
 import { verifyCallbackToken } from '../services/jwt';
+import { getPlatformAgentCredential } from '../services/platform-credentials';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -172,13 +174,8 @@ async function forwardToAnthropic(
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string,
+  anthropicApiKey: string,
 ): Promise<Response> {
-  const anthropicApiKey = env.ANTHROPIC_API_KEY;
-  if (!anthropicApiKey) {
-    return new Response(JSON.stringify({
-      error: { message: 'Anthropic API key not configured', type: 'server_error' },
-    }), { status: 503, headers: { 'Content-Type': 'application/json' } });
-  }
 
   // Translate OpenAI format → Anthropic Messages format
   const anthropicRequest = translateRequestToAnthropic(body, modelId);
@@ -378,6 +375,24 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   const isAnthropic = isAnthropicModel(modelId);
 
+  // For Anthropic models, resolve the API key from platform credentials (admin-managed).
+  // The key is stored as a platform credential for agent type 'claude-code' since
+  // that's the agent type that uses Anthropic API keys.
+  let anthropicApiKey: string | undefined;
+  if (isAnthropic) {
+    const encryptionKey = getCredentialEncryptionKey(c.env);
+    const platformCred = await getPlatformAgentCredential(db, 'claude-code', encryptionKey);
+    anthropicApiKey = platformCred?.credential;
+    if (!anthropicApiKey) {
+      return c.json({
+        error: {
+          message: 'No Anthropic API key configured. An admin must add a Claude Code platform credential.',
+          type: 'server_error',
+        },
+      }, 503);
+    }
+  }
+
   log.info('ai_proxy.forward', {
     userId,
     workspaceId,
@@ -391,7 +406,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   try {
     const response = isAnthropic
-      ? await forwardToAnthropic(c.env, body, modelId, aigMetadata)
+      ? await forwardToAnthropic(c.env, body, modelId, aigMetadata, anthropicApiKey!)
       : await forwardToWorkersAI(c.env, body, modelId, aigMetadata);
 
     log.info('ai_proxy.response', {
