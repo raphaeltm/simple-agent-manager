@@ -1,5 +1,11 @@
 # Staging Deployment and Live Verification (Hard Merge Gate)
 
+## Read First: Local-First Development Applies
+
+Before you reach this rule, you should already have exhausted local verification per `.claude/rules/29-local-first-debugging.md`. Staging is the **final integration gate**, not the development environment. If you're about to deploy to staging for the first time, ask yourself: "Have I proven every piece of this locally that CAN be proven locally?" If not, go back.
+
+If staging behavior is wrong, **READ THE LOGS before changing any code** — never guess-and-redeploy. See Rule 29 for the log location matrix (wrangler tail, `/admin/logs`, node `LogsSection`, `journalctl`, `docker logs`).
+
 ## This Is a Merge-Blocking Requirement
 
 Every PR that changes code MUST:

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // ErrorEntry represents a single error to report to the control plane.
@@ -68,7 +70,7 @@ func New(apiBaseURL, nodeID, authToken string, cfg Config) *Reporter {
 		nodeID:     nodeID,
 		authToken:  authToken,
 		config:     cfg,
-		client:     &http.Client{Timeout: cfg.HTTPTimeout},
+		client:     config.NewControlPlaneClient(cfg.HTTPTimeout),
 		queue:      make([]ErrorEntry, 0, cfg.MaxBatchSize),
 		stopC:      make(chan struct{}),
 		doneC:      make(chan struct{}),

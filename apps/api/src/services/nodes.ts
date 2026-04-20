@@ -41,6 +41,27 @@ export interface ProvisionedNode {
   updatedAt: string;
 }
 
+/**
+ * Resolves the Hetzner base image override from the `HETZNER_BASE_IMAGE` env var.
+ *
+ * The default (returned as `undefined`) lets the Hetzner provider pick its own
+ * default — currently `docker-ce` (Hetzner's Docker marketplace image, which
+ * skips Docker install and saves ~30-60s on cold provisioning). Setting
+ * `HETZNER_BASE_IMAGE=ubuntu-24.04` provides an emergency rollback without a
+ * code change. The override is only applied for the Hetzner provider; other
+ * providers have their own image resolution logic.
+ *
+ * Exported for unit-testing the env-var → provider plumbing.
+ */
+export function resolveHetznerBaseImageOverride(
+  targetProvider: CredentialProvider | undefined,
+  envValue: string | undefined,
+): string | undefined {
+  if (targetProvider !== 'hetzner') return undefined;
+  const trimmed = envValue?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export async function createNodeRecord(env: Env, input: CreateNodeInput): Promise<ProvisionedNode> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
@@ -143,8 +164,6 @@ export async function provisionNode(
       originCaCert: env.ORIGIN_CA_CERT,
       originCaKey: env.ORIGIN_CA_KEY,
       vmAgentPort: env.VM_AGENT_PORT,
-      nekoImage: env.NEKO_IMAGE,
-      nekoPrePull: env.NEKO_PRE_PULL !== 'false',
     });
 
     if (!validateCloudInitSize(cloudInit)) {
@@ -153,11 +172,17 @@ export async function provisionNode(
 
     const provider = providerResult.provider;
 
+    const baseImageOverride = resolveHetznerBaseImageOverride(
+      targetProvider,
+      env.HETZNER_BASE_IMAGE,
+    );
+
     const vm = await provider.createVM({
       name: `node-${node.id.toLowerCase()}`,
       size: node.vmSize as 'small' | 'medium' | 'large',
       location: node.vmLocation,
       userData: cloudInit,
+      ...(baseImageOverride ? { image: baseImageOverride } : {}),
       labels: {
         node: node.id.toLowerCase(),
         managed: 'simple-agent-manager',

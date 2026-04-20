@@ -122,6 +122,8 @@ export const KNOWLEDGE_DEFAULTS = {
   listPageSize: 50,
   listMaxPageSize: 200,
   autoRetrieveLimit: 20,
+  autoRetrieveMinConfidence: 0.8,
+  autoRetrieveHighConfidenceLimit: 50,
   observationMaxLength: 1000,
   entityNameMaxLength: 200,
   descriptionMaxLength: 2000,

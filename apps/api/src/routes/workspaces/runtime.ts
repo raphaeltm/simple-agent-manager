@@ -1,5 +1,5 @@
 import { type BootstrapTokenData, DEFAULT_AI_PROXY_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -16,6 +16,7 @@ import { appendBootLog } from '../../services/boot-log';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken } from '../../services/github-app';
 import { persistError } from '../../services/observability';
+import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
@@ -35,7 +36,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   const db = drizzle(c.env.DATABASE, { schema });
 
   const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -50,7 +51,8 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     db,
     workspace.userId,
     body.agentType,
-    encryptionKey
+    encryptionKey,
+    workspace.projectId
   );
 
   // Cloud provider credential fallback: if no dedicated agent key, check if the agent
@@ -167,9 +169,9 @@ runtimeRoutes.post('/:id/agent-credential-sync', jsonValidator(AgentCredentialSy
 
   const db = drizzle(c.env.DATABASE, { schema });
 
-  // Look up the workspace to get the user ID.
+  // Look up the workspace to get the user ID and project ID.
   const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -179,22 +181,55 @@ runtimeRoutes.post('/:id/agent-credential-sync', jsonValidator(AgentCredentialSy
     throw errors.notFound('Workspace');
   }
 
-  // Find the existing active credential to update.
-  const existingCreds = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, workspace.userId),
-        eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, agentType),
-        eq(schema.credentials.credentialKind, credentialKind),
-        eq(schema.credentials.isActive, true)
+  // Find the existing credential row to update. Prefer project-scoped match
+  // when the workspace is in a project; fall back to user-scoped only when
+  // there is no project-scoped row at all.
+  //
+  // Match the same HIGH #2 invariant enforced by runtime credential delivery
+  // and CodexRefreshLock: if a project-scoped row exists but is inactive, do
+  // NOT fall through to the user-scoped row. That would silently collapse a
+  // project override back onto the user default during post-session refresh sync.
+  let existing: typeof schema.credentials.$inferSelect | undefined;
+  if (workspace.projectId) {
+    const projectMatch = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, workspace.userId),
+          eq(schema.credentials.projectId, workspace.projectId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, agentType),
+          eq(schema.credentials.credentialKind, credentialKind)
+        )
       )
-    )
-    .limit(1);
-
-  const existing = existingCreds[0];
+      .limit(1);
+    const projectCredential = projectMatch[0];
+    if (projectCredential) {
+      if (projectCredential.isActive) {
+        existing = projectCredential;
+      } else {
+        return c.json({ success: false, reason: 'credential_not_found' });
+      }
+    }
+  }
+  if (!existing) {
+    const userMatch = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, workspace.userId),
+          isNull(schema.credentials.projectId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, agentType),
+          eq(schema.credentials.credentialKind, credentialKind),
+          eq(schema.credentials.isActive, true)
+        )
+      )
+      .limit(1);
+    existing = userMatch[0];
+  }
   if (!existing) {
     // No credential found — the user may have deleted it while the session was active.
     return c.json({ success: false, reason: 'credential_not_found' });
@@ -245,7 +280,10 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
   const db = drizzle(c.env.DATABASE, { schema });
 
   const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+    })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -255,6 +293,7 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     throw errors.notFound('Workspace');
   }
 
+  // Fetch user-level agent settings (existing behaviour).
   const settingsRows = await db
     .select()
     .from(schema.agentSettings)
@@ -265,24 +304,29 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
       )
     )
     .limit(1);
+  const userRow = settingsRows[0];
 
-  const row = settingsRows[0];
-  if (!row) {
-    return c.json({
-      model: null,
-      permissionMode: null,
-      opencodeProvider: null,
-      opencodeBaseUrl: null,
-      opencodeProviderName: null,
-    });
+  // Fetch project-level agent defaults for this agent type (multi-level config override).
+  let projectDefaults = { model: null as string | null, permissionMode: null as string | null };
+  if (workspace.projectId) {
+    const projectRows = await db
+      .select({ agentDefaults: schema.projects.agentDefaults })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, workspace.projectId))
+      .limit(1);
+    if (projectRows[0]) {
+      projectDefaults = resolveProjectAgentDefault(projectRows[0].agentDefaults, body.agentType);
+    }
   }
 
+  // Resolution: project.agentDefaults[agentType] > user agent_settings > null.
+  // OpenCode-specific provider/baseUrl stay user-scoped (phase 1 does not include them).
   return c.json({
-    model: row.model,
-    permissionMode: row.permissionMode,
-    opencodeProvider: row.opencodeProvider ?? null,
-    opencodeBaseUrl: row.opencodeBaseUrl ?? null,
-    opencodeProviderName: row.opencodeProviderName ?? null,
+    model: projectDefaults.model ?? userRow?.model ?? null,
+    permissionMode: projectDefaults.permissionMode ?? userRow?.permissionMode ?? null,
+    opencodeProvider: userRow?.opencodeProvider ?? null,
+    opencodeBaseUrl: userRow?.opencodeBaseUrl ?? null,
+    opencodeProviderName: userRow?.opencodeProviderName ?? null,
   });
 });
 runtimeRoutes.get('/:id/runtime', async (c) => {

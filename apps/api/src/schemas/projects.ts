@@ -1,8 +1,20 @@
+import { VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
+
+// Per-agent-type override (model + permission mode). Both fields are optional and nullable.
+// Null = clear the override for that field; missing = leave unchanged.
+const AgentDefaultEntrySchema = v.object({
+  model: v.optional(v.nullable(v.string())),
+  permissionMode: v.optional(v.nullable(v.picklist(VALID_PERMISSION_MODES))),
+});
+
+// Agent defaults: Record<agentType, { model?, permissionMode? }>.
+// We accept any string key here; the PATCH route validates keys against AGENT_CATALOG.
+const AgentDefaultsSchema = v.record(v.string(), AgentDefaultEntrySchema);
 
 export const CreateProjectSchema = v.object({
   name: v.string(),
@@ -24,6 +36,7 @@ export const UpdateProjectSchema = v.object({
   defaultDevcontainerConfigName: v.optional(v.nullable(v.string())),
   defaultProvider: v.optional(v.nullable(CredentialProviderSchema)),
   defaultLocation: v.optional(v.nullable(v.string())),
+  agentDefaults: v.optional(v.nullable(AgentDefaultsSchema)),
   workspaceIdleTimeoutMs: v.optional(v.nullable(v.number())),
   nodeIdleTimeoutMs: v.optional(v.nullable(v.number())),
   taskExecutionTimeoutMs: v.optional(v.nullable(v.number())),

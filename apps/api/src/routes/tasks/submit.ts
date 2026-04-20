@@ -34,6 +34,7 @@ import { jsonValidator, SubmitTaskSchema } from '../../schemas';
 import { resolveAgentProfile } from '../../services/agent-profiles';
 import { validateAttachments } from '../../services/attachment-upload';
 import { generateBranchName } from '../../services/branch-name';
+import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
@@ -412,8 +413,20 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
       devcontainerConfigName,
       cloudProvider: provider,
       taskMode,
-      model: resolvedProfile?.model ?? null,
-      permissionMode: resolvedProfile?.permissionMode ?? null,
+      // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
+      // then falls through to user agent_settings via callback, then platform default).
+      model:
+        resolvedProfile?.model ??
+        resolveProjectAgentDefault(
+          project.agentDefaults,
+          body.agentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null
+        ).model,
+      permissionMode:
+        resolvedProfile?.permissionMode ??
+        resolveProjectAgentDefault(
+          project.agentDefaults,
+          body.agentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null
+        ).permissionMode,
       // OpenCode provider/baseUrl: null = no profile-level override.
       // The VM agent fetches user-level agent settings via the POST /:id/agent-settings callback.
       opencodeProvider: null,

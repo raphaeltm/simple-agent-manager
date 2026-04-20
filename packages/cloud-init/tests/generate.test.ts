@@ -197,6 +197,41 @@ describe('generateCloudInit', () => {
       expect(serviceSection).toContain('Environment=PROJECT_ID=proj-123');
       expect(serviceSection).toContain('Environment=CHAT_SESSION_ID=sess-456');
     });
+
+    it('systemd unit file is in write_files, not a heredoc in runcmd', () => {
+      // Regression test: the systemd unit file MUST be in write_files, not created
+      // via a bash heredoc in runcmd. Heredocs inside cloud-init YAML block scalars
+      // have indented closing delimiters, which bash treats as content (not terminators).
+      // This caused the agent to never start on real VMs.
+      const config = generateCloudInit(baseVariables());
+      const yamlContent = config.replace(/^#cloud-config\n/, '');
+      const parsed = YAML.parse(yamlContent);
+
+      // Unit file must exist in write_files
+      const unitFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+      );
+      expect(unitFile).toBeDefined();
+      expect(unitFile.content).toContain('[Unit]');
+      expect(unitFile.content).toContain('[Service]');
+      expect(unitFile.content).toContain('ExecStart=/usr/local/bin/vm-agent');
+
+      // Unit file content must NOT have leading spaces on section headers
+      // (cloud-init strips YAML block indentation, so the content should be clean)
+      const lines = unitFile.content.split('\n');
+      const sectionHeaders = lines.filter((l: string) => l.match(/^\s*\[/));
+      for (const header of sectionHeaders) {
+        expect(header).toBe(header.trimStart());
+      }
+
+      // runcmd must NOT contain any heredoc (cat << or cat <<-)
+      const runcmdSection = config.split('runcmd:')[1]?.split('write_files:')[0] ?? '';
+      expect(runcmdSection).not.toContain('<<');
+      expect(runcmdSection).not.toContain('cat >');
+
+      // runcmd MUST contain systemctl start
+      expect(runcmdSection).toContain('systemctl start vm-agent');
+    });
   });
 
   describe('TLS certificate injection', () => {
@@ -323,8 +358,12 @@ describe('generateCloudInit', () => {
       expect(firewallScript).toBeDefined();
       expect(firewallScript.permissions).toBe('0755');
       expect(firewallScript.content).toContain('#!/bin/bash');
-      expect(firewallScript.content).toContain('iptables -P INPUT DROP');
-      expect(firewallScript.content).toContain('ip6tables -P INPUT DROP');
+      // Policy stays ACCEPT — we rely on explicit per-port DROP rules so
+      // outbound reply packets never depend on conntrack state.
+      expect(firewallScript.content).toContain('iptables -P INPUT ACCEPT');
+      expect(firewallScript.content).toContain('ip6tables -P INPUT ACCEPT');
+      expect(firewallScript.content).not.toContain('iptables -P INPUT DROP');
+      expect(firewallScript.content).not.toContain('ip6tables -P INPUT DROP');
     });
 
     it('firewall script contains correct VM agent port (TLS mode)', () => {
@@ -350,7 +389,7 @@ describe('generateCloudInit', () => {
       expect(firewallScript.content).toContain('VM_AGENT_PORT="8080"');
     });
 
-    it('firewall script allows loopback, established, and Docker bridge traffic', () => {
+    it('firewall script allows loopback and Docker bridge traffic', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -358,10 +397,55 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       const content = firewallScript.content;
-      expect(content).toContain('iptables -A INPUT -i lo -j ACCEPT');
-      expect(content).toContain('iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
-      expect(content).toContain('iptables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
-      expect(content).toContain('iptables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      // Trusted interfaces are INSERTed (-I) at position 1 so they take priority
+      // over the port-level DROP rules.
+      expect(content).toContain('iptables -I INPUT 1 -i lo -j ACCEPT');
+      expect(content).toContain('iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain('iptables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      // No conntrack ESTABLISHED,RELATED dependency — policy ACCEPT means
+      // outbound reply packets don't need a state entry to come back.
+      expect(content).not.toContain('conntrack --ctstate ESTABLISHED,RELATED');
+    });
+
+    it('firewall script installs targeted DROP rules for VM_AGENT_PORT (TCP and UDP) and SSH', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      // TCP drop on agent port (primary rule)
+      expect(content).toContain('iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
+      expect(content).toContain('ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
+      // UDP drop on agent port (blocks ICMP-unreachable-based port fingerprinting)
+      expect(content).toContain('iptables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP');
+      expect(content).toContain('ip6tables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP');
+      // SSH defense-in-depth — Hetzner cloud firewall is primary gate, but
+      // explicit DROP protects against Hetzner-firewall misconfig.
+      expect(content).toContain('iptables -A INPUT -p tcp --dport 22 -j DROP');
+      expect(content).toContain('ip6tables -A INPUT -p tcp --dport 22 -j DROP');
+    });
+
+    it('firewall script installs DROP rules before ACCEPT inserts (race-window eliminated)', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      // After -F INPUT flush, the DROP on the agent port must appear before
+      // any CF ACCEPT INSERTs. This closes the window where the port would
+      // be reachable between policy-ACCEPT and final DROP rule installation.
+      const flushIdx = content.indexOf('iptables -F INPUT');
+      const dropIdx = content.indexOf('iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
+      const cfInsertIdx = content.indexOf(
+        'iptables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
+      );
+      expect(flushIdx).toBeGreaterThan(-1);
+      expect(dropIdx).toBeGreaterThan(flushIdx);
+      expect(cfInsertIdx).toBeGreaterThan(dropIdx);
     });
 
     it('firewall script fetches Cloudflare IPs with fallback defaults', () => {
@@ -406,31 +490,9 @@ describe('generateCloudInit', () => {
       expect(cronJob.content).toContain('/etc/sam/firewall/setup-firewall.sh');
     });
 
-    it('runcmd includes iptables-persistent install and firewall setup', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.join('\n');
-      expect(runcmdStr).toContain('iptables-persistent');
-      expect(runcmdStr).toContain('/etc/sam/firewall/setup-firewall.sh');
-    });
-
-    it('firewall setup runs before VM agent start in runcmd order', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const firewallCmdIdx = runcmd.findIndex((cmd: string) =>
-        typeof cmd === 'string' && cmd.includes('setup-firewall.sh')
-      );
-      const agentStartIdx = runcmd.findIndex((cmd: string) =>
-        typeof cmd === 'string' && cmd.includes('systemctl start vm-agent')
-      );
-      expect(firewallCmdIdx).toBeGreaterThan(-1);
-      expect(agentStartIdx).toBeGreaterThan(-1);
-      expect(firewallCmdIdx).toBeLessThan(agentStartIdx);
-    });
+    // NOTE: Firewall install and setup are now handled by the vm-agent's
+    // provision package, not cloud-init runcmd. The firewall script is still
+    // written to disk via write_files for the agent to execute.
 
     it('firewall script uses custom vmAgentPort override', () => {
       const config = generateCloudInit(baseVariables({ vmAgentPort: '9999' }));
@@ -453,9 +515,14 @@ describe('generateCloudInit', () => {
       // No unrestricted ACCEPT rules
       expect(content).not.toMatch(/iptables -A INPUT -j ACCEPT/);
       expect(content).not.toMatch(/ip6tables -A INPUT -j ACCEPT/);
-      // No explicit SSH allowance
-      expect(content).not.toMatch(/--dport 22\b/);
-      expect(content).not.toMatch(/--dport ssh\b/);
+      // No ACCEPT rule for SSH (port 22) — Hetzner cloud firewall gates SSH.
+      // The host firewall DROPs port 22 as defense-in-depth, so `--dport 22`
+      // DOES appear in a DROP rule; the forbidden pattern is an ACCEPT on 22.
+      expect(content).not.toMatch(/--dport 22\b[^\n]*-j ACCEPT/);
+      expect(content).not.toMatch(/--dport ssh\b[^\n]*-j ACCEPT/);
+      // Defense-in-depth DROP for SSH must be present on both families.
+      expect(content).toMatch(/iptables -A INPUT -p tcp --dport 22 -j DROP/);
+      expect(content).toMatch(/ip6tables -A INPUT -p tcp --dport 22 -j DROP/);
     });
 
     it('IPv6 firewall rules mirror IPv4 structure', () => {
@@ -466,36 +533,34 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       const content: string = firewallScript.content;
-      expect(content).toContain('ip6tables -A INPUT -i lo -j ACCEPT');
-      expect(content).toContain('ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
-      expect(content).toContain('ip6tables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
-      expect(content).toContain('ip6tables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
-      expect(content).toContain('ip6tables -P INPUT DROP');
+      // Trusted-interface ACCEPTs are INSERTED at position 1 so they take
+      // priority over the targeted DROP rules appended earlier.
+      expect(content).toContain('ip6tables -I INPUT 1 -i lo -j ACCEPT');
+      expect(content).toContain('ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain('ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      // Policy stays ACCEPT; targeted DROP on VM_AGENT_PORT does the restriction.
+      expect(content).toContain('ip6tables -P INPUT ACCEPT');
+      expect(content).toContain('ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
+      expect(content).not.toContain('ip6tables -P INPUT DROP');
     });
 
-    it('firewall script uses set -euo pipefail with EXIT trap for DROP policy', () => {
+    it('firewall script uses set -euo pipefail and does NOT clamp policy to DROP on exit', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
       const firewallScript = parsed.write_files.find(
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
-      expect(firewallScript.content).toContain('set -euo pipefail');
-      // EXIT trap ensures DROP policy even if script aborts mid-execution
-      expect(firewallScript.content).toContain("trap 'iptables -P INPUT DROP");
-      expect(firewallScript.content).toContain('ip6tables -P INPUT DROP');
+      const content: string = firewallScript.content;
+      expect(content).toContain('set -euo pipefail');
+      // The previous implementation had `trap 'iptables -P INPUT DROP ...' EXIT`
+      // which could leave the box in total blackout if the script errored
+      // before ACCEPT rules were added. That landmine MUST not be present.
+      expect(content).not.toMatch(/trap\s+'[^']*iptables[^']*-P\s+INPUT\s+DROP/);
+      expect(content).not.toMatch(/trap\s+'[^']*ip6tables[^']*-P\s+INPUT\s+DROP/);
     });
 
-    it('runcmd includes debconf preseed before iptables-persistent install', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain('debconf-set-selections');
-      expect(runcmdStr).toContain('iptables-persistent/autosave_v4');
-      expect(runcmdStr).toContain('iptables-persistent/autosave_v6');
-    });
+    // NOTE: debconf preseed is now handled by vm-agent provision package.
 
     it('config with firewall stays within 32KB Hetzner limit', () => {
       const config = generateCloudInit(baseVariables({
@@ -611,93 +676,10 @@ describe('generateCloudInit', () => {
       expect(content).toContain('RemainAfterExit=yes');
     });
 
-    it('runcmd enables sam-metadata-block service', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain('systemctl enable sam-metadata-block.service');
-    });
+    // NOTE: metadata block service enable is now handled by vm-agent provision package.
   });
 
-  describe('TLS key permission hardening', () => {
-    it('runcmd includes chmod/chown for TLS key as defense-in-depth', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }));
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain('chmod 600 /etc/sam/tls/origin-ca-key.pem');
-      expect(runcmdStr).toContain('chown root:root /etc/sam/tls/origin-ca-key.pem');
-    });
-
-    it('TLS key hardening runcmd includes test -f guard and || true fallback', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      // Guard: only runs chmod/chown if file exists; || true prevents script abort
-      expect(runcmdStr).toContain('test -f /etc/sam/tls/origin-ca-key.pem');
-      expect(runcmdStr).toMatch(/test -f.*origin-ca-key\.pem.*\|\| true/);
-    });
-  });
-
-  describe('Neko browser sidecar pre-pull', () => {
-    it('includes default Neko image pre-pull by default', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest'");
-    });
-
-    it('uses custom Neko image when specified', () => {
-      const config = generateCloudInit(baseVariables({
-        nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
-      }));
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
-      expect(runcmdStr).not.toContain('google-chrome');
-    });
-
-    it('skips Neko pre-pull when nekoPrePull is false', () => {
-      const config = generateCloudInit(baseVariables({
-        nekoPrePull: false,
-      }));
-      const parsed = YAML.parse(config);
-
-      const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.map(String).join('\n');
-      expect(runcmdStr).not.toContain('docker pull ghcr.io/m1k1o/neko');
-      // The comment "# Neko pre-pull disabled" is in the raw YAML but stripped by parser
-      expect(config).toContain('Neko pre-pull disabled');
-    });
-
-    it('pre-pull command includes || true for fault tolerance', () => {
-      const config = generateCloudInit(baseVariables());
-      expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest' || true");
-    });
-
-    it('config with Neko pre-pull stays within 32KB limit', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-        nekoImage: 'ghcr.io/m1k1o/neko/google-chrome:latest',
-        nekoPrePull: true,
-      }));
-
-      expect(validateCloudInitSize(config)).toBe(true);
-    });
-  });
+  // TLS key permission hardening is now handled by vm-agent provision package.
 
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {
@@ -771,7 +753,6 @@ describe('validateCloudInitVariables', () => {
         taskId: 'task-ghi-789',
         taskMode: 'conversation',
         vmAgentPort: '8443',
-        nekoImage: 'ghcr.io/m1k1o/neko/google-chrome:latest',
         cfIpFetchTimeout: '30',
         logJournalMaxUse: '1G',
         logJournalKeepFree: '2G',
@@ -797,12 +778,6 @@ describe('validateCloudInitVariables', () => {
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '65535' }))).not.toThrow();
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8080' }))).not.toThrow();
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8443' }))).not.toThrow();
-    });
-
-    it('accepts Docker image with SHA256 digest', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nekoImage: 'ghcr.io/m1k1o/neko/google-chrome@sha256:abcdef1234567890',
-      }))).not.toThrow();
     });
 
     it('accepts all valid journald time units', () => {
@@ -863,18 +838,6 @@ describe('validateCloudInitVariables', () => {
       expect(() => validateCloudInitVariables(baseVariables({
         hostname: 'valid host',
       }))).toThrow('hostname');
-    });
-
-    it('rejects nekoImage with shell injection', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nekoImage: 'image; rm -rf /',
-      }))).toThrow('nekoImage');
-    });
-
-    it('rejects nekoImage with command substitution', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nekoImage: '$(malicious)',
-      }))).toThrow('nekoImage');
     });
 
     it('rejects callbackToken with shell metacharacters', () => {
@@ -1039,11 +1002,6 @@ describe('validateCloudInitVariables', () => {
       }
     });
 
-    it('rejects nekoImage starting with hyphen', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nekoImage: '-malicious',
-      }))).toThrow('nekoImage');
-    });
   });
 
   describe('generateCloudInit calls validation', () => {
@@ -1056,20 +1014,6 @@ describe('validateCloudInitVariables', () => {
     it('succeeds with valid variables', () => {
       const config = generateCloudInit(baseVariables());
       expect(config).toContain('hostname: sam-test-node');
-    });
-  });
-
-  describe('buildNekoPrePullCmd single-quotes image', () => {
-    it('default image is single-quoted in output', () => {
-      const config = generateCloudInit(baseVariables());
-      expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest'");
-    });
-
-    it('custom image is single-quoted in output', () => {
-      const config = generateCloudInit(baseVariables({
-        nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
-      }));
-      expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
     });
   });
 
@@ -1410,27 +1354,3 @@ describe('integrated size validation in generateCloudInit', () => {
   });
 });
 
-describe('buildNekoPrePullCmd defense-in-depth', () => {
-  it('rejects unsafe docker image via top-level validation', () => {
-    // The defense-in-depth assertion inside buildNekoPrePullCmd (SAFE_DOCKER_IMAGE_RE check)
-    // cannot be tested independently through the public API because generateCloudInit
-    // always runs validateCloudInitVariables first, which catches the same invalid images.
-    // The inner check protects against future refactors that might separate validation
-    // from generation. This test verifies the outer layer catches unsafe images.
-    expect(() => generateCloudInit(baseVariables({
-      nekoImage: '; rm -rf /',
-    }))).toThrow('nekoImage');
-  });
-
-  it('default image is correctly single-quoted in output', () => {
-    const config = generateCloudInit(baseVariables());
-    expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/google-chrome:latest'");
-  });
-
-  it('custom valid image is correctly single-quoted in output', () => {
-    const config = generateCloudInit(baseVariables({
-      nekoImage: 'ghcr.io/m1k1o/neko/firefox:latest',
-    }));
-    expect(config).toContain("docker pull 'ghcr.io/m1k1o/neko/firefox:latest'");
-  });
-});

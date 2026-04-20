@@ -103,7 +103,7 @@ describe('shared constants for TaskRunner DO', () => {
     { name: 'DEFAULT_TASK_RUNNER_RETRY_BASE_DELAY_MS', expectedValue: '5_000' },
     { name: 'DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS', expectedValue: '60_000' },
     { name: 'DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS', expectedValue: '5_000' },
-    { name: 'DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS', expectedValue: '600_000' },
+    { name: 'DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS', expectedValue: '900_000' },
     { name: 'DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS', expectedValue: '30 * 60 * 1000' },
     { name: 'DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS', expectedValue: '30_000' },
     { name: 'DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS', expectedValue: '10_000' },

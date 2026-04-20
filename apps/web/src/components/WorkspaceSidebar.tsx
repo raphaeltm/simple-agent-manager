@@ -11,7 +11,6 @@ import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
 import type { GitStatusData } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
 import { sanitizeUrl } from '../lib/url-utils';
-import { BrowserSidecar } from './BrowserSidecar';
 import { CollapsibleSection } from './CollapsibleSection';
 import { ResourceBar } from './node/ResourceBar';
 
@@ -422,17 +421,6 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                   </a>
                 ))}
             </div>
-          </CollapsibleSection>
-        )}
-
-        {/* Remote Browser */}
-        {isRunning && workspace?.id && (
-          <CollapsibleSection
-            title="Remote Browser"
-            defaultCollapsed
-            storageKey="sam-sidebar-browser"
-          >
-            <BrowserSidecar workspaceId={workspace.id} />
           </CollapsibleSection>
         )}
 

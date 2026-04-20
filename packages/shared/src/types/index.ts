@@ -44,10 +44,6 @@ export type {
   BootLogEntry,
   BootstrapResponse,
   BootstrapTokenData,
-  BrowserSidecarPortInfo,
-  BrowserSidecarPortsResponse,
-  BrowserSidecarResponse,
-  BrowserSidecarStatus,
   ContainerInfo,
   ContainerState,
   CreateNodeRequest,
@@ -69,8 +65,6 @@ export type {
   NodeStatus,
   NodeSystemInfo,
   PortsResponse,
-  SidecarAlias,
-  StartBrowserSidecarRequest,
   UpdateWorkspaceRequest,
   VMLocation,
   VMSize,
@@ -82,8 +76,6 @@ export type {
   WorkspaceRuntimeFile,
   WorkspaceStatus,
 } from './workspace';
-export { isSidecarAlias, SIDECAR_ALIASES } from './workspace';
-
 // Provider Catalog
 export type {
   LocationInfo,
@@ -97,6 +89,7 @@ export type {
   CreateProjectRequest,
   ListProjectsResponse,
   Project,
+  ProjectAgentDefaults,
   ProjectDetail,
   ProjectDetailResponse,
   ProjectRuntimeConfigResponse,

@@ -64,7 +64,14 @@ export interface Env {
   RATE_LIMIT_ANONYMOUS?: string;
   RATE_LIMIT_IDENTITY_TOKEN?: string;
   RATE_LIMIT_IDENTITY_TOKEN_WINDOW_SECONDS?: string;
-  RATE_LIMIT_CODEX_REFRESH?: string;
+  /**
+   * Max Codex refresh requests per user per window. Defaults to 30. Enforced
+   * atomically by CodexRefreshLock DO using ctx.storage (not KV). See
+   * {@link CodexRefreshEnv} in codex-refresh-lock.ts for the authoritative
+   * declaration — this is a Worker-level re-export so operators can configure
+   * the variable via wrangler.toml / `wrangler secret put`.
+   */
+  RATE_LIMIT_CODEX_REFRESH_PER_HOUR?: string;
   RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS?: string;
   IDENTITY_TOKEN_CACHE_BUFFER_SECONDS?: string;
   IDENTITY_TOKEN_CACHE_MIN_TTL_SECONDS?: string;
@@ -150,6 +157,9 @@ export interface Env {
   LOG_JOURNAL_MAX_RETENTION?: string;
   // Docker daemon DNS servers (comma-separated quoted IPs, default: "1.1.1.1", "8.8.8.8")
   DOCKER_DNS_SERVERS?: string;
+  // Hetzner base image override (e.g., "ubuntu-24.04" to roll back from the
+  // default "docker-ce" marketplace image). Only applies to Hetzner nodes.
+  HETZNER_BASE_IMAGE?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;
@@ -251,6 +261,8 @@ export interface Env {
   KNOWLEDGE_MAX_OBSERVATIONS_PER_ENTITY?: string;  // Max observations per entity (default: 100)
   KNOWLEDGE_SEARCH_LIMIT?: string;                 // Max search results (default: 20)
   KNOWLEDGE_AUTO_RETRIEVE_LIMIT?: string;          // Max auto-retrieved observations on session start (default: 20)
+  KNOWLEDGE_AUTO_RETRIEVE_MIN_CONFIDENCE?: string; // Min confidence for auto-retrieved observations (default: 0.8)
+  KNOWLEDGE_AUTO_RETRIEVE_HIGH_CONFIDENCE_LIMIT?: string; // Max high-confidence observations to retrieve (default: 50)
   KNOWLEDGE_OBSERVATION_MAX_LENGTH?: string;       // Max observation text length (default: 1000)
   KNOWLEDGE_ENTITY_NAME_MAX_LENGTH?: string;       // Max entity name length (default: 200)
   KNOWLEDGE_DESCRIPTION_MAX_LENGTH?: string;       // Max entity description length (default: 2000)
@@ -300,7 +312,7 @@ export interface Env {
   CODEX_REFRESH_UPSTREAM_URL?: string;             // OpenAI token endpoint (default: https://auth.openai.com/oauth/token)
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string;      // Upstream request timeout (default: 10000)
   CODEX_CLIENT_ID?: string;                        // OpenAI OAuth client_id (default: app_EMoamEEZ73f0CkXaXp7hrann)
-  CODEX_EXPECTED_SCOPES?: string;                  // Comma-separated expected scopes for upstream validation (warning log only)
+  CODEX_EXPECTED_SCOPES?: string;                  // Comma-separated scope allowlist; unset = default allowlist enforced (openid,profile,email,offline_access); empty string disables validation; unexpected scopes block refresh with 502 (MEDIUM #6)
   // Google OAuth (for GCP OIDC integration)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -361,10 +373,6 @@ export interface Env {
   GA4_FETCH_TIMEOUT_MS?: string;                  // Timeout for GA4 API fetch (default: 30000)
   // File proxy configuration (chat file browser)
   FILE_PROXY_TIMEOUT_MS?: string;                  // Timeout for VM agent file proxy requests (default: 15000)
-  BROWSER_PROXY_TIMEOUT_MS?: string;               // Timeout for browser sidecar proxy requests (default: 30000)
-  // Neko browser sidecar cloud-init configuration
-  NEKO_IMAGE?: string;                             // Docker image for Neko browser sidecar (default: ghcr.io/m1k1o/neko/google-chrome:latest)
-  NEKO_PRE_PULL?: string;                          // Pre-pull Neko image during cloud-init: "true" or "false" (default: "true")
   FILE_PROXY_MAX_RESPONSE_BYTES?: string;          // Max response body size from VM agent file proxy (default: 2097152 = 2MB)
   FILE_RAW_PROXY_MAX_BYTES?: string;              // Max response size for raw binary file proxy (default: 52428800 = 50MB)
   // File upload/download configuration
@@ -423,7 +431,7 @@ export interface Env {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string;    // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string;       // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string;       // Max stale executions to recover per sweep (default: 100)
-  // AI Inference Proxy (Workers AI gateway for trial users)
+  // AI Inference Proxy (Cloudflare AI Gateway for trial users)
   AI_PROXY_ENABLED?: string;                         // Kill switch: "false" to disable (default: enabled)
   AI_PROXY_DEFAULT_MODEL?: string;                   // Default Workers AI model (default: @cf/meta/llama-4-scout-17b-16e-instruct)
   AI_PROXY_ALLOWED_MODELS?: string;                  // Comma-separated allowed models
@@ -433,4 +441,5 @@ export interface Env {
   AI_PROXY_RATE_LIMIT_RPM?: string;                  // Requests per minute per user (default: 30)
   AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
+  AI_GATEWAY_ID?: string;                            // Cloudflare AI Gateway ID (default: sam)
 }

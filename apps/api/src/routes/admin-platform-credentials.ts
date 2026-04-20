@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { maskCredential } from '../lib/credential-mask';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
@@ -223,7 +224,7 @@ adminPlatformCredentialRoutes.get('/:id/masked-value', async (c) => {
 
   const encryptionKey = getCredentialEncryptionKey(c.env);
   const plaintext = await decrypt(row.encryptedToken, row.iv, encryptionKey);
-  const maskedKey = `...${plaintext.slice(-4)}`;
+  const maskedKey = maskCredential(plaintext);
 
   return c.json({ maskedKey });
 });

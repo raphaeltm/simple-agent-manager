@@ -186,6 +186,32 @@ fi
 # NOTE: Hetzner tokens are NOT platform secrets.
 # Users provide their own tokens through the Settings UI, stored encrypted per-user in the database.
 
+# ========================================
+# Stale Secret Cleanup
+# ========================================
+# When configuration is migrated from secrets to [vars] in wrangler.toml,
+# old secrets shadow the new vars (secrets take precedence). Delete them.
+STALE_SECRETS=(
+  "AI_PROXY_DEFAULT_MODEL"   # Migrated to wrangler.toml [vars] — code defaults in shared/constants/ai-services.ts
+  "AI_PROXY_ENABLED"         # Migrated to wrangler.toml [vars]
+)
+
+echo ""
+echo "Cleaning up stale secrets (migrated to wrangler.toml vars)..."
+for secret_name in "${STALE_SECRETS[@]}"; do
+  if output=$(echo "y" | pnpm --filter @simple-agent-manager/api exec wrangler secret delete "$secret_name" --env "$ENVIRONMENT" 2>&1); then
+    echo -e "${GREEN}  Deleted stale secret: $secret_name${NC}"
+  else
+    # Wrangler exits non-zero if the secret doesn't exist — that's fine
+    if echo "$output" | grep -qi "not found\|does not exist\|couldn't find"; then
+      echo -e "  $secret_name not present (OK)"
+    else
+      # Unexpected error — log but don't fail the deploy
+      echo -e "${YELLOW}  Could not delete $secret_name: $output${NC}"
+    fi
+  fi
+done
+
 echo ""
 if [ "$FAILED" = "true" ]; then
   echo -e "${RED}❌ Some required secrets failed to configure${NC}"

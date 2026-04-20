@@ -12,29 +12,29 @@ describe('parseWorkspaceSubdomain', () => {
   describe('standard workspace subdomains', () => {
     it('parses ws-{id}.{domain} into workspace ID', () => {
       const result = parseWorkspaceSubdomain(`ws-${VALID_ULID}.example.com`, baseDomain);
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: null, sidecar: null });
+      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: null });
     });
 
     it('uppercases workspace ID from DNS hostname', () => {
       const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}.example.com`, baseDomain);
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: null, sidecar: null });
+      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: null });
     });
   });
 
   describe('port-specific subdomains', () => {
     it('parses ws-{id}--{port}.{domain} into workspace ID and port', () => {
       const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--3000.example.com`, baseDomain);
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: 3000, sidecar: null });
+      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: 3000 });
     });
 
     it('parses port 80', () => {
       const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--80.example.com`, baseDomain);
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: 80, sidecar: null });
+      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: 80 });
     });
 
     it('parses port 65535', () => {
       const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--65535.example.com`, baseDomain);
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: 65535, sidecar: null });
+      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: 65535 });
     });
 
     it('rejects port 0', () => {
@@ -49,44 +49,17 @@ describe('parseWorkspaceSubdomain', () => {
 
     it('rejects negative port', () => {
       const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}---1.example.com`, baseDomain);
-      expect(result).toEqual({ error: "Unknown sidecar alias. Valid aliases: browser" });
+      expect(result).toEqual({ error: "Unknown subdomain suffix: -1" });
     });
 
     it('rejects trailing -- with empty port', () => {
       const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--.example.com`, baseDomain);
-      expect(result).toEqual({ error: "Unknown sidecar alias. Valid aliases: browser" });
+      expect(result).toEqual({ error: "Unknown subdomain suffix: " });
     });
 
     it('rejects partial numeric port like 3000abc', () => {
       const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--3000abc.example.com`, baseDomain);
-      expect(result).toEqual({ error: "Unknown sidecar alias. Valid aliases: browser" });
-    });
-  });
-
-  describe('sidecar alias subdomains', () => {
-    it('parses ws-{id}--browser.{domain} as browser sidecar', () => {
-      const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--browser.example.com`, baseDomain);
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: null, sidecar: 'browser' });
-    });
-
-    it('parses browser alias with multi-level base domain', () => {
-      const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--browser.staging.example.com`, 'staging.example.com');
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: null, sidecar: 'browser' });
-    });
-
-    it('rejects unknown sidecar alias', () => {
-      const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--notaport.example.com`, baseDomain);
-      expect(result).toEqual({ error: "Unknown sidecar alias. Valid aliases: browser" });
-    });
-
-    it('handles mixed-case sidecar alias (DNS is case-insensitive)', () => {
-      const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--Browser.example.com`, baseDomain);
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: null, sidecar: 'browser' });
-    });
-
-    it('port 8080 still routes to DevContainer, not sidecar', () => {
-      const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--8080.example.com`, baseDomain);
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: 8080, sidecar: null });
+      expect(result).toEqual({ error: "Unknown subdomain suffix: 3000abc" });
     });
   });
 
@@ -132,7 +105,7 @@ describe('parseWorkspaceSubdomain', () => {
   describe('edge cases', () => {
     it('handles multi-level base domain with port', () => {
       const result = parseWorkspaceSubdomain(`ws-${VALID_ULID_LOWER}--8080.staging.example.com`, 'staging.example.com');
-      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: 8080, sidecar: null });
+      expect(result).toEqual({ workspaceId: VALID_ULID, targetPort: 8080 });
     });
 
     it('returns error for empty workspace ID', () => {

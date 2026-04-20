@@ -1,7 +1,10 @@
 package server
 
 import (
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -115,4 +118,57 @@ func parseEventLimit(raw string) int {
 		return 500
 	}
 	return parsed
+}
+
+// handleExportEvents streams the raw SQLite event database file as a download.
+func (s *Server) handleExportEvents(w http.ResponseWriter, r *http.Request) {
+	if !s.requireNodeEventAuth(w, r) {
+		return
+	}
+	if s.eventStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "event store not available")
+		return
+	}
+	// Checkpoint WAL so the main .db file contains all data.
+	if err := s.eventStore.Checkpoint(); err != nil {
+		slog.Warn("eventstore: checkpoint before export failed", "error", err)
+	}
+	serveDBFile(w, r, s.eventStore.DBPath(), fmt.Sprintf("events-%s.db", s.config.NodeID))
+}
+
+// handleExportMetrics streams the raw SQLite metrics database file as a download.
+func (s *Server) handleExportMetrics(w http.ResponseWriter, r *http.Request) {
+	if !s.requireNodeEventAuth(w, r) {
+		return
+	}
+	if s.resourceMonitor == nil {
+		writeError(w, http.StatusServiceUnavailable, "resource monitor not available")
+		return
+	}
+	// Checkpoint WAL so the main .db file contains all data.
+	if err := s.resourceMonitor.Checkpoint(); err != nil {
+		slog.Warn("resourcemon: checkpoint before export failed", "error", err)
+	}
+	serveDBFile(w, r, s.resourceMonitor.DBPath(), fmt.Sprintf("metrics-%s.db", s.config.NodeID))
+}
+
+// serveDBFile sends a SQLite database file as an attachment download.
+func serveDBFile(w http.ResponseWriter, r *http.Request, dbPath, filename string) {
+	f, err := os.Open(dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to open database file")
+		return
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to stat database file")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-sqlite3")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	http.ServeContent(w, r, filename, stat.ModTime(), f)
 }

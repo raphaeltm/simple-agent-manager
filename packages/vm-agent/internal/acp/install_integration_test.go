@@ -31,6 +31,47 @@ func requireDevcontainerCLI(t *testing.T) {
 	}
 }
 
+// isExternalDevcontainerFeatureFailure reports whether a `devcontainer up`
+// failure was caused by external infrastructure SAM does not control
+// (GHCR feature registry outages, malformed upstream GPG keyrings, etc.)
+// rather than by our installer. These failures should cause a test skip, not
+// a red CI run — the agent install code under test is not exercised when the
+// devcontainer build itself never finishes.
+func isExternalDevcontainerFeatureFailure(output string) bool {
+	patterns := []string{
+		// Feature install errors originating from ghcr.io devcontainer features.
+		// The CLI wraps feature build failures with this exact prefix.
+		`Feature "Go" (ghcr.io/devcontainers/features/go) failed to install`,
+		`Feature "GitHub CLI" (ghcr.io/devcontainers/features/github-cli) failed to install`,
+		// cli.github.com occasionally serves githubcli-archive-keyring.gpg as a
+		// truncated/malformed file, causing apt to reject the keyring.
+		`Malformed certificate in keyring`,
+	}
+	for _, p := range patterns {
+		if strings.Contains(output, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// devcontainerUpOrSkip runs `devcontainer up --workspace-folder <repo>` and:
+//   - returns the combined output on success,
+//   - calls t.Skipf when the failure matches a known external-infrastructure flake,
+//   - calls t.Fatalf for all other failures.
+func devcontainerUpOrSkip(t *testing.T, ctx context.Context, repo string) []byte {
+	t.Helper()
+	cmd := exec.CommandContext(ctx, "devcontainer", "up", "--workspace-folder", repo)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if isExternalDevcontainerFeatureFailure(string(output)) {
+			t.Skipf("devcontainer up failed due to external infrastructure flake (not a SAM bug): %v\n%s", err, string(output))
+		}
+		t.Fatalf("devcontainer up failed: %v\n%s", err, string(output))
+	}
+	return output
+}
+
 func mustStartContainer(t *testing.T, image, labelKey, labelValue string, extraArgs ...string) string {
 	t.Helper()
 	label := fmt.Sprintf("%s=%s", labelKey, labelValue)
@@ -397,13 +438,8 @@ func TestIntegration_InstallAgent_Devcontainer_WithNodeFeature(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// Build devcontainer
-	dcArgs := []string{"up", "--workspace-folder", repo}
-	dcCmd := exec.CommandContext(ctx, "devcontainer", dcArgs...)
-	output, err := dcCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("devcontainer up failed: %v\n%s", err, string(output))
-	}
+	// Build devcontainer (skips on known external GHCR/CDN flakes)
+	devcontainerUpOrSkip(t, ctx, repo)
 
 	// Find the container
 	labelFilter := fmt.Sprintf("label=devcontainer.local_folder=%s", repo)
@@ -494,13 +530,8 @@ func TestIntegration_InstallAgent_Devcontainer_SAMRepoConfig(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// Build devcontainer
-	dcArgs := []string{"up", "--workspace-folder", repo}
-	dcCmd := exec.CommandContext(ctx, "devcontainer", dcArgs...)
-	output, err := dcCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("devcontainer up failed: %v\n%s", err, string(output))
-	}
+	// Build devcontainer (skips on known external GHCR/CDN flakes)
+	devcontainerUpOrSkip(t, ctx, repo)
 
 	// Find the container
 	labelFilter := fmt.Sprintf("label=devcontainer.local_folder=%s", repo)
@@ -572,13 +603,8 @@ func TestIntegration_InstallAgent_RealClaudeCodeACP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	// Build devcontainer
-	dcArgs := []string{"up", "--workspace-folder", repo}
-	dcCmd := exec.CommandContext(ctx, "devcontainer", dcArgs...)
-	output, err := dcCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("devcontainer up failed: %v\n%s", err, string(output))
-	}
+	// Build devcontainer (skips on known external GHCR/CDN flakes)
+	devcontainerUpOrSkip(t, ctx, repo)
 
 	// Find the container
 	labelFilter := fmt.Sprintf("label=devcontainer.local_folder=%s", repo)
@@ -688,13 +714,8 @@ func TestIntegration_InstallAgent_Devcontainer_PythonImage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// Build devcontainer
-	dcArgs := []string{"up", "--workspace-folder", repo}
-	dcCmd := exec.CommandContext(ctx, "devcontainer", dcArgs...)
-	output, err := dcCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("devcontainer up failed: %v\n%s", err, string(output))
-	}
+	// Build devcontainer (skips on known external GHCR/CDN flakes)
+	devcontainerUpOrSkip(t, ctx, repo)
 
 	// Find the container
 	labelFilter := fmt.Sprintf("label=devcontainer.local_folder=%s", repo)

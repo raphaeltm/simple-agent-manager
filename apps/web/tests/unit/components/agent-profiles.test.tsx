@@ -349,7 +349,8 @@ describe('ProfileFormDialog', () => {
     );
     expect(screen.getByDisplayValue('My Profile')).toBeInTheDocument();
     expect(screen.getByDisplayValue('desc')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('claude-opus-4-6')).toBeInTheDocument();
+    // ModelSelect shows display format when not focused: "Name (id)"
+    expect(screen.getByDisplayValue('Claude Opus 4.6 (claude-opus-4-6)')).toBeInTheDocument();
     expect(screen.getByDisplayValue('5')).toBeInTheDocument();
   });
 

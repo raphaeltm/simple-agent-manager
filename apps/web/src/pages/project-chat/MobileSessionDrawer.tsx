@@ -159,6 +159,7 @@ export function MobileSessionDrawer({
         <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
           <SessionList
             sessions={filteredR}
+            allSessions={sessions}
             selectedSessionId={selectedSessionId}
             onSelect={onSelect}
             onFork={onFork}
@@ -179,6 +180,7 @@ export function MobileSessionDrawer({
               {showOlder && (
                 <SessionList
                   sessions={filteredS}
+                  allSessions={sessions}
                   selectedSessionId={selectedSessionId}
                   onSelect={onSelect}
                   onFork={onFork}

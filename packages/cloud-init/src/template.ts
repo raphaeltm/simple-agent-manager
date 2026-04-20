@@ -1,125 +1,86 @@
 /**
  * Cloud-init template for node provisioning.
  *
+ * ULTRA-MINIMAL: Cloud-init ONLY downloads and starts the VM agent.
+ * The agent handles ALL other provisioning (Docker, Node.js, firewall, etc.)
+ * and heartbeats immediately on start, giving the control plane visibility
+ * within seconds of boot.
+ *
  * SECURITY: No provider/user credentials are embedded. The node agent receives
  * a callback token for authenticated control-plane check-ins and requests.
  */
 export const CLOUD_INIT_TEMPLATE = `#cloud-config
 
+# Skip default apt-get update/upgrade — the vm-agent handles package installs.
+# Without this, cloud-init blocks runcmd for 5-10 min on apt operations.
+package_update: false
+package_upgrade: false
+
 hostname: {{ hostname }}
 
 users:
   - name: workspace
-    groups: sudo, docker
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys: []
 
-packages:
-  - docker.io
-  - docker-compose
-  - git
-  - curl
-  - wget
-  - jq
-  - htop
-  - vim
-
 runcmd:
-  - systemctl enable docker
-  - systemctl start docker
-  - usermod -aG docker workspace
+  # =====================================================================
+  # Cloud-init does ONE thing: download and start the VM agent.
+  # The agent handles ALL provisioning (Docker, firewall, Node.js, etc.)
+  # and starts heartbeating immediately. No packages section — curl is
+  # pre-installed on all Hetzner Ubuntu images.
+  # =====================================================================
 
-  # Set up OS-level firewall before VM agent starts
-  - echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
-  - echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
-  - DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
-  - /etc/sam/firewall/setup-firewall.sh
-
+  - 'logger -t sam-boot "PHASE START: vm-agent-download"'
+  - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall
   - |
     ARCH=$(uname -m)
     case $ARCH in
       x86_64) ARCH="amd64" ;;
       aarch64) ARCH="arm64" ;;
     esac
-    curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}"
+    logger -t sam-boot "Downloading vm-agent for arch=$ARCH"
+    curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}" 2>&1 | logger -t sam-boot
     chmod +x /usr/local/bin/vm-agent
+    logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
+  - 'logger -t sam-boot "PHASE END: vm-agent-download"'
 
-  - |
-    cat > /etc/systemd/system/vm-agent.service << 'UNIT'
-    [Unit]
-    Description=VM Agent
-    After=network.target docker.service
-    Requires=docker.service
-
-    [Service]
-    Type=simple
-    User=root
-    Environment=NODE_ID={{ node_id }}
-    Environment=CONTROL_PLANE_URL={{ control_plane_url }}
-    Environment=JWKS_ENDPOINT={{ jwks_url }}
-    Environment=CALLBACK_TOKEN={{ callback_token }}
-    Environment=PROJECT_ID={{ project_id }}
-    Environment=CHAT_SESSION_ID={{ chat_session_id }}
-    Environment=TASK_ID={{ task_id }}
-    Environment=TASK_MODE={{ task_mode }}
-    Environment=VM_AGENT_PORT={{ vm_agent_port }}
-    Environment=TLS_CERT_PATH={{ tls_cert_path }}
-    Environment=TLS_KEY_PATH={{ tls_key_path }}
-    ExecStart=/usr/local/bin/vm-agent
-    Restart=always
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-    UNIT
-    systemctl daemon-reload
-    systemctl enable vm-agent
-    systemctl start vm-agent
-
-  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  - apt-get install -y nodejs
-  - npm install -g @devcontainers/cli || true
-
-  # Pre-pull Neko browser sidecar image (optional, controlled by NEKO_PRE_PULL)
-  {{ neko_pre_pull_cmd }}
-
-  # Apply journald configuration and restart to pick up new limits
-  - mkdir -p /etc/systemd/journald.conf.d
-  - systemctl restart systemd-journald
-
-  # Restart Docker to pick up journald log driver and DNS configuration
-  - systemctl restart docker
-
-  # Enable metadata block service to reapply DOCKER-USER rules after Docker restarts.
-  # Docker recreates DOCKER-USER on start, so iptables-persistent alone is not enough.
+  - 'logger -t sam-boot "PHASE START: vm-agent-start"'
   - systemctl daemon-reload
-  - systemctl enable sam-metadata-block.service
-
-  # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
-  - test -f /etc/sam/tls/origin-ca-key.pem && { chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem; } || true
+  - systemctl enable vm-agent
+  - systemctl start vm-agent
+  - 'logger -t sam-boot "PHASE END: vm-agent-start"'
+  - 'logger -t sam-boot "ALL PHASES COMPLETE"'
 
 write_files:
-  - path: /etc/systemd/journald.conf.d/sam.conf
-    content: |
-      [Journal]
-      Storage=persistent
-      Compress=yes
-      SystemMaxUse={{ log_journal_max_use }}
-      SystemKeepFree={{ log_journal_keep_free }}
-      MaxRetentionSec={{ log_journal_max_retention }}
+  - path: /etc/systemd/system/vm-agent.service
     permissions: '0644'
+    content: |
+      [Unit]
+      Description=VM Agent
+      After=network.target
 
-  - path: /etc/docker/daemon.json
-    content: |
-      {
-        "log-driver": "journald",
-        "log-opts": {
-          "tag": "docker/{{ docker_name_tag }}"
-        },
-        "dns": [{{ docker_dns_servers }}]
-      }
-    permissions: '0644'
+      [Service]
+      Type=simple
+      User=root
+      Environment=NODE_ID={{ node_id }}
+      Environment=CONTROL_PLANE_URL={{ control_plane_url }}
+      Environment=JWKS_ENDPOINT={{ jwks_url }}
+      Environment=CALLBACK_TOKEN={{ callback_token }}
+      Environment=PROJECT_ID={{ project_id }}
+      Environment=CHAT_SESSION_ID={{ chat_session_id }}
+      Environment=TASK_ID={{ task_id }}
+      Environment=TASK_MODE={{ task_mode }}
+      Environment=VM_AGENT_PORT={{ vm_agent_port }}
+      Environment=TLS_CERT_PATH={{ tls_cert_path }}
+      Environment=TLS_KEY_PATH={{ tls_key_path }}
+      ExecStart=/usr/local/bin/vm-agent
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
 
   - path: /etc/workspace/config.json
     content: |
@@ -134,21 +95,24 @@ write_files:
     content: |
       #!/bin/bash
       # SAM Firewall — restricts VM agent port to Cloudflare IPs only.
-      # Fetches current Cloudflare IP ranges dynamically; falls back to
-      # embedded defaults if the fetch fails. Run at boot via cloud-init
-      # and daily via /etc/cron.daily/update-cloudflare-firewall.
+      #
+      # Policy: INPUT chain stays ACCEPT. A single targeted DROP rule is
+      # appended LAST for tcp dport VM_AGENT_PORT so only the explicit CF
+      # ACCEPT rules (and loopback / docker bridges) can reach the agent port.
+      # Outbound connections and their replies are unaffected — we do NOT rely
+      # on conntrack to let reply packets back in, because conntrack state is
+      # invalidated by Docker install + restart + veth churn and the resulting
+      # silent drops caused a sustained ~6-minute "Cloudflare API unreachable"
+      # window on every fresh boot.
       set -euo pipefail
-
-      # Ensure DROP policy is always applied, even if the script exits early
-      # due to a malformed CIDR or unexpected error mid-execution.
-      trap 'iptables -P INPUT DROP 2>/dev/null; ip6tables -P INPUT DROP 2>/dev/null' EXIT
+      # NOTE: intentionally no EXIT trap that clamps policy to DROP. A failed
+      # script must not lock the box out — the previous trap caused total
+      # blackouts when any earlier step errored before ACCEPT rules were added.
 
       VM_AGENT_PORT="{{ vm_agent_port }}"
       CF_IPV4_URL="https://www.cloudflare.com/ips-v4"
       CF_IPV6_URL="https://www.cloudflare.com/ips-v6"
 
-      # Embedded fallback Cloudflare IP ranges (updated 2025-05)
-      # Source: https://www.cloudflare.com/ips/
       FALLBACK_IPV4="173.245.48.0/20
       103.21.244.0/22
       103.22.200.0/22
@@ -173,7 +137,6 @@ write_files:
       2a06:98c0::/29
       2c0f:f248::/32"
 
-      # Fetch Cloudflare IPs (with fallback to embedded defaults)
       CF_IPV4=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV4_URL" 2>/dev/null) || {
         logger -t sam-firewall "WARNING: Failed to fetch CF IPv4 ranges, using fallback"
         CF_IPV4="$FALLBACK_IPV4"
@@ -183,45 +146,55 @@ write_files:
         CF_IPV6="$FALLBACK_IPV6"
       }
 
-      # --- IPv4 rules ---
-      # Flush INPUT chain only (preserves Docker FORWARD/NAT chains)
+      # IPv4: policy ACCEPT so outbound reply packets are never dropped when
+      # conntrack state is invalidated (the root cause of the 6-minute Cloudflare
+      # blackout after Docker install + restart). Restriction is via targeted
+      # DROP rules on specific ports. The Hetzner cloud firewall remains the
+      # primary ingress gate; iptables is defense in depth against misconfig.
+      #
+      # Rule installation order (critical): install DROPs FIRST (so the agent
+      # port is never unprotected during a re-apply), then INSERT ACCEPT rules
+      # at position 1 so they take precedence. INSERT order is reverse of
+      # final priority — last -I becomes rule #1.
+      iptables -P INPUT ACCEPT
       iptables -F INPUT
 
-      # Allow loopback
-      iptables -A INPUT -i lo -j ACCEPT
+      # Catch-all DROPs installed FIRST. TCP+UDP on the agent port blocks both
+      # service traffic and port-fingerprinting via ICMP unreachable replies.
+      # TCP :22 defense-in-depth against sshd exposure — Hetzner console works
+      # without iptables SSH access for operator emergencies.
+      iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
+      iptables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
+      iptables -A INPUT -p tcp --dport 22 -j DROP
 
-      # Allow established/related connections (outbound traffic responses)
-      iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-
-      # Allow Docker bridge traffic to VM agent port (container-to-host communication)
-      iptables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
-      iptables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
-
-      # Allow Cloudflare IPs on VM agent port
+      # INSERT CF ACCEPT rules for VM_AGENT_PORT at top of chain.
       while IFS= read -r cidr; do
-        [ -n "$cidr" ] && iptables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+        [ -n "$cidr" ] && iptables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       done <<< "$CF_IPV4"
 
-      # Drop all other inbound traffic (blocks SSH, direct IP access, etc.)
-      iptables -P INPUT DROP
+      # INSERT trusted-interface ACCEPTs (lo last so it is rule #1 — loopback
+      # traffic, including localhost-to-sshd for operator tooling, is never
+      # filtered by the port-22 DROP above).
+      iptables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      iptables -I INPUT 1 -i lo -j ACCEPT
 
-      # --- IPv6 rules ---
+      # IPv6: same pattern.
+      ip6tables -P INPUT ACCEPT
       ip6tables -F INPUT
-      ip6tables -A INPUT -i lo -j ACCEPT
-      ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-      ip6tables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
-      ip6tables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+
+      ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
+      ip6tables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
+      ip6tables -A INPUT -p tcp --dport 22 -j DROP
 
       while IFS= read -r cidr; do
-        [ -n "$cidr" ] && ip6tables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+        [ -n "$cidr" ] && ip6tables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       done <<< "$CF_IPV6"
 
-      ip6tables -P INPUT DROP
+      ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      ip6tables -I INPUT 1 -i lo -j ACCEPT
 
-      # --- Block container access to cloud metadata API ---
-      # Delegates to apply-metadata-block.sh which manages the DOCKER-USER chain.
-      # Wait for Docker to create DOCKER-USER chain (up to 30s) since there is a
-      # brief race window between "systemctl start docker" returning and chain creation.
       DOCKER_USER_WAIT=0
       while ! iptables -L DOCKER-USER -n >/dev/null 2>&1; do
         if [ "$DOCKER_USER_WAIT" -ge 30 ]; then
@@ -233,7 +206,6 @@ write_files:
       done
       /etc/sam/firewall/apply-metadata-block.sh || logger -t sam-firewall "WARNING: metadata block script failed"
 
-      # Persist rules across reboots
       mkdir -p /etc/iptables
       iptables-save > /etc/iptables/rules.v4
       ip6tables-save > /etc/iptables/rules.v6
@@ -244,19 +216,13 @@ write_files:
     permissions: '0755'
     content: |
       #!/bin/bash
-      # Daily refresh of Cloudflare IP ranges for the SAM firewall.
       /etc/sam/firewall/setup-firewall.sh 2>&1 | logger -t sam-firewall-update
 
   - path: /etc/sam/firewall/apply-metadata-block.sh
     permissions: '0755'
     content: |
       #!/bin/bash
-      # Applies DOCKER-USER chain rules to block container access to the
-      # cloud metadata API. Called by sam-metadata-block.service after Docker
-      # starts, and by setup-firewall.sh during initial provisioning / daily cron.
       set -euo pipefail
-      # Cloud metadata API is IPv4-only (169.254.169.254). No ip6tables rules needed
-      # since ip6tables rejects IPv4 addresses as invalid.
       METADATA_IP="169.254.169.254"
       if iptables -L DOCKER-USER -n >/dev/null 2>&1; then
         iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
@@ -282,6 +248,27 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+
+  - path: /etc/systemd/journald.conf.d/sam.conf
+    content: |
+      [Journal]
+      Storage=persistent
+      Compress=yes
+      SystemMaxUse={{ log_journal_max_use }}
+      SystemKeepFree={{ log_journal_keep_free }}
+      MaxRetentionSec={{ log_journal_max_retention }}
+    permissions: '0644'
+
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "journald",
+        "log-opts": {
+          "tag": "docker/{{ docker_name_tag }}"
+        },
+        "dns": [{{ docker_dns_servers }}]
+      }
+    permissions: '0644'
 
   - path: /etc/sam/tls/origin-ca.pem
     content: |

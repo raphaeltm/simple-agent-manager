@@ -35,12 +35,8 @@ vi.mock('../../../src/components/GitHubAppSection', () => ({
   GitHubAppSection: () => <div data-testid="github-app-section">github-app</div>,
 }));
 
-vi.mock('../../../src/components/AgentKeysSection', () => ({
-  AgentKeysSection: () => <div data-testid="agent-keys-section">agent-keys</div>,
-}));
-
-vi.mock('../../../src/components/AgentSettingsSection', () => ({
-  AgentSettingsSection: () => <div data-testid="agent-settings-section">agent-settings</div>,
+vi.mock('../../../src/components/AgentsSection', () => ({
+  AgentsSection: () => <div data-testid="agents-section">agents</div>,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -48,8 +44,7 @@ vi.mock('../../../src/components/UserMenu', () => ({
 }));
 
 import { Settings } from '../../../src/pages/Settings';
-import { SettingsAgentConfig } from '../../../src/pages/SettingsAgentConfig';
-import { SettingsAgentKeys } from '../../../src/pages/SettingsAgentKeys';
+import { SettingsAgents } from '../../../src/pages/SettingsAgents';
 import { SettingsCloudProvider } from '../../../src/pages/SettingsCloudProvider';
 import { SettingsGitHub } from '../../../src/pages/SettingsGitHub';
 
@@ -61,8 +56,7 @@ function renderSettings(path = '/settings/cloud-provider') {
           <Route index element={<Navigate to="cloud-provider" replace />} />
           <Route path="cloud-provider" element={<SettingsCloudProvider />} />
           <Route path="github" element={<SettingsGitHub />} />
-          <Route path="agent-keys" element={<SettingsAgentKeys />} />
-          <Route path="agent-config" element={<SettingsAgentConfig />} />
+          <Route path="agents" element={<SettingsAgents />} />
         </Route>
       </Routes>
     </MemoryRouter>
@@ -82,7 +76,7 @@ describe('Settings shell', () => {
     ]);
   });
 
-  it('renders 4 tabs in the settings shell', async () => {
+  it('renders tabs in the settings shell', async () => {
     renderSettings();
 
     await waitFor(() => {
@@ -91,8 +85,7 @@ describe('Settings shell', () => {
 
     expect(screen.getByRole('tab', { name: 'Cloud Provider' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'GitHub' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Agent Keys' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Agent Config' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
   });
 
   it('renders breadcrumb with Home link', async () => {
@@ -124,24 +117,14 @@ describe('Settings shell', () => {
     expect(screen.getByTestId('github-app-section')).toBeInTheDocument();
   });
 
-  it('renders agent-keys sub-route', async () => {
-    renderSettings('/settings/agent-keys');
+  it('renders agents sub-route', async () => {
+    renderSettings('/settings/agents');
 
     await waitFor(() => {
       expect(mocks.listCredentials).toHaveBeenCalled();
     });
 
-    expect(screen.getByTestId('agent-keys-section')).toBeInTheDocument();
-  });
-
-  it('renders agent-config sub-route', async () => {
-    renderSettings('/settings/agent-config');
-
-    await waitFor(() => {
-      expect(mocks.listCredentials).toHaveBeenCalled();
-    });
-
-    expect(screen.getByTestId('agent-settings-section')).toBeInTheDocument();
+    expect(screen.getByTestId('agents-section')).toBeInTheDocument();
   });
 
   it('renders cloud-provider sub-route with scaleway form', async () => {

@@ -46,6 +46,7 @@ import { googleAuthRoutes } from './routes/google-auth';
 import { knowledgeRoutes } from './routes/knowledge';
 import { libraryRoutes } from './routes/library';
 import { mcpRoutes } from './routes/mcp';
+import { nodeLifecycleRoutes } from './routes/node-lifecycle';
 import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
 import { deploymentIdentityTokenRoute,gcpDeployCallbackRoute, projectDeploymentRoutes } from './routes/project-deployment';
@@ -155,7 +156,7 @@ app.use('*', async (c, next) => {
     log.info('ws_proxy_invalid_subdomain', { hostname, reason: parsed.error });
     return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
   }
-  const { workspaceId, targetPort, sidecar } = parsed;
+  const { workspaceId, targetPort } = parsed;
 
   // Look up workspace routing metadata from D1.
   const db = drizzle(c.env.DATABASE, { schema });
@@ -192,7 +193,6 @@ app.use('*', async (c, next) => {
     nodeId: workspace.nodeId || workspaceId,
     backendHostname,
     targetPort,
-    sidecar,
     method: c.req.raw.method,
     path: url.pathname,
   });
@@ -207,25 +207,6 @@ app.use('*', async (c, next) => {
   vmUrl.protocol = `${vmAgentProtocol}:`;
   vmUrl.hostname = backendHostname;
   vmUrl.port = vmAgentPort;
-
-  // Route sidecar alias requests to the VM agent's sidecar proxy endpoint.
-  // ws-{id}--browser.example.com/foo → {backend}/workspaces/{id}/browser/proxy/foo
-  if (sidecar !== null) {
-    const subPath = url.pathname === '/' ? '' : url.pathname;
-    vmUrl.pathname = `/workspaces/${workspaceId}/${sidecar}/proxy${subPath}`;
-
-    try {
-      const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
-      vmUrl.searchParams.set('token', token);
-    } catch (err) {
-      log.error('sidecar_proxy_token_error', {
-        workspaceId,
-        sidecar,
-        ...serializeError(err),
-      });
-      return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate sidecar proxy token' }, 500);
-    }
-  }
 
   // Route port-specific requests to the VM agent's port proxy endpoint.
   // ws-{id}--3000.example.com/foo → {backend}/workspaces/{id}/ports/3000/foo
@@ -371,6 +352,7 @@ app.route('/api/credentials', credentialsRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
 app.route('/api/nodes', nodesRoutes);
+app.route('/api/nodes', nodeLifecycleRoutes);
 app.route('/api/workspaces', workspacesRoutes);
 app.route('/api/terminal', terminalRoutes);
 app.route('/api/agent', agentRoutes);

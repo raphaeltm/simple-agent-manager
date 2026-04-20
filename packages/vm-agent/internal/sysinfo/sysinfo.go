@@ -131,6 +131,11 @@ type CollectorConfig struct {
 	VersionTimeout     time.Duration // Timeout for version check commands (default: 5s)
 	CacheTTL           time.Duration // How long to cache full results (default: 5s)
 	DiskMountPath      string        // Filesystem path for disk usage (default: "/")
+
+	// ReadFileFunc overrides the file reader (for testing). nil = use os.ReadFile.
+	ReadFileFunc func(path string) (string, error)
+	// StatFSFunc overrides the statfs syscall (for testing). nil = use syscall.Statfs.
+	StatFSFunc func(path string) (*syscall.Statfs_t, error)
 }
 
 // Collector gathers system information.
@@ -180,10 +185,18 @@ func NewCollector(cfg CollectorConfig) *Collector {
 	if cfg.DiskMountPath == "" {
 		cfg.DiskMountPath = "/"
 	}
+	readFile := cfg.ReadFileFunc
+	if readFile == nil {
+		readFile = defaultReadFile
+	}
+	statFS := cfg.StatFSFunc
+	if statFS == nil {
+		statFS = defaultStatFS
+	}
 	return &Collector{
 		config:   cfg,
-		readFile: defaultReadFile,
-		statFS:   defaultStatFS,
+		readFile: readFile,
+		statFS:   statFS,
 	}
 }
 

@@ -111,11 +111,13 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
   /** Helper: set up sequential .limit() results for workspace + credential lookups. */
   function setupDBMocks(
     workspaceRow: Record<string, unknown> | null,
-    credentialRow: Record<string, unknown> | null,
+    ...lookupRows: Array<Record<string, unknown> | null>
   ) {
     const chain = mockDB.limit;
     chain.mockResolvedValueOnce(workspaceRow ? [workspaceRow] : []);
-    chain.mockResolvedValueOnce(credentialRow ? [credentialRow] : []);
+    for (const row of lookupRows) {
+      chain.mockResolvedValueOnce(row ? [row] : []);
+    }
   }
 
   it('returns 401 when Authorization header is missing', async () => {
@@ -230,6 +232,39 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         iv: 'new-iv',
       }),
     );
+  });
+
+  it('does not fall back to user-scoped credential when a project-scoped row exists but is inactive', async () => {
+    setupDBMocks(
+      { userId: 'user-1', nodeId: 'node-1', projectId: 'proj-1' },
+      { id: 'proj-cred-1', encryptedToken: 'enc-project', iv: 'iv-project', isActive: false },
+    );
+
+    const res = await postSync(validBody);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ success: false, reason: 'credential_not_found' });
+    expect(decrypt).not.toHaveBeenCalled();
+    expect(encrypt).not.toHaveBeenCalled();
+    expect(mockDB.update).not.toHaveBeenCalled();
+  });
+
+  it('falls back to user-scoped credential when the workspace project has no project-scoped row', async () => {
+    setupDBMocks(
+      { userId: 'user-1', nodeId: 'node-1', projectId: 'proj-1' },
+      null,
+      { id: 'user-cred-1', encryptedToken: 'enc-user', iv: 'iv-user', isActive: true },
+    );
+    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      'old-different-value',
+    );
+
+    const res = await postSync(validBody);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ success: true, updated: true });
+    expect(decrypt).toHaveBeenCalledWith('enc-user', 'iv-user', 'test-key');
+    expect(encrypt).toHaveBeenCalledWith(validBody.credential, 'test-key');
   });
 
   it('rejects oversized payloads', async () => {
