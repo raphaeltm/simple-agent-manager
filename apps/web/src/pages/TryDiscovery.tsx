@@ -37,6 +37,7 @@ import {
   STAGE_TIMELINE,
   TRIAL_BACKOFF_BASE_MS,
   TRIAL_BACKOFF_CAP_MS,
+  TRIAL_DISCOVERY_STREAM_TIMEOUT_MS,
   TRIAL_EVENT_ANIMATION_MS,
   TRIAL_KNOWLEDGE_GROUP_MS,
   TRIAL_MAX_RECONNECT_ATTEMPTS,
@@ -63,6 +64,7 @@ export function TryDiscovery() {
   const sourceRef = useRef<EventSource | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
   const closedRef = useRef(false);
   // Dedup by composite key (`type:at`). Events can replay on SSE reconnect
@@ -120,11 +122,22 @@ export function TryDiscovery() {
           clearSlowTimer();
           setIsSlow(false);
           setEvents((prev) => [...prev, event]);
-          // Close early on terminal events to avoid unnecessary reconnects.
-          if (event.type === 'trial.ready' || event.type === 'trial.error') {
+          // Close immediately only on hard errors. `trial.ready` is a
+          // milestone (workspace provisioned) — the discovery agent keeps
+          // producing knowledge + idea events afterward.
+          if (event.type === 'trial.error') {
             sourceRef.current?.close();
             sourceRef.current = null;
             setConnection({ status: 'open', attempt: 0 });
+          }
+          // On trial.ready, start a grace timer — keep the stream open for
+          // TRIAL_DISCOVERY_STREAM_TIMEOUT_MS so late-arriving discovery
+          // events still reach the feed.
+          if (event.type === 'trial.ready' && !discoveryTimerRef.current) {
+            discoveryTimerRef.current = setTimeout(() => {
+              sourceRef.current?.close();
+              sourceRef.current = null;
+            }, TRIAL_DISCOVERY_STREAM_TIMEOUT_MS);
           }
         },
         onError: () => {
@@ -154,6 +167,10 @@ export function TryDiscovery() {
       closedRef.current = true;
       clearRetryTimer();
       clearSlowTimer();
+      if (discoveryTimerRef.current !== null) {
+        clearTimeout(discoveryTimerRef.current);
+        discoveryTimerRef.current = null;
+      }
       sourceRef.current?.close();
       sourceRef.current = null;
     };
@@ -173,6 +190,8 @@ export function TryDiscovery() {
   }
 
   const terminalError = view.error;
+  // The workspace is provisioned but discovery may still be running.
+  const isDiscovering = view.ready !== null && connection.status === 'open' && sourceRef.current !== null;
   // Show the stage skeleton until *substantive* progress arrives. A lone
   // `trial.started` event is just an acknowledgement — the user still sees
   // nothing happening, so keep the "Setting things up" roadmap visible.
@@ -193,6 +212,7 @@ export function TryDiscovery() {
           progressLatest={view.progressLatest}
           connection={connection}
           ready={view.ready !== null}
+          discovering={isDiscovering}
         />
 
         {terminalError ? <TerminalErrorPanel error={terminalError} /> : null}
@@ -393,9 +413,10 @@ interface HeaderProps {
   progressLatest: TrialProgressEvent | null;
   connection: ConnectionState;
   ready: boolean;
+  discovering?: boolean;
 }
 
-function DiscoveryHeader({ started, progressLatest, connection, ready }: HeaderProps) {
+function DiscoveryHeader({ started, progressLatest, connection, ready, discovering }: HeaderProps) {
   const repoName = started ? extractRepoName(started.repoUrl) : 'your repo';
   const progressPct =
     progressLatest?.progress !== undefined
@@ -412,8 +433,10 @@ function DiscoveryHeader({ started, progressLatest, connection, ready }: HeaderP
       <div className="flex items-start gap-3 justify-between">
         <div className="min-w-0 flex-1" title={repoName}>
           <Typography variant="title" as="h1" className="truncate">
-            {ready ? (
+            {ready && !discovering ? (
               <>Ready: <code className="font-mono">{repoName}</code></>
+            ) : ready && discovering ? (
+              <>Discovering <code className="font-mono">{repoName}</code>…</>
             ) : (
               <>Exploring <code className="font-mono">{repoName}</code>…</>
             )}
