@@ -453,6 +453,18 @@ export function buildFeed(events: TrialEvent[]): FeedItem[] {
       return;
     }
 
+    // Deduplicate consecutive progress events with the same stage —
+    // the orchestrator re-emits keepalive progress events while waiting
+    // for the agent to boot, which creates visual spam.
+    if (event.type === 'trial.progress') {
+      const prev = out[out.length - 1];
+      if (prev?.kind === 'event' && prev.event.type === 'trial.progress' && prev.event.stage === event.stage) {
+        // Replace the previous with the latest (keeps the most recent progress %)
+        out[out.length - 1] = { kind: 'event', key: `event-${idx}-${event.type}`, event };
+        return;
+      }
+    }
+
     out.push({ kind: 'event', key: `event-${idx}-${event.type}`, event });
   });
 
@@ -813,18 +825,18 @@ function AgentActivityGroupCard({ items }: { items: TrialAgentActivityEvent[] })
           <Brain className="w-4 h-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
+          <h3 className="text-xs font-medium text-fg-muted">
             Agent working&hellip;
           </h3>
           <ul className="mt-2 flex flex-col gap-1.5">
             {visible.map((item, idx) => (
               <li key={`${idx}-${item.at}`} className="flex items-start gap-2 text-xs text-fg-muted">
                 <ActivityRoleIcon role={item.role} />
-                <span className="min-w-0 break-words">
+                <span className="min-w-0 break-words line-clamp-2">
                   {item.toolName ? (
                     <><code className="font-mono text-[11px] text-accent">{item.toolName}</code>{' '}</>
                   ) : null}
-                  {item.text}
+                  {cleanActivityText(item.text)}
                 </span>
               </li>
             ))}
@@ -854,6 +866,31 @@ function ActivityRoleIcon({ role }: { role: 'assistant' | 'tool' | 'thinking' })
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Clean up raw agent activity text for display. Strips XML tags, collapses
+ * JSON blobs, and trims whitespace so the feed stays readable.
+ */
+function cleanActivityText(text: string): string {
+  // Strip XML-style tags (e.g. <path>...</path>, <content>...</content>)
+  let cleaned = text.replace(/<\/?[a-zA-Z][^>]*>/g, ' ');
+  // Collapse whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  // If it looks like a JSON blob, summarize it
+  if (cleaned.startsWith('{') && cleaned.length > 80) {
+    try {
+      const obj = JSON.parse(text.length <= 200 ? text : text + '"}');
+      // Try to extract a meaningful summary
+      const repo = obj.repository as string | undefined;
+      const status = obj.status as string | undefined;
+      if (repo && status) return `Workspace: ${repo} (${status})`;
+    } catch {
+      // Not valid JSON — just truncate
+    }
+    return cleaned.slice(0, 80) + '…';
+  }
+  return cleaned;
+}
 
 function extractRepoName(repoUrl: string): string {
   const match = /github\.com\/([^/]+\/[^/?#.]+)/i.exec(repoUrl);
