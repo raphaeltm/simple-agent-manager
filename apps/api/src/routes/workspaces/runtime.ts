@@ -18,6 +18,7 @@ import { getInstallationToken } from '../../services/github-app';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
+import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import {
@@ -590,6 +591,23 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
     return c.json(
       { error: 'SERVICE_UNAVAILABLE', message: 'Message persistence temporarily unavailable' },
       503
+    );
+  }
+
+  // Fire-and-forget: pipe agent activity to the trial SSE feed (if this
+  // workspace belongs to a trial project). Non-trial projects short-circuit
+  // with a single KV lookup inside the bridge.
+  if (workspace.projectId && result.persisted > 0) {
+    c.executionCtx.waitUntil(
+      bridgeAgentActivity(
+        c.env,
+        workspace.projectId,
+        body.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : undefined,
+        })),
+      ),
     );
   }
 

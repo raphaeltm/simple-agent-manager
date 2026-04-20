@@ -148,6 +148,18 @@ export interface TrialReadyEvent {
   at: number;
 }
 
+/** Agent activity — tool calls, assistant text, or thinking snippets. */
+export interface TrialAgentActivityEvent {
+  type: 'trial.agent_activity';
+  /** Which kind of agent output this represents. */
+  role: 'assistant' | 'tool' | 'thinking';
+  /** Short displayable text — truncated for SSE efficiency. */
+  text: string;
+  /** MCP tool name when role === 'tool'. */
+  toolName?: string;
+  at: number;
+}
+
 export interface TrialErrorEvent {
   type: 'trial.error';
   error: TrialErrorCode;
@@ -161,6 +173,7 @@ export type TrialEvent =
   | TrialKnowledgeEvent
   | TrialIdeaEvent
   | TrialReadyEvent
+  | TrialAgentActivityEvent
   | TrialErrorEvent;
 
 // ---------------------------------------------------------------------------
