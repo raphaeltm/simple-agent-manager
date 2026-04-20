@@ -114,10 +114,11 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
 // AI Inference Proxy (OpenAI-compatible Workers AI gateway)
 // =============================================================================
 
-/** Default model for AI proxy inference. Override via AI_PROXY_DEFAULT_MODEL env var.
- * Claude Haiku is the default — fast, capable, reliable tool calling.
- * Requires ANTHROPIC_API_KEY to be configured. Falls back to Workers AI models if not set. */
-export const DEFAULT_AI_PROXY_MODEL = 'claude-haiku-4-5-20251001';
+/** Default model for AI proxy inference when no admin override is set.
+ * Out-of-box default is a free Workers AI model — no API key required.
+ * Admins can override via the AI Proxy admin page (stored in KV) or
+ * the AI_PROXY_DEFAULT_MODEL env var. */
+export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
 /** Platform AI model metadata for UI dropdowns and allowed-model derivation. */
 export interface PlatformAIModel {
@@ -137,15 +138,15 @@ export interface PlatformAIModel {
  * Includes both Workers AI (free, Cloudflare-hosted) and Anthropic (requires ANTHROPIC_API_KEY). */
 export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   {
-    id: 'claude-haiku-4-5-20251001',
-    label: 'Claude Haiku 4.5',
-    isDefault: true,
-    provider: 'anthropic',
-  },
-  {
     id: '@cf/meta/llama-4-scout-17b-16e-instruct',
     label: 'Llama 4 Scout 17B',
+    isDefault: true,
     provider: 'workers-ai',
+  },
+  {
+    id: 'claude-haiku-4-5-20251001',
+    label: 'Claude Haiku 4.5',
+    provider: 'anthropic',
   },
   {
     id: '@cf/qwen/qwen3-30b-a3b-fp8',
@@ -158,6 +159,17 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     provider: 'workers-ai',
   },
 ];
+
+/** KV key for the admin-configured default model. Stored by the admin AI proxy config endpoint. */
+export const AI_PROXY_DEFAULT_MODEL_KV_KEY = 'platform:ai-proxy:default-model';
+
+/** Admin AI proxy configuration (stored in KV, managed via admin UI). */
+export interface AIProxyConfig {
+  /** Admin-selected default model ID */
+  defaultModel: string;
+  /** When the config was last updated (ISO string) */
+  updatedAt: string;
+}
 
 /** Default allowed models (comma-separated). Override via AI_PROXY_ALLOWED_MODELS env var. */
 export const DEFAULT_AI_PROXY_ALLOWED_MODELS = PLATFORM_AI_MODELS.map((m) => m.id).join(',');

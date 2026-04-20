@@ -56,50 +56,73 @@ describe('model allowlist parsing', () => {
 // =============================================================================
 
 describe('resolveModelId', () => {
+  /** Mock env with a KV stub that always returns null (no admin override). */
+  const mockKV = { get: async () => null } as unknown as KVNamespace;
+
   const mockEnvWorkersAI = {
     AI_PROXY_DEFAULT_MODEL: '@cf/meta/llama-4-scout-17b-16e-instruct',
+    KV: mockKV,
   } as Parameters<typeof resolveModelId>[1];
 
   const mockEnvAnthropic = {
     AI_PROXY_DEFAULT_MODEL: 'claude-haiku-4-5-20251001',
+    KV: mockKV,
   } as Parameters<typeof resolveModelId>[1];
 
-  it('returns default when model is undefined (Workers AI default)', () => {
-    expect(resolveModelId(undefined, mockEnvWorkersAI)).toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
+  it('returns default when model is undefined (Workers AI default)', async () => {
+    expect(await resolveModelId(undefined, mockEnvWorkersAI)).toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
   });
 
-  it('returns default when model is undefined (Anthropic default)', () => {
-    expect(resolveModelId(undefined, mockEnvAnthropic)).toBe('claude-haiku-4-5-20251001');
+  it('returns default when model is undefined (Anthropic default)', async () => {
+    expect(await resolveModelId(undefined, mockEnvAnthropic)).toBe('claude-haiku-4-5-20251001');
   });
 
-  it('returns model as-is when @cf/ prefix present', () => {
-    expect(resolveModelId('@cf/qwen/qwen3-30b-a3b-fp8', mockEnvWorkersAI))
+  it('returns model as-is when @cf/ prefix present', async () => {
+    expect(await resolveModelId('@cf/qwen/qwen3-30b-a3b-fp8', mockEnvWorkersAI))
       .toBe('@cf/qwen/qwen3-30b-a3b-fp8');
   });
 
-  it('strips workers-ai/ prefix', () => {
-    expect(resolveModelId('workers-ai/@cf/qwen/qwen3-30b-a3b-fp8', mockEnvWorkersAI))
+  it('strips workers-ai/ prefix', async () => {
+    expect(await resolveModelId('workers-ai/@cf/qwen/qwen3-30b-a3b-fp8', mockEnvWorkersAI))
       .toBe('@cf/qwen/qwen3-30b-a3b-fp8');
   });
 
-  it('adds @cf/ prefix when missing (OpenCode strips it)', () => {
-    expect(resolveModelId('meta/llama-4-scout-17b-16e-instruct', mockEnvWorkersAI))
+  it('adds @cf/ prefix when missing (OpenCode strips it)', async () => {
+    expect(await resolveModelId('meta/llama-4-scout-17b-16e-instruct', mockEnvWorkersAI))
       .toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
   });
 
-  it('preserves @hf/ prefix for HuggingFace models', () => {
-    expect(resolveModelId('@hf/some/model', mockEnvWorkersAI))
+  it('preserves @hf/ prefix for HuggingFace models', async () => {
+    expect(await resolveModelId('@hf/some/model', mockEnvWorkersAI))
       .toBe('@hf/some/model');
   });
 
-  it('preserves Anthropic model IDs without adding @cf/ prefix', () => {
-    expect(resolveModelId('claude-haiku-4-5-20251001', mockEnvWorkersAI))
+  it('preserves Anthropic model IDs without adding @cf/ prefix', async () => {
+    expect(await resolveModelId('claude-haiku-4-5-20251001', mockEnvWorkersAI))
       .toBe('claude-haiku-4-5-20251001');
   });
 
-  it('preserves full Anthropic model IDs with date suffix', () => {
-    expect(resolveModelId('claude-sonnet-4-5-20250514', mockEnvWorkersAI))
+  it('preserves full Anthropic model IDs with date suffix', async () => {
+    expect(await resolveModelId('claude-sonnet-4-5-20250514', mockEnvWorkersAI))
       .toBe('claude-sonnet-4-5-20250514');
+  });
+
+  it('reads admin override from KV when no model specified', async () => {
+    const kvWithOverride = {
+      get: async () => JSON.stringify({ defaultModel: 'claude-haiku-4-5-20251001', updatedAt: '2026-04-20T00:00:00Z' }),
+    } as unknown as KVNamespace;
+
+    const envWithKV = { ...mockEnvWorkersAI, KV: kvWithOverride };
+    expect(await resolveModelId(undefined, envWithKV)).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('explicit model overrides KV admin setting', async () => {
+    const kvWithOverride = {
+      get: async () => JSON.stringify({ defaultModel: 'claude-haiku-4-5-20251001', updatedAt: '2026-04-20T00:00:00Z' }),
+    } as unknown as KVNamespace;
+
+    const envWithKV = { ...mockEnvWorkersAI, KV: kvWithOverride };
+    expect(await resolveModelId('@cf/qwen/qwen3-30b-a3b-fp8', envWithKV)).toBe('@cf/qwen/qwen3-30b-a3b-fp8');
   });
 });
 

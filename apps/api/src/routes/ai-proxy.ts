@@ -12,6 +12,8 @@
  * Mount point: app.route('/ai/v1', aiProxyRoutes) in index.ts.
  */
 import {
+  AI_PROXY_DEFAULT_MODEL_KV_KEY,
+  type AIProxyConfig,
   DEFAULT_AI_PROXY_ALLOWED_MODELS,
   DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST,
   DEFAULT_AI_PROXY_MODEL,
@@ -71,10 +73,20 @@ function normalizeModelId(model: string): string {
   return resolved;
 }
 
-/** Resolve model from request, falling back to default. */
-function resolveModelId(model: string | undefined, env: Env): string {
-  if (!model) return normalizeModelId(env.AI_PROXY_DEFAULT_MODEL || DEFAULT_AI_PROXY_MODEL);
-  return normalizeModelId(model);
+/** Resolve model from request, falling back to admin KV override > env var > shared constant. */
+async function resolveModelId(model: string | undefined, env: Env): Promise<string> {
+  if (model) return normalizeModelId(model);
+
+  // Priority: KV (admin-set) > env var > shared constant
+  const kvConfig = await env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY);
+  if (kvConfig) {
+    try {
+      const parsed: AIProxyConfig = JSON.parse(kvConfig);
+      if (parsed.defaultModel) return normalizeModelId(parsed.defaultModel);
+    } catch { /* ignore corrupt KV data, fall through */ }
+  }
+
+  return normalizeModelId(env.AI_PROXY_DEFAULT_MODEL || DEFAULT_AI_PROXY_MODEL);
 }
 
 // =============================================================================
@@ -325,7 +337,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   }
 
   // --- Resolve and validate model ---
-  const modelId = resolveModelId(body.model as string | undefined, c.env);
+  const modelId = await resolveModelId(body.model as string | undefined, c.env);
   const allowedModels = getAllowedModels(c.env);
   if (!allowedModels.has(modelId)) {
     return c.json({

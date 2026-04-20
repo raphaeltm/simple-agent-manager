@@ -227,6 +227,47 @@ export async function fetchAnalyticsForwardStatus(): Promise<AnalyticsForwardSta
 }
 
 // =============================================================================
+// Admin AI Proxy Config
+// =============================================================================
+
+export interface AIProxyConfigResponse {
+  defaultModel: string;
+  source: 'admin' | 'env' | 'default';
+  updatedAt: string | null;
+  hasAnthropicCredential: boolean;
+  models: Array<{
+    id: string;
+    label: string;
+    provider: 'workers-ai' | 'anthropic';
+    isDefault?: boolean;
+    available: boolean;
+  }>;
+}
+
+export async function fetchAIProxyConfig(): Promise<AIProxyConfigResponse> {
+  return request<AIProxyConfigResponse>('/api/admin/ai-proxy/config');
+}
+
+export async function updateAIProxyConfig(defaultModel: string): Promise<{
+  defaultModel: string;
+  source: 'admin';
+  updatedAt: string;
+}> {
+  return request('/api/admin/ai-proxy/config', {
+    method: 'PUT',
+    body: JSON.stringify({ defaultModel }),
+  });
+}
+
+export async function resetAIProxyConfig(): Promise<{
+  defaultModel: string;
+  source: 'env' | 'default';
+  updatedAt: null;
+}> {
+  return request('/api/admin/ai-proxy/config', { method: 'DELETE' });
+}
+
+// =============================================================================
 // Admin Platform Credentials
 // =============================================================================
 
