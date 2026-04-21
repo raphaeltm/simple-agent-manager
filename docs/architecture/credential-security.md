@@ -122,35 +122,35 @@ Runtime flow:
 
 These are set once during deployment and managed by the platform operator:
 
-| Secret | Purpose | Who Sets It |
-|--------|---------|-------------|
-| `ENCRYPTION_KEY` | Shared fallback key | Platform operator |
-| `CREDENTIAL_ENCRYPTION_KEY` | Encrypt user credentials (overrides `ENCRYPTION_KEY`) | Platform operator |
-| `BETTER_AUTH_SECRET` | BetterAuth session management (overrides `ENCRYPTION_KEY`) | Platform operator |
-| `GITHUB_WEBHOOK_SECRET` | Webhook HMAC verification (overrides `ENCRYPTION_KEY`) | Platform operator |
-| `JWT_PRIVATE_KEY` | Sign authentication tokens | Platform operator |
-| `JWT_PUBLIC_KEY` | Verify authentication tokens | Platform operator |
-| `CF_API_TOKEN` | DNS operations for workspaces | Platform operator |
-| `CF_ZONE_ID` | DNS zone for workspace subdomains | Platform operator |
-| `GITHUB_CLIENT_*` | OAuth authentication | Platform operator |
+| Secret                      | Purpose                                                                                                                         | Who Sets It       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `ENCRYPTION_KEY`            | Shared fallback key                                                                                                             | Platform operator |
+| `CREDENTIAL_ENCRYPTION_KEY` | Encrypt user credentials (overrides `ENCRYPTION_KEY`)                                                                           | Platform operator |
+| `BETTER_AUTH_SECRET`        | BetterAuth session management (overrides `ENCRYPTION_KEY`)                                                                      | Platform operator |
+| `GITHUB_WEBHOOK_SECRET`     | Webhook HMAC verification (overrides `ENCRYPTION_KEY`; set from GitHub Actions secret `GH_WEBHOOK_SECRET` in automated deploys) | Platform operator |
+| `JWT_PRIVATE_KEY`           | Sign authentication tokens                                                                                                      | Platform operator |
+| `JWT_PUBLIC_KEY`            | Verify authentication tokens                                                                                                    | Platform operator |
+| `CF_API_TOKEN`              | Cloudflare deploy, DNS, observability, and AI Gateway operations                                                                | Platform operator |
+| `CF_ZONE_ID`                | DNS zone for workspace subdomains                                                                                               | Platform operator |
+| `GITHUB_CLIENT_*`           | OAuth authentication                                                                                                            | Platform operator |
 
 ### User Credentials (Encrypted in Database)
 
 These are provided by each user through the Settings UI:
 
-| Credential | Purpose | Who Provides It |
-|------------|---------|-----------------|
-| Hetzner API Token | Provision VMs | Each user |
-| (Future: AWS, GCP, etc.) | Provision resources | Each user |
+| Credential               | Purpose             | Who Provides It |
+| ------------------------ | ------------------- | --------------- |
+| Hetzner API Token        | Provision VMs       | Each user       |
+| (Future: AWS, GCP, etc.) | Provision resources | Each user       |
 
 ### Project Runtime Secrets (Encrypted in Database)
 
 Projects support runtime env vars and runtime files as plaintext or secret values:
 
-| Data | Storage | Encryption Behavior |
-|------|---------|---------------------|
-| Runtime env vars | `project_runtime_env_vars` | Secret rows use AES-GCM (`stored_value` + `value_iv`) |
-| Runtime files | `project_runtime_files` | Secret rows use AES-GCM (`stored_content` + `content_iv`) |
+| Data             | Storage                    | Encryption Behavior                                       |
+| ---------------- | -------------------------- | --------------------------------------------------------- |
+| Runtime env vars | `project_runtime_env_vars` | Secret rows use AES-GCM (`stored_value` + `value_iv`)     |
+| Runtime files    | `project_runtime_files`    | Secret rows use AES-GCM (`stored_content` + `content_iv`) |
 
 Secret values are masked in project runtime-config list responses and only decrypted in callback-authenticated runtime asset responses for workspace provisioning.
 
@@ -165,13 +165,13 @@ Secret values are masked in project runtime-config list responses and only decry
 
 ### Threat Model
 
-| Threat | Mitigation |
-|--------|------------|
-| Database breach | Credentials encrypted with AES-GCM |
+| Threat              | Mitigation                                          |
+| ------------------- | --------------------------------------------------- |
+| Database breach     | Credentials encrypted with AES-GCM                  |
 | Encryption key leak | Rotate the affected key, re-encrypt all credentials |
-| Token in logs | Never log decrypted tokens |
-| Cross-user access | Always filter by `user_id` in queries |
-| Replay attacks | Unique IV per credential |
+| Token in logs       | Never log decrypted tokens                          |
+| Cross-user access   | Always filter by `user_id` in queries               |
+| Replay attacks      | Unique IV per credential                            |
 
 ### What We Do NOT Do
 
@@ -198,11 +198,11 @@ In addition to user-provided cloud credentials, the platform also encrypts **OAu
 
 The following fields in the `accounts` table are encrypted at rest:
 
-| Field | Description |
-|-------|-------------|
-| `access_token` | GitHub OAuth access token used for API calls |
-| `refresh_token` | GitHub OAuth refresh token (when available) |
-| `id_token` | OpenID Connect ID token (when available) |
+| Field           | Description                                  |
+| --------------- | -------------------------------------------- |
+| `access_token`  | GitHub OAuth access token used for API calls |
+| `refresh_token` | GitHub OAuth refresh token (when available)  |
+| `id_token`      | OpenID Connect ID token (when available)     |
 
 ### How It Works
 
@@ -222,13 +222,13 @@ Without this setting, GitHub OAuth tokens are stored as plaintext in D1. If the 
 
 Agent credentials (API keys and OAuth tokens) are injected into workspaces when an ACP session starts (see `session_host.go:startAgent()`). The injection mechanism varies by agent and credential type, determined by `gateway.go:getAgentCommandInfo()`:
 
-| Agent | Credential Kind | Injection Method | Details |
-|-------|----------------|------------------|---------|
-| Claude Code | API Key | Env var `ANTHROPIC_API_KEY` | Standard env var injection |
-| Claude Code | OAuth Token | Env var `CLAUDE_CODE_OAUTH_TOKEN` | Standard env var injection |
-| OpenAI Codex | API Key | Env var `OPENAI_API_KEY` | Standard env var injection |
-| OpenAI Codex | OAuth Token | File `~/.codex/auth.json` | Written into container with `0600` permissions; `NO_BROWSER=1` env var also set |
-| Google Gemini | API Key | Env var `GEMINI_API_KEY` | Standard env var injection |
+| Agent         | Credential Kind | Injection Method                  | Details                                                                         |
+| ------------- | --------------- | --------------------------------- | ------------------------------------------------------------------------------- |
+| Claude Code   | API Key         | Env var `ANTHROPIC_API_KEY`       | Standard env var injection                                                      |
+| Claude Code   | OAuth Token     | Env var `CLAUDE_CODE_OAUTH_TOKEN` | Standard env var injection                                                      |
+| OpenAI Codex  | API Key         | Env var `OPENAI_API_KEY`          | Standard env var injection                                                      |
+| OpenAI Codex  | OAuth Token     | File `~/.codex/auth.json`         | Written into container with `0600` permissions; `NO_BROWSER=1` env var also set |
+| Google Gemini | API Key         | Env var `GEMINI_API_KEY`          | Standard env var injection                                                      |
 
 Env var injection is performed at `session_host.go:startAgent()` line `envVars = append(envVars, ...)`. File-based injection uses `gateway.go:writeAuthFileToContainer()`.
 
@@ -239,6 +239,7 @@ Unlike Claude Code which accepts OAuth tokens via environment variable, `codex-a
 When SAM injects task-scoped MCP servers into a Codex ACP session, it also writes a managed block into `~/.codex/config.toml`. That block uses Codex's native `mcp_servers.<id>.url` support and `bearer_token_env_var` so the SAM MCP bearer token stays in process environment rather than being written to disk.
 
 The auth.json file contains:
+
 - `OPENAI_API_KEY`: `null` — indicates OAuth mode (not API key)
 - `tokens.access_token`: JWT (RS256, ~1hr expiry, auto-refreshed by codex-acp)
 - `tokens.refresh_token`: Opaque refresh token (long-lived)
@@ -248,6 +249,7 @@ The auth.json file contains:
 Users obtain this file by running `codex login` on their local machine and copying `~/.codex/auth.json`. The full JSON blob is stored as a single encrypted credential in D1 (validated by `validation.ts:validateOpenAICodexAuthJson()`).
 
 Security measures for auth.json injection (see `gateway.go:writeAuthFileToContainer()`):
+
 1. File written with `0600` permissions (owner read/write only)
 2. Parent directory `.codex/` created with `0700` permissions
 3. Content streamed via stdin to `docker exec` — avoids exposing secrets in process args or `/proc/<pid>/environ`
@@ -286,30 +288,29 @@ sequenceDiagram
 ### Sync-Back Guard Conditions
 
 Preconditions checked upfront (see `session_host.go:syncCredentialOnStop()`):
+
 1. **Injection mode is `auth-file`** — env var credentials are not modified by agents at runtime
 2. **`CredentialSyncer` is configured** — the server must provide a syncer implementation
 
-Runtime early-exit paths (logged as warnings, not returned as errors):
-3. **`ContainerResolver` is nil or fails** — container no longer accessible (e.g., forcibly removed)
-4. **Auth file is empty** — nothing to sync
+Runtime early-exit paths (logged as warnings, not returned as errors): 3. **`ContainerResolver` is nil or fails** — container no longer accessible (e.g., forcibly removed) 4. **Auth file is empty** — nothing to sync
 
 ### API Endpoint
 
 `POST /api/workspaces/:id/agent-credential-sync` (callback JWT auth, not user auth):
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `agentType` | string | Agent type (e.g., `openai-codex`) |
-| `credentialKind` | string | Credential kind (e.g., `oauth-token`) |
-| `credential` | string | Full credential content (e.g., auth.json JSON) |
+| Field            | Type   | Description                                    |
+| ---------------- | ------ | ---------------------------------------------- |
+| `agentType`      | string | Agent type (e.g., `openai-codex`)              |
+| `credentialKind` | string | Credential kind (e.g., `oauth-token`)          |
+| `credential`     | string | Full credential content (e.g., auth.json JSON) |
 
 Responses:
 
-| Response | Meaning |
-|----------|---------|
+| Response                                             | Meaning                                         |
+| ---------------------------------------------------- | ----------------------------------------------- |
 | `{ success: false, reason: 'credential_not_found' }` | Credential was deleted while session was active |
-| `{ success: true, updated: false }` | Credential unchanged, no write performed |
-| `{ success: true, updated: true }` | Credential refreshed and re-encrypted in DB |
+| `{ success: true, updated: false }`                  | Credential unchanged, no write performed        |
+| `{ success: true, updated: true }`                   | Credential refreshed and re-encrypted in DB     |
 
 Input validation: `agentType` is validated against `AGENT_CATALOG` via `isValidAgentType()` from `packages/shared/src/agents.ts`. `credentialKind` must be `api-key` or `oauth-token`. Payload capped at 64 KB.
 
@@ -364,10 +365,10 @@ The `CodexRefreshLock` Durable Object (`apps/api/src/durable-objects/codex-refre
 
 ### API Endpoints
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/projects/:id/credentials` | List project-scoped credentials for a project |
-| PUT | `/api/projects/:id/credentials` | Create/update a project-scoped credential |
+| Method | Path                                                       | Purpose                                                            |
+| ------ | ---------------------------------------------------------- | ------------------------------------------------------------------ |
+| GET    | `/api/projects/:id/credentials`                            | List project-scoped credentials for a project                      |
+| PUT    | `/api/projects/:id/credentials`                            | Create/update a project-scoped credential                          |
 | DELETE | `/api/projects/:id/credentials/:agentType/:credentialKind` | Remove a project-scoped credential (falls back to user credential) |
 
 All guarded by `requireOwnedProject` — cross-user access returns **404** (not 403) to avoid confirming the existence of other users' projects.

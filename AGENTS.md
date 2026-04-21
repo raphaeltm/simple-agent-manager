@@ -84,14 +84,14 @@ The root domain does NOT serve any application. Always use subdomains:
 | **API**       | `https://api.${BASE_DOMAIN}/...`  |
 | **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` |
 
-## Env Var Naming: GH_ vs GITHUB_
+## Env Var Naming: GH* vs GITHUB*
 
-GitHub Actions reserves `GITHUB_*`, so GitHub secrets use `GH_*` prefix. The deployment script (`configure-secrets.sh`) maps them to `GITHUB_*` Worker secrets.
+GitHub Actions secret names cannot start with `GITHUB_*`, so GitHub App secrets use `GH_*` prefix. The deployment script (`configure-secrets.sh`) maps them to `GITHUB_*` Worker secrets.
 
-| Context              | Prefix     | Example             |
-| -------------------- | ---------- | ------------------- |
-| GitHub Environment   | `GH_`     | `GH_CLIENT_ID`      |
-| Worker runtime / .env | `GITHUB_` | `GITHUB_CLIENT_ID`  |
+| Context               | Prefix    | Example            |
+| --------------------- | --------- | ------------------ |
+| GitHub Environment    | `GH_`     | `GH_CLIENT_ID`     |
+| Worker runtime / .env | `GITHUB_` | `GITHUB_CLIENT_ID` |
 
 ## Wrangler Binding Rule
 
@@ -123,6 +123,7 @@ After writing or modifying ANY code, update ALL documentation that references th
 ### Constitution (full: `.claude/rules/03-constitution.md`)
 
 Validate every change against `.specify/memory/constitution.md`, especially Principle XI:
+
 - NO hardcoded URLs — derive from environment variables
 - NO hardcoded timeouts — use configurable env vars with defaults
 - NO hardcoded limits — all limits must be configurable
@@ -171,42 +172,46 @@ Tasks tracked as markdown in `tasks/` (backlog → active → archive). Check it
 
 ## Agent Configuration Cross-Reference
 
-| What | Claude Code Location | Codex Location |
-|------|---------------------|----------------|
-| Project instructions | `CLAUDE.md` | `AGENTS.md` (this file) |
-| Modular rules | `.claude/rules/*.md` | Condensed above + path-scoped `AGENTS.md` files |
-| Subagents / skills | `.claude/agents/*/` | `.agents/skills/*/SKILL.md` (symlinked) |
-| Reference skills | `.claude/skills/*/SKILL.md` | `.agents/skills/*/SKILL.md` |
-| Slash commands | `.claude/commands/*.md` | `.codex/prompts/*.md` |
-| Project config | `.claude/settings.json` | `.codex/config.toml` |
-| Constitution | `.specify/memory/constitution.md` | Same file |
-| Feature specs | `specs/` | Same directory |
+| What                 | Claude Code Location              | Codex Location                                  |
+| -------------------- | --------------------------------- | ----------------------------------------------- |
+| Project instructions | `CLAUDE.md`                       | `AGENTS.md` (this file)                         |
+| Modular rules        | `.claude/rules/*.md`              | Condensed above + path-scoped `AGENTS.md` files |
+| Subagents / skills   | `.claude/agents/*/`               | `.agents/skills/*/SKILL.md` (symlinked)         |
+| Reference skills     | `.claude/skills/*/SKILL.md`       | `.agents/skills/*/SKILL.md`                     |
+| Slash commands       | `.claude/commands/*.md`           | `.codex/prompts/*.md`                           |
+| Project config       | `.claude/settings.json`           | `.codex/config.toml`                            |
+| Constitution         | `.specify/memory/constitution.md` | Same file                                       |
+| Feature specs        | `specs/`                          | Same directory                                  |
 
 ## Codex Skills
 
 Invoke skills with `$skill-name`. Available skills in `.agents/skills/`:
 
 ### Review / Specialist Skills
+
 - `$cloudflare-specialist` — D1, KV, R2, wrangler config review
 - `$constitution-validator` — No hardcoded values compliance
 - `$doc-sync-validator` — Documentation matches code
-- `$env-validator` — GH_ vs GITHUB_ consistency
+- `$env-validator` — GH* vs GITHUB* consistency
 - `$go-specialist` — Go code review (PTY, WebSocket, JWT)
 - `$security-auditor` — Credential safety, OWASP, JWT
 - `$test-engineer` — Test generation and TDD compliance
 - `$ui-ux-specialist` — Mobile-first UI, Playwright verification
 
 ### Reference Skills
+
 - `$api-reference` — Full API endpoint reference
 - `$changelog` — Recent feature changes and history
 - `$env-reference` — Full environment variable reference
 
 ### Task Execution
+
 - `$do` — End-to-end task executor: research → plan → implement → review → PR
 
 ## Codex Prompts
 
 Speckit workflow prompts in `.codex/prompts/`:
+
 - `/prompts:speckit.specify` — Create/update feature spec
 - `/prompts:speckit.clarify` — Identify underspecified areas
 - `/prompts:speckit.plan` — Create implementation plan
