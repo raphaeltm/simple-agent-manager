@@ -103,13 +103,13 @@ describe('TrialEventBus DO', () => {
     expect(body.events[0].event.message).toBe('b');
   });
 
-  it('Appending a terminal event (trial.ready) closes the bus', async () => {
+  it('Appending trial.ready does NOT close the bus (agent continues producing events)', async () => {
     const bus = makeDO();
     await bus.fetch(appendReq({ type: 'trial.ready', projectId: 'p', at: 1 }));
 
     const poll = await bus.fetch(pollReq(0, 100));
     const body = (await poll.json()) as { closed: boolean; events: unknown[] };
-    expect(body.closed).toBe(true);
+    expect(body.closed).toBe(false);
     expect(body.events.length).toBe(1);
   });
 
