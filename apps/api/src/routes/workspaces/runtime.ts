@@ -18,8 +18,8 @@ import { getInstallationToken } from '../../services/github-app';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
-import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
+import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import {
   getWorkspaceRuntimeAssets,
