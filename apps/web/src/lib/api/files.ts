@@ -235,6 +235,17 @@ export async function removeWorktree(
 
 // ---------- Session File Proxy (proxied through CF Worker to VM agent) ----------
 
+/** Fetch recursive file index via session proxy. Returns flat list of all file paths. */
+export async function getSessionFileIndex(
+  projectId: string,
+  sessionId: string
+): Promise<string[]> {
+  const data = await request<{ files: string[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/files/find`
+  );
+  return data.files;
+}
+
 /** Fetch directory listing via session proxy. */
 export async function getSessionFileList(
   projectId: string,

@@ -1,13 +1,15 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import {
-ArrowLeft, ChevronRight, Download,
-FileText, Folder, Image, RefreshCw,   X, } from 'lucide-react';
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+  ArrowLeft, ChevronRight, Download,
+  FileText, Folder, Image, RefreshCw, Search, X,
+} from 'lucide-react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   downloadSessionFile,
   type FileEntry,
   getSessionFileContent,
+  getSessionFileIndex,
   getSessionFileList,
   getSessionFileRawUrl,
   getSessionGitDiff,
@@ -16,7 +18,8 @@ import {
   type GitStatusData,
 } from '../../lib/api';
 import { detectLanguage, formatFileSize, isImageFile } from '../../lib/file-utils';
-import { RenderedMarkdown,SyntaxHighlightedCode } from '../MarkdownRenderer';
+import { fileNameFromPath, fuzzyFilterFiles } from '../../lib/fuzzy-match';
+import { RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
 import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
 
 export type FilePanelMode = 'browse' | 'view' | 'diff' | 'git-status';
@@ -85,18 +88,40 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   // Markdown rendering mode
   const [mdMode, setMdMode] = useState<'rendered' | 'source'>('rendered');
 
+  // File search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchActive, setSearchActive] = useState(false);
+  const [fileIndex, setFileIndex] = useState<string[] | null>(null);
+  const [fileIndexLoading, setFileIndexLoading] = useState(false);
+  const [fileIndexError, setFileIndexError] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   // Focus management — move focus into panel on mount
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     panelRef.current?.focus();
   }, []);
 
-  // Escape key closes panel
+  // Escape key closes panel or search; Cmd+P/Ctrl+P opens search
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (searchActive) {
+          setSearchActive(false);
+          setSearchQuery('');
+        } else {
+          onClose();
+        }
+      }
+      // Cmd+P / Ctrl+P opens search when in browse mode
+      if ((e.metaKey || e.ctrlKey) && e.key === 'p' && (mode === 'browse' || mode === 'git-status')) {
+        e.preventDefault();
+        activateSearch();
+      }
+    };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose]);
+  }, [onClose, searchActive, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load file listing
   const loadListing = useCallback(async (path: string) => {
@@ -157,6 +182,35 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
     }
   }, [projectId, sessionId]);
 
+  // Load file index for search (cached — only fetched once per panel open)
+  const loadFileIndex = useCallback(async () => {
+    if (fileIndex !== null || fileIndexLoading) return;
+    setFileIndexLoading(true);
+    setFileIndexError(null);
+    try {
+      const files = await getSessionFileIndex(projectId, sessionId);
+      setFileIndex(files);
+    } catch (err) {
+      setFileIndexError(err instanceof Error ? err.message : 'Failed to load file index');
+    } finally {
+      setFileIndexLoading(false);
+    }
+  }, [projectId, sessionId, fileIndex, fileIndexLoading]);
+
+  // Activate search — loads file index on first activation, focuses input
+  const activateSearch = useCallback(() => {
+    setSearchActive(true);
+    loadFileIndex();
+    // Focus the input after React renders it
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [loadFileIndex]);
+
+  // Compute search results from query and file index
+  const searchResults = useMemo(
+    () => (fileIndex && searchQuery.trim()) ? fuzzyFilterFiles(fileIndex, searchQuery) : [],
+    [fileIndex, searchQuery]
+  );
+
   // Initial load based on mode
   useEffect(() => {
     if (mode === 'browse') loadListing(currentPath);
@@ -190,6 +244,8 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   const goBack = () => {
     if (mode === 'view' || mode === 'diff') {
       setMode('browse');
+      setSearchActive(false);
+      setSearchQuery('');
       loadListing(currentPath);
     } else {
       onClose();
@@ -290,16 +346,27 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           )}
 
           {mode === 'browse' && (
-            <button
-              type="button"
-              onClick={() => loadListing(currentPath)}
-              disabled={browseLoading}
-              aria-label="Refresh"
-              className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
-              style={{ opacity: browseLoading ? 0.5 : 1 }}
-            >
-              <RefreshCw size={14} className={browseLoading ? 'animate-spin' : ''} />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={activateSearch}
+                aria-label="Search files"
+                title="Search files (Ctrl+P)"
+                className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+              >
+                <Search size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => loadListing(currentPath)}
+                disabled={browseLoading}
+                aria-label="Refresh"
+                className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+                style={{ opacity: browseLoading ? 0.5 : 1 }}
+              >
+                <RefreshCw size={14} className={browseLoading ? 'animate-spin' : ''} />
+              </button>
+            </>
           )}
 
           {mode === 'view' && filePath && (
@@ -356,10 +423,91 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           </div>
         )}
 
+        {/* Search bar (browse mode, when active) */}
+        {mode === 'browse' && searchActive && (
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-border-default bg-surface shrink-0">
+            <Search size={14} className="text-fg-muted shrink-0" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search files by name..."
+              className="flex-1 min-w-0 bg-transparent border-none outline-none text-xs font-mono text-fg-primary placeholder:text-fg-muted"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setSearchActive(false);
+                  setSearchQuery('');
+                }
+                if (e.key === 'Enter' && searchResults.length > 0) {
+                  openFile(searchResults[0]!.path);
+                  setSearchActive(false);
+                  setSearchQuery('');
+                }
+              }}
+            />
+            {fileIndexLoading && <Spinner size="sm" />}
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => { setSearchQuery(''); searchInputRef.current?.focus(); }}
+                aria-label="Clear search"
+                className="p-1 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Content area */}
         <div className="flex-1 overflow-auto min-h-0">
-          {/* Browse mode */}
-          {mode === 'browse' && (
+          {/* Browse mode — search results or directory listing */}
+          {mode === 'browse' && searchActive && searchQuery.trim() && (
+            <>
+              {fileIndexError && (
+                <div className="m-4 p-3 bg-danger-tint rounded-lg text-xs" style={{ color: 'var(--sam-color-tn-red)' }}>
+                  {fileIndexError}
+                </div>
+              )}
+              {!fileIndexError && searchResults.length === 0 && fileIndex !== null && (
+                <div className="flex justify-center p-12 text-fg-muted text-sm">
+                  No files matching &ldquo;{searchQuery}&rdquo;
+                </div>
+              )}
+              {searchResults.length > 0 && (
+                <div>
+                  {searchResults.map((result) => (
+                    <button
+                      key={result.path}
+                      type="button"
+                      onClick={() => {
+                        openFile(result.path);
+                        setSearchActive(false);
+                        setSearchQuery('');
+                      }}
+                      className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[40px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
+                    >
+                      {isImageFile(result.path) ? (
+                        <Image size={14} className="shrink-0" style={{ color: 'var(--sam-color-info, #3b82f6)' }} />
+                      ) : (
+                        <FileText size={14} className="shrink-0 text-fg-muted" />
+                      )}
+                      <span className="flex flex-col min-w-0 flex-1">
+                        <HighlightedFilePath path={result.path} matches={result.matches} />
+                        <span className="text-[10px] text-fg-muted truncate">
+                          {result.path}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Browse mode — normal directory listing (when not searching) */}
+          {mode === 'browse' && !(searchActive && searchQuery.trim()) && (
             <>
               {browseLoading && entries.length === 0 && (
                 <div className="flex justify-center p-8"><Spinner size="md" /></div>
@@ -538,6 +686,25 @@ function GitStatusList({
         </section>
       )}
     </div>
+  );
+}
+
+/** Renders a file name with fuzzy-matched characters highlighted. */
+function HighlightedFilePath({ path, matches }: { path: string; matches: number[] }) {
+  const name = fileNameFromPath(path);
+  const nameStart = path.length - name.length;
+  const matchSet = new Set(matches);
+
+  return (
+    <span className="text-xs font-mono text-fg-primary truncate">
+      {Array.from(name).map((char, i) => {
+        const globalIdx = nameStart + i;
+        const isMatch = matchSet.has(globalIdx);
+        return isMatch
+          ? <span key={i} className="font-bold" style={{ color: 'var(--sam-color-accent-primary)' }}>{char}</span>
+          : <span key={i}>{char}</span>;
+      })}
+    </span>
   );
 }
 

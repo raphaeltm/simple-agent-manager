@@ -114,3 +114,29 @@ export function fileNameFromPath(path: string): string {
   const lastSlash = path.lastIndexOf('/');
   return lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
 }
+
+/**
+ * Filter and rank a list of file paths by fuzzy match against a query.
+ * Returns matched paths sorted by score (best first), up to `limit` results.
+ */
+export function fuzzyFilterFiles(
+  files: string[],
+  query: string,
+  limit = 50
+): Array<{ path: string; score: number; matches: number[] }> {
+  if (!query.trim()) return [];
+
+  const results: Array<{ path: string; score: number; matches: number[] }> = [];
+
+  for (const file of files) {
+    const match = fuzzyMatch(query, file);
+    if (match) {
+      results.push({ path: file, score: match.score, matches: match.matches });
+    }
+  }
+
+  // Sort by score descending
+  results.sort((a, b) => b.score - a.score);
+
+  return results.slice(0, limit);
+}

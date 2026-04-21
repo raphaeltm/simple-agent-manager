@@ -112,6 +112,7 @@ export {
   getGitFile,
   getGitStatus,
   getSessionFileContent,
+  getSessionFileIndex,
   getSessionFileList,
   getSessionFileRawUrl,
   getSessionGitDiff,
