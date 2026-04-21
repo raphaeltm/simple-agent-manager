@@ -13,8 +13,8 @@ import { errors } from '../middleware/error';
 
 /** Default AI Gateway ID. Override via AI_GATEWAY_ID env var. */
 const DEFAULT_GATEWAY_ID = 'sam';
-/** Default number of log entries to fetch per page. Override via AI_USAGE_PAGE_SIZE env var. */
-const DEFAULT_PAGE_SIZE = 100;
+/** Default number of log entries to fetch per page. Override via AI_USAGE_PAGE_SIZE env var. CF max is 50. */
+const DEFAULT_PAGE_SIZE = 50;
 /** Maximum pages to iterate when aggregating. Override via AI_USAGE_MAX_PAGES env var. */
 const DEFAULT_MAX_PAGES = 20;
 
