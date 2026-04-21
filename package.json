@@ -55,10 +55,10 @@
     "eslint-plugin-simple-import-sort": "13.0.0",
     "husky": "9.1.7",
     "lint-staged": "15.5.2",
-    "prettier": "3.8.1",
+    "prettier": "3.8.3",
     "ts-morph": "27.0.2",
     "tsx": "catalog:",
-    "turbo": "2.7.6",
+    "turbo": "2.9.6",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
