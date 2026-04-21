@@ -102,6 +102,9 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
     panelRef.current?.focus();
   }, []);
 
+  // Ref to hold the latest activateSearch so the keydown effect avoids stale closures
+  const activateSearchRef = useRef<() => void>(() => {});
+
   // Escape key closes panel or search; Cmd+P/Ctrl+P opens search
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -116,12 +119,12 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
       // Cmd+P / Ctrl+P opens search when in browse mode
       if ((e.metaKey || e.ctrlKey) && e.key === 'p' && (mode === 'browse' || mode === 'git-status')) {
         e.preventDefault();
-        activateSearch();
+        activateSearchRef.current();
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose, searchActive, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [onClose, searchActive, mode]);
 
   // Load file listing
   const loadListing = useCallback(async (path: string) => {
@@ -204,6 +207,9 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
     // Focus the input after React renders it
     requestAnimationFrame(() => searchInputRef.current?.focus());
   }, [loadFileIndex]);
+
+  // Keep the ref up-to-date so the keydown handler always calls the latest version
+  activateSearchRef.current = activateSearch;
 
   // Compute search results from query and file index
   const searchResults = useMemo(
@@ -486,7 +492,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                         setSearchActive(false);
                         setSearchQuery('');
                       }}
-                      className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[40px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
+                      className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[44px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
                     >
                       {isImageFile(result.path) ? (
                         <Image size={14} className="shrink-0" style={{ color: 'var(--sam-color-info, #3b82f6)' }} />
@@ -529,7 +535,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                       key={entry.name}
                       type="button"
                       onClick={() => handleEntryClick(entry)}
-                      className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[40px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
+                      className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[44px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
                     >
                       {entry.type === 'dir' ? (
                         <Folder size={14} className="shrink-0" style={{ color: 'var(--sam-color-accent-primary)' }} />
@@ -743,7 +749,7 @@ function GitFileRow({
       <button
         type="button"
         onClick={onViewDiff}
-        className="text-[10px] font-semibold px-2 py-1 rounded border border-border-default bg-transparent cursor-pointer text-fg-muted hover:text-fg-primary md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0"
+        className="text-[10px] font-semibold px-2 py-1 rounded border border-border-default bg-transparent cursor-pointer text-fg-muted hover:text-fg-primary md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
       >
         Diff
       </button>

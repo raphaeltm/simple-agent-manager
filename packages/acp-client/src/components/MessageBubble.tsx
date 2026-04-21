@@ -32,7 +32,7 @@ const REMARK_PLUGINS = [remarkGfm];
 export function isFilePathHref(href: string | undefined): boolean {
   if (!href) return false;
   // URLs, anchors, and special protocols are not file paths
-  if (/^(https?:|mailto:|#|javascript:|tel:|data:|blob:)/i.test(href)) return false;
+  if (/^(https?:|ftp:|wss?:|file:|mailto:|#|javascript:|tel:|data:|blob:)/i.test(href)) return false;
   // Must contain a dot (extension) or a slash (path separator) to look like a file path
   // Examples: src/main.ts, ./foo/bar.js, package.json, README.md
   return /[./]/.test(href);
@@ -203,6 +203,7 @@ function buildAgentMarkdownComponents(
         return (
           <button
             type="button"
+            aria-label={`Open ${path} in file browser`}
             className="text-blue-600 hover:text-blue-800 underline decoration-dotted font-mono text-inherit bg-transparent border-none cursor-pointer p-0 inline"
             onClick={(e) => {
               e.preventDefault();

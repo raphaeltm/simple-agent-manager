@@ -32,6 +32,13 @@ describe('isFilePathHref', () => {
     expect(isFilePathHref('blob:https://example.com/uuid')).toBe(false);
   });
 
+  it('returns false for ftp, ws, wss, and file protocols', () => {
+    expect(isFilePathHref('ftp://example.com/file.txt')).toBe(false);
+    expect(isFilePathHref('ws://localhost:8080')).toBe(false);
+    expect(isFilePathHref('wss://example.com/socket')).toBe(false);
+    expect(isFilePathHref('file:///tmp/test.txt')).toBe(false);
+  });
+
   it('returns false for undefined/empty', () => {
     expect(isFilePathHref(undefined)).toBe(false);
     expect(isFilePathHref('')).toBe(false);
