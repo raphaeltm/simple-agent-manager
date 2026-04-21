@@ -448,6 +448,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
+          ANTHROPIC_API_KEY_TRIAL: ${{ secrets.ANTHROPIC_API_KEY_TRIAL }}
           SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
           GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
           GA4_MEASUREMENT_ID: ${{ secrets.GA4_MEASUREMENT_ID }}

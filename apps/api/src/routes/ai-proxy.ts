@@ -159,9 +159,13 @@ async function forwardToWorkersAI(
 
   if (!response.ok) {
     const errorText = await response.text();
+    log.error('ai_proxy.workers_ai_error', {
+      status: response.status,
+      body: errorText.slice(0, 500),
+    });
     return new Response(JSON.stringify({
       error: {
-        message: `AI Gateway error (${response.status}): ${errorText.slice(0, 200)}`,
+        message: `AI inference failed (${response.status}). Please try again.`,
         type: 'server_error',
       },
     }), { status: response.status, headers: { 'Content-Type': 'application/json' } });
@@ -206,9 +210,13 @@ async function forwardToAnthropic(
 
   if (!response.ok) {
     const errorText = await response.text();
+    log.error('ai_proxy.anthropic_error', {
+      status: response.status,
+      body: errorText.slice(0, 500),
+    });
     return new Response(JSON.stringify({
       error: {
-        message: `Anthropic API error (${response.status}): ${errorText.slice(0, 200)}`,
+        message: `AI inference failed (${response.status}). Please try again.`,
         type: 'server_error',
       },
     }), { status: response.status, headers: { 'Content-Type': 'application/json' } });

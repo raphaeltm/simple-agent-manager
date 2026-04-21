@@ -21,6 +21,12 @@ import { Hono } from 'hono';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  getCurrentWindowStart,
+  getRateLimit,
+} from '../../middleware/rate-limit';
 import { verifyFingerprint } from '../../services/trial/cookies';
 import { readTrial } from '../../services/trial/trial-store';
 
@@ -29,10 +35,23 @@ const eventsRoutes = new Hono<{ Bindings: Env }>();
 const DEFAULT_HEARTBEAT_MS = 15_000;
 const DEFAULT_POLL_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_DURATION_MS = 30 * 60 * 1000; // 30 min
+const SSE_RATE_LIMIT_WINDOW_SECONDS = 300; // 5-minute window
 
 eventsRoutes.get('/:trialId/events', async (c) => {
   const trialId = c.req.param('trialId');
   if (!trialId) throw errors.badRequest('trialId is required');
+
+  // Rate limit: per-IP to prevent SSE connection storms from a single source
+  const clientIp = c.req.header('CF-Connecting-IP')
+    ?? c.req.header('X-Forwarded-For')?.split(',')[0]?.trim()
+    ?? 'unknown';
+  const sseLimit = getRateLimit(c.env, 'TRIAL_SSE');
+  const windowStart = getCurrentWindowStart(SSE_RATE_LIMIT_WINDOW_SECONDS);
+  const rateLimitKey = createRateLimitKey('trial-sse', clientIp, windowStart);
+  const { allowed } = await checkRateLimit(c.env.KV, rateLimitKey, sseLimit, SSE_RATE_LIMIT_WINDOW_SECONDS);
+  if (!allowed) {
+    return c.json({ error: 'Too many SSE connections. Please try again later.' }, 429);
+  }
 
   // Resolve trial record
   const record = await readTrial(c.env, trialId);

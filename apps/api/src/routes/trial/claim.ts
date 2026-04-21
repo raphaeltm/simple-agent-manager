@@ -112,11 +112,12 @@ claimRoutes.post('/claim', requireAuth(), async (c) => {
   const claimedAt = Date.now();
   log.info('trial_claim.success', { trialId, projectId, userId, claimedAt });
 
-  // Clear the claim cookie. Domain attribute mirrors what was set by the
-  // OAuth-callback issuer; we use host-only (no Domain) by default — safe for
-  // app.${BASE_DOMAIN}.
+  // Clear the claim cookie. Domain attribute MUST match what was set when the
+  // cookie was issued (`.BASE_DOMAIN`), otherwise the browser treats them as
+  // different cookies and the original is never deleted — enabling replay.
+  const cookieDomain = c.env.BASE_DOMAIN ? `.${c.env.BASE_DOMAIN}` : undefined;
   const response: TrialClaimResponse = { projectId, claimedAt };
-  c.header('Set-Cookie', clearClaimCookie());
+  c.header('Set-Cookie', clearClaimCookie({ domain: cookieDomain }));
   return c.json(response, 200);
 });
 

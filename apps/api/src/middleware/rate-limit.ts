@@ -40,6 +40,8 @@ export const DEFAULT_RATE_LIMITS = {
   // Tighter limit for anonymous trial creation: each call spawns a DO,
   // fires ~4 GitHub API calls, and consumes a monthly trial slot.
   TRIAL_CREATE: 10,
+  // SSE events endpoint — short window to prevent connection storms.
+  TRIAL_SSE: 30,
 } as const;
 
 /** Default time window (1 hour in seconds) */

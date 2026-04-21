@@ -63,6 +63,7 @@ function makeEnvWithDO(
       return new Response('not found', { status: 404 });
     }),
   };
+  const kvStore = new Map<string, string>();
   return {
     TRIAL_CLAIM_TOKEN_SECRET: SECRET,
     TRIAL_SSE_HEARTBEAT_MS: '60000',
@@ -71,6 +72,10 @@ function makeEnvWithDO(
     TRIAL_EVENT_BUS: {
       idFromName: vi.fn(() => 'do-id'),
       get: vi.fn(() => stub),
+    },
+    KV: {
+      get: vi.fn(async (key: string) => kvStore.get(key) ?? null),
+      put: vi.fn(async (key: string, value: string) => { kvStore.set(key, value); }),
     },
     ...overrides,
   } as unknown as Env;

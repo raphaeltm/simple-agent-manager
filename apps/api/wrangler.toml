@@ -180,13 +180,14 @@ binding = "AI"
 # - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
 # - Daily at 04:00 UTC: trial waitlist purge (rows with notified_at older than
 #   TRIAL_WAITLIST_PURGE_DAYS). Configurable via TRIAL_CRON_WAITLIST_CLEANUP.
-# - Monthly on the 1st at 03:00 UTC: trial counter rollover audit (prune DO rows beyond
+# - Monthly on the 1st at 05:00 UTC: trial counter rollover audit (prune DO rows beyond
 #   TRIAL_COUNTER_KEEP_MONTHS). Configurable via TRIAL_CRON_ROLLOVER_CRON.
+#   NOTE: Intentionally offset from the 03:00 daily job to avoid collision on the 1st.
 # NOTE: Cron strings are matched exactly in index.ts:scheduled() to dispatch between
 # the different jobs. If you change them here, update the comparisons in the scheduled
 # handler (or the corresponding TRIAL_CRON_* env vars).
 [triggers]
-crons = ["*/5 * * * *", "0 3 * * *", "0 4 * * *", "0 3 1 * *"]
+crons = ["*/5 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 
 # Secrets (set via wrangler secret put):
 # - GITHUB_CLIENT_ID

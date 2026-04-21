@@ -38,6 +38,7 @@ import { rateLimitTrialCreate } from '../../middleware/rate-limit';
 import {
   buildClaimCookie,
   buildFingerprintCookie,
+  DEFAULT_TRIAL_CLAIM_TTL_MS,
   signClaimToken,
   signFingerprint,
   type TrialClaimPayload,
@@ -381,7 +382,7 @@ createRoutes.post('/create', async (c) => {
     // bound to the trialId alone, which is sufficient for claim validation.
     projectId: '',
     issuedAt: now,
-    expiresAt: now + 1000 * 60 * 60 * 48, // 48h
+    expiresAt: now + DEFAULT_TRIAL_CLAIM_TTL_MS,
   };
   const claimSigned = await signClaimToken(claimPayload, secret);
 

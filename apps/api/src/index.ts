@@ -452,7 +452,7 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
-    const rolloverCron = env.TRIAL_CRON_ROLLOVER_CRON ?? '0 3 1 * *';
+    const rolloverCron = env.TRIAL_CRON_ROLLOVER_CRON ?? '0 5 1 * *';
     const waitlistCleanupCron = env.TRIAL_CRON_WAITLIST_CLEANUP ?? '0 4 * * *';
 
     const isDailyForward = controller.cron === '0 3 * * *';
