@@ -43,6 +43,7 @@ jobs:
           HAS_GH_APP_ID: ${{ secrets.GH_APP_ID != '' }}
           HAS_GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY != '' }}
           HAS_GH_APP_SLUG: ${{ secrets.GH_APP_SLUG != '' }}
+          HAS_GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET != '' }}
           HAS_CF_ORIGIN_CA_KEY: ${{ secrets.CF_ORIGIN_CA_KEY != '' }}
         run: |
           MISSING=""
@@ -82,6 +83,9 @@ jobs:
           fi
           if [ "$HAS_GH_APP_SLUG" != "true" ]; then
             MISSING="$MISSING\n  - secrets.GH_APP_SLUG"
+          fi
+          if [ "$HAS_GH_WEBHOOK_SECRET" != "true" ]; then
+            MISSING="$MISSING\n  - secrets.GH_WEBHOOK_SECRET"
           fi
           if [ "$HAS_CF_ORIGIN_CA_KEY" != "true" ]; then
             echo "::notice::CF_ORIGIN_CA_KEY not set — using CF_API_TOKEN for Origin CA certs. If Pulumi fails with error 1016, ensure your API token has Zone > SSL and Certificates > Edit permission."
@@ -268,7 +272,7 @@ jobs:
         id: first_deploy
         if: ${{ inputs.dry_run != true }}
         run: |
-          if [ -f /tmp/tail-worker-first-deploy ]; then
+          if [ -f .wrangler/tail-worker-first-deploy ]; then
             echo "is_first=true" >> $GITHUB_OUTPUT
             echo "First deploy detected -- will do two-pass deployment"
           else
@@ -353,7 +357,7 @@ jobs:
       - name: Re-sync Wrangler Config (add tail_consumers)
         if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
         run: |
-          rm -f /tmp/tail-worker-first-deploy
+          rm -f .wrangler/tail-worker-first-deploy
           pnpm tsx scripts/deploy/sync-wrangler-config.ts
         env:
           PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
@@ -444,7 +448,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
-          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
+          GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}

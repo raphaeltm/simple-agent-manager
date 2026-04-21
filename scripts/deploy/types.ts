@@ -96,19 +96,9 @@ export interface ProvisionedResources {
 // State Types
 // ============================================================================
 
-export type DeploymentStatus =
-  | 'pending'
-  | 'in_progress'
-  | 'completed'
-  | 'failed'
-  | 'rolled_back';
+export type DeploymentStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'rolled_back';
 
-export type StepStatus =
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'skipped';
+export type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
 export interface DeploymentStep {
   name: string;
@@ -325,6 +315,7 @@ export const REQUIRED_SECRETS = [
   'GITHUB_APP_ID',
   'GITHUB_APP_PRIVATE_KEY',
   'GITHUB_APP_SLUG',
+  'GITHUB_WEBHOOK_SECRET',
   'CF_API_TOKEN',
   'CF_ZONE_ID',
   'CF_ACCOUNT_ID',
@@ -333,6 +324,7 @@ export const REQUIRED_SECRETS = [
   'JWT_PUBLIC_KEY',
   'ORIGIN_CA_CERT',
   'ORIGIN_CA_KEY',
+  'TRIAL_CLAIM_TOKEN_SECRET',
 ] as const;
 
 // Note: HETZNER_TOKEN is NOT a platform secret.
@@ -461,10 +453,15 @@ export interface ObservabilityConfig {
 export interface WranglerEnvConfig {
   name?: string;
   account_id?: string;
-  routes?: Array<{ pattern: string; zone_name?: string; zone_id?: string; custom_domain?: boolean }>;
-  d1_databases?: WranglerTomlBindings["d1_databases"];
-  kv_namespaces?: WranglerTomlBindings["kv_namespaces"];
-  r2_buckets?: WranglerTomlBindings["r2_buckets"];
+  routes?: Array<{
+    pattern: string;
+    zone_name?: string;
+    zone_id?: string;
+    custom_domain?: boolean;
+  }>;
+  d1_databases?: WranglerTomlBindings['d1_databases'];
+  kv_namespaces?: WranglerTomlBindings['kv_namespaces'];
+  r2_buckets?: WranglerTomlBindings['r2_buckets'];
   durable_objects?: DurableObjectsConfig;
   ai?: AIBinding;
   analytics_engine_datasets?: AnalyticsEngineDatasetBinding[];

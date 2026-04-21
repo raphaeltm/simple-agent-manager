@@ -11,14 +11,15 @@ SAM's security model separates **platform secrets** (managed by operators) from 
 
 These are Cloudflare Worker secrets set during deployment:
 
-| Secret | Purpose |
-|--------|---------|
-| `ENCRYPTION_KEY` | AES-256-GCM key for encrypting user credentials |
-| `JWT_PRIVATE_KEY` | RSA-2048 key for signing workspace and callback tokens |
-| `JWT_PUBLIC_KEY` | RSA-2048 key for token verification (exposed via JWKS) |
-| `CF_API_TOKEN` | Cloudflare DNS and API access |
-| `GITHUB_CLIENT_ID/SECRET` | OAuth authentication |
-| `GITHUB_APP_*` | GitHub App for repository access |
+| Secret                    | Purpose                                                                                  |
+| ------------------------- | ---------------------------------------------------------------------------------------- |
+| `ENCRYPTION_KEY`          | AES-256-GCM key for encrypting user credentials                                          |
+| `JWT_PRIVATE_KEY`         | RSA-2048 key for signing workspace and callback tokens                                   |
+| `JWT_PUBLIC_KEY`          | RSA-2048 key for token verification (exposed via JWKS)                                   |
+| `CF_API_TOKEN`            | Cloudflare deploy, DNS, observability, and AI Gateway operations                         |
+| `GITHUB_CLIENT_ID/SECRET` | OAuth authentication                                                                     |
+| `GITHUB_APP_*`            | GitHub App for repository access                                                         |
+| `GITHUB_WEBHOOK_SECRET`   | GitHub App webhook HMAC verification; set from GitHub Actions secret `GH_WEBHOOK_SECRET` |
 
 Platform secrets are automatically generated and persisted by Pulumi on first deployment. They never appear in source control.
 
@@ -26,10 +27,10 @@ Platform secrets are automatically generated and persisted by Pulumi on first de
 
 User-provided secrets stored encrypted in D1:
 
-| Credential | Purpose | Encryption |
-|------------|---------|------------|
-| Hetzner API token | VM provisioning | AES-256-GCM, per-credential IV |
-| Agent API keys | Claude/OpenAI API access | AES-256-GCM, per-credential IV |
+| Credential         | Purpose                      | Encryption                     |
+| ------------------ | ---------------------------- | ------------------------------ |
+| Hetzner API token  | VM provisioning              | AES-256-GCM, per-credential IV |
+| Agent API keys     | Claude/OpenAI API access     | AES-256-GCM, per-credential IV |
 | Agent OAuth tokens | Claude Pro/Max subscriptions | AES-256-GCM, per-credential IV |
 
 User credentials are **never** stored as environment variables or Worker secrets.
@@ -48,12 +49,12 @@ SAM uses **BetterAuth** with GitHub OAuth for user authentication:
 
 ### Token Types
 
-| Token | Lifetime | Purpose | Validated By |
-|-------|----------|---------|-------------|
-| Session cookie | Hours | Browser authentication | API Worker (BetterAuth) |
-| Workspace JWT | Minutes | Terminal WebSocket auth | VM Agent (via JWKS) |
-| Bootstrap token | 5 minutes | One-time VM credential injection | API Worker |
-| Callback token | Minutes | VM Agent → API callbacks | API Worker |
+| Token           | Lifetime  | Purpose                          | Validated By            |
+| --------------- | --------- | -------------------------------- | ----------------------- |
+| Session cookie  | Hours     | Browser authentication           | API Worker (BetterAuth) |
+| Workspace JWT   | Minutes   | Terminal WebSocket auth          | VM Agent (via JWKS)     |
+| Bootstrap token | 5 minutes | One-time VM credential injection | API Worker              |
+| Callback token  | Minutes   | VM Agent → API callbacks         | API Worker              |
 
 ## Credential Encryption
 

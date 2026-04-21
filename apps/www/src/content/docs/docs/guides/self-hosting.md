@@ -7,11 +7,11 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 ## Prerequisites
 
-| Requirement | Purpose | Tier |
-|-------------|---------|------|
-| **Cloudflare account** | API hosting, DNS, storage | Free tier |
-| **GitHub account** | Authentication, CI/CD | Free tier |
-| **Domain on Cloudflare** | Workspace URLs | Any registrar |
+| Requirement              | Purpose                   | Tier          |
+| ------------------------ | ------------------------- | ------------- |
+| **Cloudflare account**   | API hosting, DNS, storage | Free tier     |
+| **GitHub account**       | Authentication, CI/CD     | Free tier     |
+| **Domain on Cloudflare** | Workspace URLs            | Any registrar |
 
 You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/) or [Scaleway API key](https://console.scaleway.com/iam/api-keys) through the Settings UI.
 
@@ -23,17 +23,19 @@ Fork [simple-agent-manager](https://github.com/raphaeltm/simple-agent-manager) o
 
 In Cloudflare Dashboard → My Profile → API Tokens → Create Custom Token:
 
-| Permission Type | Resource | Access |
-|-----------------|----------|--------|
-| Account | Cloudflare Workers: D1 | Edit |
-| Account | Workers KV Storage | Edit |
-| Account | Workers R2 Storage | Edit |
-| Account | Workers Scripts | Edit |
-| Account | Workers Observability | Read |
-| Account | Cloudflare Pages | Edit |
-| Zone | DNS | Edit |
-| Zone | Workers Routes | Edit |
-| Zone | Zone | Read |
+| Permission Type | Resource               | Access |
+| --------------- | ---------------------- | ------ |
+| Account         | Cloudflare Workers: D1 | Edit   |
+| Account         | Workers KV Storage     | Edit   |
+| Account         | Workers R2 Storage     | Edit   |
+| Account         | Workers Scripts        | Edit   |
+| Account         | Workers Observability  | Read   |
+| Account         | Cloudflare Pages       | Edit   |
+| Account         | AI Gateway             | Edit   |
+| Zone            | DNS                    | Edit   |
+| Zone            | Workers Routes         | Edit   |
+| Zone            | SSL and Certificates   | Edit   |
+| Zone            | Zone                   | Read   |
 
 Set **Zone Resources** to your specific domain and **Account Resources** to your account.
 
@@ -42,18 +44,22 @@ Set **Zone Resources** to your specific domain and **Account Resources** to your
 Go to [GitHub App Settings](https://github.com/settings/apps) → New GitHub App:
 
 **Basic settings:**
+
 - Homepage URL: `https://app.yourdomain.com`
 - Callback URL: `https://api.yourdomain.com/api/auth/callback/github`
 - Setup URL: `https://api.yourdomain.com/api/github/callback`
 
 **Permissions:**
+
 - Repository → Contents: Read and write
 - Repository → Metadata: Read-only
 - Account → Email addresses: Read-only
 
 **Webhook:**
+
 - URL: `https://api.yourdomain.com/api/github/webhook`
 - Active: checked
+- Secret: generate a random string and save the same value as the `GH_WEBHOOK_SECRET` GitHub Environment secret
 
 After creation, note the **App ID** and **Client ID**, generate a **Client Secret** and **Private Key**.
 
@@ -83,33 +89,34 @@ In your fork: Settings → Environments → New environment → name it `product
 
 **Environment variables:**
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `BASE_DOMAIN` | Your domain | `example.com` |
-| `RESOURCE_PREFIX` | Cloudflare resource prefix (optional) | `sam` |
+| Variable          | Description                           | Example       |
+| ----------------- | ------------------------------------- | ------------- |
+| `BASE_DOMAIN`     | Your domain                           | `example.com` |
+| `RESOURCE_PREFIX` | Cloudflare resource prefix (optional) | `sam`         |
 
 **Environment secrets:**
 
-| Secret | Description |
-|--------|-------------|
-| `CF_API_TOKEN` | Cloudflare API token |
-| `CF_ACCOUNT_ID` | Cloudflare account ID (32-char hex) |
-| `CF_ZONE_ID` | Domain zone ID (32-char hex) |
-| `R2_ACCESS_KEY_ID` | R2 API token access key |
-| `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
-| `PULUMI_CONFIG_PASSPHRASE` | Generated passphrase |
-| `GH_CLIENT_ID` | GitHub App client ID |
-| `GH_CLIENT_SECRET` | GitHub App client secret |
-| `GH_APP_ID` | GitHub App ID |
-| `GH_APP_PRIVATE_KEY` | GitHub App private key (PEM or base64) |
-| `GH_APP_SLUG` | GitHub App URL slug |
+| Secret                     | Description                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| `CF_API_TOKEN`             | Cloudflare API token                                                           |
+| `CF_ACCOUNT_ID`            | Cloudflare account ID (32-char hex)                                            |
+| `CF_ZONE_ID`               | Domain zone ID (32-char hex)                                                   |
+| `R2_ACCESS_KEY_ID`         | R2 API token access key                                                        |
+| `R2_SECRET_ACCESS_KEY`     | R2 API token secret key                                                        |
+| `PULUMI_CONFIG_PASSPHRASE` | Generated passphrase                                                           |
+| `GH_CLIENT_ID`             | GitHub App client ID                                                           |
+| `GH_CLIENT_SECRET`         | GitHub App client secret                                                       |
+| `GH_APP_ID`                | GitHub App ID                                                                  |
+| `GH_APP_PRIVATE_KEY`       | GitHub App private key (PEM or base64)                                         |
+| `GH_APP_SLUG`              | GitHub App URL slug                                                            |
+| `GH_WEBHOOK_SECRET`        | GitHub App webhook secret; mapped to the Worker secret `GITHUB_WEBHOOK_SECRET` |
 
 :::note
-GitHub secrets use `GH_*` prefix because GitHub reserves `GITHUB_*`. The deployment workflow maps `GH_*` → `GITHUB_*` when setting Worker secrets.
+GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. The deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. `GH_WEBHOOK_SECRET` becomes the Worker secret `GITHUB_WEBHOOK_SECRET` and must match the GitHub App webhook secret.
 :::
 
 :::note
-Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) are automatically generated and persisted via Pulumi. No manual setup required.
+Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`), Origin CA credentials (`ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`), and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated and persisted via Pulumi. No manual setup required.
 :::
 
 ## Step 7: Deploy
@@ -117,6 +124,7 @@ Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) are automa
 Push any commit to `main`, or go to Actions → Deploy → Run workflow.
 
 The workflow:
+
 1. Validates configuration
 2. Provisions infrastructure via Pulumi (D1, KV, R2, DNS)
 3. Deploys API Worker and Web UI
@@ -130,8 +138,8 @@ After deployment completes:
 
 ```bash
 # API health check
-curl https://api.yourdomain.com/api/health
-# Should return: {"status":"ok"}
+curl https://api.yourdomain.com/health
+# Should return: {"status":"healthy","timestamp":"..."}
 ```
 
 Open `https://app.yourdomain.com` — you should see the login page.
@@ -144,13 +152,13 @@ To remove all resources: Actions → Teardown → Run workflow → type `DELETE`
 
 ### Platform Costs
 
-| Component | Free Tier | Paid Overage |
-|-----------|-----------|--------------|
-| Cloudflare Workers | 100K req/day | $0.15/million |
-| Cloudflare D1 | 5M rows read/day | $0.001/million |
-| Cloudflare KV | 100K reads/day | $0.50/million |
-| Cloudflare R2 | 10GB storage | $0.015/GB/month |
-| Cloudflare Pages | Unlimited | Free |
+| Component          | Free Tier        | Paid Overage    |
+| ------------------ | ---------------- | --------------- |
+| Cloudflare Workers | 100K req/day     | $0.15/million   |
+| Cloudflare D1      | 5M rows read/day | $0.001/million  |
+| Cloudflare KV      | 100K reads/day   | $0.50/million   |
+| Cloudflare R2      | 10GB storage     | $0.015/GB/month |
+| Cloudflare Pages   | Unlimited        | Free            |
 
 A typical SAM deployment stays within the free tier for small to medium usage.
 
@@ -160,19 +168,19 @@ VMs are billed to each user's own cloud provider account. SAM supports Hetzner a
 
 **Hetzner:**
 
-| Size | Specs | Hourly | Monthly |
-|------|-------|--------|---------|
-| Small (cx23) | 2 vCPU, 4GB RAM | ~$0.007 | ~$4.15 |
-| Medium (cx33) | 4 vCPU, 8GB RAM | ~$0.012 | ~$7.50 |
-| Large (cx43) | 8 vCPU, 16GB RAM | ~$0.030 | ~$18 |
+| Size          | Specs            | Hourly  | Monthly |
+| ------------- | ---------------- | ------- | ------- |
+| Small (cx23)  | 2 vCPU, 4GB RAM  | ~$0.007 | ~$4.15  |
+| Medium (cx33) | 4 vCPU, 8GB RAM  | ~$0.012 | ~$7.50  |
+| Large (cx43)  | 8 vCPU, 16GB RAM | ~$0.030 | ~$18    |
 
 **Scaleway:**
 
-| Size | Type | Hourly |
-|------|------|--------|
-| Small (DEV1-M) | 3 vCPU, 4GB RAM | ~€0.024 |
+| Size             | Type             | Hourly  |
+| ---------------- | ---------------- | ------- |
+| Small (DEV1-M)   | 3 vCPU, 4GB RAM  | ~€0.024 |
 | Medium (DEV1-XL) | 4 vCPU, 12GB RAM | ~€0.048 |
-| Large (GP1-S) | 8 vCPU, 32GB RAM | ~€0.084 |
+| Large (GP1-S)    | 8 vCPU, 32GB RAM | ~€0.084 |
 
 ## Troubleshooting
 
@@ -187,6 +195,7 @@ Check that your GitHub App's Callback URL matches exactly: `https://api.yourdoma
 ### "D1_ERROR: no such table"
 
 Migrations haven't been applied. The deploy workflow runs them automatically, but you can also run manually:
+
 ```bash
 wrangler d1 migrations apply workspaces --remote
 ```

@@ -8,29 +8,33 @@ user-invocable: false
 
 ## GitHub Environment Secrets (GitHub Settings -> Environments -> production)
 
-Uses `GH_*` prefix because GitHub Actions reserves `GITHUB_*` for its own use.
+Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`.
 
-| Type     | Name                       | Required |
-| -------- | -------------------------- | -------- |
-| Variable | `BASE_DOMAIN`              | Yes |
-| Variable | `RESOURCE_PREFIX`          | No (default: `sam`) |
-| Variable | `PULUMI_STATE_BUCKET`      | No (default: `sam-pulumi-state`) |
-| Secret   | `CF_API_TOKEN`             | Yes |
-| Secret   | `CF_ACCOUNT_ID`            | Yes |
-| Secret   | `CF_ZONE_ID`               | Yes |
-| Secret   | `R2_ACCESS_KEY_ID`         | Yes |
-| Secret   | `R2_SECRET_ACCESS_KEY`     | Yes |
-| Secret   | `PULUMI_CONFIG_PASSPHRASE` | Yes |
-| Secret   | `GH_CLIENT_ID`             | Yes |
-| Secret   | `GH_CLIENT_SECRET`         | Yes |
-| Secret   | `GH_APP_ID`                | Yes |
-| Secret   | `GH_APP_PRIVATE_KEY`       | Yes |
-| Secret   | `GH_APP_SLUG`              | Yes |
-| Secret   | `ENCRYPTION_KEY`           | No (auto-generated) |
-| Secret   | `JWT_PRIVATE_KEY`          | No (auto-generated) |
-| Secret   | `JWT_PUBLIC_KEY`           | No (auto-generated) |
+| Type     | Name                       | Required                                |
+| -------- | -------------------------- | --------------------------------------- |
+| Variable | `BASE_DOMAIN`              | Yes                                     |
+| Variable | `RESOURCE_PREFIX`          | No (default: `sam`)                     |
+| Variable | `PULUMI_STATE_BUCKET`      | No (default: `sam-pulumi-state`)        |
+| Secret   | `CF_API_TOKEN`             | Yes                                     |
+| Secret   | `CF_ACCOUNT_ID`            | Yes                                     |
+| Secret   | `CF_ZONE_ID`               | Yes                                     |
+| Secret   | `R2_ACCESS_KEY_ID`         | Yes                                     |
+| Secret   | `R2_SECRET_ACCESS_KEY`     | Yes                                     |
+| Secret   | `PULUMI_CONFIG_PASSPHRASE` | Yes                                     |
+| Secret   | `GH_CLIENT_ID`             | Yes                                     |
+| Secret   | `GH_CLIENT_SECRET`         | Yes                                     |
+| Secret   | `GH_APP_ID`                | Yes                                     |
+| Secret   | `GH_APP_PRIVATE_KEY`       | Yes                                     |
+| Secret   | `GH_APP_SLUG`              | Yes                                     |
+| Secret   | `GH_WEBHOOK_SECRET`        | Yes when GitHub App webhooks are active |
+| Secret   | `ENCRYPTION_KEY`           | No (auto-generated)                     |
+| Secret   | `JWT_PRIVATE_KEY`          | No (auto-generated)                     |
+| Secret   | `JWT_PUBLIC_KEY`           | No (auto-generated)                     |
+| Secret   | `ORIGIN_CA_CERT`           | No (auto-generated)                     |
+| Secret   | `ORIGIN_CA_KEY`            | No (auto-generated)                     |
+| Secret   | `TRIAL_CLAIM_TOKEN_SECRET` | No (auto-generated)                     |
 
-## GH_ to GITHUB_ Mapping (done by `configure-secrets.sh`)
+## GH* to GITHUB* Mapping (done by `configure-secrets.sh`)
 
 ```
 GitHub Secret          ->  Cloudflare Worker Secret
@@ -39,17 +43,22 @@ GH_CLIENT_SECRET       ->  GITHUB_CLIENT_SECRET
 GH_APP_ID              ->  GITHUB_APP_ID
 GH_APP_PRIVATE_KEY     ->  GITHUB_APP_PRIVATE_KEY
 GH_APP_SLUG            ->  GITHUB_APP_SLUG
+GH_WEBHOOK_SECRET      ->  GITHUB_WEBHOOK_SECRET
 ```
+
+Use `GH_WEBHOOK_SECRET` in GitHub Actions because secret names cannot start with `GITHUB_`. The Worker/runtime secret remains `GITHUB_WEBHOOK_SECRET`, and it must match the GitHub App webhook secret exactly.
 
 ## API Worker Runtime Environment Variables
 
 See `apps/api/.env.example` for the full list. Key variables:
 
 ### Core
+
 - `WRANGLER_PORT` — Local dev port (default: 8787)
 - `BASE_DOMAIN` — Set automatically by sync scripts
 
 ### Resource Limits
+
 - `MAX_NODES_PER_USER` — Runtime node cap
 - `MAX_AGENT_SESSIONS_PER_WORKSPACE` — Runtime session cap
 - `MAX_PROJECTS_PER_USER` — Runtime project cap
@@ -57,10 +66,12 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `MAX_TASK_DEPENDENCIES_PER_TASK` — Runtime dependency-edge cap per task
 
 ### Pagination
+
 - `TASK_LIST_DEFAULT_PAGE_SIZE` — Default task/project list page size
 - `TASK_LIST_MAX_PAGE_SIZE` — Maximum task/project list page size
 
 ### Timeouts
+
 - `TASK_CALLBACK_TIMEOUT_MS` — Timeout budget for delegated-task callback processing
 - `TASK_CALLBACK_RETRY_MAX_ATTEMPTS` — Retry budget for delegated-task callback processing
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
@@ -71,12 +82,14 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `NODE_AGENT_REQUEST_TIMEOUT_MS` — Timeout for Node Agent HTTP requests (default: 30000)
 
 ### Audio/Transcription
+
 - `WHISPER_MODEL_ID` — Workers AI model for transcription (default: `@cf/openai/whisper-large-v3-turbo`)
 - `MAX_AUDIO_SIZE_BYTES` — Maximum audio upload size (default: 10485760)
 - `MAX_AUDIO_DURATION_SECONDS` — Maximum recording duration (default: 60)
 - `RATE_LIMIT_TRANSCRIBE` — Rate limit for transcription requests
 
 ### Client Error Reporting
+
 - `RATE_LIMIT_CLIENT_ERRORS` — Rate limit per hour per IP (default: 200)
 - `MAX_CLIENT_ERROR_BATCH_SIZE` — Max errors per request (default: 25)
 - `MAX_CLIENT_ERROR_BODY_BYTES` — Max request body size (default: 65536)
@@ -84,6 +97,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `MAX_VM_AGENT_ERROR_BATCH_SIZE` — Max VM agent errors per request (default: 10)
 
 ### Codex OAuth Refresh Proxy (`CodexRefreshLock` DO + `/api/auth/codex-refresh`)
+
 - `CODEX_REFRESH_PROXY_ENABLED` — Kill switch; set to `'false'` to disable the proxy entirely (default: enabled)
 - `CODEX_REFRESH_UPSTREAM_URL` — OpenAI OAuth token endpoint (default: `https://auth.openai.com/oauth/token`)
 - `CODEX_REFRESH_UPSTREAM_TIMEOUT_MS` — Timeout for upstream fetch (default: 10000)
@@ -94,6 +108,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS` — Rate-limit window length in seconds (default: 3600)
 
 ### Credential Routes Rate Limits
+
 - `RATE_LIMIT_CREDENTIAL_UPDATE` — Applied to both user-scoped (`PUT /api/credentials/agent`) and project-scoped (`PUT /api/projects/:id/credentials`) credential write endpoints (MEDIUM #7 fix)
 
 ### Trial Onboarding (`/try` flow)
@@ -114,9 +129,11 @@ See `docs/guides/trial-configuration.md` for the full table with meanings and de
 ## VM Agent Environment Variables
 
 ### Container/User
+
 - `CONTAINER_USER` — Optional `docker exec -u` override; when unset, auto-detects effective devcontainer user
 
 ### Git Operations
+
 - `GIT_EXEC_TIMEOUT` — Timeout for git commands via docker exec (default: 30s)
 - `GIT_WORKTREE_TIMEOUT` — Timeout for git worktree create/remove (default: 30s)
 - `WORKTREE_CACHE_TTL` — Cache duration for parsed `git worktree list` results (default: 5s)
@@ -124,18 +141,21 @@ See `docs/guides/trial-configuration.md` for the full table with meanings and de
 - `GIT_FILE_MAX_SIZE` — Max file size for git/file endpoint (default: 1048576)
 
 ### File Operations
+
 - `FILE_LIST_TIMEOUT` — Timeout for file listing commands (default: 10s)
 - `FILE_LIST_MAX_ENTRIES` — Max entries per directory listing (default: 1000)
 - `FILE_FIND_TIMEOUT` — Timeout for recursive file index (default: 15s)
 - `FILE_FIND_MAX_ENTRIES` — Max entries returned by file index (default: 5000)
 
 ### Error Reporting
+
 - `ERROR_REPORT_FLUSH_INTERVAL` — Background error flush interval (default: 30s)
 - `ERROR_REPORT_MAX_BATCH_SIZE` — Immediate flush threshold (default: 10)
 - `ERROR_REPORT_MAX_QUEUE_SIZE` — Max queued error entries (default: 100)
 - `ERROR_REPORT_HTTP_TIMEOUT` — HTTP POST timeout for error reports (default: 10s)
 
 ### ACP (Agent Communication Protocol)
+
 - `ACP_MESSAGE_BUFFER_SIZE` — Max buffered messages per SessionHost for late-join replay (default: 5000)
 - `ACP_VIEWER_SEND_BUFFER` — Per-viewer send channel buffer size (default: 256)
 - `ACP_PING_INTERVAL` — WebSocket ping interval for stale connection detection (default: 30s)
@@ -147,10 +167,12 @@ See `docs/guides/trial-configuration.md` for the full table with meanings and de
 - `ACP_NOTIF_SERIALIZE_TIMEOUT` — Max wait for previous session/update processing before delivering next (default: 5s)
 
 ### Events
+
 - `MAX_NODE_EVENTS` — Max node-level events retained in memory (default: 500)
 - `MAX_WORKSPACE_EVENTS` — Max workspace-level events retained in memory (default: 500)
 
 ### System Info
+
 - `SYSINFO_DOCKER_TIMEOUT` — Timeout for Docker CLI commands during system info collection (default: 10s)
 - `SYSINFO_VERSION_TIMEOUT` — Timeout for version-check commands (default: 5s)
 - `SYSINFO_CACHE_TTL` — Cache duration for system info results (default: 5s)
