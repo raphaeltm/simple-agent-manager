@@ -53,8 +53,7 @@ test.describe('Admin AI Proxy page', () => {
     expect(config.models).toBeInstanceOf(Array);
     expect(config.models.length).toBeGreaterThan(0);
 
-    // Without Anthropic key, Anthropic models should show as unavailable
-    const _anthropicModels = config.models.filter((m: { provider: string }) => m.provider === 'anthropic');
+    // Workers AI models should be available (Anthropic models may be unavailable without key)
     const workersAIModels = config.models.filter((m: { provider: string }) => m.provider === 'workers-ai');
 
     // Workers AI models should be available
