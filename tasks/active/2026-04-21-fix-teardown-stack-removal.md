@@ -19,7 +19,7 @@ The production teardown workflow can remove Pulumi stack state even when `pulumi
 - [x] Add process rule for destructive cleanup state gates.
 - [x] Run focused quality test.
 - [x] Run lint and typecheck.
-- [ ] Open PR.
+- [x] Open PR.
 
 ## Acceptance Criteria
 
