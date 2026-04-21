@@ -37,8 +37,8 @@ import {
 import { buildFeed, deriveView } from '../lib/trial-view-model';
 
 // Re-export for backward compatibility with existing tests.
-export { buildFeed } from '../lib/trial-view-model';
 export { eventDedupKey } from '../lib/trial-utils';
+export { buildFeed } from '../lib/trial-view-model';
 
 export function TryDiscovery() {
   const { trialId } = useParams<{ trialId: string }>();
