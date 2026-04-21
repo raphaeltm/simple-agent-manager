@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Trial orchestrator steps — sequential state machine steps that share common context; splitting would obscure the step ordering. See .claude/rules/18-file-size-limits.md
 /**
  * Step handlers for the TrialOrchestrator DO state machine.
  *

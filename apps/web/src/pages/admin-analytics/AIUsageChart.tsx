@@ -47,14 +47,14 @@ interface Props {
 }
 
 export const AIUsageChart: FC<Props> = ({ data }) => {
+  const modelData = useMemo(
+    () => (data?.byModel ?? []).map((m) => ({ ...m, label: shortModel(m.model) })),
+    [data?.byModel],
+  );
+
   if (!data || data.totalRequests === 0) {
     return <Body className="text-fg-muted">No AI usage data available yet.</Body>;
   }
-
-  const modelData = useMemo(
-    () => data.byModel.map((m) => ({ ...m, label: shortModel(m.model) })),
-    [data.byModel],
-  );
 
   return (
     <div className="flex flex-col gap-6">

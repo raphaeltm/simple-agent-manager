@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Trial discovery page — tightly coupled SSE state machine + UI rendering; splitting would fragment the reactive event flow. See .claude/rules/18-file-size-limits.md
 /**
  * /try/:trialId — Discovery-mode feed for a running trial.
  *

@@ -1,4 +1,4 @@
-export type { AdminErrorsFilter, AIProxyConfigResponse, AdminLogQueryParams } from './admin';
+export type { AdminErrorsFilter, AdminLogQueryParams,AIProxyConfigResponse } from './admin';
 export type {
   AiUsageByDay,
   AiUsageByModel,
@@ -25,7 +25,6 @@ export {
   approveOrSuspendUser,
   changeUserRole,
   createPlatformCredential,
-  fetchAIProxyConfig,
   deletePlatformCredential,
   fetchAdminComputeUsage,
   fetchAdminDefaultQuota,
@@ -37,6 +36,7 @@ export {
   fetchAdminUserNodeUsage,
   fetchAdminUserQuota,
   fetchAdminUserQuotas,
+  fetchAIProxyConfig,
   fetchAnalyticsAiUsage,
   fetchAnalyticsDau,
   fetchAnalyticsEvents,
