@@ -9,7 +9,7 @@ Workspaces are ephemeral AI coding environments — a VM, a devcontainer, and yo
 
 You need:
 1. A SAM account (sign in with GitHub)
-2. A **Hetzner API token** added in Settings
+2. A cloud provider credential (Hetzner, Scaleway, or GCP) added in Settings
 3. The **GitHub App installed** on at least one repository
 
 ## Creating a Workspace
@@ -26,7 +26,7 @@ You need:
 
 ### What Happens Next
 
-1. SAM selects an existing healthy node or provisions a new Hetzner VM
+1. SAM selects an existing healthy node or provisions a new VM on your cloud provider
 2. The VM runs cloud-init: installs Docker, downloads the VM Agent, starts the agent service
 3. The VM Agent creates a Docker container with your repo's devcontainer configuration
 4. Your repository is cloned into the container
