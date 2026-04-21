@@ -219,6 +219,7 @@ jobs:
 
       - name: Pulumi Refresh
         if: ${{ inputs.dry_run != true }}
+        continue-on-error: true
         working-directory: infra
         run: pulumi refresh --yes
         env:
