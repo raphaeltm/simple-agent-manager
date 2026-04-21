@@ -146,7 +146,23 @@ adminAiUsageRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin
 adminAiUsageRoutes.get('/', async (c) => {
   const period = parsePeriod(c.req.query('period'));
   const gatewayId = c.env.AI_GATEWAY_ID;
-  if (!gatewayId) throw errors.badRequest('AI_GATEWAY_ID is not configured');
+  if (!gatewayId) {
+    // AI Gateway is optional — self-hosters who don't use it get an empty summary
+    // instead of a 500. The admin dashboard renders "no data" gracefully.
+    return c.json({
+      totalRequests: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCostUsd: 0,
+      trialRequests: 0,
+      trialCostUsd: 0,
+      cachedRequests: 0,
+      errorRequests: 0,
+      byModel: [],
+      byDay: [],
+      period,
+    } satisfies AiUsageSummary);
+  }
   const pageSize = parseInt(c.env.AI_USAGE_PAGE_SIZE || '', 10) || DEFAULT_PAGE_SIZE;
   const maxPages = parseInt(c.env.AI_USAGE_MAX_PAGES || '', 10) || DEFAULT_MAX_PAGES;
   const startDate = periodToStartDate(period);

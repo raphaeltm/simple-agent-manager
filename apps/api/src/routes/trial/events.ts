@@ -41,10 +41,22 @@ eventsRoutes.get('/:trialId/events', async (c) => {
   const trialId = c.req.param('trialId');
   if (!trialId) throw errors.badRequest('trialId is required');
 
-  // Rate limit: per-IP to prevent SSE connection storms from a single source
+  // Rate limit: per-IP to prevent SSE connection storms from a single source.
+  // CF-Connecting-IP is always present on Cloudflare Workers for real traffic;
+  // X-Forwarded-For covers reverse-proxy setups. If neither is present, reject
+  // rather than sharing a single "unknown" bucket across all headerless clients.
   const clientIp = c.req.header('CF-Connecting-IP')
     ?? c.req.header('X-Forwarded-For')?.split(',')[0]?.trim()
-    ?? 'unknown';
+    ?? null;
+  if (!clientIp) {
+    log.warn('trial_events.missing_client_ip', { trialId });
+    return c.json({ error: 'Unable to determine client IP for rate limiting.' }, 400);
+  }
+  // KV-based rate limiting is not atomic (no CAS primitive), so concurrent
+  // requests from the same IP can overshoot by ~1. This is acceptable for SSE
+  // storm prevention — exact enforcement is not required. For strict limits
+  // (e.g. credential rotation), the codebase uses DO-based counters instead
+  // (see CodexRefreshLock).
   const sseLimit = getRateLimit(c.env, 'TRIAL_SSE');
   const windowStart = getCurrentWindowStart(SSE_RATE_LIMIT_WINDOW_SECONDS);
   const rateLimitKey = createRateLimitKey('trial-sse', clientIp, windowStart);
@@ -125,7 +137,7 @@ eventsRoutes.get('/:trialId/events', async (c) => {
           }
 
           if (!pollResp.ok) {
-            enqueue(encoder.encode(formatSse('error', {
+            enqueue(encoder.encode(formatSse({
               type: 'trial.error',
               error: 'invalid_url',
               message: `Event bus poll failed: ${pollResp.status}`,
@@ -141,7 +153,7 @@ eventsRoutes.get('/:trialId/events', async (c) => {
           };
 
           for (const { cursor: c2, event } of data.events) {
-            enqueue(encoder.encode(formatSse(event.type, event)));
+            enqueue(encoder.encode(formatSse(event)));
             cursor = c2;
           }
 
@@ -198,7 +210,7 @@ function parseIntSafe(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-export function formatSse(_eventName: string, data: unknown): string {
+export function formatSse(data: unknown): string {
   // Emit as the default ("message") SSE event so that EventSource consumers
   // receive the payload via `source.onmessage`. Using a named `event:` field
   // would require the client to register `addEventListener(<type>, ...)` for

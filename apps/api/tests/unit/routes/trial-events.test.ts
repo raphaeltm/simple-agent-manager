@@ -87,7 +87,9 @@ async function getEvents(
   cookie: string | null,
   env: Env
 ): Promise<Response> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    'CF-Connecting-IP': '203.0.113.1', // test IP for rate limiting
+  };
   if (cookie) headers['cookie'] = `sam_trial_fingerprint=${encodeURIComponent(cookie)}`;
   return app.request(
     `/api/trial/${trialId}/events`,
