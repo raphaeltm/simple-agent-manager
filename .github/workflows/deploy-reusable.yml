@@ -217,6 +217,17 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_USER_SERVICE_KEY: ${{ secrets.CF_ORIGIN_CA_KEY }}
 
+      - name: Pulumi Refresh
+        if: ${{ inputs.dry_run != true }}
+        working-directory: infra
+        run: pulumi refresh --yes
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_USER_SERVICE_KEY: ${{ secrets.CF_ORIGIN_CA_KEY }}
+
       - name: Pulumi Up
         if: ${{ inputs.dry_run != true }}
         working-directory: infra
