@@ -3,6 +3,7 @@ import { useEffect, useRef,useState } from 'react';
 
 import { useAdminAnalytics } from '../hooks/useAdminAnalytics';
 import {
+  AIUsageChart,
   DauChart,
   EventsTable,
   FeatureAdoptionChart,
@@ -36,6 +37,7 @@ export function AdminAnalytics() {
     retention,
     forwardStatus,
     websiteTraffic,
+    aiUsage,
     loading,
     isRefreshing,
     error,
@@ -111,6 +113,16 @@ export function AdminAnalytics() {
 
       {/* KPI Summary Cards */}
       <KpiSummary dau={dau} funnel={funnel} events={events} />
+
+      {/* AI Usage — full width */}
+      <Card>
+        <div className="p-4">
+          <h3 className="text-base font-semibold text-fg-primary mb-3">
+            AI Usage ({aiUsage?.period ?? eventPeriod})
+          </h3>
+          <AIUsageChart data={aiUsage} />
+        </div>
+      </Card>
 
       {/* DAU Chart — full width */}
       <Card>

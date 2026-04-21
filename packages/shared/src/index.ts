@@ -12,3 +12,6 @@ export * from './constants';
 
 // VM Agent Contract (Zod schemas + types)
 export * from './vm-agent-contract';
+
+// Trial Onboarding (types + Valibot schemas)
+export * from './trial';

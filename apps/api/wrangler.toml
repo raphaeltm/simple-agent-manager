@@ -36,13 +36,23 @@ HETZNER_BASE_IMAGE = "docker-ce"
 TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS = "30000"
 # AI Inference Proxy (Cloudflare AI Gateway for trial/zero-config users)
 AI_PROXY_ENABLED = "true"
-AI_PROXY_DEFAULT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
 AI_GATEWAY_ID = "sam"
 # Triggers (Event-Driven Agent Triggers)
 MAX_TRIGGERS_PER_PROJECT = "10"
 CRON_MIN_INTERVAL_MINUTES = "15"
 CRON_TEMPLATE_MAX_LENGTH = "8000"
 TRIGGER_NAME_MAX_LENGTH = "100"
+# Trial Onboarding (zero-friction URL-to-workspace)
+# See docs/guides/trial-configuration.md for the full tunable list.
+TRIAL_MONTHLY_CAP = "1500"
+TRIAL_WORKSPACE_TTL_MS = "1200000"           # 20 min
+TRIAL_DATA_RETENTION_HOURS = "168"           # 7 days
+TRIAL_ANONYMOUS_USER_ID = "system_anonymous_trials"
+TRIAL_AGENT_TYPE_STAGING = "opencode"
+TRIAL_AGENT_TYPE_PRODUCTION = "claude-code"
+TRIAL_DEFAULT_WORKSPACE_PROFILE = "lightweight"
+TRIALS_ENABLED_KV_KEY = "trials:enabled"
 
 # D1 Database
 [[d1_databases]]
@@ -99,6 +109,21 @@ class_name = "NotificationService"
 name = "CODEX_REFRESH_LOCK"
 class_name = "CodexRefreshLock"
 
+# Durable Object for trial-onboarding monthly cap counter (singleton; keyed by YYYY-MM)
+[[durable_objects.bindings]]
+name = "TRIAL_COUNTER"
+class_name = "TrialCounter"
+
+# Durable Object for per-trial SSE event buffering (keyed by trialId)
+[[durable_objects.bindings]]
+name = "TRIAL_EVENT_BUS"
+class_name = "TrialEventBus"
+
+# Durable Object for alarm-driven trial provisioning (one DO per trialId)
+[[durable_objects.bindings]]
+name = "TRIAL_ORCHESTRATOR"
+class_name = "TrialOrchestrator"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -123,6 +148,18 @@ new_sqlite_classes = ["NotificationService"]
 tag = "v6"
 new_classes = ["CodexRefreshLock"]  # Intentionally stateless: uses D1 for credential storage, no per-instance SQLite needed
 
+[[migrations]]
+tag = "v7"
+new_sqlite_classes = ["TrialCounter"]
+
+[[migrations]]
+tag = "v8"
+new_classes = ["TrialEventBus"]  # In-memory only — no SQLite storage needed for short-lived trial streams
+
+[[migrations]]
+tag = "v9"
+new_sqlite_classes = ["TrialOrchestrator"]  # Alarm-driven trial provisioning; SQLite-backed per Cloudflare recommendation for new DO classes
+
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
@@ -138,13 +175,19 @@ binding = "AI"
 # because they break Vitest — Cloudflare issue #9343).
 
 # Cron triggers:
-# - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery
+# - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery,
+#   trial expiry sweep
 # - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
-# NOTE: The daily cron string "0 3 * * *" is matched exactly in index.ts:scheduled()
-# to distinguish the daily forward job from the 5-minute sweep. If you change it here,
-# update the comparison in the scheduled handler too.
+# - Daily at 04:00 UTC: trial waitlist purge (rows with notified_at older than
+#   TRIAL_WAITLIST_PURGE_DAYS). Configurable via TRIAL_CRON_WAITLIST_CLEANUP.
+# - Monthly on the 1st at 05:00 UTC: trial counter rollover audit (prune DO rows beyond
+#   TRIAL_COUNTER_KEEP_MONTHS). Configurable via TRIAL_CRON_ROLLOVER_CRON.
+#   NOTE: Intentionally offset from the 03:00 daily job to avoid collision on the 1st.
+# NOTE: Cron strings are matched exactly in index.ts:scheduled() to dispatch between
+# the different jobs. If you change them here, update the comparisons in the scheduled
+# handler (or the corresponding TRIAL_CRON_* env vars).
 [triggers]
-crons = ["*/5 * * * *", "0 3 * * *"]
+crons = ["*/5 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 
 # Secrets (set via wrangler secret put):
 # - GITHUB_CLIENT_ID
@@ -168,3 +211,4 @@ crons = ["*/5 * * * *", "0 3 * * *"]
 # - GA4_API_SECRET (optional — Google Analytics 4 API secret, enables GA4 forwarding; NOTE: GA4 Measurement Protocol requires api_secret as a query parameter — ensure outbound request URLs are not logged)
 # - R2_ACCESS_KEY_ID (optional — R2 S3-compatible API token key ID, enables task attachment presigned uploads)
 # - R2_SECRET_ACCESS_KEY (optional — R2 S3-compatible API token secret, enables task attachment presigned uploads)
+# - TRIAL_CLAIM_TOKEN_SECRET (required when trials are enabled — HMAC secret for sam_trial_claim / sam_trial_fingerprint cookies. 32+ bytes base64.)

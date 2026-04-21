@@ -1,4 +1,4 @@
-import { type BootstrapTokenData, DEFAULT_AI_PROXY_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import { AI_PROXY_DEFAULT_MODEL_KV_KEY, type AIProxyConfig, type BootstrapTokenData, DEFAULT_AI_PROXY_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -19,6 +19,7 @@ import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
+import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import {
   getWorkspaceRuntimeAssets,
@@ -78,7 +79,16 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   if (!credentialData && body.agentType === 'opencode' && aiProxyEnabled) {
     const baseDomain = c.env.BASE_DOMAIN;
     const proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
-    const defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
+
+    // Resolve default model: KV (admin-set) > env var > shared constant
+    let defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
+    try {
+      const kvConfig = await c.env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY);
+      if (kvConfig) {
+        const parsed: AIProxyConfig = JSON.parse(kvConfig);
+        if (parsed.defaultModel) defaultModel = parsed.defaultModel;
+      }
+    } catch { /* KV unavailable or corrupt data — use env/default */ }
 
     log.info('agent_key.ai_proxy_fallback', { workspaceId, userId: workspace.userId, proxyBaseUrl });
 
@@ -601,6 +611,23 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
     return c.json(
       { error: 'SERVICE_UNAVAILABLE', message: 'Message persistence temporarily unavailable' },
       503
+    );
+  }
+
+  // Fire-and-forget: pipe agent activity to the trial SSE feed (if this
+  // workspace belongs to a trial project). Non-trial projects short-circuit
+  // with a single KV lookup inside the bridge.
+  if (workspace.projectId && result.persisted > 0) {
+    c.executionCtx.waitUntil(
+      bridgeAgentActivity(
+        c.env,
+        workspace.projectId,
+        body.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : undefined,
+        })),
+      ),
     );
   }
 
