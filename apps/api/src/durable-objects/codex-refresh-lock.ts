@@ -59,6 +59,11 @@ interface CodexRefreshEnv {
    */
   CODEX_EXPECTED_SCOPES?: string;
   /**
+   * 'warn' (default) or 'block'. Controls whether unexpected scopes block
+   * the refresh (502) or just log a warning and allow it to proceed.
+   */
+  CODEX_SCOPE_VALIDATION_MODE?: string;
+  /**
    * Rate limit: max refresh requests per user per window. Defaults to 30.
    */
   RATE_LIMIT_CODEX_REFRESH_PER_HOUR?: string;
@@ -290,16 +295,30 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // Parse new tokens from OpenAI response.
     const newTokens: Record<string, unknown> = await upstreamResponse.json();
 
-    // Scope validation (MEDIUM #6) — block instead of warn-only when upstream returns
-    // unexpected scopes. A scope change signals either provider drift or an escalation
-    // attempt; either way we refuse to store the new tokens and return 502 so the
-    // caller stays on the previous (validated) credential.
+    // Scope validation (MEDIUM #6) — warn-only mode.
+    // Previously this blocked with 502 when upstream returned unexpected scopes,
+    // but we don't yet know the full set of scopes OpenAI returns in practice.
+    // If the allowlist was incomplete, every refresh would silently fail, leaving
+    // Codex with expired tokens and "Authentication required" errors.
+    // Demoted to warn-only until we capture real-world scope data from logs.
+    // Re-enable blocking by setting CODEX_SCOPE_VALIDATION_MODE=block.
     const scopeResult = this.validateUpstreamScopes(newTokens, userId);
     if (!scopeResult.ok) {
-      return new Response(
-        JSON.stringify({ error: 'upstream_unexpected_scope', message: scopeResult.reason }),
-        { status: 502, headers: { 'Content-Type': 'application/json' } }
-      );
+      const validationMode = this.env.CODEX_SCOPE_VALIDATION_MODE ?? 'warn';
+      if (validationMode === 'block') {
+        return new Response(
+          JSON.stringify({ error: 'upstream_unexpected_scope', message: scopeResult.reason }),
+          { status: 502, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      // Warn-only: log the unexpected scopes but allow the refresh to proceed.
+      // This lets us discover what scopes OpenAI actually returns without
+      // breaking token refresh for all users.
+      log.warn('codex_refresh.unexpected_scopes_allowed', {
+        userId,
+        reason: scopeResult.reason,
+        validationMode,
+      });
     }
 
     // Update the stored auth.json with new tokens.
@@ -363,13 +382,12 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   /**
    * Validate scopes in the upstream token response.
    *
-   * Default behavior (MEDIUM #6 fix): enforce a conservative allowlist derived from
-   * known Codex OAuth flow scopes. Unexpected scopes cause the refresh to fail with
-   * 502 — the previous token remains valid so the caller can continue operating
-   * until an admin investigates.
+   * Returns { ok: false } when scopes don't match the allowlist. The caller
+   * decides whether to block (502) or warn based on CODEX_SCOPE_VALIDATION_MODE.
+   * Default mode is 'warn' — unexpected scopes are logged but refresh proceeds.
    *
-   * Override with CODEX_EXPECTED_SCOPES (comma-separated). Empty string disables
-   * validation entirely (escape hatch for provider rollouts that add new scopes).
+   * Override allowlist with CODEX_EXPECTED_SCOPES (comma-separated). Empty
+   * string disables validation entirely.
    */
   private validateUpstreamScopes(
     tokens: Record<string, unknown>,
