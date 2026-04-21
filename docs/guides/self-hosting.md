@@ -28,109 +28,112 @@ For the fastest deployment experience, use the automated GitHub Actions workflow
 
 ### GitHub Environment Configuration
 
-All configuration lives in a **GitHub Environment** named `production`. This makes configuration visible and editable in the GitHub UI.
+Automated deployment configuration lives in a **GitHub Environment** named `production`. This makes deployment inputs visible and editable in the GitHub UI. Runtime Worker `vars` that are not explicitly passed by the workflow still come from the checked-in top-level `[vars]` in `apps/api/wrangler.toml`.
 
 **Create the environment:**
+
 1. Go to your fork's **Settings → Environments**
 2. Click **New environment**
 3. Name it `production` and click **Configure environment**
 
 **Add environment variables** (visible in UI):
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `BASE_DOMAIN` | Your domain for the deployment | `example.com` |
-| `RESOURCE_PREFIX` | Prefix for Cloudflare resources (optional) | `sam` |
-| `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state (optional) | `sam-pulumi-state` |
+| Variable              | Description                                | Example            |
+| --------------------- | ------------------------------------------ | ------------------ |
+| `BASE_DOMAIN`         | Your domain for the deployment             | `example.com`      |
+| `RESOURCE_PREFIX`     | Prefix for Cloudflare resources (optional) | `sam`              |
+| `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state (optional)      | `sam-pulumi-state` |
 
 **Optional feature flags** (GitHub Environment variables):
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `REQUIRE_APPROVAL` | Require admin approval for new users. First user becomes superadmin. | _(unset — all users active)_ |
-| `HETZNER_BASE_IMAGE` | Hetzner VM base image. Set to `ubuntu-24.04` for emergency rollback from the faster `docker-ce` marketplace default. | `docker-ce` |
+| Variable             | Description                                                                                                          | Default                      |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `REQUIRE_APPROVAL`   | Require admin approval for new users. First user becomes superadmin.                                                 | _(unset — all users active)_ |
+| `HETZNER_BASE_IMAGE` | Hetzner VM base image. Set to `ubuntu-24.04` for emergency rollback from the faster `docker-ce` marketplace default. | `docker-ce`                  |
 
-**Optional runtime-config limit variables** (GitHub Environment variables):
+**Optional runtime-config limit variables** (Worker `vars`):
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT` | Max runtime env vars saved per project | `150` |
-| `MAX_PROJECT_RUNTIME_FILES_PER_PROJECT` | Max runtime files saved per project | `50` |
-| `MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES` | Max bytes per runtime env var value | `8192` |
-| `MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES` | Max bytes per runtime file content | `131072` |
-| `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH` | Max runtime file path length (chars) | `256` |
+These are runtime Worker variables, not GitHub Environment variables in the current workflow. To change them for automated deployments, edit the top-level `[vars]` in `apps/api/wrangler.toml` before deploying, or extend `.github/workflows/deploy-reusable.yml` and `scripts/deploy/sync-wrangler-config.ts` to pass them through. Cloudflare Wrangler environment `vars` are non-inheritable, so the sync script copies top-level `[vars]` into the generated `[env.production.vars]` / `[env.staging.vars]` sections.
 
-**Optional AI task title generation variables** (GitHub Environment variables):
+| Variable                                   | Description                            | Default  |
+| ------------------------------------------ | -------------------------------------- | -------- |
+| `MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT` | Max runtime env vars saved per project | `150`    |
+| `MAX_PROJECT_RUNTIME_FILES_PER_PROJECT`    | Max runtime files saved per project    | `50`     |
+| `MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES`      | Max bytes per runtime env var value    | `8192`   |
+| `MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES`   | Max bytes per runtime file content     | `131072` |
+| `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH`     | Max runtime file path length (chars)   | `256`    |
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `TASK_TITLE_MODEL` | Workers AI model for task title generation | `@cf/meta/llama-3.1-8b-instruct` |
-| `TASK_TITLE_MAX_LENGTH` | Max characters in a generated title | `100` |
-| `TASK_TITLE_TIMEOUT_MS` | Timeout (ms) for AI title generation before falling back to truncation | `5000` |
-| `TASK_TITLE_GENERATION_ENABLED` | Set to `false` to disable AI generation entirely | `true` |
-| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | Messages at or below this length bypass AI | `100` |
-| `TASK_TITLE_MAX_RETRIES` | Max retry attempts on AI generation failure (rate limit, transient errors) | `2` |
-| `TASK_TITLE_RETRY_DELAY_MS` | Base delay (ms) between retries (exponential backoff: delay × 2^attempt) | `1000` |
-| `TASK_TITLE_RETRY_MAX_DELAY_MS` | Max delay (ms) cap for retry backoff | `4000` |
+**Optional AI task title generation variables** (Worker `vars`):
+
+| Variable                             | Description                                                                | Default                     |
+| ------------------------------------ | -------------------------------------------------------------------------- | --------------------------- |
+| `TASK_TITLE_MODEL`                   | Workers AI model for task title generation                                 | `@cf/google/gemma-3-12b-it` |
+| `TASK_TITLE_MAX_LENGTH`              | Max characters in a generated title                                        | `100`                       |
+| `TASK_TITLE_TIMEOUT_MS`              | Timeout (ms) for AI title generation before falling back to truncation     | `5000`                      |
+| `TASK_TITLE_GENERATION_ENABLED`      | Set to `false` to disable AI generation entirely                           | `true`                      |
+| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | Messages at or below this length bypass AI                                 | `100`                       |
+| `TASK_TITLE_MAX_RETRIES`             | Max retry attempts on AI generation failure (rate limit, transient errors) | `2`                         |
+| `TASK_TITLE_RETRY_DELAY_MS`          | Base delay (ms) between retries (exponential backoff: delay × 2^attempt)   | `1000`                      |
+| `TASK_TITLE_RETRY_MAX_DELAY_MS`      | Max delay (ms) cap for retry backoff                                       | `4000`                      |
 
 **Add environment secrets** (hidden):
 
-| Secret | Description |
-|--------|-------------|
-| `CF_API_TOKEN` | Cloudflare API token with D1, KV, R2, DNS, Workers Scripts, Workers Observability permissions |
-| `CF_ACCOUNT_ID` | Your Cloudflare account ID (32-char hex). Also used as a Worker secret for the admin observability log viewer. |
-| `CF_ZONE_ID` | Your domain's zone ID (32-char hex) |
-| `R2_ACCESS_KEY_ID` | R2 API token access key |
-| `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
-| `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase |
-| `GH_CLIENT_ID` | GitHub App client ID |
-| `GH_CLIENT_SECRET` | GitHub App client secret |
-| `GH_APP_ID` | GitHub App ID |
-| `GH_APP_PRIVATE_KEY` | GitHub App private key (raw PEM or base64 encoded — both work) |
-| `GH_APP_SLUG` | GitHub App slug (URL name) |
+| Secret                     | Description                                                                                                                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CF_API_TOKEN`             | Cloudflare API token with D1, KV, R2, DNS, Workers Scripts, Workers Observability, AI Gateway, Workers Routes, Pages, and SSL/Certificates permissions                                                                        |
+| `CF_ACCOUNT_ID`            | Your Cloudflare account ID (32-char hex). Also used as a Worker secret for the admin observability log viewer.                                                                                                                |
+| `CF_ZONE_ID`               | Your domain's zone ID (32-char hex)                                                                                                                                                                                           |
+| `R2_ACCESS_KEY_ID`         | R2 API token access key                                                                                                                                                                                                       |
+| `R2_SECRET_ACCESS_KEY`     | R2 API token secret key                                                                                                                                                                                                       |
+| `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase                                                                                                                                                                                                     |
+| `GH_CLIENT_ID`             | GitHub App client ID                                                                                                                                                                                                          |
+| `GH_CLIENT_SECRET`         | GitHub App client secret                                                                                                                                                                                                      |
+| `GH_APP_ID`                | GitHub App ID                                                                                                                                                                                                                 |
+| `GH_APP_PRIVATE_KEY`       | GitHub App private key (raw PEM or base64 encoded — both work)                                                                                                                                                                |
+| `GH_APP_SLUG`              | GitHub App slug (URL name)                                                                                                                                                                                                    |
+| `GH_WEBHOOK_SECRET`        | GitHub webhook HMAC-SHA256 verification secret. Required when the GitHub App webhook is active; must match the GitHub App webhook secret exactly. The deploy workflow maps this to the Worker secret `GITHUB_WEBHOOK_SECRET`. |
 
 **Optional secrets** (TLS — usually not needed):
 
-| Secret | Description |
-|--------|-------------|
+| Secret             | Description                                                                                                                                                                                                                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CF_ORIGIN_CA_KEY` | **Deprecated fallback.** Cloudflare Origin CA Key — only needed if your `CF_API_TOKEN` lacks the `Zone > SSL and Certificates > Edit` permission and you can't update it. The Origin CA Key is deprecated by Cloudflare (removal Sept 2026). Prefer adding the SSL permission to your API token instead. |
 
 **Optional secrets** (purpose-specific security overrides — recommended for production):
 
-| Secret | Description |
-|--------|-------------|
-| `BETTER_AUTH_SECRET` | BetterAuth session signing/encryption (overrides `ENCRYPTION_KEY` for sessions) |
+| Secret                      | Description                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------ |
+| `BETTER_AUTH_SECRET`        | BetterAuth session signing/encryption (overrides `ENCRYPTION_KEY` for sessions)                  |
 | `CREDENTIAL_ENCRYPTION_KEY` | AES-GCM encryption of user cloud credentials (overrides `ENCRYPTION_KEY` for credential storage) |
-| `GITHUB_WEBHOOK_SECRET` | GitHub webhook HMAC-SHA256 verification (overrides `ENCRYPTION_KEY`; must match GitHub App webhook secret) |
 
 **Optional secrets** (for GCP OIDC integration — see [GCP Setup Guide](./gcp-setup.md) for full instructions):
 
-| Secret | Description |
-|--------|-------------|
-| `GOOGLE_CLIENT_ID` | Google Cloud Console OAuth 2.0 client ID (enables "Connect Google Cloud" in Settings) |
-| `GOOGLE_CLIENT_SECRET` | Google Cloud Console OAuth 2.0 client secret |
+| Secret                 | Description                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID`     | Google Cloud Console OAuth 2.0 client ID (enables "Connect Google Cloud" in Settings) |
+| `GOOGLE_CLIENT_SECRET` | Google Cloud Console OAuth 2.0 client secret                                          |
 
 > **GCP OAuth Redirect URI**: When creating a Google OAuth 2.0 client, add `https://api.<YOUR_BASE_DOMAIN>/api/deployment/gcp/callback` as an authorized redirect URI. This is a single static URI shared by all projects — no per-project URIs needed.
 
 **Optional GCP VM provisioning configuration** (env vars, not secrets — sensible defaults provided):
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GCP_STS_SCOPE` | `https://www.googleapis.com/auth/cloud-platform` | OAuth scope for STS token exchange |
-| `GCP_SA_IMPERSONATION_SCOPES` | `https://www.googleapis.com/auth/compute` | Comma-separated scopes for SA impersonation |
+| Variable                      | Default                                          | Description                                 |
+| ----------------------------- | ------------------------------------------------ | ------------------------------------------- |
+| `GCP_STS_SCOPE`               | `https://www.googleapis.com/auth/cloud-platform` | OAuth scope for STS token exchange          |
+| `GCP_SA_IMPERSONATION_SCOPES` | `https://www.googleapis.com/auth/compute`        | Comma-separated scopes for SA impersonation |
 
 For the full list of GCP configuration variables, see the [GCP Setup Guide](./gcp-setup.md#configuration-reference).
 
 **Optional GCP deployment configuration** (for project-level Defang deployment — sensible defaults provided):
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GCP_DEPLOY_WIF_POOL_ID` | `sam-deploy-pool` | WIF pool ID for project-level deployment auth |
-| `GCP_DEPLOY_WIF_PROVIDER_ID` | `sam-oidc` | OIDC provider within the deploy pool |
-| `GCP_DEPLOY_SERVICE_ACCOUNT_ID` | `sam-deployer` | Service account for deployment operations |
-| `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS` | `600` | Identity token lifetime in seconds |
+| Variable                                   | Default           | Description                                   |
+| ------------------------------------------ | ----------------- | --------------------------------------------- |
+| `GCP_DEPLOY_WIF_POOL_ID`                   | `sam-deploy-pool` | WIF pool ID for project-level deployment auth |
+| `GCP_DEPLOY_WIF_PROVIDER_ID`               | `sam-oidc`        | OIDC provider within the deploy pool          |
+| `GCP_DEPLOY_SERVICE_ACCOUNT_ID`            | `sam-deployer`    | Service account for deployment operations     |
+| `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS` | `600`             | Identity token lifetime in seconds            |
 
-> **⚠️ Naming Convention — read this before troubleshooting "missing secret" errors**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub Actions reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets. If you see `GITHUB_CLIENT_ID` in code or `.env` files, that's the Worker-side name — use `GH_CLIENT_ID` in GitHub Environment secrets. Google OAuth secrets use `GOOGLE_*` directly (no prefix mapping needed).
+> **⚠️ Naming Convention — read this before troubleshooting "missing secret" errors**: GitHub App secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub Actions secret names cannot start with `GITHUB_`. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets. If you see `GITHUB_CLIENT_ID` or `GITHUB_WEBHOOK_SECRET` in code or `.env` files, those are Worker-side names — use `GH_CLIENT_ID` and `GH_WEBHOOK_SECRET` in GitHub Environment secrets. Google OAuth secrets use `GOOGLE_*` directly.
 
 > **Note**: Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) and TLS certificates (`ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`) are **automatically generated and persisted** via Pulumi state in R2. No manual intervention required—keys are created on first deployment and reused automatically on subsequent deployments.
 
@@ -139,11 +142,13 @@ For the full list of GCP configuration variables, see the [GCP Setup Guide](./gc
 **Automatic deployment**: Every push to `main` triggers a deployment automatically.
 
 **First deployment**:
+
 1. Configure the GitHub Environment (see above)
 2. Push any commit to `main`, OR
 3. Go to **Actions** → **"Deploy"** → **"Run workflow"** for manual trigger
 
 **Subsequent deployments**: Just merge PRs to `main`. The workflow:
+
 - Validates all required configuration exists
 - Provisions infrastructure via Pulumi (idempotent)
 - Deploys API Worker and Web UI via Wrangler
@@ -154,6 +159,7 @@ For the full list of GCP configuration variables, see the [GCP Setup Guide](./gc
 ### Teardown
 
 To remove all resources:
+
 1. Go to **Actions** → **"Teardown"**
 2. Click **"Run workflow"**
 3. Type `DELETE` to confirm
@@ -184,11 +190,11 @@ Before starting, ensure you have the following ready.
 
 ### Required Accounts
 
-| Account | Purpose | Tier Needed | Sign-up Link |
-|---------|---------|-------------|--------------|
-| **Cloudflare** | API hosting, DNS, storage | Free tier | [cloudflare.com](https://dash.cloudflare.com/sign-up) |
-| **GitHub** | Authentication, repository access | Free tier | [github.com](https://github.com/signup) |
-| **Domain Registrar** | Your workspace domain | Any | (you likely already have one) |
+| Account              | Purpose                           | Tier Needed | Sign-up Link                                          |
+| -------------------- | --------------------------------- | ----------- | ----------------------------------------------------- |
+| **Cloudflare**       | API hosting, DNS, storage         | Free tier   | [cloudflare.com](https://dash.cloudflare.com/sign-up) |
+| **GitHub**           | Authentication, repository access | Free tier   | [github.com](https://github.com/signup)               |
+| **Domain Registrar** | Your workspace domain             | Any         | (you likely already have one)                         |
 
 **Note on cloud providers**: SAM uses a Bring-Your-Own-Cloud (BYOC) model. Each user provides their own Hetzner (or other provider) API token through the Settings UI to create workspaces. You do **not** need a shared cloud provider account for the platform itself — Cloudflare is the only infrastructure the platform operator manages.
 
@@ -212,6 +218,7 @@ git --version
 ```
 
 **Installing Go** (if not installed):
+
 - **macOS**: `brew install go`
 - **Ubuntu/Debian**: `sudo apt install golang-go` (or use [official installer](https://go.dev/dl/))
 - **Windows**: Download from [go.dev/dl](https://go.dev/dl/)
@@ -245,16 +252,19 @@ If your domain is not already on Cloudflare:
 You must point your domain to Cloudflare's nameservers. This varies by registrar:
 
 **GoDaddy:**
+
 1. Go to [my.godaddy.com](https://my.godaddy.com) → **My Products** → **DNS**
 2. Click **Nameservers** → **Change** → **Enter custom nameservers**
 3. Enter Cloudflare's nameservers, click **Save**
 
 **Namecheap:**
+
 1. Go to [namecheap.com](https://www.namecheap.com) → **Domain List** → **Manage**
 2. Under **Nameservers**, select **Custom DNS**
 3. Enter Cloudflare's nameservers, click **Save**
 
 **Google Domains / Squarespace Domains:**
+
 1. Go to [domains.squarespace.com](https://domains.squarespace.com)
 2. Select your domain → **DNS** → **Nameservers** → **Use custom nameservers**
 3. Enter Cloudflare's nameservers
@@ -288,20 +298,21 @@ SAM needs a Cloudflare API token with specific permissions:
 
 **Permissions** — add all of these. Each row maps to a single permission in the Cloudflare UI: select the **Scope** (Account or Zone), then the **Category** group, then the specific **Permission** and **Access Level**.
 
-| Scope | Category | Permission | Access Level |
-|-------|----------|------------|--------------|
-| Account | Developer Platform | D1 | Edit |
-| Account | Developer Platform | Workers KV Storage | Edit |
-| Account | Developer Platform | Workers R2 Storage | Edit |
-| Account | Developer Platform | Workers Scripts | Edit |
-| Account | Developer Platform | Workers Observability | Read |
-| Account | Developer Platform | Pages | Edit |
-| Zone | Developer Platform | Workers Routes | Edit |
-| Zone | SSL & Certificates | SSL and Certificates | Edit |
-| Zone | DNS & Zone | DNS | Edit |
-| Zone | DNS & Zone | Zone | Read |
+| Scope   | Category           | Permission            | Access Level |
+| ------- | ------------------ | --------------------- | ------------ |
+| Account | Developer Platform | D1                    | Edit         |
+| Account | Developer Platform | Workers KV Storage    | Edit         |
+| Account | Developer Platform | Workers R2 Storage    | Edit         |
+| Account | Developer Platform | Workers Scripts       | Edit         |
+| Account | Developer Platform | Workers Observability | Read         |
+| Account | Developer Platform | Pages                 | Edit         |
+| Account | AI                 | AI Gateway            | Edit         |
+| Zone    | Developer Platform | Workers Routes        | Edit         |
+| Zone    | SSL & Certificates | SSL and Certificates  | Edit         |
+| Zone    | DNS & Zone         | DNS                   | Edit         |
+| Zone    | DNS & Zone         | Zone                  | Read         |
 
-**Zone Resources**: Select **Include** → **Specific zone** → *your domain*
+**Zone Resources**: Select **Include** → **Specific zone** → _your domain_
 
 **Account Resources**: Select **Include** → **Your account name**
 
@@ -362,6 +373,7 @@ Replace `YOUR_DOMAIN` with your `BASE_DOMAIN` value (e.g., `https://app.simple-a
 You also need R2 S3-compatible API credentials for presigned URL generation. Create these in the Cloudflare Dashboard under R2 → Manage R2 API Tokens, with **Object Read & Write** permissions scoped to the `workspaces-assets` bucket. Set `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` as Worker secrets.
 
 **Save these IDs** from the command outputs:
+
 - D1 Database ID (e.g., `abc123...`)
 - KV Namespace ID (e.g., `def456...`)
 
@@ -410,11 +422,11 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 |-------|-------|
 | **Active** | ✓ Checked |
 | **Webhook URL** | `https://api.example.com/api/github/webhook` |
-| **Webhook secret** | Generate a random string (save it!) |
+| **Webhook secret** | Generate a random string and save the same value as the `GH_WEBHOOK_SECRET` GitHub Environment secret |
 
 **Permissions:**
 
-*Repository permissions:*
+_Repository permissions:_
 | Permission | Access |
 |------------|--------|
 | **Contents** | Read and write |
@@ -422,7 +434,7 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 
 > **Note**: Contents requires **Read and write** access because workspaces need to commit and push code changes back to repositories.
 
-*Account permissions:*
+_Account permissions:_
 | Permission | Access |
 |------------|--------|
 | **Email addresses** | Read-only |
@@ -430,6 +442,7 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 > **Note**: SAM uses this permission to read the account's **primary** email from `GET /user/emails`. Without it, SAM falls back to the public profile email from `GET /user`, or a GitHub noreply fallback when no email is available.
 
 **Where can this GitHub App be installed?**: Select based on your needs:
+
 - **Only on this account**: For personal use
 - **Any account**: For public/team use
 
@@ -469,6 +482,7 @@ pnpm tsx scripts/deploy/generate-keys.ts
 ```
 
 This generates:
+
 - **ENCRYPTION_KEY**: Shared fallback key — used for credential encryption, session management, and webhook verification when purpose-specific overrides are not set
 - **JWT_PRIVATE_KEY**: RSA private key for signing terminal access tokens
 - **JWT_PUBLIC_KEY**: RSA public key for token verification
@@ -584,6 +598,7 @@ make build-all
 ```
 
 This creates binaries in `packages/vm-agent/bin/`:
+
 - `vm-agent-linux-amd64`
 - `vm-agent-linux-arm64`
 - `vm-agent-darwin-amd64` (for local testing)
@@ -598,22 +613,32 @@ cd apps/api
 
 # Set each secret (you'll be prompted for the value)
 wrangler secret put CF_API_TOKEN
+wrangler secret put CF_ACCOUNT_ID
 wrangler secret put CF_ZONE_ID
 wrangler secret put GITHUB_CLIENT_ID
 wrangler secret put GITHUB_CLIENT_SECRET
 wrangler secret put GITHUB_APP_ID
 wrangler secret put GITHUB_APP_PRIVATE_KEY
+wrangler secret put GITHUB_APP_SLUG
+wrangler secret put GITHUB_WEBHOOK_SECRET
 wrangler secret put ENCRYPTION_KEY
 wrangler secret put JWT_PRIVATE_KEY
 wrangler secret put JWT_PUBLIC_KEY
+wrangler secret put ORIGIN_CA_CERT
+wrangler secret put ORIGIN_CA_KEY
+wrangler secret put TRIAL_CLAIM_TOKEN_SECRET
 
 # Optional purpose-specific overrides (recommended for production)
 # wrangler secret put BETTER_AUTH_SECRET
 # wrangler secret put CREDENTIAL_ENCRYPTION_KEY
-# wrangler secret put GITHUB_WEBHOOK_SECRET
+
+# Optional task attachment upload support
+# wrangler secret put R2_ACCESS_KEY_ID
+# wrangler secret put R2_SECRET_ACCESS_KEY
 ```
 
 **Tip**: For multiline values (like private keys), you can pipe them:
+
 ```bash
 cat path/to/github-app-key.pem | wrangler secret put GITHUB_APP_PRIVATE_KEY
 ```
@@ -660,6 +685,8 @@ wrangler r2 object put workspaces-assets/agents/version.json --file bin/version.
 
 </details>
 
+> **Manual deployment note**: The automated Pulumi workflow generates and persists `ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`, and `TRIAL_CLAIM_TOKEN_SECRET`. In the manual flow, you must generate and set those Worker secrets yourself. Use `wrangler secret put <NAME> --env production` if you deploy the Worker with a Wrangler environment.
+
 ---
 
 ## DNS Configuration
@@ -672,16 +699,18 @@ Configure DNS records in Cloudflare to route traffic to your deployments.
 
 In Cloudflare Dashboard → your domain → **DNS**:
 
-| Type | Name | Content | Proxy Status |
-|------|------|---------|--------------|
+| Type  | Name  | Content                                     | Proxy Status     |
+| ----- | ----- | ------------------------------------------- | ---------------- |
 | CNAME | `api` | `workspaces-api.your-subdomain.workers.dev` | Proxied (orange) |
-| CNAME | `app` | `simple-agent-manager.pages.dev` | Proxied (orange) |
-| A | `*` | `192.0.2.0` | Proxied (orange) |
+| CNAME | `app` | `simple-agent-manager.pages.dev`            | Proxied (orange) |
+| CNAME | `*`   | `workspaces-api.your-subdomain.workers.dev` | Proxied (orange) |
 
 **Notes**:
+
 - The `*` (wildcard) record catches workspace subdomains (e.g., `ws-abc123.workspaces.example.com`)
-- The dummy IP `192.0.2.0` is fine because the Workers handle routing
+- The wildcard record should target the deployed API Worker hostname, matching the automated Pulumi deployment
 - All records should be **proxied** (orange cloud) for SSL and Workers routing
+- If you configure Worker routes manually, add routes for `api.example.com/*` and `*.example.com/*`, plus a more-specific `*.vm.example.com/*` route with no Worker script so VM-agent backend traffic bypasses the wildcard Worker route.
 
 ### SSL/TLS Configuration
 
@@ -702,8 +731,8 @@ Test each component to ensure everything works.
 ### Test 1: API Health Check
 
 ```bash
-curl https://api.example.com/api/health
-# Should return: {"status":"ok"}
+curl https://api.example.com/health
+# Should return: {"status":"healthy","timestamp":"..."}
 ```
 
 ### Test 2: Web UI Access
@@ -751,13 +780,13 @@ Nodes use systemd journald for centralized log aggregation. The cloud-init templ
 
 **Journald configuration** (applied via `/etc/systemd/journald.conf.d/sam.conf`):
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `SystemMaxUse` | `500M` | Max disk space for journal |
-| `SystemKeepFree` | `1G` | Minimum free disk to maintain |
-| `MaxRetentionSec` | `7day` | Max log retention period |
-| `Storage` | `persistent` | Persist logs across reboots |
-| `Compress` | `yes` | Compress stored journal entries |
+| Setting           | Default      | Description                     |
+| ----------------- | ------------ | ------------------------------- |
+| `SystemMaxUse`    | `500M`       | Max disk space for journal      |
+| `SystemKeepFree`  | `1G`         | Minimum free disk to maintain   |
+| `MaxRetentionSec` | `7day`       | Max log retention period        |
+| `Storage`         | `persistent` | Persist logs across reboots     |
+| `Compress`        | `yes`        | Compress stored journal entries |
 
 These defaults can be overridden per-node by passing `logJournalMaxUse`, `logJournalKeepFree`, and `logJournalMaxRetention` to the cloud-init generator.
 
@@ -765,18 +794,18 @@ These defaults can be overridden per-node by passing `logJournalMaxUse`, `logJou
 
 **VM Agent environment variables**:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOG_LEVEL` | `info` | Agent log level (`debug`, `info`, `warn`, `error`) |
-| `LOG_FORMAT` | `json` | Log output format (`json` or `text`) |
-| `LOG_RETRIEVAL_DEFAULT_LIMIT` | `200` | Default entries per log page |
-| `LOG_RETRIEVAL_MAX_LIMIT` | `1000` | Maximum entries per log page |
-| `LOG_STREAM_BUFFER_SIZE` | `100` | Catch-up entries sent on stream connect |
-| `LOG_READER_TIMEOUT` | `30s` | Timeout for journalctl read commands |
-| `LOG_STREAM_PING_INTERVAL` | `30s` | WebSocket ping interval for log stream |
-| `LOG_STREAM_PONG_TIMEOUT` | `90s` | WebSocket pong deadline for log stream |
-| `SYSINFO_DOCKER_LIST_TIMEOUT` | `10s` | Timeout for `docker ps` command |
-| `SYSINFO_DOCKER_STATS_TIMEOUT` | `10s` | Timeout for `docker stats` command |
+| Variable                       | Default | Description                                        |
+| ------------------------------ | ------- | -------------------------------------------------- |
+| `LOG_LEVEL`                    | `info`  | Agent log level (`debug`, `info`, `warn`, `error`) |
+| `LOG_FORMAT`                   | `json`  | Log output format (`json` or `text`)               |
+| `LOG_RETRIEVAL_DEFAULT_LIMIT`  | `200`   | Default entries per log page                       |
+| `LOG_RETRIEVAL_MAX_LIMIT`      | `1000`  | Maximum entries per log page                       |
+| `LOG_STREAM_BUFFER_SIZE`       | `100`   | Catch-up entries sent on stream connect            |
+| `LOG_READER_TIMEOUT`           | `30s`   | Timeout for journalctl read commands               |
+| `LOG_STREAM_PING_INTERVAL`     | `30s`   | WebSocket ping interval for log stream             |
+| `LOG_STREAM_PONG_TIMEOUT`      | `90s`   | WebSocket pong deadline for log stream             |
+| `SYSINFO_DOCKER_LIST_TIMEOUT`  | `10s`   | Timeout for `docker ps` command                    |
+| `SYSINFO_DOCKER_STATS_TIMEOUT` | `10s`   | Timeout for `docker stats` command                 |
 
 ### Updating the VM Agent
 
@@ -798,6 +827,7 @@ wrangler r2 object put workspaces-assets/agents/version.json --file bin/version.
 ### Database Migrations
 
 SAM uses two D1 databases:
+
 - **DATABASE** (`workspaces`): Core platform data (users, nodes, workspaces, projects, tasks)
 - **OBSERVABILITY_DATABASE** (`observability`): Error storage for the admin observability dashboard (spec 023). Isolated from the main database to prevent error volume from affecting core queries.
 
@@ -838,16 +868,16 @@ new_sqlite_classes = ["ProjectData"]
 
 **Configurable DO limits** (set as Worker vars or environment variables):
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MAX_SESSIONS_PER_PROJECT` | Max chat sessions per project | `1000` |
-| `MAX_MESSAGES_PER_SESSION` | Max messages per chat session | `10000` |
-| `MESSAGE_SIZE_THRESHOLD` | Max message size in bytes | `102400` |
-| `ACTIVITY_RETENTION_DAYS` | Days to retain activity events | `90` |
-| `SESSION_IDLE_TIMEOUT_MINUTES` | Idle session timeout | `60` |
-| `DO_SUMMARY_SYNC_DEBOUNCE_MS` | Debounce for DO-to-D1 summary sync | `5000` |
-| `DEFAULT_TASK_AGENT_TYPE` | Agent used for autonomous task execution | `opencode` |
-| `WORKSPACE_IDLE_TIMEOUT_MS` | Global default idle timeout before workspace is stopped (overridable per-project) | `7200000` (2h) |
+| Variable                       | Description                                                                       | Default        |
+| ------------------------------ | --------------------------------------------------------------------------------- | -------------- |
+| `MAX_SESSIONS_PER_PROJECT`     | Max chat sessions per project                                                     | `1000`         |
+| `MAX_MESSAGES_PER_SESSION`     | Max messages per chat session                                                     | `10000`        |
+| `MESSAGE_SIZE_THRESHOLD`       | Max message size in bytes                                                         | `102400`       |
+| `ACTIVITY_RETENTION_DAYS`      | Days to retain activity events                                                    | `90`           |
+| `SESSION_IDLE_TIMEOUT_MINUTES` | Idle session timeout                                                              | `60`           |
+| `DO_SUMMARY_SYNC_DEBOUNCE_MS`  | Debounce for DO-to-D1 summary sync                                                | `5000`         |
+| `DEFAULT_TASK_AGENT_TYPE`      | Agent used for autonomous task execution                                          | `opencode`     |
+| `WORKSPACE_IDLE_TIMEOUT_MS`    | Global default idle timeout before workspace is stopped (overridable per-project) | `7200000` (2h) |
 
 See `apps/api/.env.example` for the full list of configurable variables.
 
@@ -859,16 +889,16 @@ The proxy intercepts Codex refresh requests and serializes them per user via a D
 
 **Configurable variables:**
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CODEX_REFRESH_PROXY_ENABLED` | Kill switch — set to `"false"` to disable | Enabled |
-| `CODEX_REFRESH_LOCK_TIMEOUT_MS` | Per-user lock timeout | `30000` (30s) |
-| `CODEX_REFRESH_UPSTREAM_URL` | OpenAI token endpoint | `https://auth.openai.com/oauth/token` |
-| `CODEX_REFRESH_UPSTREAM_TIMEOUT_MS` | Upstream request timeout | `10000` (10s) |
-| `CODEX_CLIENT_ID` | OpenAI OAuth client ID | `app_EMoamEEZ73f0CkXaXp7hrann` |
-| `RATE_LIMIT_CODEX_REFRESH_PER_HOUR` | Max refresh requests per hour per user (enforced atomically via CodexRefreshLock DO ctx.storage) | `30` |
-| `RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS` | Rate limit window in seconds | `3600` (1 hour) |
-| `CODEX_EXPECTED_SCOPES` | Comma-separated allowlist of OAuth scopes the upstream may return. Unexpected scopes block the refresh with 502 and the previous token remains valid. Empty string disables validation. | `openid,profile,email,offline_access` |
+| Variable                                  | Description                                                                                                                                                                             | Default                               |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `CODEX_REFRESH_PROXY_ENABLED`             | Kill switch — set to `"false"` to disable                                                                                                                                               | Enabled                               |
+| `CODEX_REFRESH_LOCK_TIMEOUT_MS`           | Per-user lock timeout                                                                                                                                                                   | `30000` (30s)                         |
+| `CODEX_REFRESH_UPSTREAM_URL`              | OpenAI token endpoint                                                                                                                                                                   | `https://auth.openai.com/oauth/token` |
+| `CODEX_REFRESH_UPSTREAM_TIMEOUT_MS`       | Upstream request timeout                                                                                                                                                                | `10000` (10s)                         |
+| `CODEX_CLIENT_ID`                         | OpenAI OAuth client ID                                                                                                                                                                  | `app_EMoamEEZ73f0CkXaXp7hrann`        |
+| `RATE_LIMIT_CODEX_REFRESH_PER_HOUR`       | Max refresh requests per hour per user (enforced atomically via CodexRefreshLock DO ctx.storage)                                                                                        | `30`                                  |
+| `RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS` | Rate limit window in seconds                                                                                                                                                            | `3600` (1 hour)                       |
+| `CODEX_EXPECTED_SCOPES`                   | Comma-separated allowlist of OAuth scopes the upstream may return. Unexpected scopes block the refresh with 502 and the previous token remains valid. Empty string disables validation. | `openid,profile,email,offline_access` |
 
 ### Trial Onboarding
 
@@ -879,6 +909,7 @@ If you want to expose the zero-friction `/try` URL-to-workspace flow on your dep
 Security keys are managed by Pulumi and normally don't need rotation. If you need to rotate keys:
 
 **Option 1: Force Pulumi to recreate keys**
+
 ```bash
 # Remove protection from key resources (temporarily)
 cd infra
@@ -894,6 +925,7 @@ pulumi up
 ```
 
 **Option 2: Manual rotation**
+
 ```bash
 # Generate new keys locally
 pnpm tsx scripts/deploy/generate-keys.ts
@@ -906,6 +938,7 @@ wrangler secret put ENCRYPTION_KEY
 ```
 
 **Warning**: Rotating keys will:
+
 - Invalidate all active terminal sessions (JWT keys)
 - Make existing encrypted credentials unreadable (`CREDENTIAL_ENCRYPTION_KEY`, or `ENCRYPTION_KEY` if the override is not set) - users will need to re-enter their Hetzner tokens
 
@@ -920,6 +953,7 @@ wrangler secret put ENCRYPTION_KEY
 **Cause**: `PULUMI_CONFIG_PASSPHRASE` doesn't match the one used when state was created.
 
 **Fix**:
+
 1. Use the same passphrase used during initial deployment
 2. If you lost the passphrase, delete the stack in R2 and start fresh:
    ```bash
@@ -932,6 +966,7 @@ wrangler secret put ENCRYPTION_KEY
 **Cause**: R2 backend connection failed or bucket doesn't exist.
 
 **Fix**:
+
 1. Verify the Pulumi state bucket exists in Cloudflare R2
 2. Check R2 credentials (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) in your GitHub Environment
 3. Verify the bucket name matches the `PULUMI_STATE_BUCKET` environment variable (default: `sam-pulumi-state`)
@@ -947,6 +982,7 @@ wrangler secret put ENCRYPTION_KEY
 **Cause**: Resource was created outside Pulumi or imported incorrectly.
 
 **Fix**:
+
 1. If the resource should be managed by Pulumi, import it:
    ```bash
    pulumi import cloudflare:index/d1Database:D1Database sam-database <database-id>
@@ -958,6 +994,7 @@ wrangler secret put ENCRYPTION_KEY
 **Cause**: Cron triggers (used for provisioning timeout checks) require the account's `workers.dev` subdomain to be initialized. The deploy workflow handles this automatically via the Cloudflare API, but it may fail if the API token lacks the `Workers Scripts` permission.
 
 **Fix**:
+
 1. **Automatic**: The deployment workflow includes an "Ensure workers.dev Subdomain" step that initializes it. Verify your API token has `Account: Workers Scripts (Edit)` permission.
 2. **Manual**: Go to **Cloudflare Dashboard** → **Workers & Pages** → click on any worker → **Settings** → **Domains & Routes** → enable the `workers.dev` route.
 
@@ -972,6 +1009,7 @@ wrangler secret put ENCRYPTION_KEY
 **Cause**: Worker deployed but configuration issue preventing startup.
 
 **Fix**:
+
 1. Check worker logs: `wrangler tail`
 2. Verify all secrets are set correctly
 3. Check D1 migrations were applied
@@ -983,9 +1021,22 @@ wrangler secret put ENCRYPTION_KEY
 **Cause**: The `CF_API_TOKEN` is missing the "Workers Observability (Read)" permission, which is required for the admin log viewer.
 
 **Fix**:
+
 1. Go to **Cloudflare Dashboard** → **My Profile** → **API Tokens**
 2. Edit the token used for SAM
 3. Add permission: **Account → Workers Observability → Read**
+4. Save the token
+5. If the token was regenerated, update the `CF_API_TOKEN` secret in your GitHub Environment and redeploy
+
+### "Configure AI Gateway" fails with 403
+
+**Cause**: The `CF_API_TOKEN` is missing the account-level "AI Gateway (Edit)" permission. The deploy workflow configures the account AI Gateway before deploying the Worker.
+
+**Fix**:
+
+1. Go to **Cloudflare Dashboard** → **My Profile** → **API Tokens**
+2. Edit the token used for SAM
+3. Add permission: **Account → AI Gateway → Edit**
 4. Save the token
 5. If the token was regenerated, update the `CF_API_TOKEN` secret in your GitHub Environment and redeploy
 
@@ -994,6 +1045,7 @@ wrangler secret put ENCRYPTION_KEY
 **Cause**: Callback URL mismatch or incorrect GitHub App settings
 
 **Fix**:
+
 1. Check your GitHub App's **Callback URL** matches exactly: `https://api.example.com/api/auth/callback/github`
 2. Check your GitHub App's **Setup URL** is set to: `https://api.example.com/api/github/callback`
 3. Ensure **"Request user authorization (OAuth) during installation"** is **unchecked** — when checked, it disables the Setup URL and causes post-installation redirects to hit BetterAuth, which fails
@@ -1005,6 +1057,7 @@ wrangler secret put ENCRYPTION_KEY
 **Cause**: Migrations haven't been applied
 
 **Fix**:
+
 ```bash
 wrangler d1 migrations apply workspaces --remote
 ```
@@ -1014,6 +1067,7 @@ wrangler d1 migrations apply workspaces --remote
 **Cause**: R2 bucket not configured or binaries not uploaded
 
 **Fix**:
+
 1. Verify R2 bucket exists: `wrangler r2 bucket list`
 2. Re-upload binaries (see Step 7 above)
 
@@ -1022,6 +1076,7 @@ wrangler d1 migrations apply workspaces --remote
 **Cause**: VM provisioning failed or agent didn't start
 
 **Fix**:
+
 1. Check Hetzner console for VM status
 2. If VM is running, SSH in and check: `systemctl status vm-agent`
 3. View cloud-init logs: `cat /var/log/cloud-init-output.log`
@@ -1031,6 +1086,7 @@ wrangler d1 migrations apply workspaces --remote
 **Cause**: The GitHub App private key is stored in an unsupported format. GitHub App keys are generated as PKCS#1 (`-----BEGIN RSA PRIVATE KEY-----`), and the API automatically converts them to PKCS#8 format at runtime.
 
 **Fix**:
+
 1. Ensure the key is stored either as raw PEM or base64-encoded PEM (both work)
 2. For base64 encoding: `cat your-key.pem | base64 -w0`
 3. For raw PEM via wrangler: `cat your-key.pem | wrangler secret put GITHUB_APP_PRIVATE_KEY`
@@ -1041,6 +1097,7 @@ wrangler d1 migrations apply workspaces --remote
 **Cause**: Key mismatch between API and expectations
 
 **Fix**:
+
 1. Ensure JWT_PUBLIC_KEY and JWT_PRIVATE_KEY are from the same key pair
 2. Check keys aren't truncated (base64 encoding)
 3. Regenerate keys if needed
@@ -1050,6 +1107,7 @@ wrangler d1 migrations apply workspaces --remote
 **Cause**: DNS not propagated or misconfigured
 
 **Fix**:
+
 1. Verify nameservers changed at registrar
 2. Check DNS records in Cloudflare dashboard
 3. Wait up to 24 hours for propagation
@@ -1061,13 +1119,13 @@ wrangler d1 migrations apply workspaces --remote
 
 ### Platform Costs (Your Infrastructure)
 
-| Component | Free Tier Limit | Paid Overage |
-|-----------|-----------------|--------------|
-| **Cloudflare Workers** | 100K requests/day | $0.15/million |
-| **Cloudflare D1** | 5M rows read/day | $0.001/million |
-| **Cloudflare KV** | 100K reads/day | $0.50/million |
-| **Cloudflare R2** | 10GB storage | $0.015/GB/month |
-| **Cloudflare Pages** | Unlimited | Free |
+| Component              | Free Tier Limit   | Paid Overage    |
+| ---------------------- | ----------------- | --------------- |
+| **Cloudflare Workers** | 100K requests/day | $0.15/million   |
+| **Cloudflare D1**      | 5M rows read/day  | $0.001/million  |
+| **Cloudflare KV**      | 100K reads/day    | $0.50/million   |
+| **Cloudflare R2**      | 10GB storage      | $0.015/GB/month |
+| **Cloudflare Pages**   | Unlimited         | Free            |
 
 **Typical SAM deployment**: Stays within free tier for small to medium usage.
 
@@ -1075,11 +1133,11 @@ wrangler d1 migrations apply workspaces --remote
 
 Users provide their own Hetzner API token. Workspace VMs are billed to their account:
 
-| VM Size | Specs | Hourly | Monthly |
-|---------|-------|--------|---------|
-| **Small** (CX22) | 2 vCPU, 4GB RAM | €0.006 (~$0.007) | €3.79 (~$4.15) |
-| **Medium** (CX32) | 4 vCPU, 8GB RAM | €0.011 (~$0.012) | €6.80 (~$7.50) |
-| **Large** (CX42) | 8 vCPU, 16GB RAM | €0.027 (~$0.030) | €16.40 (~$18) |
+| VM Size           | Specs            | Hourly           | Monthly        |
+| ----------------- | ---------------- | ---------------- | -------------- |
+| **Small** (CX22)  | 2 vCPU, 4GB RAM  | €0.006 (~$0.007) | €3.79 (~$4.15) |
+| **Medium** (CX32) | 4 vCPU, 8GB RAM  | €0.011 (~$0.012) | €6.80 (~$7.50) |
+| **Large** (CX42)  | 8 vCPU, 16GB RAM | €0.027 (~$0.030) | €16.40 (~$18)  |
 
 VMs are billed hourly until they are explicitly stopped or deleted.
 
@@ -1103,4 +1161,4 @@ VMs are billed hourly until they are explicitly stopped or deleted.
 
 ---
 
-*Last updated: 2026-04-14*
+_Last updated: 2026-04-14_

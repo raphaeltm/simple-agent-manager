@@ -16,20 +16,22 @@ You are an environment variable consistency validator for the Simple Agent Manag
 
 This project has a critical naming convention for environment variables:
 
-| Context | Prefix | Example | Where Used |
-|---------|--------|---------|------------|
-| **GitHub Environment** | `GH_` | `GH_CLIENT_ID` | GitHub Settings → Environments → production |
-| **Cloudflare Worker** | `GITHUB_` | `GITHUB_CLIENT_ID` | Worker runtime, local `.env` files |
+| Context                | Prefix    | Example            | Where Used                                  |
+| ---------------------- | --------- | ------------------ | ------------------------------------------- |
+| **GitHub Environment** | `GH_`     | `GH_CLIENT_ID`     | GitHub Settings → Environments → production |
+| **Cloudflare Worker**  | `GITHUB_` | `GITHUB_CLIENT_ID` | Worker runtime, local `.env` files          |
 
-**Why different names?** GitHub Actions reserves `GITHUB_*` environment variables for its own use. Using `GITHUB_CLIENT_ID` as a GitHub secret would conflict. So we use `GH_*` in GitHub, and the deployment script maps them to `GITHUB_*` Worker secrets.
+**Why different names?** GitHub Actions secret names cannot start with `GITHUB_*`. Using `GITHUB_CLIENT_ID` as a GitHub secret would fail. So we use `GH_*` in GitHub, and the deployment script maps them to `GITHUB_*` Worker secrets.
 
 The mapping is done by `scripts/deploy/configure-secrets.sh`:
+
 ```
 GH_CLIENT_ID           →  GITHUB_CLIENT_ID
 GH_CLIENT_SECRET       →  GITHUB_CLIENT_SECRET
 GH_APP_ID              →  GITHUB_APP_ID
 GH_APP_PRIVATE_KEY     →  GITHUB_APP_PRIVATE_KEY
 GH_APP_SLUG            →  GITHUB_APP_SLUG
+GH_WEBHOOK_SECRET      →  GITHUB_WEBHOOK_SECRET
 ```
 
 ## When Invoked
@@ -44,10 +46,12 @@ GH_APP_SLUG            →  GITHUB_APP_SLUG
 ### 1. Env Interface Consistency
 
 **Files to Review**:
+
 - `apps/api/src/index.ts` (Env interface, lines 15-40)
 - `scripts/deploy/types.ts` (REQUIRED_SECRETS array)
 
 **Checklist**:
+
 - [ ] All Env interface members are documented in CLAUDE.md
 - [ ] REQUIRED_SECRETS array matches configure-secrets.sh secrets
 - [ ] Optional vs required correctly marked (optional ends with `?`)
@@ -56,12 +60,14 @@ GH_APP_SLUG            →  GITHUB_APP_SLUG
 ### 2. Prefix Convention
 
 **Files to Review**:
+
 - `CLAUDE.md` - Environment Variable Naming section
 - `docs/guides/self-hosting.md` - GitHub Environment Configuration
 - `.specify/memory/constitution.md` - Development Workflow
 - `.env.example` files (if any)
 
 **Checklist**:
+
 - [ ] GitHub Environment tables use `GH_*` prefix
 - [ ] Cloudflare Worker tables use `GITHUB_*` prefix
 - [ ] Local .env examples use `GITHUB_*` prefix
@@ -71,12 +77,14 @@ GH_APP_SLUG            →  GITHUB_APP_SLUG
 ### 3. Cross-Document Consistency
 
 **Files to Review**:
+
 - `CLAUDE.md`
 - `docs/guides/self-hosting.md`
 - `.specify/memory/constitution.md`
 - `docs/architecture/secrets-taxonomy.md`
 
 **Checklist**:
+
 - [ ] All documents list same environment variables
 - [ ] Descriptions are consistent across documents
 - [ ] Required vs optional status is consistent
@@ -85,10 +93,12 @@ GH_APP_SLUG            →  GITHUB_APP_SLUG
 ### 4. Script Validation
 
 **Files to Review**:
+
 - `scripts/deploy/configure-secrets.sh`
 - `.github/workflows/deploy.yml`
 
 **Checklist**:
+
 - [ ] All secrets read in workflow are passed to configure-secrets.sh
 - [ ] configure-secrets.sh sets all REQUIRED_SECRETS
 - [ ] Error messages use correct prefix for context
@@ -124,12 +134,12 @@ grep -n "wrangler secret" scripts/deploy/configure-secrets.sh
 
 ### Summary
 
-| Category | Status | Issues |
-|----------|--------|--------|
-| Env Interface | PASS/FAIL | X |
-| Prefix Convention | PASS/FAIL | X |
-| Cross-Document | PASS/FAIL | X |
-| Scripts | PASS/FAIL | X |
+| Category          | Status    | Issues |
+| ----------------- | --------- | ------ |
+| Env Interface     | PASS/FAIL | X      |
+| Prefix Convention | PASS/FAIL | X      |
+| Cross-Document    | PASS/FAIL | X      |
+| Scripts           | PASS/FAIL | X      |
 
 ### Findings
 
@@ -142,7 +152,9 @@ grep -n "wrangler secret" scripts/deploy/configure-secrets.sh
 
 **Evidence**:
 ```
+
 Relevant code or documentation snippet
+
 ```
 
 **Recommendation**: How to fix it.
@@ -163,7 +175,7 @@ Relevant code or documentation snippet
 
 ## Important Notes
 
-- The GH_* vs GITHUB_* convention exists because GitHub reserves GITHUB_* variables
+- The GH*\* vs GITHUB*\_ convention exists because GitHub Actions secret names cannot start with GITHUB\_\_
 - Always specify which context (GitHub or Worker) when documenting
 - HETZNER_TOKEN is NOT a platform secret (users provide their own via UI)
 - Bindings (DATABASE, KV, R2) are Cloudflare bindings, not env vars to document for users

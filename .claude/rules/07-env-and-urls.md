@@ -4,14 +4,14 @@
 
 GitHub secrets and Cloudflare Worker secrets use DIFFERENT naming conventions. Confusing them causes deployment failures.
 
-| Context | Prefix | Example | Where Used |
-|---------|--------|---------|------------|
-| **GitHub Environment** | `GH_` | `GH_CLIENT_ID` | GitHub Settings -> Environments -> production |
-| **Cloudflare Worker** | `GITHUB_` | `GITHUB_CLIENT_ID` | Worker runtime, local `.env` files |
+| Context                | Prefix    | Example            | Where Used                                    |
+| ---------------------- | --------- | ------------------ | --------------------------------------------- |
+| **GitHub Environment** | `GH_`     | `GH_CLIENT_ID`     | GitHub Settings -> Environments -> production |
+| **Cloudflare Worker**  | `GITHUB_` | `GITHUB_CLIENT_ID` | Worker runtime, local `.env` files            |
 
 ### Why Different Names?
 
-GitHub Actions reserves `GITHUB_*` for its own use. So we use `GH_*` in GitHub, and `configure-secrets.sh` maps them to `GITHUB_*` Worker secrets.
+GitHub Actions secret names cannot start with `GITHUB_*`. So we use `GH_*` in GitHub, and `configure-secrets.sh` maps them to `GITHUB_*` Worker secrets.
 
 ### The Mapping (done by `configure-secrets.sh`)
 
@@ -22,6 +22,7 @@ GH_CLIENT_SECRET       ->  GITHUB_CLIENT_SECRET
 GH_APP_ID              ->  GITHUB_APP_ID
 GH_APP_PRIVATE_KEY     ->  GITHUB_APP_PRIVATE_KEY
 GH_APP_SLUG            ->  GITHUB_APP_SLUG
+GH_WEBHOOK_SECRET      ->  GITHUB_WEBHOOK_SECRET
 ```
 
 ### Documentation Rules
@@ -37,6 +38,7 @@ GH_APP_SLUG            ->  GITHUB_APP_SLUG
 - **User configuring GitHub**: Tell them to use `GH_CLIENT_ID`
 - **Code reading from env**: Use `env.GITHUB_CLIENT_ID`
 - **Local development**: Use `GITHUB_CLIENT_ID` in `.env`
+- **GitHub webhook secret**: Tell them to use `GH_WEBHOOK_SECRET` in GitHub and `GITHUB_WEBHOOK_SECRET` in Worker/local env
 
 ## Wrangler Environment Sections (Generated at Deploy Time)
 
@@ -56,6 +58,7 @@ Add the binding to the **top-level section of `wrangler.toml` only**. The sync s
 - **Derived bindings** (worker name, routes, tail_consumers): Computed from `DEPLOYMENT_CONFIG` naming conventions.
 
 The CI quality check (`pnpm quality:wrangler-bindings`) verifies:
+
 1. No `[env.*]` sections exist in checked-in `wrangler.toml` files
 2. All required binding types are present at the top level
 
@@ -81,11 +84,11 @@ Local development uses `.dev.vars`.
 
 When constructing URLs using `BASE_DOMAIN`, you MUST use the correct subdomain prefix. The root domain does NOT serve any application.
 
-| Destination | URL Pattern | Example |
-|-------------|-------------|---------|
-| **Web UI** | `https://app.${BASE_DOMAIN}/...` | `https://app.simple-agent-manager.org/settings` |
-| **API** | `https://api.${BASE_DOMAIN}/...` | `https://api.simple-agent-manager.org/health` |
-| **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` | `https://ws-abc123.simple-agent-manager.org` |
+| Destination   | URL Pattern                       | Example                                         |
+| ------------- | --------------------------------- | ----------------------------------------------- |
+| **Web UI**    | `https://app.${BASE_DOMAIN}/...`  | `https://app.simple-agent-manager.org/settings` |
+| **API**       | `https://api.${BASE_DOMAIN}/...`  | `https://api.simple-agent-manager.org/health`   |
+| **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` | `https://ws-abc123.simple-agent-manager.org`    |
 
 **NEVER** use `https://${BASE_DOMAIN}/...` (bare root domain) for redirects or links.
 

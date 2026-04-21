@@ -33,10 +33,12 @@ curl -I https://app.example.com
 #### "Cloudflare API authentication failed"
 
 **Symptoms:**
+
 - Deployment fails immediately
 - Error code: `CF_AUTH_FAILED`
 
 **Causes:**
+
 1. Invalid API token
 2. Expired API token
 3. Token not copied correctly (whitespace issues)
@@ -44,12 +46,14 @@ curl -I https://app.example.com
 **Solutions:**
 
 1. Verify token format:
+
    ```bash
    # Token should be ~40 characters, alphanumeric
    echo $CF_API_TOKEN | wc -c  # Should be ~41 (40 + newline)
    ```
 
 2. Test token directly:
+
    ```bash
    curl -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
      -H "Authorization: Bearer $CF_API_TOKEN"
@@ -62,18 +66,19 @@ curl -I https://app.example.com
 #### "API token is missing required permissions"
 
 **Symptoms:**
+
 - Preflight checks fail
 - Error code: `CF_MISSING_PERMISSIONS`
 
 **Required Permissions:**
 
-| Scope | Permission | Level |
-|-------|------------|-------|
-| Account | Workers Scripts | Edit |
-| Account | D1 | Edit |
-| Account | Workers KV Storage | Edit |
-| Account | Workers R2 Storage | Edit |
-| Zone | DNS | Edit |
+| Scope   | Permission         | Level |
+| ------- | ------------------ | ----- |
+| Account | Workers Scripts    | Edit  |
+| Account | D1                 | Edit  |
+| Account | Workers KV Storage | Edit  |
+| Account | Workers R2 Storage | Edit  |
+| Zone    | DNS                | Edit  |
 
 **Solutions:**
 
@@ -88,10 +93,12 @@ curl -I https://app.example.com
 #### "Failed to create D1 database"
 
 **Symptoms:**
+
 - Provisioning step fails
 - Error code: `D1_CREATE_FAILED`
 
 **Causes:**
+
 1. D1 database limit reached (Free: 10 databases)
 2. Missing D1 permission
 3. Invalid database name
@@ -99,11 +106,13 @@ curl -I https://app.example.com
 **Solutions:**
 
 1. Check existing databases:
+
    ```bash
    npx wrangler d1 list
    ```
 
 2. Delete unused databases if at limit:
+
    ```bash
    npx wrangler d1 delete database-name
    ```
@@ -118,16 +127,19 @@ curl -I https://app.example.com
 #### "Failed to create KV namespace"
 
 **Symptoms:**
+
 - Provisioning step fails
 - Error code: `KV_CREATE_FAILED`
 
 **Causes:**
+
 1. KV namespace limit reached (Free: 100 namespaces)
 2. Missing KV permission
 
 **Solutions:**
 
 1. Check existing namespaces:
+
    ```bash
    npx wrangler kv:namespace list
    ```
@@ -139,10 +151,12 @@ curl -I https://app.example.com
 #### "Failed to create R2 bucket"
 
 **Symptoms:**
+
 - Provisioning step fails
 - Error code: `R2_CREATE_FAILED`
 
 **Causes:**
+
 1. Bucket name already exists (globally unique)
 2. Invalid bucket name
 3. Missing R2 permission
@@ -162,10 +176,12 @@ curl -I https://app.example.com
 #### "Zone not found"
 
 **Symptoms:**
+
 - DNS configuration fails
 - Error code: `DNS_ZONE_NOT_FOUND`
 
 **Causes:**
+
 1. Wrong Zone ID
 2. Domain not active in Cloudflare
 3. Domain paused
@@ -188,6 +204,7 @@ curl -I https://app.example.com
 #### "DNS record already exists"
 
 **Symptoms:**
+
 - DNS step reports conflict
 - Records exist with different content
 
@@ -206,12 +223,14 @@ curl -I https://app.example.com
 #### "Worker deployment failed"
 
 **Symptoms:**
+
 - Deploy step fails
 - Build errors
 
 **Solutions:**
 
 1. Check local build first:
+
    ```bash
    cd apps/api
    pnpm build
@@ -229,6 +248,7 @@ curl -I https://app.example.com
 #### "Pages deployment failed"
 
 **Symptoms:**
+
 - Pages deploy step fails
 - Project not found error
 
@@ -247,10 +267,12 @@ curl -I https://app.example.com
 #### "API endpoint unhealthy"
 
 **Symptoms:**
+
 - Health check shows API failing
 - 502/504 errors
 
 **Causes:**
+
 1. Worker not deployed
 2. Worker crashed on startup
 3. Missing environment variables
@@ -258,12 +280,14 @@ curl -I https://app.example.com
 **Solutions:**
 
 1. Check Worker logs:
+
    ```bash
    cd apps/api
    npx wrangler tail
    ```
 
 2. Verify secrets are set:
+
    ```bash
    npx wrangler secret list
    ```
@@ -278,10 +302,12 @@ curl -I https://app.example.com
 #### "Web UI unhealthy"
 
 **Symptoms:**
+
 - Health check shows Web failing
 - 404 errors
 
 **Causes:**
+
 1. Pages not deployed
 2. DNS not pointing correctly
 3. Build failure
@@ -289,6 +315,7 @@ curl -I https://app.example.com
 **Solutions:**
 
 1. Verify Pages deployment:
+
    ```bash
    cd apps/web
    npx wrangler pages deployment list
@@ -323,6 +350,7 @@ cat .wrangler/state/deployment-production.json
 ```
 
 The state file shows:
+
 - Which steps completed
 - Resource IDs created
 - Any errors encountered
@@ -350,14 +378,25 @@ pnpm deploy:setup
 
 #### "Secrets not found"
 
-Ensure all required secrets are set in your repository:
-1. Settings → Secrets and variables → Actions
-2. Add repository secrets (not environment secrets)
+Ensure all required secrets are set in the GitHub Environment used by the deploy workflow:
+
+1. Settings → Environments → `production`
+2. Add the required environment secrets
 
 Required secrets:
+
 - `CF_API_TOKEN`
 - `CF_ACCOUNT_ID`
 - `CF_ZONE_ID`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `PULUMI_CONFIG_PASSPHRASE`
+- `GH_CLIENT_ID`
+- `GH_CLIENT_SECRET`
+- `GH_APP_ID`
+- `GH_APP_PRIVATE_KEY`
+- `GH_APP_SLUG`
+- `GH_WEBHOOK_SECRET`
 
 #### "Workflow failed with exit code 1"
 
@@ -421,6 +460,7 @@ env | grep -E "^(CF_|BASE_|DEPLOY_)" | sed 's/TOKEN=.*/TOKEN=***/'
 File issues at: [GitHub Issues](https://github.com/your-org/simple-agent-manager/issues)
 
 Include:
+
 1. Error message/code
 2. Steps to reproduce
 3. Debug information above
@@ -428,4 +468,4 @@ Include:
 
 ---
 
-*Last updated: January 2026*
+_Last updated: January 2026_

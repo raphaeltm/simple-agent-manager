@@ -108,11 +108,13 @@ set_worker_secret "ENCRYPTION_KEY" "$ENCRYPTION_KEY" "$ENVIRONMENT" "true" || FA
 set_worker_secret "JWT_PRIVATE_KEY" "$JWT_PRIVATE_KEY" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "JWT_PUBLIC_KEY" "$JWT_PUBLIC_KEY" "$ENVIRONMENT" "true" || FAILED=true
 
-# Configure purpose-specific secret overrides (optional — fall back to ENCRYPTION_KEY)
-# When set, these isolate each security domain so compromise of one doesn't affect the others.
+# Configure purpose-specific secret overrides.
+# BETTER_AUTH_SECRET and CREDENTIAL_ENCRYPTION_KEY fall back to ENCRYPTION_KEY.
+# GITHUB_WEBHOOK_SECRET is required by the self-hosted GitHub App webhook setup.
 set_worker_secret "BETTER_AUTH_SECRET" "${BETTER_AUTH_SECRET:-}" "$ENVIRONMENT" "false"
 set_worker_secret "CREDENTIAL_ENCRYPTION_KEY" "${CREDENTIAL_ENCRYPTION_KEY:-}" "$ENVIRONMENT" "false"
-set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GITHUB_WEBHOOK_SECRET:-}" "$ENVIRONMENT" "false"
+# GitHub Actions secret names cannot start with GITHUB_, so CI passes GH_WEBHOOK_SECRET.
+set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GH_WEBHOOK_SECRET:-${GITHUB_WEBHOOK_SECRET:-}}" "$ENVIRONMENT" "true" || FAILED=true
 
 # Configure Cloudflare secrets (required for DNS and observability operations)
 set_worker_secret "CF_API_TOKEN" "${CF_API_TOKEN:-}" "$ENVIRONMENT" "true" || FAILED=true
@@ -120,7 +122,7 @@ set_worker_secret "CF_ZONE_ID" "${CF_ZONE_ID:-}" "$ENVIRONMENT" "true" || FAILED
 set_worker_secret "CF_ACCOUNT_ID" "${CF_ACCOUNT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 
 # Configure GitHub secrets (required - platform is useless without authentication)
-# GH_* env vars (GitHub Actions reserves GITHUB_*) are mapped to GITHUB_* Worker secrets.
+# GH_* env vars (GitHub Actions does not allow GITHUB_* secret names) are mapped to GITHUB_* Worker secrets.
 # See CLAUDE.md "Env Var Naming: GH_ vs GITHUB_" and .claude/rules/07-env-and-urls.md.
 set_worker_secret "GITHUB_CLIENT_ID" "${GH_CLIENT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "GITHUB_CLIENT_SECRET" "${GH_CLIENT_SECRET:-}" "$ENVIRONMENT" "true" || FAILED=true

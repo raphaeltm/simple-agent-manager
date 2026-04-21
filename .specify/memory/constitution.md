@@ -30,6 +30,7 @@ The project is open source first. All core functionality MUST be available under
 encouraged but MUST NOT compromise the open source core.
 
 **Rules:**
+
 - Core platform functionality remains fully open source
 - Enterprise/premium features, if any, MUST be clearly separated (e.g., `enterprise/` directory)
 - Sustainability mechanisms (sponsorships, hosted offerings) are documented in ROADMAP.md
@@ -44,6 +45,7 @@ This is infrastructure software. Users depend on it for their AI coding environm
 paramount. Bugs in this codebase can cause data loss, unexpected costs, or security vulnerabilities.
 
 **Rules:**
+
 - Test coverage MUST exceed 90% for critical paths (VM provisioning, DNS management, idle detection)
 - Test coverage SHOULD exceed 80% overall
 - TDD is REQUIRED for all critical paths: tests written → tests fail → implementation → tests pass
@@ -59,6 +61,7 @@ Every feature, API, and architectural decision MUST be documented. Documentation
 deliverable, not an afterthought.
 
 **Rules:**
+
 - Public APIs MUST have complete reference documentation with examples
 - Every user journey has a corresponding guide in `/docs/guides/`
 - Architecture decisions are recorded in `/docs/adr/` (Architecture Decision Records)
@@ -75,6 +78,7 @@ Usability applies to both end users AND developers. The "happy path" should be d
 Code should read like well-written prose.
 
 **Rules:**
+
 - Default configuration works out-of-the-box for common use cases
 - Error messages are actionable: explain what went wrong AND how to fix it
 - Code follows single responsibility principle: one function/class does one thing
@@ -91,6 +95,7 @@ Project direction is visible in the repository. Contributors should understand w
 in progress, and what's completed.
 
 **Rules:**
+
 - ROADMAP.md outlines phases, priorities, and target milestones
 - GitHub Projects or Issues track work in progress
 - Milestones group related issues for release planning
@@ -105,6 +110,7 @@ Contributors MUST be guided toward success automatically. Humans shouldn't have 
 or run tests manually.
 
 **Rules:**
+
 - Pre-commit hooks enforce formatting and linting (Husky + lint-staged)
 - CI runs on every PR: lint, typecheck, test, coverage check
 - Branch protection requires passing CI and code review
@@ -120,6 +126,7 @@ All contributions are welcome: code, documentation, bug reports, feature request
 design feedback. The project actively lowers barriers to entry.
 
 **Rules:**
+
 - CONTRIBUTING.md provides clear getting-started instructions
 - Issues labeled `good-first-issue` exist for newcomers
 - Code review feedback is constructive and educational
@@ -135,6 +142,7 @@ AI coding agents (Claude Code, GitHub Copilot, Cursor) are first-class developme
 structure MUST help agents understand and contribute effectively.
 
 **Rules:**
+
 - CLAUDE.md at repository root provides project reference context (concise, universally applicable)
 - `.claude/rules/*.md` provides auto-loaded behavioral rules for Claude Code
 - AGENTS.md provides detailed build/test/convention instructions for non-Claude AI agents
@@ -153,6 +161,7 @@ Code is organized by domain responsibility. Domain logic, reusable utilities, an
 code are clearly separated.
 
 **Rules:**
+
 - Monorepo structure with pnpm workspaces + Turborepo:
   - `apps/` - Deployable applications (UI, API, workers)
   - `packages/` - Shared, reusable libraries (providers, cloud-init, shared types)
@@ -171,6 +180,7 @@ code are clearly separated.
 Complexity is the enemy. Every abstraction, pattern, and dependency MUST justify its existence.
 
 **Rules:**
+
 - YAGNI: Don't build features until needed
 - KISS: Prefer simple solutions; clever code is hard to debug
 - New dependencies require justification in PR description
@@ -187,6 +197,7 @@ Complexity is the enemy. Every abstraction, pattern, and dependency MUST justify
 All business logic values, URLs, timeouts, limits, and configuration MUST be configurable. Hardcoded values create technical debt and make the system inflexible.
 
 **Rules:**
+
 - **NO hardcoded URLs**: All API endpoints, callback URLs, and service addresses MUST derive from environment variables or configuration
 - **NO hardcoded timeouts**: All duration values (idle timeout, token expiry, retry delays) MUST be configurable via environment variables with sensible defaults
 - **NO hardcoded limits**: All limits (max workspaces, max sessions, rate limits) MUST be configurable
@@ -195,6 +206,7 @@ All business logic values, URLs, timeouts, limits, and configuration MUST be con
 - **Constants for truly constant values**: Only mathematical constants, protocol versions, and similar invariants may be hardcoded
 
 **Correct Pattern:**
+
 ```typescript
 // ✅ GOOD: Configurable with sensible default
 const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT_SECONDS || '1800');
@@ -206,6 +218,7 @@ const ISSUER = 'https://api.workspaces.example.com';
 ```
 
 **Configuration Sources (in order of precedence):**
+
 1. Environment variables (runtime)
 2. Cloudflare Worker bindings (env.VAR_NAME)
 3. Default values in code (fallback only)
@@ -219,6 +232,7 @@ MUST consider two audiences equally: users upgrading an existing deployment AND 
 scratch to their own infrastructure accounts.
 
 **Rules:**
+
 - **From-scratch parity**: Any feature that works on the hosted platform MUST also work for a fresh
   self-hosted deployment following the setup guide. No "works on our infra but not yours" situations.
 - **Infrastructure as Code for all resources**: Every infrastructure resource (D1 databases, KV namespaces,
@@ -237,6 +251,7 @@ scratch to their own infrastructure accounts.
   the self-hosting implications explicitly addressed.
 
 **Validation Checklist (for architectural changes):**
+
 - [ ] Can a new user deploy this from zero using only the setup guide?
 - [ ] Are all new infrastructure resources in the Pulumi stack or documented setup scripts?
 - [ ] Does the deploy workflow handle both "first deploy" and "upgrade" paths?
@@ -252,6 +267,7 @@ architectural choice that makes self-hosting harder narrows the user base and co
 Errors MUST be detected and surfaced at the earliest possible point. Silent failures that propagate invalid state across system boundaries cause data corruption, misrouted data, and bugs that are extremely difficult to diagnose. When in doubt, reject and log rather than silently accept.
 
 **Rules:**
+
 - **Validate identity at every boundary**: When data crosses a system boundary (API endpoint, Durable Object, VM agent, WebSocket), validate ALL identity fields (workspaceId, projectId, sessionId, taskId, userId) before processing. Never trust that upstream already validated.
 - **Fail loudly on ID mismatches**: If a message claims to belong to session X but the workspace is linked to session Y, reject the message with an explicit error. Never silently route it to session X or any other destination.
 - **Drop rather than misroute**: When identity validation fails, it is always better to drop a message (and log the failure) than to deliver it to the wrong destination. Misrouted data is worse than missing data.
@@ -260,12 +276,15 @@ Errors MUST be detected and surfaced at the earliest possible point. Silent fail
 - **Assert preconditions at function entry**: Functions that require specific state (e.g., "sessionId must be set") MUST assert that state at entry, not discover it mid-execution.
 
 **Correct Pattern:**
+
 ```typescript
 // GOOD: Validate and fail early with context
 if (workspace.chatSessionId && workspace.chatSessionId !== sessionId) {
   console.error('Message routing mismatch', {
-    workspaceId, expectedSessionId: workspace.chatSessionId,
-    receivedSessionId: sessionId, action: 'rejected'
+    workspaceId,
+    expectedSessionId: workspace.chatSessionId,
+    receivedSessionId: sessionId,
+    action: 'rejected',
   });
   throw errors.badRequest(
     `Session mismatch: workspace is linked to session ${workspace.chatSessionId}`
@@ -337,6 +356,7 @@ This project manages cloud infrastructure (Cloudflare Workers, Pages, R2, KV, DN
 The project uses a deliberate separation of concerns between two tools:
 
 **Pulumi (Infrastructure Provisioning)**
+
 - Provisions Cloudflare resources: D1 databases, KV namespaces, R2 buckets, DNS records
 - Uses official `@pulumi/cloudflare` provider (TypeScript)
 - State stored in Cloudflare R2 bucket (S3-compatible, self-hosted, no Pulumi Cloud)
@@ -344,23 +364,27 @@ The project uses a deliberate separation of concerns between two tools:
 - Provides proper state management, drift detection, and idempotency
 
 **Wrangler (Application Deployment)**
+
 - Deploys Workers and Pages projects (application code)
 - Runs D1 database migrations
 - Configures Worker secrets
 - Uses `wrangler.toml` for deployment configuration (not resource creation)
 
 **Why This Split:**
+
 - Pulumi excels at infrastructure lifecycle (create/update/delete with state tracking)
 - Wrangler excels at deployment workflows (it understands Workers internals)
 - Wrangler's "auto-provisioning" is limited and lacks state management
 - Custom API code is brittle and duplicates SDK functionality
 
 **Official SDK Usage:**
+
 - Use `cloudflare` npm package (official TypeScript SDK) for any direct API calls
 - Use `@pulumi/cloudflare` for infrastructure provisioning
 - NEVER write custom HTTP wrappers for Cloudflare APIs
 
 **Rules:**
+
 - All infrastructure changes go through PR review (no manual console changes)
 - Infrastructure drift is checked quarterly (compare deployed state vs config)
 - Never use `--force` or bypass flags without documented justification
@@ -370,13 +394,14 @@ The project uses a deliberate separation of concerns between two tools:
 
 Three environments with clear separation:
 
-| Environment | Wrangler Command | Purpose |
-|-------------|-----------------|---------|
-| Development | `wrangler dev` | Local development with hot reload |
-| Staging | `wrangler deploy --env staging` | Pre-production testing |
-| Production | `wrangler deploy` | Live user-facing deployment |
+| Environment | Wrangler Command                | Purpose                           |
+| ----------- | ------------------------------- | --------------------------------- |
+| Development | `wrangler dev`                  | Local development with hot reload |
+| Staging     | `wrangler deploy --env staging` | Pre-production testing            |
+| Production  | `wrangler deploy`               | Live user-facing deployment       |
 
 **Rules:**
+
 - Environment-specific config uses `[env.staging]` sections in `wrangler.toml`
 - Environment variables differ by environment (documented in README)
 - Never deploy directly to production without staging verification
@@ -387,6 +412,7 @@ Three environments with clear separation:
 Secrets are sensitive values (API keys, tokens, passwords) that MUST NOT be exposed.
 
 **Rules:**
+
 - NEVER hardcode secrets in source code, config files, or commit history
 - Use Cloudflare Workers secrets: `wrangler secret put SECRET_NAME`
 - Local development uses `.dev.vars` file (gitignored)
@@ -395,6 +421,7 @@ Secrets are sensitive values (API keys, tokens, passwords) that MUST NOT be expo
 - Rotate secrets on suspected compromise; schedule rotation for long-lived secrets
 
 **Secret Files (gitignored):**
+
 ```
 .dev.vars          # Local Cloudflare Workers secrets
 .env               # General environment variables
@@ -404,30 +431,32 @@ Secrets are sensitive values (API keys, tokens, passwords) that MUST NOT be expo
 ```
 
 **Required Secrets Documentation (in README):**
+
 ```markdown
 ## Required Secrets
 
-| Secret Name | Description | Where to Get |
-|-------------|-------------|--------------|
-| HETZNER_TOKEN | Hetzner Cloud API token | Hetzner console → API tokens |
-| CF_API_TOKEN | Cloudflare API token | Cloudflare dashboard → API tokens |
-| ANTHROPIC_API_KEY | User-provided per workspace | User provides |
+| Secret Name       | Description                 | Where to Get                      |
+| ----------------- | --------------------------- | --------------------------------- |
+| HETZNER_TOKEN     | Hetzner Cloud API token     | Hetzner console → API tokens      |
+| CF_API_TOKEN      | Cloudflare API token        | Cloudflare dashboard → API tokens |
+| ANTHROPIC_API_KEY | User-provided per workspace | User provides                     |
 ```
 
 ### Resource Naming Conventions
 
 Consistent naming enables identification and automation:
 
-| Resource Type | Pattern | Example |
-|---------------|---------|---------|
-| Workers | `{project}-{env}` | `simple-agent-manager-staging` |
+| Resource Type | Pattern                     | Example                              |
+| ------------- | --------------------------- | ------------------------------------ |
+| Workers       | `{project}-{env}`           | `simple-agent-manager-staging`       |
 | KV Namespaces | `{project}-{env}-{purpose}` | `simple-agent-manager-prod-sessions` |
-| R2 Buckets | `{project}-{env}-{purpose}` | `simple-agent-manager-prod-backups` |
-| D1 Databases | `{project}-{env}` | `simple-agent-manager-staging` |
-| DNS Records | `*.{vm-id}.vm.{domain}` | `*.abc123.vm.example.com` |
-| Hetzner VMs | `ws-{workspace-id}` | `ws-abc123` |
+| R2 Buckets    | `{project}-{env}-{purpose}` | `simple-agent-manager-prod-backups`  |
+| D1 Databases  | `{project}-{env}`           | `simple-agent-manager-staging`       |
+| DNS Records   | `*.{vm-id}.vm.{domain}`     | `*.abc123.vm.example.com`            |
+| Hetzner VMs   | `ws-{workspace-id}`         | `ws-abc123`                          |
 
 **Rules:**
+
 - All names lowercase with hyphens (no underscores or camelCase)
 - Include environment in name for clarity
 - VM labels include `managed-by: simple-agent-manager` for filtering
@@ -437,6 +466,7 @@ Consistent naming enables identification and automation:
 Cloud-init scripts configure VMs on first boot. They live in `scripts/vm/`.
 
 **Rules:**
+
 - Scripts MUST be idempotent (safe to run multiple times)
 - Use template variables for dynamic values: `${VARIABLE_NAME}`
 - Test scripts in Docker before deploying to cloud
@@ -445,6 +475,7 @@ Cloud-init scripts configure VMs on first boot. They live in `scripts/vm/`.
 - Scripts are versioned and tagged with releases
 
 **Script Structure:**
+
 ```bash
 #!/bin/bash
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
@@ -464,12 +495,14 @@ log "Cloud-init completed successfully"
 Infrastructure changes require testing before production deployment.
 
 **Testing Levels:**
+
 1. **Local**: `wrangler dev` for Worker logic testing
 2. **Unit Tests**: Mock cloud provider APIs in `packages/providers/`
 3. **Integration Tests**: Deploy to staging, verify end-to-end
 4. **Cloud-Init Tests**: Run scripts in Docker container locally
 
 **Rules:**
+
 - All provider API interactions have mock-based unit tests
 - Critical paths (VM creation, DNS management) have integration tests
 - Cloud-init scripts tested in Docker before cloud deployment
@@ -478,6 +511,7 @@ Infrastructure changes require testing before production deployment.
 ### Deployment & Rollback
 
 **Deployment Process:**
+
 1. Merge to `main` triggers CI/CD
 2. CI runs tests, lint, typecheck
 3. Agent triggers staging deployment manually via `gh workflow run deploy-staging.yml --ref <branch>`
@@ -485,12 +519,14 @@ Infrastructure changes require testing before production deployment.
 5. Production deployment creates immutable version in Cloudflare
 
 **Rollback Procedures:**
+
 - Cloudflare maintains version history; rollback via dashboard or API
 - For critical issues: `wrangler rollback` to previous version
 - Database rollbacks require migration scripts (test in staging first)
 - Document rollback steps in runbooks for each component
 
 **Rules:**
+
 - Never delete previous versions immediately after deployment
 - Gradual rollouts for high-risk changes (Cloudflare supports percentage-based)
 - Incident response: rollback first, investigate second
@@ -504,6 +540,7 @@ authentication, orchestration, and workspace metadata while users retain ownersh
 ### Data Ownership Model
 
 **What We Store (Cloudflare D1/KV):**
+
 - User profiles (from GitHub OAuth)
 - User's Hetzner API tokens (AES-GCM encrypted with per-user initialization vectors)
 - Workspace metadata (name, repo, status, VM ID, DNS record ID)
@@ -511,10 +548,12 @@ authentication, orchestration, and workspace metadata while users retain ownersh
 - Sessions and rate limiting data
 
 **What We DON'T Store:**
+
 - VMs (created on user's Hetzner account, billed to them)
 - Code (lives on Git provider and in user's VMs)
 
 **Rules:**
+
 - Users MUST be able to delete all their data via account deletion
 - Encrypted credentials use AES-GCM with unique IVs per credential
 - Workspace metadata is soft-deleted first, hard-deleted after 30 days
@@ -523,6 +562,7 @@ authentication, orchestration, and workspace metadata while users retain ownersh
 ### User Credential Security
 
 **Rules:**
+
 - NEVER log or expose decrypted credentials in error messages
 - Credentials are decrypted only at point of use (just-in-time)
 - Encryption key is a Worker secret, never in source code
@@ -532,6 +572,7 @@ authentication, orchestration, and workspace metadata while users retain ownersh
 ### Privacy Principles
 
 **Rules:**
+
 - User's code never passes through our control plane (direct GitHub ↔ VM)
 - We cannot access running VMs (no SSH keys, no backdoors)
 - Workspace URLs are unique per workspace, not guessable
@@ -548,16 +589,19 @@ for Cloudflare-native authentication. OAuth with Git providers serves dual purpo
 AND repository access.
 
 **Supported Providers:**
+
 - GitHub (primary, implemented first)
 - GitLab (future)
 - Bitbucket (future)
 
 **OAuth Scopes (GitHub example):**
+
 - `read:user` - User profile information
 - `user:email` - User email addresses
 - `repo` - Full repository access (read/write, list repos)
 
 **Rules:**
+
 - Git provider OAuth is the ONLY authentication method (no email/password)
 - OAuth tokens are stored encrypted in D1 (enables repo listing, cloning, pushing)
 - Token refresh is handled automatically by BetterAuth
@@ -568,31 +612,36 @@ AND repository access.
 - Design for multiple providers: abstract Git operations behind provider interface
 
 **Configuration Pattern:**
+
 ```typescript
 // apps/api/src/auth.ts
-import { betterAuth } from "better-auth";
-import { withCloudflare } from "better-auth-cloudflare";
+import { betterAuth } from 'better-auth';
+import { withCloudflare } from 'better-auth-cloudflare';
 
 export function createAuth(env: CloudflareBindings, cf?: IncomingRequestCfProperties) {
-    return betterAuth({
-        ...withCloudflare({
-            d1: { db: drizzle(env.DATABASE), options: { usePlural: true } },
-            kv: env.KV,
-        }, {
-            socialProviders: {
-                github: {
-                    clientId: env.GITHUB_CLIENT_ID,
-                    clientSecret: env.GITHUB_CLIENT_SECRET,
-                    scope: ["read:user", "user:email", "repo"],
-                },
-                // Future: gitlab, bitbucket
-            },
-        }),
-    });
+  return betterAuth({
+    ...withCloudflare(
+      {
+        d1: { db: drizzle(env.DATABASE), options: { usePlural: true } },
+        kv: env.KV,
+      },
+      {
+        socialProviders: {
+          github: {
+            clientId: env.GITHUB_CLIENT_ID,
+            clientSecret: env.GITHUB_CLIENT_SECRET,
+            scope: ['read:user', 'user:email', 'repo'],
+          },
+          // Future: gitlab, bitbucket
+        },
+      }
+    ),
+  });
 }
 ```
 
 **Git Token Flow:**
+
 1. User authenticates via OAuth (e.g., GitHub)
 2. We receive access token with `repo` scope
 3. Token is encrypted and stored in D1 (linked to user account)
@@ -605,6 +654,7 @@ export function createAuth(env: CloudflareBindings, cf?: IncomingRequestCfProper
 Terminal access uses short-lived JWTs issued by the control plane and validated by VM Agents.
 
 **Rules:**
+
 - JWTs are RS256 signed (RSA 2048-bit minimum)
 - Token lifetime: 1 hour maximum
 - JWKS endpoint: `/.well-known/jwks.json` (cached, supports key rotation)
@@ -613,6 +663,7 @@ Terminal access uses short-lived JWTs issued by the control plane and validated 
 - Token is passed via URL parameter on redirect, then exchanged for session cookie
 
 **Terminal Access Flow:**
+
 1. User clicks "Open Terminal" in control plane UI
 2. Control plane validates session, verifies workspace ownership
 3. Control plane issues JWT with workspace claim
@@ -623,6 +674,7 @@ Terminal access uses short-lived JWTs issued by the control plane and validated 
 ### Session Management
 
 **Rules:**
+
 - Control plane sessions: managed by BetterAuth in Cloudflare KV
 - VM Agent sessions: simple cookie with HMAC signature
 - Session cookies are `HttpOnly`, `Secure`, `SameSite=Strict`
@@ -636,12 +688,14 @@ PTY sessions. It does NOT run in Docker.
 ### Single Binary Architecture
 
 **Why Go:**
+
 - Single static binary, no runtime dependencies
 - Cross-compiles to linux/amd64 and linux/arm64
 - Fast startup (milliseconds)
 - Excellent PTY and WebSocket support
 
 **Rules:**
+
 - The agent is ONE binary with embedded UI (no separate processes)
 - No ttyd dependency (agent handles PTY directly)
 - No Docker for the agent (runs on VM host)
@@ -652,6 +706,7 @@ PTY sessions. It does NOT run in Docker.
 The React UI is compiled into the Go binary using Go's `embed` package.
 
 **Build Process:**
+
 ```makefile
 build: ui
     go build -o bin/vm-agent .
@@ -661,12 +716,14 @@ ui:
 ```
 
 **Rules:**
+
 - The VM agent has no embedded web UI (removed — the control plane app at `apps/web` provides all user-facing interfaces)
 - The Go binary is a pure API server with no static file serving
 
 ### PTY Management
 
 **Rules:**
+
 - Use `github.com/creack/pty` for PTY spawning
 - Shell command: `devcontainer exec --workspace-folder /workspace bash`
 - Support terminal resize (SIGWINCH handling)
@@ -674,6 +731,7 @@ ui:
 - Clean session teardown on disconnect
 
 **WebSocket Protocol:**
+
 - Use `github.com/gorilla/websocket`
 - Binary frames for terminal I/O
 - JSON frames for control messages (resize, heartbeat)
@@ -682,6 +740,7 @@ ui:
 ### Distribution Strategy
 
 **Rules:**
+
 - Build via goreleaser automation for multi-arch: `vm-agent-linux-amd64`, `vm-agent-linux-arm64`
 - Binaries are embedded in or served by the control plane (NOT downloaded from GitHub at runtime)
 - Download in cloud-init from control plane: `curl -Lo /usr/local/bin/vm-agent $API_URL/agent/download?arch=amd64`
@@ -704,17 +763,20 @@ This enables self-hosting in air-gapped or restricted environments and ensures v
 ### Rules
 
 **Artifacts We Build:**
+
 - VM Agent binary MUST be served from the control plane, not external sources
 - Cloud-init scripts MUST be generated by or served from the control plane
 - No hardcoded URLs to GitHub, npm, or CDNs for OUR artifacts
 
 **Allowed External Dependencies:**
+
 - User's Git provider (GitHub, GitLab, etc.) - required for repository access
 - Container registries (Docker Hub, GHCR) - required for devcontainer images
 - OS package repositories (apt, apk) - required for system packages
 - User's cloud provider APIs (Hetzner, etc.) - required for VM provisioning
 
 **Version Consistency:**
+
 - Control plane MUST serve VM Agent binaries that match its deployed version
 - Cloud-init MUST request the correct architecture binary from control plane
 - VM Agent MUST report its version; control plane MAY reject outdated agents
@@ -729,6 +791,7 @@ This enables self-hosting in air-gapped or restricted environments and ensures v
 a realistic local environment is impractical. Instead, we deploy frequently and test on real infrastructure.
 
 **Rules:**
+
 - `pnpm dev` starts local development servers (Workers miniflare, Vite) for rapid iteration
 - Merge to `main` triggers automatic deployment to production
 - Manual deployment available via workflow_dispatch
@@ -741,6 +804,7 @@ a realistic local environment is impractical. Instead, we deploy frequently and 
 not buried in one-time scripts or hidden state files. This enables easy auditing and modification.
 
 **Rules:**
+
 - Push/merge to `main` automatically deploys to production
 - All configuration lives in **GitHub Environments** (Settings → Environments → production)
 - Environment **variables** (visible) for non-sensitive config: `BASE_DOMAIN`, `RESOURCE_PREFIX`
@@ -750,29 +814,30 @@ not buried in one-time scripts or hidden state files. This enables easy auditing
 
 **GitHub Environment Configuration:**
 
-| Type | Name | Description |
-|------|------|-------------|
-| Variable | `BASE_DOMAIN` | Base domain for deployment (e.g., `example.com`) |
-| Variable | `RESOURCE_PREFIX` | Prefix for resources (default: `sam`) |
-| Variable | `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state (default: `sam-pulumi-state`) |
-| Secret | `CF_API_TOKEN` | Cloudflare API token |
-| Secret | `CF_ACCOUNT_ID` | Cloudflare account ID |
-| Secret | `CF_ZONE_ID` | Cloudflare zone ID |
-| Secret | `R2_ACCESS_KEY_ID` | R2 access key for Pulumi state |
-| Secret | `R2_SECRET_ACCESS_KEY` | R2 secret key for Pulumi state |
-| Secret | `PULUMI_CONFIG_PASSPHRASE` | Encryption passphrase for Pulumi state |
-| Secret | `GH_CLIENT_ID` | GitHub OAuth client ID |
-| Secret | `GH_CLIENT_SECRET` | GitHub OAuth client secret |
-| Secret | `GH_APP_ID` | GitHub App ID |
-| Secret | `GH_APP_PRIVATE_KEY` | GitHub App private key |
-| Secret | `GH_APP_SLUG` | GitHub App slug |
-| Secret | `ENCRYPTION_KEY` | AES-256 key (optional, auto-generated) |
-| Secret | `JWT_PRIVATE_KEY` | JWT signing key (optional, auto-generated) |
-| Secret | `JWT_PUBLIC_KEY` | JWT verification key (optional, auto-generated) |
+| Type     | Name                       | Description                                              |
+| -------- | -------------------------- | -------------------------------------------------------- |
+| Variable | `BASE_DOMAIN`              | Base domain for deployment (e.g., `example.com`)         |
+| Variable | `RESOURCE_PREFIX`          | Prefix for resources (default: `sam`)                    |
+| Variable | `PULUMI_STATE_BUCKET`      | R2 bucket for Pulumi state (default: `sam-pulumi-state`) |
+| Secret   | `CF_API_TOKEN`             | Cloudflare API token                                     |
+| Secret   | `CF_ACCOUNT_ID`            | Cloudflare account ID                                    |
+| Secret   | `CF_ZONE_ID`               | Cloudflare zone ID                                       |
+| Secret   | `R2_ACCESS_KEY_ID`         | R2 access key for Pulumi state                           |
+| Secret   | `R2_SECRET_ACCESS_KEY`     | R2 secret key for Pulumi state                           |
+| Secret   | `PULUMI_CONFIG_PASSPHRASE` | Encryption passphrase for Pulumi state                   |
+| Secret   | `GH_CLIENT_ID`             | GitHub OAuth client ID                                   |
+| Secret   | `GH_CLIENT_SECRET`         | GitHub OAuth client secret                               |
+| Secret   | `GH_APP_ID`                | GitHub App ID                                            |
+| Secret   | `GH_APP_PRIVATE_KEY`       | GitHub App private key                                   |
+| Secret   | `GH_APP_SLUG`              | GitHub App slug                                          |
+| Secret   | `ENCRYPTION_KEY`           | AES-256 key (optional, auto-generated)                   |
+| Secret   | `JWT_PRIVATE_KEY`          | JWT signing key (optional, auto-generated)               |
+| Secret   | `JWT_PUBLIC_KEY`           | JWT verification key (optional, auto-generated)          |
 
-**Naming Convention**: GitHub secrets use `GH_*` prefix for GitHub-related credentials because GitHub reserves `GITHUB_*` environment variables for its own use. The deployment workflow (`configure-secrets.sh`) maps these to `GITHUB_*` Cloudflare Worker secrets (e.g., `GH_CLIENT_ID` → `GITHUB_CLIENT_ID`).
+**Naming Convention**: GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. The deployment workflow (`configure-secrets.sh`) maps these to `GITHUB_*` Cloudflare Worker secrets (e.g., `GH_CLIENT_ID` → `GITHUB_CLIENT_ID`, `GH_WEBHOOK_SECRET` → `GITHUB_WEBHOOK_SECRET`).
 
 **Deployment Pipeline:**
+
 1. **Validate** - Check all required configuration exists
 2. **Infrastructure** - Pulumi provisions D1, KV, R2, DNS records
 3. **Configuration** - Sync Pulumi outputs to Wrangler, generate keys if needed
@@ -783,6 +848,7 @@ not buried in one-time scripts or hidden state files. This enables easy auditing
 8. **Validation** - Health check the deployed API
 
 **Teardown:**
+
 - Manual workflow_dispatch only (requires typing "DELETE")
 - Uses same GitHub Environment for configuration
 - Pulumi destroy removes infrastructure
@@ -816,6 +882,7 @@ not buried in one-time scripts or hidden state files. This enables easy auditing
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `ci`
 
 Examples:
+
 - `feat(api): add workspace creation endpoint`
 - `fix(providers): handle Hetzner rate limiting`
 - `docs(readme): add quickstart guide`

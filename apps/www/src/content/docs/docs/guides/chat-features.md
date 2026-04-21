@@ -21,11 +21,11 @@ While chatting with an agent, you can browse the workspace's file system directl
 
 ### What You Can Do
 
-| Action | Description |
-|--------|-------------|
-| **Browse** | Navigate directories and view the full file tree |
-| **View** | Read any file with syntax highlighting |
-| **Diff** | View git diffs for changed files |
+| Action         | Description                                        |
+| -------------- | -------------------------------------------------- |
+| **Browse**     | Navigate directories and view the full file tree   |
+| **View**       | Read any file with syntax highlighting             |
+| **Diff**       | View git diffs for changed files                   |
 | **Git status** | See which files are modified, staged, or untracked |
 
 ## File Upload and Download
@@ -37,6 +37,7 @@ You can attach files to your chat messages and download files from workspace con
 Click the **paperclip** button in the chat input to attach files. Files are uploaded to the workspace container's `.private` directory.
 
 **Limits:**
+
 - Maximum per-file size: 50 MB (configurable via `FILE_UPLOAD_MAX_BYTES`)
 - Maximum batch size: 250 MB (configurable via `FILE_UPLOAD_BATCH_MAX_BYTES`)
 - Filenames must not contain shell metacharacters
@@ -61,6 +62,7 @@ Supported formats include PNG, JPG, GIF, SVG, WebP, and other common image types
 Click the microphone button to speak your message instead of typing. SAM transcribes your audio using OpenAI Whisper (via Cloudflare Workers AI).
 
 **Limits:**
+
 - Maximum audio file size: 10 MB
 - Maximum recording duration: 60 seconds
 - Rate limit: 30 transcriptions per minute
@@ -77,14 +79,14 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 
 ### TTS Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TTS_ENABLED` | `true` | Enable/disable TTS |
-| `TTS_MODEL` | `@cf/deepgram/aura-2-en` | Workers AI TTS model |
-| `TTS_SPEAKER` | `luna` | Voice selection |
-| `TTS_ENCODING` | `mp3` | Audio encoding format |
-| `TTS_MAX_TEXT_LENGTH` | `10000` | Max characters per synthesis |
-| `TTS_TIMEOUT_MS` | `60000` | Synthesis timeout |
+| Variable              | Default                  | Description                  |
+| --------------------- | ------------------------ | ---------------------------- |
+| `TTS_ENABLED`         | `true`                   | Enable/disable TTS           |
+| `TTS_MODEL`           | `@cf/deepgram/aura-2-en` | Workers AI TTS model         |
+| `TTS_SPEAKER`         | `luna`                   | Voice selection              |
+| `TTS_ENCODING`        | `mp3`                    | Audio encoding format        |
+| `TTS_MAX_TEXT_LENGTH` | `100000`                 | Max characters per synthesis |
+| `TTS_TIMEOUT_MS`      | `60000`                  | Synthesis timeout            |
 
 ## Conversation Forking
 
@@ -103,13 +105,13 @@ When forking, SAM uses Workers AI to generate a concise summary of the conversat
 
 For short conversations (5 or fewer messages), the messages are passed directly without AI summarization. For longer conversations, a model generates a focused summary.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONTEXT_SUMMARY_MODEL` | `@cf/google/gemma-3-12b-it` | Model for context summarization |
-| `CONTEXT_SUMMARY_MAX_LENGTH` | `4000` | Max summary length (characters) |
-| `CONTEXT_SUMMARY_TIMEOUT_MS` | `10000` | Summarization timeout |
-| `CONTEXT_SUMMARY_MAX_MESSAGES` | `50` | Max messages to include |
-| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5` | Skip AI for conversations this short |
+| Variable                          | Default                     | Description                          |
+| --------------------------------- | --------------------------- | ------------------------------------ |
+| `CONTEXT_SUMMARY_MODEL`           | `@cf/google/gemma-3-12b-it` | Model for context summarization      |
+| `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                      | Max summary length (characters)      |
+| `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                     | Summarization timeout                |
+| `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                        | Max messages to include              |
+| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5`                         | Skip AI for conversations this short |
 
 ### Fork Limits
 
