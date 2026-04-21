@@ -1,6 +1,6 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { fileNameFromPath,fuzzyMatch } from '../../../src/lib/fuzzy-match';
+import { fileNameFromPath, fuzzyFilterFiles, fuzzyMatch } from '../../../src/lib/fuzzy-match';
 
 describe('fuzzyMatch', () => {
   it('returns score 0 and empty matches for empty query', () => {
@@ -148,5 +148,51 @@ describe('fileNameFromPath', () => {
 
   it('handles root-relative path', () => {
     expect(fileNameFromPath('/etc/config.json')).toBe('config.json');
+  });
+});
+
+describe('fuzzyFilterFiles', () => {
+  const files = [
+    'src/components/App.tsx',
+    'src/components/Button.tsx',
+    'src/lib/api/client.ts',
+    'src/lib/api/files.ts',
+    'package.json',
+    'README.md',
+    'apps/api/src/routes/projects/files.ts',
+  ];
+
+  it('returns empty array for empty query', () => {
+    expect(fuzzyFilterFiles(files, '')).toEqual([]);
+    expect(fuzzyFilterFiles(files, '   ')).toEqual([]);
+  });
+
+  it('returns matching files sorted by score', () => {
+    const results = fuzzyFilterFiles(files, 'files');
+    expect(results.length).toBeGreaterThan(0);
+    // The file named "files.ts" should rank high
+    expect(results.some(r => r.path.endsWith('files.ts'))).toBe(true);
+  });
+
+  it('respects limit parameter', () => {
+    const results = fuzzyFilterFiles(files, 'ts', 2);
+    expect(results.length).toBeLessThanOrEqual(2);
+  });
+
+  it('returns empty when no files match', () => {
+    const results = fuzzyFilterFiles(files, 'zzzzz');
+    expect(results).toEqual([]);
+  });
+
+  it('returns match indices for highlighting', () => {
+    const results = fuzzyFilterFiles(files, 'App');
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]!.matches.length).toBeGreaterThan(0);
+  });
+
+  it('ranks exact filename matches higher', () => {
+    const results = fuzzyFilterFiles(files, 'package.json');
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]!.path).toBe('package.json');
   });
 });

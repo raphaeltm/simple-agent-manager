@@ -298,6 +298,85 @@ describe('MessageBubble', () => {
     });
   });
 
+  describe('file path link interception', () => {
+    it('renders file-path hrefs as clickable buttons when onFileClick is provided', () => {
+      const onFileClick = vi.fn();
+      const markdown = 'Check [src/main.ts](src/main.ts) for details';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" onFileClick={onFileClick} />
+      );
+
+      // Should render a button, not an <a> tag, for the file path
+      const button = container.querySelector('button');
+      expect(button).not.toBeNull();
+      expect(button!.textContent).toBe('src/main.ts');
+
+      // No <a> tags for file paths
+      const links = container.querySelectorAll('a');
+      expect(links.length).toBe(0);
+
+      // Click should call onFileClick
+      fireEvent.click(button!);
+      expect(onFileClick).toHaveBeenCalledWith('src/main.ts', null);
+    });
+
+    it('parses line numbers from file path links', () => {
+      const onFileClick = vi.fn();
+      // Use a path with directory separator so markdown parser treats it as a link href
+      const markdown = 'See [src/app.tsx:42](src/app.tsx:42)';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" onFileClick={onFileClick} />
+      );
+
+      const button = container.querySelector('button');
+      expect(button).not.toBeNull();
+      fireEvent.click(button!);
+      expect(onFileClick).toHaveBeenCalledWith('src/app.tsx', 42);
+    });
+
+    it('still opens http URLs in new tab even when onFileClick is provided', () => {
+      const onFileClick = vi.fn();
+      const markdown = 'Visit [example](https://example.com)';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" onFileClick={onFileClick} />
+      );
+
+      const link = container.querySelector('a');
+      expect(link).not.toBeNull();
+      expect(link!.getAttribute('target')).toBe('_blank');
+      expect(link!.getAttribute('href')).toBe('https://example.com');
+
+      // No buttons for URLs
+      const buttons = container.querySelectorAll('button');
+      expect(buttons.length).toBe(0);
+    });
+
+    it('renders file paths as plain links when onFileClick is not provided', () => {
+      const markdown = 'Check [src/main.ts](src/main.ts) for details';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      // Without onFileClick, file paths render as normal <a> tags
+      const link = container.querySelector('a');
+      expect(link).not.toBeNull();
+      expect(link!.getAttribute('target')).toBe('_blank');
+    });
+
+    it('does not intercept file paths in user messages', () => {
+      const onFileClick = vi.fn();
+      const markdown = 'Check [src/main.ts](src/main.ts)';
+      const { container } = render(
+        <MessageBubble text={markdown} role="user" onFileClick={onFileClick} />
+      );
+
+      // User messages always use the basic <a> renderer
+      const link = container.querySelector('a');
+      expect(link).not.toBeNull();
+      expect(link!.getAttribute('target')).toBe('_blank');
+    });
+  });
+
   describe('overflow protection', () => {
     it('bubble container has min-w-0 but NOT overflow-hidden (popover must not be clipped)', () => {
       const { container } = render(
