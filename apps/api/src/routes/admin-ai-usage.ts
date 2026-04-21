@@ -95,8 +95,9 @@ async function fetchGatewayLogs(
     log.error('admin_ai_usage.gateway_api_error', {
       status: resp.status,
       body: body.slice(0, 500),
+      url: url.replace(/Bearer\s+\S+/, 'Bearer [REDACTED]'),
     });
-    throw errors.internal(`AI Gateway API error: ${resp.status}`);
+    throw errors.internal(`AI Gateway API error: ${resp.status} — ${body.slice(0, 200)}`);
   }
 
   return resp.json() as Promise<AIGatewayLogsResponse>;
@@ -169,7 +170,7 @@ adminAiUsageRoutes.get('/', async (c) => {
       per_page: pageSize.toString(),
       start_date: startDate,
       order_by: 'created_at',
-      direction: 'desc',
+      order_by_direction: 'desc',
     });
 
     const resp = await fetchGatewayLogs(c.env, gatewayId, params);
