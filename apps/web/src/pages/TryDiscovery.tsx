@@ -16,6 +16,7 @@
  *   - All thresholds configurable via env (see lib/trial-ui-config.ts).
  */
 import type {
+  TrialAgentActivityEvent,
   TrialErrorEvent,
   TrialEvent,
   TrialIdea,
@@ -26,8 +27,9 @@ import type {
   TrialStartedEvent,
 } from '@simple-agent-manager/shared';
 import { Alert, Typography } from '@simple-agent-manager/ui';
+import { BookOpen, Brain, Lightbulb, Terminal, Wrench } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import { ChatGate } from '../components/trial/ChatGate';
@@ -37,6 +39,7 @@ import {
   STAGE_TIMELINE,
   TRIAL_BACKOFF_BASE_MS,
   TRIAL_BACKOFF_CAP_MS,
+  TRIAL_DISCOVERY_STREAM_TIMEOUT_MS,
   TRIAL_EVENT_ANIMATION_MS,
   TRIAL_KNOWLEDGE_GROUP_MS,
   TRIAL_MAX_RECONNECT_ATTEMPTS,
@@ -63,6 +66,7 @@ export function TryDiscovery() {
   const sourceRef = useRef<EventSource | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
   const closedRef = useRef(false);
   // Dedup by composite key (`type:at`). Events can replay on SSE reconnect
@@ -120,11 +124,22 @@ export function TryDiscovery() {
           clearSlowTimer();
           setIsSlow(false);
           setEvents((prev) => [...prev, event]);
-          // Close early on terminal events to avoid unnecessary reconnects.
-          if (event.type === 'trial.ready' || event.type === 'trial.error') {
+          // Close immediately only on hard errors. `trial.ready` is a
+          // milestone (workspace provisioned) — the discovery agent keeps
+          // producing knowledge + idea events afterward.
+          if (event.type === 'trial.error') {
             sourceRef.current?.close();
             sourceRef.current = null;
             setConnection({ status: 'open', attempt: 0 });
+          }
+          // On trial.ready, start a grace timer — keep the stream open for
+          // TRIAL_DISCOVERY_STREAM_TIMEOUT_MS so late-arriving discovery
+          // events still reach the feed.
+          if (event.type === 'trial.ready' && !discoveryTimerRef.current) {
+            discoveryTimerRef.current = setTimeout(() => {
+              sourceRef.current?.close();
+              sourceRef.current = null;
+            }, TRIAL_DISCOVERY_STREAM_TIMEOUT_MS);
           }
         },
         onError: () => {
@@ -154,10 +169,25 @@ export function TryDiscovery() {
       closedRef.current = true;
       clearRetryTimer();
       clearSlowTimer();
+      if (discoveryTimerRef.current !== null) {
+        clearTimeout(discoveryTimerRef.current);
+        discoveryTimerRef.current = null;
+      }
       sourceRef.current?.close();
       sourceRef.current = null;
     };
   }, [trialId]);
+
+  const feedRef = useRef<HTMLOListElement>(null);
+
+  // Auto-scroll to bottom when new events arrive (especially on mobile).
+  useLayoutEffect(() => {
+    if (events.length === 0 || !feedRef.current) return;
+    const last = feedRef.current.lastElementChild;
+    if (last) {
+      last.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [events.length]);
 
   // Derive structured buckets from the flat event list. Memoized so re-renders
   // on new events don't re-scan.
@@ -173,6 +203,8 @@ export function TryDiscovery() {
   }
 
   const terminalError = view.error;
+  // The workspace is provisioned but discovery may still be running.
+  const isDiscovering = view.ready !== null && connection.status === 'open' && sourceRef.current !== null;
   // Show the stage skeleton until *substantive* progress arrives. A lone
   // `trial.started` event is just an acknowledgement — the user still sees
   // nothing happening, so keep the "Setting things up" roadmap visible.
@@ -193,6 +225,7 @@ export function TryDiscovery() {
           progressLatest={view.progressLatest}
           connection={connection}
           ready={view.ready !== null}
+          discovering={isDiscovering}
         />
 
         {terminalError ? <TerminalErrorPanel error={terminalError} /> : null}
@@ -210,6 +243,7 @@ export function TryDiscovery() {
         ) : null}
 
         <ol
+          ref={feedRef}
           className="flex flex-col gap-3"
           role="feed"
           aria-busy={connection.status !== 'open'}
@@ -219,8 +253,10 @@ export function TryDiscovery() {
             <li key={item.key} className="trial-feed-item motion-safe:animate-trial-slide-in">
               {item.kind === 'event' ? (
                 <EventCard event={item.event} />
-              ) : (
+              ) : item.kind === 'knowledge-group' ? (
                 <KnowledgeGroupCard items={item.items} />
+              ) : (
+                <AgentActivityGroupCard items={item.items} />
               )}
             </li>
           ))}
@@ -295,6 +331,7 @@ interface DiscoveryView {
   error: TrialErrorEvent | null;
   ideas: TrialIdeaEvent[];
   knowledge: TrialKnowledgeEvent[];
+  activity: TrialAgentActivityEvent[];
 }
 
 function deriveView(events: TrialEvent[]): DiscoveryView {
@@ -305,6 +342,7 @@ function deriveView(events: TrialEvent[]): DiscoveryView {
     error: null,
     ideas: [],
     knowledge: [],
+    activity: [],
   };
   for (const event of events) {
     switch (event.type) {
@@ -323,6 +361,9 @@ function deriveView(events: TrialEvent[]): DiscoveryView {
       case 'trial.ready':
         view.ready = event;
         break;
+      case 'trial.agent_activity':
+        view.activity.push(event);
+        break;
       case 'trial.error':
         view.error = event;
         break;
@@ -337,50 +378,97 @@ function deriveView(events: TrialEvent[]): DiscoveryView {
  * types break the group. Order is preserved.
  */
 type FeedItem =
-  | { kind: 'event'; key: string; event: Exclude<TrialEvent, TrialKnowledgeEvent | TrialErrorEvent> }
-  | { kind: 'knowledge-group'; key: string; items: TrialKnowledgeEvent[] };
+  | { kind: 'event'; key: string; event: Exclude<TrialEvent, TrialKnowledgeEvent | TrialAgentActivityEvent | TrialErrorEvent> }
+  | { kind: 'knowledge-group'; key: string; items: TrialKnowledgeEvent[] }
+  | { kind: 'activity-group'; key: string; items: TrialAgentActivityEvent[] };
 
 export function buildFeed(events: TrialEvent[]): FeedItem[] {
   const out: FeedItem[] = [];
-  let group: TrialKnowledgeEvent[] = [];
-  let groupStartIdx = -1;
+  let knowledgeGroup: TrialKnowledgeEvent[] = [];
+  let knowledgeGroupStartIdx = -1;
+  let activityGroup: TrialAgentActivityEvent[] = [];
+  let activityGroupStartIdx = -1;
 
-  const flushGroup = () => {
-    if (group.length === 0) return;
+  const flushKnowledge = () => {
+    if (knowledgeGroup.length === 0) return;
     out.push({
       kind: 'knowledge-group',
-      key: `knowledge-${groupStartIdx}-${group.length}`,
-      items: group,
+      key: `knowledge-${knowledgeGroupStartIdx}-${knowledgeGroup.length}`,
+      items: knowledgeGroup,
     });
-    group = [];
-    groupStartIdx = -1;
+    knowledgeGroup = [];
+    knowledgeGroupStartIdx = -1;
+  };
+
+  const flushActivity = () => {
+    if (activityGroup.length === 0) return;
+    out.push({
+      kind: 'activity-group',
+      key: `activity-${activityGroupStartIdx}-${activityGroup.length}`,
+      items: activityGroup,
+    });
+    activityGroup = [];
+    activityGroupStartIdx = -1;
+  };
+
+  const flushAll = () => {
+    flushKnowledge();
+    flushActivity();
   };
 
   events.forEach((event, idx) => {
     if (event.type === 'trial.knowledge') {
-      const last = group[group.length - 1];
-      if (group.length === 0 || (last && event.at - last.at <= TRIAL_KNOWLEDGE_GROUP_MS)) {
-        if (group.length === 0) groupStartIdx = idx;
-        group.push(event);
+      flushActivity();
+      const last = knowledgeGroup[knowledgeGroup.length - 1];
+      if (knowledgeGroup.length === 0 || (last && event.at - last.at <= TRIAL_KNOWLEDGE_GROUP_MS)) {
+        if (knowledgeGroup.length === 0) knowledgeGroupStartIdx = idx;
+        knowledgeGroup.push(event);
       } else {
-        flushGroup();
-        group = [event];
-        groupStartIdx = idx;
+        flushKnowledge();
+        knowledgeGroup = [event];
+        knowledgeGroupStartIdx = idx;
       }
       return;
     }
 
-    flushGroup();
+    if (event.type === 'trial.agent_activity') {
+      flushKnowledge();
+      const last = activityGroup[activityGroup.length - 1];
+      // Group activity events arriving within the same window
+      if (activityGroup.length === 0 || (last && event.at - last.at <= TRIAL_KNOWLEDGE_GROUP_MS)) {
+        if (activityGroup.length === 0) activityGroupStartIdx = idx;
+        activityGroup.push(event);
+      } else {
+        flushActivity();
+        activityGroup = [event];
+        activityGroupStartIdx = idx;
+      }
+      return;
+    }
+
+    flushAll();
 
     if (event.type === 'trial.error') {
       // Rendered as the terminal panel above, not in the feed.
       return;
     }
 
+    // Deduplicate consecutive progress events with the same stage —
+    // the orchestrator re-emits keepalive progress events while waiting
+    // for the agent to boot, which creates visual spam.
+    if (event.type === 'trial.progress') {
+      const prev = out[out.length - 1];
+      if (prev?.kind === 'event' && prev.event.type === 'trial.progress' && prev.event.stage === event.stage) {
+        // Replace the previous with the latest (keeps the most recent progress %)
+        out[out.length - 1] = { kind: 'event', key: `event-${idx}-${event.type}`, event };
+        return;
+      }
+    }
+
     out.push({ kind: 'event', key: `event-${idx}-${event.type}`, event });
   });
 
-  flushGroup();
+  flushAll();
   return out;
 }
 
@@ -393,9 +481,10 @@ interface HeaderProps {
   progressLatest: TrialProgressEvent | null;
   connection: ConnectionState;
   ready: boolean;
+  discovering?: boolean;
 }
 
-function DiscoveryHeader({ started, progressLatest, connection, ready }: HeaderProps) {
+function DiscoveryHeader({ started, progressLatest, connection, ready, discovering }: HeaderProps) {
   const repoName = started ? extractRepoName(started.repoUrl) : 'your repo';
   const progressPct =
     progressLatest?.progress !== undefined
@@ -412,8 +501,10 @@ function DiscoveryHeader({ started, progressLatest, connection, ready }: HeaderP
       <div className="flex items-start gap-3 justify-between">
         <div className="min-w-0 flex-1" title={repoName}>
           <Typography variant="title" as="h1" className="truncate">
-            {ready ? (
+            {ready && !discovering ? (
               <>Ready: <code className="font-mono">{repoName}</code></>
+            ) : ready && discovering ? (
+              <>Discovering <code className="font-mono">{repoName}</code>…</>
             ) : (
               <>Exploring <code className="font-mono">{repoName}</code>…</>
             )}
@@ -581,8 +672,8 @@ function EventCard({
   switch (event.type) {
     case 'trial.started':
       return (
-        <Card tone="neutral" icon="◎" title={`Started exploring ${extractRepoName(event.repoUrl)}`}>
-          <p className="text-xs text-fg-muted">Trial id: <code>{event.trialId}</code></p>
+        <Card tone="neutral" icon="◎" title={`Exploring ${extractRepoName(event.repoUrl)}`}>
+          <p className="text-xs text-fg-muted">Trial id: <code className="font-mono text-[11px]">{event.trialId}</code></p>
         </Card>
       );
     case 'trial.progress':
@@ -597,8 +688,11 @@ function EventCard({
       return <IdeaCard event={event} />;
     case 'trial.ready':
       return (
-        <Card tone="success" icon="✓" title="Workspace ready">
-          <p className="text-sm">Your workspace is warm and waiting. Chat below to continue.</p>
+        <Card tone="success" icon={<Terminal className="w-5 h-5" />} title="Environment ready">
+          <p className="text-xs text-fg-muted">
+            Your development environment is configured. An agent is now analyzing the
+            repository to build a knowledge graph and suggest next steps&hellip;
+          </p>
         </Card>
       );
     default:
@@ -613,7 +707,7 @@ function Card({
   children,
 }: {
   tone: 'neutral' | 'success' | 'info';
-  icon: string;
+  icon: ReactNode;
   title: string;
   children?: ReactNode;
 }) {
@@ -656,7 +750,9 @@ function KnowledgeGroupCard({ items }: { items: TrialKnowledgeEvent[] }) {
       className="rounded-md border border-border-default bg-surface p-3 sm:p-4"
     >
       <div className="flex items-start gap-3">
-        <span aria-hidden className="text-lg leading-none shrink-0">📎</span>
+        <span aria-hidden className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-accent/10 text-accent">
+          <BookOpen className="w-4 h-4" />
+        </span>
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold truncate">{head.entity}</h3>
           <p className="mt-1 text-xs text-fg-muted">{head.observation}</p>
@@ -695,9 +791,9 @@ function IdeaCard({ event }: { event: TrialIdeaEvent }) {
       <div className="flex items-start gap-3">
         <span
           aria-hidden
-          className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-info text-fg-on-accent text-xs font-semibold"
+          className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-info text-fg-on-accent"
         >
-          ★
+          <Lightbulb className="w-4 h-4" />
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold">{event.title}</h3>
@@ -708,9 +804,93 @@ function IdeaCard({ event }: { event: TrialIdeaEvent }) {
   );
 }
 
+/**
+ * Grouped card for a burst of `trial.agent_activity` events. Shows what the
+ * discovery agent is doing — tool calls, thinking snippets, assistant text.
+ * Only the latest 3 items are shown to keep the feed compact.
+ */
+function AgentActivityGroupCard({ items }: { items: TrialAgentActivityEvent[] }) {
+  // Show only the most recent items to avoid feed spam
+  const visible = items.slice(-3);
+  return (
+    <article
+      data-testid="trial-activity-group"
+      className="rounded-md border border-border-default bg-surface/60 p-3 sm:p-4"
+    >
+      <div className="flex items-start gap-3">
+        <span
+          aria-hidden
+          className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-canvas border border-border-default text-fg-muted trial-skeleton-active"
+        >
+          <Brain className="w-4 h-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-xs font-medium text-fg-muted">
+            Agent working&hellip;
+          </h3>
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {visible.map((item, idx) => (
+              <li key={`${idx}-${item.at}`} className="flex items-start gap-2 text-xs text-fg-muted">
+                <ActivityRoleIcon role={item.role} />
+                <span className="min-w-0 break-words line-clamp-2">
+                  {item.toolName ? (
+                    <><code className="font-mono text-[11px] text-accent">{item.toolName}</code>{' '}</>
+                  ) : null}
+                  {cleanActivityText(item.text)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {items.length > 3 ? (
+            <p className="mt-1 text-[11px] text-fg-muted">
+              +{items.length - 3} more actions
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ActivityRoleIcon({ role }: { role: 'assistant' | 'tool' | 'thinking' }) {
+  switch (role) {
+    case 'tool':
+      return <Wrench className="w-3 h-3 shrink-0 mt-0.5" />;
+    case 'thinking':
+      return <Brain className="w-3 h-3 shrink-0 mt-0.5" />;
+    default:
+      return <Terminal className="w-3 h-3 shrink-0 mt-0.5" />;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Clean up raw agent activity text for display. Strips XML tags, collapses
+ * JSON blobs, and trims whitespace so the feed stays readable.
+ */
+function cleanActivityText(text: string): string {
+  // Strip XML-style tags (e.g. <path>...</path>, <content>...</content>)
+  let cleaned = text.replace(/<\/?[a-zA-Z][^>]*>/g, ' ');
+  // Collapse whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  // If it looks like a JSON blob, summarize it
+  if (cleaned.startsWith('{') && cleaned.length > 80) {
+    try {
+      const obj = JSON.parse(text.length <= 200 ? text : text + '"}');
+      // Try to extract a meaningful summary
+      const repo = obj.repository as string | undefined;
+      const status = obj.status as string | undefined;
+      if (repo && status) return `Workspace: ${repo} (${status})`;
+    } catch {
+      // Not valid JSON — just truncate
+    }
+    return cleaned.slice(0, 80) + '…';
+  }
+  return cleaned;
+}
 
 function extractRepoName(repoUrl: string): string {
   const match = /github\.com\/([^/]+\/[^/?#.]+)/i.exec(repoUrl);

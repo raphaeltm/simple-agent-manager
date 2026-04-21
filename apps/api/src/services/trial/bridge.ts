@@ -98,6 +98,54 @@ export async function bridgeKnowledgeAdded(
 }
 
 /**
+ * Emit `trial.agent_activity` when the discovery agent produces output.
+ * Called from the message persistence path for assistant/tool/thinking roles.
+ *
+ * Truncates long text to keep SSE payloads small — the feed only needs a
+ * summary of what the agent is doing, not the full output.
+ */
+export async function bridgeAgentActivity(
+  env: Env,
+  projectId: string,
+  messages: Array<{
+    role: string;
+    content: string;
+    toolMetadata?: unknown;
+  }>,
+): Promise<void> {
+  try {
+    const record = await readTrialByProject(env, projectId);
+    if (!record) return;
+
+    for (const msg of messages) {
+      // Only surface agent-facing roles, skip user messages
+      if (msg.role !== 'assistant' && msg.role !== 'tool' && msg.role !== 'thinking') continue;
+      // Skip empty content
+      const text = (msg.content || '').trim();
+      if (!text) continue;
+
+      const toolName =
+        msg.role === 'tool' && msg.toolMetadata && typeof msg.toolMetadata === 'object'
+          ? (msg.toolMetadata as Record<string, unknown>).toolName as string | undefined
+          : undefined;
+
+      await emitTrialEventForProject(env, projectId, {
+        type: 'trial.agent_activity',
+        role: msg.role as 'assistant' | 'tool' | 'thinking',
+        text: text.length > 200 ? text.slice(0, 200) + '…' : text,
+        ...(toolName ? { toolName } : {}),
+        at: Date.now(),
+      });
+    }
+  } catch (err) {
+    log.warn('trial_bridge.agent_activity_failed', {
+      projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Emit `trial.idea` when the discovery agent creates an idea via MCP.
  */
 export async function bridgeIdeaCreated(

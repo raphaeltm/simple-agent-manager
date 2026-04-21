@@ -15,9 +15,11 @@
  *   GET  /poll     ?cursor=&timeoutMs= -> { events, cursor, closed }
  *   POST /close                         mark the trial stream as finished
  *
- * Close semantics: once `/close` is called (after trial.ready / trial.error),
- * subsequent `/poll` calls return `closed: true` and the SSE endpoint finishes
- * the response stream.
+ * Close semantics: once `/close` is called (after trial.error, or when the
+ * discovery agent session ends), subsequent `/poll` calls return
+ * `closed: true` and the SSE endpoint finishes the response stream.
+ * `trial.ready` is NOT terminal — the discovery agent continues producing
+ * knowledge and idea events after the workspace is provisioned.
  */
 
 import type { TrialEvent } from '@simple-agent-manager/shared';
@@ -100,8 +102,11 @@ export class TrialEventBus extends DurableObject<Env> {
       this.buffer.splice(0, this.buffer.length - MAX_BUFFERED_EVENTS);
     }
 
-    // Auto-close on terminal events
-    if (event.type === 'trial.ready' || event.type === 'trial.error') {
+    // Auto-close only on hard-terminal events. `trial.ready` is a milestone
+    // (workspace provisioned) but the discovery agent continues producing
+    // `trial.knowledge` and `trial.idea` events afterward — closing here
+    // would reject those late-arriving events with 409.
+    if (event.type === 'trial.error') {
       this.closed = true;
     }
 

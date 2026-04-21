@@ -43,6 +43,17 @@ export const TRIAL_BACKOFF_BASE_MS = num(env.VITE_TRIAL_BACKOFF_BASE_MS, 1_000);
 /** Cap on exponential backoff delay (ms). */
 export const TRIAL_BACKOFF_CAP_MS = num(env.VITE_TRIAL_BACKOFF_CAP_MS, 16_000);
 
+/**
+ * How long to keep the discovery event stream open after `trial.ready` (ms).
+ * The agent continues producing knowledge + idea events after provisioning
+ * completes. Close the stream after this grace period so the browser doesn't
+ * hold a connection forever.
+ */
+export const TRIAL_DISCOVERY_STREAM_TIMEOUT_MS = num(
+  env.VITE_TRIAL_DISCOVERY_STREAM_TIMEOUT_MS,
+  180_000, // 3 minutes — enough for the agent to discover and report
+);
+
 // ---------------------------------------------------------------------------
 // Stage label vocabulary
 // ---------------------------------------------------------------------------
