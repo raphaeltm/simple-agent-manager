@@ -446,6 +446,8 @@ export interface Env {
   AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
   AI_GATEWAY_ID?: string;                            // Cloudflare AI Gateway ID (default: sam)
+  AI_USAGE_PAGE_SIZE?: string;                       // AI Gateway logs page size for admin usage aggregation (default: 100)
+  AI_USAGE_MAX_PAGES?: string;                       // Max pages to iterate for AI usage aggregation (default: 20)
   // Trial Onboarding (zero-friction URL-to-workspace)
   TRIAL_CLAIM_TOKEN_SECRET?: string;                 // Secret: HMAC key for sam_trial_claim / sam_trial_fingerprint cookies
   TRIAL_MONTHLY_CAP?: string;                        // Global cap per calendar month (default: 1500)

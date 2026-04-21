@@ -226,6 +226,47 @@ export async function fetchAnalyticsForwardStatus(): Promise<AnalyticsForwardSta
   return request<AnalyticsForwardStatusResponse>('/api/admin/analytics/forward-status');
 }
 
+// Phase 5: AI Usage (AI Gateway logs)
+
+export interface AiUsageByModel {
+  model: string;
+  provider: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  cachedRequests: number;
+  errorRequests: number;
+}
+
+export interface AiUsageByDay {
+  date: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+export interface AnalyticsAiUsageResponse {
+  totalRequests: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  trialRequests: number;
+  trialCostUsd: number;
+  cachedRequests: number;
+  errorRequests: number;
+  byModel: AiUsageByModel[];
+  byDay: AiUsageByDay[];
+  period: string;
+}
+
+export async function fetchAnalyticsAiUsage(period?: string): Promise<AnalyticsAiUsageResponse> {
+  const params = period ? `?period=${period}` : '';
+  return request<AnalyticsAiUsageResponse>(`/api/admin/analytics/ai-usage${params}`);
+}
+
 // =============================================================================
 // Admin AI Proxy Config
 // =============================================================================

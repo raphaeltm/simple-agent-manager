@@ -282,10 +282,10 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   const workspaceId = tokenPayload.workspace;
 
-  // --- Resolve workspaceId → userId ---
+  // --- Resolve workspaceId → userId + projectId ---
   const db = drizzle(c.env.DATABASE, { schema });
   const workspace = await db
-    .select({ userId: schema.workspaces.userId })
+    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .get();
@@ -296,6 +296,18 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   }
 
   const userId = workspace.userId;
+  const projectId = workspace.projectId;
+
+  // Check if this workspace belongs to a trial
+  let trialId: string | undefined;
+  if (projectId) {
+    const trial = await db
+      .select({ id: schema.trials.id })
+      .from(schema.trials)
+      .where(eq(schema.trials.projectId, projectId))
+      .get();
+    trialId = trial?.id;
+  }
 
   // --- Rate limit: per-user RPM ---
   const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
@@ -380,6 +392,8 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   const aigMetadata = JSON.stringify({
     userId,
     workspaceId,
+    projectId: projectId ?? undefined,
+    trialId: trialId ?? undefined,
     modelId,
     stream: !!body.stream,
     hasTools: !!body.tools,
