@@ -33,7 +33,13 @@ vi.mock('cloudflare:workers', () => ({
 const { TrialEventBus } = await import('../../../src/durable-objects/trial-event-bus');
 
 function makeDO() {
-  const ctx = {} as unknown;
+  const store = new Map<string, unknown>();
+  const ctx = {
+    storage: {
+      get: async <T>(key: string): Promise<T | undefined> => store.get(key) as T | undefined,
+      put: async (key: string, value: unknown): Promise<void> => { store.set(key, value); },
+    },
+  } as unknown;
   const env = {} as unknown;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new TrialEventBus(ctx as any, env as any);

@@ -183,6 +183,14 @@ else
   echo -e "${YELLOW}ℹ  Skipping GA4 secrets (GA4_API_SECRET/GA4_MEASUREMENT_ID not set — GA4 analytics forwarding disabled)${NC}"
 fi
 
+# Configure trial Anthropic API key (optional — only needed when trials use Anthropic provider)
+ANTHROPIC_API_KEY_TRIAL="${ANTHROPIC_API_KEY_TRIAL:-}"
+if [ -n "$ANTHROPIC_API_KEY_TRIAL" ]; then
+  set_worker_secret "ANTHROPIC_API_KEY_TRIAL" "$ANTHROPIC_API_KEY_TRIAL" "$ENVIRONMENT" "false"
+else
+  echo -e "${YELLOW}ℹ  Skipping ANTHROPIC_API_KEY_TRIAL (not set — trials will use Workers AI provider)${NC}"
+fi
+
 # Configure smoke test auth (optional — only needed for staging/test environments)
 SMOKE_TEST_AUTH_ENABLED="${SMOKE_TEST_AUTH_ENABLED:-}"
 if [ -n "$SMOKE_TEST_AUTH_ENABLED" ]; then

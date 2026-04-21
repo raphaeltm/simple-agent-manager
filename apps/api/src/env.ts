@@ -463,7 +463,7 @@ export interface Env {
   TRIAL_GITHUB_TIMEOUT_MS?: string;                  // Timeout for GitHub repo metadata probe (default: 5000)
   TRIAL_COUNTER_KEEP_MONTHS?: string;                // Months of counter rows to retain in DO (default: 3)
   TRIAL_WAITLIST_PURGE_DAYS?: string;                // Days after reset_date before notified waitlist rows are purged (default: 30)
-  TRIAL_CRON_ROLLOVER_CRON?: string;                 // Cron expression used by the monthly rollover audit (default: 0 3 1 * *)
+  TRIAL_CRON_ROLLOVER_CRON?: string;                 // Cron expression used by the monthly rollover audit (default: 0 5 1 * *)
   TRIAL_CRON_WAITLIST_CLEANUP?: string;              // Cron expression used by the daily waitlist cleanup (default: 0 4 * * *)
   TRIAL_SSE_HEARTBEAT_MS?: string;                   // SSE comment heartbeat cadence (default: 15000)
   TRIAL_SSE_POLL_TIMEOUT_MS?: string;                // Long-poll timeout per DO fetch (default: 15000)

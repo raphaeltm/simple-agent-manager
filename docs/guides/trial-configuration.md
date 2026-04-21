@@ -33,6 +33,12 @@ These are declared in `apps/api/wrangler.toml` at the top level (no `[env.*]` se
 | `TRIAL_DEFAULT_WORKSPACE_PROFILE` | `lightweight` | Devcontainer profile (see `packages/cloud-init`) used for trial workspaces. |
 | `TRIALS_ENABLED_KV_KEY` | `trials:enabled` | KV key read by the kill-switch. |
 | `TRIAL_KILL_SWITCH_CACHE_MS` | `30000` (30 s) | In-memory cache TTL for the kill-switch lookup. Lower = faster propagation, higher = fewer KV reads. |
+| `TRIAL_MODEL` | `@cf/qwen/qwen3-30b-a3b-fp8` | AI model used for trial conversations. Override to use a different Workers AI or Anthropic model. |
+| `TRIAL_LLM_PROVIDER` | `workers-ai` | LLM provider for trial inference: `"workers-ai"` (zero-cost, built-in) or `"anthropic"` (requires `ANTHROPIC_API_KEY_TRIAL`). |
+| `ANTHROPIC_API_KEY_TRIAL` | — | Anthropic API key scoped to trial runs. Required **only** when `TRIAL_LLM_PROVIDER=anthropic` and `ENVIRONMENT=production`. Set via `wrangler secret put` or add to GitHub Environment secrets. |
+| `ENVIRONMENT` | `staging` | Deployment mode: `"staging"` or `"production"`. Controls which agent type and model are used for trials. Set automatically by the deploy pipeline via `sync-wrangler-config.ts`. |
+| `RATE_LIMIT_TRIAL_CREATE` | `10` | Per-IP rate limit (requests/hour) for `POST /api/trial/create`. |
+| `RATE_LIMIT_TRIAL_SSE` | `30` | Per-IP rate limit (connections/5 min) for SSE event streaming. |
 
 ## Orchestrator and Fast-Path Knowledge
 
@@ -78,6 +84,14 @@ ACP session notifications and MCP knowledge/idea tool calls are bridged into the
 | `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS` | `5000` | Per-request timeout for each unauthenticated GitHub REST call (fast-path knowledge probe). |
 | `TRIAL_KNOWLEDGE_MAX_EVENTS` | `10` | Upper bound on `trial.knowledge` events emitted by the fast-path probe. |
 | `TRIAL_GITHUB_TIMEOUT_MS` | `5000` | Per-request timeout for the default-branch probe in the TrialOrchestrator (`fetchDefaultBranch`). On timeout, 404, or network error the probe falls back to `main`. |
+
+### SSE tunables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TRIAL_SSE_HEARTBEAT_MS` | `15000` (15 s) | Interval between heartbeat comment frames sent to keep the SSE connection alive. |
+| `TRIAL_SSE_POLL_TIMEOUT_MS` | `15000` (15 s) | Long-poll timeout per cycle when querying the TrialEventBus DO. |
+| `TRIAL_SSE_MAX_DURATION_MS` | `1800000` (30 min) | Hard cap on SSE connection duration. |
 
 ## Kill Switch
 

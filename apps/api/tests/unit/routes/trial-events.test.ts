@@ -63,6 +63,7 @@ function makeEnvWithDO(
       return new Response('not found', { status: 404 });
     }),
   };
+  const kvStore = new Map<string, string>();
   return {
     TRIAL_CLAIM_TOKEN_SECRET: SECRET,
     TRIAL_SSE_HEARTBEAT_MS: '60000',
@@ -71,6 +72,10 @@ function makeEnvWithDO(
     TRIAL_EVENT_BUS: {
       idFromName: vi.fn(() => 'do-id'),
       get: vi.fn(() => stub),
+    },
+    KV: {
+      get: vi.fn(async (key: string) => kvStore.get(key) ?? null),
+      put: vi.fn(async (key: string, value: string) => { kvStore.set(key, value); }),
     },
     ...overrides,
   } as unknown as Env;
@@ -82,7 +87,9 @@ async function getEvents(
   cookie: string | null,
   env: Env
 ): Promise<Response> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    'CF-Connecting-IP': '203.0.113.1', // test IP for rate limiting
+  };
   if (cookie) headers['cookie'] = `sam_trial_fingerprint=${encodeURIComponent(cookie)}`;
   return app.request(
     `/api/trial/${trialId}/events`,

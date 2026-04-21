@@ -242,3 +242,73 @@ describe('trial cookies — cookie string builders', () => {
     expect(c).toContain('Secure');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cookie domain consistency (regression test for CRITICAL cookie domain bug)
+// ---------------------------------------------------------------------------
+// The browser treats cookies with different Domain attributes as distinct.
+// If create.ts sets `Domain=.example.com` but claim.ts clears without a Domain,
+// the original cookie is never deleted — enabling replay attacks. This test
+// asserts the invariant that all three cookie call sites produce matching Domain
+// attributes.
+// See: clearClaimCookie domain mismatch fix in claim.ts / oauth-hook.ts.
+
+describe('trial cookies — domain consistency invariant', () => {
+  const domain = '.example.com';
+
+  it('buildClaimCookie includes Domain when provided', () => {
+    const c = buildClaimCookie('tok', { domain });
+    expect(c).toContain(`Domain=${domain}`);
+  });
+
+  it('clearClaimCookie includes the same Domain when provided', () => {
+    const c = clearClaimCookie({ domain });
+    expect(c).toContain(`Domain=${domain}`);
+  });
+
+  it('buildFingerprintCookie includes Domain when provided', () => {
+    const c = buildFingerprintCookie('uuid.sig', { domain });
+    expect(c).toContain(`Domain=${domain}`);
+  });
+
+  it('clearClaimCookie WITHOUT domain does NOT match a domain-scoped cookie', () => {
+    // This is the exact bug: if you set with Domain=.example.com but clear
+    // without Domain, the browser sees them as different cookies.
+    const setCookie = buildClaimCookie('tok', { domain });
+    const clearCookie = clearClaimCookie(); // no domain — the old buggy path
+
+    // Extract Domain= from each
+    const setDomain = setCookie.match(/Domain=[^;]+/)?.[0];
+    const clearDomain = clearCookie.match(/Domain=[^;]+/)?.[0];
+
+    expect(setDomain).toBe(`Domain=${domain}`);
+    expect(clearDomain).toBeUndefined(); // no Domain in the clear cookie
+    // Therefore these are DIFFERENT cookies from the browser's perspective.
+    // The fix: always pass the same domain to clearClaimCookie.
+    expect(setDomain).not.toBe(clearDomain);
+  });
+
+  it('clearClaimCookie WITH domain matches the set cookie domain', () => {
+    // This is the fixed path: both set and clear use the same domain.
+    const setCookie = buildClaimCookie('tok', { domain });
+    const clearCookie = clearClaimCookie({ domain });
+
+    const setDomain = setCookie.match(/Domain=[^;]+/)?.[0];
+    const clearDomain = clearCookie.match(/Domain=[^;]+/)?.[0];
+
+    expect(setDomain).toBe(`Domain=${domain}`);
+    expect(clearDomain).toBe(`Domain=${domain}`);
+    // Same Domain → browser treats them as the same cookie → clear works.
+  });
+
+  it('all three builders omit Domain when no domain is provided', () => {
+    // Without a domain, all cookies are host-only — consistent by omission.
+    const claim = buildClaimCookie('tok');
+    const clear = clearClaimCookie();
+    const fp = buildFingerprintCookie('uuid.sig');
+
+    expect(claim).not.toContain('Domain=');
+    expect(clear).not.toContain('Domain=');
+    expect(fp).not.toContain('Domain=');
+  });
+});

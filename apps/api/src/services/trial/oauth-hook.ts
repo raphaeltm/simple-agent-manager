@@ -68,7 +68,8 @@ export async function maybeAttachTrialClaimCookie(
     expiresAt: now + DEFAULT_TRIAL_CLAIM_TTL_MS,
   };
   const token = await signClaimToken(payload, secret);
-  const cookie = buildClaimCookie(token);
+  const cookieDomain = env.BASE_DOMAIN ? `.${env.BASE_DOMAIN}` : undefined;
+  const cookie = buildClaimCookie(token, { domain: cookieDomain });
 
   // Rewrite the redirect Location to the app's claim landing page.
   const baseDomain = env.BASE_DOMAIN;

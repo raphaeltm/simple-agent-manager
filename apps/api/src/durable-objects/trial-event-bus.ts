@@ -46,10 +46,24 @@ export class TrialEventBus extends DurableObject<Env> {
   private buffer: BufferedEvent[] = [];
   private nextCursor = 1;
   private closed = false;
+  private closedLoaded = false;
   private waiters: Set<Waiter> = new Set();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+  }
+
+  /**
+   * Lazily load the `closed` flag from DO storage. In-memory state is lost on
+   * eviction; persisting this single flag ensures SSE consumers see `closed: true`
+   * even after the DO is re-instantiated (the event buffer is intentionally NOT
+   * persisted — short-lived trial streams don't need full replay).
+   */
+  private async ensureClosedLoaded(): Promise<void> {
+    if (this.closedLoaded) return;
+    const stored = await this.ctx.storage.get<boolean>('closed');
+    if (stored === true) this.closed = true;
+    this.closedLoaded = true;
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -73,6 +87,7 @@ export class TrialEventBus extends DurableObject<Env> {
   // -------------------------------------------------------------------------
 
   private async handleAppend(req: Request): Promise<Response> {
+    await this.ensureClosedLoaded();
     log.info('trial_event_bus.handleAppend.enter', {
       closed: this.closed,
       bufferLen: this.buffer.length,
@@ -108,6 +123,7 @@ export class TrialEventBus extends DurableObject<Env> {
     // would reject those late-arriving events with 409.
     if (event.type === 'trial.error') {
       this.closed = true;
+      await this.ctx.storage.put('closed', true);
     }
 
     this.wakeWaiters();
@@ -119,6 +135,7 @@ export class TrialEventBus extends DurableObject<Env> {
   // -------------------------------------------------------------------------
 
   private async handlePoll(url: URL): Promise<Response> {
+    await this.ensureClosedLoaded();
     const cursor = Number.parseInt(url.searchParams.get('cursor') ?? '0', 10) || 0;
     const requestedTimeout = Number.parseInt(
       url.searchParams.get('timeoutMs') ?? String(DEFAULT_POLL_TIMEOUT_MS),
@@ -164,6 +181,7 @@ export class TrialEventBus extends DurableObject<Env> {
 
   private async handleClose(): Promise<Response> {
     this.closed = true;
+    await this.ctx.storage.put('closed', true);
     this.wakeWaiters();
     return Response.json({ closed: true });
   }

@@ -11,8 +11,6 @@ import { log } from '../lib/logger';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 
-/** Default AI Gateway ID. Override via AI_GATEWAY_ID env var. */
-const DEFAULT_GATEWAY_ID = 'sam';
 /** Default number of log entries to fetch per page. Override via AI_USAGE_PAGE_SIZE env var. CF max is 50. */
 const DEFAULT_PAGE_SIZE = 50;
 /** Maximum pages to iterate when aggregating. Override via AI_USAGE_MAX_PAGES env var. */
@@ -97,7 +95,7 @@ async function fetchGatewayLogs(
       body: body.slice(0, 500),
       url: url.replace(/Bearer\s+\S+/, 'Bearer [REDACTED]'),
     });
-    throw errors.internal(`AI Gateway API error: ${resp.status} — ${body.slice(0, 200)}`);
+    throw errors.internal(`AI Gateway API error (${resp.status}). Check admin logs for details.`);
   }
 
   return resp.json() as Promise<AIGatewayLogsResponse>;
@@ -147,7 +145,24 @@ adminAiUsageRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin
  */
 adminAiUsageRoutes.get('/', async (c) => {
   const period = parsePeriod(c.req.query('period'));
-  const gatewayId = c.env.AI_GATEWAY_ID || DEFAULT_GATEWAY_ID;
+  const gatewayId = c.env.AI_GATEWAY_ID;
+  if (!gatewayId) {
+    // AI Gateway is optional — self-hosters who don't use it get an empty summary
+    // instead of a 500. The admin dashboard renders "no data" gracefully.
+    return c.json({
+      totalRequests: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCostUsd: 0,
+      trialRequests: 0,
+      trialCostUsd: 0,
+      cachedRequests: 0,
+      errorRequests: 0,
+      byModel: [],
+      byDay: [],
+      period,
+    } satisfies AiUsageSummary);
+  }
   const pageSize = parseInt(c.env.AI_USAGE_PAGE_SIZE || '', 10) || DEFAULT_PAGE_SIZE;
   const maxPages = parseInt(c.env.AI_USAGE_MAX_PAGES || '', 10) || DEFAULT_MAX_PAGES;
   const startDate = periodToStartDate(period);

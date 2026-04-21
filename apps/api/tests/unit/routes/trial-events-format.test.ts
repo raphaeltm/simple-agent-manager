@@ -22,7 +22,7 @@ import { formatSse } from '../../../src/routes/trial/events';
 
 describe('formatSse()', () => {
   it('produces an unnamed SSE frame so EventSource.onmessage fires', () => {
-    const frame = formatSse('trial.ready', { type: 'trial.ready', at: 123 });
+    const frame = formatSse({ type: 'trial.ready', at: 123 });
     expect(frame).toBe('data: {"type":"trial.ready","at":123}\n\n');
     // No `event:` line — otherwise the client has to register listeners
     // per event type and `onmessage` silently never fires.
@@ -30,14 +30,14 @@ describe('formatSse()', () => {
   });
 
   it('json-encodes the data payload (newlines inside strings are escaped)', () => {
-    const frame = formatSse('trial.log', { msg: 'line1\nline2' });
+    const frame = formatSse({ msg: 'line1\nline2' });
     // JSON.stringify escapes the embedded newline to \n (literal backslash n),
     // preventing the payload from terminating the SSE frame early.
     expect(frame).toBe('data: {"msg":"line1\\nline2"}\n\n');
   });
 
   it('frame shape is exactly one data line plus the blank terminator', () => {
-    const frame = formatSse('trial.knowledge', {
+    const frame = formatSse({
       type: 'trial.knowledge',
       key: 'description',
       value: 'hello',
