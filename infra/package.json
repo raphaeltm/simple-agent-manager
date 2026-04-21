@@ -12,7 +12,7 @@
   "dependencies": {
     "@pulumi/cloudflare": "5.49.1",
     "@pulumi/pulumi": "3.217.1",
-    "@pulumi/random": "4.19.1",
+    "@pulumi/random": "4.19.2",
     "@pulumi/tls": "5.3.1"
   },
   "devDependencies": {
