@@ -153,6 +153,23 @@ jobs:
           echo "name=$STACK" >> $GITHUB_OUTPUT
           echo "Stack: $STACK for environment: ${{ inputs.environment }}"
 
+      - name: Compute Resource Prefix
+        id: prefix
+        run: |
+          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
+          if [ -n "$EXPLICIT" ]; then
+            echo "value=$EXPLICIT" >> $GITHUB_OUTPUT
+            echo "Resource prefix (explicit): $EXPLICIT"
+          else
+            # Derive from BASE_DOMAIN: 's' + first 6 hex chars of sha256
+            # Must match infra/resources/config.ts derivePrefix()
+            DOMAIN="${{ vars.BASE_DOMAIN }}"
+            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
+            PREFIX="s${HASH}"
+            echo "value=$PREFIX" >> $GITHUB_OUTPUT
+            echo "Resource prefix (derived from $DOMAIN): $PREFIX"
+          fi
+
       # ========================================
       # Phase 1: Infrastructure (Pulumi)
       # ========================================
@@ -204,7 +221,7 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
-          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX || 'sam' }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
 
       - name: Pulumi Preview
         if: ${{ inputs.dry_run == true }}
@@ -278,7 +295,7 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          AI_GATEWAY_ID: ${{ vars.RESOURCE_PREFIX || 'sam' }}
+          AI_GATEWAY_ID: ${{ steps.prefix.outputs.value }}
 
       - name: Check First Deploy Status
         id: first_deploy
@@ -296,7 +313,7 @@ jobs:
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX || 'sam' }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
         run: |
           SUBDOMAIN="$RESOURCE_PREFIX"
           echo "Ensuring workers.dev subdomain is initialized: ${SUBDOMAIN}.workers.dev"
@@ -326,7 +343,7 @@ jobs:
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          PAGES_PROJECT: ${{ vars.RESOURCE_PREFIX || 'sam' }}-web-${{ steps.stack.outputs.name }}
+          PAGES_PROJECT: ${{ steps.prefix.outputs.value }}-web-${{ steps.stack.outputs.name }}
           PAGES_DOMAIN: app.${{ vars.BASE_DOMAIN }}
 
       # ========================================
@@ -395,7 +412,7 @@ jobs:
       - name: Deploy Web UI
         if: ${{ inputs.dry_run != true }}
         run: |
-          PREFIX="${{ vars.RESOURCE_PREFIX || 'sam' }}"
+          PREFIX="${{ steps.prefix.outputs.value }}"
           STACK="${{ steps.stack.outputs.name }}"
           PROJECT_NAME="${PREFIX}-web-${STACK}"
           # --branch main: Deploy as "production" so custom domains serve this deployment.

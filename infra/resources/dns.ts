@@ -1,12 +1,7 @@
 import * as cloudflare from "@pulumi/cloudflare";
 import * as pulumi from "@pulumi/pulumi";
 import { pagesProject } from "./pages";
-
-const config = new pulumi.Config();
-const zoneId = config.require("cloudflareZoneId");
-const baseDomain = config.require("baseDomain");
-const prefix = config.get("resourcePrefix") || "sam";
-const stack = pulumi.getStack();
+import { zoneId, baseDomain, prefix, stack } from "./config";
 
 // API subdomain (api.example.com -> Worker)
 export const apiDnsRecord = new cloudflare.Record(`${prefix}-dns-api`, {

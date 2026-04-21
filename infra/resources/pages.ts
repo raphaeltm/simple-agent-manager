@@ -1,11 +1,5 @@
 import * as cloudflare from "@pulumi/cloudflare";
-import * as pulumi from "@pulumi/pulumi";
-
-const config = new pulumi.Config();
-const accountId = config.require("cloudflareAccountId");
-const baseDomain = config.require("baseDomain");
-const prefix = config.get("resourcePrefix") || "sam";
-const stack = pulumi.getStack();
+import { accountId, baseDomain, prefix, stack } from "./config";
 
 export const pagesProject = new cloudflare.PagesProject(
   `${prefix}-pages-project`,

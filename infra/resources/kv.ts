@@ -1,10 +1,5 @@
 import * as cloudflare from "@pulumi/cloudflare";
-import * as pulumi from "@pulumi/pulumi";
-
-const config = new pulumi.Config();
-const accountId = config.require("cloudflareAccountId");
-const prefix = config.get("resourcePrefix") || "sam";
-const stack = pulumi.getStack();
+import { accountId, prefix, stack } from "./config";
 
 export const kvNamespace = new cloudflare.WorkersKvNamespace(`${prefix}-kv`, {
   accountId: accountId,

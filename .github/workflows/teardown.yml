@@ -56,7 +56,14 @@ jobs:
       - name: Resolve Resource Names
         id: names
         run: |
-          PREFIX="${{ vars.RESOURCE_PREFIX || 'sam' }}"
+          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
+          if [ -n "$EXPLICIT" ]; then
+            PREFIX="$EXPLICIT"
+          else
+            DOMAIN="${{ vars.BASE_DOMAIN }}"
+            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
+            PREFIX="s${HASH}"
+          fi
           if [ "$INPUT_ENVIRONMENT" = "production" ]; then
             STACK="prod"
           else

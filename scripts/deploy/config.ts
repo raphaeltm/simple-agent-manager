@@ -2,6 +2,7 @@
  * Centralized deployment configuration
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -9,11 +10,24 @@ import { resolve } from "node:path";
 const packageJsonPath = resolve(import.meta.dirname, "../../package.json");
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
 
+/**
+ * Derive a short, DNS-safe prefix from a domain name.
+ * Uses first 6 hex chars of SHA-256, prefixed with 's' to ensure it starts
+ * with a letter. Must match the derivation in infra/resources/config.ts.
+ */
+function derivePrefix(domain: string): string {
+  if (!domain) return "sam";
+  const hash = createHash("sha256").update(domain).digest("hex");
+  return `s${hash.slice(0, 6)}`;
+}
+
 export const DEPLOYMENT_CONFIG = {
   /**
-   * Resource name prefix used across all infrastructure
+   * Resource name prefix used across all infrastructure.
+   * Explicit RESOURCE_PREFIX takes precedence; otherwise derived from
+   * BASE_DOMAIN so forks get unique names without extra configuration.
    */
-  prefix: process.env.RESOURCE_PREFIX || "sam",
+  prefix: process.env.RESOURCE_PREFIX || derivePrefix(process.env.BASE_DOMAIN || ""),
 
   /**
    * Stack name mappings
