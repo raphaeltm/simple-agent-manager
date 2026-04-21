@@ -19,6 +19,9 @@ export interface Env {
   TASK_RUNNER: DurableObjectNamespace;
   NOTIFICATION: DurableObjectNamespace;
   CODEX_REFRESH_LOCK: DurableObjectNamespace;
+  TRIAL_COUNTER: DurableObjectNamespace;
+  TRIAL_EVENT_BUS: DurableObjectNamespace;
+  TRIAL_ORCHESTRATOR: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -62,6 +65,7 @@ export interface Env {
   RATE_LIMIT_TERMINAL_TOKEN?: string;
   RATE_LIMIT_CREDENTIAL_UPDATE?: string;
   RATE_LIMIT_ANONYMOUS?: string;
+  RATE_LIMIT_TRIAL_CREATE?: string;
   RATE_LIMIT_IDENTITY_TOKEN?: string;
   RATE_LIMIT_IDENTITY_TOKEN_WINDOW_SECONDS?: string;
   /**
@@ -312,7 +316,8 @@ export interface Env {
   CODEX_REFRESH_UPSTREAM_URL?: string;             // OpenAI token endpoint (default: https://auth.openai.com/oauth/token)
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string;      // Upstream request timeout (default: 10000)
   CODEX_CLIENT_ID?: string;                        // OpenAI OAuth client_id (default: app_EMoamEEZ73f0CkXaXp7hrann)
-  CODEX_EXPECTED_SCOPES?: string;                  // Comma-separated scope allowlist; unset = default allowlist enforced (openid,profile,email,offline_access); empty string disables validation; unexpected scopes block refresh with 502 (MEDIUM #6)
+  CODEX_EXPECTED_SCOPES?: string;                  // Comma-separated scope allowlist; unset = default allowlist enforced (openid,profile,email,offline_access); empty string disables validation
+  CODEX_SCOPE_VALIDATION_MODE?: string;            // 'warn' (default) or 'block' — controls whether unexpected scopes block refresh (502) or just log a warning
   // Google OAuth (for GCP OIDC integration)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -431,9 +436,9 @@ export interface Env {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string;    // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string;       // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string;       // Max stale executions to recover per sweep (default: 100)
-  // AI Inference Proxy (Cloudflare AI Gateway for trial users)
+  // AI Inference Proxy (Cloudflare AI Gateway — Workers AI + Anthropic)
   AI_PROXY_ENABLED?: string;                         // Kill switch: "false" to disable (default: enabled)
-  AI_PROXY_DEFAULT_MODEL?: string;                   // Default Workers AI model (default: @cf/meta/llama-4-scout-17b-16e-instruct)
+  AI_PROXY_DEFAULT_MODEL?: string;                   // Default model (default: claude-haiku-4-5-20251001)
   AI_PROXY_ALLOWED_MODELS?: string;                  // Comma-separated allowed models
   AI_PROXY_DAILY_INPUT_TOKEN_LIMIT?: string;         // Per-user daily input token cap (default: 500000)
   AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT?: string;        // Per-user daily output token cap (default: 200000)
@@ -442,4 +447,53 @@ export interface Env {
   AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
   AI_GATEWAY_ID?: string;                            // Cloudflare AI Gateway ID (default: sam)
+  AI_USAGE_PAGE_SIZE?: string;                       // AI Gateway logs page size for admin usage aggregation (default: 100)
+  AI_USAGE_MAX_PAGES?: string;                       // Max pages to iterate for AI usage aggregation (default: 20)
+  // Trial Onboarding (zero-friction URL-to-workspace)
+  TRIAL_CLAIM_TOKEN_SECRET?: string;                 // Secret: HMAC key for sam_trial_claim / sam_trial_fingerprint cookies
+  TRIAL_MONTHLY_CAP?: string;                        // Global cap per calendar month (default: 1500)
+  TRIAL_WORKSPACE_TTL_MS?: string;                   // Trial workspace lifetime in ms (default: 1200000 = 20 min)
+  TRIAL_DATA_RETENTION_HOURS?: string;               // Hours to retain trial project data post-expiry (default: 168 = 7d)
+  TRIAL_ANONYMOUS_USER_ID?: string;                  // Sentinel user id (default: system_anonymous_trials)
+  TRIAL_AGENT_TYPE_STAGING?: string;                 // Agent used for trials in staging (default: opencode)
+  TRIAL_AGENT_TYPE_PRODUCTION?: string;              // Agent used for trials in production (default: claude-code)
+  TRIAL_DEFAULT_WORKSPACE_PROFILE?: string;          // Workspace profile (default: lightweight)
+  TRIALS_ENABLED_KV_KEY?: string;                    // KV key read by kill-switch (default: trials:enabled)
+  TRIAL_KILL_SWITCH_CACHE_MS?: string;               // Kill-switch cache TTL in ms (default: 30000)
+  TRIAL_REPO_MAX_KB?: string;                        // Max GitHub repo size in KB (default: 512000 = 500 MB)
+  TRIAL_GITHUB_TIMEOUT_MS?: string;                  // Timeout for GitHub repo metadata probe (default: 5000)
+  TRIAL_COUNTER_KEEP_MONTHS?: string;                // Months of counter rows to retain in DO (default: 3)
+  TRIAL_WAITLIST_PURGE_DAYS?: string;                // Days after reset_date before notified waitlist rows are purged (default: 30)
+  TRIAL_CRON_ROLLOVER_CRON?: string;                 // Cron expression used by the monthly rollover audit (default: 0 5 1 * *)
+  TRIAL_CRON_WAITLIST_CLEANUP?: string;              // Cron expression used by the daily waitlist cleanup (default: 0 4 * * *)
+  TRIAL_SSE_HEARTBEAT_MS?: string;                   // SSE comment heartbeat cadence (default: 15000)
+  TRIAL_SSE_POLL_TIMEOUT_MS?: string;                // Long-poll timeout per DO fetch (default: 15000)
+  TRIAL_SSE_MAX_DURATION_MS?: string;                // Hard cap on a single SSE connection (default: 1800000 = 30 min)
+  /** Deployment mode — "staging" | "production". Chooses trial agent + model. */
+  ENVIRONMENT?: string;
+  /** Anthropic API key scoped for trial runs (production mode only). */
+  ANTHROPIC_API_KEY_TRIAL?: string;
+  /** Override for default trial model (production mode default: claude-sonnet-4-6). */
+  TRIAL_MODEL?: string;
+  /** Override for default trial LLM provider ("anthropic" | "workers-ai"). */
+  TRIAL_LLM_PROVIDER?: string;
+  // TrialOrchestrator DO (alarm-driven trial provisioning)
+  TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS?: string;
+  TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES?: string;
+  TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS?: string;
+  TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS?: string;
+  TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS?: string;
+  TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS?: string;
+  TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS?: string;
+  TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS?: string;
+  TRIAL_ORCHESTRATOR_HEARTBEAT_SKEW_MS?: string;
+  // Fast-path GitHub knowledge probes (fired from POST /api/trial/create)
+  TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS?: string;
+  TRIAL_KNOWLEDGE_MAX_EVENTS?: string;
+  /** Sentinel GitHub installation id used for anonymous trial projects. */
+  TRIAL_ANONYMOUS_INSTALLATION_ID?: string;
+  /** Trial VM size override (default: DEFAULT_VM_SIZE from shared). */
+  TRIAL_VM_SIZE?: string;
+  /** Trial VM location override (default: DEFAULT_VM_LOCATION from shared). */
+  TRIAL_VM_LOCATION?: string;
 }

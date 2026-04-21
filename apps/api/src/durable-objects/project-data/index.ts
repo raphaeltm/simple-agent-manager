@@ -237,6 +237,32 @@ export class ProjectData extends DurableObject<Env> {
     const projectId = this.getProjectId();
     const result = acpSessions.transitionAcpSession(this.sql, sessionId, toStatus, opts, projectId);
     if (toStatus === 'assigned' || toStatus === 'running') await this.scheduleHeartbeatAlarm();
+
+    // Trial bridge — fan `running`/`failed` transitions out as trial.ready /
+    // trial.error SSE events. Non-trial projects short-circuit inside the
+    // helper after a single KV lookup, so overhead on normal traffic is minimal.
+    // Fire-and-forget; wrapped in its own try/catch inside the helper.
+    //
+    // The local ProjectData `Env` type is a narrow subset (D1 + config knobs),
+    // but at runtime Cloudflare injects every binding declared in wrangler.toml
+    // — including KV and TRIAL_EVENT_BUS that the bridge needs. Cast through
+    // unknown so the DO type stays minimal without leaking worker-scope bindings.
+    try {
+      if (projectId) {
+        const { bridgeAcpSessionTransition } = await import('../../services/trial/bridge');
+        const workerEnv = this.env as unknown as import('../../env').Env;
+        await bridgeAcpSessionTransition(workerEnv, projectId, toStatus, {
+          errorMessage: opts.errorMessage ?? null,
+        });
+      }
+    } catch (err) {
+      log.warn('project_data.trial_bridge_dispatch_failed', {
+        projectId,
+        toStatus,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     return result.session;
   }
 

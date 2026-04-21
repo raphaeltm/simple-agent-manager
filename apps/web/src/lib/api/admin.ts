@@ -226,6 +226,88 @@ export async function fetchAnalyticsForwardStatus(): Promise<AnalyticsForwardSta
   return request<AnalyticsForwardStatusResponse>('/api/admin/analytics/forward-status');
 }
 
+// Phase 5: AI Usage (AI Gateway logs)
+
+export interface AiUsageByModel {
+  model: string;
+  provider: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  cachedRequests: number;
+  errorRequests: number;
+}
+
+export interface AiUsageByDay {
+  date: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+export interface AnalyticsAiUsageResponse {
+  totalRequests: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  trialRequests: number;
+  trialCostUsd: number;
+  cachedRequests: number;
+  errorRequests: number;
+  byModel: AiUsageByModel[];
+  byDay: AiUsageByDay[];
+  period: string;
+}
+
+export async function fetchAnalyticsAiUsage(period?: string): Promise<AnalyticsAiUsageResponse> {
+  const params = period ? `?period=${period}` : '';
+  return request<AnalyticsAiUsageResponse>(`/api/admin/analytics/ai-usage${params}`);
+}
+
+// =============================================================================
+// Admin AI Proxy Config
+// =============================================================================
+
+export interface AIProxyConfigResponse {
+  defaultModel: string;
+  source: 'admin' | 'env' | 'default';
+  updatedAt: string | null;
+  hasAnthropicCredential: boolean;
+  models: Array<{
+    id: string;
+    label: string;
+    provider: 'workers-ai' | 'anthropic';
+    isDefault?: boolean;
+    available: boolean;
+  }>;
+}
+
+export async function fetchAIProxyConfig(): Promise<AIProxyConfigResponse> {
+  return request<AIProxyConfigResponse>('/api/admin/ai-proxy/config');
+}
+
+export async function updateAIProxyConfig(defaultModel: string): Promise<{
+  defaultModel: string;
+  source: 'admin';
+  updatedAt: string;
+}> {
+  return request('/api/admin/ai-proxy/config', {
+    method: 'PUT',
+    body: JSON.stringify({ defaultModel }),
+  });
+}
+
+export async function resetAIProxyConfig(): Promise<{
+  defaultModel: string;
+  source: 'env' | 'default';
+  updatedAt: null;
+}> {
+  return request('/api/admin/ai-proxy/config', { method: 'DELETE' });
+}
+
 // =============================================================================
 // Admin Platform Credentials
 // =============================================================================

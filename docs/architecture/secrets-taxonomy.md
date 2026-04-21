@@ -65,6 +65,8 @@ These override `ENCRYPTION_KEY` for their respective domain, providing secret is
 | `GITHUB_CLIENT_SECRET` | OAuth authentication | For GitHub login |
 | `GITHUB_APP_ID` | GitHub App integration | For repo access |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App authentication | For repo access |
+| `TRIAL_CLAIM_TOKEN_SECRET` | HMAC-SHA256 signing for `sam_trial_claim` / `sam_trial_fingerprint` cookies | When trials are enabled |
+| `ANTHROPIC_API_KEY_TRIAL` | Anthropic API key for trial AI inference (isolated from main key) | When trials use Anthropic provider |
 
 ### Optional Runtime Configuration (Not Secrets)
 
@@ -186,6 +188,8 @@ Set via `wrangler secret put` or deployment workflow:
 - `GITHUB_CLIENT_SECRET` (optional)
 - `GITHUB_APP_ID` (optional)
 - `GITHUB_APP_PRIVATE_KEY` (optional)
+- `TRIAL_CLAIM_TOKEN_SECRET` (required when trials enabled — 32+ bytes base64)
+- `ANTHROPIC_API_KEY_TRIAL` (optional — trials use Workers AI when unset)
 
 ## Security Rules
 

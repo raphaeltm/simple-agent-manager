@@ -295,11 +295,15 @@ export const projects = sqliteTable(
       table.userId,
       table.normalizedName
     ),
-    userInstallationRepoUnique: uniqueIndex('idx_projects_user_installation_repository').on(
-      table.userId,
-      table.installationId,
-      table.repository
-    ),
+    // Trial-onboarding sentinel owner is excluded from the uniqueness invariant:
+    // every anonymous trial inserts a row with the same (sentinel user, sentinel
+    // installation), so "one project per user+installation+repo" cannot hold for
+    // the sentinel. Isolation for trial rows is enforced by `projectId` scoping
+    // (see helpers.ts:resolveAnonymousUserId). The index still enforces
+    // uniqueness for real users. See migration 0046.
+    userInstallationRepoUnique: uniqueIndex('idx_projects_user_installation_repository')
+      .on(table.userId, table.installationId, table.repository)
+      .where(sql`user_id != 'system_anonymous_trials'`),
     userGithubRepoIdUnique: uniqueIndex('idx_projects_user_github_repo_id')
       .on(table.userId, table.githubRepoId)
       .where(sql`github_repo_id IS NOT NULL`),
@@ -1303,3 +1307,92 @@ export const userQuotas = sqliteTable('user_quotas', {
 });
 
 export type UserQuotaRow = typeof userQuotas.$inferSelect;
+
+// =============================================================================
+// Trial Onboarding — Waitlist
+// =============================================================================
+
+/**
+ * Cap-exceeded trial signups. One row per (email, resetDate). The monthly
+ * notifier cron marks `notifiedAt` when the reset window opens and an email
+ * is sent. See docs/guides/trial-configuration.md.
+ */
+export const trialWaitlist = sqliteTable(
+  'trial_waitlist',
+  {
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    submittedAt: integer('submitted_at').notNull(), // epoch ms
+    resetDate: text('reset_date').notNull(), // 'YYYY-MM-01' UTC
+    notifiedAt: integer('notified_at'), // epoch ms, nullable
+  },
+  (table) => ({
+    emailResetIdx: uniqueIndex('idx_trial_waitlist_email_reset').on(
+      table.email,
+      table.resetDate
+    ),
+    resetNotifyIdx: index('idx_trial_waitlist_reset_notify').on(
+      table.resetDate,
+      table.notifiedAt
+    ),
+  })
+);
+
+export type TrialWaitlistRow = typeof trialWaitlist.$inferSelect;
+export type NewTrialWaitlistRow = typeof trialWaitlist.$inferInsert;
+
+// =============================================================================
+// Trial Onboarding — Trial records
+// =============================================================================
+
+/**
+ * Anonymous trial records. One row per trial lifecycle, created on
+ * POST /api/trial/create before the project row is provisioned. The
+ * orchestrator populates `projectId` once provisioning completes.
+ *
+ * Status state machine:
+ *   pending -> ready | failed | expired
+ *   ready   -> claimed | expired
+ *   failed  -> (terminal)
+ *   expired -> (terminal; reaped by retention cron)
+ *   claimed -> (terminal; project.user_id now points to the claimant)
+ *
+ * `monthKey` mirrors the TrialCounter DO keyspace ('YYYY-MM' UTC) and is
+ * used for decrement-on-failure and for the monthly rollover audit.
+ */
+export const trials = sqliteTable(
+  'trials',
+  {
+    id: text('id').primaryKey(),
+    fingerprint: text('fingerprint').notNull(),
+    repoUrl: text('repo_url').notNull(),
+    repoOwner: text('repo_owner').notNull(),
+    repoName: text('repo_name').notNull(),
+    monthKey: text('month_key').notNull(),
+    status: text('status').notNull().default('pending'),
+    projectId: text('project_id'),
+    claimedByUserId: text('claimed_by_user_id'),
+    createdAt: integer('created_at').notNull(), // epoch ms
+    expiresAt: integer('expires_at').notNull(), // epoch ms
+    claimedAt: integer('claimed_at'), // epoch ms, nullable
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+  },
+  (table) => ({
+    fingerprintIdx: index('idx_trials_fingerprint').on(
+      table.fingerprint,
+      table.createdAt
+    ),
+    statusExpiryIdx: index('idx_trials_status_expiry').on(
+      table.status,
+      table.expiresAt
+    ),
+    monthKeyStatusIdx: index('idx_trials_month_key_status').on(
+      table.monthKey,
+      table.status
+    ),
+  })
+);
+
+export type TrialRow = typeof trials.$inferSelect;
+export type NewTrialRow = typeof trials.$inferInsert;
