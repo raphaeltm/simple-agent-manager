@@ -24,6 +24,14 @@ describe('isFilePathHref', () => {
     expect(isFilePathHref('data:text/html,<h1>hi</h1>')).toBe(false);
   });
 
+  it('returns false for tel links', () => {
+    expect(isFilePathHref('tel:+1234567890')).toBe(false);
+  });
+
+  it('returns false for blob URIs', () => {
+    expect(isFilePathHref('blob:https://example.com/uuid')).toBe(false);
+  });
+
   it('returns false for undefined/empty', () => {
     expect(isFilePathHref(undefined)).toBe(false);
     expect(isFilePathHref('')).toBe(false);
@@ -72,5 +80,9 @@ describe('parseFilePathRef', () => {
 
   it('handles simple filename', () => {
     expect(parseFilePathRef('package.json')).toEqual({ path: 'package.json', line: null });
+  });
+
+  it('treats line 0 as a valid line number', () => {
+    expect(parseFilePathRef('src/file.ts:0')).toEqual({ path: 'src/file.ts', line: 0 });
   });
 });
