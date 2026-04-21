@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef,useState } from 'react';
 
 import {
+  type AnalyticsAiUsageResponse,
   type AnalyticsDauResponse,
   type AnalyticsEventsResponse,
   type AnalyticsFeatureAdoptionResponse,
@@ -9,6 +10,7 @@ import {
   type AnalyticsGeoResponse,
   type AnalyticsRetentionResponse,
   type AnalyticsWebsiteTrafficResponse,
+  fetchAnalyticsAiUsage,
   fetchAnalyticsDau,
   fetchAnalyticsEvents,
   fetchAnalyticsFeatureAdoption,
@@ -28,6 +30,7 @@ export interface UseAdminAnalyticsReturn {
   retention: AnalyticsRetentionResponse | null;
   forwardStatus: AnalyticsForwardStatusResponse | null;
   websiteTraffic: AnalyticsWebsiteTrafficResponse | null;
+  aiUsage: AnalyticsAiUsageResponse | null;
   loading: boolean;
   isRefreshing: boolean;
   error: string | null;
@@ -48,6 +51,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
   const [retention, setRetention] = useState<AnalyticsRetentionResponse | null>(null);
   const [forwardStatus, setForwardStatus] = useState<AnalyticsForwardStatusResponse | null>(null);
   const [websiteTraffic, setWebsiteTraffic] = useState<AnalyticsWebsiteTrafficResponse | null>(null);
+  const [aiUsage, setAiUsage] = useState<AnalyticsAiUsageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +71,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
     }
     try {
       setError(null);
-      const [dauRes, eventsRes, funnelRes, adoptionRes, geoRes, retentionRes, forwardRes, websiteTrafficRes] = await Promise.all([
+      const [dauRes, eventsRes, funnelRes, adoptionRes, geoRes, retentionRes, forwardRes, websiteTrafficRes, aiUsageRes] = await Promise.all([
         fetchAnalyticsDau(),
         fetchAnalyticsEvents(period),
         fetchAnalyticsFunnel(),
@@ -76,6 +80,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
         fetchAnalyticsRetention(),
         fetchAnalyticsForwardStatus(),
         fetchAnalyticsWebsiteTraffic(period),
+        fetchAnalyticsAiUsage(period).catch(() => null),
       ]);
 
       if (!mountedRef.current) return;
@@ -88,6 +93,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
       setRetention(retentionRes);
       setForwardStatus(forwardRes);
       setWebsiteTraffic(websiteTrafficRes);
+      setAiUsage(aiUsageRes);
     } catch (err) {
       if (mountedRef.current) {
         setError(err instanceof Error ? err.message : 'Failed to load analytics data');
@@ -118,7 +124,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
   }, [fetchAll, eventPeriod]);
 
   return {
-    dau, events, funnel, featureAdoption, geo, retention, forwardStatus, websiteTraffic,
+    dau, events, funnel, featureAdoption, geo, retention, forwardStatus, websiteTraffic, aiUsage,
     loading, isRefreshing, error, eventPeriod, setEventPeriod, refresh,
   };
 }

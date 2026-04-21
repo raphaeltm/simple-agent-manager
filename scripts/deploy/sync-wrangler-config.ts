@@ -197,6 +197,8 @@ function generateApiWorkerEnv(
       ...(process.env.HETZNER_BASE_IMAGE ? { HETZNER_BASE_IMAGE: process.env.HETZNER_BASE_IMAGE } : {}),
       // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
       AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
+      // Deployment environment — used by trial runner to choose agent type + model
+      ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
     },
 
     // Dynamic bindings from Pulumi outputs

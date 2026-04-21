@@ -29,6 +29,7 @@
     "vitest": "catalog:"
   },
   "dependencies": {
+    "valibot": "catalog:",
     "zod": "catalog:"
   }
 }

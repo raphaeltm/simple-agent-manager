@@ -172,6 +172,13 @@ Match the verification to what the PR actually changes:
 - Verifying no console errors
 - "The code changes look correct"
 - "Unit tests pass"
+- **For browser-consumed streams (SSE / WebSocket): using `curl` to verify that
+  bytes arrive on the wire.** Curl confirms the *byte stream*; only a real
+  browser confirms *dispatch* to the client-side handler (`EventSource.onmessage`
+  or `WebSocket.onmessage`). A server can emit perfectly valid SSE that the
+  browser parses and then silently drops because nothing is listening for the
+  specific event name. See
+  `docs/notes/2026-04-19-trial-sse-named-events-postmortem.md`.
 
 These are baseline regression checks. They do NOT verify that the specific fix or feature works on the live environment.
 

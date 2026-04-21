@@ -23,6 +23,7 @@ Before marking a feature complete:
 - [ ] The test asserts the **final outcome**, not just that intermediate steps succeeded
 - [ ] If the test uses mocks at system boundaries, the mock asserts the **exact payload** the real system would receive
 - [ ] Any untestable gaps are documented with manual verification steps
+- [ ] **Port-of-pattern coverage** — when porting a multi-step pattern (VM boot, credential rotation, agent session lifecycle) from an existing consumer to a new one, the new consumer's tests MUST mock each cross-boundary target and assert **every step of the pattern fired** with the correct payload. A test that asserts "step 1 fired" but not "step 3 fired" does not prove the port is complete. See `docs/notes/2026-04-19-trial-orchestrator-agent-boot-postmortem.md` for the class of bug this prevents.
 
 ## Data Flow Tracing (Mandatory for Multi-Component Features)
 

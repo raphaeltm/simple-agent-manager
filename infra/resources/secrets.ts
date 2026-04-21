@@ -46,7 +46,24 @@ const jwtKeyResource = new tls.PrivateKey(
   { protect: true }
 );
 
+/**
+ * HMAC-SHA256 secret for trial onboarding claim/fingerprint cookies.
+ * 32 bytes (256 bits), base64-encoded.
+ *
+ * Used by `apps/api/src/services/trial/cookies.ts` to sign and verify
+ * `sam_trial_fingerprint` (7d) and `sam_trial_claim` (48h) cookies.
+ * Rotating this invalidates all in-flight trials.
+ */
+const trialClaimTokenResource = new random.RandomId(
+  "trial-claim-token-secret",
+  {
+    byteLength: 32,
+  },
+  { protect: true }
+);
+
 // Export as secret outputs (Pulumi redacts secrets in logs and state output)
 export const encryptionKey = pulumi.secret(encryptionKeyResource.b64Std);
 export const jwtPrivateKey = pulumi.secret(jwtKeyResource.privateKeyPemPkcs8);
 export const jwtPublicKey = pulumi.secret(jwtKeyResource.publicKeyPem);
+export const trialClaimTokenSecret = pulumi.secret(trialClaimTokenResource.b64Std);

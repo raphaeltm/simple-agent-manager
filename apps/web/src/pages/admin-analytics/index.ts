@@ -1,3 +1,4 @@
+export { AIUsageChart } from './AIUsageChart';
 export { DauChart } from './DauChart';
 export { EventsTable } from './EventsTable';
 export { FeatureAdoptionChart } from './FeatureAdoptionChart';

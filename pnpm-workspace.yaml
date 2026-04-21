@@ -41,6 +41,7 @@ catalog:
   # === Shared Libraries ===
   better-auth: 1.4.17
   zod: 3.25.76
+  valibot: 1.3.1
   execa: 8.0.1
   prism-react-renderer: 2.4.1
   react-markdown: 10.1.0

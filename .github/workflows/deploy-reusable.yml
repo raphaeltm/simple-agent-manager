@@ -404,6 +404,22 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
+      - name: Enable Trials on Staging (KV kill-switch)
+        # Trials are gated by a KV flag that fails closed. Staging always enables them
+        # automatically so the /try flow is live after every deploy. Production stays
+        # opt-in (operator flips the flag manually when ready to accept live traffic).
+        if: ${{ inputs.dry_run != true && inputs.environment == 'staging' }}
+        working-directory: apps/api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          echo "Enabling trials kill-switch on staging (KV trials:enabled=true)"
+          # `wrangler kv key put` writes to remote by default; --remote is not a valid flag here.
+          pnpm exec wrangler kv key put "trials:enabled" "true" \
+            --binding KV \
+            --env staging
+
       - name: Configure Worker Secrets
         if: ${{ inputs.dry_run != true }}
         run: bash scripts/deploy/configure-secrets.sh ${{ inputs.environment }}
@@ -432,6 +448,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
+          ANTHROPIC_API_KEY_TRIAL: ${{ secrets.ANTHROPIC_API_KEY_TRIAL }}
           SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
           GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
           GA4_MEASUREMENT_ID: ${{ secrets.GA4_MEASUREMENT_ID }}
