@@ -50,8 +50,6 @@ const getMidpoint = (
 
 const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
   const isMobile = window.innerWidth < 640;
-  const defaultZoom = isMobile ? 1.2 : 1;
-  const maxZoom = isMobile ? 10 : 8;
   const viewBoxAttr = svg.getAttribute('viewBox');
   if (!viewBoxAttr) {
     return { reset: () => {} };
@@ -62,11 +60,21 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
     .map(Number);
   const baseCenterX = baseMinX + baseWidth / 2;
   const baseCenterY = baseMinY + baseHeight / 2;
+  const getShell = () => surface.closest<HTMLElement>('.mermaid-shell');
+  const getDefaultZoom = () => {
+    const isFullscreen = getShell()?.classList.contains('is-fullscreen');
+    if (isMobile) {
+      return isFullscreen ? 2.2 : 1.25;
+    }
 
-  let zoom = defaultZoom;
+    return isFullscreen ? 1.2 : 1;
+  };
+  const getMaxZoom = () => (isMobile ? 18 : 10);
+
+  let zoom = getDefaultZoom();
   let centerX = baseCenterX;
   let centerY = baseCenterY;
-  let gestureStartZoom = defaultZoom;
+  let gestureStartZoom = zoom;
   let gestureStartCenterX = baseCenterX;
   let gestureStartCenterY = baseCenterY;
   let startPointerDistance = 0;
@@ -106,7 +114,7 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
   };
 
   const reset = () => {
-    zoom = defaultZoom;
+    zoom = getDefaultZoom();
     centerX = baseCenterX;
     centerY = baseCenterY;
     applyViewBox();
@@ -164,7 +172,7 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
     (event) => {
       event.preventDefault();
 
-      const nextZoom = clamp(zoom - event.deltaY * 0.0012, 1, maxZoom);
+      const nextZoom = clamp(zoom - event.deltaY * 0.0012, 1, getMaxZoom());
       if (nextZoom === zoom) {
         return;
       }
@@ -234,7 +242,7 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
       const nextZoom = clamp(
         gestureStartZoom * (currentDistance / startPointerDistance),
         1,
-        maxZoom
+        getMaxZoom()
       );
       const nextCenter = zoomAroundPoint(
         midpoint.x,
