@@ -336,9 +336,9 @@ const formattedDate = date.toLocaleDateString('en-US', {
   .post-body :global(.mermaid-canvas svg) {
     width: min(100%, 1100px);
     height: auto;
-    transform-origin: center center;
-    will-change: transform;
-    filter: drop-shadow(0 22px 45px rgba(0, 0, 0, 0.28));
+    shape-rendering: geometricPrecision;
+    text-rendering: geometricPrecision;
+    color-rendering: optimizeQuality;
   }
 
   .post-body :global(.mermaid-shell .label),
@@ -370,7 +370,6 @@ const formattedDate = date.toLocaleDateString('en-US', {
     background:
       radial-gradient(circle at top left, rgba(110, 215, 154, 0.16), transparent 28%),
       linear-gradient(180deg, rgba(19, 32, 29, 0.985), rgba(7, 11, 10, 0.995));
-    backdrop-filter: blur(16px);
   }
 
   .post-body :global(.mermaid-shell.is-fullscreen .mermaid-chrome) {
@@ -392,7 +391,6 @@ const formattedDate = date.toLocaleDateString('en-US', {
     border: 1px solid rgba(110, 215, 154, 0.12);
     border-radius: 14px;
     background: rgba(7, 11, 10, 0.68);
-    backdrop-filter: blur(10px);
   }
 
   .post-body :global(.mermaid-shell.is-fullscreen .mermaid-actions) {
@@ -491,7 +489,6 @@ const formattedDate = date.toLocaleDateString('en-US', {
       padding: 8px 12px;
       font-size: 0.78rem;
       background: rgba(7, 11, 10, 0.78);
-      backdrop-filter: blur(10px);
     }
 
     .post-body :global(.mermaid-shell.is-fullscreen .mermaid-surface),
