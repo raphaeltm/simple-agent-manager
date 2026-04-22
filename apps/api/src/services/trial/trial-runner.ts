@@ -14,8 +14,12 @@
  * the event bus is wired in Track A / ACP status handlers (separate concern).
  */
 
+import { drizzle } from 'drizzle-orm/d1';
+
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
+import { getPlatformAgentCredential } from '../platform-credentials';
 import * as projectDataService from '../project-data';
 import { DISCOVERY_PROMPT, DISCOVERY_PROMPT_VERSION } from './discovery-prompt';
 
@@ -110,11 +114,15 @@ export async function startDiscoveryAgent(
 ): Promise<StartDiscoveryAgentResult> {
   const config = resolveTrialRunnerConfig(env);
 
-  // Validate production config: Anthropic mode REQUIRES the API key.
-  if (config.mode === 'production' && config.provider === 'anthropic') {
-    if (!env.ANTHROPIC_API_KEY_TRIAL) {
+  // Validate Anthropic mode: resolve the API key from platform credentials
+  // (admin-managed via UI), matching the same path as the AI proxy.
+  if (config.provider === 'anthropic') {
+    const db = drizzle(env.DATABASE);
+    const encryptionKey = getCredentialEncryptionKey(env);
+    const platformCred = await getPlatformAgentCredential(db, 'claude-code', encryptionKey);
+    if (!platformCred?.credential) {
       throw new Error(
-        'ANTHROPIC_API_KEY_TRIAL is required for production trial runner (Anthropic provider)'
+        'No Anthropic API key configured. An admin must add a Claude Code platform credential via the Credentials page.'
       );
     }
   }

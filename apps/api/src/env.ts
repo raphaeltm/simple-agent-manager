@@ -471,8 +471,6 @@ export interface Env {
   TRIAL_SSE_MAX_DURATION_MS?: string;                // Hard cap on a single SSE connection (default: 1800000 = 30 min)
   /** Deployment mode — "staging" | "production". Chooses trial agent + model. */
   ENVIRONMENT?: string;
-  /** Anthropic API key scoped for trial runs (production mode only). */
-  ANTHROPIC_API_KEY_TRIAL?: string;
   /** Override for default trial model (production mode default: claude-sonnet-4-6). */
   TRIAL_MODEL?: string;
   /** Override for default trial LLM provider ("anthropic" | "workers-ai"). */

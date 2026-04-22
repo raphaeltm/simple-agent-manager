@@ -414,9 +414,12 @@ export async function handleNodeAgentReady(
     }
   }
 
-  // Not ready — requeue. We use the DO's existing alarm loop: throwing a
-  // transient error causes the orchestrator to schedule a backoff retry.
-  throw new Error('Trial node agent not yet ready — will retry');
+  // Not ready — self-schedule a poll alarm (same pattern as workspace_ready).
+  // This avoids the global retry counter + exponential backoff, which exhausts
+  // after ~5 retries (~31s) well before the 180s timeout window.
+  const pollIntervalMs = rc.getWorkspaceReadyPollIntervalMs();
+  const nextPollMs = Math.min(pollIntervalMs, Math.max(timeoutMs - elapsed, 1_000));
+  await rc.ctx.storage.setAlarm(Date.now() + nextPollMs);
 }
 
 // ---------------------------------------------------------------------------

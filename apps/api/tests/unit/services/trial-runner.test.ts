@@ -5,7 +5,7 @@
  *   - resolveTrialRunnerConfig — mode resolution (staging/production),
  *     agentType default per mode, provider override, model override
  *   - startDiscoveryAgent — creates chat + ACP session with discovery prompt
- *   - Production + anthropic provider requires ANTHROPIC_API_KEY_TRIAL
+ *   - Anthropic provider requires platform credential (admin-configured)
  *   - emitTrialEvent — appends to TrialEventBus DO stub, no-ops on error
  *   - emitTrialEventForProject — looks up trial by project then appends
  */
@@ -29,6 +29,20 @@ const { readTrialByProjectMock, readTrialMock } = vi.hoisted(() => ({
 vi.mock('../../../src/services/trial/trial-store', () => ({
   readTrialByProject: readTrialByProjectMock,
   readTrial: readTrialMock,
+}));
+
+// Mock platform-credentials + secrets used by startDiscoveryAgent for Anthropic key
+const { getPlatformAgentCredentialMock } = vi.hoisted(() => ({
+  getPlatformAgentCredentialMock: vi.fn(),
+}));
+vi.mock('../../../src/services/platform-credentials', () => ({
+  getPlatformAgentCredential: getPlatformAgentCredentialMock,
+}));
+vi.mock('../../../src/lib/secrets', () => ({
+  getCredentialEncryptionKey: () => 'test-encryption-key',
+}));
+vi.mock('drizzle-orm/d1', () => ({
+  drizzle: () => ({}),
 }));
 
 // Silence logs
@@ -177,18 +191,20 @@ describe('trial-runner — startDiscoveryAgent', () => {
     );
   });
 
-  it('throws when production + anthropic provider but ANTHROPIC_API_KEY_TRIAL unset', async () => {
+  it('throws when anthropic provider but no platform credential configured', async () => {
+    getPlatformAgentCredentialMock.mockResolvedValue(null);
     const env = envBase({ ENVIRONMENT: 'production' } as Partial<Env>);
     await expect(
       startDiscoveryAgent(env, { projectId: 'p', workspaceId: 'w' })
-    ).rejects.toThrow(/ANTHROPIC_API_KEY_TRIAL/);
+    ).rejects.toThrow(/No Anthropic API key configured/);
   });
 
-  it('succeeds when production + anthropic + key is present', async () => {
-    const env = envBase({
-      ENVIRONMENT: 'production',
-      ANTHROPIC_API_KEY_TRIAL: 'sk-test',
-    } as Partial<Env>);
+  it('succeeds when anthropic provider + platform credential is configured', async () => {
+    getPlatformAgentCredentialMock.mockResolvedValue({
+      credential: 'sk-ant-test',
+      credentialKind: 'api-key',
+    });
+    const env = envBase({ ENVIRONMENT: 'production' } as Partial<Env>);
     const result = await startDiscoveryAgent(env, {
       projectId: 'p',
       workspaceId: 'w',
