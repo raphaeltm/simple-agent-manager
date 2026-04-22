@@ -17,7 +17,7 @@ vi.mock('react-router', async () => {
 });
 
 vi.mock('../../src/components/AuthProvider', () => ({
-  useAuth: () => ({ isSuperadmin: false }),
+  useAuth: () => ({ canAccessAdmin: false, isSuperadmin: false }),
 }));
 
 vi.mock('../../src/lib/api', async (importOriginal) => ({

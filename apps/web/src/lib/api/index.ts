@@ -1,5 +1,6 @@
 export type { AdminErrorsFilter, AdminLogQueryParams,AIProxyConfigResponse } from './admin';
 export type {
+  AdminPlatformInfraResponse,
   AiUsageByDay,
   AiUsageByModel,
   AnalyticsAiUsageResponse,
@@ -11,6 +12,7 @@ export type {
   AnalyticsGeoResponse,
   AnalyticsRetentionResponse,
   AnalyticsWebsiteTrafficResponse,
+  PlatformInfraNodeAssociation,
   WebsiteTrafficHost,
   WebsiteTrafficSection,
 } from './admin';
@@ -25,6 +27,7 @@ export {
   approveOrSuspendUser,
   changeUserRole,
   createPlatformCredential,
+  deleteAdminPlatformInfraAssociation,
   deletePlatformCredential,
   fetchAdminComputeUsage,
   fetchAdminDefaultQuota,
@@ -32,6 +35,7 @@ export {
   fetchAdminErrorTrends,
   fetchAdminHealth,
   fetchAdminNodeUsage,
+  fetchAdminPlatformInfra,
   fetchAdminUserComputeUsage,
   fetchAdminUserNodeUsage,
   fetchAdminUserQuota,
@@ -56,6 +60,7 @@ export {
   updateAdminUserQuota,
   updateAIProxyConfig,
   updatePlatformCredential,
+  upsertAdminPlatformInfraAssociation,
 } from './admin';
 export {
   createAgentProfile,

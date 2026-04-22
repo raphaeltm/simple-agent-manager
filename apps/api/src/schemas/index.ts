@@ -79,6 +79,7 @@ export {
   AnalyticsForwardSchema,
   CreatePlatformCredentialSchema,
   UpdatePlatformCredentialSchema,
+  UpsertPlatformInfraAssociationSchema,
 } from './admin';
 
 // Trigger schemas

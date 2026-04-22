@@ -161,6 +161,26 @@ export function requireSuperadmin(): MiddlewareHandler<{ Bindings: Env }> {
 }
 
 /**
+ * Admin middleware.
+ * Requires the user to have the 'admin' or 'superadmin' role.
+ * Must be used AFTER requireAuth().
+ */
+export function requireAdmin(): MiddlewareHandler<{ Bindings: Env }> {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    const auth = c.get('auth');
+    if (!auth) {
+      throw errors.unauthorized('Authentication required');
+    }
+
+    if (auth.user.role !== 'superadmin' && auth.user.role !== 'admin') {
+      throw errors.forbidden('Admin access required');
+    }
+
+    await next();
+  };
+}
+
+/**
  * Helper to get authenticated user from context.
  * Throws if not authenticated.
  */

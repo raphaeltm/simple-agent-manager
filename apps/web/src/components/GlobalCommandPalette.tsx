@@ -154,7 +154,7 @@ function resultKey(result: PaletteResult): string {
 export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isSuperadmin } = useAuth();
+  const { canAccessAdmin } = useAuth();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -232,11 +232,11 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       { id: 'nav-workspaces', label: 'Workspaces', path: '/workspaces', icon: <Monitor size={14} /> },
       { id: 'nav-settings', label: 'Settings', path: '/settings', icon: <Settings size={14} /> },
     ];
-    if (isSuperadmin) {
+    if (canAccessAdmin) {
       items.push({ id: 'nav-admin', label: 'Admin', path: '/admin', icon: <Shield size={14} /> });
     }
     return items;
-  }, [isSuperadmin]);
+  }, [canAccessAdmin]);
 
   // Build action items
   const actionItems = useMemo(() => {

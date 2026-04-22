@@ -217,6 +217,7 @@ export {
 // Admin Observability
 export type {
   AdminLogEntry,
+  AdminPlatformInfraResponse,
   ErrorListResponse,
   ErrorTrendBucket,
   ErrorTrendResponse,
@@ -230,6 +231,12 @@ export type {
   PlatformError,
   PlatformErrorLevel,
   PlatformErrorSource,
+  PlatformInfraAssociationReason,
+  PlatformInfraNodeAssociation,
+  PlatformInfraNodeSummary,
+  PlatformInfraTrialSummary,
+  PlatformInfraUserOption,
+  UpsertPlatformInfraAssociationRequest,
 } from './admin';
 
 // Agent Settings & Profiles

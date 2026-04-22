@@ -28,16 +28,23 @@ Separately, admins need a dedicated operational surface for monitoring platform-
 
 ## Implementation Checklist
 
-- [ ] Add a task state file for the `/do` workflow and keep it updated throughout execution.
-- [ ] Expose `Nodes` and `Workspaces` in the main navigation for all authenticated users while keeping their existing user-scoped data behavior unchanged.
-- [ ] Extend frontend auth state with explicit admin capabilities instead of relying only on `isSuperadmin`.
-- [ ] Add backend schema and migration support for platform node association metadata.
-- [ ] Add admin API endpoints for listing platform-managed nodes and creating/removing node-to-user associations with an explicit reason.
-- [ ] Add an admin UI surface for platform infrastructure, including node summaries, trial context, association controls, and empty/error states.
-- [ ] Restrict the new admin platform infra surface to `admin` and `superadmin`, while keeping the broader admin tabs limited appropriately for non-superadmins.
-- [ ] Add/update unit tests for nav visibility, admin tab behavior, the new admin API route, and the new admin platform infra page.
-- [ ] Add a Playwright visual audit for the new/changed UI surfaces with mobile and desktop coverage.
+- [x] Add a task state file for the `/do` workflow and keep it updated throughout execution.
+- [x] Expose `Nodes` and `Workspaces` in the main navigation for all authenticated users while keeping their existing user-scoped data behavior unchanged.
+- [x] Extend frontend auth state with explicit admin capabilities instead of relying only on `isSuperadmin`.
+- [x] Add backend schema and migration support for platform node association metadata.
+- [x] Add admin API endpoints for listing platform-managed nodes and creating/removing node-to-user associations with an explicit reason.
+- [x] Add an admin UI surface for platform infrastructure, including node summaries, trial context, association controls, and empty/error states.
+- [x] Restrict the new admin platform infra surface to `admin` and `superadmin`, while keeping the broader admin tabs limited appropriately for non-superadmins.
+- [x] Add/update unit tests for nav visibility, admin tab behavior, the new admin API route, and the new admin platform infra page.
+- [x] Add a Playwright visual audit for the new/changed UI surfaces with mobile and desktop coverage.
 - [ ] Run validation required by `/do`: lint, typecheck, tests, build, specialist review, and staging verification.
+
+## Implementation Notes
+
+- The implementation was first developed in the primary workspace, then migrated into the `/do` feature worktree `../sam-infrastructure-nav-admin`.
+- Phase 2 baseline validation in the worktree required small follow-up fixes for missing type re-exports and import/export ordering in changed files before `pnpm typecheck` and `pnpm lint` passed.
+- The Playwright visual audit initially exposed brittle assertions in the new audit spec rather than UI defects; the spec was corrected to match the real API error shape and to use unambiguous locators before the mobile/desktop screenshots were regenerated successfully.
+- The mobile UX guide was updated to reflect that Infrastructure navigation is available to all authenticated users while the platform infrastructure admin surface remains admin-only.
 
 ## Acceptance Criteria
 
@@ -48,7 +55,7 @@ Separately, admins need a dedicated operational surface for monitoring platform-
 - [ ] Admins can associate a platform-managed node with an active user and a reason, and can clear that association.
 - [ ] Trial-related node context is visible on the admin platform infra page when relevant.
 - [ ] Updated tests cover both the personal-infra visibility change and the platform-infra admin behavior.
-- [ ] A Playwright audit demonstrates the changed UI renders without overflow or clipping on mobile and desktop.
+- [x] A Playwright audit demonstrates the changed UI renders without overflow or clipping on mobile and desktop.
 
 ## References
 

@@ -29,7 +29,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ children }: AppShellProps) {
-  const { user, isSuperadmin } = useAuth();
+  const { user, canAccessAdmin } = useAuth();
   const isMobile = useIsMobile();
   const location = useLocation();
   const navigate = useNavigate();
@@ -62,11 +62,11 @@ export function AppShell({ children }: AppShellProps) {
       path: item.path,
       icon: item.icon,
     }));
-    if (isSuperadmin) {
+    if (canAccessAdmin) {
       items.push({ label: 'Admin', path: '/admin', icon: <Shield size={18} /> });
     }
     return items;
-  }, [isSuperadmin, projectId]);
+  }, [canAccessAdmin, projectId]);
 
   const mobileGlobalNavItems = useMemo((): MobileNavItem[] => {
     const items: MobileNavItem[] = GLOBAL_NAV_ITEMS.map((item) => ({
@@ -74,21 +74,20 @@ export function AppShell({ children }: AppShellProps) {
       path: item.path,
       icon: item.icon,
     }));
-    if (isSuperadmin) {
+    if (canAccessAdmin) {
       items.push({ label: 'Admin', path: '/admin', icon: <Shield size={18} /> });
     }
     return items;
-  }, [isSuperadmin]);
+  }, [canAccessAdmin]);
 
   const mobileInfraSection = useMemo(() => {
-    if (!isSuperadmin) return undefined;
     return {
       items: [
         { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
         { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
       ],
     };
-  }, [isSuperadmin]);
+  }, []);
 
   // Close drawer and reset nav toggle on route change
   useEffect(() => {

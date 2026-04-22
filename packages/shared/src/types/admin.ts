@@ -101,3 +101,63 @@ export interface LogStreamClientMessage {
   levels?: string[];
   search?: string;
 }
+
+// =============================================================================
+// Admin Platform Infrastructure
+// =============================================================================
+
+export type PlatformInfraAssociationReason = 'trial' | 'support' | 'migration' | 'other';
+
+export interface PlatformInfraUserOption {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+export interface PlatformInfraNodeAssociation {
+  nodeId: string;
+  userId: string;
+  userEmail: string;
+  userName: string | null;
+  reason: PlatformInfraAssociationReason;
+  associatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlatformInfraTrialSummary {
+  id: string;
+  status: string;
+  repoOwner: string;
+  repoName: string;
+  claimedByUserId: string | null;
+}
+
+export interface PlatformInfraNodeSummary {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  status: string;
+  healthStatus: string;
+  cloudProvider: string | null;
+  vmSize: string;
+  vmLocation: string;
+  credentialSource: string | null;
+  lastHeartbeatAt: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  workspaceCount: number;
+  activeWorkspaceCount: number;
+  trial: PlatformInfraTrialSummary | null;
+  association: PlatformInfraNodeAssociation | null;
+}
+
+export interface AdminPlatformInfraResponse {
+  nodes: PlatformInfraNodeSummary[];
+  users: PlatformInfraUserOption[];
+}
+
+export interface UpsertPlatformInfraAssociationRequest {
+  userId: string;
+  reason: PlatformInfraAssociationReason;
+}

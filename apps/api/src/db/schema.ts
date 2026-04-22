@@ -45,7 +45,7 @@
 
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // =============================================================================
 // Users (BetterAuth compatible + custom fields)
@@ -1396,3 +1396,46 @@ export const trials = sqliteTable(
 
 export type TrialRow = typeof trials.$inferSelect;
 export type NewTrialRow = typeof trials.$inferInsert;
+
+// =============================================================================
+// Admin Platform Infrastructure Associations
+// =============================================================================
+
+/**
+ * Operational association metadata for platform-funded nodes.
+ *
+ * This is explicitly NOT an ownership table. User-facing access control must
+ * continue to flow through the canonical node/workspace ownership fields.
+ */
+export const platformNodeAssociations = sqliteTable(
+  'platform_node_associations',
+  {
+    nodeId: text('node_id')
+      .primaryKey()
+      .references(() => nodes.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    reason: text('reason').notNull(),
+    associatedBy: text('associated_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userIdIdx: index('idx_platform_node_associations_user_id').on(table.userId),
+    reasonIdx: index('idx_platform_node_associations_reason').on(table.reason),
+    reasonCheck: check(
+      'platform_node_associations_reason_check',
+      sql`${table.reason} in ('trial', 'support', 'migration', 'other')`
+    ),
+  })
+);
+
+export type PlatformNodeAssociationRow = typeof platformNodeAssociations.$inferSelect;
+export type NewPlatformNodeAssociationRow = typeof platformNodeAssociations.$inferInsert;

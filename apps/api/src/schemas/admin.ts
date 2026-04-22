@@ -26,3 +26,8 @@ export const UpdatePlatformCredentialSchema = v.object({
   label: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(100))),
   isEnabled: v.optional(v.boolean()),
 });
+
+export const UpsertPlatformInfraAssociationSchema = v.object({
+  userId: v.pipe(v.string(), v.minLength(1)),
+  reason: v.picklist(['trial', 'support', 'migration', 'other']),
+});

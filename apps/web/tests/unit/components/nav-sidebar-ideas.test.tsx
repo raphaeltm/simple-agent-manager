@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/components/AuthProvider', () => ({
-  useAuth: () => ({ isSuperadmin: false }),
+  useAuth: () => ({ canAccessAdmin: false, isSuperadmin: false }),
 }));
 
 import { NavSidebar, PROJECT_NAV_ITEMS } from '../../../src/components/NavSidebar';

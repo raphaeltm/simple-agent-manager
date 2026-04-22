@@ -123,14 +123,15 @@ The mobile navigation drawer (`apps/web/src/components/MobileNavDrawer.tsx`) is 
 - **User header**: Avatar, name, email, close button
 - **Project name header**: Shown when navigating inside a project (uppercase, truncated)
 - **Nav items**: Each item has a Lucide icon (18px) + label, with active state highlighting (accent color + left border)
-- **Infrastructure section**: Collapsible accordion for superadmins only (Nodes, Workspaces) — hidden when inside a project context
+- **Infrastructure section**: Collapsible accordion for all authenticated users (Nodes, Workspaces) — shown directly in global mobile nav and available from project context after toggling back to global navigation
 - **Sign out**: At bottom with LogOut icon
 
 ### Key Behaviors
 - Opens from hamburger menu in mobile header, slides in from right
 - Closes on: backdrop click, Escape key, or navigation to a new route
 - Icons are required on all nav items — text-only labels are not acceptable
-- Superadmin items (Admin, Infrastructure) follow the same visibility rules as desktop
+- Admin-only items follow the same visibility rules as desktop
+- The Infrastructure section exposes each user's personal Nodes and Workspaces views; the separate platform infrastructure admin surface remains admin-only
 
 ### Parity Rule
 Any change to the desktop sidebar nav items, icons, or sections must be applied to the mobile drawer as well. See `.claude/rules/15-nav-parity.md` for the enforcement checklist.

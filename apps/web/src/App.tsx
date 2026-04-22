@@ -17,6 +17,7 @@ import { AdminErrors } from './pages/AdminErrors';
 import { AdminLogs } from './pages/AdminLogs';
 import { AdminOverview } from './pages/AdminOverview';
 import { AdminPlatformCredentials } from './pages/AdminPlatformCredentials';
+import { AdminPlatformInfra } from './pages/AdminPlatformInfra';
 import { AdminStream } from './pages/AdminStream';
 import { AdminUsers } from './pages/AdminUsers';
 import { Chats } from './pages/Chats';
@@ -129,6 +130,7 @@ export default function App() {
             <Route path="/ui-standards" element={<UiStandards />} />
             <Route path="/admin" element={<Admin />}>
               <Route index element={<Navigate to="users" replace />} />
+              <Route path="platform-infra" element={<AdminPlatformInfra />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="credentials" element={<AdminPlatformCredentials />} />
               <Route path="ai-proxy" element={<AdminAIProxy />} />

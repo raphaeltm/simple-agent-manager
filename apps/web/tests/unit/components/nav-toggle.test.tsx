@@ -7,7 +7,7 @@ import { extractProjectId, NavSidebar } from '../../../src/components/NavSidebar
 
 // Mock AuthProvider to provide superadmin context
 vi.mock('../../../src/components/AuthProvider', () => ({
-  useAuth: () => ({ isSuperadmin: false }),
+  useAuth: () => ({ canAccessAdmin: false, isSuperadmin: false }),
 }));
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,10 @@ interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  isAdmin: boolean;
   isSuperadmin: boolean;
+  canAccessAdmin: boolean;
+  canManagePlatformInfra: boolean;
   isApproved: boolean;
   /** True when BetterAuth is re-checking the session (e.g. after tab regains focus) */
   isRefetching: boolean;
@@ -79,7 +82,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     user: enrichedUser,
     isLoading: isPending,
     isAuthenticated: !!user,
+    isAdmin: role === 'admin' || role === 'superadmin',
     isSuperadmin: role === 'superadmin',
+    canAccessAdmin: role === 'admin' || role === 'superadmin',
+    canManagePlatformInfra: role === 'admin' || role === 'superadmin',
     isApproved: status === 'active' || role === 'superadmin' || role === 'admin',
     isRefetching: isRefetching ?? false,
   };

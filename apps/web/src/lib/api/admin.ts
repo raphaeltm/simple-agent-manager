@@ -1,4 +1,5 @@
 import type {
+  AdminPlatformInfraResponse,
   AdminUsersResponse,
   CreatePlatformCredentialRequest,
   ErrorListResponse,
@@ -7,12 +8,19 @@ import type {
   ListPlatformCredentialsResponse,
   LogQueryResponse,
   PlatformCredentialResponse,
+  PlatformInfraNodeAssociation,
   UpdatePlatformCredentialRequest,
+  UpsertPlatformInfraAssociationRequest,
   UserRole,
   UserStatus,
 } from '@simple-agent-manager/shared';
 
 import { API_URL, request } from './client';
+
+export type {
+  AdminPlatformInfraResponse,
+  PlatformInfraNodeAssociation,
+};
 
 // =============================================================================
 // Admin
@@ -337,6 +345,32 @@ export async function updatePlatformCredential(
 
 export async function deletePlatformCredential(id: string): Promise<{ success: boolean }> {
   return request<{ success: boolean }>(`/api/admin/platform-credentials/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// =============================================================================
+// Admin Platform Infrastructure
+// =============================================================================
+
+export async function fetchAdminPlatformInfra(): Promise<AdminPlatformInfraResponse> {
+  return request<AdminPlatformInfraResponse>('/api/admin/platform-infra');
+}
+
+export async function upsertAdminPlatformInfraAssociation(
+  nodeId: string,
+  data: UpsertPlatformInfraAssociationRequest,
+): Promise<PlatformInfraNodeAssociation> {
+  return request<PlatformInfraNodeAssociation>(`/api/admin/platform-infra/nodes/${nodeId}/association`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAdminPlatformInfraAssociation(
+  nodeId: string,
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/admin/platform-infra/nodes/${nodeId}/association`, {
     method: 'DELETE',
   });
 }
