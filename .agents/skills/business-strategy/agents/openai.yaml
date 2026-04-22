@@ -1,0 +1,4 @@
+interface:
+  display_name: "Business Strategy"
+  short_description: "Market sizing, pricing, business model, GTM"
+  default_prompt: "Use $business-strategy to build market sizing (TAM/SAM/SOM), business model canvas, pricing analysis, revenue models, and go-to-market plans."

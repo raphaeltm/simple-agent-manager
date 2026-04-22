@@ -31,6 +31,8 @@ TodoWrite([
 
 You may add sub-tasks for implementation details, but these 7 phase-level items MUST remain in the todo list at all times. Mark each phase as `completed` only when ALL of its steps are done. If the conversation is resumed after compaction, check the todo list to determine which phase you are in and continue from there — do NOT re-read only the code summary.
 
+Also create `.do-state.md` in the repo root (gitignored) as a complementary external memory file. See `.claude/rules/14-do-workflow-persistence.md` for the full spec. Re-read it at every phase boundary.
+
 ---
 
 ## Phase 1: Research & Task Creation
@@ -110,7 +112,19 @@ Execute the checklist from the task file. Follow these rules:
    - `pnpm lint` after any code changes
    - `pnpm test` after adding/modifying tests
 
+5. **Playwright visual audit (MANDATORY for UI changes).** If this PR touches any files in `apps/web/`, `packages/ui/`, or `packages/terminal/`, you MUST run a local Playwright visual audit before proceeding to Phase 4. See `.claude/rules/17-ui-visual-testing.md` for full requirements.
+
+   - Use mock data covering: normal data, long text (200+ char titles), empty states, many items (30+), error states
+   - Capture screenshots at both mobile (375x667) and desktop (1280x800) viewports
+   - Store screenshots in `.codex/tmp/playwright-screenshots/`
+   - Assert no horizontal overflow (`scrollWidth <= innerWidth`)
+   - Fix any issues found before continuing
+
+6. **Update `.do-state.md`** after every commit — check off completed implementation items and add notes.
+
 ---
+
+> **Checkpoint (MANDATORY)**: Re-read `.do-state.md` AND the task file. Walk through every acceptance criterion and confirm it's met. Only proceed once you've verified completeness.
 
 ## Phase 4: Pre-PR Validation
 
@@ -132,10 +146,11 @@ Before creating the PR, ensure everything is solid:
 
 ## Phase 5: Review
 
-Dispatch review based on what the PR touches:
+Dispatch review based on what the PR touches. **Always include** the task-completion-validator in addition to domain-specific reviewers:
 
 | PR touches | Skill | What it checks |
 |------------|-------|----------------|
+| **Always** | `$task-completion-validator` | Planned vs. actual work — research gaps, unwired UI, missing tests |
 | Go code (`packages/vm-agent/`) | `$go-specialist` | Concurrency, resource leaks, Go idioms |
 | TypeScript API (`apps/api/`) | `$cloudflare-specialist` | D1, KV, Workers patterns |
 | UI code (`apps/web/`, `packages/ui/`) | `$ui-ux-specialist` | Accessibility, layout, interactions |
@@ -169,23 +184,40 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 ### 6a. Standard Verification (All Code Changes)
 
-1. **Deploy to staging:**
+1. **Check for existing staging deployments** before triggering your own:
+   ```bash
+   gh run list --workflow=deploy-staging.yml --status=in_progress --status=queued --json databaseId,status,createdAt,headBranch
    ```
-   pnpm deploy:setup --environment staging
+   If there are active or queued runs, wait at least **5 minutes** from the most recent run's `createdAt` before triggering yours.
+
+2. **Deploy to staging:**
+   ```bash
+   gh workflow run deploy-staging.yml --ref <your-branch-name>
    ```
-   Or trigger the staging deployment via GitHub Actions.
+   Then watch for completion:
+   ```bash
+   sleep 5
+   gh run list --workflow=deploy-staging.yml --branch=<your-branch-name> --limit=1 --json databaseId,status
+   gh run watch <run-id>
+   ```
+   If the deployment fails, inspect logs with `gh run view <run-id> --log-failed`, fix the issue, and re-trigger.
 
-2. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
+3. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
 
-3. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
+4. **Authenticate** using the smoke test token via token-login API:
+   ```
+   POST https://api.sammy.party/api/auth/token-login
+   Body: { "token": "<SAM_PLAYWRIGHT_PRIMARY_USER env var>" }
+   ```
+   If the env var is not set, ask the human for credentials.
 
-4. **Verify the changed behavior works end-to-end:**
+5. **Verify the changed behavior works end-to-end:**
    - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
    - **API/backend changes**: verify affected endpoints respond correctly and downstream behavior works through the UI
 
-5. **Report findings** to the user with evidence (screenshots or Playwright observations).
+6. **Report findings** to the user with evidence (screenshots or Playwright observations).
 
-6. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
+7. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
 
 ### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
 
@@ -240,6 +272,8 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
    ```
    git pull origin main
    ```
+
+7. **Delete `.do-state.md`** — the workflow is complete.
 
 ---
 

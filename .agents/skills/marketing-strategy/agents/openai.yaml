@@ -1,0 +1,4 @@
+interface:
+  display_name: "Marketing Strategy"
+  short_description: "Positioning, messaging, content calendar, gap analysis"
+  default_prompt: "Use $marketing-strategy to build positioning documents, messaging guides, content calendars, channel strategy, and gap analyses."

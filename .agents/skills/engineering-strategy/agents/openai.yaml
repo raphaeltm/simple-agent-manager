@@ -1,0 +1,4 @@
+interface:
+  display_name: "Engineering Strategy"
+  short_description: "Roadmap, tech radar, build-vs-buy, tech debt"
+  default_prompt: "Use $engineering-strategy to build roadmaps (Now/Next/Later), technology radar, build-vs-buy analyses, and tech debt registers."
