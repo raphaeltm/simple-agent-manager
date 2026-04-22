@@ -1246,6 +1246,28 @@ describe('ProjectData Durable Object', () => {
       expect(session!.messageCount).toBe(2);
     });
 
+    it('message persistence extends scheduled idle cleanup', async () => {
+      const stub = getStub('project-msg-activity-idle-reset');
+      const sessionId = await stub.createSession('ws-msg-idle', 'Message idle reset test');
+
+      const { cleanupAt: firstCleanupAt } = await stub.scheduleIdleCleanup(sessionId, 'ws-msg-idle', null);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Still working',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+
+      const secondCleanupAt = await stub.getCleanupAt(sessionId);
+      expect(secondCleanupAt).not.toBeNull();
+      expect(secondCleanupAt!).toBeGreaterThan(firstCleanupAt);
+    });
+
     it('terminal activity works without a session id', async () => {
       const stub = getStub('project-terminal-no-session');
       // Create a session to ensure the DO is initialized

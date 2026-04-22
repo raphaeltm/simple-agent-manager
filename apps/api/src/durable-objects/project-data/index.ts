@@ -91,6 +91,10 @@ export class ProjectData extends DurableObject<Env> {
 
   async persistMessage(sessionId: string, role: string, content: string, toolMetadata: string | null): Promise<string> {
     const result = messages.persistMessage(this.sql, this.env, sessionId, role, content, toolMetadata);
+    const idleReset = idleCleanup.resetIdleCleanup(this.sql, this.env, sessionId);
+    if (idleReset.cleanupAt > 0) {
+      await this.recalculateAlarm();
+    }
     if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
     this.scheduleSummarySync();
     let parsedToolMetadata: unknown = null;
@@ -111,6 +115,10 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<{ persisted: number; duplicates: number }> {
     const result = messages.persistMessageBatch(this.sql, this.env, sessionId, batchMessages);
     if (result.persisted > 0) {
+      const idleReset = idleCleanup.resetIdleCleanup(this.sql, this.env, sessionId);
+      if (idleReset.cleanupAt > 0) {
+        await this.recalculateAlarm();
+      }
       if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
       this.scheduleSummarySync();
       this.broadcastEvent('messages.batch', { sessionId, messages: result.persistedMessages, count: result.persisted }, sessionId);
