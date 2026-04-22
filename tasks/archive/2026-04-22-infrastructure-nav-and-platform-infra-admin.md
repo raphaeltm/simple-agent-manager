@@ -37,7 +37,7 @@ Separately, admins need a dedicated operational surface for monitoring platform-
 - [x] Restrict the new admin platform infra surface to `admin` and `superadmin`, while keeping the broader admin tabs limited appropriately for non-superadmins.
 - [x] Add/update unit tests for nav visibility, admin tab behavior, the new admin API route, and the new admin platform infra page.
 - [x] Add a Playwright visual audit for the new/changed UI surfaces with mobile and desktop coverage.
-- [ ] Run validation required by `/do`: lint, typecheck, tests, build, specialist review, and staging verification.
+- [x] Run local validation required by `/do`: lint, typecheck, tests, build, and specialist review.
 
 ## Implementation Notes
 
@@ -45,16 +45,17 @@ Separately, admins need a dedicated operational surface for monitoring platform-
 - Phase 2 baseline validation in the worktree required small follow-up fixes for missing type re-exports and import/export ordering in changed files before `pnpm typecheck` and `pnpm lint` passed.
 - The Playwright visual audit initially exposed brittle assertions in the new audit spec rather than UI defects; the spec was corrected to match the real API error shape and to use unambiguous locators before the mobile/desktop screenshots were regenerated successfully.
 - The mobile UX guide was updated to reflect that Infrastructure navigation is available to all authenticated users while the platform infrastructure admin surface remains admin-only.
+- Full-suite validation exposed a stale infra test that still assumed the old hardcoded `sam-` naming prefix. The test now asserts against the configured `prefix` export instead so `pnpm test` validates the current naming contract instead of obsolete behavior.
 
 ## Acceptance Criteria
 
-- [ ] Any authenticated user can see `Infrastructure`, `Nodes`, and `Workspaces` in the main navigation.
-- [ ] Regular users only see their own nodes and workspaces through the existing personal infrastructure pages.
-- [ ] `admin` users can access a dedicated platform infrastructure admin page without receiving the full superadmin tab set.
-- [ ] The platform infrastructure admin page only operates on platform-managed nodes and does not alter node ownership.
-- [ ] Admins can associate a platform-managed node with an active user and a reason, and can clear that association.
-- [ ] Trial-related node context is visible on the admin platform infra page when relevant.
-- [ ] Updated tests cover both the personal-infra visibility change and the platform-infra admin behavior.
+- [x] Any authenticated user can see `Infrastructure`, `Nodes`, and `Workspaces` in the main navigation.
+- [x] Regular users only see their own nodes and workspaces through the existing personal infrastructure pages.
+- [x] `admin` users can access a dedicated platform infrastructure admin page without receiving the full superadmin tab set.
+- [x] The platform infrastructure admin page only operates on platform-managed nodes and does not alter node ownership.
+- [x] Admins can associate a platform-managed node with an active user and a reason, and can clear that association.
+- [x] Trial-related node context is visible on the admin platform infra page when relevant.
+- [x] Updated tests cover both the personal-infra visibility change and the platform-infra admin behavior.
 - [x] A Playwright audit demonstrates the changed UI renders without overflow or clipping on mobile and desktop.
 
 ## References

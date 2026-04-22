@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import "./setup";
+import { prefix } from "../resources/config";
 
 describe("D1 Database Resource", () => {
   let databaseModule: typeof import("../resources/database");
@@ -27,6 +28,6 @@ describe("D1 Database Resource", () => {
         return n;
       });
     });
-    expect(name).toMatch(/^sam-/);
+    expect(name).toMatch(new RegExp(`^${prefix}-`));
   });
 });
