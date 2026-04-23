@@ -6,6 +6,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 describe('dead code removal', () => {
