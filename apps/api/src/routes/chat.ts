@@ -8,7 +8,7 @@
  */
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import { isTaskExecutionStep } from '@simple-agent-manager/shared';
-import { and, desc,eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -167,33 +167,32 @@ chatRoutes.get('/:sessionId', async (c) => {
     }
   }
 
-  // Look up the most recent agent session ID (ULID) from D1 so the UI can
-  // route ACP WebSocket to the correct VM agent session instead of creating a
-  // duplicate.  We intentionally do NOT filter by status='running' — the
-  // agent session may be suspended (idle timeout) or briefly in another
-  // transient state.  The VM agent auto-resumes suspended sessions on
-  // WebSocket attach (agent_ws.go:96-117), so the browser should always
-  // reconnect with the original agent session ID to preserve conversation
-  // context.  Filtering by status caused the UI to fall back to the chat
-  // session ID, which created a new SessionHost on the VM and wiped the
-  // conversation history.
+  // Resolve the ACP session from the ProjectData DO's canonical chatSessionId
+  // mapping rather than inferring it from the workspace. A workspace can host
+  // multiple agent sessions over time, so "latest agent session in workspace"
+  // is not a safe proxy for "agent session for this chat session".
+  //
+  // We intentionally do NOT filter by ACP status='running' — the agent session
+  // may be suspended (idle timeout) or briefly in another transient state. The
+  // VM agent auto-resumes suspended sessions on WebSocket attach
+  // (agent_ws.go:96-117), so the browser should always reconnect with the
+  // original ACP session ID linked to this chat session to preserve
+  // conversation context.
   let agentSessionId: string | null = null;
-  const workspaceId = (session as Record<string, unknown>).workspaceId as string | null;
-  if (workspaceId) {
-    try {
-      const [agentRow] = await db
-        .select({ id: schema.agentSessions.id })
-        .from(schema.agentSessions)
-        .where(eq(schema.agentSessions.workspaceId, workspaceId))
-        .orderBy(desc(schema.agentSessions.createdAt))
-        .limit(1);
-      if (agentRow) {
-        agentSessionId = agentRow.id;
-      }
-    } catch (err) {
-      // D1 lookup failure is non-fatal — UI falls back to chat session ID
-      log.warn('chat.agent_session_id_lookup_failed', { workspaceId, error: err instanceof Error ? err.message : String(err) });
-    }
+  try {
+    const acpSessions = await projectDataService.listAcpSessions(c.env, projectId, {
+      chatSessionId: sessionId,
+      limit: 1,
+    });
+    agentSessionId = acpSessions.sessions[0]?.id ?? null;
+  } catch (err) {
+    // ACP session lookup failure is non-fatal — UI falls back to the chat
+    // session ID and can still load persisted history from the DO.
+    log.warn('chat.agent_session_id_lookup_failed', {
+      projectId,
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   return c.json({

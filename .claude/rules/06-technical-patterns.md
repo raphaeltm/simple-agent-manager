@@ -136,6 +136,37 @@ Before committing UI form changes:
 - [ ] The backend handler reads every field the API request type defines
 - [ ] At least one test verifies the field's value reaches the backend function that acts on it
 
+## Canonical Session Routing (Required)
+
+When a route or UI component bridges persisted chat history to a live agent connection, you MUST resolve the live session using the canonical chat-scoped identifier, not a broader workspace-scoped heuristic.
+
+### Why This Rule Exists
+
+The disappearing-messages regression on 2026-04-22 was caused by `apps/api/src/routes/chat.ts` resolving `agentSessionId` as "latest agent session in the workspace" from D1. That looked plausible, but the canonical mapping already lived in the ProjectData DO as `acp_sessions.chat_session_id`. Once a workspace had multiple agent sessions over time, the UI could attach live ACP state from the wrong conversation and overwrite the expected chat view.
+
+### Required Steps
+
+1. **Find the narrowest canonical identifier** for the handoff. If a mapping table or DO record already ties `chatSessionId` to a live session, use that instead of inferring from `workspaceId`.
+2. **Do not substitute recency for identity.** "Latest session in workspace" is not a safe proxy for "session for this chat."
+3. **Write a route or integration test** that asserts the canonical lookup is used.
+4. **Write a negative assertion** when practical: prove the broader heuristic is not consulted for this path.
+5. **Preserve suspended or transient sessions** by avoiding status filters unless the canonical contract explicitly requires one.
+
+## Idle Cleanup And Message Activity
+
+When a session has an armed idle-cleanup timer, the server must treat newly persisted messages as authoritative activity and extend the timer on the server side.
+
+### Why This Rule Exists
+
+The disappearing-messages regression on 2026-04-22 was triggered by a scheduled idle cleanup stopping a chat session while fresh agent output was still being persisted from the VM agent. The browser had an `idle-reset` endpoint, but the durable-object write path did not extend the cleanup deadline during `persistMessage()` or `persistMessageBatch()`. Once the session was marked `stopped`, `POST /api/workspaces/:id/messages` began returning permanent `400` errors and the VM agent discarded those messages.
+
+### Required Steps
+
+1. **Refresh idle cleanup from authoritative writes.** Any successfully persisted user or agent message must extend an existing idle-cleanup schedule inside the ProjectData DO.
+2. **Do not rely on browser optimism.** Client-side `idle-reset` calls are supplementary; they are not sufficient for lifecycle correctness.
+3. **Keep cleanup scheduling and persistence coupled.** If a session can still accept messages, the persistence path must be able to keep it alive.
+4. **Write a regression test** proving persisted messages move `cleanupAt` forward for a scheduled session.
+
 ## Adding New Features
 
 1. Check if types need to be added to `packages/shared`
