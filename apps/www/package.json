@@ -4,17 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "astro dev",
+    "dev": "pnpm build:assets && astro dev",
+    "build:assets": "pnpm build:tracker && pnpm build:blog-mermaid",
+    "build:blog-mermaid": "pnpm exec esbuild src/scripts/blog-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/blog-mermaid.js",
     "build:tracker": "npx tsx scripts/build-tracker.ts",
-    "build": "pnpm build:tracker && astro build",
+    "build": "pnpm build:assets && astro build",
     "preview": "astro preview"
   },
   "dependencies": {
     "@astrojs/sitemap": "3.7.2",
     "@astrojs/starlight": "0.37.7",
-    "astro": "5.17.3"
+    "astro": "5.17.3",
+    "mermaid": "11.14.0"
   },
   "devDependencies": {
+    "esbuild": "0.25.12",
     "typescript": "catalog:"
   }
 }
