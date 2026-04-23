@@ -38,6 +38,7 @@ Long workflows lose context to compaction. You MUST maintain a `.do-state.md` fi
 2. **Research the codebase.** Before writing anything:
    - Search and read to find all relevant code paths
    - Read related docs in `docs/`, `specs/`, `.claude/rules/`
+   - **Review relevant post-mortems** in `docs/notes/*-postmortem.md`. Search for post-mortems that touch the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections. These contain hard-won lessons about what goes wrong in this codebase — ignoring them risks repeating the exact same mistakes. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is almost certainly a relevant post-mortem.
    - Use web search for external library/API docs if needed
    - Identify existing patterns, conventions, and test approaches in the affected areas
 

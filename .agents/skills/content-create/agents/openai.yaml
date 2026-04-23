@@ -1,0 +1,4 @@
+interface:
+  display_name: "Content Creation"
+  short_description: "Social posts, blog outlines, changelogs, launch copy"
+  default_prompt: "Use $content-create to draft social media posts, blog outlines, changelog announcements, product launch copy, and developer content from strategy artifacts."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Task Completion Validator"
+  short_description: "Cross-references planned vs actual work"
+  default_prompt: "Use $task-completion-validator to validate task completion before archiving — checks research findings, checklist items, acceptance criteria, UI-backend paths, and multi-resource selection."
