@@ -179,4 +179,15 @@ export class ProviderError extends Error {
   ) {
     super(message, options);
   }
+
+  /** Make Error properties visible to JSON.stringify */
+  toJSON(): Record<string, unknown> {
+    return {
+      name: this.name,
+      message: this.message,
+      provider: this.providerName,
+      statusCode: this.statusCode,
+      cause: this.cause instanceof Error ? this.cause.message : this.cause,
+    };
+  }
 }

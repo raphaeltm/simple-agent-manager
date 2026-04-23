@@ -8,6 +8,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
 import {
@@ -248,10 +249,9 @@ export async function setTaskStatus(
         errorMessage: toStatus === 'failed' ? (options.errorMessage?.trim() || 'Task failed') : null,
       })
       .where(eq(schema.triggerExecutions.id, updatedTask.triggerExecutionId))
-      .catch((err) => {
+      .catch((err: unknown) => {
         // Best-effort — don't fail the task status update if execution sync fails
-        // eslint-disable-next-line no-console
-        console.error('trigger_execution_sync_failed', {
+        log.error('trigger_execution_sync_failed', {
           taskId: task.id,
           triggerExecutionId: updatedTask.triggerExecutionId,
           error: String(err),

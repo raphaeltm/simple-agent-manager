@@ -202,7 +202,7 @@ export function CreateWorkspace() {
         setBranchesError('Could not fetch branches, showing common defaults');
       }
     } catch (err) {
-      console.log('Could not fetch branches:', err);
+      console.error('Could not fetch branches:', err);
       // Provide common branch names as fallback
       setBranches([{ name: 'main' }, { name: 'master' }, { name: 'develop' }]);
       setBranchesError('Unable to fetch branches. Common branch names provided.');
