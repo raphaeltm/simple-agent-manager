@@ -94,9 +94,7 @@ const useCaseIcons = [
       <div class="detail-glow" aria-hidden="true"></div>
       <div class="container detail-hero-content">
         <div class="hero-logo animate-on-scroll">
-          <svg width="72" height="72" viewBox="0 0 128 128" fill="none" aria-hidden="true">
-            <Fragment set:html={integration.logoSvg} />
-          </svg>
+          <img src={integration.logoPath} alt={`${integration.name} logo`} width="72" height="72" />
         </div>
         <span class="hero-category animate-on-scroll">{integration.categoryLabel}</span>
         <h1 class="detail-title animate-on-scroll">{integration.tagline}</h1>
@@ -229,9 +227,7 @@ const useCaseIcons = [
             {related.map((rel, i) => (
               <a href={`/integrations/${rel.slug}/`} class="related-card animate-on-scroll" style={`transition-delay: ${i * 80}ms`}>
                 <div class="related-logo">
-                  <svg width="36" height="36" viewBox="0 0 128 128" fill="none" aria-hidden="true">
-                    <Fragment set:html={rel.logoSvg} />
-                  </svg>
+                  <img src={rel.logoPath} alt={`${rel.name} logo`} width="36" height="36" loading="lazy" />
                 </div>
                 <div class="related-info">
                   <h3 class="related-name">{rel.name}</h3>

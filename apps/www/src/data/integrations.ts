@@ -13,8 +13,8 @@ export interface Integration {
   description: string;
   /** Brand color for the logo background */
   color: string;
-  /** SVG path data for the logo icon */
-  logoSvg: string;
+  /** Path to the logo image file in /images/integrations/ */
+  logoPath: string;
   /** SEO-optimized page title */
   seoTitle: string;
   /** SEO meta description (max ~155 chars) */
@@ -47,8 +47,7 @@ export const integrations: Integration[] = [
     description:
       "Claude Code by Anthropic is an agentic coding tool that lives in your terminal. With SAM, you can run dozens of Claude Code instances in parallel across cloud VMs — each in its own isolated devcontainer with full access to your repo's toolchain.",
     color: '#CC785C',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#CC785C"/><path d="M34 64C34 47.4 47.4 34 64 34C80.6 34 94 47.4 94 64C94 80.6 80.6 94 64 94C47.4 94 34 80.6 34 64Z" fill="white"/><path d="M48 64C48 55.2 55.2 48 64 48V80C55.2 80 48 72.8 48 64Z" fill="#CC785C"/>',
+    logoPath: '/images/integrations/anthropic.svg',
     seoTitle: 'Run Claude Code in the Cloud | SAM',
     seoDescription:
       'Run Claude Code agents in parallel on your own cloud VMs. SAM orchestrates Anthropic\'s Claude Code with isolated devcontainers, lifecycle management, and automatic PR creation.',
@@ -88,8 +87,7 @@ export const integrations: Integration[] = [
     description:
       "OpenAI Codex is a cloud-native coding agent that writes and executes code in a sandboxed environment. With SAM, you can run Codex on your own infrastructure — keeping your code on your VMs while leveraging OpenAI's latest models.",
     color: '#000000',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#000"/><circle cx="64" cy="64" r="32" fill="white"/>',
+    logoPath: '/images/integrations/openai.svg',
     seoTitle: 'Run OpenAI Codex on Your Infrastructure | SAM',
     seoDescription:
       'Run OpenAI Codex coding agents on your own cloud VMs. SAM handles provisioning, devcontainer setup, and lifecycle management for Codex workspaces.',
@@ -129,8 +127,7 @@ export const integrations: Integration[] = [
     description:
       "Google's Gemini CLI brings Gemini's multimodal capabilities to the command line for coding tasks. SAM orchestrates Gemini CLI on your infrastructure, giving you access to Google's most capable models in isolated cloud environments.",
     color: '#1A73E8',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#1A73E8"/><path d="M40 64L64 40L88 64L64 88Z" fill="white"/>',
+    logoPath: '/images/integrations/google-gemini.svg',
     seoTitle: 'Run Gemini CLI in Cloud Workspaces | SAM',
     seoDescription:
       'Run Google Gemini CLI coding agents on your own infrastructure. SAM provisions VMs, builds devcontainers, and manages agent lifecycles for Gemini CLI.',
@@ -170,8 +167,7 @@ export const integrations: Integration[] = [
     description:
       "Mistral Vibe is Mistral AI's agentic coding tool, powered by Devstral — a model purpose-built for software engineering. With SAM, you can run dozens of Vibe agents in parallel on your own cloud, each working on a different coding task.",
     color: '#FF6B35',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#FF6B35"/><path d="M40 84L64 44L88 84Z" fill="white"/>',
+    logoPath: '/images/integrations/mistral.svg',
     seoTitle: 'Run Mistral Vibe Agents in Parallel | SAM',
     seoDescription:
       'Run Mistral Vibe coding agents in parallel on your own cloud. SAM orchestrates Devstral-powered Vibe agents with full devcontainer support and automatic PR creation.',
@@ -210,8 +206,7 @@ export const integrations: Integration[] = [
     description:
       "OpenCode is an open-source AI coding agent from SST that works with multiple inference providers. With SAM, you can run OpenCode on your cloud VMs using Scaleway, Google Vertex, Anthropic, or any OpenAI-compatible API as the backend.",
     color: '#6366F1',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#6366F1"/><path d="M40 64H88M64 40V88" stroke="white" stroke-width="8" stroke-linecap="round"/>',
+    logoPath: '/images/integrations/sst.svg',
     seoTitle: 'Run OpenCode with Any AI Provider | SAM',
     seoDescription:
       'Run OpenCode agents on your cloud with any inference provider — Scaleway, Google Vertex, Anthropic, or custom endpoints. SAM handles VM provisioning and agent lifecycle.',
@@ -252,8 +247,7 @@ export const integrations: Integration[] = [
     description:
       "Hetzner Cloud offers high-performance, affordable VMs across Europe and the US. As SAM's original and most battle-tested cloud provider, Hetzner gives you excellent compute value for running AI coding agents at scale.",
     color: '#D50C2D',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#D50C2D"/><path d="M44 40V88M84 40V88M44 64H84" stroke="white" stroke-width="10" stroke-linecap="round"/>',
+    logoPath: '/images/integrations/hetzner.svg',
     seoTitle: 'Run AI Coding Agents on Hetzner Cloud | SAM',
     seoDescription:
       'Run AI coding agents on affordable Hetzner Cloud VMs. SAM handles provisioning, devcontainer setup, and lifecycle management on your Hetzner account.',
@@ -291,8 +285,7 @@ export const integrations: Integration[] = [
     description:
       "Scaleway is a European cloud provider offering compute, storage, and AI inference services. With SAM, you can run coding agents on Scaleway VMs across Paris, Amsterdam, and Warsaw — and even pair them with Scaleway's native AI inference for a fully European AI stack.",
     color: '#4F0599',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#4F0599"/><path d="M44 88V56a20 20 0 0 1 40 0v32" stroke="white" stroke-width="10" stroke-linecap="round" fill="none"/><circle cx="64" cy="48" r="4" fill="white"/>',
+    logoPath: '/images/integrations/scaleway.svg',
     seoTitle: 'Run AI Agents on Scaleway Infrastructure | SAM',
     seoDescription:
       'Run AI coding agents on Scaleway VMs in Paris, Amsterdam, and Warsaw. SAM provisions workspaces on your Scaleway account with full BYOC control.',
@@ -331,8 +324,7 @@ export const integrations: Integration[] = [
     description:
       "Google Cloud Platform provides global infrastructure with enterprise-grade security. SAM integrates with GCP using Workload Identity Federation — no long-lived credentials needed. Run coding agents on Compute Engine VMs across 8 regions worldwide.",
     color: '#4285F4',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#4285F4"/><path d="M64 36L88 76H40Z" fill="#EA4335"/><rect x="52" y="68" width="24" height="24" rx="2" fill="#34A853"/><circle cx="76" cy="56" r="12" fill="#FBBC04"/>',
+    logoPath: '/images/integrations/gcp.svg',
     seoTitle: 'Run AI Coding Agents on Google Cloud | SAM',
     seoDescription:
       'Run AI coding agents on Google Cloud VMs with Workload Identity Federation. SAM provisions Compute Engine instances across 8 global regions.',
@@ -373,8 +365,7 @@ export const integrations: Integration[] = [
     description:
       "SAM runs on Cloudflare Workers, and Workers AI provides free AI inference at the edge. SAM uses Workers AI for task title generation, text-to-speech, and context summarization — all included with the platform at no extra cost.",
     color: '#F6821F',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#F6821F"/><path d="M84 52L68 76H100Z" fill="white" opacity="0.9"/><path d="M56 44L32 84H80Z" fill="white"/>',
+    logoPath: '/images/integrations/cloudflare.svg',
     seoTitle: 'Free AI with Cloudflare Workers AI | SAM',
     seoDescription:
       'SAM includes free AI inference via Cloudflare Workers AI — task titles, text-to-speech, and summarization at no extra cost. Built into the platform.',
@@ -412,8 +403,7 @@ export const integrations: Integration[] = [
     description:
       "SAM integrates deeply with GitHub for repository access, authentication, and pull request management. Install the SAM GitHub App on your repos, and agents can clone code, push branches, and open PRs — all with proper GitHub permissions.",
     color: '#24292F',
-    logoSvg:
-      '<rect width="128" height="128" rx="16" fill="#24292F"/><path d="M64 28c-19.9 0-36 16.1-36 36 0 15.9 10.3 29.4 24.6 34.2 1.8.3 2.4-.8 2.4-1.7v-6.7c-10 2.2-12.1-4.2-12.1-4.2-1.6-4.2-4-5.3-4-5.3-3.3-2.2.2-2.2.2-2.2 3.6.3 5.5 3.7 5.5 3.7 3.2 5.5 8.4 3.9 10.5 3 .3-2.3 1.3-3.9 2.3-4.8-8-.9-16.4-4-16.4-17.8 0-3.9 1.4-7.1 3.7-9.7-.4-.9-1.6-4.6.4-9.5 0 0 3-.9 9.9 3.7 2.9-.8 5.9-1.2 9-1.2 3 0 6.1.4 9 1.2 6.9-4.7 9.9-3.7 9.9-3.7 2 4.9.7 8.6.4 9.5 2.3 2.5 3.7 5.7 3.7 9.7 0 13.8-8.4 16.9-16.4 17.8 1.3 1.1 2.5 3.3 2.5 6.7v9.9c0 1 .6 2.1 2.4 1.7C89.7 93.4 100 79.9 100 64c0-19.9-16.1-36-36-36z" fill="white"/>',
+    logoPath: '/images/integrations/github.svg',
     seoTitle: 'GitHub Integration for AI Coding Agents | SAM',
     seoDescription:
       'Connect your GitHub repos to SAM for automatic agent provisioning, branch management, and pull request creation. GitHub App integration with proper permissions.',
