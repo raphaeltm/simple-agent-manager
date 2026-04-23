@@ -15,6 +15,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
@@ -24,17 +25,6 @@ import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
-
-function requireRouteParam(
-  c: { req: { param: (name: string) => string | undefined } },
-  name: string
-): string {
-  const value = c.req.param(name);
-  if (!value) {
-    throw errors.badRequest(`${name} is required`);
-  }
-  return value;
-}
 
 chatRoutes.use('/*', requireAuth(), requireApproved());
 
