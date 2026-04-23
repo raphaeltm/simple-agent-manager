@@ -228,7 +228,7 @@ export class ProjectData extends DurableObject<Env> {
 
   // --- ACP Session Lifecycle ---
 
-  async createAcpSession(opts: { chatSessionId: string; initialPrompt: string | null; agentType: string | null; parentSessionId?: string | null; forkDepth?: number }) {
+  async createAcpSession(opts: { chatSessionId: string; initialPrompt: string | null; agentType: string | null; parentSessionId?: string | null; forkDepth?: number; id?: string }) {
     const result = acpSessions.createAcpSession(this.sql, opts);
     const projectId = this.getProjectId();
     log.info('acp_session.created', { sessionId: result.id, chatSessionId: opts.chatSessionId, projectId, parentSessionId: opts.parentSessionId ?? null, forkDepth: opts.forkDepth ?? 0 });

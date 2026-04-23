@@ -351,7 +351,8 @@ export async function createAcpSession(
   initialPrompt: string | null,
   agentType: string | null,
   parentSessionId: string | null = null,
-  forkDepth: number = 0
+  forkDepth: number = 0,
+  id?: string
 ): Promise<AcpSession> {
   const stub = await getStub(env, projectId);
   return stub.createAcpSession({
@@ -360,6 +361,7 @@ export async function createAcpSession(
     agentType,
     parentSessionId,
     forkDepth,
+    id,
   });
 }
 

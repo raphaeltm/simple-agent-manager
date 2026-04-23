@@ -34,6 +34,10 @@ export function createAcpSession(
     agentType: string | null;
     parentSessionId?: string | null;
     forkDepth?: number;
+    /** Optional explicit ID. When provided, the ACP session uses this ID instead of generating one.
+     *  Used by the task runner to align the ACP session ID with the D1 agent session ID,
+     *  so the browser can connect to the correct VM agent session via WebSocket. */
+    id?: string;
   }
 ): AcpSession {
   const chatSession = sql
@@ -43,7 +47,7 @@ export function createAcpSession(
     throw new Error(`Chat session ${opts.chatSessionId} not found`);
   }
 
-  const id = generateId();
+  const id = opts.id ?? generateId();
   const now = Date.now();
 
   sql.exec(
