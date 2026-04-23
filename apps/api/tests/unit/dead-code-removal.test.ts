@@ -18,32 +18,14 @@ describe('dead code removal', () => {
   });
 
   describe('scripts/deploy/types.ts exports', () => {
-    it('should not export DeploymentState', async () => {
-      const types = await import('../../../../scripts/deploy/types');
-      expect('DeploymentState' in types).toBe(false);
-    });
-
-    it('should not export DEPLOYMENT_STATE_VERSION', async () => {
+    it('should not export DEPLOYMENT_STATE_VERSION constant', async () => {
       const types = await import('../../../../scripts/deploy/types');
       expect('DEPLOYMENT_STATE_VERSION' in types).toBe(false);
     });
 
-    it('should still export other types like REQUIRED_SECRETS', async () => {
+    it('should still export other runtime values like REQUIRED_SECRETS', async () => {
       const types = await import('../../../../scripts/deploy/types');
       expect('REQUIRED_SECRETS' in types).toBe(true);
-    });
-  });
-
-  describe('requireRouteParam deduplication', () => {
-    it('is exported from lib/route-helpers.ts', async () => {
-      const routeHelpers = await import('../../src/lib/route-helpers');
-      expect(typeof routeHelpers.requireRouteParam).toBe('function');
-    });
-
-    it('throws 400 for missing params', async () => {
-      const { requireRouteParam } = await import('../../src/lib/route-helpers');
-      const mockContext = { req: { param: () => undefined } };
-      expect(() => requireRouteParam(mockContext, 'id')).toThrow();
     });
   });
 });

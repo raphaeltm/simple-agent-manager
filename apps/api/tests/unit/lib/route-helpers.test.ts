@@ -39,9 +39,8 @@ describe('requireRouteParam', () => {
     expect(() => requireRouteParam(c, 'projectId')).toThrow();
   });
 
-  it('returns empty string if param value is empty string', () => {
+  it('throws when param value is empty string', () => {
     const c = makeContext({ projectId: '' });
-    // Empty string is falsy, so it should throw
     expect(() => requireRouteParam(c, 'projectId')).toThrow();
   });
 });

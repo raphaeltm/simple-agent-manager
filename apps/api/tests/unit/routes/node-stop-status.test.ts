@@ -150,16 +150,23 @@ describe('POST /api/nodes/:id/stop', () => {
     expect(body.status).toBe('stopped');
   });
 
-  it('does not return "deleted" status', async () => {
-    const response = await app.request('/api/nodes/node-1/stop', { method: 'POST' }, env);
-
-    const body = await response.json<{ status: string }>();
-    expect(body.status).not.toBe('deleted');
-  });
-
-  it('calls stopNodeResources with correct arguments', async () => {
+  it('calls stopNodeResources exactly once with correct arguments', async () => {
     await app.request('/api/nodes/node-1/stop', { method: 'POST' }, env);
 
+    expect(mocks.stopNodeResources).toHaveBeenCalledTimes(1);
     expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-1', 'user-123', env);
+  });
+
+  it('returns 404 when node is not found', async () => {
+    mocks.requireNodeOwnership.mockRejectedValue(
+      Object.assign(new Error('Node not found'), {
+        statusCode: 404,
+        error: 'NOT_FOUND',
+        message: 'Node not found',
+      }),
+    );
+
+    const response = await app.request('/api/nodes/node-1/stop', { method: 'POST' }, env);
+    expect(response.status).toBe(404);
   });
 });

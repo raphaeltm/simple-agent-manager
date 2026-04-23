@@ -61,4 +61,12 @@ describe('ProviderError.toJSON', () => {
 
     expect(parsed.cause).toBe('ECONNRESET');
   });
+
+  it('does not expose stack trace in serialized output', () => {
+    const err = new ProviderError('hetzner', 500, 'Internal error');
+    const json = err.toJSON();
+
+    expect('stack' in json).toBe(false);
+  });
 });
+
