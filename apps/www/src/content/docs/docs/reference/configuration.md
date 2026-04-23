@@ -185,7 +185,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 | Variable                       | Default  | Description                        |
 | ------------------------------ | -------- | ---------------------------------- |
-| `MAX_SESSIONS_PER_PROJECT`     | `1000`   | Max chat sessions per project      |
+| `MAX_SESSIONS_PER_PROJECT`     | `10000`  | Max chat sessions per project      |
 | `MAX_MESSAGES_PER_SESSION`     | `10000`  | Max messages per chat session      |
 | `MESSAGE_SIZE_THRESHOLD`       | `102400` | Max message size in bytes          |
 | `ACTIVITY_RETENTION_DAYS`      | `90`     | Days to retain activity events     |

@@ -17,7 +17,7 @@ export function createSession(
   topic: string | null,
   taskId: string | null = null
 ): { id: string; now: number } {
-  const maxSessions = parseInt(env.MAX_SESSIONS_PER_PROJECT || '1000', 10);
+  const maxSessions = parseInt(env.MAX_SESSIONS_PER_PROJECT || '10000', 10);
   const countRow = sql
     .exec('SELECT COUNT(*) as cnt FROM chat_sessions')
     .toArray()[0];
