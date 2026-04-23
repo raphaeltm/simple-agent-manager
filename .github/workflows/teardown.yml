@@ -715,7 +715,7 @@ jobs:
       # ================================================================
       - name: Remove Pulumi Stack
         id: remove_stack
-        if: ${{ !inputs.keep_data && !inputs.dry_run && steps.pulumi_stack.outputs.status == 'ok' }}
+        if: ${{ !inputs.keep_data && !inputs.dry_run && steps.pulumi_stack.outputs.status == 'ok' && steps.pulumi_destroy.outputs.status == 'deleted' }}
         continue-on-error: true
         working-directory: infra
         run: |

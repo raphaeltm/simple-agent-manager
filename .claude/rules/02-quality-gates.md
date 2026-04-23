@@ -77,6 +77,10 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 - **If mocks hid the bug**, the right response is often an integration or E2E test that uses real (or more realistic) dependencies. Shallow unit tests with overly permissive mocks can give false confidence.
 - **If the bug was a missing propagation** (value set in A but never forwarded to B), write a test that constructs the real lifecycle (A then B) and asserts the value arrives.
 
+### Destructive Cleanup State Gates
+
+When a workflow deletes state, metadata, lock files, Pulumi stacks, or other recovery handles after deleting external resources, the state-deletion step MUST be gated on an explicit successful cleanup output from the preceding deletion step. Do not gate state deletion only on setup or discovery success. A failed external cleanup must leave state intact so the next run can retry or reconcile resources safely.
+
 ### Evaluating Test Realism
 
 Before finalizing tests, ask:
