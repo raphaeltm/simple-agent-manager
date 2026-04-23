@@ -126,6 +126,41 @@ const storedAuthJson = JSON.stringify({
   },
 });
 
+async function sha256Hex(value: string): Promise<string> {
+  const data = new TextEncoder().encode(value);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = new Uint8Array(hashBuffer);
+  return Array.from(hashArray)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function createRotatedTokenStorage(token: string, ageMs: number) {
+  return {
+    'rotated-tokens': [
+      {
+        tokenHash: await sha256Hex(token),
+        rotatedAt: Date.now() - ageMs,
+      },
+    ],
+  };
+}
+
+function mockSuccessfulRefreshResponse(
+  tokens: Record<string, string> = {
+    access_token: 'new-access',
+    refresh_token: 'new-refresh',
+    id_token: 'new-id',
+  },
+) {
+  vi.mocked(fetch).mockResolvedValue(
+    new Response(JSON.stringify(tokens), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+}
+
 /**
  * Configure the D1 mock to return a user-scoped credential row for the SECOND
  * query (the first, project-scoped query returns null when called).
@@ -272,23 +307,10 @@ describe('CodexRefreshLock', () => {
 
   describe('grace window for recently-rotated tokens', () => {
     it('returns full tokens (including refresh_token) when stale token is within grace window', async () => {
-      // Simulate: a previous refresh rotated 'old-refresh' → 'stored-refresh' recently.
-      // The DO storage has a record of that rotation.
-      // A caller presenting 'old-refresh' should get the full token set.
-
-      // First, compute the hash of 'old-refresh' to pre-populate DO storage.
-      const data = new TextEncoder().encode('old-refresh');
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = new Uint8Array(hashBuffer);
-      const oldRefreshHash = Array.from(hashArray)
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('');
-
-      const { do: doInstance, env } = createDO({}, {
-        'rotated-tokens': [
-          { tokenHash: oldRefreshHash, rotatedAt: Date.now() - 60_000 }, // 1 min ago
-        ],
-      });
+      const { do: doInstance, env } = createDO(
+        {},
+        await createRotatedTokenStorage('old-refresh', 60_000),
+      );
       setupCredentialFound(env);
 
       const res = await doInstance.fetch(
@@ -315,18 +337,10 @@ describe('CodexRefreshLock', () => {
     });
 
     it('rejects stale token outside grace window (CRITICAL #1 still applies)', async () => {
-      const data = new TextEncoder().encode('very-old-refresh');
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = new Uint8Array(hashBuffer);
-      const oldRefreshHash = Array.from(hashArray)
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('');
-
-      const { do: doInstance, env } = createDO({}, {
-        'rotated-tokens': [
-          { tokenHash: oldRefreshHash, rotatedAt: Date.now() - 600_000 }, // 10 min ago (outside 5 min default)
-        ],
-      });
+      const { do: doInstance, env } = createDO(
+        {},
+        await createRotatedTokenStorage('very-old-refresh', 600_000),
+      );
       setupCredentialFound(env);
 
       const res = await doInstance.fetch(
@@ -367,17 +381,7 @@ describe('CodexRefreshLock', () => {
     it('records rotated token in DO storage on successful refresh', async () => {
       const { do: doInstance, env, ctx } = createDO();
       setupCredentialFound(env);
-
-      vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            access_token: 'new-access',
-            refresh_token: 'new-refresh', // different from 'stored-refresh'
-            id_token: 'new-id',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      );
+      mockSuccessfulRefreshResponse();
 
       await doInstance.fetch(
         makeRequest({
@@ -396,29 +400,17 @@ describe('CodexRefreshLock', () => {
       expect(rotatedTokens[0].rotatedAt).toBeGreaterThan(0);
 
       // Verify the hash matches 'stored-refresh'.
-      const data = new TextEncoder().encode('stored-refresh');
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = new Uint8Array(hashBuffer);
-      const expectedHash = Array.from(hashArray)
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('');
-      expect(rotatedTokens[0].tokenHash).toBe(expectedHash);
+      expect(rotatedTokens[0].tokenHash).toBe(await sha256Hex('stored-refresh'));
     });
 
     it('does NOT record rotated token when refresh_token is unchanged', async () => {
       const { do: doInstance, env, ctx } = createDO();
       setupCredentialFound(env);
-
-      vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            access_token: 'new-access',
-            refresh_token: 'stored-refresh', // same as stored — no rotation
-            id_token: 'new-id',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      );
+      mockSuccessfulRefreshResponse({
+        access_token: 'new-access',
+        refresh_token: 'stored-refresh',
+        id_token: 'new-id',
+      });
 
       await doInstance.fetch(
         makeRequest({
@@ -433,22 +425,9 @@ describe('CodexRefreshLock', () => {
     });
 
     it('respects configurable grace window via CODEX_REFRESH_GRACE_WINDOW_MS', async () => {
-      // Set a very short grace window (1 second).
-      const data = new TextEncoder().encode('recently-rotated');
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = new Uint8Array(hashBuffer);
-      const tokenHash = Array.from(hashArray)
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('');
-
-      // Token rotated 2 seconds ago — outside 1-second grace window.
       const { do: doInstance, env } = createDO(
         { CODEX_REFRESH_GRACE_WINDOW_MS: '1000' },
-        {
-          'rotated-tokens': [
-            { tokenHash, rotatedAt: Date.now() - 2_000 },
-          ],
-        },
+        await createRotatedTokenStorage('recently-rotated', 2_000),
       );
       setupCredentialFound(env);
 
