@@ -267,6 +267,207 @@ describe('CodexRefreshLock', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Grace window — recently-rotated tokens receive full response
+  // -----------------------------------------------------------------------
+
+  describe('grace window for recently-rotated tokens', () => {
+    it('returns full tokens (including refresh_token) when stale token is within grace window', async () => {
+      // Simulate: a previous refresh rotated 'old-refresh' → 'stored-refresh' recently.
+      // The DO storage has a record of that rotation.
+      // A caller presenting 'old-refresh' should get the full token set.
+
+      // First, compute the hash of 'old-refresh' to pre-populate DO storage.
+      const data = new TextEncoder().encode('old-refresh');
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = new Uint8Array(hashBuffer);
+      const oldRefreshHash = Array.from(hashArray)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+
+      const { do: doInstance, env } = createDO({}, {
+        'rotated-tokens': [
+          { tokenHash: oldRefreshHash, rotatedAt: Date.now() - 60_000 }, // 1 min ago
+        ],
+      });
+      setupCredentialFound(env);
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'old-refresh', // stale, but recently rotated
+          userId: 'user-1',
+        }),
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      // Grace window hit: full tokens returned including refresh_token.
+      expect(json.access_token).toBe('stored-access');
+      expect(json.refresh_token).toBe('stored-refresh');
+      expect(json.id_token).toBe('stored-id');
+      expect(json.stale).toBeUndefined(); // no stale flag
+
+      // No upstream fetch — we return stored tokens directly.
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+      expect(mockLogInfo).toHaveBeenCalledWith(
+        'codex_refresh.grace_window_hit',
+        expect.objectContaining({ userId: 'user-1' }),
+      );
+    });
+
+    it('rejects stale token outside grace window (CRITICAL #1 still applies)', async () => {
+      const data = new TextEncoder().encode('very-old-refresh');
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = new Uint8Array(hashBuffer);
+      const oldRefreshHash = Array.from(hashArray)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+
+      const { do: doInstance, env } = createDO({}, {
+        'rotated-tokens': [
+          { tokenHash: oldRefreshHash, rotatedAt: Date.now() - 600_000 }, // 10 min ago (outside 5 min default)
+        ],
+      });
+      setupCredentialFound(env);
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'very-old-refresh',
+          userId: 'user-1',
+        }),
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      // CRITICAL #1: outside grace window → no refresh_token.
+      expect(json.refresh_token).toBeUndefined();
+      expect(json.access_token).toBe('stored-access');
+      expect(json.id_token).toBe('stored-id');
+      expect(json.stale).toBe(true);
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    });
+
+    it('rejects completely unknown stale token (no grace window entry)', async () => {
+      const { do: doInstance, env } = createDO();
+      setupCredentialFound(env);
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'totally-unknown-token',
+          userId: 'user-1',
+        }),
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      // No grace window entry → CRITICAL #1 applies.
+      expect(json.refresh_token).toBeUndefined();
+      expect(json.stale).toBe(true);
+    });
+
+    it('records rotated token in DO storage on successful refresh', async () => {
+      const { do: doInstance, env, ctx } = createDO();
+      setupCredentialFound(env);
+
+      vi.mocked(fetch).mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            access_token: 'new-access',
+            refresh_token: 'new-refresh', // different from 'stored-refresh'
+            id_token: 'new-id',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+      await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'stored-refresh', // matches stored → fresh path
+          userId: 'user-1',
+        }),
+      );
+
+      // The old 'stored-refresh' should be recorded in rotated-tokens.
+      const rotatedTokens = ctx.storage._store.get('rotated-tokens') as Array<{
+        tokenHash: string;
+        rotatedAt: number;
+      }>;
+      expect(rotatedTokens).toBeDefined();
+      expect(rotatedTokens.length).toBe(1);
+      expect(rotatedTokens[0].rotatedAt).toBeGreaterThan(0);
+
+      // Verify the hash matches 'stored-refresh'.
+      const data = new TextEncoder().encode('stored-refresh');
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = new Uint8Array(hashBuffer);
+      const expectedHash = Array.from(hashArray)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+      expect(rotatedTokens[0].tokenHash).toBe(expectedHash);
+    });
+
+    it('does NOT record rotated token when refresh_token is unchanged', async () => {
+      const { do: doInstance, env, ctx } = createDO();
+      setupCredentialFound(env);
+
+      vi.mocked(fetch).mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            access_token: 'new-access',
+            refresh_token: 'stored-refresh', // same as stored — no rotation
+            id_token: 'new-id',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+      await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'stored-refresh',
+          userId: 'user-1',
+        }),
+      );
+
+      // No rotation happened — rotated-tokens should not be written.
+      const rotatedTokens = ctx.storage._store.get('rotated-tokens');
+      expect(rotatedTokens).toBeUndefined();
+    });
+
+    it('respects configurable grace window via CODEX_REFRESH_GRACE_WINDOW_MS', async () => {
+      // Set a very short grace window (1 second).
+      const data = new TextEncoder().encode('recently-rotated');
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = new Uint8Array(hashBuffer);
+      const tokenHash = Array.from(hashArray)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+
+      // Token rotated 2 seconds ago — outside 1-second grace window.
+      const { do: doInstance, env } = createDO(
+        { CODEX_REFRESH_GRACE_WINDOW_MS: '1000' },
+        {
+          'rotated-tokens': [
+            { tokenHash, rotatedAt: Date.now() - 2_000 },
+          ],
+        },
+      );
+      setupCredentialFound(env);
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'recently-rotated',
+          userId: 'user-1',
+        }),
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      // Outside the short grace window → stale.
+      expect(json.refresh_token).toBeUndefined();
+      expect(json.stale).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Fresh-token path — forwards to upstream and persists
   // -----------------------------------------------------------------------
 

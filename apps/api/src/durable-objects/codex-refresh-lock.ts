@@ -12,10 +12,13 @@
  * userId — it does not re-verify auth.
  *
  * Security notes:
- *  - Stale-refresh branch (CRITICAL #1): NEVER returns `refresh_token`. A caller that submits
- *    a non-matching refresh token did not prove possession of the current one, so we must not
- *    hand it out. We do return the short-lived `access_token` so a legitimate concurrent caller
- *    can continue operating without a full re-auth.
+ *  - Stale-refresh branch (CRITICAL #1) with grace window: When a caller submits a non-matching
+ *    refresh token, we check if it was recently rotated (within CODEX_REFRESH_GRACE_WINDOW_MS,
+ *    default 5 min). If so, the caller is a legitimate concurrent session that started before
+ *    the rotation — we return the full token set including the current refresh_token. Outside
+ *    the grace window, we return only short-lived tokens (access_token, id_token) without the
+ *    refresh_token, forcing re-auth. This balances security (don't hand out rotating credentials
+ *    to truly old/stolen tokens) with operational correctness (don't break concurrent sessions).
  *  - Project vs user fallback (HIGH #2): if `projectId` is supplied AND any project-scoped row
  *    exists for (userId, projectId) — active OR inactive — we do NOT fall back to the
  *    user-scoped row. An inactive project row means the user explicitly deactivated
@@ -71,6 +74,13 @@ interface CodexRefreshEnv {
    * Rate limit window in seconds. Defaults to 3600 (1 hour).
    */
   RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS?: string;
+  /**
+   * Grace window (ms) during which a recently-rotated refresh token is still
+   * accepted and receives the full token response (including the current
+   * refresh_token). Handles the race where Session A rotates the token while
+   * Session B still holds the previous one. Defaults to 300000 (5 minutes).
+   */
+  CODEX_REFRESH_GRACE_WINDOW_MS?: string;
 }
 
 const DEFAULT_UPSTREAM_URL = 'https://auth.openai.com/oauth/token';
@@ -94,6 +104,31 @@ const DEFAULT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const DEFAULT_EXPECTED_SCOPES = 'openid,profile,email,offline_access';
 const DEFAULT_RATE_LIMIT = 30;
 const DEFAULT_RATE_WINDOW_SECONDS = 3600;
+/**
+ * Default grace window: 5 minutes. During this window, a refresh token that
+ * was recently rotated out (by another session's successful refresh) will still
+ * receive the full token response including the current refresh_token. This
+ * prevents the race condition where Session B starts with valid tokens, but
+ * Session A rotates them before B's first refresh attempt.
+ */
+const DEFAULT_GRACE_WINDOW_MS = 300_000;
+/**
+ * Maximum number of recently-rotated token hashes to track in DO storage.
+ * Keeps storage bounded even under pathological refresh patterns.
+ */
+const MAX_ROTATED_TOKEN_ENTRIES = 5;
+
+/**
+ * A recently-rotated refresh token entry stored in DO storage.
+ * We store a SHA-256 hex digest of the old token (not the token itself) so that
+ * even if DO storage is compromised, the old tokens cannot be extracted.
+ */
+interface RotatedTokenEntry {
+  /** SHA-256 hex digest of the old refresh token. */
+  tokenHash: string;
+  /** Unix timestamp (ms) when the token was rotated out. */
+  rotatedAt: number;
+}
 
 interface RateLimitState {
   /** Start of the current window in unix seconds. */
@@ -209,16 +244,38 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     const storedRefreshToken = tokens?.refresh_token;
 
     if (refreshToken !== storedRefreshToken) {
-      // CRITICAL #1 fix: stale token path.
-      // Another workspace (owned by the same user) rotated the refresh token
-      // before this caller's request arrived. The caller did NOT prove possession
-      // of the current refresh token, so we MUST NOT return it — doing so would
-      // allow any workspace with a stolen/expired refresh token to obtain the
-      // current rotating credential.
-      //
-      // We still return the short-lived `access_token` and `id_token` so a
-      // concurrent legitimate caller can continue operating. The caller can
-      // obtain a new refresh token only via a full re-auth flow.
+      // Stale token path — the caller's refresh token doesn't match what's in DB.
+      // Check if it was recently rotated (grace window) before rejecting.
+      const graceWindowMs =
+        parseInt(this.env.CODEX_REFRESH_GRACE_WINDOW_MS || '', 10) || DEFAULT_GRACE_WINDOW_MS;
+      const withinGrace = await this.isWithinGraceWindow(refreshToken, graceWindowMs);
+
+      if (withinGrace) {
+        // The caller's token was valid recently — this is a legitimate concurrent
+        // session that started before the rotation. Return the full token set
+        // so the session can continue operating without re-auth.
+        log.info('codex_refresh.grace_window_hit', {
+          userId,
+          graceWindowMs,
+        });
+        return new Response(
+          JSON.stringify({
+            access_token: tokens?.access_token ?? null,
+            refresh_token: tokens?.refresh_token ?? null,
+            id_token: tokens?.id_token ?? null,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Outside grace window — CRITICAL #1 still applies.
+      // The caller did NOT prove possession of the current refresh token AND
+      // the token is too old to be from a legitimate concurrent session. Do NOT
+      // return the refresh_token. Return short-lived tokens only.
+      log.warn('codex_refresh.stale_token_rejected', {
+        userId,
+        graceWindowMs,
+      });
       return new Response(
         JSON.stringify({
           access_token: tokens?.access_token ?? null,
@@ -319,6 +376,12 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         reason: scopeResult.reason,
         validationMode,
       });
+    }
+
+    // Before updating tokens, record the old refresh_token in the grace window
+    // so concurrent sessions holding it can still refresh successfully.
+    if (storedRefreshToken && typeof newTokens.refresh_token === 'string' && newTokens.refresh_token !== storedRefreshToken) {
+      await this.recordRotatedToken(storedRefreshToken);
     }
 
     // Update the stored auth.json with new tokens.
@@ -437,6 +500,62 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     return { ok: true };
+  }
+
+  /**
+   * Hash a refresh token using SHA-256. We store hashes (not raw tokens) in DO
+   * storage so that a storage compromise doesn't leak old refresh tokens.
+   */
+  private async hashToken(token: string): Promise<string> {
+    const data = new TextEncoder().encode(token);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = new Uint8Array(hashBuffer);
+    return Array.from(hashArray)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  /**
+   * Record a recently-rotated refresh token in DO storage. Called after a
+   * successful upstream refresh replaces the stored token with a new one.
+   * Keeps at most MAX_ROTATED_TOKEN_ENTRIES entries; prunes expired ones.
+   */
+  private async recordRotatedToken(oldRefreshToken: string): Promise<void> {
+    const hash = await this.hashToken(oldRefreshToken);
+    const now = Date.now();
+    const graceWindowMs =
+      parseInt(this.env.CODEX_REFRESH_GRACE_WINDOW_MS || '', 10) || DEFAULT_GRACE_WINDOW_MS;
+
+    const entries =
+      (await this.ctx.storage.get<RotatedTokenEntry[]>('rotated-tokens')) ?? [];
+
+    // Prune expired entries and add the new one.
+    const fresh = entries
+      .filter((e) => now - e.rotatedAt < graceWindowMs)
+      .slice(-(MAX_ROTATED_TOKEN_ENTRIES - 1));
+    fresh.push({ tokenHash: hash, rotatedAt: now });
+
+    await this.ctx.storage.put('rotated-tokens', fresh);
+  }
+
+  /**
+   * Check whether the given refresh token was rotated out within the grace window.
+   * Returns true if the token hash matches a recently-rotated entry.
+   */
+  private async isWithinGraceWindow(
+    refreshToken: string,
+    graceWindowMs: number
+  ): Promise<boolean> {
+    const entries =
+      (await this.ctx.storage.get<RotatedTokenEntry[]>('rotated-tokens')) ?? [];
+    if (entries.length === 0) return false;
+
+    const hash = await this.hashToken(refreshToken);
+    const now = Date.now();
+
+    return entries.some(
+      (e) => e.tokenHash === hash && now - e.rotatedAt < graceWindowMs
+    );
   }
 
   /**
