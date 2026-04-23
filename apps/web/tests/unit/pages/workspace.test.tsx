@@ -706,7 +706,9 @@ describe('Workspace page', () => {
       );
     });
 
-    expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
+    });
     expect(screen.getByTestId('location-probe').textContent).toContain(
       'worktree=%2Fworkspaces%2Frepo-wt-feature-auth'
     );

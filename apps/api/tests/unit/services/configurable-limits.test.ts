@@ -46,8 +46,8 @@ describe('getRuntimeLimits', () => {
       expect(defaults.maxProjectsPerUser).toBe(100);
     });
 
-    it('maxTasksPerProject defaults to 500', () => {
-      expect(defaults.maxTasksPerProject).toBe(500);
+    it('maxTasksPerProject defaults to 10000', () => {
+      expect(defaults.maxTasksPerProject).toBe(10000);
     });
 
     it('maxTaskDependenciesPerTask defaults to 50', () => {
@@ -171,7 +171,7 @@ describe('getRuntimeLimits', () => {
     });
 
     it('ignores negative numbers', () => {
-      expect(getRuntimeLimits({ MAX_TASKS_PER_PROJECT: '-5' }).maxTasksPerProject).toBe(500);
+      expect(getRuntimeLimits({ MAX_TASKS_PER_PROJECT: '-5' }).maxTasksPerProject).toBe(10000);
     });
 
     it('ignores empty string', () => {

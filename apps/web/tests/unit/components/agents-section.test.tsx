@@ -92,6 +92,19 @@ describe('AgentsSection', () => {
   });
 
   it('calls saveAgentSettings when the Save Settings button is clicked', async () => {
+    mocks.listAgentCredentials.mockResolvedValue({
+      credentials: [
+        {
+          id: 'cred-claude',
+          agentType: 'claude-code',
+          credentialKind: 'api-key',
+          maskedKey: 'sk-****abcd',
+          isActive: true,
+          createdAt: '2026-04-01T00:00:00Z',
+          updatedAt: '2026-04-01T00:00:00Z',
+        },
+      ],
+    });
     mocks.saveAgentSettings.mockResolvedValue(
       makeSettings('claude-code', { permissionMode: 'default' }),
     );
