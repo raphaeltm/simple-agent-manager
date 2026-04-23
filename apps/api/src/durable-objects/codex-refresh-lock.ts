@@ -246,8 +246,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     if (refreshToken !== storedRefreshToken) {
       // Stale token path — the caller's refresh token doesn't match what's in DB.
       // Check if it was recently rotated (grace window) before rejecting.
-      const graceWindowMs =
-        parseInt(this.env.CODEX_REFRESH_GRACE_WINDOW_MS || '', 10) || DEFAULT_GRACE_WINDOW_MS;
+      const graceWindowMs = this.getGraceWindowMs();
       const withinGrace = await this.isWithinGraceWindow(refreshToken, graceWindowMs);
 
       if (withinGrace) {
@@ -523,11 +522,8 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   private async recordRotatedToken(oldRefreshToken: string): Promise<void> {
     const hash = await this.hashToken(oldRefreshToken);
     const now = Date.now();
-    const graceWindowMs =
-      parseInt(this.env.CODEX_REFRESH_GRACE_WINDOW_MS || '', 10) || DEFAULT_GRACE_WINDOW_MS;
-
-    const entries =
-      (await this.ctx.storage.get<RotatedTokenEntry[]>('rotated-tokens')) ?? [];
+    const graceWindowMs = this.getGraceWindowMs();
+    const entries = await this.getRotatedTokenEntries();
 
     // Prune expired entries and add the new one.
     const fresh = entries
@@ -546,8 +542,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     refreshToken: string,
     graceWindowMs: number
   ): Promise<boolean> {
-    const entries =
-      (await this.ctx.storage.get<RotatedTokenEntry[]>('rotated-tokens')) ?? [];
+    const entries = await this.getRotatedTokenEntries();
     if (entries.length === 0) return false;
 
     const hash = await this.hashToken(refreshToken);
@@ -556,6 +551,17 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     return entries.some(
       (e) => e.tokenHash === hash && now - e.rotatedAt < graceWindowMs
     );
+  }
+
+  private getGraceWindowMs(): number {
+    return (
+      parseInt(this.env.CODEX_REFRESH_GRACE_WINDOW_MS || '', 10) ||
+      DEFAULT_GRACE_WINDOW_MS
+    );
+  }
+
+  private async getRotatedTokenEntries(): Promise<RotatedTokenEntry[]> {
+    return (await this.ctx.storage.get<RotatedTokenEntry[]>('rotated-tokens')) ?? [];
   }
 
   /**

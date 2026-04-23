@@ -110,6 +110,16 @@ function createDO(
   return { do: new CodexRefreshLock(ctx, env), env, ctx };
 }
 
+async function createDOWithRotatedToken(
+  token: string,
+  ageMs: number,
+  envOverrides: Record<string, unknown> = {},
+) {
+  const setup = createDO(envOverrides, await createRotatedTokenStorage(token, ageMs));
+  setupCredentialFound(setup.env);
+  return setup;
+}
+
 function makeRequest(payload: Record<string, unknown>): Request {
   return new Request('https://do-internal/refresh', {
     method: 'POST',
@@ -307,11 +317,7 @@ describe('CodexRefreshLock', () => {
 
   describe('grace window for recently-rotated tokens', () => {
     it('returns full tokens (including refresh_token) when stale token is within grace window', async () => {
-      const { do: doInstance, env } = createDO(
-        {},
-        await createRotatedTokenStorage('old-refresh', 60_000),
-      );
-      setupCredentialFound(env);
+      const { do: doInstance } = await createDOWithRotatedToken('old-refresh', 60_000);
 
       const res = await doInstance.fetch(
         makeRequest({
@@ -337,11 +343,7 @@ describe('CodexRefreshLock', () => {
     });
 
     it('rejects stale token outside grace window (CRITICAL #1 still applies)', async () => {
-      const { do: doInstance, env } = createDO(
-        {},
-        await createRotatedTokenStorage('very-old-refresh', 600_000),
-      );
-      setupCredentialFound(env);
+      const { do: doInstance } = await createDOWithRotatedToken('very-old-refresh', 600_000);
 
       const res = await doInstance.fetch(
         makeRequest({
@@ -425,11 +427,11 @@ describe('CodexRefreshLock', () => {
     });
 
     it('respects configurable grace window via CODEX_REFRESH_GRACE_WINDOW_MS', async () => {
-      const { do: doInstance, env } = createDO(
+      const { do: doInstance } = await createDOWithRotatedToken(
+        'recently-rotated',
+        2_000,
         { CODEX_REFRESH_GRACE_WINDOW_MS: '1000' },
-        await createRotatedTokenStorage('recently-rotated', 2_000),
       );
-      setupCredentialFound(env);
 
       const res = await doInstance.fetch(
         makeRequest({
