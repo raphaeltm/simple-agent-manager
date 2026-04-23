@@ -38,7 +38,7 @@ export const DEFAULT_NODE_HEARTBEAT_STALE_SECONDS = 180;
 export const DEFAULT_MAX_PROJECTS_PER_USER = 100;
 
 /** Default max tasks per project. Override via MAX_TASKS_PER_PROJECT env var. */
-export const DEFAULT_MAX_TASKS_PER_PROJECT = 500;
+export const DEFAULT_MAX_TASKS_PER_PROJECT = 10_000;
 
 /** Default max dependency edges per task. Override via MAX_TASK_DEPENDENCIES_PER_TASK env var. */
 export const DEFAULT_MAX_TASK_DEPENDENCIES_PER_TASK = 50;
