@@ -37,7 +37,7 @@ Phase 1: Research & Task Creation
 - [ ] Phase 4: Pre-PR Validation
 - [ ] Phase 5: Review
 - [ ] Phase 6: Staging Verification
-- [ ] Phase 7: Pull Request & Cleanup
+- [ ] Phase 7: Pull Request & Post-Merge Deploy Monitoring
 
 ## Phase 5: Review Tracker
 <populated when Phase 5 starts — one line per dispatched reviewer>
@@ -86,10 +86,11 @@ This forces a deliberate pause that prevents the "rush to PR" failure mode.
 | Repeating already-done work | Checked items + notes show what's been accomplished |
 | Jumping to PR creation early | Phase checklist enforces ordering |
 | Merging before reviewers finish | Review Tracker blocks Phase 5 completion until all reviewers report back |
+| Silently failing production deploy | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
 
 ## Cleanup
 
-Delete `.do-state.md` at the end of Phase 7 (after PR merge and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
+Delete `.do-state.md` at the end of Phase 7 (after PR merge, deploy monitoring, and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
 
 ## Phase 5 → Phase 6 Transition Guard
 

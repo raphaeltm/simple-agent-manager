@@ -274,7 +274,7 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 
 ---
 
-## Phase 7: Pull Request
+## Phase 7: Pull Request & Post-Merge Deploy Monitoring
 
 > **Checkpoint**: Re-read `.do-state.md`. Confirm ALL Phases 1-6 are complete. If any phase is unchecked, GO BACK and complete it. Update "Current Phase" to Phase 7.
 
@@ -305,6 +305,40 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
    git pull origin main
    ```
 
+### 7b. Post-Merge Production Deploy Monitoring (MANDATORY)
+
+After merging to main, you MUST monitor the production deployment to completion. **Do NOT consider the task done until the deploy succeeds or you have alerted the user about a failure.**
+
+1. **Wait for the Deploy Production workflow to start** (usually within 30 seconds of merge):
+   ```bash
+   sleep 10
+   gh run list --workflow=deploy.yml --branch=main --limit=1 --json databaseId,status,conclusion,createdAt
+   ```
+
+2. **Watch it to completion:**
+   ```bash
+   gh run watch <run-id>
+   ```
+
+3. **If the deploy succeeds**: Report to the user: "Production deploy succeeded. Changes are live."
+
+4. **If the deploy FAILS**: This is critical. You MUST:
+   - Immediately inspect the failure: `gh run view <run-id> --log-failed`
+   - **Alert the user immediately** with:
+     - The fact that the production deploy failed
+     - The specific failure reason (e.g., missing secret, build error, Pulumi failure)
+     - Whether this is something the agent can fix (code issue) or requires human intervention (missing secrets, infrastructure config)
+   - If it's a code issue you introduced: fix it, push to main, and monitor the next deploy
+   - If it requires human intervention (missing secrets, permissions, external config): **tell the user explicitly what action they need to take** and do NOT silently move on
+
+5. **Check for pre-existing deploy failures**: Before monitoring your own deploy, check if recent deploys have been failing:
+   ```bash
+   gh run list --workflow=deploy.yml --limit=5 --json conclusion,createdAt,displayTitle
+   ```
+   If the last several deploys have all failed, **alert the user immediately** — there may be a systemic configuration issue that is blocking all deployments. Do not assume your merge will deploy successfully just because CI passed.
+
+> **Why this is mandatory**: On 2026-04-23, production deploys failed silently for 2 days due to a missing `GH_WEBHOOK_SECRET`. Multiple agents merged PRs without noticing. 6+ changes accumulated undeployed with no one aware. This step exists to ensure deploy failures are caught immediately, not days later.
+
 7. **Delete `.do-state.md`** — the workflow is complete.
 
 ---
@@ -316,3 +350,4 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 - **Safety**: Push often, never force-push, never commit to main (except the task file).
 - **Quality**: Every shortcut now is a bug later. Follow the rules.
 - **Iteration**: Review feedback is not optional — address it all.
+- **Deploy awareness**: A merged PR is not shipped until the deploy succeeds. Monitor it.

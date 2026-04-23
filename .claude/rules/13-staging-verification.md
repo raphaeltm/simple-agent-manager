@@ -60,8 +60,14 @@ Staging deployment is **manual** — it does NOT run automatically on PRs. You m
 
 If the deployment fails:
 - Inspect the deployment logs: `gh run view <RUN_ID> --log-failed`
-- Fix the deployment issue in your branch
-- Push and re-trigger the deployment
+- **Distinguish code failures from configuration failures:**
+  - **Code failure** (build error, type error, test failure): Fix the issue in your branch, push, and re-trigger
+  - **Configuration failure** (missing secrets, missing environment variables, permissions errors): **Alert the user immediately.** You cannot fix missing GitHub Environment secrets or Cloudflare configuration. Tell the user exactly what is missing and what action they need to take. Do NOT skip staging verification because of a config failure — do NOT merge without it.
+- **Check for pre-existing deploy failures** before assuming your code broke it:
+  ```bash
+  gh run list --workflow=deploy-staging.yml --limit=5 --json conclusion,createdAt,displayTitle
+  ```
+  If the last several staging deploys have all failed with the same error, this is a systemic issue — **alert the user** that staging deployments are broken and require intervention. Do not rationalize around it ("my code is fine, it's just a config issue") — a broken staging pipeline is a broken merge gate.
 - **A failed staging deployment is the same severity as a failed test — it blocks merge**
 
 ### 2. Log In and Verify Using Playwright
