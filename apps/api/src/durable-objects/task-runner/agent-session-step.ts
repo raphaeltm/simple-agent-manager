@@ -73,6 +73,63 @@ export async function handleAgentSession(
       state.projectId,
     );
 
+    // Create ACP session in ProjectData DO so the chat session can find its agentSessionId.
+    // Without this, the browser has no ACP session to connect to and shows "Agent offline".
+    if (state.stepResults.chatSessionId && state.projectId) {
+      const projectDataService = await import('../../services/project-data');
+      try {
+        const acpSession = await projectDataService.createAcpSession(
+          rc.env,
+          state.projectId,
+          state.stepResults.chatSessionId,
+          null, // initialPrompt — already sent to the VM agent directly
+          agentType,
+        );
+        // Transition to assigned (links workspace + node)
+        await projectDataService.transitionAcpSession(
+          rc.env,
+          state.projectId,
+          acpSession.id,
+          'assigned',
+          {
+            actorType: 'system',
+            actorId: 'task-runner',
+            reason: 'Task runner assigned agent session to workspace',
+            workspaceId: state.stepResults.workspaceId,
+            nodeId: state.stepResults.nodeId,
+          },
+        );
+        // Transition to running (agent session created on node)
+        await projectDataService.transitionAcpSession(
+          rc.env,
+          state.projectId,
+          acpSession.id,
+          'running',
+          {
+            actorType: 'system',
+            actorId: 'task-runner',
+            reason: 'Agent session started on node',
+            acpSdkSessionId: sessionId,
+          },
+        );
+        log.info('task_runner_do.step.acp_session_created', {
+          taskId: state.taskId,
+          acpSessionId: acpSession.id,
+          chatSessionId: state.stepResults.chatSessionId,
+          projectId: state.projectId,
+        });
+      } catch (err) {
+        // ACP session creation failure is non-fatal for the task itself —
+        // the agent will still run, but the browser won't have live ACP connection.
+        log.error('task_runner_do.step.acp_session_create_failed', {
+          taskId: state.taskId,
+          chatSessionId: state.stepResults.chatSessionId,
+          projectId: state.projectId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     log.info('task_runner_do.step.agent_session_created', {
       taskId: state.taskId,
       agentSessionId: sessionId,
