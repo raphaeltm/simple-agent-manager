@@ -78,12 +78,17 @@ export async function handleAgentSession(
     if (state.stepResults.chatSessionId && state.projectId) {
       const projectDataService = await import('../../services/project-data');
       try {
+        // Use the D1 agent session ID as the ACP session ID so the browser
+        // passes the correct sessionId to the VM agent WebSocket endpoint.
         const acpSession = await projectDataService.createAcpSession(
           rc.env,
           state.projectId,
           state.stepResults.chatSessionId,
           null, // initialPrompt — already sent to the VM agent directly
           agentType,
+          null, // parentSessionId
+          0,    // forkDepth
+          sessionId, // use D1 agent session ID as ACP session ID
         );
         // Transition to assigned (links workspace + node)
         await projectDataService.transitionAcpSession(
