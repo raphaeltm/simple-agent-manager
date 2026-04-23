@@ -342,42 +342,48 @@ describe('CodexRefreshLock', () => {
       );
     });
 
-    it('rejects stale token outside grace window (CRITICAL #1 still applies)', async () => {
-      const { do: doInstance } = await createDOWithRotatedToken('very-old-refresh', 600_000);
+    it.each([
+      {
+        name: 'token was rotated outside the default grace window',
+        setup: () => createDOWithRotatedToken('very-old-refresh', 600_000),
+        refreshToken: 'very-old-refresh',
+      },
+      {
+        name: 'token has no grace-window entry',
+        setup: async () => {
+          const setup = createDO();
+          setupCredentialFound(setup.env);
+          return setup;
+        },
+        refreshToken: 'totally-unknown-token',
+      },
+      {
+        name: 'token is older than the configured custom grace window',
+        setup: () =>
+          createDOWithRotatedToken(
+            'recently-rotated',
+            2_000,
+            { CODEX_REFRESH_GRACE_WINDOW_MS: '1000' },
+          ),
+        refreshToken: 'recently-rotated',
+      },
+    ])('returns stale tokens when $name', async ({ setup, refreshToken }) => {
+      const { do: doInstance } = await setup();
 
       const res = await doInstance.fetch(
         makeRequest({
-          refreshToken: 'very-old-refresh',
+          refreshToken,
           userId: 'user-1',
         }),
       );
       expect(res.status).toBe(200);
       const json = await res.json();
 
-      // CRITICAL #1: outside grace window → no refresh_token.
       expect(json.refresh_token).toBeUndefined();
       expect(json.access_token).toBe('stored-access');
       expect(json.id_token).toBe('stored-id');
       expect(json.stale).toBe(true);
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
-    });
-
-    it('rejects completely unknown stale token (no grace window entry)', async () => {
-      const { do: doInstance, env } = createDO();
-      setupCredentialFound(env);
-
-      const res = await doInstance.fetch(
-        makeRequest({
-          refreshToken: 'totally-unknown-token',
-          userId: 'user-1',
-        }),
-      );
-      expect(res.status).toBe(200);
-      const json = await res.json();
-
-      // No grace window entry → CRITICAL #1 applies.
-      expect(json.refresh_token).toBeUndefined();
-      expect(json.stale).toBe(true);
     });
 
     it('records rotated token in DO storage on successful refresh', async () => {
@@ -426,26 +432,6 @@ describe('CodexRefreshLock', () => {
       expect(rotatedTokens).toBeUndefined();
     });
 
-    it('respects configurable grace window via CODEX_REFRESH_GRACE_WINDOW_MS', async () => {
-      const { do: doInstance } = await createDOWithRotatedToken(
-        'recently-rotated',
-        2_000,
-        { CODEX_REFRESH_GRACE_WINDOW_MS: '1000' },
-      );
-
-      const res = await doInstance.fetch(
-        makeRequest({
-          refreshToken: 'recently-rotated',
-          userId: 'user-1',
-        }),
-      );
-      expect(res.status).toBe(200);
-      const json = await res.json();
-
-      // Outside the short grace window → stale.
-      expect(json.refresh_token).toBeUndefined();
-      expect(json.stale).toBe(true);
-    });
   });
 
   // -----------------------------------------------------------------------
