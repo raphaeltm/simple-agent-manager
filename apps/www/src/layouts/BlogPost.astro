@@ -337,7 +337,7 @@ const formattedDate = date.toLocaleDateString('en-US', {
     width: 100%;
     min-height: 360px;
     height: 100%;
-    padding: 20px;
+    padding: 0;
   }
 
   .post-body :global(.mermaid-canvas svg) {
@@ -417,7 +417,8 @@ const formattedDate = date.toLocaleDateString('en-US', {
 
   .post-body :global(.mermaid-shell.is-fullscreen .mermaid-canvas) {
     min-height: calc(100vh - 32px);
-    padding: 24px;
+    align-items: flex-start;
+    padding: 0;
   }
 
   .post-body :global(.mermaid-shell.is-fullscreen .mermaid-canvas svg) {
@@ -448,7 +449,7 @@ const formattedDate = date.toLocaleDateString('en-US', {
 
     .post-body :global(.mermaid-canvas) {
       min-height: 300px;
-      padding: 14px;
+      padding: 0;
     }
 
     .post-body :global(.mermaid-shell.is-fullscreen) {
@@ -490,7 +491,7 @@ const formattedDate = date.toLocaleDateString('en-US', {
     .post-body :global(.mermaid-shell.is-fullscreen .mermaid-canvas) {
       min-height: 100vh;
       max-height: 100vh;
-      padding: 12px;
+      padding: 0;
     }
   }
 

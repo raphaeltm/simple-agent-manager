@@ -86,12 +86,24 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
   const activePointers = new Map<number, { x: number; y: number }>();
 
   const getInteractionRect = () => {
-    const rect = svg.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      return rect;
+    const shell = getShell();
+    if (shell?.classList.contains('is-fullscreen')) {
+      return surface.getBoundingClientRect();
     }
 
     return surface.getBoundingClientRect();
+  };
+
+  const getViewportWindow = (currentZoom = zoom) => {
+    const rect = getInteractionRect();
+    const fitScale = Math.min(rect.width / baseWidth, rect.height / baseHeight);
+    const effectiveScale = Math.max(fitScale * currentZoom, Number.EPSILON);
+
+    return {
+      rect,
+      width: rect.width / effectiveScale,
+      height: rect.height / effectiveScale,
+    };
   };
 
   const clampCenter = (
@@ -99,12 +111,21 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
     nextCenterY: number,
     nextZoom = zoom
   ) => {
-    const viewWidth = baseWidth / nextZoom;
-    const viewHeight = baseHeight / nextZoom;
-    const minCenterX = baseMinX + viewWidth / 2;
-    const maxCenterX = baseMinX + baseWidth - viewWidth / 2;
-    const minCenterY = baseMinY + viewHeight / 2;
-    const maxCenterY = baseMinY + baseHeight - viewHeight / 2;
+    const viewport = getViewportWindow(nextZoom);
+    const viewWidth = viewport.width;
+    const viewHeight = viewport.height;
+    const minCenterX =
+      viewWidth >= baseWidth ? baseCenterX : baseMinX + viewWidth / 2;
+    const maxCenterX =
+      viewWidth >= baseWidth
+        ? baseCenterX
+        : baseMinX + baseWidth - viewWidth / 2;
+    const minCenterY =
+      viewHeight >= baseHeight ? baseCenterY : baseMinY + viewHeight / 2;
+    const maxCenterY =
+      viewHeight >= baseHeight
+        ? baseCenterY
+        : baseMinY + baseHeight - viewHeight / 2;
 
     return {
       x: clamp(nextCenterX, minCenterX, maxCenterX),
@@ -113,8 +134,9 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
   };
 
   const applyViewBox = () => {
-    const viewWidth = baseWidth / zoom;
-    const viewHeight = baseHeight / zoom;
+    const viewport = getViewportWindow(zoom);
+    const viewWidth = viewport.width;
+    const viewHeight = viewport.height;
     const clampedCenter = clampCenter(centerX, centerY, zoom);
     centerX = clampedCenter.x;
     centerY = clampedCenter.y;
@@ -139,9 +161,10 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
     currentCenterY = centerY,
     currentZoom = zoom
   ) => {
-    const rect = getInteractionRect();
-    const currentWidth = baseWidth / currentZoom;
-    const currentHeight = baseHeight / currentZoom;
+    const viewport = getViewportWindow(currentZoom);
+    const rect = viewport.rect;
+    const currentWidth = viewport.width;
+    const currentHeight = viewport.height;
     return {
       x:
         currentCenterX - currentWidth / 2 + ((clientX - rect.left) / rect.width) * currentWidth,
@@ -160,7 +183,8 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
     baseCenterXInput = centerX,
     baseCenterYInput = centerY
   ) => {
-    const rect = getInteractionRect();
+    const viewport = getViewportWindow(nextZoom);
+    const rect = viewport.rect;
     const anchor = getSvgPoint(
       clientX,
       clientY,
@@ -168,8 +192,8 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
       baseCenterYInput,
       baseZoom
     );
-    const nextWidth = baseWidth / nextZoom;
-    const nextHeight = baseHeight / nextZoom;
+    const nextWidth = viewport.width;
+    const nextHeight = viewport.height;
     const relativeX = (clientX - rect.left) / rect.width;
     const relativeY = (clientY - rect.top) / rect.height;
 
@@ -264,8 +288,9 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
         gestureStartCenterX,
         gestureStartCenterY
       );
-      const startWidth = baseWidth / gestureStartZoom;
-      const startHeight = baseHeight / gestureStartZoom;
+      const gestureViewport = getViewportWindow(gestureStartZoom);
+      const startWidth = gestureViewport.width;
+      const startHeight = gestureViewport.height;
       const deltaMidX =
         ((midpoint.x - startPointerMidpoint.x) / rect.width) * startWidth;
       const deltaMidY =
@@ -284,9 +309,10 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
         return;
       }
 
-      const rect = getInteractionRect();
-      const currentWidth = baseWidth / zoom;
-      const currentHeight = baseHeight / zoom;
+      const viewport = getViewportWindow(zoom);
+      const rect = viewport.rect;
+      const currentWidth = viewport.width;
+      const currentHeight = viewport.height;
       const deltaX =
         ((pointer.x - panStartPointer.x) / rect.width) * currentWidth;
       const deltaY =
