@@ -257,14 +257,11 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
           userId,
           graceWindowMs,
         });
-        return new Response(
-          JSON.stringify({
-            access_token: tokens?.access_token ?? null,
-            refresh_token: tokens?.refresh_token ?? null,
-            id_token: tokens?.id_token ?? null,
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        );
+        return this.createTokenResponse({
+          accessToken: tokens?.access_token ?? null,
+          refreshToken: tokens?.refresh_token ?? null,
+          idToken: tokens?.id_token ?? null,
+        });
       }
 
       // Outside grace window — CRITICAL #1 still applies.
@@ -275,15 +272,11 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         userId,
         graceWindowMs,
       });
-      return new Response(
-        JSON.stringify({
-          access_token: tokens?.access_token ?? null,
-          id_token: tokens?.id_token ?? null,
-          // refresh_token intentionally omitted (CRITICAL #1)
-          stale: true,
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      );
+      return this.createTokenResponse({
+        accessToken: tokens?.access_token ?? null,
+        idToken: tokens?.id_token ?? null,
+        stale: true,
+      });
     }
 
     // Token matches — forward to OpenAI for a real refresh.
@@ -404,14 +397,11 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       .run();
 
     // Return the new tokens to Codex.
-    return new Response(
-      JSON.stringify({
-        access_token: (typeof newTokens.access_token === 'string' ? newTokens.access_token : null),
-        refresh_token: (typeof newTokens.refresh_token === 'string' ? newTokens.refresh_token : null),
-        id_token: (typeof newTokens.id_token === 'string' ? newTokens.id_token : null),
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    );
+    return this.createTokenResponse({
+      accessToken: typeof newTokens.access_token === 'string' ? newTokens.access_token : null,
+      refreshToken: typeof newTokens.refresh_token === 'string' ? newTokens.refresh_token : null,
+      idToken: typeof newTokens.id_token === 'string' ? newTokens.id_token : null,
+    });
   }
 
   /**
@@ -562,6 +552,28 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
   private async getRotatedTokenEntries(): Promise<RotatedTokenEntry[]> {
     return (await this.ctx.storage.get<RotatedTokenEntry[]>('rotated-tokens')) ?? [];
+  }
+
+  private createTokenResponse({
+    accessToken,
+    refreshToken,
+    idToken,
+    stale,
+  }: {
+    accessToken: string | null;
+    refreshToken?: string | null;
+    idToken: string | null;
+    stale?: boolean;
+  }): Response {
+    return new Response(
+      JSON.stringify({
+        access_token: accessToken,
+        ...(refreshToken !== undefined ? { refresh_token: refreshToken } : {}),
+        id_token: idToken,
+        ...(stale ? { stale: true } : {}),
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   /**
