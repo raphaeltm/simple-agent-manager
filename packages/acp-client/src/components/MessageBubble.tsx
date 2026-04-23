@@ -33,6 +33,8 @@ export function isFilePathHref(href: string | undefined): boolean {
   if (!href) return false;
   // URLs, anchors, and special protocols are not file paths
   if (/^(https?:|ftp:|wss?:|file:|mailto:|#|javascript:|tel:|data:|blob:)/i.test(href)) return false;
+  // Bare hostnames without protocol (e.g., www.example.com, docs.example.com) are URLs, not file paths
+  if (/^(www\.|([a-z0-9-]+\.)+?(com|org|net|io|dev|app|co|edu|gov)\b)/i.test(href)) return false;
   // Must contain a dot (extension) or a slash (path separator) to look like a file path
   // Examples: src/main.ts, ./foo/bar.js, package.json, README.md
   return /[./]/.test(href);
@@ -204,7 +206,7 @@ function buildAgentMarkdownComponents(
           <button
             type="button"
             aria-label={`Open ${path} in file browser`}
-            className="text-blue-600 hover:text-blue-800 underline decoration-dotted font-mono text-inherit bg-transparent border-none cursor-pointer p-0 inline"
+            className="text-blue-600 hover:text-blue-800 underline decoration-dotted font-mono text-inherit bg-transparent border-none cursor-pointer px-0.5 py-0.5 inline-flex items-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 rounded-sm"
             onClick={(e) => {
               e.preventDefault();
               onFileClick(path, line);

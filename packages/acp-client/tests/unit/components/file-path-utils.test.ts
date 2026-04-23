@@ -66,6 +66,15 @@ describe('isFilePathHref', () => {
   it('returns false for bare words without dots or slashes', () => {
     expect(isFilePathHref('foobar')).toBe(false);
   });
+
+  it('returns false for bare hostnames without protocol', () => {
+    expect(isFilePathHref('www.example.com')).toBe(false);
+    expect(isFilePathHref('docs.example.com')).toBe(false);
+    expect(isFilePathHref('github.io')).toBe(false);
+    expect(isFilePathHref('npmjs.org')).toBe(false);
+    expect(isFilePathHref('example.dev')).toBe(false);
+    expect(isFilePathHref('myapp.app')).toBe(false);
+  });
 });
 
 describe('parseFilePathRef', () => {

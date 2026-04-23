@@ -296,7 +296,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               type="button"
               onClick={goBack}
               aria-label="Back"
-              className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+              className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
             >
               <ArrowLeft size={16} />
             </button>
@@ -357,8 +357,8 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                 type="button"
                 onClick={activateSearch}
                 aria-label="Search files"
-                title="Search files (Ctrl+P)"
-                className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+                title="Search files (Cmd/Ctrl+P)"
+                className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
               >
                 <Search size={14} />
               </button>
@@ -367,7 +367,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                 onClick={() => loadListing(currentPath)}
                 disabled={browseLoading}
                 aria-label="Refresh"
-                className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+                className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
                 style={{ opacity: browseLoading ? 0.5 : 1 }}
               >
                 <RefreshCw size={14} className={browseLoading ? 'animate-spin' : ''} />
@@ -394,7 +394,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                 }
               }}
               aria-label="Download file"
-              className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+              className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
             >
               <Download size={14} />
             </button>
@@ -404,7 +404,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close file panel"
-            className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+            className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
           >
             <X size={16} />
           </button>
@@ -439,6 +439,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search files by name..."
+              aria-label="Search files"
               className="flex-1 min-w-0 bg-transparent border-none outline-none text-xs font-mono text-fg-primary placeholder:text-fg-muted"
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
@@ -458,7 +459,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                 type="button"
                 onClick={() => { setSearchQuery(''); searchInputRef.current?.focus(); }}
                 aria-label="Clear search"
-                className="p-1 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
+                className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
               >
                 <X size={12} />
               </button>
@@ -487,6 +488,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                     <button
                       key={result.path}
                       type="button"
+                      aria-label={`Open ${result.path}`}
                       onClick={() => {
                         openFile(result.path);
                         setSearchActive(false);
@@ -683,7 +685,7 @@ function GitStatusList({
               key={`untracked-${file.path}`}
               type="button"
               onClick={() => onViewFile(file.path)}
-              className="w-full flex items-center gap-2 px-4 py-1.5 text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
+              className="w-full flex items-center gap-2 px-4 py-1.5 min-h-[44px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
             >
               <span className="text-xs font-mono text-fg-muted">?</span>
               <span className="text-xs font-mono text-fg-primary truncate">{file.path}</span>
@@ -702,13 +704,13 @@ function HighlightedFilePath({ path, matches }: { path: string; matches: number[
   const matchSet = new Set(matches);
 
   return (
-    <span className="text-xs font-mono text-fg-primary truncate">
+    <span className="text-xs font-mono text-fg-primary truncate" aria-label={name}>
       {Array.from(name).map((char, i) => {
         const globalIdx = nameStart + i;
         const isMatch = matchSet.has(globalIdx);
         return isMatch
-          ? <span key={i} className="font-bold" style={{ color: 'var(--sam-color-accent-primary)' }}>{char}</span>
-          : <span key={i}>{char}</span>;
+          ? <span key={i} aria-hidden="true" className="font-bold" style={{ color: 'var(--sam-color-accent-primary)' }}>{char}</span>
+          : <span key={i} aria-hidden="true">{char}</span>;
       })}
     </span>
   );
@@ -749,7 +751,7 @@ function GitFileRow({
       <button
         type="button"
         onClick={onViewDiff}
-        className="text-[10px] font-semibold px-2 py-1 rounded border border-border-default bg-transparent cursor-pointer text-fg-muted hover:text-fg-primary md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
+        className="text-[10px] font-semibold px-2 py-1 rounded border border-border-default bg-transparent cursor-pointer text-fg-muted hover:text-fg-primary md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--sam-color-focus-ring,#3b82f6)] focus-visible:ring-offset-1 transition-opacity shrink-0"
       >
         Diff
       </button>
