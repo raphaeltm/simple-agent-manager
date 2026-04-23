@@ -1,0 +1,410 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import { integrations, categories } from '../../data/integrations';
+
+const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
+const siteUrl = `https://www.${baseDomain}`;
+const appUrl = `https://app.${baseDomain}`;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  name: 'SAM Integrations',
+  description: 'Browse all technology integrations available on Simple Agent Manager — AI coding agents, cloud providers, and AI models.',
+  numberOfItems: integrations.length,
+  itemListElement: integrations.map((integration, index) => ({
+    '@type': 'ListItem',
+    position: index + 1,
+    name: integration.name,
+    url: `${siteUrl}/integrations/${integration.slug}/`,
+  })),
+};
+---
+
+<Base
+  title="Integrations — Run Any Agent on Any Cloud | SAM"
+  description="Browse SAM's integrations: Claude Code, Codex, Gemini CLI, Mistral Vibe, and more on Hetzner, Scaleway, or GCP. Pick your agent, pick your cloud."
+>
+  <Header />
+  <main>
+    <!-- Hero -->
+    <section class="hub-hero">
+      <div class="hub-glow" aria-hidden="true"></div>
+      <div class="container hub-hero-content">
+        <span class="section-label animate-on-scroll">Integrations</span>
+        <h1 class="hub-title animate-on-scroll">
+          Pick your agent.<br /><span class="gradient-text">Pick your cloud.</span>
+        </h1>
+        <p class="hub-subtitle animate-on-scroll">
+          SAM works with the best AI coding agents and cloud providers.
+          Bring your own API keys, bring your own infrastructure — run agents your way.
+        </p>
+      </div>
+    </section>
+
+    <!-- Integration Grid by Category -->
+    {categories.map((cat) => {
+      const items = integrations.filter(i => i.category === cat.id);
+      return (
+        <section class="category-section" id={cat.id}>
+          <div class="container">
+            <div class="category-header animate-on-scroll">
+              <h2 class="category-title">{cat.label}</h2>
+              <p class="category-desc">{cat.description}</p>
+            </div>
+            <div class="integration-grid">
+              {items.map((item, i) => (
+                <a href={`/integrations/${item.slug}/`} class="integration-card animate-on-scroll" style={`transition-delay: ${i * 80}ms`}>
+                  <div class="card-logo">
+                    <img src={item.logoPath} alt={`${item.name} logo`} width="40" height="40" loading="lazy" />
+                  </div>
+                  <div class="card-content">
+                    <h3 class="card-name">{item.name}</h3>
+                    <span class="card-category">{item.categoryLabel}</span>
+                    <p class="card-tagline">{item.tagline}</p>
+                  </div>
+                  <div class="card-arrow" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+                    </svg>
+                  </div>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+      );
+    })}
+
+    <!-- CTA -->
+    <section class="hub-cta">
+      <div class="container">
+        <div class="hub-cta-content animate-on-scroll">
+          <h2 class="cta-title">Ready to run agents on your infrastructure?</h2>
+          <p class="cta-subtitle">Pick any agent, pick any cloud. SAM handles the rest.</p>
+          <div class="cta-actions">
+            <a href={appUrl} class="btn-cta btn-cta-primary">
+              Get Started
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </a>
+            <a href="/docs/" class="btn-cta btn-cta-secondary">Read the Docs</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="container footer-inner">
+        <div class="footer-brand">
+          <svg width="24" height="24" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <rect width="512" height="512" rx="112" fill="#0b1110"/>
+            <rect x="56" y="56" width="400" height="400" rx="80" fill="#13201d" stroke="#29423b" stroke-width="8"/>
+            <path d="M154 208L226 256L154 304" stroke="#16a34a" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M270 318H360" stroke="#e6f2ee" stroke-width="26" stroke-linecap="round"/>
+          </svg>
+          <span>Simple Agent Manager</span>
+        </div>
+        <div class="footer-links">
+          <a href="/">Home</a>
+          <a href="/blog/">Blog</a>
+          <a href="/integrations/">Integrations</a>
+          <a href="https://github.com/raphaeltm/simple-agent-manager" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+        <p class="footer-copy">&copy; {new Date().getFullYear()} Simple Agent Manager. Open source under AGPL-3.0.</p>
+      </div>
+    </footer>
+  </main>
+
+  <!-- JSON-LD -->
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+</Base>
+
+<style>
+  /* Hub Hero */
+  .hub-hero {
+    position: relative;
+    padding: 160px 0 60px;
+    overflow: hidden;
+  }
+
+  @media (min-width: 768px) {
+    .hub-hero { padding: 180px 0 80px; }
+  }
+
+  .hub-glow {
+    position: absolute;
+    top: -200px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 800px;
+    height: 600px;
+    background: radial-gradient(ellipse at center, var(--color-accent-glow) 0%, transparent 70%);
+    pointer-events: none;
+    animation: glow-pulse 6s ease-in-out infinite;
+  }
+
+  .hub-hero-content {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+  }
+
+  .hub-title {
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    color: var(--color-fg-primary);
+    margin-top: 16px;
+    margin-bottom: 24px;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hub-subtitle {
+    font-size: clamp(1rem, 2vw, 1.25rem);
+    color: var(--color-fg-muted);
+    max-width: 560px;
+    margin: 0 auto;
+    line-height: 1.7;
+  }
+
+  /* Category Sections */
+  .category-section {
+    padding: 60px 0;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .category-header {
+    margin-bottom: 40px;
+  }
+
+  .category-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .category-desc {
+    font-size: 1rem;
+    color: var(--color-fg-muted);
+  }
+
+  /* Integration Grid */
+  .integration-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  @media (min-width: 640px) {
+    .integration-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  @media (min-width: 1024px) {
+    .integration-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  /* Integration Card */
+  .integration-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 24px;
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    transition: border-color 0.3s, box-shadow 0.3s, transform 0.2s, opacity 0.6s ease;
+    text-decoration: none;
+    color: inherit;
+  }
+
+  .integration-card:hover {
+    border-color: var(--color-border);
+    box-shadow: 0 0 40px var(--color-accent-glow);
+    transform: translateY(-2px);
+    color: inherit;
+  }
+
+  .card-logo {
+    flex-shrink: 0;
+    width: 56px;
+    height: 56px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg-inset);
+    border: 1px solid var(--color-border-subtle);
+    overflow: hidden;
+  }
+
+  .card-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .card-name {
+    font-family: var(--font-display);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 4px;
+  }
+
+  .card-category {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .card-tagline {
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+    margin-top: 8px;
+  }
+
+  .card-arrow {
+    flex-shrink: 0;
+    color: var(--color-fg-dim);
+    margin-top: 4px;
+    transition: color 0.2s, transform 0.2s;
+  }
+
+  .integration-card:hover .card-arrow {
+    color: var(--color-accent);
+    transform: translateX(4px);
+  }
+
+  /* CTA */
+  .hub-cta {
+    padding: 80px 0;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  @media (min-width: 768px) {
+    .hub-cta { padding: 120px 0; }
+  }
+
+  .hub-cta-content {
+    text-align: center;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .cta-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.5rem, 4vw, 2.25rem);
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 16px;
+    line-height: 1.2;
+  }
+
+  .cta-subtitle {
+    font-size: 1.0625rem;
+    color: var(--color-fg-muted);
+    line-height: 1.7;
+    margin-bottom: 32px;
+  }
+
+  .cta-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .btn-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    padding: 14px 32px;
+    border-radius: var(--radius-md);
+    transition: all 0.2s;
+  }
+
+  .btn-cta-primary {
+    background: var(--color-accent);
+    color: white;
+  }
+
+  .btn-cta-primary:hover {
+    background: var(--color-accent-hover);
+    color: white;
+    transform: translateY(-1px);
+  }
+
+  .btn-cta-secondary {
+    background: var(--color-bg-surface);
+    color: var(--color-fg-primary);
+    border: 1px solid var(--color-border);
+  }
+
+  .btn-cta-secondary:hover {
+    background: var(--color-bg-surface-hover);
+    color: var(--color-fg-primary);
+    border-color: var(--color-fg-dim);
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 1px solid var(--color-border-subtle);
+    padding: 40px 0;
+  }
+
+  .footer-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    text-align: center;
+  }
+
+  .footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-display);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-fg-muted);
+  }
+
+  .footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 24px;
+  }
+
+  .footer-links a {
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+  }
+
+  .footer-links a:hover {
+    color: var(--color-fg-muted);
+  }
+
+  .footer-copy {
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+  }
+</style>
