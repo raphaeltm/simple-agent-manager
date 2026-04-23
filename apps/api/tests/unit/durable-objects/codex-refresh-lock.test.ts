@@ -110,6 +110,16 @@ function createDO(
   return { do: new CodexRefreshLock(ctx, env), env, ctx };
 }
 
+async function createDOWithRotatedToken(
+  token: string,
+  ageMs: number,
+  envOverrides: Record<string, unknown> = {},
+) {
+  const setup = createDO(envOverrides, await createRotatedTokenStorage(token, ageMs));
+  setupCredentialFound(setup.env);
+  return setup;
+}
+
 function makeRequest(payload: Record<string, unknown>): Request {
   return new Request('https://do-internal/refresh', {
     method: 'POST',
@@ -125,6 +135,41 @@ const storedAuthJson = JSON.stringify({
     id_token: 'stored-id',
   },
 });
+
+async function sha256Hex(value: string): Promise<string> {
+  const data = new TextEncoder().encode(value);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = new Uint8Array(hashBuffer);
+  return Array.from(hashArray)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function createRotatedTokenStorage(token: string, ageMs: number) {
+  return {
+    'rotated-tokens': [
+      {
+        tokenHash: await sha256Hex(token),
+        rotatedAt: Date.now() - ageMs,
+      },
+    ],
+  };
+}
+
+function mockSuccessfulRefreshResponse(
+  tokens: Record<string, string> = {
+    access_token: 'new-access',
+    refresh_token: 'new-refresh',
+    id_token: 'new-id',
+  },
+) {
+  vi.mocked(fetch).mockResolvedValue(
+    new Response(JSON.stringify(tokens), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+}
 
 /**
  * Configure the D1 mock to return a user-scoped credential row for the SECOND
@@ -264,6 +309,129 @@ describe('CodexRefreshLock', () => {
 
     // No upstream fetch should have been made (no valid refresh token to spend).
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  // -----------------------------------------------------------------------
+  // Grace window — recently-rotated tokens receive full response
+  // -----------------------------------------------------------------------
+
+  describe('grace window for recently-rotated tokens', () => {
+    it('returns full tokens (including refresh_token) when stale token is within grace window', async () => {
+      const { do: doInstance } = await createDOWithRotatedToken('old-refresh', 60_000);
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'old-refresh', // stale, but recently rotated
+          userId: 'user-1',
+        }),
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      // Grace window hit: full tokens returned including refresh_token.
+      expect(json.access_token).toBe('stored-access');
+      expect(json.refresh_token).toBe('stored-refresh');
+      expect(json.id_token).toBe('stored-id');
+      expect(json.stale).toBeUndefined(); // no stale flag
+
+      // No upstream fetch — we return stored tokens directly.
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+      expect(mockLogInfo).toHaveBeenCalledWith(
+        'codex_refresh.grace_window_hit',
+        expect.objectContaining({ userId: 'user-1' }),
+      );
+    });
+
+    it.each([
+      {
+        name: 'token was rotated outside the default grace window',
+        setup: () => createDOWithRotatedToken('very-old-refresh', 600_000),
+        refreshToken: 'very-old-refresh',
+      },
+      {
+        name: 'token has no grace-window entry',
+        setup: async () => {
+          const setup = createDO();
+          setupCredentialFound(setup.env);
+          return setup;
+        },
+        refreshToken: 'totally-unknown-token',
+      },
+      {
+        name: 'token is older than the configured custom grace window',
+        setup: () =>
+          createDOWithRotatedToken(
+            'recently-rotated',
+            2_000,
+            { CODEX_REFRESH_GRACE_WINDOW_MS: '1000' },
+          ),
+        refreshToken: 'recently-rotated',
+      },
+    ])('returns stale tokens when $name', async ({ setup, refreshToken }) => {
+      const { do: doInstance } = await setup();
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken,
+          userId: 'user-1',
+        }),
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      expect(json.refresh_token).toBeUndefined();
+      expect(json.access_token).toBe('stored-access');
+      expect(json.id_token).toBe('stored-id');
+      expect(json.stale).toBe(true);
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    });
+
+    it('records rotated token in DO storage on successful refresh', async () => {
+      const { do: doInstance, env, ctx } = createDO();
+      setupCredentialFound(env);
+      mockSuccessfulRefreshResponse();
+
+      await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'stored-refresh', // matches stored → fresh path
+          userId: 'user-1',
+        }),
+      );
+
+      // The old 'stored-refresh' should be recorded in rotated-tokens.
+      const rotatedTokens = ctx.storage._store.get('rotated-tokens') as Array<{
+        tokenHash: string;
+        rotatedAt: number;
+      }>;
+      expect(rotatedTokens).toBeDefined();
+      expect(rotatedTokens.length).toBe(1);
+      expect(rotatedTokens[0].rotatedAt).toBeGreaterThan(0);
+
+      // Verify the hash matches 'stored-refresh'.
+      expect(rotatedTokens[0].tokenHash).toBe(await sha256Hex('stored-refresh'));
+    });
+
+    it('does NOT record rotated token when refresh_token is unchanged', async () => {
+      const { do: doInstance, env, ctx } = createDO();
+      setupCredentialFound(env);
+      mockSuccessfulRefreshResponse({
+        access_token: 'new-access',
+        refresh_token: 'stored-refresh',
+        id_token: 'new-id',
+      });
+
+      await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'stored-refresh',
+          userId: 'user-1',
+        }),
+      );
+
+      // No rotation happened — rotated-tokens should not be written.
+      const rotatedTokens = ctx.storage._store.get('rotated-tokens');
+      expect(rotatedTokens).toBeUndefined();
+    });
+
   });
 
   // -----------------------------------------------------------------------
