@@ -320,6 +320,18 @@ describe('MessageBubble', () => {
       expect(onFileClick).toHaveBeenCalledWith('src/main.ts', null);
     });
 
+    it('sets aria-label on file-path buttons for accessibility', () => {
+      const onFileClick = vi.fn();
+      const markdown = 'Check [src/main.ts](src/main.ts) for details';
+      render(
+        <MessageBubble text={markdown} role="agent" onFileClick={onFileClick} />
+      );
+
+      const button = screen.getByLabelText('Open src/main.ts in file browser');
+      expect(button).toBeTruthy();
+      expect(button.tagName).toBe('BUTTON');
+    });
+
     it('parses line numbers from file path links', () => {
       const onFileClick = vi.fn();
       // Use a path with directory separator so markdown parser treats it as a link href

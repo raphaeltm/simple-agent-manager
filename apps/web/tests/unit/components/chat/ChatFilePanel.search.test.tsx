@@ -218,6 +218,38 @@ describe('ChatFilePanel search', () => {
     });
   });
 
+  it('clicking a search result opens the file (mouse click path)', async () => {
+    renderPanel();
+    await waitFor(() => expect(mockGetSessionFileList).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByLabelText('Search files'));
+    await waitFor(() => expect(mockGetSessionFileIndex).toHaveBeenCalled());
+
+    const input = screen.getByPlaceholderText('Search files by name...');
+    fireEvent.change(input, { target: { value: 'utils' } });
+
+    // Wait for results to render
+    await waitFor(() => {
+      expect(screen.getByLabelText('Open src/lib/utils.ts')).toBeTruthy();
+    });
+
+    // Mock file content for view mode
+    mockGetSessionFileContent.mockResolvedValue({ content: 'export const x = 1;' });
+
+    // Click the result button (not Enter key)
+    fireEvent.click(screen.getByLabelText('Open src/lib/utils.ts'));
+
+    // Should switch to view mode — search bar should disappear
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText('Search files by name...')).toBeNull();
+    });
+
+    // Should have called loadFile for the result
+    await waitFor(() => {
+      expect(mockGetSessionFileContent).toHaveBeenCalled();
+    });
+  });
+
   it('clear button resets search query', async () => {
     renderPanel();
     await waitFor(() => expect(mockGetSessionFileList).toHaveBeenCalled());
