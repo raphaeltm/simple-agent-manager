@@ -229,6 +229,23 @@ index abc1234..def5678 100644
 // Setup Helpers
 // ---------------------------------------------------------------------------
 
+const MOCK_FILE_INDEX = {
+  files: [
+    'src/components/App.tsx',
+    'src/components/Button.tsx',
+    'src/components/Header.tsx',
+    'src/lib/api/client.ts',
+    'src/lib/utils.ts',
+    'src/index.ts',
+    'packages/shared/src/types.ts',
+    'packages/shared/src/very/deeply/nested/path/to/a/long/directory/structure/ComponentWithExtremelyLongName.tsx',
+    'package.json',
+    'tsconfig.json',
+    'README.md',
+    '.gitignore',
+  ],
+};
+
 async function setupMocks(page: Page, options: {
   session?: ReturnType<typeof makeChatSession>;
   messages?: unknown[];
@@ -238,6 +255,7 @@ async function setupMocks(page: Page, options: {
   fileContent?: typeof MOCK_FILE_CONTENT | null;
   gitStatus?: typeof MOCK_GIT_STATUS | null;
   gitDiff?: typeof MOCK_DIFF | null;
+  fileIndex?: typeof MOCK_FILE_INDEX | null;
   fileError?: boolean;
 } = {}) {
   const {
@@ -249,6 +267,7 @@ async function setupMocks(page: Page, options: {
     fileContent = MOCK_FILE_CONTENT,
     gitStatus = MOCK_GIT_STATUS,
     gitDiff = MOCK_DIFF,
+    fileIndex = MOCK_FILE_INDEX,
     fileError = false,
   } = options;
 
@@ -306,6 +325,12 @@ async function setupMocks(page: Page, options: {
     }
 
     // File proxy routes
+    if (url.includes('/files/find')) {
+      if (fileError) return route.fulfill({ status: 500, json: { error: 'VM agent unreachable' } });
+      if (!fileIndex) return route.fulfill({ json: { files: [] } });
+      return route.fulfill({ json: fileIndex });
+    }
+
     if (url.includes('/files/list')) {
       if (fileError) return route.fulfill({ status: 500, json: { error: 'VM agent unreachable' } });
       if (!fileListing) return route.fulfill({ status: 404, json: { error: 'not_found' } });
@@ -608,6 +633,119 @@ test.describe('ChatFileViewer — Desktop', () => {
     await page.waitForTimeout(1500);
 
     await takeScreenshot(page, 'tool-call-clickable-files-desktop');
+    await assertNoOverflow(page);
+  });
+});
+
+// ===========================================================================
+// FILE SEARCH TESTS — Mobile
+// ===========================================================================
+
+test.describe('ChatFileViewer — File Search — Mobile', () => {
+  test('search with results (including long paths)', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-test-1/chat/cs-1');
+    await page.waitForTimeout(1000);
+
+    await openPanel(page, 'Files');
+
+    // Click the Search files button
+    const searchBtn = page.getByLabel('Search files');
+    await expect(searchBtn).toBeVisible({ timeout: 3000 });
+    await searchBtn.click();
+    await page.waitForTimeout(500);
+
+    // Type a query that matches several files
+    const input = page.getByPlaceholder('Search files by name...');
+    await expect(input).toBeVisible({ timeout: 3000 });
+    await input.fill('ts');
+    await page.waitForTimeout(500);
+
+    await takeScreenshot(page, 'file-search-results-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('search with no matches', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-test-1/chat/cs-1');
+    await page.waitForTimeout(1000);
+
+    await openPanel(page, 'Files');
+
+    const searchBtn = page.getByLabel('Search files');
+    await searchBtn.click();
+    await page.waitForTimeout(500);
+
+    const input = page.getByPlaceholder('Search files by name...');
+    await input.fill('zzzzz_no_match');
+    await page.waitForTimeout(500);
+
+    await takeScreenshot(page, 'file-search-no-results-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('search with long path results does not overflow', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-test-1/chat/cs-1');
+    await page.waitForTimeout(1000);
+
+    await openPanel(page, 'Files');
+
+    const searchBtn = page.getByLabel('Search files');
+    await searchBtn.click();
+    await page.waitForTimeout(500);
+
+    const input = page.getByPlaceholder('Search files by name...');
+    await input.fill('Component');
+    await page.waitForTimeout(500);
+
+    await takeScreenshot(page, 'file-search-long-path-mobile');
+    await assertNoOverflow(page);
+  });
+});
+
+// ===========================================================================
+// FILE SEARCH TESTS — Desktop
+// ===========================================================================
+
+test.describe('ChatFileViewer — File Search — Desktop', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+  test('search with results', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-test-1/chat/cs-1');
+    await page.waitForTimeout(1000);
+
+    await openPanel(page, 'Files');
+
+    const searchBtn = page.getByLabel('Search files');
+    await searchBtn.click();
+    await page.waitForTimeout(500);
+
+    const input = page.getByPlaceholder('Search files by name...');
+    await input.fill('App');
+    await page.waitForTimeout(500);
+
+    await takeScreenshot(page, 'file-search-results-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('search with long path results', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-test-1/chat/cs-1');
+    await page.waitForTimeout(1000);
+
+    await openPanel(page, 'Files');
+
+    const searchBtn = page.getByLabel('Search files');
+    await searchBtn.click();
+    await page.waitForTimeout(500);
+
+    const input = page.getByPlaceholder('Search files by name...');
+    await input.fill('Component');
+    await page.waitForTimeout(500);
+
+    await takeScreenshot(page, 'file-search-long-path-desktop');
     await assertNoOverflow(page);
   });
 });

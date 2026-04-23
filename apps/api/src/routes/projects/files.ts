@@ -258,6 +258,22 @@ function requireSafePath(rawPath: string | undefined): string {
   return normalizeFileProxyPath(rawPath);
 }
 
+/** GET /:id/sessions/:sessionId/files/find — Proxy recursive file index */
+fileProxyRoutes.get('/:id/sessions/:sessionId/files/find', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+
+  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+    c.env,
+    projectId,
+    sessionId,
+    userId
+  );
+
+  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'files/find', new URLSearchParams());
+});
+
 /** GET /:id/sessions/:sessionId/files/list — Proxy directory listing */
 fileProxyRoutes.get('/:id/sessions/:sessionId/files/list', async (c) => {
   const userId = getUserId(c);
