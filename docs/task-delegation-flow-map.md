@@ -575,7 +575,7 @@ The idle cleanup flow (`awaiting_followup` -> `scheduleIdleCleanup`) looks up th
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `MAX_SESSIONS_PER_PROJECT` | 1,000 | Session limit per project |
+| `MAX_SESSIONS_PER_PROJECT` | 10,000 | Session limit per project |
 | `MAX_MESSAGES_PER_SESSION` | 10,000 | Message limit per session |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | 15 | Idle cleanup timer |
 | `ACTIVITY_RETENTION_DAYS` | 30 | Activity event retention |

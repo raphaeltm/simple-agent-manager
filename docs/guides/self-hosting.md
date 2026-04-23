@@ -870,7 +870,7 @@ new_sqlite_classes = ["ProjectData"]
 
 | Variable                       | Description                                                                       | Default        |
 | ------------------------------ | --------------------------------------------------------------------------------- | -------------- |
-| `MAX_SESSIONS_PER_PROJECT`     | Max chat sessions per project                                                     | `1000`         |
+| `MAX_SESSIONS_PER_PROJECT`     | Max chat sessions per project                                                     | `10000`        |
 | `MAX_MESSAGES_PER_SESSION`     | Max messages per chat session                                                     | `10000`        |
 | `MESSAGE_SIZE_THRESHOLD`       | Max message size in bytes                                                         | `102400`       |
 | `ACTIVITY_RETENTION_DAYS`      | Days to retain activity events                                                    | `90`           |
