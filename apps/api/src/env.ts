@@ -416,6 +416,7 @@ export interface Env {
   LIBRARY_MAX_DIRECTORY_DEPTH?: string;          // Max directory nesting depth (default: 10)
   LIBRARY_MAX_DIRECTORY_PATH_LENGTH?: string;    // Max directory path length in chars (default: 500)
   LIBRARY_MAX_DIRECTORIES_PER_PROJECT?: string;  // Max directories per project (default: 500)
+  LIBRARY_MAX_SEARCH_LENGTH?: string;            // Max search query length in chars (default: 200)
   // Compute usage metering
   COMPUTE_USAGE_RECENT_RECORDS_LIMIT?: string;  // Max recent records in admin user detail (default: 50)
   // Compute quota enforcement
