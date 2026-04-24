@@ -344,16 +344,27 @@ describe('SessionHeader', () => {
     expect(screen.getByTitle(/ACP: acp-session-42/)).toBeInTheDocument();
   });
 
-  it('copies value to clipboard when CopyableId is clicked', async () => {
+  it('copies value to clipboard and shows checkmark when CopyableId is clicked', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
 
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
-    fireEvent.click(screen.getByTitle(/Session: sess-abc123/));
+
+    const pill = screen.getByTitle(/Session: sess-abc123/);
+    // Before click: shows copy icon, not check icon
+    expect(pill.querySelector('[data-testid="icon-copy"]')).toBeInTheDocument();
+    expect(pill.querySelector('[data-testid="icon-check-circle"]')).not.toBeInTheDocument();
+
+    fireEvent.click(pill);
 
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('sess-abc123');
+    });
+
+    // After copy: shows checkmark feedback
+    await waitFor(() => {
+      expect(pill.querySelector('[data-testid="icon-check-circle"]')).toBeInTheDocument();
     });
   });
 

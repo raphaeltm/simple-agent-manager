@@ -44,7 +44,7 @@ function CopyableId({ label, value, icon }: { label: string; value: string; icon
       type="button"
       onClick={handleCopy}
       title={`${label}: ${value} — click to copy`}
-      className="inline-flex items-center gap-1 text-[11px] font-mono px-1.5 py-0.5 rounded border border-border-default bg-surface-default cursor-pointer hover:bg-surface-hover transition-colors min-w-0"
+      className="inline-flex items-center gap-1 text-[11px] font-mono px-1.5 py-0.5 rounded border border-border-default bg-surface-default cursor-pointer hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors min-w-0"
       style={{ color: copied ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)' }}
     >
       {icon && <span className="shrink-0 opacity-60" aria-hidden="true">{icon}</span>}
