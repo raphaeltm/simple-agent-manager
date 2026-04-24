@@ -72,6 +72,10 @@ export function getMaxDirectoriesPerProject(env: Env): number {
   return parseIntOrDefault(env.LIBRARY_MAX_DIRECTORIES_PER_PROJECT, LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT);
 }
 
+export function getMaxSearchLength(env: Env): number {
+  return parseIntOrDefault(env.LIBRARY_MAX_SEARCH_LENGTH, LIBRARY_DEFAULTS.MAX_SEARCH_LENGTH);
+}
+
 /** Validate a directory path using configurable env limits. Throws on invalid. Returns normalized path. */
 export function validateDirectory(directory: string, env: Env): string {
   return validateDirectoryPath(directory, getMaxDirectoryDepth(env), getMaxDirectoryPathLength(env));

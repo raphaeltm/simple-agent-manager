@@ -30,12 +30,19 @@ import {
   validateDirectory,
   validateFilename,
 } from '../services/file-library';
+import { getMaxSearchLength } from '../services/file-library-config';
 
 const libraryRoutes = new Hono<{ Bindings: Env }>();
 
 // ---------------------------------------------------------------------------
 // Helper: get encryption key
 // ---------------------------------------------------------------------------
+
+function validateSearchLength(search: string | undefined, env: Env): void {
+  if (search && search.length > getMaxSearchLength(env)) {
+    throw errors.badRequest(`Search query exceeds maximum length of ${getMaxSearchLength(env)} characters`);
+  }
+}
 
 function getEncryptionKey(env: Env): string {
   const key = env.LIBRARY_ENCRYPTION_KEY ?? env.ENCRYPTION_KEY;
@@ -170,6 +177,7 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   await requireOwnedProject(db, projectId, userId);
 
   const query = c.req.query();
+  validateSearchLength(query['search'] || undefined, c.env);
   const filters: ListFilesRequest = {
     tags: query['tags'] ? query['tags'].split(',').map((t) => t.trim()).filter(Boolean) : undefined,
     mimeType: query['mimeType'] || undefined,
@@ -203,7 +211,9 @@ libraryRoutes.get('/directories', requireAuth(), requireApproved(), async (c) =>
 
   const rawParent = c.req.query('parentDirectory') || '/';
   const parentDirectory = validateDirectory(rawParent, c.env);
-  const directories = await listDirectories(db, projectId, parentDirectory, c.env);
+  const search = c.req.query('search') || undefined;
+  validateSearchLength(search, c.env);
+  const directories = await listDirectories(db, projectId, parentDirectory, c.env, search);
 
   return c.json({ directories }, 200);
 });

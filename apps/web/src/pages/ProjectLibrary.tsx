@@ -24,19 +24,43 @@ import {
   uploadLibraryFile,
 } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
+import {
+  getCachedDirectories,
+  getCachedFiles,
+  setCachedDirectories,
+  setCachedFiles,
+} from '../lib/library-cache';
 import { useProjectContext } from './ProjectContext';
 
 let uploadIdCounter = 0;
+
+/** Client-side filter: match files whose filename contains the search string. */
+function filterFilesBySearch(files: FileWithTags[], search: string): FileWithTags[] {
+  if (!search) return files;
+  const lower = search.toLowerCase();
+  return files.filter((f) => f.filename.toLowerCase().includes(lower));
+}
+
+/** Client-side filter: match directories whose name contains the search string. */
+function filterDirectoriesBySearch(dirs: DirectoryEntry[], search: string): DirectoryEntry[] {
+  if (!search) return dirs;
+  const lower = search.toLowerCase();
+  return dirs.filter((d) => d.name.toLowerCase().includes(lower));
+}
 
 export function ProjectLibrary() {
   const { projectId } = useProjectContext();
   const isMobile = useIsMobile();
 
-  // Data state
-  const [files, setFiles] = useState<FileWithTags[]>([]);
-  const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Initialize from cache for instant render (avoids loading spinner on revisit)
+  const initialCachedFiles = getCachedFiles(projectId, '/', 'createdAt');
+  const initialCachedDirs = getCachedDirectories(projectId, '/');
+  const hasCachedData = !!(initialCachedFiles && initialCachedDirs);
+
+  // Data state — holds the last full API response (unfiltered)
+  const [files, setFiles] = useState<FileWithTags[]>(hasCachedData ? initialCachedFiles.files : []);
+  const [directories, setDirectories] = useState<DirectoryEntry[]>(hasCachedData ? initialCachedDirs : []);
+  const [loading, setLoading] = useState(!hasCachedData);
   const [refreshing, setRefreshing] = useState(false);
 
   // Directory navigation
@@ -84,11 +108,31 @@ export function ProjectLibrary() {
   }, [files]);
 
   // ---------------------------------------------------------------------------
+  // Client-side filtering — instant feedback while API call is in-flight
+  // ---------------------------------------------------------------------------
+
+  const displayFiles = useMemo(() => {
+    // When the user is typing (searchInput differs from debouncedSearch),
+    // client-filter the existing data for instant feedback
+    if (searchInput && searchInput !== debouncedSearch) {
+      return filterFilesBySearch(files, searchInput);
+    }
+    return files;
+  }, [files, searchInput, debouncedSearch]);
+
+  const displayDirectories = useMemo(() => {
+    if (searchInput && searchInput !== debouncedSearch) {
+      return filterDirectoriesBySearch(directories, searchInput);
+    }
+    return directories;
+  }, [directories, searchInput, debouncedSearch]);
+
+  // ---------------------------------------------------------------------------
   // Data loading — only uses debouncedSearch, not raw searchInput
   // ---------------------------------------------------------------------------
 
   // Track whether initial load has completed so subsequent filter changes use background refresh
-  const hasLoadedOnce = useRef(false);
+  const hasLoadedOnce = useRef(hasCachedData);
 
   const loadFiles = useCallback(
     async (opts?: { background?: boolean }) => {
@@ -112,16 +156,21 @@ export function ProjectLibrary() {
 
         const [filesResult, dirsResult] = await Promise.all([
           listLibraryFiles(projectId, filters),
-          // Only load directories when not searching
+          // When searching, also fetch directories with search parameter
           isSearching
-            ? Promise.resolve({ directories: [] })
+            ? listLibraryDirectories(projectId, currentDirectory, debouncedSearch)
             : listLibraryDirectories(projectId, currentDirectory),
         ]);
 
         setFiles(filesResult.files);
-        setTotal(filesResult.total);
         setDirectories(dirsResult.directories);
         hasLoadedOnce.current = true;
+
+        // Cache unfiltered results (no search, no tag/source filters)
+        if (!debouncedSearch && activeTags.length === 0 && sourceFilter === 'all') {
+          setCachedFiles(projectId, currentDirectory, sortBy, filesResult);
+          setCachedDirectories(projectId, currentDirectory, dirsResult.directories);
+        }
       } catch (err) {
         console.error('Failed to load library files:', err);
       } finally {
@@ -362,7 +411,7 @@ export function ProjectLibrary() {
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search files across all directories..."
+              placeholder="Search files and folders..."
               className="w-full pl-9 pr-9 py-2 text-sm rounded-lg border border-border-default bg-surface text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent"
             />
             {/* Inline spinner shown while debounce is pending or API is in-flight */}
@@ -439,8 +488,23 @@ export function ProjectLibrary() {
         />
       )}
 
+      {/* Status bar — file count + refreshing indicator (at TOP, always visible) */}
+      {(displayFiles.length > 0 || displayDirectories.length > 0) && (
+        <div className="flex items-center gap-2">
+          {refreshing && <Spinner size="sm" />}
+          <p className="text-xs text-fg-muted m-0">
+            {displayFiles.length} file{displayFiles.length !== 1 ? 's' : ''}
+            {displayDirectories.length > 0 && `, ${displayDirectories.length} folder${displayDirectories.length !== 1 ? 's' : ''}`}
+            {currentDirectory !== '/' && !isSearching && (
+              <span> in {currentDirectory}</span>
+            )}
+            {refreshing && <span className="ml-1">— updating...</span>}
+          </p>
+        </div>
+      )}
+
       {/* Directories — always shown as a compact card grid */}
-      {directories.length > 0 && (
+      {displayDirectories.length > 0 && (
         <div
           className={`grid gap-3 ${
             isMobile
@@ -448,7 +512,7 @@ export function ProjectLibrary() {
               : 'grid-cols-[repeat(auto-fill,minmax(120px,140px))]'
           }`}
         >
-          {directories.map((dir) => (
+          {displayDirectories.map((dir) => (
             <button
               key={dir.path}
               onClick={() => navigateToDirectory(dir.path)}
@@ -468,7 +532,7 @@ export function ProjectLibrary() {
       )}
 
       {/* Files content */}
-      {files.length === 0 && directories.length === 0 ? (
+      {displayFiles.length === 0 && displayDirectories.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <FolderOpen size={40} className="text-fg-muted mb-3 opacity-30" />
           <p className="text-sm text-fg-muted m-0 max-w-xs">
@@ -489,7 +553,7 @@ export function ProjectLibrary() {
         </div>
       ) : viewMode === 'list' ? (
         <div className="flex flex-col gap-1.5">
-          {files.map((file) => (
+          {displayFiles.map((file) => (
             <FileListItem
               key={file.id}
               file={file}
@@ -505,7 +569,7 @@ export function ProjectLibrary() {
         <div
           className={`grid gap-3 ${isMobile ? 'grid-cols-2' : 'grid-cols-[repeat(auto-fill,minmax(200px,1fr))]'}`}
         >
-          {files.map((file) => (
+          {displayFiles.map((file) => (
             <FileGridCard
               key={file.id}
               file={file}
@@ -516,19 +580,6 @@ export function ProjectLibrary() {
               onPreview={setPreviewFile}
             />
           ))}
-        </div>
-      )}
-
-      {/* File count + refreshing indicator */}
-      {files.length > 0 && (
-        <div className="flex items-center justify-center gap-2">
-          {refreshing && <Spinner size="sm" />}
-          <p className="text-xs text-fg-muted text-center m-0">
-            Showing {files.length} of {total} file{total !== 1 ? 's' : ''}
-            {currentDirectory !== '/' && !isSearching && (
-              <span> in {currentDirectory}</span>
-            )}
-          </p>
         </div>
       )}
 

@@ -167,6 +167,8 @@ export const LIBRARY_DEFAULTS = {
   MAX_DIRECTORIES_PER_PROJECT: 500,
   /** Maximum file size for inline browser preview in bytes (default: 50MB). Env: FILE_PREVIEW_MAX_BYTES */
   FILE_PREVIEW_MAX_BYTES: 50 * 1024 * 1024,
+  /** Maximum search query length in characters (default: 200). Env: LIBRARY_MAX_SEARCH_LENGTH */
+  MAX_SEARCH_LENGTH: 200,
 } as const;
 
 /**
