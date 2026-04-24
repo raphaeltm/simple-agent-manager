@@ -266,7 +266,7 @@ describe('ProjectLibrary', () => {
     const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
     await userEvent.click(filterBtn);
 
-    // Mock all subsequent calls (one per keystroke triggers a new API call)
+    // Mock subsequent calls (debounced — fires after user stops typing)
     mocks.listLibraryFiles.mockResolvedValue(makeResponse([]));
     const searchInput = screen.getByPlaceholderText('Search files across all directories...');
     await userEvent.type(searchInput, 'x');
@@ -409,5 +409,92 @@ describe('ProjectLibrary', () => {
       expect(screen.getByRole('navigation', { name: 'Directory breadcrumb' })).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: 'Root directory' })).toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Search debounce tests
+  // ---------------------------------------------------------------------------
+
+  it('debounces search — typing multiple chars fires API once after delay, not per keystroke', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const files = [makeFile({ id: 'f1', filename: 'readme.md' })];
+    mocks.listLibraryFiles.mockResolvedValue(makeResponse(files));
+    mocks.listLibraryDirectories.mockResolvedValue({ directories: [] });
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderLibrary();
+
+    // Wait for initial load
+    await waitFor(() => {
+      expect(screen.getByText('readme.md')).toBeInTheDocument();
+    });
+
+    const initialCallCount = mocks.listLibraryFiles.mock.calls.length;
+
+    // Open filters
+    const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
+    await user.click(filterBtn);
+
+    const searchInput = screen.getByPlaceholderText('Search files across all directories...');
+
+    // Type multiple characters rapidly
+    await user.type(searchInput, 'hel');
+
+    // Advance past the debounce delay (300ms)
+    await vi.advanceTimersByTimeAsync(500);
+
+    await waitFor(() => {
+      const calls = mocks.listLibraryFiles.mock.calls;
+      const searchCalls = calls.filter(
+        (call: unknown[]) => call[1] && (call[1] as Record<string, unknown>).search === 'hel',
+      );
+      // Should have exactly one call with the full debounced search string 'hel'
+      expect(searchCalls.length).toBe(1);
+    });
+
+    // Should NOT have fired per-keystroke calls (h, he, hel = 3 separate search calls)
+    const searchCalls = mocks.listLibraryFiles.mock.calls
+      .slice(initialCallCount)
+      .filter((call: unknown[]) => call[1] && (call[1] as Record<string, unknown>).search);
+    expect(searchCalls.length).toBe(1);
+
+    vi.useRealTimers();
+  });
+
+  it('existing content stays visible during search refresh (no full-page spinner)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const files = [
+      makeFile({ id: 'f1', filename: 'readme.md' }),
+      makeFile({ id: 'f2', filename: 'notes.txt' }),
+    ];
+    mocks.listLibraryFiles.mockResolvedValueOnce(makeResponse(files));
+    mocks.listLibraryDirectories.mockResolvedValue({ directories: [] });
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderLibrary();
+
+    await waitFor(() => {
+      expect(screen.getByText('readme.md')).toBeInTheDocument();
+    });
+    expect(screen.getByText('notes.txt')).toBeInTheDocument();
+
+    // Make subsequent API call hang forever (simulates in-flight request)
+    mocks.listLibraryFiles.mockReturnValue(new Promise(() => {}));
+
+    // Open filters and type a search query
+    const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
+    await user.click(filterBtn);
+
+    const searchInput = screen.getByPlaceholderText('Search files across all directories...');
+    await user.type(searchInput, 'x');
+
+    // Advance past the debounce delay so the search fires
+    await vi.advanceTimersByTimeAsync(500);
+
+    // Existing files should still be visible (background refresh, not full-page spinner)
+    expect(screen.getByText('readme.md')).toBeInTheDocument();
+    expect(screen.getByText('notes.txt')).toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 });

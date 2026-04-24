@@ -27,22 +27,22 @@ Two UX issues in the project library page (`apps/web/src/pages/ProjectLibrary.ts
 
 ## Implementation Checklist
 
-- [ ] 1. Add a `useDebouncedValue` hook (or inline useRef/useEffect debounce pattern)
-- [ ] 2. Split search state into `searchInput` (raw) and `debouncedSearch` (delayed) — use debounced value in `loadFiles`
-- [ ] 3. Change `loadFiles` to use `setRefreshing(true)` for search/filter changes (preserves existing content), only `setLoading(true)` for initial mount
-- [ ] 4. Show a subtle search-in-progress indicator (small spinner near the search input) instead of replacing the entire content
-- [ ] 5. Always render directories as a compact grid of square cards with folder icons — separate from the file view mode (list vs grid)
-- [ ] 6. Ensure directory cards use `aspect-square` or fixed dimensions, centered icon and name
-- [ ] 7. Write Playwright visual audit tests with mock data covering normal, long-text, empty, many-items, and error scenarios
-- [ ] 8. Test on mobile (375px) and desktop (1280px) viewports
-- [ ] 9. Assert no horizontal overflow
+- [x] 1. Add a `useDebouncedValue` hook (or inline useRef/useEffect debounce pattern)
+- [x] 2. Split search state into `searchInput` (raw) and `debouncedSearch` (delayed) — use debounced value in `loadFiles`
+- [x] 3. Change `loadFiles` to use `setRefreshing(true)` for search/filter changes (preserves existing content), only `setLoading(true)` for initial mount
+- [x] 4. Show a subtle search-in-progress indicator (small spinner near the search input) instead of replacing the entire content
+- [x] 5. Always render directories as a compact grid of square cards with folder icons — separate from the file view mode (list vs grid)
+- [x] 6. Ensure directory cards use `aspect-square` or fixed dimensions, centered icon and name
+- [x] 7. Write Playwright visual audit tests with mock data covering normal, long-text, empty, many-items, and error scenarios
+- [x] 8. Test on mobile (375px) and desktop (1280px) viewports
+- [x] 9. Assert no horizontal overflow
 
 ## Acceptance Criteria
 
-- [ ] Typing in search does NOT trigger a request per keystroke — requests fire after user stops typing (~300ms)
-- [ ] Search results update without replacing existing content with a full-page spinner
-- [ ] A subtle inline indicator shows while search is in progress
-- [ ] Directories display as square cards with folder icons on desktop (both list and grid view modes)
-- [ ] Directory layout looks good on mobile too
-- [ ] No horizontal overflow on any viewport
-- [ ] Playwright screenshots captured for mobile and desktop
+- [x] Typing in search does NOT trigger a request per keystroke — requests fire after user stops typing (~300ms)
+- [x] Search results update without replacing existing content with a full-page spinner
+- [x] A subtle inline indicator shows while search is in progress
+- [x] Directories display as square cards with folder icons on desktop (both list and grid view modes)
+- [x] Directory layout looks good on mobile too
+- [x] No horizontal overflow on any viewport
+- [x] Playwright screenshots captured for mobile and desktop
