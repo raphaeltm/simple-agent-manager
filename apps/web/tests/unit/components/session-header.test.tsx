@@ -7,16 +7,28 @@ import type { ChatSessionResponse } from '../../../src/lib/api';
 const mocks = vi.hoisted(() => ({
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
+  getProjectTask: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   updateProjectTaskStatus: mocks.updateProjectTaskStatus,
   deleteWorkspace: mocks.deleteWorkspace,
+  getProjectTask: mocks.getProjectTask,
 }));
 
 vi.mock('../../../src/lib/text-utils', () => ({
   stripMarkdown: (s: string) => s,
+}));
+
+vi.mock('../../../src/lib/url-utils', () => ({
+  sanitizeUrl: (s: string) => s,
+}));
+
+vi.mock('react-router', () => ({
+  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string; [key: string]: unknown }) => (
+    <a href={to} {...props}>{children}</a>
+  ),
 }));
 
 vi.mock('@simple-agent-manager/ui', () => ({
@@ -30,20 +42,27 @@ vi.mock('@simple-agent-manager/ui', () => ({
 
 vi.mock('lucide-react', () => ({
   Box: () => <span />,
-  CheckCircle2: () => <span />,
+  CheckCircle2: () => <span data-testid="icon-check-circle" />,
   ChevronDown: () => <span />,
   ChevronUp: () => <span />,
+  Clock: () => <span />,
   Cloud: () => <span />,
+  Copy: () => <span data-testid="icon-copy" />,
   Cpu: () => <span />,
   ExternalLink: () => <span />,
   FolderOpen: () => <span />,
   GitBranch: () => <span />,
   GitCompare: () => <span />,
+  GitFork: () => <span />,
   Globe: () => <span />,
+  Hash: () => <span />,
   Loader2: () => <span />,
   MapPin: () => <span />,
   Monitor: () => <span />,
+  RotateCcw: () => <span />,
   Server: () => <span />,
+  Tag: () => <span />,
+  Timer: () => <span />,
 }));
 
 import { SessionHeader } from '../../../src/components/project-message-view/SessionHeader';
@@ -166,7 +185,7 @@ describe('SessionHeader', () => {
   it('shows Workspace button for active sessions with workspace', () => {
     renderHeader({ sessionState: 'active' });
     fireEvent.click(screen.getByLabelText('Show session details'));
-    expect(screen.getByText('Workspace')).toBeInTheDocument();
+    expect(screen.getByLabelText('Open workspace')).toBeInTheDocument();
   });
 
   it('shows Complete button when task is eligible', () => {
@@ -295,5 +314,141 @@ describe('SessionHeader', () => {
     await waitFor(() => {
       expect(screen.getByText('Completing...')).toBeInTheDocument();
     });
+  });
+
+  // --- CopyableId and Reference IDs ---
+
+  it('shows References section with session ID when expanded', () => {
+    renderHeader();
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.getByText('References')).toBeInTheDocument();
+    // Session ID is always present — look for the truncated display
+    expect(screen.getByTitle(/Session: sess-abc123/)).toBeInTheDocument();
+  });
+
+  it('shows task ID pill when task embed is present', () => {
+    renderHeader({ taskEmbed: makeTaskEmbed({ id: 'task-xyz789' }) });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.getByTitle(/Task: task-xyz789/)).toBeInTheDocument();
+  });
+
+  it('shows workspace ID pill when workspace is linked', () => {
+    renderHeader({ session: makeSession({ workspaceId: 'ws-deadbeef' }) });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.getByTitle(/Workspace: ws-deadbeef/)).toBeInTheDocument();
+  });
+
+  it('shows ACP session ID pill when agent session is linked', () => {
+    renderHeader({ session: makeSession({ agentSessionId: 'acp-session-42' }) });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.getByTitle(/ACP: acp-session-42/)).toBeInTheDocument();
+  });
+
+  it('copies value to clipboard and shows checkmark when CopyableId is clicked', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderHeader();
+    fireEvent.click(screen.getByLabelText('Show session details'));
+
+    const pill = screen.getByTitle(/Session: sess-abc123/);
+    // Before click: shows copy icon, not check icon
+    expect(pill.querySelector('[data-testid="icon-copy"]')).toBeInTheDocument();
+    expect(pill.querySelector('[data-testid="icon-check-circle"]')).not.toBeInTheDocument();
+
+    fireEvent.click(pill);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('sess-abc123');
+    });
+
+    // After copy: shows checkmark feedback
+    await waitFor(() => {
+      expect(pill.querySelector('[data-testid="icon-check-circle"]')).toBeInTheDocument();
+    });
+  });
+
+  // --- Task execution step and status badge ---
+
+  it('shows task execution step when task is in_progress', () => {
+    renderHeader({
+      taskEmbed: makeTaskEmbed({ status: 'in_progress', executionStep: 'node_provisioning' }),
+    });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.getByText('Provisioning node')).toBeInTheDocument();
+  });
+
+  it('does not show execution step when task is completed', () => {
+    renderHeader({
+      taskEmbed: makeTaskEmbed({ status: 'completed', executionStep: 'agent_session' }),
+    });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.queryByText('Agent running')).not.toBeInTheDocument();
+  });
+
+  it('shows task status badge with formatted text', () => {
+    renderHeader({
+      taskEmbed: makeTaskEmbed({ status: 'in_progress' }),
+    });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.getByText('In progress')).toBeInTheDocument();
+  });
+
+  it('shows completed status badge with check icon', () => {
+    renderHeader({
+      taskEmbed: makeTaskEmbed({ status: 'completed' }),
+    });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    const badge = screen.getByText('Completed');
+    expect(badge).toBeInTheDocument();
+    // Check icon is within the badge
+    expect(badge.closest('span')?.querySelector('[data-testid="icon-check-circle"]')).toBeInTheDocument();
+  });
+
+  // --- Session timing ---
+
+  it('shows session start time when startedAt is set', () => {
+    const startedAt = new Date('2026-04-24T10:30:00Z').getTime();
+    renderHeader({ session: makeSession({ startedAt }) });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    // The formatted time should contain Apr 24
+    expect(screen.getByText(/Apr 24/)).toBeInTheDocument();
+  });
+
+  it('shows duration for completed sessions', () => {
+    const startedAt = new Date('2026-04-24T10:00:00Z').getTime();
+    const endedAt = new Date('2026-04-24T10:15:00Z').getTime();
+    renderHeader({ session: makeSession({ startedAt, endedAt }) });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.getByText('15m')).toBeInTheDocument();
+  });
+
+  it('shows running indicator for active sessions with timing', () => {
+    const startedAt = Date.now() - 60_000; // 1 minute ago
+    renderHeader({
+      session: makeSession({ startedAt }),
+      taskEmbed: null,
+      workspace: null,
+    });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.getByText('(running)')).toBeInTheDocument();
+  });
+
+  // --- Retry and Fork buttons ---
+
+  it('shows retry button when onRetry is provided and session has task', () => {
+    renderHeader({
+      session: makeSession({ taskId: 'task-1' }),
+      onRetry: vi.fn(),
+    });
+    expect(screen.getByLabelText('Retry task')).toBeInTheDocument();
+  });
+
+  it('shows fork button when onFork is provided and session has task', () => {
+    renderHeader({
+      session: makeSession({ taskId: 'task-1' }),
+      onFork: vi.fn(),
+    });
+    expect(screen.getByLabelText('Fork session')).toBeInTheDocument();
   });
 });
