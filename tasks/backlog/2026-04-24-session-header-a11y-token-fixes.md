@@ -1,7 +1,7 @@
 # Session Header Accessibility and Design Token Fixes
 
 **Created**: 2026-04-24
-**Source**: Post-merge UI/UX specialist review of PR #804
+**Source**: Post-merge UI/UX specialist review + task-completion-validator of PR #804
 
 ## Problem
 
@@ -37,6 +37,10 @@ The session header enhancements (PR #804) shipped with several accessibility gap
 
 10. **No handling for `cancelled` status in badge colors**: Falls through to default with no distinct visual treatment.
 
+11. **Add Playwright visual audit spec for session header**: Rule 17 requires a dedicated local Playwright spec with mock data scenarios (normal, long IDs with full ULIDs, empty states) at mobile (375x667) and desktop (1280x800) viewports. Staging Playwright verification was done but no spec file was created.
+
+12. **Document `allowedHosts: true` in vite.config.ts**: Added for Codespace port forwarding but lacks a comment explaining why. Add inline comment or revert if no longer needed.
+
 ## Acceptance Criteria
 
 - [ ] All Tailwind token references match the design system (`bg-surface`, not `bg-surface-default`)
@@ -47,3 +51,5 @@ The session header enhancements (PR #804) shipped with several accessibility gap
 - [ ] Expand toggle has `aria-controls` pointing to panel `id`
 - [ ] Failed status badge has a non-color indicator (icon)
 - [ ] `hasDetails` constant removed, guards simplified
+- [ ] Playwright visual audit spec added with long-ID mock data scenarios
+- [ ] `allowedHosts: true` in vite.config.ts documented or reverted
