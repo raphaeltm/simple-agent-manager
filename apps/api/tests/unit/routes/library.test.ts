@@ -479,7 +479,8 @@ describe('library routes', () => {
         expect.anything(),
         'test-project-id',
         '/docs/',
-        env
+        env,
+        undefined
       );
     });
 
