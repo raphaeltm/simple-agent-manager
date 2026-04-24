@@ -1155,8 +1155,8 @@ describe('ProjectMessageView — collapsible session header', () => {
     expect(screen.getByText('Stopped')).toBeTruthy();
   });
 
-  it('does not show expand toggle when there are no details', async () => {
-    // Session without branch, PR, or workspace link
+  it('always shows expand toggle for reference IDs', async () => {
+    // Even sessions without branch, PR, or workspace still have reference IDs
     const session = { ...makeSession('sess-4', 'stopped'), workspaceId: null };
     const response = {
       session,
@@ -1171,9 +1171,8 @@ describe('ProjectMessageView — collapsible session header', () => {
       expect(screen.getByText('Session sess-4')).toBeTruthy();
     });
 
-    // No toggle should exist
-    expect(screen.queryByRole('button', { name: /show session details/i })).toBeNull();
-    expect(screen.queryByRole('button', { name: /hide session details/i })).toBeNull();
+    // Toggle should always exist — every session has at least a Session ID to display
+    expect(screen.queryByRole('button', { name: /show session details/i })).not.toBeNull();
   });
 });
 
@@ -1235,7 +1234,8 @@ describe('ProjectMessageView — session context dropdown', () => {
 
     // Should show workspace info
     expect(screen.getByText('Workspace:')).toBeTruthy();
-    expect(screen.getByText('(running)')).toBeTruthy();
+    // Workspace status "(running)" may appear alongside timing "(running)" — check at least one exists
+    expect(screen.getAllByText('(running)').length).toBeGreaterThanOrEqual(1);
 
     // Should show VM size
     expect(screen.getByText('VM Size:')).toBeTruthy();
