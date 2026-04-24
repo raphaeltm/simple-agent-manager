@@ -273,6 +273,9 @@ export async function getSessionFileContent(
 /**
  * Build a URL to fetch raw binary file content via session proxy.
  * Used as <img src> for image rendering — browser handles the fetch directly.
+ * Must be an absolute URL (including API_URL) because the web app and API are
+ * on different subdomains (app.* vs api.*). A relative `/api/...` path would
+ * resolve against the app origin and 404.
  */
 export function getSessionFileRawUrl(
   projectId: string,
@@ -280,7 +283,7 @@ export function getSessionFileRawUrl(
   filePath: string
 ): string {
   const params = new URLSearchParams({ path: filePath });
-  return `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/files/raw?${params.toString()}`;
+  return `${API_URL}/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/files/raw?${params.toString()}`;
 }
 
 /**
