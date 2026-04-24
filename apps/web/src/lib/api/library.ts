@@ -204,9 +204,11 @@ export async function deleteLibraryFile(
 export async function listLibraryDirectories(
   projectId: string,
   parentDirectory: string = '/',
+  search?: string,
 ): Promise<{ directories: DirectoryEntry[] }> {
   const params = new URLSearchParams();
   if (parentDirectory !== '/') params.set('parentDirectory', parentDirectory);
+  if (search) params.set('search', search);
   const qs = params.toString();
   return request<{ directories: DirectoryEntry[] }>(
     `/api/projects/${projectId}/library/directories${qs ? `?${qs}` : ''}`,

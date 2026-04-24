@@ -125,9 +125,11 @@ export async function listDirectories(
   projectId: string,
   parentDirectory: string = '/',
   env?: Env,
+  search?: string,
 ): Promise<DirectoryEntry[]> {
-  // Query all distinct directories that start with the parent path
-  const escapedParent = parentDirectory.replace(/[%_]/g, '\\$&');
+  // When searching, query ALL directories in the project (not just children of parentDirectory)
+  const useParent = search ? '/' : parentDirectory;
+  const escapedParent = useParent.replace(/[%_]/g, '\\$&');
   const maxDirs = env ? getMaxDirectoriesPerProject(env) : LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT;
   const allDirs = await db
     .select({
@@ -144,9 +146,36 @@ export async function listDirectories(
     .groupBy(schema.projectFiles.directory)
     .limit(maxDirs + 1);
 
-  // Extract immediate children of parentDirectory
+  // When searching, collect all unique directory paths and filter by name match
+  if (search) {
+    const searchLower = search.toLowerCase();
+    const matchedDirs = new Map<string, number>();
+
+    for (const row of allDirs) {
+      const segments = row.directory.split('/').filter(Boolean);
+      // Check each segment for a match — include the directory if any segment matches
+      const matches = segments.some((seg) => seg.toLowerCase().includes(searchLower));
+      if (matches) {
+        const current = matchedDirs.get(row.directory) ?? 0;
+        matchedDirs.set(row.directory, current + row.count);
+      }
+    }
+
+    return Array.from(matchedDirs.entries())
+      .map(([path, fileCount]) => {
+        const segments = path.split('/').filter(Boolean);
+        return {
+          path,
+          name: segments[segments.length - 1]!,
+          fileCount,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  // Extract immediate children of parentDirectory (non-search path)
   const childDirs = new Map<string, number>();
-  const parentDepth = parentDirectory === '/' ? 0 : parentDirectory.split('/').filter(Boolean).length;
+  const parentDepth = useParent === '/' ? 0 : useParent.split('/').filter(Boolean).length;
 
   for (const row of allDirs) {
     const segments = row.directory.split('/').filter(Boolean);

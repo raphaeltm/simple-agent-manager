@@ -1,5 +1,7 @@
 import { createAuthClient } from 'better-auth/react';
 
+import { clearLibraryCache } from './library-cache';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
 /**
@@ -30,6 +32,7 @@ export async function signOut() {
   await authClient.signOut({
     fetchOptions: {
       onSuccess: () => {
+        clearLibraryCache();
         window.location.href = '/';
       },
     },
