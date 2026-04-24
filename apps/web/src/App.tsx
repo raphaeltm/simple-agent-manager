@@ -47,7 +47,6 @@ import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
 import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { TaskDetail } from './pages/TaskDetail';
-import { SessionHeaderPrototype } from './pages/SessionHeaderPrototype';
 import { TrialChatGateHarness } from './pages/TrialChatGateHarness';
 import { Try } from './pages/Try';
 import { TryCapExceeded } from './pages/TryCapExceeded';
@@ -84,9 +83,6 @@ export default function App() {
           <Route path="/try/:trialId" element={<TryDiscovery />} />
           {/* Harness for Playwright audits — mounts trial components with mock data */}
           <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
-          {/* Prototype: enhanced session header with copyable IDs and task timing */}
-          <Route path="/__test/session-header" element={<SessionHeaderPrototype />} />
-
           {/* Protected routes with AppShell (persistent navigation) */}
           <Route element={<ProtectedLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
