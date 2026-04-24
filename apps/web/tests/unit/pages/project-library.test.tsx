@@ -44,6 +44,17 @@ vi.mock('../../../src/hooks/useIsMobile', () => ({
   useIsMobile: () => false,
 }));
 
+// Mock library-cache to avoid localStorage issues in test env
+const cacheMocks = vi.hoisted(() => ({
+  getCachedFiles: vi.fn().mockReturnValue(null),
+  setCachedFiles: vi.fn(),
+  getCachedDirectories: vi.fn().mockReturnValue(null),
+  setCachedDirectories: vi.fn(),
+  clearLibraryCache: vi.fn(),
+}));
+
+vi.mock('../../../src/lib/library-cache', () => cacheMocks);
+
 import { ProjectLibrary } from '../../../src/pages/ProjectLibrary';
 
 // ---------------------------------------------------------------------------
@@ -91,6 +102,8 @@ function renderLibrary() {
 describe('ProjectLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    cacheMocks.getCachedFiles.mockReturnValue(null);
+    cacheMocks.getCachedDirectories.mockReturnValue(null);
     // Default: no directories
     mocks.listLibraryDirectories.mockResolvedValue({ directories: [] });
   });
@@ -108,7 +121,7 @@ describe('ProjectLibrary', () => {
       expect(screen.getByText('readme.md')).toBeInTheDocument();
     });
     expect(screen.getByText('photo.png')).toBeInTheDocument();
-    expect(screen.getByText('Showing 2 of 2 files')).toBeInTheDocument();
+    expect(screen.getByText(/2 files/)).toBeInTheDocument();
   });
 
   it('renders empty state when no files exist', async () => {
@@ -188,7 +201,7 @@ describe('ProjectLibrary', () => {
     const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
     await userEvent.click(filterBtn);
 
-    expect(screen.getByPlaceholderText('Search files across all directories...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search files and folders...')).toBeInTheDocument();
   });
 
   it('switches between list and grid view', async () => {
@@ -268,7 +281,7 @@ describe('ProjectLibrary', () => {
 
     // Mock subsequent calls (debounced — fires after user stops typing)
     mocks.listLibraryFiles.mockResolvedValue(makeResponse([]));
-    const searchInput = screen.getByPlaceholderText('Search files across all directories...');
+    const searchInput = screen.getByPlaceholderText('Search files and folders...');
     await userEvent.type(searchInput, 'x');
 
     // Verify at least one call includes a search param
@@ -435,7 +448,7 @@ describe('ProjectLibrary', () => {
     const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
     await user.click(filterBtn);
 
-    const searchInput = screen.getByPlaceholderText('Search files across all directories...');
+    const searchInput = screen.getByPlaceholderText('Search files and folders...');
 
     // Type multiple characters rapidly
     await user.type(searchInput, 'hel');
@@ -481,20 +494,158 @@ describe('ProjectLibrary', () => {
     // Make subsequent API call hang forever (simulates in-flight request)
     mocks.listLibraryFiles.mockReturnValue(new Promise(() => {}));
 
-    // Open filters and type a search query
+    // Open filters and type a search query that matches existing files
     const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
     await user.click(filterBtn);
 
-    const searchInput = screen.getByPlaceholderText('Search files across all directories...');
-    await user.type(searchInput, 'x');
+    const searchInput = screen.getByPlaceholderText('Search files and folders...');
+    await user.type(searchInput, 'me');
 
     // Advance past the debounce delay so the search fires
     await vi.advanceTimersByTimeAsync(500);
 
-    // Existing files should still be visible (background refresh, not full-page spinner)
+    // Client-filtered match (readme.md) should remain visible — no full-page spinner
     expect(screen.getByText('readme.md')).toBeInTheDocument();
-    expect(screen.getByText('notes.txt')).toBeInTheDocument();
+    // Non-matching file filtered out by client-side instant filter
+    expect(screen.queryByText('notes.txt')).not.toBeInTheDocument();
 
     vi.useRealTimers();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Client-side filtering tests
+  // ---------------------------------------------------------------------------
+
+  it('client-side filters files instantly while search is pending', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const files = [
+      makeFile({ id: 'f1', filename: 'readme.md' }),
+      makeFile({ id: 'f2', filename: 'notes.txt' }),
+      makeFile({ id: 'f3', filename: 'readme-advanced.md' }),
+    ];
+    mocks.listLibraryFiles.mockResolvedValue(makeResponse(files));
+    mocks.listLibraryDirectories.mockResolvedValue({ directories: [] });
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderLibrary();
+
+    await waitFor(() => {
+      expect(screen.getByText('readme.md')).toBeInTheDocument();
+    });
+
+    // Open filters
+    const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
+    await user.click(filterBtn);
+
+    const searchInput = screen.getByPlaceholderText('Search files and folders...');
+    await user.type(searchInput, 'readme');
+
+    // WITHOUT advancing timers — client-side filter should already be active
+    // readme.md and readme-advanced.md should be visible, notes.txt should not
+    expect(screen.getByText('readme.md')).toBeInTheDocument();
+    expect(screen.getByText('readme-advanced.md')).toBeInTheDocument();
+    expect(screen.queryByText('notes.txt')).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  it('client-side filters directories by name while search is pending', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const files = [makeFile({ id: 'f1', filename: 'test.txt' })];
+    mocks.listLibraryFiles.mockResolvedValue(makeResponse(files));
+    mocks.listLibraryDirectories.mockResolvedValueOnce({
+      directories: [
+        { path: '/docs/', name: 'docs', fileCount: 3 },
+        { path: '/images/', name: 'images', fileCount: 5 },
+      ],
+    });
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderLibrary();
+
+    await waitFor(() => {
+      expect(screen.getByText('docs')).toBeInTheDocument();
+    });
+    expect(screen.getByText('images')).toBeInTheDocument();
+
+    const filterBtn = screen.getByRole('button', { name: 'Toggle filters' });
+    await user.click(filterBtn);
+
+    const searchInput = screen.getByPlaceholderText('Search files and folders...');
+    await user.type(searchInput, 'doc');
+
+    // 'docs' directory should remain, 'images' should be filtered out
+    expect(screen.getByText('docs')).toBeInTheDocument();
+    expect(screen.queryByText('images')).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Cache tests
+  // ---------------------------------------------------------------------------
+
+  it('renders cached data instantly on mount before API call returns', async () => {
+    const cachedFiles = makeResponse([
+      makeFile({ id: 'f1', filename: 'cached-file.txt' }),
+    ]);
+    cacheMocks.getCachedFiles.mockReturnValue(cachedFiles);
+    cacheMocks.getCachedDirectories.mockReturnValue([]);
+
+    // Make API call hang
+    mocks.listLibraryFiles.mockReturnValue(new Promise(() => {}));
+    mocks.listLibraryDirectories.mockReturnValue(new Promise(() => {}));
+
+    renderLibrary();
+
+    // Cached file should appear immediately without waiting for API
+    await waitFor(() => {
+      expect(screen.getByText('cached-file.txt')).toBeInTheDocument();
+    });
+  });
+
+  it('caches API results after successful load', async () => {
+    const files = [makeFile({ id: 'f1', filename: 'new-file.txt' })];
+    mocks.listLibraryFiles.mockResolvedValueOnce(makeResponse(files));
+
+    renderLibrary();
+
+    await waitFor(() => {
+      expect(screen.getByText('new-file.txt')).toBeInTheDocument();
+    });
+
+    // setCachedFiles should have been called with the response
+    expect(cacheMocks.setCachedFiles).toHaveBeenCalledWith(
+      'proj-test', '/', 'createdAt',
+      expect.objectContaining({ files }),
+    );
+    expect(cacheMocks.setCachedDirectories).toHaveBeenCalledWith(
+      'proj-test', '/', [],
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Status bar placement test
+  // ---------------------------------------------------------------------------
+
+  it('shows status bar at the top with file and folder counts', async () => {
+    const files = [
+      makeFile({ id: 'f1', filename: 'readme.md' }),
+      makeFile({ id: 'f2', filename: 'notes.txt' }),
+    ];
+    mocks.listLibraryFiles.mockResolvedValueOnce(makeResponse(files));
+    mocks.listLibraryDirectories.mockResolvedValueOnce({
+      directories: [{ path: '/docs/', name: 'docs', fileCount: 3 }],
+    });
+
+    renderLibrary();
+
+    await waitFor(() => {
+      expect(screen.getByText('readme.md')).toBeInTheDocument();
+    });
+
+    // Status bar should show both file and folder counts
+    expect(screen.getByText(/2 files/)).toBeInTheDocument();
+    expect(screen.getByText(/1 folder/)).toBeInTheDocument();
   });
 });

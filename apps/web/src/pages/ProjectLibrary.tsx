@@ -52,10 +52,15 @@ export function ProjectLibrary() {
   const { projectId } = useProjectContext();
   const isMobile = useIsMobile();
 
+  // Initialize from cache for instant render (avoids loading spinner on revisit)
+  const initialCachedFiles = getCachedFiles(projectId, '/', 'createdAt');
+  const initialCachedDirs = getCachedDirectories(projectId, '/');
+  const hasCachedData = !!(initialCachedFiles && initialCachedDirs);
+
   // Data state — holds the last full API response (unfiltered)
-  const [files, setFiles] = useState<FileWithTags[]>([]);
-  const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [files, setFiles] = useState<FileWithTags[]>(hasCachedData ? initialCachedFiles.files : []);
+  const [directories, setDirectories] = useState<DirectoryEntry[]>(hasCachedData ? initialCachedDirs : []);
+  const [loading, setLoading] = useState(!hasCachedData);
   const [refreshing, setRefreshing] = useState(false);
 
   // Directory navigation
@@ -127,7 +132,7 @@ export function ProjectLibrary() {
   // ---------------------------------------------------------------------------
 
   // Track whether initial load has completed so subsequent filter changes use background refresh
-  const hasLoadedOnce = useRef(false);
+  const hasLoadedOnce = useRef(hasCachedData);
 
   const loadFiles = useCallback(
     async (opts?: { background?: boolean }) => {
@@ -135,22 +140,7 @@ export function ProjectLibrary() {
       if (isBackground) {
         setRefreshing(true);
       } else {
-        // Try loading from cache for instant render
-        if (!debouncedSearch && activeTags.length === 0 && sourceFilter === 'all') {
-          const cachedFiles = getCachedFiles(projectId, currentDirectory, sortBy);
-          const cachedDirs = getCachedDirectories(projectId, currentDirectory);
-          if (cachedFiles && cachedDirs) {
-            setFiles(cachedFiles.files);
-            setDirectories(cachedDirs);
-            hasLoadedOnce.current = true;
-            // Still fetch fresh data in background
-            setRefreshing(true);
-          } else {
-            setLoading(true);
-          }
-        } else {
-          setLoading(true);
-        }
+        setLoading(true);
       }
       try {
         const filters: ListFilesRequest = {
