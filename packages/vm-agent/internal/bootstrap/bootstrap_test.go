@@ -55,6 +55,7 @@ func TestNormalizeRepoURL(t *testing.T) {
 func TestWithGitHubToken(t *testing.T) {
 	t.Parallel()
 
+	// GitHub URL uses x-access-token username
 	urlWithToken, err := withGitHubToken("https://github.com/octo/repo.git", "abc123")
 	if err != nil {
 		t.Fatalf("withGitHubToken returned error: %v", err)
@@ -63,12 +64,57 @@ func TestWithGitHubToken(t *testing.T) {
 		t.Fatalf("unexpected tokenized url: %s", urlWithToken)
 	}
 
-	nonGithubURL, err := withGitHubToken("https://gitlab.com/octo/repo.git", "abc123")
+	// Artifacts URL uses "x" username
+	artifactsURL, err := withGitHubToken("https://acct123.artifacts.cloudflare.net/git/default/my-repo.git", "art_token")
 	if err != nil {
-		t.Fatalf("withGitHubToken returned error for non-github url: %v", err)
+		t.Fatalf("withGitHubToken returned error for artifacts url: %v", err)
 	}
-	if nonGithubURL != "https://gitlab.com/octo/repo.git" {
-		t.Fatalf("expected non-github URL to remain unchanged, got: %s", nonGithubURL)
+	if artifactsURL != "https://x:art_token@acct123.artifacts.cloudflare.net/git/default/my-repo.git" {
+		t.Fatalf("unexpected artifacts tokenized url: %s", artifactsURL)
+	}
+
+	// Other HTTPS URLs also get credentials (x-access-token by default)
+	otherURL, err := withGitHubToken("https://gitlab.com/octo/repo.git", "abc123")
+	if err != nil {
+		t.Fatalf("withGitHubToken returned error for other url: %v", err)
+	}
+	if otherURL != "https://x-access-token:abc123@gitlab.com/octo/repo.git" {
+		t.Fatalf("expected other URL to get x-access-token credentials, got: %s", otherURL)
+	}
+
+	// Empty token returns URL unchanged
+	noToken, err := withGitHubToken("https://github.com/octo/repo.git", "")
+	if err != nil {
+		t.Fatalf("withGitHubToken returned error for empty token: %v", err)
+	}
+	if noToken != "https://github.com/octo/repo.git" {
+		t.Fatalf("expected URL unchanged with empty token, got: %s", noToken)
+	}
+}
+
+func TestNeedsCredentialHelper(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		repo string
+		want bool
+	}{
+		{name: "github short", repo: "octo/repo", want: true},
+		{name: "github URL", repo: "https://github.com/octo/repo.git", want: true},
+		{name: "artifacts URL", repo: "https://acct.artifacts.cloudflare.net/git/default/repo.git", want: true},
+		{name: "gitlab URL", repo: "https://gitlab.com/octo/repo.git", want: false},
+		{name: "empty", repo: "", want: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := needsCredentialHelper(tc.repo); got != tc.want {
+				t.Fatalf("needsCredentialHelper(%q) = %v, want %v", tc.repo, got, tc.want)
+			}
+		})
 	}
 }
 

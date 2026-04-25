@@ -2495,6 +2495,9 @@ func isGitHubRepo(repo string) bool {
 // needsCredentialHelper returns true if the repo requires a git credential
 // helper for authentication (GitHub or Cloudflare Artifacts).
 func needsCredentialHelper(repo string) bool {
+	if strings.TrimSpace(repo) == "" {
+		return false
+	}
 	normalized := normalizeRepoURL(repo)
 	u, err := url.Parse(normalized)
 	if err != nil {
