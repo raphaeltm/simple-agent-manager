@@ -10,7 +10,7 @@ catalog:
   vite: 6.4.1
   vitest: 4.1.5
   tsx: 4.21.0
-  eslint: 8.57.1
+  eslint: 10.2.1
   jsdom: 24.1.3
 
   # === Vitest Ecosystem ===
