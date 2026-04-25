@@ -333,7 +333,7 @@ app.get('/health', (c) => {
 
 // Public config — exposes feature flags the UI needs before auth
 app.get('/api/config/artifacts-enabled', (c) => {
-  return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
+  return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' });
 });
 
 // JWKS endpoint (must be at root level)
