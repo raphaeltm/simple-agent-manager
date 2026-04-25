@@ -12,6 +12,9 @@ import type { VMSize, WorkspaceProfile, WorkspaceResponse } from './workspace';
 
 export type ProjectStatus = 'active' | 'detached';
 
+/** Git repository provider for a project. */
+export type RepoProvider = 'github' | 'artifacts';
+
 /**
  * Per-project agent defaults. Keys are agent types (claude-code, openai-codex, etc.).
  * For each agent type, optionally override model and/or permission mode.
@@ -32,9 +35,13 @@ export interface Project {
   userId: string;
   name: string;
   description: string | null;
-  installationId: string;
+  installationId: string | null;
   repository: string;
   defaultBranch: string;
+  /** Repo provider: 'github' (default) or 'artifacts'. */
+  repoProvider: RepoProvider;
+  /** Cloudflare Artifacts repo ID. Null for GitHub-backed projects. */
+  artifactsRepoId?: string | null;
   defaultVmSize?: VMSize | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
@@ -67,6 +74,7 @@ export interface ProjectSummary {
   repository: string;
   githubRepoId: number | null;
   defaultBranch: string;
+  repoProvider: RepoProvider;
   status: ProjectStatus;
   activeWorkspaceCount: number;
   activeSessionCount: number;
@@ -94,11 +102,15 @@ export interface ProjectDetailResponse extends Project {
 export interface CreateProjectRequest {
   name: string;
   description?: string;
-  installationId: string;
-  repository: string;
+  /** Required for GitHub projects. Null/omitted for Artifacts. */
+  installationId?: string;
+  /** Required for GitHub projects. Auto-generated for Artifacts. */
+  repository?: string;
   githubRepoId?: number;
   githubRepoNodeId?: string;
-  defaultBranch: string;
+  defaultBranch?: string;
+  /** Repo provider: 'github' (default) or 'artifacts'. */
+  repoProvider?: RepoProvider;
 }
 
 export interface UpdateProjectRequest {
@@ -167,3 +179,16 @@ export interface ListProjectsResponse {
   projects: Project[];
   nextCursor?: string | null;
 }
+
+/** Configurable defaults for Artifacts-backed projects (Constitution Principle XI). */
+export const ARTIFACTS_DEFAULTS = {
+  /** Default branch for new Artifacts repos. Env: ARTIFACTS_DEFAULT_BRANCH */
+  DEFAULT_BRANCH: 'main',
+  /** TTL in seconds for generated Artifacts tokens. Env: ARTIFACTS_TOKEN_TTL_SECONDS */
+  TOKEN_TTL_SECONDS: 3600,
+  /** Maximum Artifacts repos per user. Env: ARTIFACTS_MAX_REPOS_PER_USER */
+  MAX_REPOS_PER_USER: 50,
+} as const;
+
+/** Valid repo provider values. */
+export const VALID_REPO_PROVIDERS: readonly RepoProvider[] = ['github', 'artifacts'] as const;

@@ -85,6 +85,10 @@ export type {
 } from './provider';
 
 // Project
+export {
+  ARTIFACTS_DEFAULTS,
+  VALID_REPO_PROVIDERS,
+} from './project';
 export type {
   CreateProjectRequest,
   ListProjectsResponse,
@@ -97,6 +101,7 @@ export type {
   ProjectRuntimeFileResponse,
   ProjectStatus,
   ProjectSummary,
+  RepoProvider,
   UpdateProjectRequest,
   UpsertProjectRuntimeEnvVarRequest,
   UpsertProjectRuntimeFileRequest,

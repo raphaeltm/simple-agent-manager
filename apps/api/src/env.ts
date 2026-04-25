@@ -8,6 +8,28 @@ export interface Env {
   R2: R2Bucket;
   // Workers AI for speech-to-text transcription
   AI: Ai;
+  // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
+  ARTIFACTS?: {
+    create(name: string, opts?: { description?: string; setDefaultBranch?: string }): Promise<{
+      id: string;
+      name: string;
+      remote: string;
+      token: string;
+      default_branch: string;
+    }>;
+    get(name: string): Promise<{
+      id: string;
+      name: string;
+      remote: string;
+      defaultBranch: string;
+      createToken(scope?: 'read' | 'write', ttl?: number): Promise<{
+        id: string;
+        plaintext: string;
+        scope: string;
+        expires_at: string;
+      }>;
+    }>;
+  };
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)
@@ -495,4 +517,13 @@ export interface Env {
   TRIAL_VM_SIZE?: string;
   /** Trial VM location override (default: DEFAULT_VM_LOCATION from shared). */
   TRIAL_VM_LOCATION?: string;
+  // Cloudflare Artifacts (GitHub-optional project creation)
+  /** Kill switch — set to 'true' to enable Artifacts as a repo provider. */
+  ARTIFACTS_ENABLED?: string;
+  /** Default branch for new Artifacts repos (default: 'main'). */
+  ARTIFACTS_DEFAULT_BRANCH?: string;
+  /** TTL in seconds for Artifacts tokens (default: 3600). */
+  ARTIFACTS_TOKEN_TTL_SECONDS?: string;
+  /** Max Artifacts repos per user (default: 50). */
+  ARTIFACTS_MAX_REPOS_PER_USER?: string;
 }

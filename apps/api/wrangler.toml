@@ -54,6 +54,11 @@ TRIAL_AGENT_TYPE_PRODUCTION = "claude-code"
 TRIAL_DEFAULT_WORKSPACE_PROFILE = "lightweight"
 TRIALS_ENABLED_KV_KEY = "trials:enabled"
 
+# Cloudflare Artifacts for SAM-native Git repos (GitHub-optional projects)
+[[artifacts]]
+binding = "ARTIFACTS"
+namespace = "default"
+
 # D1 Database
 [[d1_databases]]
 binding = "DATABASE"

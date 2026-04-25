@@ -244,10 +244,13 @@ export const projects = sqliteTable(
     normalizedName: text('normalized_name').notNull(),
     description: text('description'),
     installationId: text('installation_id')
-      .notNull()
       .references(() => githubInstallations.id, { onDelete: 'cascade' }),
     repository: text('repository').notNull(),
     defaultBranch: text('default_branch').notNull().default('main'),
+    /** Repo provider: 'github' (default) or 'artifacts' (Cloudflare Artifacts). */
+    repoProvider: text('repo_provider').notNull().default('github'),
+    /** Cloudflare Artifacts repo ID. Null for GitHub-backed projects. */
+    artifactsRepoId: text('artifacts_repo_id'),
     githubRepoId: integer('github_repo_id'),
     githubRepoNodeId: text('github_repo_node_id'),
     // Per-project defaults (null = use platform defaults from env vars).
@@ -307,6 +310,9 @@ export const projects = sqliteTable(
     userGithubRepoIdUnique: uniqueIndex('idx_projects_user_github_repo_id')
       .on(table.userId, table.githubRepoId)
       .where(sql`github_repo_id IS NOT NULL`),
+    userArtifactsRepoUnique: uniqueIndex('idx_projects_user_artifacts_repo')
+      .on(table.userId, table.artifactsRepoId)
+      .where(sql`artifacts_repo_id IS NOT NULL`),
   })
 );
 
