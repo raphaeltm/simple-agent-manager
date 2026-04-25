@@ -10,6 +10,17 @@ After completing ANY task, you MUST re-read the user's original request and veri
 4. Acknowledge any items that were deferred or handled differently
 5. Do NOT mark work as complete until this validation passes
 
+## Blocker Validation (Before Deferring or Stopping)
+
+Before telling the human you cannot continue, you MUST validate that the blocker is real.
+
+1. Identify the exact assumption: missing auth, missing binary, missing dependency, missing file, permission issue, broken remote, unavailable env var, and so on
+2. Run the direct verification step in the environment
+3. Try the obvious documented recovery step if one exists
+4. Only then report the blocker, with the command(s) attempted and the observed result
+
+Untested assumptions are not blockers. "I think this won't work" is not an acceptable stopping condition.
+
 ## Feature Testing Requirements
 
 If you build or modify a feature, you MUST add tests that prove it works before calling the task complete.

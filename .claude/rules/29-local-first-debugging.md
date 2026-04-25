@@ -156,6 +156,24 @@ This is still log-driven debugging — you're making the system more observable 
 
 Every one of these is a guess. Every one of these costs a deploy cycle. Every one of these can be ruled in or out by reading a specific log line. Read the log first.
 
+## Assumption Verification Before Reporting Blockers
+
+Do not tell the human you are blocked because of an environment assumption you have not tested. Before declaring that something cannot be done, you MUST try the cheapest direct verification step available.
+
+### Required Procedure Before Reporting a Blocker
+
+1. **Name the suspected blocker.** Example: "GitHub CLI may not be authenticated" or "the API tests may fail because dependencies are missing."
+2. **Run the direct check.** Examples: `gh auth status`, `git remote -v`, `pnpm install`, documented package build order, `test -f <path>`, `which <binary>`.
+3. **Try the obvious local recovery path** if the first failure has a standard remedy documented in the repo or tool output.
+4. **Only then report the blocker**, including the exact check performed and why the result really prevents progress.
+
+### Never Do This
+
+- Assume GitHub auth is missing without running `gh auth status`
+- Assume validation cannot run without trying `pnpm install` or the repo's documented build order
+- Assume a file/path/config is absent without checking the filesystem
+- Give up after the first failed command when the failure itself points to the next verification step
+
 ## Quick Compliance Check
 
 Before deploying to staging for the first time on a feature:
@@ -168,6 +186,11 @@ Before your second or later staging deploy on the same feature:
 - [ ] You have read the logs from the most recent failure in full
 - [ ] You can quote a specific log line that justifies the next change
 - [ ] You are not guessing
+
+Before telling the human you are blocked:
+- [ ] You ran a direct environment check for the suspected blocker
+- [ ] You tried the obvious documented recovery step when one existed
+- [ ] You can quote the command/result that proves the blocker is real
 
 ## References
 
