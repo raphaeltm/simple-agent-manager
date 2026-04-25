@@ -38,6 +38,11 @@ const DO_MIGRATION_FILES = [
     import.meta.dirname,
     '../../apps/api/src/durable-objects/notification-migrations.ts'
   ),
+  // trial-counter.ts has inline DDL (CREATE TABLE IF NOT EXISTS) — scan it too
+  resolve(
+    import.meta.dirname,
+    '../../apps/api/src/durable-objects/trial-counter.ts'
+  ),
 ];
 
 interface Violation {
@@ -50,11 +55,11 @@ interface Violation {
 /**
  * Allowlist for patterns that are safe in context.
  * Format: "basename:line" — e.g., "migrations.ts:154"
+ *
+ * Currently empty — all DO migrations use safe patterns. Add entries here
+ * only with a justifying comment explaining why the pattern is safe.
  */
-const ALLOWLISTED_VIOLATIONS = new Set([
-  // DROP INDEX is safe (not DROP TABLE) — migration 007 drops an old index
-  // before creating a replacement composite index. No data loss.
-]);
+const ALLOWLISTED_VIOLATIONS = new Set<string>([]);
 
 /**
  * Extract SQL string literals from a TypeScript migration file.

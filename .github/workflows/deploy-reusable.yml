@@ -438,17 +438,13 @@ jobs:
 
           # D1 supports time-travel (point-in-time recovery) for the last 30 days.
           # Record the current timestamp so we can restore if a migration causes data loss.
+          # Note: wrangler v4 removed `d1 backup create` — time-travel is the only recovery mechanism.
           BACKUP_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "Pre-migration timestamp: $BACKUP_TIMESTAMP"
           echo "To restore: wrangler d1 time-travel restore $DB_NAME --timestamp=$BACKUP_TIMESTAMP"
           echo "backup_timestamp=$BACKUP_TIMESTAMP" >> "$GITHUB_OUTPUT"
 
-          # Also create an explicit D1 backup via the API for belt-and-suspenders safety
-          cd ../apps/api
-          pnpm exec wrangler d1 backup create "$DB_NAME" --remote --env ${{ inputs.environment }} || echo "WARNING: D1 backup create failed (non-blocking)"
-          pnpm exec wrangler d1 backup create "$OBS_DB_NAME" --remote --env ${{ inputs.environment }} || echo "WARNING: Observability D1 backup create failed (non-blocking)"
-
-          echo "D1 backups created. Pre-migration bookmark: $BACKUP_TIMESTAMP"
+          echo "Pre-migration time-travel bookmark: $BACKUP_TIMESTAMP"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -465,7 +461,7 @@ jobs:
 
           echo "=== Pre-Migration Row Counts ==="
           COUNTS=""
-          for table in projects users tasks triggers trigger_executions agent_profiles credentials nodes workspaces sessions; do
+          for table in projects users tasks triggers trigger_executions agent_profiles credentials nodes workspaces sessions project_deployment_credentials project_runtime_env_vars project_runtime_files; do
             COUNT=$(pnpm exec wrangler d1 execute "$DB_NAME" \
               --remote --env ${{ inputs.environment }} \
               --command="SELECT COUNT(*) as count FROM $table" \
@@ -548,8 +544,8 @@ jobs:
 
           echo ""
           if [ "$FAILED" -eq 1 ]; then
-            echo "::error::POST-MIGRATION DATA INTEGRITY CHECK FAILED"
-            echo "::error::Data loss detected. The deployment will continue but IMMEDIATE ACTION is required."
+            echo "::error::POST-MIGRATION DATA INTEGRITY CHECK FAILED — DEPLOY BLOCKED"
+            echo "::error::Data loss detected. Deployment is halted to prevent serving with corrupt data."
             echo "::error::Restore command: wrangler d1 time-travel restore $DB_NAME --timestamp=$BACKUP_TS"
             echo ""
             echo "## DATA INTEGRITY ALERT" >> $GITHUB_STEP_SUMMARY

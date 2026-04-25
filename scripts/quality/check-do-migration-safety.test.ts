@@ -22,7 +22,7 @@ describe('DO migration safety check', () => {
     expect(result).toContain('DO migration safety check passed');
   });
 
-  it('reports on both migration files', () => {
+  it('reports on all scanned migration files', () => {
     const result = execSync(
       'npx tsx scripts/quality/check-do-migration-safety.ts',
       {
@@ -33,6 +33,7 @@ describe('DO migration safety check', () => {
     );
     expect(result).toContain('migrations.ts: PASS');
     expect(result).toContain('notification-migrations.ts: PASS');
+    expect(result).toContain('trial-counter.ts: PASS');
   });
 });
 
