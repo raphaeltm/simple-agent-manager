@@ -15,6 +15,7 @@ export function ProjectCreate() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [artifactsEnabled, setArtifactsEnabled] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -28,6 +29,22 @@ export function ProjectCreate() {
     }
   }, []);
 
+  // Check if artifacts provider is enabled
+  useEffect(() => {
+    const checkArtifacts = async () => {
+      try {
+        const resp = await fetch('/api/config/artifacts-enabled');
+        if (resp.ok) {
+          const data = await resp.json() as { enabled: boolean };
+          setArtifactsEnabled(data.enabled);
+        }
+      } catch {
+        // Artifacts check is best-effort — if it fails, GitHub-only mode
+      }
+    };
+    void checkArtifacts();
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -38,10 +55,15 @@ export function ProjectCreate() {
       const project = await createProject({
         name: values.name,
         description: values.description || undefined,
-        installationId: values.installationId,
-        repository: values.repository,
-        defaultBranch: values.defaultBranch,
-        githubRepoId: values.githubRepoId,
+        ...(values.repoProvider === 'artifacts'
+          ? { repoProvider: 'artifacts' }
+          : {
+              repoProvider: 'github',
+              installationId: values.installationId,
+              repository: values.repository,
+              defaultBranch: values.defaultBranch,
+              githubRepoId: values.githubRepoId,
+            }),
       });
       toast.success('Project created');
       navigate(`/projects/${project.id}`);
@@ -51,6 +73,8 @@ export function ProjectCreate() {
       setSubmitting(false);
     }
   };
+
+  const canShowForm = installations.length > 0 || artifactsEnabled;
 
   return (
     <PageLayout title="New Project" maxWidth="xl" headerRight={<UserMenu />}>
@@ -78,7 +102,7 @@ export function ProjectCreate() {
             <Skeleton width="30%" height="0.875rem" />
             <Skeleton width="100%" height="2.5rem" borderRadius="var(--sam-radius-md)" />
           </div>
-        ) : installations.length === 0 ? (
+        ) : !canShowForm ? (
           <Alert variant="warning">
             Install the GitHub App first in Settings before creating projects.
           </Alert>
@@ -89,6 +113,7 @@ export function ProjectCreate() {
             submitting={submitting}
             onSubmit={handleCreate}
             onCancel={() => navigate('/projects')}
+            artifactsEnabled={artifactsEnabled}
           />
         )}
       </div>

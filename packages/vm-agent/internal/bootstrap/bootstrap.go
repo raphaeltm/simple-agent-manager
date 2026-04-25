@@ -1654,8 +1654,8 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	if cfg.Repository == "" {
 		return nil
 	}
-	if !isGitHubRepo(cfg.Repository) {
-		slog.Info("Repository is not a GitHub repository, skipping git credential helper setup", "repository", cfg.Repository)
+	if !needsCredentialHelper(cfg.Repository) {
+		slog.Info("Repository does not need credential helper, skipping setup", "repository", cfg.Repository)
 		return nil
 	}
 	if cfg.CallbackToken == "" {
@@ -1897,8 +1897,8 @@ const credentialHelperContainerPath = "/usr/local/bin/git-credential-sam"
 //
 // Returns the host path of the written file, or empty string if skipped.
 func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
-	if !isGitHubRepo(cfg.Repository) {
-		slog.Info("Repository is not GitHub, skipping host-side credential helper", "repository", cfg.Repository)
+	if !needsCredentialHelper(cfg.Repository) {
+		slog.Info("Repository does not need credential helper, skipping host-side write", "repository", cfg.Repository)
 		return "", nil
 	}
 	if cfg.CallbackToken == "" {
@@ -2470,10 +2470,16 @@ func withGitHubToken(repoURL, token string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if u.Scheme != "https" || !strings.EqualFold(u.Host, "github.com") {
+	if u.Scheme != "https" {
 		return repoURL, nil
 	}
-	u.User = url.UserPassword("x-access-token", token)
+
+	// For GitHub repos use "x-access-token" username; for Artifacts use "x".
+	username := "x-access-token"
+	if strings.Contains(u.Host, "artifacts.cloudflare.net") {
+		username = "x"
+	}
+	u.User = url.UserPassword(username, token)
 	return u.String(), nil
 }
 
@@ -2484,6 +2490,18 @@ func isGitHubRepo(repo string) bool {
 		return false
 	}
 	return strings.EqualFold(u.Host, "github.com")
+}
+
+// needsCredentialHelper returns true if the repo requires a git credential
+// helper for authentication (GitHub or Cloudflare Artifacts).
+func needsCredentialHelper(repo string) bool {
+	normalized := normalizeRepoURL(repo)
+	u, err := url.Parse(normalized)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Host)
+	return host == "github.com" || strings.Contains(host, "artifacts.cloudflare.net")
 }
 
 func redactSecret(input, secret string) string {

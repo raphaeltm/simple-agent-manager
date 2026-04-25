@@ -2,11 +2,13 @@ import type {
   ListProjectsResponse,
   Project,
   ProjectDetailResponse,
+  RepoProvider,
   TaskStatus,
   UpdateProjectRequest,
 } from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
+  ARTIFACTS_DEFAULTS,
   CREDENTIAL_PROVIDERS,
   DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
   DEVCONTAINER_CONFIG_NAME_REGEX,
@@ -66,21 +68,14 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
   const body = c.req.valid('json');
 
   const name = body.name?.trim();
-  const installationId = body.installationId?.trim();
-  const repository = normalizeRepository(body.repository ?? '');
-  const defaultBranch = body.defaultBranch?.trim();
+  const repoProvider: RepoProvider = body.repoProvider === 'artifacts' ? 'artifacts' : 'github';
   const description = body.description?.trim() || null;
-  const githubRepoId = typeof body.githubRepoId === 'number' ? body.githubRepoId : null;
-  const githubRepoNodeId = body.githubRepoNodeId?.trim() || null;
 
-  if (!name || !installationId || !repository || !defaultBranch) {
-    throw errors.badRequest('name, installationId, repository, and defaultBranch are required');
+  if (!name) {
+    throw errors.badRequest('name is required');
   }
 
-  if (!isValidRepositoryFormat(repository)) {
-    throw errors.badRequest('repository must be in owner/repo format');
-  }
-
+  // Check project count limit
   const [projectCountRow] = await db
     .select({ count: count() })
     .from(schema.projects)
@@ -90,11 +85,8 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
     throw errors.badRequest(`Maximum ${limits.maxProjectsPerUser} projects allowed`);
   }
 
-  const installation = await requireOwnedInstallation(db, installationId, userId);
-  await assertRepositoryAccess(installation.installationId, repository, c.env);
-
+  // Check duplicate project name
   const normalizedName = normalizeProjectName(name);
-
   const duplicateNameRows = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
@@ -109,56 +101,131 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
     throw errors.conflict('Project name must be unique per user');
   }
 
-  const duplicateRepositoryRows = await db
-    .select({ id: schema.projects.id })
-    .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.userId, userId),
-        eq(schema.projects.installationId, installation.id),
-        eq(schema.projects.repository, repository)
-      )
-    )
-    .limit(1);
-  if (duplicateRepositoryRows[0]) {
-    throw errors.conflict('Project repository is already linked');
-  }
+  const now = new Date().toISOString();
+  const projectId = ulid();
 
-  // Enforce unique (userId, githubRepoId) when provided
-  if (githubRepoId !== null) {
-    const duplicateRepoIdRows = await db
+  if (repoProvider === 'artifacts') {
+    // ─── Artifacts-backed project ───────────────────────────────────────
+    const artifactsEnabled = c.env.ARTIFACTS_ENABLED === 'true';
+    if (!artifactsEnabled) {
+      throw errors.badRequest('Artifacts repo provider is not enabled');
+    }
+    if (!c.env.ARTIFACTS) {
+      throw errors.internal('Artifacts binding is not configured');
+    }
+
+    // Check per-user Artifacts repo limit
+    const maxRepos = parseInt(c.env.ARTIFACTS_MAX_REPOS_PER_USER || '', 10) || ARTIFACTS_DEFAULTS.MAX_REPOS_PER_USER;
+    const [artifactsCountRow] = await db
+      .select({ count: count() })
+      .from(schema.projects)
+      .where(
+        and(
+          eq(schema.projects.userId, userId),
+          eq(schema.projects.repoProvider, 'artifacts')
+        )
+      );
+    if ((artifactsCountRow?.count ?? 0) >= maxRepos) {
+      throw errors.badRequest(`Maximum ${maxRepos} Artifacts-backed projects allowed`);
+    }
+
+    const defaultBranch = body.defaultBranch?.trim()
+      || c.env.ARTIFACTS_DEFAULT_BRANCH
+      || ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
+
+    // Create Artifacts repo — name includes projectId for uniqueness
+    const repoName = `${normalizedName}-${projectId}`;
+    const created = await c.env.ARTIFACTS.create(repoName, {
+      description: description || undefined,
+      setDefaultBranch: defaultBranch,
+    });
+
+    // Store the full Artifacts clone URL as repository so normalizeRepoURL()
+    // on the VM agent passes it through as-is (it handles https:// URLs correctly).
+    const repository = created.remote;
+
+    await db.insert(schema.projects).values({
+      id: projectId,
+      userId,
+      name,
+      normalizedName,
+      description,
+      installationId: null,
+      repository,
+      defaultBranch,
+      repoProvider: 'artifacts',
+      artifactsRepoId: created.name,
+      createdBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } else {
+    // ─── GitHub-backed project (existing flow) ──────────────────────────
+    const installationId = body.installationId?.trim();
+    const repository = normalizeRepository(body.repository ?? '');
+    const defaultBranch = body.defaultBranch?.trim();
+    const githubRepoId = typeof body.githubRepoId === 'number' ? body.githubRepoId : null;
+    const githubRepoNodeId = body.githubRepoNodeId?.trim() || null;
+
+    if (!installationId || !repository || !defaultBranch) {
+      throw errors.badRequest('installationId, repository, and defaultBranch are required for GitHub projects');
+    }
+
+    if (!isValidRepositoryFormat(repository)) {
+      throw errors.badRequest('repository must be in owner/repo format');
+    }
+
+    const installation = await requireOwnedInstallation(db, installationId, userId);
+    await assertRepositoryAccess(installation.installationId, repository, c.env);
+
+    const duplicateRepositoryRows = await db
       .select({ id: schema.projects.id })
       .from(schema.projects)
       .where(
         and(
           eq(schema.projects.userId, userId),
-          eq(schema.projects.githubRepoId, githubRepoId)
+          eq(schema.projects.installationId, installation.id),
+          eq(schema.projects.repository, repository)
         )
       )
       .limit(1);
-    if (duplicateRepoIdRows[0]) {
-      throw errors.conflict('A project with this GitHub repository ID already exists');
+    if (duplicateRepositoryRows[0]) {
+      throw errors.conflict('Project repository is already linked');
     }
+
+    if (githubRepoId !== null) {
+      const duplicateRepoIdRows = await db
+        .select({ id: schema.projects.id })
+        .from(schema.projects)
+        .where(
+          and(
+            eq(schema.projects.userId, userId),
+            eq(schema.projects.githubRepoId, githubRepoId)
+          )
+        )
+        .limit(1);
+      if (duplicateRepoIdRows[0]) {
+        throw errors.conflict('A project with this GitHub repository ID already exists');
+      }
+    }
+
+    await db.insert(schema.projects).values({
+      id: projectId,
+      userId,
+      name,
+      normalizedName,
+      description,
+      installationId: installation.id,
+      repository,
+      defaultBranch,
+      repoProvider: 'github',
+      githubRepoId,
+      githubRepoNodeId,
+      createdBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
   }
-
-  const now = new Date().toISOString();
-  const projectId = ulid();
-
-  await db.insert(schema.projects).values({
-    id: projectId,
-    userId,
-    name,
-    normalizedName,
-    description,
-    installationId: installation.id,
-    repository,
-    defaultBranch,
-    githubRepoId,
-    githubRepoNodeId,
-    createdBy: userId,
-    createdAt: now,
-    updatedAt: now,
-  });
 
   const rows = await db
     .select()

@@ -106,6 +106,7 @@ export async function handleGetInstructions(
       name: project.name,
       repository: project.repository,
       defaultBranch: project.defaultBranch,
+      repoProvider: project.repoProvider || 'github',
     },
     instructions: [
       ...(task.taskMode === 'conversation'

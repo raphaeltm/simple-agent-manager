@@ -331,6 +331,11 @@ app.get('/health', (c) => {
   }, hasCriticalBindings ? 200 : 503);
 });
 
+// Public config — exposes feature flags the UI needs before auth
+app.get('/api/config/artifacts-enabled', (c) => {
+  return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
+});
+
 // JWKS endpoint (must be at root level)
 // Add cache headers per constitution principle XI
 app.get('/.well-known/jwks.json', async (c) => {

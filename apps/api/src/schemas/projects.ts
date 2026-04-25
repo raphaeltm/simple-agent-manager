@@ -19,11 +19,12 @@ const AgentDefaultsSchema = v.record(v.string(), AgentDefaultEntrySchema);
 export const CreateProjectSchema = v.object({
   name: v.string(),
   description: v.optional(v.string()),
-  installationId: v.string(),
-  repository: v.string(),
+  installationId: v.optional(v.string()),
+  repository: v.optional(v.string()),
   githubRepoId: v.optional(v.number()),
   githubRepoNodeId: v.optional(v.string()),
-  defaultBranch: v.string(),
+  defaultBranch: v.optional(v.string()),
+  repoProvider: v.optional(v.picklist(['github', 'artifacts'])),
 });
 
 export const UpdateProjectSchema = v.object({
