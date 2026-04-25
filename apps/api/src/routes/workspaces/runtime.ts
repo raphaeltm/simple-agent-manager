@@ -407,7 +407,6 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   // Look up the project to check repoProvider
   let repoProvider = 'github';
   let artifactsRepoId: string | null = null;
-  let artifactsRemote: string | null = null;
   if (workspace.projectId) {
     const projectRows = await db
       .select({

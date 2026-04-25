@@ -736,11 +736,14 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     }
   }
 
-  await assertRepositoryAccess(
-    (await requireOwnedInstallation(db, existing.installationId, userId)).installationId,
-    existing.repository,
-    c.env
-  );
+  // Only verify GitHub repository access for GitHub-backed projects
+  if (existing.installationId) {
+    await assertRepositoryAccess(
+      (await requireOwnedInstallation(db, existing.installationId, userId)).installationId,
+      existing.repository,
+      c.env
+    );
+  }
 
   const normalizedName = normalizeProjectName(nextName);
 

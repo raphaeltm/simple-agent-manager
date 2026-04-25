@@ -40,7 +40,7 @@ export async function startTaskRunnerDO(
     taskTitle: string;
     taskDescription?: string | null;
     repository: string;
-    installationId: string;
+    installationId: string | null;
     outputBranch?: string | null;
     projectDefaultVmSize?: VMSize | null;
     /** Chat session ID created at task submit time (TDF-6) */
