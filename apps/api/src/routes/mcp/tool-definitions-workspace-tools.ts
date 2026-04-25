@@ -65,26 +65,6 @@ export const WORKSPACE_TOOLS = [
     },
   },
   {
-    name: 'check_cost_estimate',
-    description:
-      'Get VM hourly rate, runtime duration, and estimated total cost for this workspace session.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {},
-      additionalProperties: false,
-    },
-  },
-  {
-    name: 'get_remaining_budget',
-    description:
-      'Get remaining project cost budget. Budget tracking is not yet implemented — always returns null values. Will return budget, spent, and remaining amounts once configured.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {},
-      additionalProperties: false,
-    },
-  },
-  {
     name: 'list_project_agents',
     description:
       'List all active agent sessions in this project (excluding yourself). Shows task IDs, titles, statuses, and branches. Useful for multi-agent coordination.',

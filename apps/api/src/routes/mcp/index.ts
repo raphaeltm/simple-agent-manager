@@ -85,7 +85,6 @@ import {
 } from './task-tools';
 import { handleCreateTrigger } from './trigger-tools';
 import {
-  handleCheckCostEstimate,
   handleExposePort,
   handleGetCredentialStatus,
   handleGetNetworkInfo,
@@ -97,7 +96,6 @@ import {
   handleGetCiStatus,
   handleGetDeploymentStatus,
   handleGetPeerAgentOutput,
-  handleGetRemainingBudget,
   handleGetTaskDependencies,
   handleListProjectAgents,
   handleReportEnvironmentIssue,
@@ -251,10 +249,6 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleExposePort(requestId, toolArgs, tokenData, c.env));
         case 'check_dns_status':
           return c.json(await handleCheckDnsStatus(requestId, tokenData, c.env));
-        case 'check_cost_estimate':
-          return c.json(await handleCheckCostEstimate(requestId, tokenData, c.env));
-        case 'get_remaining_budget':
-          return c.json(await handleGetRemainingBudget(requestId, tokenData, c.env));
         case 'list_project_agents':
           return c.json(await handleListProjectAgents(requestId, tokenData, c.env));
         case 'get_peer_agent_output':
