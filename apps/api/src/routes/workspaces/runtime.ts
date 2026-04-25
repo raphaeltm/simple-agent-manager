@@ -426,13 +426,18 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
 
   if (repoProvider === 'artifacts') {
     // ─── Artifacts token ──────────────────────────────────────────────
+    if (c.env.ARTIFACTS_ENABLED !== 'true') {
+      throw errors.forbidden('Artifacts provider is not enabled');
+    }
     if (!c.env.ARTIFACTS || !artifactsRepoId) {
       throw errors.internal('Artifacts binding or repo ID missing');
     }
 
     const ttl = parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10) || 3600;
+    // Use requested scope or default to 'write' (agents need push access)
+    const requestedScope = c.req.query('scope') === 'read' ? 'read' as const : 'write' as const;
     const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
-    const tokenResult = await repo.createToken('write', ttl);
+    const tokenResult = await repo.createToken(requestedScope, ttl);
 
     // Strip ?expires= suffix from token for git credential use
     const tokenSecret = tokenResult.plaintext.split('?expires=')[0] || tokenResult.plaintext;

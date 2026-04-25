@@ -69,7 +69,8 @@ CREATE INDEX IF NOT EXISTS idx_projects_installation_id ON projects(installation
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_normalized_name ON projects(user_id, normalized_name);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_installation_repository ON projects(user_id, installation_id, repository) WHERE user_id != 'system_anonymous_trials';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_github_repo_id ON projects(user_id, github_repo_id) WHERE github_repo_id IS NOT NULL;
--- New: uniqueness for Artifacts projects
+-- New: uniqueness for Artifacts projects (by repo ID and by repository URL)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_artifacts_repo ON projects(user_id, artifacts_repo_id) WHERE artifacts_repo_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_artifacts_repository ON projects(user_id, repository) WHERE repo_provider = 'artifacts';
 
 PRAGMA foreign_keys = ON;
