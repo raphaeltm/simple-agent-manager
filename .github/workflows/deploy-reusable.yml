@@ -354,6 +354,7 @@ jobs:
         run: pnpm build
         env:
           VITE_API_URL: https://api.${{ vars.BASE_DOMAIN }}
+          VITE_PUBLIC_WEBSITE_URL: ${{ vars.PUBLIC_WEBSITE_URL || '' }}
           VITE_FEATURE_MULTI_TERMINAL: 'true'
 
       # Deploy API worker first (without tail_consumers on first deploy)
