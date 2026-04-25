@@ -82,6 +82,10 @@ Merge to `main` automatically deploys to production via GitHub Actions.
 
 Staging deployment is manual — triggered via `gh workflow run deploy-staging.yml --ref <branch>`. Agents executing the `/do` workflow MUST deploy to staging and verify the live app before merging. A failed staging deploy blocks merge just like a failed test. Before triggering a deployment, check for existing active runs and wait at least 5 minutes if one is in progress. If the deploy fails due to missing secrets or configuration (not code), **alert the user immediately** — do not skip verification. See `.claude/rules/13-staging-verification.md`.
 
+### HARD GATE: Features Must Work End-to-End on Staging (NEVER SHIP BROKEN FEATURES)
+
+Staging verification means the feature WORKS — not that pages load, not that config endpoints respond, not that the UI renders. The actual feature, exercised as an end user would, must complete successfully with ZERO errors. If the feature errors on staging for ANY reason (missing binding, wrong toolchain version, unconfigured service), **do NOT merge — alert the user immediately.** Never rationalize a staging error as "expected." See `.claude/rules/30-never-ship-broken-features.md`.
+
 ### Post-Merge Production Deploy Monitoring (MANDATORY)
 
 After merging ANY PR to main, agents MUST monitor the Deploy Production workflow to completion. If the deploy fails, **alert the user immediately** with the failure reason and whether it requires human intervention. Do NOT silently finish the task when the deploy fails — a merged PR is not shipped until the deploy succeeds. See the `/do` workflow Phase 7b for the full procedure.

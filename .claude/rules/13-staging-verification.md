@@ -196,6 +196,29 @@ If the feature genuinely cannot be tested on staging (e.g., requires credentials
 3. Do NOT merge without human approval for the gap
 4. Do NOT substitute page-load checks as if they verify the feature
 
+## Zero Errors During Feature Verification (ABSOLUTE)
+
+When you exercise the feature on staging, **any error is a merge blocker**. This includes:
+
+- API errors (4xx, 5xx) during the feature flow
+- Error toasts, error banners, or error states in the UI
+- Console errors related to the feature
+- "Not configured" or "not available" messages
+- The feature silently doing nothing when it should do something
+
+**You do NOT get to decide that an error is "expected" or "not relevant."** If the feature errors when a user tries to use it, the feature is broken. Period.
+
+### Banned Rationalizations
+
+If you catch yourself thinking any of these during staging verification, STOP — you are about to ship broken code:
+
+- "The error is expected because [infrastructure/config/tooling] isn't set up yet" → The feature isn't ready. Don't merge.
+- "The config endpoint returns the right value, which is the main change" → The main change is the FEATURE. Verify the feature.
+- "This will work once [X] is upgraded/configured separately" → It doesn't work NOW. Don't ship NOW.
+- "I verified the components work individually" → Components working individually ≠ feature working end-to-end.
+
+See `.claude/rules/30-never-ship-broken-features.md` for the full anti-rationalization rule and the incident that created it.
+
 ## No Self-Exemptions
 
 - "It's just a docs change" → if you changed ANY `.ts`, `.tsx`, `.go`, or other runtime code, you verify
