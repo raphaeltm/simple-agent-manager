@@ -23,7 +23,7 @@ catalog:
 
   # === Cloudflare ===
   '@cloudflare/workers-types': 4.20260401.1
-  wrangler: 3.114.17
+  wrangler: 4.85.0
 
   # === React Ecosystem ===
   react: 19.1.0
