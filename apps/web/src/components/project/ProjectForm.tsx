@@ -56,6 +56,10 @@ export function ProjectForm({
     return installations[0]?.id ?? '';
   }, [initialValues?.installationId, installations]);
 
+  // Note: in edit mode the toggle is hidden (!isEditMode && artifactsEnabled),
+  // but repoProvider state may still be 'artifacts' from initialValues.
+  // The submit handler branches on isArtifacts, which is safe because
+  // edit mode does not change repoProvider.
   const [repoProvider, setRepoProvider] = useState<RepoProvider>(
     initialValues?.repoProvider ?? 'github'
   );
@@ -196,27 +200,32 @@ export function ProjectForm({
       {!isEditMode && artifactsEnabled && (
         <fieldset className="grid gap-1.5">
           <legend className="text-sm text-fg-muted">Repository Provider</legend>
-          <div className="flex gap-2">
+          {/* radiogroup with aria-checked for screen reader accessibility */}
+          <div className="flex gap-2" role="radiogroup" aria-label="Repository Provider">
             <button
               type="button"
+              role="radio"
+              aria-checked={isArtifacts}
               onClick={() => setRepoProvider('artifacts')}
               disabled={submitting}
-              className={`flex-1 rounded-md border py-2 px-3 text-sm font-medium transition-colors ${
+              className={`flex-1 rounded-md py-3 px-3 text-sm font-medium transition-colors ${
                 isArtifacts
-                  ? 'border-accent bg-accent/10 text-accent'
-                  : 'border-border-default bg-surface text-fg-muted hover:border-fg-muted'
+                  ? 'border-2 border-accent bg-accent/10 text-accent'
+                  : 'border border-border-default bg-surface text-fg-muted hover:border-fg-muted'
               }`}
             >
               SAM Git
             </button>
             <button
               type="button"
+              role="radio"
+              aria-checked={!isArtifacts}
               onClick={() => setRepoProvider('github')}
               disabled={submitting}
-              className={`flex-1 rounded-md border py-2 px-3 text-sm font-medium transition-colors ${
+              className={`flex-1 rounded-md py-3 px-3 text-sm font-medium transition-colors ${
                 !isArtifacts
-                  ? 'border-accent bg-accent/10 text-accent'
-                  : 'border-border-default bg-surface text-fg-muted hover:border-fg-muted'
+                  ? 'border-2 border-accent bg-accent/10 text-accent'
+                  : 'border border-border-default bg-surface text-fg-muted hover:border-fg-muted'
               }`}
             >
               GitHub

@@ -16,6 +16,7 @@ export function ProjectCreate() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [artifactsEnabled, setArtifactsEnabled] = useState(false);
+  const [artifactsLoading, setArtifactsLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -40,6 +41,8 @@ export function ProjectCreate() {
         }
       } catch {
         // Artifacts check is best-effort — if it fails, GitHub-only mode
+      } finally {
+        setArtifactsLoading(false);
       }
     };
     void checkArtifacts();
@@ -74,6 +77,7 @@ export function ProjectCreate() {
     }
   };
 
+  const isLoading = loading || artifactsLoading;
   const canShowForm = installations.length > 0 || artifactsEnabled;
 
   return (
@@ -95,7 +99,7 @@ export function ProjectCreate() {
       )}
 
       <div className="mt-4 border border-border-default rounded-md bg-surface p-4">
-        {loading ? (
+        {isLoading ? (
           <div className="grid gap-3">
             <Skeleton width="30%" height="0.875rem" />
             <Skeleton width="100%" height="2.5rem" borderRadius="var(--sam-radius-md)" />
