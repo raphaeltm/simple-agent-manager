@@ -233,25 +233,6 @@ export async function handleGetTaskDependencies(
   }
 }
 
-export async function handleGetRemainingBudget(
-  requestId: string | number | null,
-  _tokenData: McpTokenData,
-  _env: Env,
-): Promise<JsonRpcResponse> {
-  // Budget tracking is not yet implemented — return a note
-  return jsonRpcSuccess(requestId, {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        note: 'Budget tracking is not yet configured for this project.',
-        budgetUsd: null,
-        spentUsd: null,
-        remainingUsd: null,
-      }, null, 2),
-    }],
-  });
-}
-
 export async function handleReportEnvironmentIssue(
   requestId: string | number | null,
   params: Record<string, unknown>,

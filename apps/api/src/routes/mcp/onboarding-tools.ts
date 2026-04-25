@@ -80,10 +80,6 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 - \`expose_port\` — Register a local port and get a public URL for it. Critical when you want the human to see a running dev server, preview, or test endpoint.
 - \`check_dns_status\` — Verify DNS and TLS for this workspace.
 
-**Cost & Budget:**
-- \`check_cost_estimate\` — Current VM hourly rate and estimated session cost. Be aware of this — you're on a metered VM.
-- \`get_remaining_budget\` — Project budget remaining, if configured.
-
 **Multi-Agent Coordination:**
 - \`list_project_agents\` — Other agents currently working on this project, their branches, and statuses. Check this before starting work to avoid merge conflicts.
 - \`get_peer_agent_output\` — Read the result of a completed sibling task.
@@ -125,9 +121,7 @@ These are patterns that work well across different types of tasks:
 - Push all changes to the output branch
 - \`complete_task\` with a clear summary of what was accomplished
 
-**Cost awareness:**
-- \`check_cost_estimate\` periodically during long tasks
-- \`get_remaining_budget\` before starting expensive operations (large builds, extensive test suites)
+**Resource awareness:**
 - Don't leave long-running processes idle
 - Don't install large packages you won't use
 
@@ -173,7 +167,7 @@ Guidelines for what to write:
 
 3. **Be specific to this project.** Don't just say "push frequently." Say "after updating schema files in \`src/db/\`, push immediately — these are high-conflict files. Check \`list_project_agents\` before modifying them." Tailor the guidance to what you learned about the project.
 
-4. **Teach the tools in context.** Don't list all MCP tools in a wall of text. Introduce them where they're relevant: mention \`expose_port\` in the section about running the dev server, mention \`list_project_agents\` in the section about shared modules, mention \`check_cost_estimate\` near the section about running the full test suite.
+4. **Teach the tools in context.** Don't list all MCP tools in a wall of text. Introduce them where they're relevant: mention \`expose_port\` in the section about running the dev server, mention \`list_project_agents\` in the section about shared modules, mention \`report_environment_issue\` when discussing infrastructure problems.
 
 5. **Include the knowledge/history tools.** Agents should know they can \`search_tasks\` and \`search_messages\` to understand project context, \`create_idea\` to capture things worth tracking, and \`search_ideas\` to find existing ideas before creating duplicates.
 

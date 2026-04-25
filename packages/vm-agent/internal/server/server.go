@@ -827,7 +827,6 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/credential-status", s.handleMcpCredentialStatus)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/network-info", s.handleMcpNetworkInfo)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/expose-port", s.handleMcpExposePort)
-	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/cost-estimate", s.handleMcpCostEstimate)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/diff-summary", s.handleMcpDiffSummary)
 
 	// Boot log WebSocket (available during bootstrap for real-time streaming)

@@ -39,7 +39,6 @@ type VmAgentToolPath =
   | 'credential-status'
   | 'network-info'
   | 'expose-port'
-  | 'cost-estimate'
   | 'diff-summary';
 
 // ─── Shared proxy helper ────────────────────────────────────────────────────
@@ -210,21 +209,6 @@ export async function handleExposePort(
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
   } catch (e) {
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to expose port: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
-export async function handleCheckCostEstimate(
-  requestId: string | number | null,
-  tokenData: McpTokenData,
-  env: Env,
-): Promise<JsonRpcResponse> {
-  const err = requireWorkspace(requestId, tokenData);
-  if (err) return err;
-  try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'cost-estimate');
-    return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
-  } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get cost estimate: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 

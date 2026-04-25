@@ -302,8 +302,6 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_network_info');
       expect(toolNames).toContain('expose_port');
       expect(toolNames).toContain('check_dns_status');
-      expect(toolNames).toContain('check_cost_estimate');
-      expect(toolNames).toContain('get_remaining_budget');
       expect(toolNames).toContain('list_project_agents');
       expect(toolNames).toContain('get_peer_agent_output');
       expect(toolNames).toContain('get_task_dependencies');
@@ -326,7 +324,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('create_agent_profile');
       expect(toolNames).toContain('update_agent_profile');
       expect(toolNames).toContain('delete_agent_profile');
-      expect(body.result.tools).toHaveLength(63);
+      expect(body.result.tools).toHaveLength(61);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -3610,24 +3608,6 @@ describe('MCP Routes', () => {
         expect(data.status).toBe('reported');
         expect(data.severity).toBe(severity);
       }
-    });
-
-    // ─── get_remaining_budget stub ────────────────────────────────────
-
-    it('get_remaining_budget: returns not-yet-configured note', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_remaining_budget',
-        arguments: {},
-      }));
-
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.error).toBeUndefined();
-      const data = JSON.parse(body.result.content[0].text);
-      expect(data.note).toContain('not yet configured');
-      expect(data.budgetUsd).toBeNull();
-      expect(data.spentUsd).toBeNull();
-      expect(data.remainingUsd).toBeNull();
     });
 
     // ─── get_task_dependencies requires task-scoped token ─────────────

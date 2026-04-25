@@ -66,16 +66,6 @@ type McpExposePortResponse struct {
 	Label       string `json:"label,omitempty"`
 }
 
-// McpCostEstimateResponse contains cost estimation for the workspace session.
-type McpCostEstimateResponse struct {
-	VMSize     string  `json:"vmSize"`
-	HourlyRate float64 `json:"hourlyRate"`
-	UptimeSecs float64 `json:"uptimeSeconds"`
-	UptimeHrs  float64 `json:"uptimeHours"`
-	TotalCost  float64 `json:"totalCost"`
-	Currency   string  `json:"currency"`
-}
-
 // McpDiffSummaryResponse contains a summary of git changes since workspace creation.
 type McpDiffSummaryResponse struct {
 	Branch         string   `json:"branch"`
@@ -88,16 +78,6 @@ type McpDiffSummaryResponse struct {
 	DeletedFiles   []string `json:"deletedFiles"`
 	UntrackedFiles []string `json:"untrackedFiles"`
 	Truncated      bool     `json:"truncated,omitempty"`
-}
-
-// defaultVMPricing maps VM size to hourly rate in USD.
-// Currently the VM agent does not track per-workspace VM size, so "small" is used
-// as a default. The Worker-side handler can override via WORKSPACE_TOOL_COST_PRICING_JSON.
-var defaultVMPricing = map[string]float64{
-	"small":   0.007,
-	"medium":  0.017,
-	"large":   0.033,
-	"x-large": 0.065,
 }
 
 // maxFileListEntries caps file lists in diff summary responses to prevent unbounded output.
@@ -298,48 +278,6 @@ func (s *Server) handleMcpExposePort(w http.ResponseWriter, r *http.Request) {
 		ExternalURL: externalURL,
 		Listening:   listening,
 		Label:       req.Label,
-	})
-}
-
-// handleMcpCostEstimate returns cost estimation for the workspace session.
-// GET /workspaces/{workspaceId}/mcp/cost-estimate
-func (s *Server) handleMcpCostEstimate(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.PathValue("workspaceId")
-	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
-		return
-	}
-
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
-		return
-	}
-
-	// Compute uptime from workspace CreatedAt (avoids docker exec for /proc/uptime)
-	var uptimeSecs float64
-	vmSize := "small" // VM agent does not currently track per-workspace VM size
-	s.workspaceMu.RLock()
-	if runtime, ok := s.workspaces[workspaceID]; ok {
-		uptimeSecs = time.Since(runtime.CreatedAt).Seconds()
-	}
-	s.workspaceMu.RUnlock()
-
-	// Look up hourly rate
-	pricing := defaultVMPricing
-	hourlyRate := pricing[vmSize]
-	if hourlyRate == 0 {
-		hourlyRate = pricing["small"]
-	}
-
-	uptimeHrs := uptimeSecs / 3600.0
-	totalCost := hourlyRate * uptimeHrs
-
-	writeJSON(w, http.StatusOK, McpCostEstimateResponse{
-		VMSize:     vmSize,
-		HourlyRate: hourlyRate,
-		UptimeSecs: uptimeSecs,
-		UptimeHrs:  uptimeHrs,
-		TotalCost:  totalCost,
-		Currency:   "USD",
 	})
 }
 
