@@ -6,7 +6,6 @@
  */
 
 import { ARTIFACTS_DEFAULTS, VALID_REPO_PROVIDERS } from '@simple-agent-manager/shared';
-import type { RepoProvider } from '@simple-agent-manager/shared';
 import { parse } from 'valibot';
 import { describe, expect, it } from 'vitest';
 
