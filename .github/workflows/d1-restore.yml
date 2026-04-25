@@ -128,6 +128,7 @@ jobs:
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Time Travel info
         working-directory: apps/api
@@ -147,6 +148,7 @@ jobs:
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Restore main database
         if: ${{ inputs.dry_run != true && (inputs.database == 'main' || inputs.database == 'both') }}
@@ -158,6 +160,7 @@ jobs:
           echo "Main database restored."
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Restore observability database
         if: ${{ inputs.dry_run != true && (inputs.database == 'observability' || inputs.database == 'both') }}
@@ -169,6 +172,7 @@ jobs:
           echo "Observability database restored."
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Post-restore verification
         if: ${{ inputs.dry_run != true }}
@@ -193,6 +197,7 @@ jobs:
           echo "IMPORTANT: If migration 0047 has been fixed, re-run deployment to apply the safe version."
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Dry run summary
         if: ${{ inputs.dry_run == true }}
