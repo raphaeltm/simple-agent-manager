@@ -90,6 +90,20 @@ Staging verification means the feature WORKS — not that pages load, not that c
 
 After merging ANY PR to main, agents MUST monitor the Deploy Production workflow to completion. If the deploy fails, **alert the user immediately** with the failure reason and whether it requires human intervention. Do NOT silently finish the task when the deploy fails — a merged PR is not shipped until the deploy succeeds. See the `/do` workflow Phase 7b for the full procedure.
 
+### Data Integrity Safeguards (CRITICAL)
+
+Production data loss is catastrophic and irreversible. Multiple deterministic gates prevent it:
+
+| Gate | Runs in | What it catches |
+|------|---------|----------------|
+| `pnpm quality:migration-safety` | CI (every PR) | DROP TABLE on CASCADE parents, DELETE without WHERE, PRAGMA foreign_keys=OFF, UPDATE without WHERE, any DROP TABLE in new migrations |
+| `pnpm quality:do-migration-safety` | CI (every PR) | DROP TABLE, DELETE without WHERE, UPDATE without WHERE in Durable Object SQLite migrations (no recovery mechanism) |
+| Pre-migration D1 backup | Deploy pipeline | Creates time-travel bookmark + explicit backup before every migration run |
+| Post-migration row count verification | Deploy pipeline | Compares row counts before/after migrations; **blocks deploy** if >50% data loss detected in any table |
+| D1 Time Travel Restore | Manual workflow | Point-in-time recovery for D1 databases (30-day window). See `d1-restore.yml` |
+
+**Migration rules:** See `.claude/rules/31-migration-safety.md`. NEVER use `DROP TABLE` on any table with CASCADE children. Use `ALTER TABLE ADD COLUMN` instead of table recreation.
+
 ## Key Concepts
 
 - **Workspace**: AI coding environment (VM + devcontainer + Claude Code)

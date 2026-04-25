@@ -424,6 +424,7 @@ jobs:
 
       - name: Backup D1 Databases (pre-migration safety net)
         if: ${{ inputs.dry_run != true }}
+        id: d1_backup
         working-directory: infra
         run: |
           DB_NAME=$(pulumi stack output d1DatabaseName)
@@ -437,21 +438,47 @@ jobs:
 
           # D1 supports time-travel (point-in-time recovery) for the last 30 days.
           # Record the current timestamp so we can restore if a migration causes data loss.
+          # Note: wrangler v4 removed `d1 backup create` — time-travel is the only recovery mechanism.
           BACKUP_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "Pre-migration timestamp: $BACKUP_TIMESTAMP"
           echo "To restore: wrangler d1 time-travel restore $DB_NAME --timestamp=$BACKUP_TIMESTAMP"
+          echo "backup_timestamp=$BACKUP_TIMESTAMP" >> "$GITHUB_OUTPUT"
 
-          # Also create an explicit D1 backup via the API for belt-and-suspenders safety
-          cd ../apps/api
-          pnpm exec wrangler d1 backup create "$DB_NAME" --remote --env ${{ inputs.environment }} || echo "WARNING: D1 backup create failed (non-blocking)"
-          pnpm exec wrangler d1 backup create "$OBS_DB_NAME" --remote --env ${{ inputs.environment }} || echo "WARNING: Observability D1 backup create failed (non-blocking)"
-
-          echo "D1 backups created. Pre-migration bookmark: $BACKUP_TIMESTAMP"
+          echo "Pre-migration time-travel bookmark: $BACKUP_TIMESTAMP"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Record pre-migration row counts (data integrity baseline)
+        if: ${{ inputs.dry_run != true }}
+        id: pre_migration_counts
+        working-directory: infra
+        run: |
+          DB_NAME=$(pulumi stack output d1DatabaseName)
+          cd ../apps/api
+
+          echo "=== Pre-Migration Row Counts ==="
+          COUNTS=""
+          for table in projects users tasks triggers trigger_executions agent_profiles credentials nodes workspaces sessions project_deployment_credentials project_runtime_env_vars project_runtime_files; do
+            COUNT=$(pnpm exec wrangler d1 execute "$DB_NAME" \
+              --remote --env ${{ inputs.environment }} \
+              --command="SELECT COUNT(*) as count FROM $table" \
+              --json 2>/dev/null | node -e "
+                const data = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+                console.log(data[0]?.results?.[0]?.count ?? '-1');
+              " 2>/dev/null || echo "-1")
+            echo "  $table: $COUNT rows"
+            COUNTS="${COUNTS}${table}:${COUNT},"
+          done
+          echo "counts=${COUNTS}" >> "$GITHUB_OUTPUT"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Run Database Migrations
         if: ${{ inputs.dry_run != true }}
@@ -467,6 +494,79 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Verify post-migration data integrity (BLOCKS DEPLOY ON DATA LOSS)
+        if: ${{ inputs.dry_run != true }}
+        working-directory: infra
+        run: |
+          DB_NAME=$(pulumi stack output d1DatabaseName)
+          PRE_COUNTS="${{ steps.pre_migration_counts.outputs.counts }}"
+          BACKUP_TS="${{ steps.d1_backup.outputs.backup_timestamp }}"
+          cd ../apps/api
+
+          echo "=== Post-Migration Data Integrity Check ==="
+          echo "Pre-migration backup timestamp: $BACKUP_TS"
+          echo ""
+
+          FAILED=0
+          IFS=',' read -ra PAIRS <<< "$PRE_COUNTS"
+          for pair in "${PAIRS[@]}"; do
+            [ -z "$pair" ] && continue
+            TABLE="${pair%%:*}"
+            PRE_COUNT="${pair##*:}"
+
+            # Skip tables where pre-count failed (new tables, etc.)
+            [ "$PRE_COUNT" = "-1" ] && continue
+
+            POST_COUNT=$(pnpm exec wrangler d1 execute "$DB_NAME" \
+              --remote --env ${{ inputs.environment }} \
+              --command="SELECT COUNT(*) as count FROM $TABLE" \
+              --json 2>/dev/null | node -e "
+                const data = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+                console.log(data[0]?.results?.[0]?.count ?? '-1');
+              " 2>/dev/null || echo "-1")
+
+            [ "$POST_COUNT" = "-1" ] && continue
+
+            # Check for catastrophic data loss (>50% row count drop)
+            if [ "$PRE_COUNT" -gt 0 ] && [ "$POST_COUNT" -eq 0 ]; then
+              echo "::error::CRITICAL DATA LOSS: $TABLE had $PRE_COUNT rows, now has 0!"
+              echo "  Restore with: wrangler d1 time-travel restore $DB_NAME --timestamp=$BACKUP_TS"
+              FAILED=1
+            elif [ "$PRE_COUNT" -gt 10 ] && [ "$POST_COUNT" -lt $(( PRE_COUNT / 2 )) ]; then
+              echo "::error::SIGNIFICANT DATA LOSS: $TABLE dropped from $PRE_COUNT to $POST_COUNT rows (>50% loss)"
+              echo "  Restore with: wrangler d1 time-travel restore $DB_NAME --timestamp=$BACKUP_TS"
+              FAILED=1
+            else
+              echo "  $TABLE: $PRE_COUNT -> $POST_COUNT rows (OK)"
+            fi
+          done
+
+          echo ""
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::POST-MIGRATION DATA INTEGRITY CHECK FAILED — DEPLOY BLOCKED"
+            echo "::error::Data loss detected. Deployment is halted to prevent serving with corrupt data."
+            echo "::error::Restore command: wrangler d1 time-travel restore $DB_NAME --timestamp=$BACKUP_TS"
+            echo ""
+            echo "## DATA INTEGRITY ALERT" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Post-migration verification detected data loss." >> $GITHUB_STEP_SUMMARY
+            echo "Pre-migration backup: \`$BACKUP_TS\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Restore command:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "wrangler d1 time-travel restore $DB_NAME --timestamp=$BACKUP_TS" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "Post-migration data integrity check PASSED. No unexpected data loss."
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Enable Trials on Staging (KV kill-switch)
         # Trials are gated by a KV flag that fails closed. Staging always enables them
