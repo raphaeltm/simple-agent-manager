@@ -114,6 +114,7 @@ mcpRoutes.post('/', async (c) => {
   const [tokenData, rawToken] = await authenticateMcpRequest(
     c.req.header('Authorization'),
     c.env.KV,
+    c.env,
   );
   if (!tokenData) {
     return c.json(

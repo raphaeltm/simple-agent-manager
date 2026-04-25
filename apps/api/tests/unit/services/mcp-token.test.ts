@@ -1,4 +1,8 @@
-import { DEFAULT_MCP_TOKEN_TTL_SECONDS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS,
+  DEFAULT_MCP_TOKEN_TTL_SECONDS,
+  DEFAULT_TASK_RUN_MAX_EXECUTION_MS,
+} from '@simple-agent-manager/shared';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 const mockKV = {
@@ -51,6 +55,23 @@ describe('MCP Token Service', () => {
     it('should return default for zero value', async () => {
       const { getMcpTokenTTL } = await import('../../../src/services/mcp-token');
       expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: '0' })).toBe(DEFAULT_MCP_TOKEN_TTL_SECONDS);
+    });
+  });
+
+  describe('getMcpTokenMaxLifetime', () => {
+    it('should return default max lifetime when no env provided', async () => {
+      const { getMcpTokenMaxLifetime } = await import('../../../src/services/mcp-token');
+      expect(getMcpTokenMaxLifetime()).toBe(DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS);
+    });
+
+    it('should return configured max lifetime from env', async () => {
+      const { getMcpTokenMaxLifetime } = await import('../../../src/services/mcp-token');
+      expect(getMcpTokenMaxLifetime({ MCP_TOKEN_MAX_LIFETIME_SECONDS: '7200' })).toBe(7200);
+    });
+
+    it('should return default for invalid max lifetime', async () => {
+      const { getMcpTokenMaxLifetime } = await import('../../../src/services/mcp-token');
+      expect(getMcpTokenMaxLifetime({ MCP_TOKEN_MAX_LIFETIME_SECONDS: 'invalid' })).toBe(DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS);
     });
   });
 
@@ -123,6 +144,10 @@ describe('MCP Token Service', () => {
   });
 
   describe('validateMcpToken', () => {
+    beforeEach(() => {
+      vi.useRealTimers();
+    });
+
     it('should return null for non-existent token', async () => {
       const { validateMcpToken } = await import('../../../src/services/mcp-token');
       mockKV.get.mockResolvedValue(null);
@@ -131,10 +156,13 @@ describe('MCP Token Service', () => {
 
       expect(result).toBeNull();
       expect(mockKV.get).toHaveBeenCalledWith('mcp:missing-token', { type: 'json' });
+      expect(mockKV.put).not.toHaveBeenCalled();
     });
 
-    it('should return data without deleting for valid token', async () => {
+    it('should return data and refresh TTL for valid token', async () => {
       const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-03-07T01:00:00Z'));
       const data = {
         taskId: 'task-123',
         projectId: 'proj-456',
@@ -148,8 +176,106 @@ describe('MCP Token Service', () => {
 
       expect(result).toEqual(data);
       expect(mockKV.get).toHaveBeenCalledWith('mcp:valid-token', { type: 'json' });
+      expect(mockKV.put).toHaveBeenCalledWith(
+        'mcp:valid-token',
+        JSON.stringify(data),
+        { expirationTtl: DEFAULT_MCP_TOKEN_TTL_SECONDS },
+      );
       // MCP tokens are NOT consumed on validation (unlike bootstrap tokens)
       expect(mockKV.delete).not.toHaveBeenCalled();
+    });
+
+    it('should refresh TTL using configured env values', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-03-07T01:00:00Z'));
+      const data = {
+        taskId: 'task-123',
+        projectId: 'proj-456',
+        userId: 'user-789',
+        workspaceId: 'ws-abc',
+        createdAt: '2026-03-07T00:00:00Z',
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      const result = await validateMcpToken(mockKV as unknown as KVNamespace, 'valid-token', {
+        MCP_TOKEN_TTL_SECONDS: '3600',
+        MCP_TOKEN_MAX_LIFETIME_SECONDS: '7200',
+      });
+
+      expect(result).toEqual(data);
+      expect(mockKV.put).toHaveBeenCalledWith(
+        'mcp:valid-token',
+        JSON.stringify(data),
+        { expirationTtl: 3600 },
+      );
+    });
+
+    it('should remain valid beyond the original 4 hour TTL while actively refreshed', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      vi.useFakeTimers();
+      mockKV.get.mockResolvedValue({
+        taskId: 'task-123',
+        projectId: 'proj-456',
+        userId: 'user-789',
+        workspaceId: 'ws-abc',
+        createdAt: '2026-03-07T00:00:00Z',
+      });
+
+      vi.setSystemTime(new Date('2026-03-07T03:59:00Z'));
+      await validateMcpToken(mockKV as unknown as KVNamespace, 'still-valid');
+
+      vi.setSystemTime(new Date('2026-03-07T04:30:00Z'));
+      const result = await validateMcpToken(mockKV as unknown as KVNamespace, 'still-valid');
+
+      expect(result).not.toBeNull();
+      expect(mockKV.put).toHaveBeenCalledTimes(2);
+      expect(mockKV.put).toHaveBeenNthCalledWith(
+        2,
+        'mcp:still-valid',
+        JSON.stringify({
+          taskId: 'task-123',
+          projectId: 'proj-456',
+          userId: 'user-789',
+          workspaceId: 'ws-abc',
+          createdAt: '2026-03-07T00:00:00Z',
+        }),
+        { expirationTtl: DEFAULT_MCP_TOKEN_TTL_SECONDS },
+      );
+    });
+
+    it('should reject tokens older than the configured max lifetime', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-03-08T01:00:01Z'));
+      mockKV.get.mockResolvedValue({
+        taskId: 'task-123',
+        projectId: 'proj-456',
+        userId: 'user-789',
+        workspaceId: 'ws-abc',
+        createdAt: '2026-03-07T00:00:00Z',
+      });
+
+      const result = await validateMcpToken(mockKV as unknown as KVNamespace, 'expired-token');
+
+      expect(result).toBeNull();
+      expect(mockKV.put).not.toHaveBeenCalled();
+    });
+
+    it('should reject tokens with invalid creation timestamps', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      mockKV.get.mockResolvedValue({
+        taskId: 'task-123',
+        projectId: 'proj-456',
+        userId: 'user-789',
+        workspaceId: 'ws-abc',
+        createdAt: 'not-a-date',
+      });
+
+      const result = await validateMcpToken(mockKV as unknown as KVNamespace, 'bad-token');
+
+      expect(result).toBeNull();
+      expect(mockKV.put).not.toHaveBeenCalled();
     });
   });
 

@@ -33,3 +33,7 @@ PR #410 (commit `af303ab`, 2026-03-16) reduced `DEFAULT_MCP_TOKEN_TTL_SECONDS` f
 1. **Regression guard test added** (`mcp-token.test.ts`): asserts `DEFAULT_MCP_TOKEN_TTL_SECONDS >= DEFAULT_TASK_RUN_MAX_EXECUTION_MS / 1000` — this test would have caught PR #410's reduction
 2. **Constant moved to shared** (`packages/shared/src/constants.ts`): places the TTL constant next to the task execution time constant, making the relationship visible
 3. **Behavioral test added**: verifies that `storeMcpToken()` actually passes a TTL >= task max execution seconds to KV
+
+## Follow-Up
+
+This fix restored the invariant that the initial token TTL must cover maximum task execution time, but it still assumed sessions end before the original KV TTL does. The 2026-04-25 long-session refresh follow-up addresses that remaining gap by refreshing active MCP tokens on validation while enforcing a hard max lifetime cap.

@@ -256,7 +256,7 @@ export class TrialOrchestrator extends DurableObject<Env> {
   ): Promise<void> {
     // Revoke MCP token BEFORE marking state as failed so a leaked token from a
     // botched/timed-out trial cannot continue hitting MCP endpoints for the
-    // remainder of its 4-hour TTL (DEFAULT_MCP_TOKEN_TTL_SECONDS). Mirrors the
+    // remainder of its inactivity TTL or hard max lifetime. Mirrors the
     // TaskRunner failure-path cleanup at
     // `task-runner/state-machine.ts:265-275`. Best-effort — log-and-continue
     // so a KV hiccup doesn't block the failure emission path.

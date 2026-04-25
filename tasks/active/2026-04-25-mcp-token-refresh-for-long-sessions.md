@@ -78,17 +78,17 @@ Set TTL to 24h but add a `maxLifetime` field to the token data. `validateMcpToke
 
 ## Implementation Checklist
 
-- [ ] Modify `validateMcpToken()` to refresh KV TTL on successful validation
-- [ ] Add `maxLifetimeSeconds` check against `createdAt` in token data (cap at 24h)
-- [ ] Update regression guard test to cover the sliding window behavior
-- [ ] Add test: token remains valid after repeated calls spanning > 4h (mock time)
-- [ ] Add test: token expires after max lifetime even with continuous use
-- [ ] Update `docs/notes/2026-03-17-mcp-token-ttl-too-short-postmortem.md` with reference to this fix
+- [x] Modify `validateMcpToken()` to refresh KV TTL on successful validation
+- [x] Add `maxLifetimeSeconds` check against `createdAt` in token data (cap at 24h)
+- [x] Update regression guard test to cover the sliding window behavior
+- [x] Add test: token remains valid after repeated calls spanning > 4h (mock time)
+- [x] Add test: token expires after max lifetime even with continuous use
+- [x] Update `docs/notes/2026-03-17-mcp-token-ttl-too-short-postmortem.md` with reference to this fix
 
 ## Acceptance Criteria
 
-- [ ] MCP tokens remain valid for agent sessions that exceed 4 hours, as long as the agent is actively making tool calls
-- [ ] Tokens expire after max lifetime (24h) regardless of activity
-- [ ] Tokens still expire after 4h of inactivity (sliding window)
-- [ ] No regression in token revocation on task completion
-- [ ] Existing regression guard test still passes
+- [x] MCP tokens remain valid for agent sessions that exceed 4 hours, as long as the agent is actively making tool calls
+- [x] Tokens expire after max lifetime (24h) regardless of activity
+- [x] Tokens still expire after 4h of inactivity (sliding window)
+- [x] No regression in token revocation on task completion
+- [x] Existing regression guard test still passes

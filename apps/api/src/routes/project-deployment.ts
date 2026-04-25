@@ -333,7 +333,7 @@ deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => 
   // Validate MCP token — callback tokens are NOT accepted here.
   // Callback tokens are operational credentials for node-to-API communication
   // (heartbeats, message reporting) and must not grant GCP deployment access.
-  const mcpData = await validateMcpToken(c.env.KV, token);
+  const mcpData = await validateMcpToken(c.env.KV, token, c.env);
   if (!mcpData) {
     throw errors.forbidden('Identity token endpoint requires a valid MCP token');
   }

@@ -7,7 +7,10 @@
  * bootstrap tokens, MCP tokens are reusable for the task's lifetime.
  */
 
-import { DEFAULT_MCP_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS,
+  DEFAULT_MCP_TOKEN_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
 
 /** KV key prefix for MCP tokens */
 const MCP_TOKEN_PREFIX = 'mcp:';
@@ -21,8 +24,13 @@ export interface McpTokenData {
   createdAt: string;
 }
 
+interface McpTokenEnv {
+  MCP_TOKEN_TTL_SECONDS?: string;
+  MCP_TOKEN_MAX_LIFETIME_SECONDS?: string;
+}
+
 /** Get MCP token TTL from env or use default (per constitution principle XI) */
-export function getMcpTokenTTL(env?: { MCP_TOKEN_TTL_SECONDS?: string }): number {
+export function getMcpTokenTTL(env?: McpTokenEnv): number {
   if (env?.MCP_TOKEN_TTL_SECONDS) {
     const ttl = parseInt(env.MCP_TOKEN_TTL_SECONDS, 10);
     if (!isNaN(ttl) && ttl > 0) {
@@ -30,6 +38,17 @@ export function getMcpTokenTTL(env?: { MCP_TOKEN_TTL_SECONDS?: string }): number
     }
   }
   return DEFAULT_MCP_TOKEN_TTL_SECONDS;
+}
+
+/** Get MCP token hard max lifetime from env or use default. */
+export function getMcpTokenMaxLifetime(env?: McpTokenEnv): number {
+  if (env?.MCP_TOKEN_MAX_LIFETIME_SECONDS) {
+    const maxLifetime = parseInt(env.MCP_TOKEN_MAX_LIFETIME_SECONDS, 10);
+    if (!isNaN(maxLifetime) && maxLifetime > 0) {
+      return maxLifetime;
+    }
+  }
+  return DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS;
 }
 
 /**
@@ -52,7 +71,7 @@ export async function storeMcpToken(
   kv: KVNamespace,
   token: string,
   data: McpTokenData,
-  env?: { MCP_TOKEN_TTL_SECONDS?: string },
+  env?: McpTokenEnv,
 ): Promise<void> {
   const ttl = getMcpTokenTTL(env);
   await kv.put(`${MCP_TOKEN_PREFIX}${token}`, JSON.stringify(data), {
@@ -70,9 +89,29 @@ export async function storeMcpToken(
 export async function validateMcpToken(
   kv: KVNamespace,
   token: string,
+  env?: McpTokenEnv,
 ): Promise<McpTokenData | null> {
   const key = `${MCP_TOKEN_PREFIX}${token}`;
-  return kv.get<McpTokenData>(key, { type: 'json' });
+  const data = await kv.get<McpTokenData>(key, { type: 'json' });
+  if (!data) {
+    return null;
+  }
+
+  const createdAtMs = Date.parse(data.createdAt);
+  if (Number.isNaN(createdAtMs)) {
+    return null;
+  }
+
+  const maxLifetimeMs = getMcpTokenMaxLifetime(env) * 1000;
+  if (Date.now() - createdAtMs > maxLifetimeMs) {
+    return null;
+  }
+
+  await kv.put(key, JSON.stringify(data), {
+    expirationTtl: getMcpTokenTTL(env),
+  });
+
+  return data;
 }
 
 /**

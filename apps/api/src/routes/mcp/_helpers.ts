@@ -263,12 +263,13 @@ export async function checkMcpRateLimit(
 export async function authenticateMcpRequest(
   authHeader: string | undefined,
   kv: KVNamespace,
+  env?: { MCP_TOKEN_TTL_SECONDS?: string; MCP_TOKEN_MAX_LIFETIME_SECONDS?: string },
 ): Promise<[McpTokenData, string] | [null, null]> {
   if (!authHeader?.startsWith('Bearer ') || authHeader.length <= 7) {
     return [null, null];
   }
   const token = authHeader.slice(7);
-  const data = await validateMcpToken(kv, token);
+  const data = await validateMcpToken(kv, token, env);
   return data ? [data, token] : [null, null];
 }
 
