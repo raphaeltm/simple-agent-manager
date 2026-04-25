@@ -7,6 +7,7 @@ import { ProjectForm, type ProjectFormValues } from '../components/project/Proje
 import { UserMenu } from '../components/UserMenu';
 import { useToast } from '../hooks/useToast';
 import { createProject, listGitHubInstallations } from '../lib/api';
+import { API_URL } from '../lib/api/client';
 
 export function ProjectCreate() {
   const navigate = useNavigate();
@@ -34,7 +35,7 @@ export function ProjectCreate() {
   useEffect(() => {
     const checkArtifacts = async () => {
       try {
-        const resp = await fetch('/api/config/artifacts-enabled');
+        const resp = await fetch(`${API_URL}/api/config/artifacts-enabled`, { credentials: 'include' });
         if (resp.ok) {
           const data = await resp.json() as { enabled: boolean };
           setArtifactsEnabled(data.enabled);
