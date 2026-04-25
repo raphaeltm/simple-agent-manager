@@ -244,6 +244,7 @@ export const projects = sqliteTable(
     normalizedName: text('normalized_name').notNull(),
     description: text('description'),
     installationId: text('installation_id')
+      .notNull()
       .references(() => githubInstallations.id, { onDelete: 'cascade' }),
     repository: text('repository').notNull(),
     defaultBranch: text('default_branch').notNull().default('main'),

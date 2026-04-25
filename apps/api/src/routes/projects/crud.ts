@@ -151,7 +151,9 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
         name,
         normalizedName,
         description,
-        installationId: null,
+        installationId:
+          c.env.TRIAL_ANONYMOUS_INSTALLATION_ID ??
+          'system_anonymous_trials_installation',
         repository,
         defaultBranch,
         repoProvider: 'artifacts',

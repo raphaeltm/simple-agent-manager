@@ -41,7 +41,7 @@ export interface TaskRunConfig {
   taskTitle: string;
   taskDescription: string | null;
   repository: string;
-  installationId: string | null;
+  installationId: string;
   outputBranch: string | null;
   projectDefaultVmSize: VMSize | null;
   /** Chat session ID created at task submit time (TDF-6: single session per task) */

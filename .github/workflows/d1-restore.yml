@@ -1,0 +1,187 @@
+name: D1 Time Travel Restore
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment (staging or production)'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      timestamp:
+        description: 'RFC3339 timestamp to restore to (e.g. 2026-04-25T12:30:00Z). Must be within last 30 days.'
+        required: true
+        type: string
+      database:
+        description: 'Which database to restore'
+        required: true
+        type: choice
+        options:
+          - main
+          - observability
+          - both
+        default: main
+      dry_run:
+        description: 'Preview only — show what would be restored without actually restoring'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Only one restore at a time
+concurrency:
+  group: d1-restore-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: Restore D1 (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@903f9c1a6ebcba6cf41d87230be49611ac97822e # v6.0.3
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Pulumi
+        uses: pulumi/actions@12bf8bb00e20e1e8242e07fead2b41e53adab2ea # v6
+        with:
+          command: version
+
+      - name: Select Pulumi stack
+        working-directory: infra
+        run: |
+          STACK="${{ inputs.environment }}"
+          pulumi stack select "$STACK" --non-interactive
+        env:
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Resolve database names
+        id: db
+        working-directory: infra
+        run: |
+          DB_NAME=$(pulumi stack output d1DatabaseName)
+          OBS_DB_NAME=$(pulumi stack output observabilityD1DatabaseName)
+          echo "db_name=$DB_NAME" >> "$GITHUB_OUTPUT"
+          echo "obs_db_name=$OBS_DB_NAME" >> "$GITHUB_OUTPUT"
+          echo "Main database: $DB_NAME"
+          echo "Observability database: $OBS_DB_NAME"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Pre-restore verification
+        working-directory: apps/api
+        run: |
+          echo "=== Pre-Restore State ==="
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Restore timestamp: ${{ inputs.timestamp }}"
+          echo "Target database(s): ${{ inputs.database }}"
+          echo "Dry run: ${{ inputs.dry_run }}"
+          echo ""
+
+          if [[ "${{ inputs.database }}" == "main" || "${{ inputs.database }}" == "both" ]]; then
+            echo "--- Main DB row counts (BEFORE restore) ---"
+            for table in projects tasks triggers trigger_executions agent_profiles credentials; do
+              COUNT=$(pnpm exec wrangler d1 execute "${{ steps.db.outputs.db_name }}" \
+                --remote --env ${{ inputs.environment }} \
+                --command="SELECT COUNT(*) as count FROM $table" \
+                --json 2>/dev/null | node -e "
+                  const data = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+                  console.log(data[0]?.results?.[0]?.count ?? 'ERROR');
+                " 2>/dev/null || echo "ERROR")
+              echo "  $table: $COUNT rows"
+            done
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Time Travel info
+        working-directory: apps/api
+        run: |
+          echo "=== Time Travel Info ==="
+          if [[ "${{ inputs.database }}" == "main" || "${{ inputs.database }}" == "both" ]]; then
+            echo "--- Main DB ---"
+            pnpm exec wrangler d1 time-travel info "${{ steps.db.outputs.db_name }}" \
+              --timestamp="${{ inputs.timestamp }}" \
+              --json || echo "WARNING: Could not get time-travel info for main DB"
+          fi
+          if [[ "${{ inputs.database }}" == "observability" || "${{ inputs.database }}" == "both" ]]; then
+            echo "--- Observability DB ---"
+            pnpm exec wrangler d1 time-travel info "${{ steps.db.outputs.obs_db_name }}" \
+              --timestamp="${{ inputs.timestamp }}" \
+              --json || echo "WARNING: Could not get time-travel info for observability DB"
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Restore main database
+        if: ${{ inputs.dry_run != true && (inputs.database == 'main' || inputs.database == 'both') }}
+        working-directory: apps/api
+        run: |
+          echo "RESTORING main database to ${{ inputs.timestamp }}..."
+          pnpm exec wrangler d1 time-travel restore "${{ steps.db.outputs.db_name }}" \
+            --timestamp="${{ inputs.timestamp }}"
+          echo "Main database restored."
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Restore observability database
+        if: ${{ inputs.dry_run != true && (inputs.database == 'observability' || inputs.database == 'both') }}
+        working-directory: apps/api
+        run: |
+          echo "RESTORING observability database to ${{ inputs.timestamp }}..."
+          pnpm exec wrangler d1 time-travel restore "${{ steps.db.outputs.obs_db_name }}" \
+            --timestamp="${{ inputs.timestamp }}"
+          echo "Observability database restored."
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Post-restore verification
+        if: ${{ inputs.dry_run != true }}
+        working-directory: apps/api
+        run: |
+          echo "=== Post-Restore Verification ==="
+          if [[ "${{ inputs.database }}" == "main" || "${{ inputs.database }}" == "both" ]]; then
+            echo "--- Main DB row counts (AFTER restore) ---"
+            for table in projects tasks triggers trigger_executions agent_profiles credentials; do
+              COUNT=$(pnpm exec wrangler d1 execute "${{ steps.db.outputs.db_name }}" \
+                --remote --env ${{ inputs.environment }} \
+                --command="SELECT COUNT(*) as count FROM $table" \
+                --json 2>/dev/null | node -e "
+                  const data = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+                  console.log(data[0]?.results?.[0]?.count ?? 'ERROR');
+                " 2>/dev/null || echo "ERROR")
+              echo "  $table: $COUNT rows"
+            done
+          fi
+          echo ""
+          echo "Restore complete. Verify the application works before re-deploying."
+          echo "IMPORTANT: If migration 0047 has been fixed, re-run deployment to apply the safe version."
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "=== DRY RUN COMPLETE ==="
+          echo "No changes were made."
+          echo ""
+          echo "To perform the actual restore, re-run this workflow with dry_run=false."
+          echo ""
+          echo "Target: ${{ inputs.environment }}"
+          echo "Timestamp: ${{ inputs.timestamp }}"
+          echo "Database: ${{ inputs.database }}"

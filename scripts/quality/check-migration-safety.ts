@@ -43,14 +43,13 @@ const MIGRATIONS_DIR = resolve(
  * Format: "filename:line" matching the violation output.
  */
 const ALLOWLISTED_VIOLATIONS = new Set([
-  // Ran before any child tables existed — no actual cascade risk at the time
+  // Ran before any child tables existed — no actual cascade risk at the time.
+  // These are safe on fresh forks (tables are empty when they run).
   '0002_betterauth_tables.sql:27',
   '0003_users_timestamp_to_integer.sql:39',
   '0037_project_file_directories.sql:44',
-  // THE MIGRATION THAT CAUSED THE 2026-04-25 DATA LOSS INCIDENT.
-  // Already applied in production. Listed here ONLY so CI passes on main.
-  // This is the reason this check exists.
-  '0047_artifacts_repo_provider.sql:61',
+  // NOTE: 0047 was rewritten to use safe ALTER TABLE ADD COLUMN.
+  // No longer needs an allowlist entry.
 ]);
 
 interface ForeignKey {
