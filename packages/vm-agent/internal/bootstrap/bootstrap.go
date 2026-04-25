@@ -2474,9 +2474,15 @@ func withGitHubToken(repoURL, token string) (string, error) {
 		return repoURL, nil
 	}
 
+	// Only inject credentials for hosts we actually vend tokens for.
+	host := strings.ToLower(u.Host)
+	if !isKnownGitHost(host) {
+		return repoURL, nil
+	}
+
 	// For GitHub repos use "x-access-token" username; for Artifacts use "x".
 	username := "x-access-token"
-	if strings.Contains(u.Host, "artifacts.cloudflare.net") {
+	if isArtifactsHost(host) {
 		username = "x"
 	}
 	u.User = url.UserPassword(username, token)
@@ -2492,6 +2498,17 @@ func isGitHubRepo(repo string) bool {
 	return strings.EqualFold(u.Host, "github.com")
 }
 
+// isArtifactsHost returns true if host is a Cloudflare Artifacts git host.
+func isArtifactsHost(host string) bool {
+	return host == "artifacts.cloudflare.net" ||
+		strings.HasSuffix(host, ".artifacts.cloudflare.net")
+}
+
+// isKnownGitHost returns true if host is one we vend tokens for.
+func isKnownGitHost(host string) bool {
+	return host == "github.com" || isArtifactsHost(host)
+}
+
 // needsCredentialHelper returns true if the repo requires a git credential
 // helper for authentication (GitHub or Cloudflare Artifacts).
 func needsCredentialHelper(repo string) bool {
@@ -2504,7 +2521,7 @@ func needsCredentialHelper(repo string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Host)
-	return host == "github.com" || strings.Contains(host, "artifacts.cloudflare.net")
+	return isKnownGitHost(host)
 }
 
 func redactSecret(input, secret string) string {

@@ -39,13 +39,17 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine host and username from clone URL (Artifacts) or default (GitHub)
+	// Determine host and username from clone URL (Artifacts) or default (GitHub).
+	// Artifacts clone URLs use username "x"; GitHub uses "x-access-token".
 	host := "github.com"
 	username := "x-access-token"
 	if resp.CloneURL != "" {
 		if parsed, parseErr := url.Parse(resp.CloneURL); parseErr == nil && parsed.Host != "" {
 			host = parsed.Host
-			username = "x" // Artifacts uses "x" as the username
+			h := strings.ToLower(parsed.Host)
+			if h == "artifacts.cloudflare.net" || strings.HasSuffix(h, ".artifacts.cloudflare.net") {
+				username = "x"
+			}
 		}
 	}
 
@@ -60,10 +64,6 @@ func (s *Server) fetchGitToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return resp.Token, nil
-}
-
-func (s *Server) fetchGitTokenResponse(ctx context.Context) (*gitTokenResponse, error) {
-	return s.fetchGitTokenResponseForWorkspace(ctx, s.config.WorkspaceID, s.config.CallbackToken)
 }
 
 func (s *Server) fetchGitTokenForWorkspace(ctx context.Context, workspaceID, callbackToken string) (string, error) {

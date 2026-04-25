@@ -73,13 +73,22 @@ func TestWithGitHubToken(t *testing.T) {
 		t.Fatalf("unexpected artifacts tokenized url: %s", artifactsURL)
 	}
 
-	// Other HTTPS URLs also get credentials (x-access-token by default)
+	// Non-GitHub/Artifacts HTTPS URLs are returned unchanged (no credential leak)
 	otherURL, err := withGitHubToken("https://gitlab.com/octo/repo.git", "abc123")
 	if err != nil {
 		t.Fatalf("withGitHubToken returned error for other url: %v", err)
 	}
-	if otherURL != "https://x-access-token:abc123@gitlab.com/octo/repo.git" {
-		t.Fatalf("expected other URL to get x-access-token credentials, got: %s", otherURL)
+	if otherURL != "https://gitlab.com/octo/repo.git" {
+		t.Fatalf("expected other URL unchanged, got: %s", otherURL)
+	}
+
+	// HTTP Artifacts URL returned unchanged (no credential leak over plain HTTP)
+	httpArtifacts, err := withGitHubToken("http://acct.artifacts.cloudflare.net/git/default/repo.git", "art_token")
+	if err != nil {
+		t.Fatalf("withGitHubToken returned error for http artifacts url: %v", err)
+	}
+	if httpArtifacts != "http://acct.artifacts.cloudflare.net/git/default/repo.git" {
+		t.Fatalf("expected http artifacts URL unchanged, got: %s", httpArtifacts)
 	}
 
 	// Empty token returns URL unchanged
