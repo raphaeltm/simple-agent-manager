@@ -177,7 +177,7 @@ jobs:
         run: |
           BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
 
-          if npx wrangler r2 bucket create $BUCKET_NAME 2>&1; then
+          if npx wrangler r2 bucket create $BUCKET_NAME --remote 2>&1; then
             echo "Created R2 bucket: $BUCKET_NAME"
           else
             echo "R2 bucket already exists or was created: $BUCKET_NAME"
