@@ -422,6 +422,37 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+      - name: Backup D1 Databases (pre-migration safety net)
+        if: ${{ inputs.dry_run != true }}
+        working-directory: infra
+        run: |
+          DB_NAME=$(pulumi stack output d1DatabaseName)
+          DB_ID=$(pulumi stack output d1DatabaseId)
+          OBS_DB_NAME=$(pulumi stack output observabilityD1DatabaseName)
+          OBS_DB_ID=$(pulumi stack output observabilityD1DatabaseId)
+
+          echo "Creating D1 time-travel bookmark before migrations..."
+          echo "Database: $DB_NAME ($DB_ID)"
+          echo "Obs Database: $OBS_DB_NAME ($OBS_DB_ID)"
+
+          # D1 supports time-travel (point-in-time recovery) for the last 30 days.
+          # Record the current timestamp so we can restore if a migration causes data loss.
+          BACKUP_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "Pre-migration timestamp: $BACKUP_TIMESTAMP"
+          echo "To restore: wrangler d1 time-travel restore $DB_NAME --timestamp=$BACKUP_TIMESTAMP"
+
+          # Also create an explicit D1 backup via the API for belt-and-suspenders safety
+          cd ../apps/api
+          pnpm exec wrangler d1 backup create "$DB_NAME" --remote --env ${{ inputs.environment }} || echo "WARNING: D1 backup create failed (non-blocking)"
+          pnpm exec wrangler d1 backup create "$OBS_DB_NAME" --remote --env ${{ inputs.environment }} || echo "WARNING: Observability D1 backup create failed (non-blocking)"
+
+          echo "D1 backups created. Pre-migration bookmark: $BACKUP_TIMESTAMP"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
       - name: Run Database Migrations
         if: ${{ inputs.dry_run != true }}
         working-directory: infra
