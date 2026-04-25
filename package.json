@@ -44,7 +44,8 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@iarna/toml": "2.2.5"
+    "@iarna/toml": "2.2.5",
+    "lucide-react": "1.8.0"
   },
   "devDependencies": {
     "@commitlint/cli": "19.8.1",
