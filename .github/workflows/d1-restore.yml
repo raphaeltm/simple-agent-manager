@@ -55,17 +55,37 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup Pulumi
-        uses: pulumi/actions@12bf8bb00e20e1e8242e07fead2b41e53adab2ea # v6
-        with:
-          command: version
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@8582a9e8cc630786854029b4e09281acd6794b58 # v6.6.1
+
+      - name: Determine Stack Name
+        id: stack
+        run: |
+          case "${{ inputs.environment }}" in
+            production) STACK="prod" ;;
+            staging) STACK="staging" ;;
+            *) STACK="${{ inputs.environment }}" ;;
+          esac
+          echo "name=$STACK" >> $GITHUB_OUTPUT
+          echo "Stack: $STACK for environment: ${{ inputs.environment }}"
+
+      - name: Login to Pulumi R2 Backend
+        run: |
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
+          R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          pulumi login "s3://${BUCKET_NAME}?endpoint=${R2_ENDPOINT}&region=auto"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
       - name: Select Pulumi stack
         working-directory: infra
         run: |
-          STACK="${{ inputs.environment }}"
-          pulumi stack select "$STACK" --non-interactive
+          STACK_NAME="${{ steps.stack.outputs.name }}"
+          pulumi stack select "$STACK_NAME" --non-interactive
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
       - name: Resolve database names
