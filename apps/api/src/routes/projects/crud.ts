@@ -144,21 +144,35 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
     // on the VM agent passes it through as-is (it handles https:// URLs correctly).
     const repository = created.remote;
 
-    await db.insert(schema.projects).values({
-      id: projectId,
-      userId,
-      name,
-      normalizedName,
-      description,
-      installationId: null,
-      repository,
-      defaultBranch,
-      repoProvider: 'artifacts',
-      artifactsRepoId: created.name,
-      createdBy: userId,
-      createdAt: now,
-      updatedAt: now,
-    });
+    try {
+      await db.insert(schema.projects).values({
+        id: projectId,
+        userId,
+        name,
+        normalizedName,
+        description,
+        installationId: null,
+        repository,
+        defaultBranch,
+        repoProvider: 'artifacts',
+        artifactsRepoId: created.name,
+        createdBy: userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (dbError) {
+      // Log the orphaned Artifacts repo so it can be cleaned up manually.
+      // The Artifacts API may not support repo deletion yet, so we log
+      // enough detail for manual reconciliation.
+      log.error('project_create.artifacts_db_insert_failed', {
+        projectId,
+        repoName: created.name,
+        repository,
+        error: dbError instanceof Error ? dbError.message : String(dbError),
+        action: 'orphaned_artifacts_repo',
+      });
+      throw dbError;
+    }
   } else {
     // ─── GitHub-backed project (existing flow) ──────────────────────────
     const installationId = body.installationId?.trim();

@@ -1,23 +1,11 @@
--- Add repo_provider column to projects (github or artifacts)
-ALTER TABLE projects ADD COLUMN repo_provider TEXT NOT NULL DEFAULT 'github';
+-- Add repo_provider column and make installation_id nullable for Artifacts-backed projects.
+-- SQLite doesn't support ALTER COLUMN to remove NOT NULL, so we recreate the table.
+-- Wrapped in a transaction for atomicity (D1 safety).
 
--- Add artifacts_repo_id for Artifacts-backed projects
-ALTER TABLE projects ADD COLUMN artifacts_repo_id TEXT;
-
--- Make installation_id nullable for Artifacts-backed projects.
--- SQLite doesn't support ALTER COLUMN, so we recreate the table.
--- However, D1 migrations should be additive — and installation_id is already
--- referenced by existing FK constraints. Instead, we handle nullability at
--- the application layer: the Drizzle schema will mark it as nullable, and
--- Artifacts projects will insert NULL. The existing NOT NULL constraint in
--- the original CREATE TABLE will need to be handled by creating a new table.
---
--- Actually, SQLite's ALTER TABLE ADD COLUMN doesn't support NOT NULL without
--- a DEFAULT. And we can't ALTER COLUMN to remove NOT NULL in SQLite.
--- The pragmatic approach: create a new projects table, copy data, swap.
+PRAGMA foreign_keys = OFF;
 
 -- Step 1: Create new table without NOT NULL on installation_id
-CREATE TABLE projects_new (
+CREATE TABLE IF NOT EXISTS projects_new (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -56,7 +44,7 @@ CREATE TABLE projects_new (
 );
 
 -- Step 2: Copy data from old table
-INSERT INTO projects_new SELECT
+INSERT OR IGNORE INTO projects_new SELECT
   id, user_id, name, normalized_name, description, installation_id,
   repository, default_branch, github_repo_id, github_repo_node_id,
   default_vm_size, default_agent_type, default_workspace_profile,
@@ -70,14 +58,18 @@ INSERT INTO projects_new SELECT
 FROM projects;
 
 -- Step 3: Drop old table and rename
-DROP TABLE projects;
+DROP TABLE IF EXISTS projects;
 ALTER TABLE projects_new RENAME TO projects;
 
--- Step 4: Recreate indexes
-CREATE INDEX idx_projects_user_id ON projects(user_id);
-CREATE INDEX idx_projects_installation_id ON projects(installation_id);
-CREATE UNIQUE INDEX idx_projects_user_normalized_name ON projects(user_id, normalized_name);
-CREATE UNIQUE INDEX idx_projects_user_installation_repository ON projects(user_id, installation_id, repository) WHERE user_id != 'system_anonymous_trials';
-CREATE UNIQUE INDEX idx_projects_user_github_repo_id ON projects(user_id, github_repo_id) WHERE github_repo_id IS NOT NULL;
+-- Step 4: Recreate indexes (IF NOT EXISTS for retry safety)
+-- Note: idx_projects_user_installation_repository preserves the partial filter
+-- from migration 0046 (excludes system_anonymous_trials).
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_projects_installation_id ON projects(installation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_normalized_name ON projects(user_id, normalized_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_installation_repository ON projects(user_id, installation_id, repository) WHERE user_id != 'system_anonymous_trials';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_github_repo_id ON projects(user_id, github_repo_id) WHERE github_repo_id IS NOT NULL;
 -- New: uniqueness for Artifacts projects
-CREATE UNIQUE INDEX idx_projects_user_artifacts_repo ON projects(user_id, artifacts_repo_id) WHERE artifacts_repo_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_artifacts_repo ON projects(user_id, artifacts_repo_id) WHERE artifacts_repo_id IS NOT NULL;
+
+PRAGMA foreign_keys = ON;

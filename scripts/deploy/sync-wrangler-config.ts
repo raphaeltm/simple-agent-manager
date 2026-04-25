@@ -121,6 +121,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
   ai: AIBinding | undefined;
   analytics_engine_datasets: AnalyticsEngineDatasetBinding[] | undefined;
   migrations: MigrationEntry[] | undefined;
+  artifacts: unknown[] | undefined;
 } {
   return {
     durable_objects: topLevel.durable_objects as DurableObjectsConfig | undefined,
@@ -129,6 +130,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
       | AnalyticsEngineDatasetBinding[]
       | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
+    artifacts: topLevel.artifacts as unknown[] | undefined,
   };
 }
 
@@ -242,6 +244,7 @@ function generateApiWorkerEnv(
       ? { analytics_engine_datasets: staticBindings.analytics_engine_datasets }
       : {}),
     ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
+    ...(staticBindings.artifacts ? { artifacts: staticBindings.artifacts } : {}),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
     ...(includeTailConsumers ? { tail_consumers: [{ service: tailWorkerName }] } : {}),
