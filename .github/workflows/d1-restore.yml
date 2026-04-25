@@ -1,5 +1,26 @@
 name: D1 Time Travel Restore
 
+# This workflow restores D1 databases to a point-in-time using Cloudflare's
+# 30-day time-travel feature. It works for both the upstream repo AND forks.
+#
+# FORK SETUP:
+#   1. Create a GitHub Environment matching your deployment (e.g., "production")
+#   2. Add these secrets to the environment:
+#      - CF_API_TOKEN: Cloudflare API token with D1 edit permissions
+#      - CF_ACCOUNT_ID: Your Cloudflare account ID
+#      - R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY: For Pulumi state access
+#      - PULUMI_CONFIG_PASSPHRASE: Your Pulumi stack passphrase
+#   3. Set the PULUMI_STATE_BUCKET variable if your bucket name differs from 'sam-pulumi-state'
+#
+# USAGE:
+#   gh workflow run d1-restore.yml --ref main \
+#     -f environment=production \
+#     -f timestamp=2026-04-25T12:30:00Z \
+#     -f database=both \
+#     -f dry_run=true
+#
+# Always run with dry_run=true first to preview the restore.
+
 on:
   workflow_dispatch:
     inputs:
@@ -115,7 +136,7 @@ jobs:
 
           if [[ "${{ inputs.database }}" == "main" || "${{ inputs.database }}" == "both" ]]; then
             echo "--- Main DB row counts (BEFORE restore) ---"
-            for table in projects tasks triggers trigger_executions agent_profiles credentials; do
+            for table in projects users tasks triggers trigger_executions agent_profiles credentials nodes workspaces sessions project_deployment_credentials project_runtime_env_vars project_runtime_files; do
               COUNT=$(pnpm exec wrangler d1 execute "${{ steps.db.outputs.db_name }}" \
                 --remote --env ${{ inputs.environment }} \
                 --command="SELECT COUNT(*) as count FROM $table" \
@@ -181,7 +202,7 @@ jobs:
           echo "=== Post-Restore Verification ==="
           if [[ "${{ inputs.database }}" == "main" || "${{ inputs.database }}" == "both" ]]; then
             echo "--- Main DB row counts (AFTER restore) ---"
-            for table in projects tasks triggers trigger_executions agent_profiles credentials; do
+            for table in projects users tasks triggers trigger_executions agent_profiles credentials nodes workspaces sessions project_deployment_credentials project_runtime_env_vars project_runtime_files; do
               COUNT=$(pnpm exec wrangler d1 execute "${{ steps.db.outputs.db_name }}" \
                 --remote --env ${{ inputs.environment }} \
                 --command="SELECT COUNT(*) as count FROM $table" \
@@ -194,7 +215,11 @@ jobs:
           fi
           echo ""
           echo "Restore complete. Verify the application works before re-deploying."
-          echo "IMPORTANT: If migration 0047 has been fixed, re-run deployment to apply the safe version."
+          echo ""
+          echo "NEXT STEPS:"
+          echo "  1. Verify the restored data looks correct (check row counts above)"
+          echo "  2. Re-deploy to apply any migrations that should run after the restore point"
+          echo "  3. Verify the application works end-to-end"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

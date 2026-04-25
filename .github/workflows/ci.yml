@@ -240,8 +240,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Migration safety check (blocks destructive DROP TABLE)
+      - name: D1 migration safety check (blocks destructive DROP TABLE)
         run: pnpm quality:migration-safety
+
+      - name: DO migration safety check (blocks destructive patterns in Durable Object SQLite)
+        run: pnpm quality:do-migration-safety
 
       - name: AST-based code quality checks
         run: pnpm quality:ast-checks

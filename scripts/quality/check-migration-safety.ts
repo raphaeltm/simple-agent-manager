@@ -17,6 +17,16 @@
  *
  * 3. TRUNCATE / DELETE FROM without WHERE on FK parent tables.
  *
+ * 4. UPDATE without WHERE on FK parent tables (can corrupt all rows
+ *    and trigger CASCADE side effects depending on triggers).
+ *
+ * 5. PRAGMA foreign_keys = OFF without a corresponding ON — disabling
+ *    FK enforcement is a red flag that usually precedes table recreation.
+ *
+ * 6. Any DROP TABLE on ANY table (even non-CASCADE parents) in migrations
+ *    numbered higher than the last allowlisted migration. New migrations
+ *    should never drop tables — only add columns or create new tables.
+ *
  * Why this exists:
  * Migration 0047 dropped and recreated the `projects` table. The `triggers`,
  * `tasks`, `agent_profiles`, `deployment_credentials`, and other tables had
@@ -244,6 +254,68 @@ function scanForViolations(
             pattern: 'TRUNCATE on CASCADE parent',
             message: `TRUNCATE ${tableName} will delete all rows and cascade to child tables.`,
           });
+        }
+      }
+
+      // Check for UPDATE without WHERE on a CASCADE parent
+      const updateMatch = line.match(/UPDATE\s+(\w+)\s+SET\b/i);
+      if (updateMatch) {
+        const tableName = updateMatch[1];
+        const children = cascadeMap.get(tableName);
+        const contextLines = lines
+          .slice(i, Math.min(i + 3, lines.length))
+          .join(' ');
+        if (children && children.length > 0 && !/WHERE/i.test(contextLines)) {
+          violations.push({
+            file,
+            line: lineNum,
+            pattern: 'UPDATE without WHERE on CASCADE parent',
+            message:
+              `UPDATE ${tableName} SET without WHERE modifies all rows in a CASCADE parent. ` +
+              `Add a WHERE clause to scope the update.`,
+          });
+        }
+      }
+
+      // Check for PRAGMA foreign_keys = OFF (red flag for table recreation)
+      if (/PRAGMA\s+foreign_keys\s*=\s*(OFF|0|FALSE)/i.test(line)) {
+        violations.push({
+          file,
+          line: lineNum,
+          pattern: 'PRAGMA foreign_keys = OFF',
+          message:
+            'Disabling foreign key enforcement is dangerous — it usually precedes ' +
+            'a DROP TABLE / table recreation that bypasses CASCADE checks. ' +
+            'D1 may not honor this PRAGMA across statement boundaries. ' +
+            'Use ALTER TABLE ADD COLUMN instead of table recreation.',
+        });
+      }
+
+      // Check for DROP TABLE on ANY table in new migrations (post-allowlist era).
+      // Even non-CASCADE parents should not be dropped in new migrations.
+      const anyDropMatch = line.match(
+        /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i
+      );
+      if (anyDropMatch) {
+        const tableName = anyDropMatch[1];
+        if (
+          !tableName.endsWith('_new') &&
+          !tableName.endsWith('_tmp') &&
+          !cascadeMap.has(tableName) // already caught by the CASCADE check above
+        ) {
+          // Only flag if this is a "new era" migration (after 0047)
+          const migNum = parseInt(file.match(/^(\d+)/)?.[1] ?? '0', 10);
+          if (migNum > 47) {
+            violations.push({
+              file,
+              line: lineNum,
+              pattern: 'DROP TABLE in new migration',
+              message:
+                `DROP TABLE ${tableName} — new migrations should never drop tables. ` +
+                `Even tables without CASCADE children may have data that cannot be recovered. ` +
+                `Use ALTER TABLE ADD COLUMN or CREATE TABLE IF NOT EXISTS.`,
+            });
+          }
         }
       }
     }

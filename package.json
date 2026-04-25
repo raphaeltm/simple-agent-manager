@@ -38,6 +38,7 @@
     "quality:ast-checks": "tsx scripts/quality/ast-checks.ts",
     "quality:file-sizes": "tsx scripts/quality/check-file-sizes.ts",
     "quality:migration-safety": "tsx scripts/quality/check-migration-safety.ts",
+    "quality:do-migration-safety": "tsx scripts/quality/check-do-migration-safety.ts",
     "quality:source-contract-tests": "tsx scripts/quality/check-source-contract-tests.ts",
     "quality:specialist-review": "tsx scripts/quality/check-specialist-review-evidence.ts",
     "quality:specialist-review:test": "npx vitest run --config scripts/quality/vitest.config.ts",
