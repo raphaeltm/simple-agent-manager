@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 
@@ -131,11 +131,17 @@ describe('MCP Routes', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T01:00:00Z'));
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
     const { mcpRoutes } = await import('../../../src/routes/mcp');
     app = new Hono();
     app.route('/mcp', mcpRoutes);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // ─── Authentication ──────────────────────────────────────────────────

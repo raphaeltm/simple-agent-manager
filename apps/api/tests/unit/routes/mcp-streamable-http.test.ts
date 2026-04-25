@@ -9,7 +9,7 @@
  * - Regression: existing request methods still return 200 with JSON-RPC responses
  */
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock KV namespace
 const mockKV = {
@@ -128,6 +128,8 @@ describe('MCP Streamable HTTP Compliance', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T01:00:00Z'));
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
 
@@ -137,6 +139,10 @@ describe('MCP Streamable HTTP Compliance', () => {
     const { mcpRoutes } = await import('../../../src/routes/mcp');
     app = new Hono();
     app.route('/mcp', mcpRoutes);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // ─── Notification handling (202 with no body) ─────────────────────────
@@ -215,15 +221,13 @@ describe('MCP Streamable HTTP Compliance', () => {
       // Send a notification — rate limit KV should not be called
       const putCallsBefore = mockKV.put.mock.calls.length;
       await mcpPost(app, jsonRpcNotification('notifications/initialized'));
-      // Rate limit check does KV.get + KV.put; notification should skip that
-      // Auth KV.get is still called (1 call), but rate limit adds 2 more
-      // With notification early-return, we expect only the auth KV.get
+      // Notification auth still performs one KV.get and one KV.put to refresh the token TTL.
+      // The early return should skip any additional rate-limit KV operations.
       const kvGetCalls = mockKV.get.mock.calls;
-      // First call is auth (mcp:valid-token), no rate limit call
       expect(kvGetCalls.length).toBe(1);
       expect(kvGetCalls[0][0]).toBe('mcp:valid-token');
-      // No KV.put calls for rate limiting
-      expect(mockKV.put.mock.calls.length).toBe(putCallsBefore);
+      expect(mockKV.put.mock.calls.length).toBe(putCallsBefore + 1);
+      expect(mockKV.put.mock.calls[putCallsBefore]?.[0]).toBe('mcp:valid-token');
     });
   });
 
