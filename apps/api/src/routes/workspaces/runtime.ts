@@ -389,15 +389,69 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
 
   const db = drizzle(c.env.DATABASE, { schema });
 
+  // Look up workspace → project to determine repo provider
   const workspaceRows = await db
-    .select({ installationId: schema.workspaces.installationId })
+    .select({
+      installationId: schema.workspaces.installationId,
+      projectId: schema.workspaces.projectId,
+    })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
   const workspace = workspaceRows[0];
-  if (!workspace || !workspace.installationId) {
+  if (!workspace) {
     throw errors.notFound('Workspace');
+  }
+
+  // Look up the project to check repoProvider
+  let repoProvider = 'github';
+  let artifactsRepoId: string | null = null;
+  if (workspace.projectId) {
+    const projectRows = await db
+      .select({
+        repoProvider: schema.projects.repoProvider,
+        artifactsRepoId: schema.projects.artifactsRepoId,
+      })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, workspace.projectId))
+      .limit(1);
+
+    const project = projectRows[0];
+    if (project) {
+      repoProvider = project.repoProvider || 'github';
+      artifactsRepoId = project.artifactsRepoId;
+    }
+  }
+
+  if (repoProvider === 'artifacts') {
+    // ─── Artifacts token ──────────────────────────────────────────────
+    if (c.env.ARTIFACTS_ENABLED !== 'true') {
+      throw errors.forbidden('Artifacts provider is not enabled');
+    }
+    if (!c.env.ARTIFACTS || !artifactsRepoId) {
+      throw errors.internal('Artifacts binding or repo ID missing');
+    }
+
+    const ttl = parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10) || 3600;
+    // Use requested scope or default to 'write' (agents need push access)
+    const requestedScope = c.req.query('scope') === 'read' ? 'read' as const : 'write' as const;
+    const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
+    const tokenResult = await repo.createToken(requestedScope, ttl);
+
+    // Strip ?expires= suffix from token for git credential use
+    const tokenSecret = tokenResult.plaintext.split('?expires=')[0] || tokenResult.plaintext;
+
+    return c.json({
+      token: tokenSecret,
+      expiresAt: tokenResult.expires_at,
+      cloneUrl: repo.remote,
+    });
+  }
+
+  // ─── GitHub token (existing flow) ──────────────────────────────────
+  if (!workspace.installationId) {
+    throw errors.notFound('Workspace has no GitHub installation');
   }
 
   const installations = await db

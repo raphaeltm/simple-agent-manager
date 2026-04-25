@@ -249,11 +249,11 @@ export function CreateWorkspace() {
         const defBranch = proj.defaultBranch ?? 'main';
         setBranch(defBranch);
         setRepoDefaultBranch(defBranch);
-        setInstallationId(proj.installationId);
+        setInstallationId(proj.installationId ?? '');
         if (proj.defaultVmSize) {
           setVmSize(proj.defaultVmSize as VMSize);
         }
-        void fetchBranches(proj.repository, proj.installationId, defBranch);
+        void fetchBranches(proj.repository, proj.installationId ?? '', defBranch);
       })
       .catch(() => {
         // Project fetch failed

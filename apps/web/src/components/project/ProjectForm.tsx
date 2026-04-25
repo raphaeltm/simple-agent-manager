@@ -1,6 +1,6 @@
-import type { GitHubInstallation } from '@simple-agent-manager/shared';
+import type { GitHubInstallation, RepoProvider } from '@simple-agent-manager/shared';
 import { Button, Input } from '@simple-agent-manager/ui';
-import { type FormEvent,useCallback, useMemo, useState } from 'react';
+import { type FormEvent, useCallback, useMemo, useState } from 'react';
 
 import { listBranches } from '../../lib/api';
 import { BranchSelector } from '../BranchSelector';
@@ -13,6 +13,7 @@ export interface ProjectFormValues {
   repository: string;
   defaultBranch: string;
   githubRepoId?: number;
+  repoProvider?: RepoProvider;
 }
 
 interface ProjectFormProps {
@@ -23,6 +24,7 @@ interface ProjectFormProps {
   onSubmit: (values: ProjectFormValues) => Promise<void> | void;
   onCancel?: () => void;
   submitLabel?: string;
+  artifactsEnabled?: boolean;
 }
 
 function normalizeRepository(value: string): string {
@@ -45,6 +47,7 @@ export function ProjectForm({
   onSubmit,
   onCancel,
   submitLabel,
+  artifactsEnabled = false,
 }: ProjectFormProps) {
   const defaultInstallationId = useMemo(() => {
     if (initialValues?.installationId) {
@@ -53,6 +56,13 @@ export function ProjectForm({
     return installations[0]?.id ?? '';
   }, [initialValues?.installationId, installations]);
 
+  // Note: in edit mode the toggle is hidden (!isEditMode && artifactsEnabled),
+  // but repoProvider state may still be 'artifacts' from initialValues.
+  // The submit handler branches on isArtifacts, which is safe because
+  // edit mode does not change repoProvider.
+  const [repoProvider, setRepoProvider] = useState<RepoProvider>(
+    initialValues?.repoProvider ?? 'github'
+  );
   const [values, setValues] = useState<ProjectFormValues>({
     name: initialValues?.name ?? '',
     description: initialValues?.description ?? '',
@@ -67,6 +77,7 @@ export function ProjectForm({
   const [error, setError] = useState<string | null>(null);
 
   const isEditMode = mode === 'edit';
+  const isArtifacts = repoProvider === 'artifacts';
 
   const fetchBranches = useCallback(async (repository: string, installationId: string, defBranch?: string) => {
     setBranchesLoading(true);
@@ -143,6 +154,20 @@ export function ProjectForm({
       return;
     }
 
+    if (isArtifacts) {
+      // Artifacts path: only name is required, repo is auto-created
+      await onSubmit({
+        name: values.name.trim(),
+        description: values.description.trim(),
+        installationId: '',
+        repository: '',
+        defaultBranch: 'main',
+        repoProvider: 'artifacts',
+      });
+      return;
+    }
+
+    // GitHub path: full validation
     if (!values.defaultBranch.trim()) {
       setError('Default branch is required');
       return;
@@ -165,11 +190,55 @@ export function ProjectForm({
       repository: normalizeRepository(values.repository),
       defaultBranch: values.defaultBranch.trim(),
       githubRepoId: values.githubRepoId,
+      repoProvider: 'github',
     });
   };
 
   return (
     <form onSubmit={handleSubmit} className="grid gap-3">
+      {/* Provider toggle — only shown in create mode when artifacts is enabled */}
+      {!isEditMode && artifactsEnabled && (
+        <fieldset className="grid gap-1.5">
+          <legend className="text-sm text-fg-muted">Repository Provider</legend>
+          {/* radiogroup with aria-checked for screen reader accessibility */}
+          <div className="flex gap-2" role="radiogroup" aria-label="Repository Provider">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={isArtifacts}
+              onClick={() => setRepoProvider('artifacts')}
+              disabled={submitting}
+              className={`flex-1 rounded-md py-3 px-3 text-sm font-medium transition-colors ${
+                isArtifacts
+                  ? 'border-2 border-accent bg-accent/10 text-accent'
+                  : 'border border-border-default bg-surface text-fg-muted hover:border-fg-muted'
+              }`}
+            >
+              SAM Git
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!isArtifacts}
+              onClick={() => setRepoProvider('github')}
+              disabled={submitting}
+              className={`flex-1 rounded-md py-3 px-3 text-sm font-medium transition-colors ${
+                !isArtifacts
+                  ? 'border-2 border-accent bg-accent/10 text-accent'
+                  : 'border border-border-default bg-surface text-fg-muted hover:border-fg-muted'
+              }`}
+            >
+              GitHub
+            </button>
+          </div>
+          {isArtifacts && (
+            <p className="text-xs text-fg-muted">
+              A Git repository will be created automatically. No GitHub account needed.
+            </p>
+          )}
+        </fieldset>
+      )}
+
       <label className="grid gap-1.5">
         <span className="text-sm text-fg-muted">Name</span>
         <Input
@@ -191,62 +260,67 @@ export function ProjectForm({
         />
       </label>
 
-      <label className="grid gap-1.5">
-        <span className="text-sm text-fg-muted">Installation</span>
-        <select
-          value={values.installationId}
-          onChange={(event) => handleInstallationChange(event.currentTarget.value)}
-          disabled={submitting || isEditMode}
-          className="w-full rounded-md border border-border-default bg-surface text-fg-primary py-2.5 px-3 min-h-11"
-        >
-          {installations.length === 0 ? (
-            <option value="">No installations</option>
-          ) : (
-            installations.map((installation) => (
-              <option key={installation.id} value={installation.id}>
-                {installation.accountName} ({installation.accountType})
-              </option>
-            ))
-          )}
-        </select>
-      </label>
+      {/* GitHub-specific fields — hidden for Artifacts provider */}
+      {!isArtifacts && (
+        <>
+          <label className="grid gap-1.5">
+            <span className="text-sm text-fg-muted">Installation</span>
+            <select
+              value={values.installationId}
+              onChange={(event) => handleInstallationChange(event.currentTarget.value)}
+              disabled={submitting || isEditMode}
+              className="w-full rounded-md border border-border-default bg-surface text-fg-primary py-2.5 px-3 min-h-11"
+            >
+              {installations.length === 0 ? (
+                <option value="">No installations</option>
+              ) : (
+                installations.map((installation) => (
+                  <option key={installation.id} value={installation.id}>
+                    {installation.accountName} ({installation.accountType})
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
 
-      <label htmlFor="project-repository" className="grid gap-1.5">
-        <span className="text-sm text-fg-muted">Repository</span>
-        {isEditMode ? (
-          <Input
-            id="project-repository"
-            value={values.repository}
-            onChange={(event) => handleChange('repository', event.currentTarget.value)}
-            placeholder="owner/repo"
-            disabled
-          />
-        ) : (
-          <RepoSelector
-            id="project-repository"
-            value={values.repository}
-            onChange={handleRepositoryChange}
-            onRepoSelect={handleRepoSelect}
-            installationId={values.installationId}
-            disabled={submitting}
-            required
-          />
-        )}
-      </label>
+          <label htmlFor="project-repository" className="grid gap-1.5">
+            <span className="text-sm text-fg-muted">Repository</span>
+            {isEditMode ? (
+              <Input
+                id="project-repository"
+                value={values.repository}
+                onChange={(event) => handleChange('repository', event.currentTarget.value)}
+                placeholder="owner/repo"
+                disabled
+              />
+            ) : (
+              <RepoSelector
+                id="project-repository"
+                value={values.repository}
+                onChange={handleRepositoryChange}
+                onRepoSelect={handleRepoSelect}
+                installationId={values.installationId}
+                disabled={submitting}
+                required
+              />
+            )}
+          </label>
 
-      <label htmlFor="project-default-branch" className="grid gap-1.5">
-        <span className="text-sm text-fg-muted">Default branch</span>
-        <BranchSelector
-          id="project-default-branch"
-          branches={branches}
-          value={values.defaultBranch}
-          onChange={(val) => handleChange('defaultBranch', val)}
-          defaultBranch={repoDefaultBranch}
-          loading={!isEditMode && branchesLoading}
-          error={!isEditMode ? branchesError : null}
-          disabled={submitting}
-        />
-      </label>
+          <label htmlFor="project-default-branch" className="grid gap-1.5">
+            <span className="text-sm text-fg-muted">Default branch</span>
+            <BranchSelector
+              id="project-default-branch"
+              branches={branches}
+              value={values.defaultBranch}
+              onChange={(val) => handleChange('defaultBranch', val)}
+              defaultBranch={repoDefaultBranch}
+              loading={!isEditMode && branchesLoading}
+              error={!isEditMode ? branchesError : null}
+              disabled={submitting}
+            />
+          </label>
+        </>
+      )}
 
       {error && (
         <div className="text-danger text-sm" role="alert">
