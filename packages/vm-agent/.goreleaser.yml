@@ -57,7 +57,7 @@ publishers:
     cmd: |
       for file in dist/vm-agent-*; do
         name=$(basename $file)
-        wrangler r2 object put agents/$name --file $file
+        wrangler r2 object put agents/$name --file $file --remote
       done
     env:
       - CLOUDFLARE_API_TOKEN={{ .Env.CLOUDFLARE_API_TOKEN }}

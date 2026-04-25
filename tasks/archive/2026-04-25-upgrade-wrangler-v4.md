@@ -36,19 +36,18 @@ Additionally, the config endpoint at `apps/api/src/index.ts:336` had its binding
 
 ## Implementation Checklist
 
-- [ ] 1. Upgrade `wrangler` version in `pnpm-workspace.yaml` catalog from `3.114.17` to `4.85.0`
-- [ ] 2. Run `pnpm install` to update lockfile
-- [ ] 3. Add `--remote` flag to KV/R2 commands in `deploy-reusable.yml`:
-  - `wrangler kv key put` (line ~452)
-  - `wrangler r2 object put` (lines ~507-508)
-  - Check `wrangler r2 bucket create` (line ~180)
-- [ ] 4. Restore binding check in config endpoint (`apps/api/src/index.ts:336`):
-  - Change from: `c.env.ARTIFACTS_ENABLED === 'true'`
-  - Change to: `c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS`
-- [ ] 5. Run `pnpm typecheck` to verify no type breaks from Wrangler v4
-- [ ] 6. Run `pnpm lint` to verify no lint breaks
-- [ ] 7. Run `pnpm test` to verify no test breaks
-- [ ] 8. Run `pnpm build` to verify build succeeds with new esbuild
+- [x] 1. Upgrade `wrangler` version in `pnpm-workspace.yaml` catalog from `3.114.17` to `4.85.0`
+- [x] 2. Run `pnpm install` to update lockfile
+- [x] 3. Add `--remote` flag to KV/R2 commands in `deploy-reusable.yml`:
+  - `wrangler kv key put` (line ~452) — added `--remote`
+  - `wrangler r2 object put` (lines ~507-508) — added `--remote`
+  - `wrangler r2 bucket create` (line ~180) — management API call, no `--remote` needed
+- [x] 4. Restore binding check in config endpoint (`apps/api/src/index.ts:336`):
+  - Changed to: `c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS`
+- [x] 5. Run `pnpm typecheck` — all 16 tasks pass
+- [x] 6. Run `pnpm lint` — 0 errors, 473 pre-existing warnings
+- [x] 7. Run `pnpm test` — 1958 tests pass
+- [x] 8. Run `pnpm build` — all 9 build tasks pass
 
 ## Acceptance Criteria
 

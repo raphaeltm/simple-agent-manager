@@ -141,7 +141,7 @@ curl -I https://app.example.com
 1. Check existing namespaces:
 
    ```bash
-   npx wrangler kv:namespace list
+   npx wrangler kv namespace list
    ```
 
 2. Delete unused namespaces

@@ -337,7 +337,7 @@ npx wrangler d1 create workspaces
 # Note the database_id from the output!
 
 # Create KV Namespace for sessions
-npx wrangler kv:namespace create sessions
+npx wrangler kv namespace create sessions
 # Note the namespace id from the output!
 
 # Create R2 Bucket for VM Agent binaries and task attachments
@@ -675,12 +675,12 @@ If this is your first Pages deployment, Wrangler will create the project. Note t
 cd packages/vm-agent
 
 # Upload each binary
-wrangler r2 object put workspaces-assets/agents/vm-agent-linux-amd64 --file bin/vm-agent-linux-amd64
-wrangler r2 object put workspaces-assets/agents/vm-agent-linux-arm64 --file bin/vm-agent-linux-arm64
+wrangler r2 object put workspaces-assets/agents/vm-agent-linux-amd64 --file bin/vm-agent-linux-amd64 --remote
+wrangler r2 object put workspaces-assets/agents/vm-agent-linux-arm64 --file bin/vm-agent-linux-arm64 --remote
 
 # Upload version info
 echo '{"version": "1.0.0", "buildDate": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > bin/version.json
-wrangler r2 object put workspaces-assets/agents/version.json --file bin/version.json
+wrangler r2 object put workspaces-assets/agents/version.json --file bin/version.json --remote
 ```
 
 </details>
@@ -816,12 +816,12 @@ cd packages/vm-agent
 make build-all
 
 # Re-upload to R2
-wrangler r2 object put workspaces-assets/agents/vm-agent-linux-amd64 --file bin/vm-agent-linux-amd64
-wrangler r2 object put workspaces-assets/agents/vm-agent-linux-arm64 --file bin/vm-agent-linux-arm64
+wrangler r2 object put workspaces-assets/agents/vm-agent-linux-amd64 --file bin/vm-agent-linux-amd64 --remote
+wrangler r2 object put workspaces-assets/agents/vm-agent-linux-arm64 --file bin/vm-agent-linux-arm64 --remote
 
 # Update version
 echo '{"version": "1.0.1", "buildDate": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > bin/version.json
-wrangler r2 object put workspaces-assets/agents/version.json --file bin/version.json
+wrangler r2 object put workspaces-assets/agents/version.json --file bin/version.json --remote
 ```
 
 ### Database Migrations

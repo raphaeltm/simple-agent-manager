@@ -72,7 +72,7 @@ function createD1Database(name: string): string | undefined {
 function createKVNamespace(title: string): string | undefined {
   console.log(`📦 Creating local KV namespace: ${title}`);
   try {
-    const output = execCommand(`npx wrangler kv:namespace create "${title}" --local --preview 2>&1`);
+    const output = execCommand(`npx wrangler kv namespace create "${title}" --local --preview 2>&1`);
     // Parse the namespace ID from output
     const match = output.match(/id\s*=\s*"([^"]+)"/);
     if (match) {
@@ -81,7 +81,7 @@ function createKVNamespace(title: string): string | undefined {
     }
 
     // Try to list existing namespaces
-    const listOutput = execCommand(`npx wrangler kv:namespace list --local --json 2>/dev/null || echo "[]"`);
+    const listOutput = execCommand(`npx wrangler kv namespace list --local --json 2>/dev/null || echo "[]"`);
     try {
       const namespaces = JSON.parse(listOutput);
       const existing = namespaces.find((ns: any) => ns.title === title);

@@ -448,10 +448,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
           echo "Enabling trials kill-switch on staging (KV trials:enabled=true)"
-          # `wrangler kv key put` writes to remote by default; --remote is not a valid flag here.
+          # Wrangler v4: KV commands default to local; --remote required for deployed KV.
           pnpm exec wrangler kv key put "trials:enabled" "true" \
             --binding KV \
-            --env staging
+            --env staging \
+            --remote
 
       - name: Configure Worker Secrets
         if: ${{ inputs.dry_run != true }}
@@ -504,8 +505,9 @@ jobs:
         working-directory: infra
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
-          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64
-          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64
+          # Wrangler v4: R2 commands default to local; --remote required for deployed R2.
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64 --remote
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
