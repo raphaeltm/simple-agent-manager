@@ -19,6 +19,19 @@ The SAM control plane monitors ACP sessions for activity. If your session appear
 
 **You MUST keep the session visibly active** by polling subtask status in a foreground loop. Never dispatch subtasks and silently wait — always use an explicit sleep-then-check cycle.
 
+## Verify Assumptions Before Reporting Blockers
+
+Do not stop a workflow because of an environment assumption you have not tested.
+
+Before reporting a blocker, you MUST:
+
+1. Identify the exact suspected blocker
+2. Run the direct check (`gh auth status`, `git remote -v`, file existence check, dependency install/build step, command availability check, etc.)
+3. Try the obvious repo-documented recovery step when one exists
+4. Report the exact commands tried and what they returned
+
+Untested assumptions are not blockers.
+
 ---
 
 ## Phase 1: Understand & Decompose

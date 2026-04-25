@@ -26,6 +26,24 @@ Long workflows lose context to compaction. You MUST maintain a `.do-state.md` fi
 
 **At the Phase 3 → Phase 4 boundary:** Enter Plan Mode briefly. Re-read the state file, re-read the task file, and verify every checklist item is genuinely complete before proceeding. This checkpoint prevents the "rush to PR" failure mode.
 
+## ⚠️ CRITICAL: Verify Assumptions Before Reporting Blockers
+
+Do not tell the human you are blocked because of an untested assumption about the environment.
+
+Before reporting that you cannot proceed, you MUST:
+
+1. Name the suspected blocker clearly
+2. Run the cheapest direct verification step available
+3. Try the obvious repo-documented recovery step when one exists
+4. Report the exact command(s) tried and the observed result
+
+Examples:
+- If you think GitHub access is unavailable, run `gh auth status`
+- If tests fail because a workspace package cannot be resolved, follow the documented build order before declaring validation blocked
+- If a binary seems missing, verify whether dependencies simply have not been installed yet
+
+Statements like "it probably won't work" or "credentials seem unavailable" are not acceptable blocker evidence.
+
 ---
 
 ## Phase 1: Research & Task Creation
