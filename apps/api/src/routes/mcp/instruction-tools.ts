@@ -124,6 +124,13 @@ export async function handleGetInstructions(
             'If you encounter blockers, report them via `update_task_status` with a clear description.',
           ]),
       ...knowledgeInstructions,
+      ...((project.repoProvider === 'artifacts')
+        ? [
+            'This project uses SAM Git (Cloudflare Artifacts) — NOT GitHub.',
+            'Do NOT use `gh pr create`, `gh` CLI, or any GitHub-specific commands.',
+            'Push your changes directly to the remote branch. Summarize your changes in the task completion message.',
+          ]
+        : []),
     ],
     // Include formatted directives as a readable text block (primary way agents consume knowledge)
     ...(knowledgeDirectives ? { knowledgeDirectives } : {}),

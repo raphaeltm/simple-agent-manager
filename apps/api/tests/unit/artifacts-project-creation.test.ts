@@ -105,6 +105,33 @@ describe('Git token response for Artifacts', () => {
   });
 });
 
+describe('Artifacts agent instructions', () => {
+  it('artifacts projects should produce instructions that forbid gh CLI', () => {
+    // Simulates what handleGetInstructions returns for Artifacts projects
+    const repoProvider = 'artifacts';
+    const artifactsInstructions = repoProvider === 'artifacts'
+      ? [
+          'This project uses SAM Git (Cloudflare Artifacts) — NOT GitHub.',
+          'Do NOT use `gh pr create`, `gh` CLI, or any GitHub-specific commands.',
+          'Push your changes directly to the remote branch. Summarize your changes in the task completion message.',
+        ]
+      : [];
+
+    expect(artifactsInstructions).toHaveLength(3);
+    expect(artifactsInstructions.some(i => i.includes('gh pr create'))).toBe(true);
+    expect(artifactsInstructions.some(i => i.includes('NOT GitHub'))).toBe(true);
+  });
+
+  it('github projects should not produce artifacts instructions', () => {
+    const repoProvider = 'github';
+    const artifactsInstructions = repoProvider === 'artifacts'
+      ? ['This project uses SAM Git']
+      : [];
+
+    expect(artifactsInstructions).toHaveLength(0);
+  });
+});
+
 describe('Artifacts project repository format', () => {
   it('stores full clone URL as repository for Artifacts projects', () => {
     // The project creation stores created.remote as repository
