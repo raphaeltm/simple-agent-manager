@@ -53,6 +53,7 @@ import { TryCapExceeded } from './pages/TryCapExceeded';
 import { TryDiscovery } from './pages/TryDiscovery';
 import { TryWaitlistThanks } from './pages/TryWaitlistThanks';
 import { UiStandards } from './pages/UiStandards';
+import { SamPrototype } from './pages/SamPrototype';
 import { Workspace } from './pages/workspace';
 import { Workspaces } from './pages/Workspaces';
 
@@ -81,6 +82,8 @@ export default function App() {
           <Route path="/try/cap-exceeded" element={<TryCapExceeded />} />
           <Route path="/try/waitlist/thanks" element={<TryWaitlistThanks />} />
           <Route path="/try/:trialId" element={<TryDiscovery />} />
+          {/* SAM prototype — public, no auth */}
+          <Route path="/sam" element={<SamPrototype />} />
           {/* Harness for Playwright audits — mounts trial components with mock data */}
           <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
           {/* Protected routes with AppShell (persistent navigation) */}
