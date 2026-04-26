@@ -714,6 +714,66 @@ export async function getMailboxStats(
 // =========================================================================
 // WebSocket
 // =========================================================================
+// Mission State & Handoffs
+// =========================================================================
+
+export async function createMissionStateEntry(
+  env: Env, projectId: string, missionId: string, entryType: string,
+  title: string, content: string | null, sourceTaskId: string | null,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.createMissionStateEntry(missionId, entryType, title, content, sourceTaskId);
+}
+
+export async function getMissionStateEntries(
+  env: Env, projectId: string, missionId: string, entryType: string | null,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.getMissionStateEntries(missionId, entryType);
+}
+
+export async function getMissionStateEntry(env: Env, projectId: string, entryId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getMissionStateEntry(entryId);
+}
+
+export async function updateMissionStateEntry(
+  env: Env, projectId: string, entryId: string,
+  updates: { title?: string; content?: string | null },
+) {
+  const stub = await getStub(env, projectId);
+  return stub.updateMissionStateEntry(entryId, updates);
+}
+
+export async function deleteMissionStateEntry(env: Env, projectId: string, entryId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.deleteMissionStateEntry(entryId);
+}
+
+export async function createHandoffPacket(
+  env: Env, projectId: string, missionId: string, fromTaskId: string, toTaskId: string | null,
+  summary: string, facts: unknown[], openQuestions: string[], artifactRefs: unknown[], suggestedActions: string[],
+) {
+  const stub = await getStub(env, projectId);
+  return stub.createHandoffPacket(missionId, fromTaskId, toTaskId, summary, facts, openQuestions, artifactRefs, suggestedActions);
+}
+
+export async function getHandoffPackets(env: Env, projectId: string, missionId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getHandoffPackets(missionId);
+}
+
+export async function getHandoffPacket(env: Env, projectId: string, handoffId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getHandoffPacket(handoffId);
+}
+
+export async function getHandoffPacketsForTask(env: Env, projectId: string, taskId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getHandoffPacketsForTask(taskId);
+}
+
+// =========================================================================
 
 /**
  * Forward a WebSocket upgrade request to the project's DO.

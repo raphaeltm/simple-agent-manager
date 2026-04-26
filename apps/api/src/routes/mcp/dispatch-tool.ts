@@ -154,12 +154,16 @@ export async function handleDispatchTask(
     explicitVmLocation = params.vmLocation.trim();
   }
 
+  // missionId — inherit from parent task or explicit override
+  const explicitMissionId = typeof params.missionId === 'string' ? params.missionId.trim() : undefined;
+
   // ── Look up current task to get dispatch depth ──────────────────────────
   const [currentTask] = await db
     .select({
       id: schema.tasks.id,
       dispatchDepth: schema.tasks.dispatchDepth,
       status: schema.tasks.status,
+      missionId: schema.tasks.missionId,
     })
     .from(schema.tasks)
     .where(
@@ -400,10 +404,10 @@ export async function handleDispatchTask(
   const conditionalInsertResult = await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint,
+     task_mode, agent_profile_hint, mission_id,
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
-     ?, ?,
+     ?, ?, ?,
      ?, ?
      WHERE (
        SELECT count(*) FROM tasks
@@ -421,6 +425,7 @@ export async function handleDispatchTask(
     taskTitle, fullDescription, priority, newDepth, branchName,
     tokenData.userId,
     resolvedTaskMode, resolvedProfile?.profileId ?? null,
+    explicitMissionId ?? currentTask.missionId ?? null,
     now, now,
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,

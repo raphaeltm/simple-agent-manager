@@ -104,6 +104,10 @@ export const TASK_LIFECYCLE_TOOLS = [
           type: 'string',
           description: 'VM location/datacenter. Must be valid for the selected provider. Defaults to profile or project default.',
         },
+        missionId: {
+          type: 'string',
+          description: 'Mission ID to attach this task to. The task inherits the mission context and can read/write mission state.',
+        },
       },
       required: ['description'],
       additionalProperties: false,

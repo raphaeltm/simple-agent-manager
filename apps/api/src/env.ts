@@ -302,6 +302,8 @@ export interface Env {
   KNOWLEDGE_LIST_PAGE_SIZE?: string;               // Default page size for entity list (default: 50)
   KNOWLEDGE_LIST_MAX_PAGE_SIZE?: string;           // Max page size for entity list (default: 200)
   KNOWLEDGE_SEARCH_MAX_LIMIT?: string;             // Max search results cap (default: 100)
+  // Mission orchestration limits
+  MISSION_MAX_PER_PROJECT?: string;                // Max missions per project (default: 50)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;

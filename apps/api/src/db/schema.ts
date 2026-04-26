@@ -421,6 +421,40 @@ export const projectDeploymentCredentials = sqliteTable(
 );
 
 // =============================================================================
+// Missions (Phase 2: Orchestration Primitives)
+// =============================================================================
+export const missions = sqliteTable(
+  'missions',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    description: text('description'),
+    status: text('status').notNull().default('planning'),
+    /** Soft FK to tasks table. The root task that initiated this mission. */
+    rootTaskId: text('root_task_id'),
+    /** JSON-serialized MissionBudgetConfig. Enforcement comes in later phases. */
+    budgetConfig: text('budget_config'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectIdIdx: index('idx_missions_project_id').on(table.projectId),
+    projectStatusIdx: index('idx_missions_project_status').on(table.projectId, table.status),
+    userIdIdx: index('idx_missions_user_id').on(table.userId),
+  })
+);
+
+// =============================================================================
 // Tasks
 // =============================================================================
 export const tasks = sqliteTable(
@@ -466,6 +500,10 @@ export const tasks = sqliteTable(
     triggerExecutionId: text('trigger_execution_id'),
     /** Whether the agent credential came from the user or the platform. */
     agentCredentialSource: text('agent_credential_source').default('user'), // 'user' | 'platform'
+    /** Null for standalone tasks; set when task belongs to a mission. Set null on mission delete. */
+    missionId: text('mission_id').references(() => missions.id, { onDelete: 'set null' }),
+    /** Scheduler classification for mission tasks. Null for standalone tasks. */
+    schedulerState: text('scheduler_state'),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -488,6 +526,7 @@ export const tasks = sqliteTable(
     ),
     projectCreatedAtIdx: index('idx_tasks_project_created_at').on(table.projectId, table.createdAt),
     projectUserIdx: index('idx_tasks_project_user').on(table.projectId, table.userId),
+    missionIdIdx: index('idx_tasks_mission_id').on(table.missionId),
   })
 );
 
@@ -983,6 +1022,8 @@ export type ProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferSelect;
 export type NewProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferInsert;
 export type ProjectRuntimeFile = typeof projectRuntimeFiles.$inferSelect;
 export type NewProjectRuntimeFile = typeof projectRuntimeFiles.$inferInsert;
+export type Mission = typeof missions.$inferSelect;
+export type NewMission = typeof missions.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type TaskDependency = typeof taskDependencies.$inferSelect;

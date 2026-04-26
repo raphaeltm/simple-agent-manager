@@ -25,6 +25,7 @@ import * as knowledge from './knowledge';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messages from './messages';
+import * as missionState from './missions';
 import * as sessions from './sessions';
 
 export type { Env } from './types';
@@ -561,6 +562,55 @@ export class ProjectData extends DurableObject<Env> {
 
   async getMailboxStats() {
     return mailbox.getMailboxStats(this.sql);
+  }
+
+  // --- Mission State & Handoffs ---
+
+  async createMissionStateEntry(missionId: string, entryType: string, title: string, content: string | null, sourceTaskId: string | null) {
+    const result = missionState.createMissionStateEntry(this.sql, missionId, entryType as Parameters<typeof missionState.createMissionStateEntry>[2], title, content, sourceTaskId);
+    this.broadcastEvent('mission.state.created', { id: result.id, missionId, entryType });
+    return result;
+  }
+
+  async getMissionStateEntries(missionId: string, entryType: string | null) {
+    return missionState.getMissionStateEntries(this.sql, missionId, entryType as Parameters<typeof missionState.getMissionStateEntries>[2] | undefined);
+  }
+
+  async getMissionStateEntry(entryId: string) {
+    return missionState.getMissionStateEntry(this.sql, entryId);
+  }
+
+  async updateMissionStateEntry(entryId: string, updates: { title?: string; content?: string | null }) {
+    missionState.updateMissionStateEntry(this.sql, entryId, updates);
+    this.broadcastEvent('mission.state.updated', { id: entryId });
+  }
+
+  async deleteMissionStateEntry(entryId: string) {
+    const deleted = missionState.deleteMissionStateEntry(this.sql, entryId);
+    if (deleted) this.broadcastEvent('mission.state.deleted', { id: entryId });
+    return deleted;
+  }
+
+  async createHandoffPacket(
+    missionId: string, fromTaskId: string, toTaskId: string | null,
+    summary: string, facts: unknown[], openQuestions: string[],
+    artifactRefs: unknown[], suggestedActions: string[],
+  ) {
+    const result = missionState.createHandoffPacket(this.sql, missionId, fromTaskId, toTaskId, summary, facts, openQuestions, artifactRefs, suggestedActions);
+    this.broadcastEvent('mission.handoff.created', { id: result.id, missionId, fromTaskId, toTaskId });
+    return result;
+  }
+
+  async getHandoffPackets(missionId: string) {
+    return missionState.getHandoffPackets(this.sql, missionId);
+  }
+
+  async getHandoffPacket(handoffId: string) {
+    return missionState.getHandoffPacket(this.sql, handoffId);
+  }
+
+  async getHandoffPacketsForTask(taskId: string) {
+    return missionState.getHandoffPacketsForTask(this.sql, taskId);
   }
 
   // --- Internal Helpers ---

@@ -14,6 +14,7 @@
 
 export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 export { LIBRARY_TOOLS } from './tool-definitions-library-tools';
+export { MISSION_TOOLS } from './tool-definitions-mission-tools';
 export { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 export { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 export { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
@@ -24,6 +25,7 @@ export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 import { LIBRARY_TOOLS } from './tool-definitions-library-tools';
+import { MISSION_TOOLS } from './tool-definitions-mission-tools';
 import { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 import { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 import { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
@@ -42,4 +44,5 @@ export const MCP_TOOLS = [
   ...TRIGGER_TOOLS,
   ...PROFILE_TOOLS,
   ...KNOWLEDGE_TOOLS,
+  ...MISSION_TOOLS,
 ];
