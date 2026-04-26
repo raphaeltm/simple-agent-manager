@@ -8,6 +8,7 @@ import {
   OVERRIDABLE_SCHEDULER_STATES,
   type SchedulerState,
 } from '@simple-agent-manager/shared';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -111,6 +112,19 @@ orchestratorRoutes.post('/tasks/:taskId/override', async (c) => {
   if (!OVERRIDABLE_SCHEDULER_STATES.includes(body.newState as SchedulerState)) {
     throw errors.badRequest(`Invalid state: ${body.newState}. Must be one of: ${OVERRIDABLE_SCHEDULER_STATES.join(', ')}`);
   }
+
+  // Verify mission belongs to this project (prevents cross-project probing)
+  const [mission] = await db
+    .select({ id: schema.missions.id })
+    .from(schema.missions)
+    .where(
+      and(
+        eq(schema.missions.id, body.missionId),
+        eq(schema.missions.projectId, projectId),
+      ),
+    )
+    .limit(1);
+  if (!mission) throw errors.notFound('Mission not found in this project');
 
   const ok = await orchestratorService.overrideTaskState(
     c.env, projectId, body.missionId, taskId, body.newState as SchedulerState, body.reason,

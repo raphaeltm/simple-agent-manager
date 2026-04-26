@@ -7,12 +7,21 @@
  */
 import type { DecisionAction } from '@simple-agent-manager/shared';
 import type { OrchestratorConfig } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_VM_LOCATION,
+  DEFAULT_VM_SIZE,
+  DEFAULT_WORKSPACE_PROFILE,
+  getDefaultLocationForProvider,
+  isValidProvider,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
+import { startTaskRunnerDO } from '../../services/task-runner-do';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -87,16 +96,19 @@ async function processMission(
   // 2. Recompute scheduler states
   await recomputeMissionSchedulerStates(env.DATABASE, missionId);
 
-  // 3. Find newly completed tasks — check for handoff packets to route
+  // 3. Auto-dispatch schedulable tasks
+  await autoDispatchSchedulableTasks(sql, env, projectId, missionId, config, now);
+
+  // 5. Find newly completed tasks — check for handoff packets to route
   const completedTasks = tasks.filter((t) => t.status === 'completed');
   for (const task of completedTasks) {
     await routeHandoffsForTask(sql, env, projectId, missionId, task.id, tasks, now);
   }
 
-  // 4. Detect stalled tasks
+  // 6. Detect stalled tasks
   await detectStalls(sql, env, projectId, missionId, tasks, config, now);
 
-  // 5. Check if mission is complete (all tasks terminal)
+  // 7. Check if mission is complete (all tasks terminal)
   const allTerminal = tasks.every(
     (t) => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled',
   );
@@ -122,6 +134,208 @@ async function processMission(
   }
 }
 
+// ── Auto-Dispatch ─────────────────────────────────────────────────────────────
+
+interface DispatchableTaskRow {
+  id: string;
+  title: string;
+  description: string | null;
+  user_id: string;
+  project_id: string;
+  output_branch: string | null;
+  dispatch_depth: number;
+  priority: number;
+}
+
+/**
+ * Find schedulable tasks and auto-dispatch them via startTaskRunnerDO.
+ * Respects concurrency limits from mission budget_config and per-cycle max.
+ */
+async function autoDispatchSchedulableTasks(
+  sql: SqlStorage,
+  env: Env,
+  projectId: string,
+  missionId: string,
+  config: OrchestratorConfig,
+  now: number,
+): Promise<void> {
+  // Re-read task states from D1 (fresh after recompute)
+  const schedulableResult = await env.DATABASE.prepare(
+    `SELECT id, title, description, user_id, project_id, output_branch, dispatch_depth, priority
+     FROM tasks
+     WHERE mission_id = ? AND scheduler_state = 'schedulable' AND status = 'queued'
+     ORDER BY priority DESC, created_at ASC
+     LIMIT ?`,
+  ).bind(missionId, config.maxDispatchesPerCycle).all<DispatchableTaskRow>();
+
+  const schedulable = schedulableResult.results ?? [];
+  if (schedulable.length === 0) return;
+
+  // Check concurrency limit: count currently active tasks in this mission
+  const activeCountResult = await env.DATABASE.prepare(
+    `SELECT COUNT(*) as cnt FROM tasks
+     WHERE mission_id = ? AND status IN ('in_progress', 'delegated', 'provisioning', 'running')`,
+  ).bind(missionId).first<{ cnt: number }>();
+
+  const activeCount = activeCountResult?.cnt ?? 0;
+
+  // Resolve max active tasks from mission budget_config
+  const missionRow = await env.DATABASE.prepare(
+    'SELECT budget_config FROM missions WHERE id = ?',
+  ).bind(missionId).first<{ budget_config: string | null }>();
+
+  let maxActive = config.maxActiveTasksPerMission;
+  if (missionRow?.budget_config) {
+    try {
+      const budget = JSON.parse(missionRow.budget_config) as { maxActiveTasks?: number };
+      if (budget.maxActiveTasks && budget.maxActiveTasks > 0) {
+        maxActive = budget.maxActiveTasks;
+      }
+    } catch {
+      // Invalid JSON — use default
+    }
+  }
+
+  const slotsAvailable = Math.max(0, maxActive - activeCount);
+  if (slotsAvailable === 0) {
+    logDecision(sql, missionId, null, 'skip',
+      `${schedulable.length} schedulable task(s) held: concurrency limit reached (${activeCount}/${maxActive} active)`, now);
+    return;
+  }
+
+  // Fetch project info (needed for startTaskRunnerDO)
+  const projectRow = await env.DATABASE.prepare(
+    `SELECT repository, installation_id, default_branch, default_vm_size, default_provider,
+            default_location, default_agent_type, default_workspace_profile, default_devcontainer_config_name,
+            task_execution_timeout_ms, max_workspaces_per_node, node_cpu_threshold_percent,
+            node_memory_threshold_percent, warm_node_timeout_ms
+     FROM projects WHERE id = ?`,
+  ).bind(projectId).first<{
+    repository: string;
+    installation_id: string;
+    default_branch: string;
+    default_vm_size: string | null;
+    default_provider: string | null;
+    default_location: string | null;
+    default_agent_type: string | null;
+    default_workspace_profile: string | null;
+    default_devcontainer_config_name: string | null;
+    task_execution_timeout_ms: number | null;
+    max_workspaces_per_node: number | null;
+    node_cpu_threshold_percent: number | null;
+    node_memory_threshold_percent: number | null;
+    warm_node_timeout_ms: number | null;
+  }>();
+
+  if (!projectRow) {
+    logDecision(sql, missionId, null, 'skip', 'Project not found — cannot dispatch', now);
+    return;
+  }
+
+  const toDispatch = schedulable.slice(0, Math.min(slotsAvailable, config.maxDispatchesPerCycle));
+  let dispatched = 0;
+
+  for (const task of toDispatch) {
+    try {
+      // Resolve user info for git config
+      const userRow = await env.DATABASE.prepare(
+        'SELECT name, email, github_id FROM users WHERE id = ?',
+      ).bind(task.user_id).first<{ name: string | null; email: string | null; github_id: string | null }>();
+
+      // Resolve VM config from project defaults
+      const resolvedProvider: CredentialProvider | null =
+        typeof projectRow.default_provider === 'string' && isValidProvider(projectRow.default_provider)
+          ? projectRow.default_provider
+          : null;
+      const resolvedVmSize: VMSize = (projectRow.default_vm_size as VMSize | null) ?? DEFAULT_VM_SIZE;
+      const resolvedVmLocation: VMLocation = (projectRow.default_location as VMLocation | null)
+        ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
+        ?? DEFAULT_VM_LOCATION;
+      const resolvedWorkspaceProfile: WorkspaceProfile =
+        (projectRow.default_workspace_profile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE;
+      const resolvedDevcontainerConfig: string | null = resolvedWorkspaceProfile === 'lightweight'
+        ? null
+        : (projectRow.default_devcontainer_config_name ?? null);
+
+      // Create chat session for the task
+      const sessionId = await projectDataService.createSession(
+        env, projectId, null, task.title, task.id,
+      );
+
+      if (task.description) {
+        await projectDataService.persistMessage(env, projectId, sessionId, 'user', task.description, null);
+      }
+
+      // Transition task to queued → provisioning via status update
+      await env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ?`,
+      ).bind(new Date().toISOString(), task.id).run();
+
+      // Start the TaskRunner DO
+      await startTaskRunnerDO(env, {
+        taskId: task.id,
+        projectId,
+        userId: task.user_id,
+        vmSize: resolvedVmSize,
+        vmLocation: resolvedVmLocation,
+        branch: projectRow.default_branch,
+        userName: userRow?.name ?? null,
+        userEmail: userRow?.email ?? null,
+        githubId: userRow?.github_id ?? null,
+        taskTitle: task.title,
+        taskDescription: task.description ?? null,
+        repository: projectRow.repository,
+        installationId: projectRow.installation_id,
+        outputBranch: task.output_branch ?? null,
+        projectDefaultVmSize: projectRow.default_vm_size as VMSize | null,
+        chatSessionId: sessionId,
+        agentType: projectRow.default_agent_type ?? null,
+        workspaceProfile: resolvedWorkspaceProfile,
+        devcontainerConfigName: resolvedDevcontainerConfig,
+        cloudProvider: resolvedProvider,
+        projectScaling: {
+          taskExecutionTimeoutMs: projectRow.task_execution_timeout_ms ?? null,
+          maxWorkspacesPerNode: projectRow.max_workspaces_per_node ?? null,
+          nodeCpuThresholdPercent: projectRow.node_cpu_threshold_percent ?? null,
+          nodeMemoryThresholdPercent: projectRow.node_memory_threshold_percent ?? null,
+          warmNodeTimeoutMs: projectRow.warm_node_timeout_ms ?? null,
+        },
+      });
+
+      // Record in scheduling_queue
+      sql.exec(
+        `INSERT INTO scheduling_queue (id, mission_id, task_id, scheduled_at, dispatched_at, reason)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ulid(), missionId, task.id, now, now, 'auto-dispatch: task became schedulable',
+      );
+
+      logDecision(sql, missionId, task.id, 'dispatch',
+        `Auto-dispatched schedulable task (slot ${dispatched + 1}/${slotsAvailable})`, now);
+
+      dispatched++;
+
+      log.info('orchestrator.task_dispatched', {
+        projectId, missionId, taskId: task.id, slot: dispatched, slotsAvailable,
+      });
+    } catch (err) {
+      log.error('orchestrator.auto_dispatch_failed', {
+        projectId, missionId, taskId: task.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      logDecision(sql, missionId, task.id, 'skip',
+        `Auto-dispatch failed: ${err instanceof Error ? err.message : String(err)}`, now);
+    }
+  }
+
+  if (dispatched > 0) {
+    // Update last_dispatch_at
+    sql.exec(
+      'UPDATE orchestrator_missions SET last_dispatch_at = ? WHERE mission_id = ?',
+      now, missionId,
+    );
+  }
+}
+
 // ── Handoff Routing ───────────────────────────────────────────────────────────
 
 /**
@@ -136,10 +350,10 @@ async function routeHandoffsForTask(
   allTasks: TaskRow[],
   now: number,
 ): Promise<void> {
-  // Check if we already routed handoffs for this task
+  // Check if we already routed handoffs for this task in this mission
   const alreadyRouted = sql.exec(
-    `SELECT 1 FROM decision_log WHERE task_id = ? AND action = 'handoff_routed' LIMIT 1`,
-    completedTaskId,
+    `SELECT 1 FROM decision_log WHERE mission_id = ? AND task_id = ? AND action = 'handoff_routed' LIMIT 1`,
+    missionId, completedTaskId,
   ).toArray();
   if (alreadyRouted.length > 0) return;
 

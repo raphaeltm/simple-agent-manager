@@ -53,6 +53,7 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    */
   async startOrchestration(projectId: string, missionId: string): Promise<void> {
     this.projectId = projectId;
+    await this.ctx.storage.put('projectId', projectId);
     const now = Date.now();
     const sql = this.ctx.storage.sql;
 
@@ -129,30 +130,29 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     this.projectId = projectId;
     const sql = this.ctx.storage.sql;
 
-    // Remove from orchestrator tracking
-    const result = sql.exec(
-      `DELETE FROM orchestrator_missions WHERE mission_id = ?`,
-      missionId,
-    );
-    if (result.rowsWritten === 0) return false;
+    // Verify mission is tracked before proceeding
+    const tracked = sql.exec(
+      `SELECT 1 FROM orchestrator_missions WHERE mission_id = ?`, missionId,
+    ).toArray();
+    if (tracked.length === 0) return false;
 
-    // Cancel non-terminal tasks in D1
+    // Update D1 first (source of truth) — cancel tasks and mission
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
       `UPDATE tasks SET status = 'cancelled', scheduler_state = 'cancelled', updated_at = ?
        WHERE mission_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`,
     ).bind(now, missionId).run();
 
-    // Update D1 mission status
     await this.env.DATABASE.prepare(
       'UPDATE missions SET status = ?, updated_at = ? WHERE id = ?',
     ).bind('cancelled', now, missionId).run();
 
+    // Then remove from DO tracking
+    sql.exec(`DELETE FROM orchestrator_missions WHERE mission_id = ?`, missionId);
+    sql.exec('DELETE FROM scheduling_queue WHERE mission_id = ?', missionId);
+
     logDecision(sql, missionId, null, 'cancel', 'Mission cancelled by user', Date.now());
     log.info('orchestrator.mission_cancelled', { projectId, missionId });
-
-    // Clean up scheduling queue
-    sql.exec('DELETE FROM scheduling_queue WHERE mission_id = ?', missionId);
 
     return true;
   }
@@ -210,8 +210,12 @@ export class ProjectOrchestrator extends DurableObject<Env> {
       event: notification.event,
     });
 
-    // Trigger immediate scheduling cycle by arming alarm for now
-    await this.ctx.storage.setAlarm(Date.now());
+    // Trigger immediate scheduling cycle — only if no closer alarm exists
+    const existingAlarm = await this.ctx.storage.getAlarm();
+    const now = Date.now();
+    if (existingAlarm === null || existingAlarm > now) {
+      await this.ctx.storage.setAlarm(now);
+    }
   }
 
   /**
@@ -366,7 +370,14 @@ export class ProjectOrchestrator extends DurableObject<Env> {
   private async resolveProjectId(): Promise<string | null> {
     if (this.projectId) return this.projectId;
 
-    // Try to resolve from the first mission
+    // Try from DO storage first (persisted on first RPC call)
+    const stored = await this.ctx.storage.get<string>('projectId');
+    if (stored) {
+      this.projectId = stored;
+      return stored;
+    }
+
+    // Fallback: resolve from the first mission via D1
     const missions = this.ctx.storage.sql.exec(
       'SELECT mission_id FROM orchestrator_missions LIMIT 1',
     ).toArray() as unknown as Array<{ mission_id: string }>;
@@ -374,13 +385,14 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     if (missions.length === 0) return null;
 
     const firstMission = missions[0]!;
-    // Look up the project from D1
     const result = await this.env.DATABASE.prepare(
       'SELECT project_id FROM missions WHERE id = ?',
     ).bind(firstMission.mission_id).first<{ project_id: string }>();
 
     if (result) {
       this.projectId = result.project_id;
+      // Persist for future alarm calls
+      await this.ctx.storage.put('projectId', result.project_id);
     }
     return this.projectId;
   }
