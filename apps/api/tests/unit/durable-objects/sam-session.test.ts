@@ -8,9 +8,25 @@
  * - Agent loop streaming with mocked Anthropic response
  * - Anthropic message format conversion
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import {
+  DEFAULT_SAM_AIG_SOURCE,
+  DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
+  DEFAULT_SAM_MAX_CONVERSATIONS,
+  DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION,
+  DEFAULT_SAM_MAX_TOKENS,
+  DEFAULT_SAM_MAX_TURNS,
+  DEFAULT_SAM_MODEL,
+  DEFAULT_SAM_RATE_LIMIT_RPM,
+  DEFAULT_SAM_RATE_LIMIT_WINDOW_SECONDS,
+  resolveSamConfig,
+  SAM_ANTHROPIC_VERSION,
+} from '@simple-agent-manager/shared';
+import { describe, expect, it, vi } from 'vitest';
 
-// Mock cloudflare:workers before importing SamSession
+import { executeTool } from '../../../src/durable-objects/sam-session/tools';
+import type { CollectedToolCall, ToolContext } from '../../../src/durable-objects/sam-session/types';
+
+// Mock cloudflare:workers (vitest hoists vi.mock calls automatically)
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
     ctx: unknown;
@@ -22,7 +38,6 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-// Mock platform credentials
 vi.mock('../../../src/lib/secrets', () => ({
   getCredentialEncryptionKey: vi.fn().mockReturnValue('test-key'),
 }));
@@ -32,23 +47,6 @@ vi.mock('../../../src/services/platform-credentials', () => ({
     credential: 'test-api-key',
   }),
 }));
-
-// Import after mocks
-import {
-  DEFAULT_SAM_MODEL,
-  DEFAULT_SAM_MAX_TOKENS,
-  DEFAULT_SAM_MAX_TURNS,
-  DEFAULT_SAM_RATE_LIMIT_RPM,
-  DEFAULT_SAM_RATE_LIMIT_WINDOW_SECONDS,
-  DEFAULT_SAM_MAX_CONVERSATIONS,
-  DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION,
-  DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
-  DEFAULT_SAM_AIG_SOURCE,
-  SAM_ANTHROPIC_VERSION,
-  resolveSamConfig,
-} from '@simple-agent-manager/shared';
-import type { CollectedToolCall, ToolContext } from '../../../src/durable-objects/sam-session/types';
-import { executeTool } from '../../../src/durable-objects/sam-session/tools';
 
 describe('SAM Constants and Config', () => {
   it('has correct default values', () => {

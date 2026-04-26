@@ -3,8 +3,8 @@
  * executes tools, and streams SSE events to the browser.
  */
 import {
-  type SamConfig,
   SAM_ANTHROPIC_VERSION,
+  type SamConfig,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
@@ -168,9 +168,10 @@ async function processAnthropicStream(
   let currentToolName = '';
   let currentToolInputJson = '';
 
-  while (true) {
+  let streamDone = false;
+  while (!streamDone) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done) { streamDone = true; break; }
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');

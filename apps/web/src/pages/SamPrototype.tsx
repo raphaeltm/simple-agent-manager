@@ -1,17 +1,17 @@
-import { useState, useRef, useEffect, useCallback, type FC } from 'react';
 import {
-  MessageSquare,
-  LayoutDashboard,
-  Send,
-  ArrowLeft,
-  GitBranch,
-  Clock,
   AlertTriangle,
-  Loader2,
-  ChevronRight,
+  ArrowLeft,
   Bot,
+  ChevronRight,
+  Clock,
+  GitBranch,
+  LayoutDashboard,
+  Loader2,
+  MessageSquare,
+  Send,
   Wrench,
 } from 'lucide-react';
+import { type FC,useCallback, useEffect, useRef, useState } from 'react';
 
 import { API_URL } from '../lib/api/client';
 
@@ -548,9 +548,10 @@ export function SamPrototype() {
       const decoder = new TextDecoder();
       let buffer = '';
 
-      while (true) {
+      let streamDone = false;
+      while (!streamDone) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) { streamDone = true; break; }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');

@@ -5,9 +5,9 @@
  * in embedded SQLite, runs the agent loop, and streams SSE responses.
  */
 import {
+  DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
   DEFAULT_SAM_MAX_CONVERSATIONS,
   DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION,
-  DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
   resolveSamConfig,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
