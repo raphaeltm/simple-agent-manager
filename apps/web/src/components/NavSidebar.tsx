@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bell,
+  Bot,
   Brain,
   ChevronDown,
   ChevronRight,
@@ -33,6 +34,7 @@ export interface NavItem {
 /** Global nav items shown when NOT inside a project */
 export const GLOBAL_NAV_ITEMS: NavItem[] = [
   { label: 'Home', path: '/dashboard', icon: <Home size={18} /> },
+  { label: 'SAM', path: '/sam', icon: <Bot size={18} /> },
   { label: 'Chats', path: '/chats', icon: <MessageSquare size={18} /> },
   { label: 'Projects', path: '/projects', icon: <FolderKanban size={18} /> },
   { label: 'Map', path: '/account-map', icon: <Map size={18} /> },

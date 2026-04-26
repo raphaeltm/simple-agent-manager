@@ -327,7 +327,7 @@ export async function runAgentLoop(
     }
   }
 
-  if (turnCount >= config.maxTurns) {
+  if (continueLoop && turnCount >= config.maxTurns) {
     await writer.write(encodeSseEvent({
       type: 'error',
       message: 'Maximum tool iterations reached. Please try a simpler request.',

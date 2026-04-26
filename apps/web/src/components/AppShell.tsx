@@ -1,6 +1,6 @@
 import { Menu, Monitor, Search, Server, Shield } from 'lucide-react';
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -131,7 +131,9 @@ export function AppShell({ children }: AppShellProps) {
       <div className="flex flex-col bg-canvas h-screen">
         <header className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-surface">
           {/* Title on the left */}
-          <img src="/sam-head.png" alt="SAM" className="h-7 w-7 object-contain" />
+          <Link to="/sam">
+            <img src="/sam-head.png" alt="SAM" className="h-7 w-7 object-contain" />
+          </Link>
           {/* Search + Notifications + Hamburger on the right */}
           <div className="flex items-center gap-1">
             <button
