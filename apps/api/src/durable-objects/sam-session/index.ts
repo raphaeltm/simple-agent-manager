@@ -60,6 +60,18 @@ function migrate(sql: SqlStorage): void {
 
     sql.exec(`INSERT INTO sam_migrations (name) VALUES ('001-initial')`);
   }
+
+  if (!applied.has('002-rate-limits')) {
+    sql.exec(`
+      CREATE TABLE rate_limits (
+        id INTEGER PRIMARY KEY,
+        window_start INTEGER NOT NULL,
+        request_count INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    sql.exec(`INSERT INTO rate_limits (id, window_start, request_count) VALUES (1, 0, 0)`);
+    sql.exec(`INSERT INTO sam_migrations (name) VALUES ('002-rate-limits')`);
+  }
 }
 
 /** Encode an SSE event as unnamed data frame. */
@@ -134,6 +146,12 @@ export class SamSession extends DurableObject<AppEnv> {
 
     const userId = body.userId;
     const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
+
+    // Rate limit check
+    const rateLimitResponse = this.checkRateLimit(config.rateLimitRpm, config.rateLimitWindowSeconds);
+    if (rateLimitResponse) {
+      return rateLimitResponse;
+    }
 
     // Get or create conversation
     let conversationId = body.conversationId;
@@ -294,6 +312,65 @@ export class SamSession extends DurableObject<AppEnv> {
         conversationId
       );
     });
+  }
+
+  /**
+   * Check and enforce per-user rate limiting using DO SQLite.
+   * Returns a 429 Response if rate limit exceeded, or null if OK.
+   * Uses a single-row sliding window: resets count when window expires.
+   */
+  private checkRateLimit(maxRpm: number, windowSeconds: number): Response | null {
+    const nowMs = Date.now();
+    const windowMs = windowSeconds * 1000;
+
+    const row = this.sql.exec(
+      'SELECT window_start, request_count FROM rate_limits WHERE id = 1'
+    ).toArray()[0] as { window_start: number; request_count: number } | undefined;
+
+    if (!row) {
+      // Seed row if missing (shouldn't happen after migration)
+      this.sql.exec(
+        'INSERT OR REPLACE INTO rate_limits (id, window_start, request_count) VALUES (1, ?, 1)',
+        nowMs
+      );
+      return null;
+    }
+
+    const windowStart = Number(row.window_start);
+    const count = Number(row.request_count);
+
+    if (nowMs - windowStart > windowMs) {
+      // Window expired — reset
+      this.sql.exec(
+        'UPDATE rate_limits SET window_start = ?, request_count = 1 WHERE id = 1',
+        nowMs
+      );
+      return null;
+    }
+
+    if (count >= maxRpm) {
+      const retryAfterSeconds = Math.ceil((windowStart + windowMs - nowMs) / 1000);
+      log.warn('sam_session.rate_limited', { count, maxRpm, retryAfterSeconds });
+      return new Response(
+        JSON.stringify({
+          error: 'Rate limit exceeded',
+          retryAfter: retryAfterSeconds,
+        }),
+        {
+          status: 429,
+          headers: {
+            'content-type': 'application/json',
+            'retry-after': String(retryAfterSeconds),
+          },
+        }
+      );
+    }
+
+    // Increment counter
+    this.sql.exec(
+      'UPDATE rate_limits SET request_count = request_count + 1 WHERE id = 1'
+    );
+    return null;
   }
 
   /** Load conversation history for the agent loop. */
