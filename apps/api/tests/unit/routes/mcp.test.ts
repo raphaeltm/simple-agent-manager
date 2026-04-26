@@ -324,7 +324,14 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('create_agent_profile');
       expect(toolNames).toContain('update_agent_profile');
       expect(toolNames).toContain('delete_agent_profile');
-      expect(body.result.tools).toHaveLength(70);
+      // Orchestrator lifecycle tools
+      expect(toolNames).toContain('get_orchestrator_status');
+      expect(toolNames).toContain('get_scheduling_queue');
+      expect(toolNames).toContain('pause_mission');
+      expect(toolNames).toContain('resume_mission');
+      expect(toolNames).toContain('cancel_mission');
+      expect(toolNames).toContain('override_task_state');
+      expect(body.result.tools).toHaveLength(76);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

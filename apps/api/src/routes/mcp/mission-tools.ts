@@ -11,7 +11,9 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import * as projectDataService from '../../services/project-data';
+import * as orchestratorService from '../../services/project-orchestrator';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -60,6 +62,17 @@ export async function handleCreateMission(
     `INSERT INTO missions (id, project_id, user_id, title, description, status, budget_config, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'planning', ?, ?, ?)`,
   ).bind(id, tokenData.projectId, tokenData.userId, title, description, budgetConfig, now, now).run();
+
+  // Register mission with the ProjectOrchestrator DO for scheduling
+  try {
+    await orchestratorService.startOrchestration(env, tokenData.projectId, id);
+  } catch (err) {
+    log.warn('mcp.create_mission.orchestrator_start_failed', {
+      missionId: id,
+      projectId: tokenData.projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: JSON.stringify({ id, status: 'planning', title }) }],

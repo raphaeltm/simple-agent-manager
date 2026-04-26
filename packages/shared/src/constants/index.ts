@@ -261,6 +261,19 @@ export {
   resolveMissionStateLimits,
 } from './missions';
 
+// Orchestrator (Phase 3: Project Orchestrator)
+export type { OrchestratorConfig } from './orchestrator';
+export {
+  DEFAULT_ORCHESTRATOR_DECISION_LOG_MAX_ENTRIES,
+  DEFAULT_ORCHESTRATOR_MAX_ACTIVE_TASKS_PER_MISSION,
+  DEFAULT_ORCHESTRATOR_MAX_DISPATCHES_PER_CYCLE,
+  DEFAULT_ORCHESTRATOR_QUEUE_MAX_ENTRIES,
+  DEFAULT_ORCHESTRATOR_RECENT_DECISIONS_LIMIT,
+  DEFAULT_ORCHESTRATOR_SCHEDULING_INTERVAL_MS,
+  DEFAULT_ORCHESTRATOR_STALL_TIMEOUT_MS,
+  resolveOrchestratorConfig,
+} from './orchestrator';
+
 // Notifications
 export type { HumanInputCategory } from './notifications';
 export {

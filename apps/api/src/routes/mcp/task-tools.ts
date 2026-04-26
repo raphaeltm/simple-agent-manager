@@ -13,6 +13,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as notificationService from '../../services/notification';
+import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
@@ -271,6 +272,22 @@ export async function handleCompleteTask(
       await recomputeMissionSchedulerStates(env.DATABASE, taskRow.mission_id);
     } catch (err) {
       log.warn('mcp.complete_task.scheduler_state_recompute_failed', {
+        taskId: tokenData.taskId,
+        missionId: taskRow.mission_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Notify the orchestrator of the completion — triggers immediate scheduling cycle
+    try {
+      await orchestratorService.notifyTaskEvent(env, tokenData.projectId, {
+        taskId: tokenData.taskId,
+        missionId: taskRow.mission_id,
+        event: 'completed',
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      log.warn('mcp.complete_task.orchestrator_notify_failed', {
         taskId: tokenData.taskId,
         missionId: taskRow.mission_id,
         error: err instanceof Error ? err.message : String(err),
