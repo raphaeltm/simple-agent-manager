@@ -6,6 +6,11 @@
  *
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
+import {
+  resolveHandoffLimits,
+  resolveMissionStateLimits,
+} from '@simple-agent-manager/shared';
+
 import type { ProjectData } from '../durable-objects/project-data';
 import type { Env } from '../env';
 
@@ -713,6 +718,69 @@ export async function getMailboxStats(
 
 // =========================================================================
 // WebSocket
+// =========================================================================
+// Mission State & Handoffs
+// =========================================================================
+
+export async function createMissionStateEntry(
+  env: Env, projectId: string, missionId: string, entryType: string,
+  title: string, content: string | null, sourceTaskId: string | null,
+) {
+  const stub = await getStub(env, projectId);
+  const limits = resolveMissionStateLimits(env);
+  return stub.createMissionStateEntry(missionId, entryType, title, content, sourceTaskId, limits);
+}
+
+export async function getMissionStateEntries(
+  env: Env, projectId: string, missionId: string, entryType: string | null,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.getMissionStateEntries(missionId, entryType);
+}
+
+export async function getMissionStateEntry(env: Env, projectId: string, entryId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getMissionStateEntry(entryId);
+}
+
+export async function updateMissionStateEntry(
+  env: Env, projectId: string, entryId: string,
+  updates: { title?: string; content?: string | null },
+) {
+  const stub = await getStub(env, projectId);
+  const limits = resolveMissionStateLimits(env);
+  return stub.updateMissionStateEntry(entryId, updates, limits);
+}
+
+export async function deleteMissionStateEntry(env: Env, projectId: string, entryId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.deleteMissionStateEntry(entryId);
+}
+
+export async function createHandoffPacket(
+  env: Env, projectId: string, missionId: string, fromTaskId: string, toTaskId: string | null,
+  summary: string, facts: unknown[], openQuestions: string[], artifactRefs: unknown[], suggestedActions: string[],
+) {
+  const stub = await getStub(env, projectId);
+  const limits = resolveHandoffLimits(env);
+  return stub.createHandoffPacket(missionId, fromTaskId, toTaskId, summary, facts, openQuestions, artifactRefs, suggestedActions, limits);
+}
+
+export async function getHandoffPackets(env: Env, projectId: string, missionId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getHandoffPackets(missionId);
+}
+
+export async function getHandoffPacket(env: Env, projectId: string, handoffId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getHandoffPacket(handoffId);
+}
+
+export async function getHandoffPacketsForTask(env: Env, projectId: string, taskId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getHandoffPacketsForTask(taskId);
+}
+
 // =========================================================================
 
 /**

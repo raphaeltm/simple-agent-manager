@@ -57,6 +57,14 @@ import {
   handleUploadToLibrary,
 } from './library-tools';
 import { handleAckMessage, handleGetPendingMessages, handleSendDurableMessage } from './mailbox-tools';
+import {
+  handleCreateMission,
+  handleGetHandoff,
+  handleGetMission,
+  handleGetMissionState,
+  handlePublishHandoff,
+  handlePublishMissionState,
+} from './mission-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
@@ -321,6 +329,19 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleConfirmKnowledge(requestId, toolArgs, tokenData, c.env));
         case 'flag_contradiction':
           return c.json(await handleFlagContradiction(requestId, toolArgs, tokenData, c.env));
+        // ─── Mission orchestration tools ───────────────────────────────
+        case 'create_mission':
+          return c.json(await handleCreateMission(requestId, toolArgs, tokenData, c.env));
+        case 'get_mission':
+          return c.json(await handleGetMission(requestId, toolArgs, tokenData, c.env));
+        case 'publish_mission_state':
+          return c.json(await handlePublishMissionState(requestId, toolArgs, tokenData, c.env));
+        case 'get_mission_state':
+          return c.json(await handleGetMissionState(requestId, toolArgs, tokenData, c.env));
+        case 'publish_handoff':
+          return c.json(await handlePublishHandoff(requestId, toolArgs, tokenData, c.env));
+        case 'get_handoff':
+          return c.json(await handleGetHandoff(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }

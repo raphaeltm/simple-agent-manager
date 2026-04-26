@@ -19,6 +19,7 @@ import { resolveAgentProfile } from '../../services/agent-profiles';
 import { generateBranchName } from '../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
+import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import {
@@ -154,12 +155,16 @@ export async function handleDispatchTask(
     explicitVmLocation = params.vmLocation.trim();
   }
 
+  // missionId — inherit from parent task or explicit override
+  const explicitMissionId = typeof params.missionId === 'string' ? params.missionId.trim() : undefined;
+
   // ── Look up current task to get dispatch depth ──────────────────────────
   const [currentTask] = await db
     .select({
       id: schema.tasks.id,
       dispatchDepth: schema.tasks.dispatchDepth,
       status: schema.tasks.status,
+      missionId: schema.tasks.missionId,
     })
     .from(schema.tasks)
     .where(
@@ -400,10 +405,10 @@ export async function handleDispatchTask(
   const conditionalInsertResult = await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint,
+     task_mode, agent_profile_hint, mission_id,
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
-     ?, ?,
+     ?, ?, ?,
      ?, ?
      WHERE (
        SELECT count(*) FROM tasks
@@ -421,6 +426,7 @@ export async function handleDispatchTask(
     taskTitle, fullDescription, priority, newDepth, branchName,
     tokenData.userId,
     resolvedTaskMode, resolvedProfile?.profileId ?? null,
+    explicitMissionId ?? currentTask.missionId ?? null,
     now, now,
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,
@@ -601,6 +607,20 @@ export async function handleDispatchTask(
       taskId,
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+
+  // Recompute scheduler states if the new task belongs to a mission (best-effort)
+  const resolvedMissionId = explicitMissionId ?? currentTask.missionId ?? null;
+  if (resolvedMissionId) {
+    try {
+      await recomputeMissionSchedulerStates(env.DATABASE, resolvedMissionId);
+    } catch (err) {
+      log.warn('mcp.dispatch_task.scheduler_state_recompute_failed', {
+        taskId,
+        missionId: resolvedMissionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   log.info('mcp.dispatch_task.created', {

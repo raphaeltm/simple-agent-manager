@@ -389,5 +389,31 @@ export {
   SENDER_TYPES,
 } from './mailbox';
 
+// Mission (Phase 2: Orchestration Primitives)
+export type {
+  CreateMissionRequest,
+  HandoffArtifactRef,
+  HandoffFact,
+  HandoffPacket,
+  Mission,
+  MissionBudgetConfig,
+  MissionStateEntry,
+  MissionStateEntryType,
+  MissionStatus,
+  MissionTaskSummary,
+  MissionWithTasks,
+  PublishHandoffRequest,
+  PublishMissionStateRequest,
+  SchedulerState,
+} from './mission';
+export {
+  isMissionStateEntryType,
+  isMissionStatus,
+  isSchedulerState,
+  MISSION_STATE_ENTRY_TYPES,
+  MISSION_STATUSES,
+  SCHEDULER_STATES,
+} from './mission';
+
 // API Error
 export type { ApiError } from './api-error';

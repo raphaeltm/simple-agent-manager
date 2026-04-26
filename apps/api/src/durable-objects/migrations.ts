@@ -480,6 +480,61 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '018-mission-state-handoffs',
+    run: (sql) => {
+      // Mission state entries — shared facts, decisions, risks, contracts for a mission
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS mission_state_entries (
+          id TEXT PRIMARY KEY,
+          mission_id TEXT NOT NULL,
+          entry_type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT,
+          source_task_id TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_mission_state_entries_mission
+          ON mission_state_entries(mission_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_mission_state_entries_type
+          ON mission_state_entries(mission_id, entry_type)
+      `);
+
+      // Handoff packets — structured inter-task communication envelopes
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS handoff_packets (
+          id TEXT PRIMARY KEY,
+          mission_id TEXT NOT NULL,
+          from_task_id TEXT NOT NULL,
+          to_task_id TEXT,
+          summary TEXT NOT NULL,
+          facts TEXT,
+          open_questions TEXT,
+          artifact_refs TEXT,
+          suggested_actions TEXT,
+          created_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_handoff_packets_mission
+          ON handoff_packets(mission_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_handoff_packets_from_task
+          ON handoff_packets(from_task_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_handoff_packets_to_task
+          ON handoff_packets(to_task_id)
+          WHERE to_task_id IS NOT NULL
+      `);
+    },
+  },
 ];
 
 /**

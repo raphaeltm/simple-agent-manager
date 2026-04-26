@@ -324,7 +324,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('create_agent_profile');
       expect(toolNames).toContain('update_agent_profile');
       expect(toolNames).toContain('delete_agent_profile');
-      expect(body.result.tools).toHaveLength(64);
+      expect(body.result.tools).toHaveLength(70);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -1664,6 +1664,103 @@ describe('MCP Routes', () => {
       // Explicit 'large' should override project default 'small'
       const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
       expect(startInput.config.vmSize).toBe('large');
+    });
+
+    it('should inherit missionId from parent task when not explicitly provided', async () => {
+      // Mock current task with missionId set
+      mockD1._stmt.all.mockResolvedValue({ results: [mockProject] });
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress', 'mission-parent-1']]) // current task with missionId
+        .mockResolvedValueOnce([[0]])  // child count
+        .mockResolvedValueOnce([[0]])  // active dispatched count
+        .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
+      mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Child task inheriting mission',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      // Verify the INSERT SQL includes mission_id column
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      // The batch INSERT binds include mission_id — find the bind call containing 'mission-parent-1'
+      const hasMissionId = bindCalls.some((call: unknown[]) =>
+        call.some((arg: unknown) => arg === 'mission-parent-1'),
+      );
+      expect(hasMissionId).toBe(true);
+    });
+
+    it('should use explicit missionId over inherited parent missionId', async () => {
+      // Mock current task with missionId set
+      mockD1._stmt.all.mockResolvedValue({ results: [mockProject] });
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress', 'mission-parent-1']]) // current task with missionId
+        .mockResolvedValueOnce([[0]])  // child count
+        .mockResolvedValueOnce([[0]])  // active dispatched count
+        .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
+      mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Child task with explicit mission',
+          missionId: 'mission-explicit-2',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      // Verify explicit missionId was used (not the parent's)
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      const hasExplicitMission = bindCalls.some((call: unknown[]) =>
+        call.some((arg: unknown) => arg === 'mission-explicit-2'),
+      );
+      const hasParentMission = bindCalls.some((call: unknown[]) =>
+        call.some((arg: unknown) => arg === 'mission-parent-1'),
+      );
+      expect(hasExplicitMission).toBe(true);
+      // Parent missionId appears in the current task lookup result but should NOT appear in the INSERT
+      // We check it's not in the batch bind calls (which are the INSERT calls)
+      // The parent missionId is in the raw() result, not in bind calls
+      expect(hasParentMission).toBe(false);
+    });
+
+    it('should set missionId to null when parent has no mission and none provided', async () => {
+      // Mock current task WITHOUT missionId
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Standalone task no mission',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      // Verify null missionId in bind calls — the INSERT should have null for mission_id
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      // Check that no mission ID string was bound (only null)
+      const hasMissionString = bindCalls.some((call: unknown[]) =>
+        call.some((arg: unknown) => typeof arg === 'string' && arg.startsWith('mission-')),
+      );
+      expect(hasMissionString).toBe(false);
     });
   });
 
@@ -3363,6 +3460,189 @@ describe('MCP Routes', () => {
       expect(sql).toContain('status = ?');
       const bindCalls = mockD1._stmt.bind.mock.calls;
       expect(bindCalls[0]).toContain('draft');
+    });
+  });
+
+  // ─── mission tools ──────────────────────────────────────────────────
+
+  describe('create_mission', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing title', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_mission',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('title is required');
+    });
+
+    it('should create mission successfully', async () => {
+      // Mock D1 count query for per-project limit
+      mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
+      mockD1._stmt.run.mockResolvedValue({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_mission',
+        arguments: {
+          title: 'Test Mission',
+          description: 'A test mission description',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.id).toBeDefined();
+      expect(data.status).toBe('planning');
+      expect(data.title).toBe('Test Mission');
+    });
+
+    it('should enforce per-project mission limit from env var', async () => {
+      // Mock count at the limit
+      mockD1._stmt.first.mockResolvedValueOnce({ cnt: 50 });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_mission',
+        arguments: { title: 'Over limit' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Maximum missions per project');
+    });
+  });
+
+  describe('get_mission', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing missionId', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_mission',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('missionId is required');
+    });
+
+    it('should return not found for non-existent mission', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_mission',
+        arguments: { missionId: 'nonexistent' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Mission not found');
+    });
+  });
+
+  describe('publish_mission_state', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject invalid entryType', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'publish_mission_state',
+        arguments: {
+          missionId: 'mission-1',
+          entryType: 'invalid_type',
+          title: 'Test',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Invalid entryType');
+    });
+
+    it('should reject missing title', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'publish_mission_state',
+        arguments: {
+          missionId: 'mission-1',
+          entryType: 'decision',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('title is required');
+    });
+
+    it('should reject when mission not found in project', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce(null); // mission lookup
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'publish_mission_state',
+        arguments: {
+          missionId: 'other-project-mission',
+          entryType: 'fact',
+          title: 'Cross-project attempt',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Mission not found in this project');
+    });
+  });
+
+  describe('publish_handoff', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing summary', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'publish_handoff',
+        arguments: {
+          missionId: 'mission-1',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('summary is required');
+    });
+
+    it('should reject when mission not found in project', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce(null); // mission lookup
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'publish_handoff',
+        arguments: {
+          missionId: 'other-project-mission',
+          summary: 'Cross-project attempt',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Mission not found in this project');
     });
   });
 

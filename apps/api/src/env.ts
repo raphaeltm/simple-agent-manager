@@ -302,6 +302,21 @@ export interface Env {
   KNOWLEDGE_LIST_PAGE_SIZE?: string;               // Default page size for entity list (default: 50)
   KNOWLEDGE_LIST_MAX_PAGE_SIZE?: string;           // Max page size for entity list (default: 200)
   KNOWLEDGE_SEARCH_MAX_LIMIT?: string;             // Max search results cap (default: 100)
+  // Mission orchestration limits
+  MISSION_MAX_PER_PROJECT?: string;                // Max missions per project (default: 50)
+  MISSION_MAX_STATE_ENTRIES?: string;              // Max state entries per mission (default: 200)
+  MISSION_MAX_HANDOFFS?: string;                   // Max handoff packets per mission (default: 100)
+  MISSION_TITLE_MAX_LENGTH?: string;               // Max mission title length (default: 200)
+  MISSION_DESCRIPTION_MAX_LENGTH?: string;         // Max mission description length (default: 5000)
+  MISSION_STATE_TITLE_MAX_LENGTH?: string;         // Max state entry title length (default: 200)
+  MISSION_STATE_CONTENT_MAX_LENGTH?: string;       // Max state entry content length (default: 2000)
+  HANDOFF_SUMMARY_MAX_LENGTH?: string;             // Max handoff summary length (default: 5000)
+  HANDOFF_MAX_FACTS?: string;                      // Max facts per handoff (default: 50)
+  HANDOFF_MAX_OPEN_QUESTIONS?: string;             // Max open questions per handoff (default: 20)
+  HANDOFF_MAX_ARTIFACT_REFS?: string;              // Max artifact refs per handoff (default: 30)
+  HANDOFF_MAX_SUGGESTED_ACTIONS?: string;          // Max suggested actions per handoff (default: 20)
+  MISSION_LIST_PAGE_SIZE?: string;                 // Default mission list page size (default: 20)
+  MISSION_LIST_MAX_PAGE_SIZE?: string;             // Max mission list page size (default: 100)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;
