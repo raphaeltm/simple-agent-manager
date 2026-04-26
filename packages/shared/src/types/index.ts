@@ -415,5 +415,21 @@ export {
   SCHEDULER_STATES,
 } from './mission';
 
+// Orchestrator (Phase 3: Project Orchestrator)
+export type {
+  DecisionAction,
+  DecisionLogEntry,
+  OrchestratorMissionEntry,
+  OrchestratorStatus,
+  OverrideTaskStateRequest,
+  SchedulingQueueEntry,
+  TaskEventNotification,
+  TaskEventType,
+} from './orchestrator';
+export {
+  DECISION_ACTIONS,
+  OVERRIDABLE_SCHEDULER_STATES,
+} from './orchestrator';
+
 // API Error
 export type { ApiError } from './api-error';
