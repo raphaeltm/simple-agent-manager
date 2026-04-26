@@ -431,6 +431,55 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    name: '017-agent-mailbox',
+    run: (sql) => {
+      // Extend the existing session_inbox table (migration 015) into a full
+      // durable mailbox with message classes, delivery state machine, and ack tracking.
+      // Uses ALTER TABLE ADD COLUMN — safe, no DROP TABLE.
+
+      // message_class: escalating urgency (notify, deliver, interrupt, preempt_and_replan, shutdown_with_final_prompt)
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN message_class TEXT NOT NULL DEFAULT 'notify'`); } catch { /* already exists */ }
+
+      // delivery_state: queued → delivered → acked → expired
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'`); } catch { /* already exists */ }
+
+      // Sender identity
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_type TEXT NOT NULL DEFAULT 'system'`); } catch { /* already exists */ }
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_id TEXT`); } catch { /* already exists */ }
+
+      // Ack tracking
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 0`); } catch { /* already exists */ }
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN acked_at INTEGER`); } catch { /* already exists */ }
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_timeout_ms INTEGER`); } catch { /* already exists */ }
+
+      // Expiry
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN expires_at INTEGER`); } catch { /* already exists */ }
+
+      // Delivery tracking
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0`); } catch { /* already exists */ }
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN last_delivery_at INTEGER`); } catch { /* already exists */ }
+
+      // Structured metadata (JSON)
+      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN metadata TEXT`); } catch { /* already exists */ }
+
+      // Indexes for efficient delivery sweep queries
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_inbox_delivery_sweep
+          ON session_inbox(delivery_state, message_class, created_at)
+          WHERE delivery_state IN ('queued', 'delivered')
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_inbox_target_state
+          ON session_inbox(target_session_id, delivery_state)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_inbox_expires
+          ON session_inbox(expires_at)
+          WHERE expires_at IS NOT NULL AND delivery_state NOT IN ('acked', 'expired')
+      `);
+    },
+  },
 ];
 
 /**

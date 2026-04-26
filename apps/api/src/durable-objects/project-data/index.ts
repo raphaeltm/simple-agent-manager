@@ -22,6 +22,7 @@ import * as commands from './commands';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
+import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messages from './messages';
 import * as sessions from './sessions';
@@ -497,6 +498,60 @@ export class ProjectData extends DurableObject<Env> {
 
   async flagKnowledgeContradiction(existingObservationId: string, newObservation: string, sourceSessionId: string | null) {
     return knowledge.flagContradiction(this.sql, this.env, existingObservationId, newObservation, sourceSessionId);
+  }
+
+  // --- Agent Mailbox (Durable Messaging) ---
+
+  async enqueueMailboxMessage(opts: Parameters<typeof mailbox.enqueueMessage>[1]): Promise<ReturnType<typeof mailbox.enqueueMessage>> {
+    const msg = mailbox.enqueueMessage(this.sql, opts);
+    this.broadcastEvent('mailbox.enqueued', { messageId: msg.id, messageClass: msg.messageClass, targetSessionId: msg.targetSessionId });
+    return msg;
+  }
+
+  async getPendingMailboxMessages(targetSessionId: string, limit?: number) {
+    return mailbox.getPendingMessages(this.sql, targetSessionId, limit);
+  }
+
+  async getMailboxMessage(messageId: string) {
+    return mailbox.getMessage(this.sql, messageId);
+  }
+
+  async markMailboxMessageDelivered(messageId: string): Promise<boolean> {
+    const result = mailbox.markDelivered(this.sql, messageId);
+    if (result) this.broadcastEvent('mailbox.delivered', { messageId });
+    return result;
+  }
+
+  async acknowledgeMailboxMessage(messageId: string): Promise<boolean> {
+    const result = mailbox.acknowledgeMessage(this.sql, messageId);
+    if (result) this.broadcastEvent('mailbox.acked', { messageId });
+    return result;
+  }
+
+  async expireStaleMailboxMessages(maxAttempts: number): Promise<number> {
+    return mailbox.expireStaleMessages(this.sql, maxAttempts);
+  }
+
+  async getUnackedMailboxMessages(defaultAckTimeoutMs: number) {
+    return mailbox.getUnackedMessages(this.sql, defaultAckTimeoutMs);
+  }
+
+  async requeueMailboxMessage(messageId: string): Promise<boolean> {
+    return mailbox.requeueForRedelivery(this.sql, messageId);
+  }
+
+  async listMailboxMessages(opts?: Parameters<typeof mailbox.listMessages>[1]) {
+    return mailbox.listMessages(this.sql, opts);
+  }
+
+  async cancelMailboxMessage(messageId: string): Promise<boolean> {
+    const result = mailbox.cancelMessage(this.sql, messageId);
+    if (result) this.broadcastEvent('mailbox.cancelled', { messageId });
+    return result;
+  }
+
+  async getMailboxStats() {
+    return mailbox.getMailboxStats(this.sql);
   }
 
   // --- Internal Helpers ---
