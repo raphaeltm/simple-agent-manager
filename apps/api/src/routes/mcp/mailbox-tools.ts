@@ -56,9 +56,14 @@ export async function handleSendDurableMessage(
     return jsonRpcError(requestId, INVALID_PARAMS, `Invalid messageClass. Must be one of: ${MESSAGE_CLASSES.join(', ')}`);
   }
 
-  const metadata = params.metadata && typeof params.metadata === 'object'
-    ? params.metadata as Record<string, unknown>
-    : null;
+  let metadata: Record<string, unknown> | null = null;
+  if (params.metadata && typeof params.metadata === 'object') {
+    const serialized = JSON.stringify(params.metadata);
+    if (serialized.length > 4096) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'metadata exceeds maximum size (4096 bytes)');
+    }
+    metadata = params.metadata as Record<string, unknown>;
+  }
 
   // Validate caller is a task agent
   if (!tokenData.taskId) {
@@ -118,7 +123,7 @@ export async function handleSendDurableMessage(
       targetTaskId,
       error: errorMessage,
     });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to enqueue message: ${errorMessage}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to enqueue message');
   }
 }
 
@@ -166,7 +171,7 @@ export async function handleGetPendingMessages(
       chatSessionId,
       error: errorMessage,
     });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get pending messages: ${errorMessage}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to get pending messages');
   }
 }
 
@@ -183,7 +188,22 @@ export async function handleAckMessage(
     return jsonRpcError(requestId, INVALID_PARAMS, 'messageId is required');
   }
 
+  // Verify the caller owns this message (session-level isolation)
+  const callerChatSessionId = await resolveCallerChatSession(tokenData, env);
+  if (!callerChatSessionId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Cannot resolve caller session');
+  }
+
   try {
+    // Fetch the message and verify ownership before acknowledging
+    const message = await projectDataService.getMailboxMessage(env, tokenData.projectId, messageId);
+    if (!message) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'Message not found');
+    }
+    if (message.targetSessionId !== callerChatSessionId) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'Message does not belong to this agent session');
+    }
+
     const acked = await projectDataService.acknowledgeMailboxMessage(
       env, tokenData.projectId, messageId,
     );
@@ -201,7 +221,7 @@ export async function handleAckMessage(
       projectId: tokenData.projectId,
       error: errorMessage,
     });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to acknowledge message: ${errorMessage}`);
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to acknowledge message');
   }
 }
 
@@ -355,7 +375,10 @@ async function resolveCallerChatSession(
   const [workspace] = await db
     .select({ chatSessionId: schema.workspaces.chatSessionId })
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, tokenData.workspaceId))
+    .where(and(
+      eq(schema.workspaces.id, tokenData.workspaceId),
+      eq(schema.workspaces.projectId, tokenData.projectId),
+    ))
     .limit(1);
 
   return workspace?.chatSessionId ?? null;

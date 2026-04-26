@@ -13,7 +13,6 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   DELIVERY_STATE_TRANSITIONS,
-  DELIVERY_TERMINAL_STATES,
   DURABLE_MESSAGE_CLASSES,
 } from '@simple-agent-manager/shared';
 
@@ -297,16 +296,15 @@ export function getUnackedMessages(
 
 /**
  * Re-queue a delivered-but-unacked message for re-delivery.
+ * Uses the state machine transition delivered → queued, then clears delivered_at.
  */
 export function requeueForRedelivery(sql: SqlStorage, messageId: string): boolean {
-  const msg = getMessage(sql, messageId);
-  if (!msg || msg.deliveryState !== 'delivered') return false;
-
-  sql.exec(
-    `UPDATE session_inbox SET delivery_state = 'queued', delivered_at = NULL WHERE id = ?`,
-    messageId,
-  );
-  return true;
+  const requeued = transitionState(sql, messageId, 'queued');
+  if (requeued) {
+    // Clear delivered_at so the message appears fresh for next delivery attempt
+    sql.exec(`UPDATE session_inbox SET delivered_at = NULL WHERE id = ?`, messageId);
+  }
+  return requeued;
 }
 
 /**
@@ -362,12 +360,13 @@ export function listMessages(
 }
 
 /**
- * Cancel (expire) a queued message by ID. Only queued messages can be cancelled.
+ * Cancel (expire) a queued message by ID. Only queued messages can be cancelled —
+ * delivered messages must complete their ack/expire cycle to preserve the audit trail.
  */
 export function cancelMessage(sql: SqlStorage, messageId: string): boolean {
   const msg = getMessage(sql, messageId);
   if (!msg) return false;
-  if ((DELIVERY_TERMINAL_STATES as readonly string[]).includes(msg.deliveryState)) return false;
+  if (msg.deliveryState !== 'queued') return false;
   return expireMessage(sql, messageId);
 }
 

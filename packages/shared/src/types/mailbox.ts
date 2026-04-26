@@ -39,7 +39,7 @@ export type DeliveryState = (typeof DELIVERY_STATES)[number];
 /** Valid state transitions for the delivery state machine. */
 export const DELIVERY_STATE_TRANSITIONS: Record<DeliveryState, DeliveryState[]> = {
   queued: ['delivered', 'expired'],
-  delivered: ['acked', 'expired'],
+  delivered: ['acked', 'expired', 'queued'],
   acked: [],
   expired: [],
 };

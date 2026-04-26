@@ -511,6 +511,9 @@ export class ProjectData extends DurableObject<Env> {
   async enqueueMailboxMessage(opts: Parameters<typeof mailbox.enqueueMessage>[1]): Promise<ReturnType<typeof mailbox.enqueueMessage>> {
     const msg = mailbox.enqueueMessage(this.sql, opts);
     this.broadcastEvent('mailbox.enqueued', { messageId: msg.id, messageClass: msg.messageClass, targetSessionId: msg.targetSessionId });
+    this.recalculateAlarm().catch((err) =>
+      log.warn('schedule_mailbox_alarm_failed', { messageId: msg.id, error: err instanceof Error ? err.message : String(err) }),
+    );
     return msg;
   }
 

@@ -47,9 +47,10 @@ describe('Mailbox Types and Constants', () => {
     expect(DELIVERY_STATE_TRANSITIONS.queued).toContain('delivered');
     expect(DELIVERY_STATE_TRANSITIONS.queued).toContain('expired');
 
-    // delivered can go to acked or expired
+    // delivered can go to acked, expired, or queued (requeue for re-delivery)
     expect(DELIVERY_STATE_TRANSITIONS.delivered).toContain('acked');
     expect(DELIVERY_STATE_TRANSITIONS.delivered).toContain('expired');
+    expect(DELIVERY_STATE_TRANSITIONS.delivered).toContain('queued');
 
     // acked and expired are terminal — no transitions allowed
     expect(DELIVERY_STATE_TRANSITIONS.acked).toEqual([]);

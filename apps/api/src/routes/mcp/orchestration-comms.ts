@@ -271,7 +271,7 @@ export async function handleSendMessageToSubtask(
             sourceTaskId: tokenData.taskId ?? null,
             senderType: 'agent',
             senderId: tokenData.workspaceId,
-            messageClass: 'notify',
+            messageClass: 'deliver',
             content: message,
             metadata: null,
           });

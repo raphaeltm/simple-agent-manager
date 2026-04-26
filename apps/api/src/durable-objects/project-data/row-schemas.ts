@@ -34,6 +34,16 @@ export function parseRow<TOutput>(
   return result.output;
 }
 
+/** Safely parse a JSON string, returning null on failure. */
+function safeParseJson(value: string | null): unknown {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 // =============================================================================
 // Aggregate / utility row schemas
 // =============================================================================
@@ -603,7 +613,7 @@ export function parseMailboxMessageRow(row: unknown): AgentMailboxMessage {
     messageClass: r.message_class as AgentMailboxMessage['messageClass'],
     deliveryState: r.delivery_state as AgentMailboxMessage['deliveryState'],
     content: r.content,
-    metadata: r.metadata ? JSON.parse(r.metadata) : null,
+    metadata: safeParseJson(r.metadata) as Record<string, unknown> | null,
     ackRequired: r.ack_required === 1,
     ackTimeoutMs: r.ack_timeout_ms,
     deliveryAttempts: r.delivery_attempts,
@@ -657,7 +667,7 @@ export function parseInboxMessageRow(row: unknown): {
     expiresAt: r.expires_at,
     deliveryAttempts: r.delivery_attempts,
     lastDeliveryAt: r.last_delivery_at,
-    metadata: r.metadata ? JSON.parse(r.metadata) : null,
+    metadata: safeParseJson(r.metadata),
   };
 }
 

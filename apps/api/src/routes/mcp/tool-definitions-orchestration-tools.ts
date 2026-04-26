@@ -10,7 +10,7 @@ export const ORCHESTRATION_TOOLS = [
       'Send a durable message to a child task\'s agent. The message is persisted in the mailbox and will be delivered ' +
       'even if the child agent is busy. Message classes control urgency: "notify" (best-effort), "deliver" (durable, ack optional), ' +
       '"interrupt" (preempts current work), "preempt_and_replan" (requires ack + replanning), ' +
-      '"shutdown_with_final_prompt" (delivers final message, then terminates the agent). ' +
+      '"shutdown_with_final_prompt" (delivers final message with highest urgency — session termination is a Phase 2 feature). ' +
       'Returns the message ID and delivery state.',
     inputSchema: {
       type: 'object' as const,
