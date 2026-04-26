@@ -19,6 +19,7 @@ import { resolveAgentProfile } from '../../services/agent-profiles';
 import { generateBranchName } from '../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
+import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import {
@@ -606,6 +607,20 @@ export async function handleDispatchTask(
       taskId,
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+
+  // Recompute scheduler states if the new task belongs to a mission (best-effort)
+  const resolvedMissionId = explicitMissionId ?? currentTask.missionId ?? null;
+  if (resolvedMissionId) {
+    try {
+      await recomputeMissionSchedulerStates(env.DATABASE, resolvedMissionId);
+    } catch (err) {
+      log.warn('mcp.dispatch_task.scheduler_state_recompute_failed', {
+        taskId,
+        missionId: resolvedMissionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   log.info('mcp.dispatch_task.created', {

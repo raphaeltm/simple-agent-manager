@@ -13,6 +13,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as notificationService from '../../services/notification';
+import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
@@ -146,13 +147,14 @@ export async function handleCompleteTask(
   // instead of completing the task. This prevents agents that ignore conversation-mode instructions
   // from prematurely ending the conversation.
   const taskRow = await env.DATABASE.prepare(
-    `SELECT task_mode, user_id, title, output_pr_url, output_branch FROM tasks WHERE id = ? AND project_id = ?`,
+    `SELECT task_mode, user_id, title, output_pr_url, output_branch, mission_id FROM tasks WHERE id = ? AND project_id = ?`,
   ).bind(tokenData.taskId, tokenData.projectId).first<{
     task_mode: string;
     user_id: string;
     title: string;
     output_pr_url: string | null;
     output_branch: string | null;
+    mission_id: string | null;
   }>();
 
   const isConversation = taskRow?.task_mode === 'conversation';
@@ -261,6 +263,20 @@ export async function handleCompleteTask(
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
   await syncTriggerExecutionStatus(env.DATABASE, tokenData.taskId, 'completed');
+
+  // Recompute scheduler states for sibling tasks in the same mission (best-effort).
+  // When a mission task completes, other tasks that were blocked_dependency may become schedulable.
+  if (taskRow?.mission_id) {
+    try {
+      await recomputeMissionSchedulerStates(env.DATABASE, taskRow.mission_id);
+    } catch (err) {
+      log.warn('mcp.complete_task.scheduler_state_recompute_failed', {
+        taskId: tokenData.taskId,
+        missionId: taskRow.mission_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   // Record completion activity event
   try {
