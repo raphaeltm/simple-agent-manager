@@ -104,23 +104,19 @@ export function updateMissionStateEntry(
     );
   }
 
+  const existing = sql
+    .exec('SELECT title, content FROM mission_state_entries WHERE id = ?', entryId)
+    .toArray();
+  if (existing.length === 0) return;
+  const current = existing[0] as { title: string; content: string | null };
+
   const now = Date.now();
-  const setClauses: string[] = ['updated_at = ?'];
-  const params: (string | number | null)[] = [now];
+  const newTitle = updates.title !== undefined ? updates.title : current.title;
+  const newContent = updates.content !== undefined ? updates.content : current.content;
 
-  if (updates.title !== undefined) {
-    setClauses.push('title = ?');
-    params.push(updates.title);
-  }
-  if (updates.content !== undefined) {
-    setClauses.push('content = ?');
-    params.push(updates.content);
-  }
-
-  params.push(entryId);
   sql.exec(
-    `UPDATE mission_state_entries SET ${setClauses.join(', ')} WHERE id = ?`,
-    ...params,
+    'UPDATE mission_state_entries SET title = ?, content = ?, updated_at = ? WHERE id = ?',
+    newTitle, newContent, now, entryId,
   );
 }
 
