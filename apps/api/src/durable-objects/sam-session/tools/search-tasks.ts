@@ -49,7 +49,9 @@ export async function searchTasks(
     conditions.push(eq(schema.tasks.projectId, input.projectId));
   }
   if (input.keyword) {
-    conditions.push(like(schema.tasks.title, `%${input.keyword}%`));
+    // Escape SQL LIKE wildcards in user input
+    const escaped = input.keyword.replace(/%/g, '\\%').replace(/_/g, '\\_');
+    conditions.push(like(schema.tasks.title, `%${escaped}%`));
   }
 
   const rows = await db

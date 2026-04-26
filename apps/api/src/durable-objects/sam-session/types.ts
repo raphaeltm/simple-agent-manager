@@ -1,5 +1,6 @@
 /** SSE event types streamed to the browser. */
 export type SamSseEvent =
+  | { type: 'conversation_started'; conversationId: string }
   | { type: 'text_delta'; content: string }
   | { type: 'tool_start'; tool: string; input: unknown }
   | { type: 'tool_result'; tool: string; result: unknown }

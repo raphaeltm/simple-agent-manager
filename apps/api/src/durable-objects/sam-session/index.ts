@@ -74,7 +74,7 @@ export class SamSession extends DurableObject<AppEnv> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     ctx.blockConcurrencyWhile(async () => {
-      this.ctx.storage.transactionSync(() => { migrate(this.sql); });
+      migrate(this.sql);
     });
   }
 
@@ -166,11 +166,7 @@ export class SamSession extends DurableObject<AppEnv> {
     const writer = writable.getWriter();
 
     // Send conversationId as first event
-    writer.write(
-      new TextEncoder().encode(
-        `data: ${JSON.stringify({ type: 'conversation_started', conversationId })}\n\n`
-      )
-    );
+    writer.write(encodeSseEvent({ type: 'conversation_started', conversationId }));
 
     // Run agent loop in background
     this.ctx.waitUntil(
@@ -210,7 +206,6 @@ export class SamSession extends DurableObject<AppEnv> {
       headers: {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
-        'connection': 'keep-alive',
       },
     });
   }
@@ -263,7 +258,7 @@ export class SamSession extends DurableObject<AppEnv> {
     );
   }
 
-  /** Persist a message to the conversation. */
+  /** Persist a message to the conversation (atomic via transactionSync). */
   private persistMessage(
     conversationId: string,
     role: string,
@@ -271,47 +266,49 @@ export class SamSession extends DurableObject<AppEnv> {
     toolCallsJson?: string | null,
     toolCallId?: string | null,
   ): void {
-    const id = crypto.randomUUID();
+    this.ctx.storage.transactionSync(() => {
+      const id = crypto.randomUUID();
 
-    // Get next sequence number
-    const seqResult = this.sql.exec(
-      'SELECT COALESCE(MAX(sequence), 0) as max_seq FROM messages WHERE conversation_id = ?',
-      conversationId
-    ).toArray();
-    const nextSeq = Number(seqResult[0]?.max_seq ?? 0) + 1;
+      // Get next sequence number
+      const seqResult = this.sql.exec(
+        'SELECT COALESCE(MAX(sequence), 0) as max_seq FROM messages WHERE conversation_id = ?',
+        conversationId
+      ).toArray();
+      const nextSeq = Number(seqResult[0]?.max_seq ?? 0) + 1;
 
-    this.sql.exec(
-      `INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      id,
-      conversationId,
-      role,
-      content,
-      toolCallsJson ?? null,
-      toolCallId ?? null,
-      nextSeq
-    );
+      this.sql.exec(
+        `INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        id,
+        conversationId,
+        role,
+        content,
+        toolCallsJson ?? null,
+        toolCallId ?? null,
+        nextSeq
+      );
 
-    // Update conversation timestamp
-    this.sql.exec(
-      "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?",
-      conversationId
-    );
+      // Update conversation timestamp
+      this.sql.exec(
+        "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?",
+        conversationId
+      );
+    });
   }
 
   /** Load conversation history for the agent loop. */
   private loadHistory(conversationId: string, contextWindow: number): MessageRow[] {
-    // Load last N messages (excluding the just-added user message which runAgentLoop adds itself)
-    // We get all messages except the very last one (which is the new user message)
+    // Rows are ordered DESC (most recent first). rows[0] is the user message we just
+    // persisted — skip it because runAgentLoop adds it separately. Then reverse the
+    // rest into chronological order for the LLM context.
     const rows = this.sql.exec(
       `SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence, created_at
        FROM messages WHERE conversation_id = ?
        ORDER BY sequence DESC LIMIT ?`,
       conversationId,
-      contextWindow + 1 // +1 because we'll exclude the last user message
+      contextWindow + 1 // +1 because we skip the most recent (just-added user message)
     ).toArray() as unknown as MessageRow[];
 
-    // Remove the last user message (just added) and reverse to chronological order
     const filtered = rows.length > 0 ? rows.slice(1) : [];
     return filtered.reverse();
   }

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
@@ -40,7 +40,6 @@ export async function listProjects(
       .from(schema.projects)
       .where(eq(schema.projects.userId, ctx.userId));
   } else {
-    const { and } = await import('drizzle-orm');
     rows = await db
       .select({
         id: schema.projects.id,
