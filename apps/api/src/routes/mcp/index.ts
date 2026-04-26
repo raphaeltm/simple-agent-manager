@@ -81,6 +81,13 @@ import {
   handleResumeMission as handleResumeMissionOrch,
 } from './orchestrator-lifecycle-tools';
 import {
+  handleAddPolicy,
+  handleGetPolicy,
+  handleListPolicies,
+  handleRemovePolicy,
+  handleUpdatePolicy,
+} from './policy-tools';
+import {
   handleCreateAgentProfile,
   handleDeleteAgentProfile,
   handleGetAgentProfile,
@@ -363,6 +370,17 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleCancelMissionOrch(requestId, toolArgs, tokenData, c.env));
         case 'override_task_state':
           return c.json(await handleOverrideTaskState(requestId, toolArgs, tokenData, c.env));
+        // ─── Project policy tools (Phase 4) ──────────────────────────────
+        case 'add_policy':
+          return c.json(await handleAddPolicy(requestId, toolArgs, tokenData, c.env));
+        case 'list_policies':
+          return c.json(await handleListPolicies(requestId, toolArgs, tokenData, c.env));
+        case 'get_policy':
+          return c.json(await handleGetPolicy(requestId, toolArgs, tokenData, c.env));
+        case 'update_policy':
+          return c.json(await handleUpdatePolicy(requestId, toolArgs, tokenData, c.env));
+        case 'remove_policy':
+          return c.json(await handleRemovePolicy(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }

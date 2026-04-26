@@ -326,6 +326,13 @@ export interface Env {
   ORCHESTRATOR_DECISION_LOG_MAX_ENTRIES?: string;  // Max decision log entries (default: 500)
   ORCHESTRATOR_RECENT_DECISIONS_LIMIT?: string;    // Recent decisions in status (default: 20)
   ORCHESTRATOR_QUEUE_MAX_ENTRIES?: string;         // Max scheduling queue entries (default: 100)
+  // Policy Propagation (Phase 4)
+  POLICY_MAX_PER_PROJECT?: string;                 // Max active policies per project (default: 100)
+  POLICY_TITLE_MAX_LENGTH?: string;                // Max policy title length (default: 200)
+  POLICY_CONTENT_MAX_LENGTH?: string;              // Max policy content length (default: 2000)
+  POLICY_LIST_PAGE_SIZE?: string;                  // Default policy list page size (default: 50)
+  POLICY_LIST_MAX_PAGE_SIZE?: string;              // Max policy list page size (default: 200)
+  POLICY_DEFAULT_CONFIDENCE?: string;              // Default policy confidence (default: 0.8)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;
