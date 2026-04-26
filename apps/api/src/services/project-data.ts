@@ -640,9 +640,10 @@ export async function flagKnowledgeContradiction(
   return stub.flagKnowledgeContradiction(existingObservationId, newObservation, sourceSessionId);
 }
 
-// =========================================================================
-// Agent Mailbox (Durable Messaging)
-// =========================================================================
+// ── Project Policies (Phase 4: Policy Propagation) ───────────────────────
+export { createPolicy, getActivePolicies, getPolicy, listPolicies, removePolicy, updatePolicy } from './project-data-policies';
+
+// ── Agent Mailbox (Durable Messaging) ────────────────────────────────────
 
 import type { AgentMailboxMessage, DeliveryState, MessageClass } from '@simple-agent-manager/shared';
 
@@ -716,11 +717,7 @@ export async function getMailboxStats(
   return stub.getMailboxStats();
 }
 
-// =========================================================================
-// WebSocket
-// =========================================================================
-// Mission State & Handoffs
-// =========================================================================
+// ── Mission State & Handoffs ──────────────────────────────────────────────
 
 export async function createMissionStateEntry(
   env: Env, projectId: string, missionId: string, entryType: string,

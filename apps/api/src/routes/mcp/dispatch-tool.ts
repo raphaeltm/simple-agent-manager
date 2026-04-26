@@ -289,7 +289,34 @@ export async function handleDispatchTask(
   if (references.length > 0) {
     fullDescription += '\n\n## References\n' + references.map((r) => `- ${r}`).join('\n');
   }
-  // Enforce length limit on the final description (after reference concatenation)
+
+  // ── Propagate active project policies to child tasks ──────────────────
+  // When dispatching within a mission, append active policies so sub-agents
+  // inherit the same rules/constraints without needing to call get_instructions.
+  if (explicitMissionId ?? currentTask.missionId) {
+    try {
+      const activePolicies = await projectDataService.getActivePolicies(env, tokenData.projectId);
+      if (activePolicies.length > 0) {
+        const categoryLabels: Record<string, string> = {
+          rule: 'RULE',
+          constraint: 'CONSTRAINT',
+          delegation: 'DELEGATION',
+          preference: 'PREFERENCE',
+        };
+        const policyLines = activePolicies.map(
+          (p) => `- [${categoryLabels[p.category] || p.category.toUpperCase()}] ${p.title}: ${p.content}`,
+        );
+        fullDescription += '\n\n## Project Policies (inherited)\n' + policyLines.join('\n');
+      }
+    } catch (err) {
+      log.warn('mcp.dispatch_task.policy_propagation_failed', {
+        projectId: tokenData.projectId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Enforce length limit on the final description (after reference + policy concatenation)
   if (fullDescription.length > limits.dispatchDescriptionMaxLength) {
     fullDescription = fullDescription.slice(0, limits.dispatchDescriptionMaxLength);
   }

@@ -431,5 +431,22 @@ export {
   OVERRIDABLE_SCHEDULER_STATES,
 } from './orchestrator';
 
+// Project Policy (Phase 4: Policy Propagation)
+export type {
+  CreatePolicyRequest,
+  ListPoliciesResponse,
+  PolicyCategory,
+  PolicySource,
+  ProjectPolicy,
+  UpdatePolicyRequest,
+} from './policy';
+export {
+  isPolicyCategory,
+  isPolicySource,
+  POLICY_CATEGORIES,
+  POLICY_DEFAULTS,
+  POLICY_SOURCES,
+} from './policy';
+
 // API Error
 export type { ApiError } from './api-error';

@@ -26,6 +26,7 @@ import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messages from './messages';
 import * as missionState from './missions';
+import * as policies from './policies';
 import * as sessions from './sessions';
 
 export type { Env } from './types';
@@ -612,6 +613,45 @@ export class ProjectData extends DurableObject<Env> {
 
   async getHandoffPacketsForTask(taskId: string) {
     return missionState.getHandoffPacketsForTask(this.sql, taskId);
+  }
+
+  // --- Project Policies (Phase 4: Policy Propagation) ---
+
+  async createPolicy(
+    category: import('@simple-agent-manager/shared').PolicyCategory,
+    title: string,
+    content: string,
+    source: import('@simple-agent-manager/shared').PolicySource,
+    sourceSessionId: string | null,
+    confidence: number,
+  ) {
+    const result = policies.createPolicy(this.sql, this.env, category, title, content, source, sourceSessionId, confidence);
+    this.broadcastEvent('policy.created', { id: result.id, category, title });
+    return result;
+  }
+
+  async getPolicy(policyId: string) {
+    return policies.getPolicy(this.sql, policyId);
+  }
+
+  async listPolicies(category: string | null, activeOnly: boolean, limit: number, offset: number) {
+    return policies.listPolicies(this.sql, category, activeOnly, limit, offset);
+  }
+
+  async updatePolicy(policyId: string, updates: { title?: string; content?: string; category?: import('@simple-agent-manager/shared').PolicyCategory; active?: boolean; confidence?: number }) {
+    const result = policies.updatePolicy(this.sql, policyId, updates);
+    if (result) this.broadcastEvent('policy.updated', { id: policyId });
+    return result;
+  }
+
+  async removePolicy(policyId: string) {
+    const result = policies.removePolicy(this.sql, policyId);
+    if (result) this.broadcastEvent('policy.removed', { id: policyId });
+    return result;
+  }
+
+  async getActivePolicies() {
+    return policies.getActivePolicies(this.sql, this.env);
   }
 
   // --- Internal Helpers ---

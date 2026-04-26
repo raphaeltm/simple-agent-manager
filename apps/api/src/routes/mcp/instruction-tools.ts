@@ -92,6 +92,28 @@ export async function handleGetInstructions(
     task.taskMode === 'conversation',
   );
 
+  // Retrieve active project policies (Phase 4: Policy Propagation).
+  // Policies are dynamic rules and preferences that agents must follow.
+  let policyContext: { id: string; category: string; title: string; content: string; confidence: number }[] = [];
+  try {
+    const activePolicies = await projectDataService.getActivePolicies(env, tokenData.projectId);
+    policyContext = activePolicies.map((p) => ({
+      id: p.id,
+      category: p.category,
+      title: p.title,
+      content: p.content,
+      confidence: p.confidence,
+    }));
+  } catch (err) {
+    log.warn('mcp.get_instructions.policy_retrieval_failed', {
+      projectId: tokenData.projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  const policyDirectives = formatPolicyDirectives(policyContext);
+  const policyInstructions = buildPolicyInstructions(policyContext.length > 0, task.taskMode === 'conversation');
+
   const result = {
     task: {
       id: task.id,
@@ -124,6 +146,7 @@ export async function handleGetInstructions(
             'If you encounter blockers, report them via `update_task_status` with a clear description.',
           ]),
       ...knowledgeInstructions,
+      ...policyInstructions,
       ...((project.repoProvider === 'artifacts')
         ? [
             'This project uses SAM Git (Cloudflare Artifacts) — NOT GitHub.',
@@ -136,6 +159,9 @@ export async function handleGetInstructions(
     ...(knowledgeDirectives ? { knowledgeDirectives } : {}),
     // Also include structured data for programmatic use
     ...(knowledgeContext.length > 0 ? { knowledgeContext } : {}),
+    // Include policy directives and structured data
+    ...(policyDirectives ? { policyDirectives } : {}),
+    ...(policyContext.length > 0 ? { policyContext } : {}),
   };
 
   return jsonRpcSuccess(requestId, {
@@ -245,6 +271,92 @@ function buildKnowledgeInstructions(hasKnowledge: boolean, isConversation: boole
       'You are in a direct conversation — this is the richest source of user knowledge. '
       + 'Pay close attention to corrections, preferences, and context the user shares. '
       + 'Store important observations as you go, not just at the end.',
+    );
+  }
+
+  return instructions;
+}
+
+// ─── Policy Formatting Helpers ──────────────────────────────────────────────
+
+interface PolicyEntry {
+  id: string;
+  category: string;
+  title: string;
+  content: string;
+  confidence: number;
+}
+
+/**
+ * Format active policies into a readable text block grouped by category.
+ * Returns null if there are no policies.
+ *
+ * Output looks like:
+ *   ## Project Policies — you MUST follow these
+ *
+ *   ### Rules
+ *   - **Always use conventional commits**: Commit messages must follow ...
+ *
+ *   ### Constraints
+ *   - **This project uses Valibot, not Zod**: All runtime validation ...
+ */
+function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
+  if (entries.length === 0) return null;
+
+  // Group by category
+  const grouped = new Map<string, { title: string; content: string }[]>();
+  for (const entry of entries) {
+    let group = grouped.get(entry.category);
+    if (!group) {
+      group = [];
+      grouped.set(entry.category, group);
+    }
+    group.push({ title: entry.title, content: entry.content });
+  }
+
+  // Category display order and labels
+  const categoryLabels: Record<string, string> = {
+    rule: 'Rules (MUST follow)',
+    constraint: 'Constraints (technical limitations)',
+    delegation: 'Delegation (agent autonomy)',
+    preference: 'Preferences (soft guidance)',
+  };
+
+  const lines: string[] = ['## Project Policies — you MUST follow these\n'];
+  for (const [category, items] of grouped) {
+    const label = categoryLabels[category] || category;
+    lines.push(`### ${label}`);
+    for (const item of items) {
+      lines.push(`- **${item.title}**: ${item.content}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Build policy-related instructions based on whether policies exist
+ * and the session mode.
+ */
+function buildPolicyInstructions(hasPolicies: boolean, isConversation: boolean): string[] {
+  const instructions: string[] = [];
+
+  if (hasPolicies) {
+    instructions.push(
+      'The policyDirectives field above contains project policies set by the user. '
+      + 'You MUST follow all rules and constraints. Preferences are softer guidance — follow them unless you have a good reason not to.',
+    );
+    instructions.push(
+      'If a user statement contradicts an existing policy, use `update_policy` to update it. '
+      + 'If a policy is no longer relevant, use `remove_policy` to deactivate it.',
+    );
+  }
+
+  if (isConversation) {
+    instructions.push(
+      'When a user states a rule, constraint, delegation preference, or soft preference, '
+      + 'save it as a project policy via `add_policy` so it applies to all future agents in this project.',
     );
   }
 

@@ -274,6 +274,18 @@ export {
   resolveOrchestratorConfig,
 } from './orchestrator';
 
+// Policies (Phase 4: Policy Propagation)
+export type { PolicyLimits } from './policies';
+export {
+  DEFAULT_POLICY_CONFIDENCE,
+  DEFAULT_POLICY_CONTENT_MAX_LENGTH,
+  DEFAULT_POLICY_LIST_MAX_PAGE_SIZE,
+  DEFAULT_POLICY_LIST_PAGE_SIZE,
+  DEFAULT_POLICY_MAX_PER_PROJECT,
+  DEFAULT_POLICY_TITLE_MAX_LENGTH,
+  resolvePolicyLimits,
+} from './policies';
+
 // Notifications
 export type { HumanInputCategory } from './notifications';
 export {

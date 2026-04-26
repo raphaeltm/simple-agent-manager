@@ -535,6 +535,35 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '019-project-policies',
+    run: (sql) => {
+      // Project policies — structured dynamic policies per project (Phase 4: Policy Propagation)
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_policies (
+          id TEXT PRIMARY KEY,
+          category TEXT NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'explicit',
+          source_session_id TEXT,
+          confidence REAL NOT NULL DEFAULT 0.8,
+          active INTEGER NOT NULL DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_policies_active
+          ON project_policies(active)
+          WHERE active = 1
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_policies_category
+          ON project_policies(category, active)
+      `);
+    },
+  },
 ];
 
 /**
