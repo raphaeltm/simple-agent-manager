@@ -322,7 +322,7 @@ function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
     preference: 'Preferences (soft guidance)',
   };
 
-  const lines: string[] = ['## Project Policies — you MUST follow these\\n'];
+  const lines: string[] = ['## Project Policies — you MUST follow these\n'];
   for (const [category, items] of grouped) {
     const label = categoryLabels[category] || category;
     lines.push(`### ${label}`);
@@ -332,7 +332,7 @@ function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
     lines.push('');
   }
 
-  return lines.join('\\n');
+  return lines.join('\n');
 }
 
 /**

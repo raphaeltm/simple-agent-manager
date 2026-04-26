@@ -15,6 +15,7 @@ import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
+import { sanitizeUserInput } from './mcp/_helpers';
 
 export const policyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -99,7 +100,7 @@ policyRoutes.post('/', async (c) => {
 
   const result = await projectDataService.createPolicy(
     c.env, projectId,
-    body.category, body.title.trim(), body.content.trim(),
+    body.category, sanitizeUserInput(body.title.trim()), sanitizeUserInput(body.content.trim()),
     body.source || 'explicit',
     null, // sourceSessionId — REST has no task context
     body.confidence ?? limits.defaultConfidence,
@@ -129,14 +130,14 @@ policyRoutes.patch('/:policyId', async (c) => {
     if (body.title.length > limits.titleMaxLength) {
       throw errors.badRequest(`title exceeds maximum length of ${limits.titleMaxLength} characters`);
     }
-    updates.title = body.title.trim();
+    updates.title = sanitizeUserInput(body.title.trim());
   }
   if (body.content !== undefined) {
     if (!body.content.trim()) throw errors.badRequest('content must be non-empty');
     if (body.content.length > limits.contentMaxLength) {
       throw errors.badRequest(`content exceeds maximum length of ${limits.contentMaxLength} characters`);
     }
-    updates.content = body.content.trim();
+    updates.content = sanitizeUserInput(body.content.trim());
   }
   if (body.category !== undefined) {
     if (!isPolicyCategory(body.category)) {

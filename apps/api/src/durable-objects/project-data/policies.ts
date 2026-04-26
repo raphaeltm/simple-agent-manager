@@ -158,11 +158,14 @@ export function removePolicy(sql: SqlStorage, policyId: string): boolean {
  * Get all active policies for injection into agent instructions.
  * Ordered by category then created_at for consistent presentation.
  */
-export function getActivePolicies(sql: SqlStorage): ReturnType<typeof parsePolicyRow>[] {
+export function getActivePolicies(sql: SqlStorage, env: Env): ReturnType<typeof parsePolicyRow>[] {
+  const max = getMaxPolicies(env);
   const rows = sql.exec(
     `SELECT * FROM project_policies
      WHERE active = 1
-     ORDER BY category ASC, created_at ASC`,
+     ORDER BY category ASC, created_at ASC
+     LIMIT ?`,
+    max,
   ).toArray();
   return rows.map((row) => parsePolicyRow(row));
 }

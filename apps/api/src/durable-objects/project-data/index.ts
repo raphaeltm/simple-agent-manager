@@ -651,7 +651,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async getActivePolicies() {
-    return policies.getActivePolicies(this.sql);
+    return policies.getActivePolicies(this.sql, this.env);
   }
 
   // --- Internal Helpers ---
