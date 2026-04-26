@@ -184,7 +184,7 @@ export class SamSession extends DurableObject<AppEnv> {
     const writer = writable.getWriter();
 
     // Send conversationId as first event
-    writer.write(encodeSseEvent({ type: 'conversation_started', conversationId }));
+    await writer.write(encodeSseEvent({ type: 'conversation_started', conversationId }));
 
     // Run agent loop in background
     this.ctx.waitUntil(
@@ -317,7 +317,7 @@ export class SamSession extends DurableObject<AppEnv> {
   /**
    * Check and enforce per-user rate limiting using DO SQLite.
    * Returns a 429 Response if rate limit exceeded, or null if OK.
-   * Uses a single-row sliding window: resets count when window expires.
+   * Uses a single-row tumbling window: count resets when the window expires.
    */
   private checkRateLimit(maxRpm: number, windowSeconds: number): Response | null {
     const nowMs = Date.now();
