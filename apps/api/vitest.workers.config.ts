@@ -42,6 +42,10 @@ export default defineConfig({
             className: 'TrialOrchestrator',
             useSQLite: true,
           },
+          SAM_SESSION: {
+            className: 'SamSession',
+            useSQLite: true,
+          },
         },
         bindings: {
           BASE_DOMAIN: 'test.example.com',
