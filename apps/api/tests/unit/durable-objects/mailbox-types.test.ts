@@ -1,8 +1,6 @@
 /**
  * Unit tests for mailbox shared types, constants, and migration safety.
  */
-import { describe, expect, it } from 'vitest';
-
 import {
   DELIVERY_STATE_TRANSITIONS,
   DELIVERY_STATES,
@@ -12,6 +10,7 @@ import {
   MESSAGE_CLASSES,
   SENDER_TYPES,
 } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 

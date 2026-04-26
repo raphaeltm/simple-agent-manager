@@ -56,8 +56,8 @@ import {
   handleReplaceLibraryFile,
   handleUploadToLibrary,
 } from './library-tools';
-import { handleGetRepoSetupGuide } from './onboarding-tools';
 import { handleAckMessage, handleGetPendingMessages, handleSendDurableMessage } from './mailbox-tools';
+import { handleGetRepoSetupGuide } from './onboarding-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
   handleAddDependency,

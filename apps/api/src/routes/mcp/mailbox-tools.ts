@@ -5,12 +5,11 @@
  * get_pending_messages: Retrieve unacked messages for the calling agent's session.
  * ack_message: Acknowledge receipt of a delivered message.
  */
+import type { MessageClass } from '@simple-agent-manager/shared';
+import { MESSAGE_CLASSES } from '@simple-agent-manager/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
-
-import type { MessageClass } from '@simple-agent-manager/shared';
-import { MESSAGE_CLASSES } from '@simple-agent-manager/shared';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
