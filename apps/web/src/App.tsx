@@ -52,8 +52,8 @@ import { Try } from './pages/Try';
 import { TryCapExceeded } from './pages/TryCapExceeded';
 import { TryDiscovery } from './pages/TryDiscovery';
 import { TryWaitlistThanks } from './pages/TryWaitlistThanks';
-import { UiStandards } from './pages/UiStandards';
 import { SamPrototype } from './pages/SamPrototype';
+import { UiStandards } from './pages/UiStandards';
 import { Workspace } from './pages/workspace';
 import { Workspaces } from './pages/Workspaces';
 

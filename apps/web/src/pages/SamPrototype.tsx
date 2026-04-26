@@ -593,7 +593,7 @@ export function SamPrototype() {
                 if (m.id !== samMsgId) return m;
                 const calls = [...(m.toolCalls || [])];
                 const idx = calls.findIndex((tc) => tc.name === event.tool && !tc.result);
-                if (idx >= 0) calls[idx] = { ...calls[idx], result: event.result };
+                if (idx >= 0) calls[idx] = { name: calls[idx]!.name, result: event.result };
                 return { ...m, toolCalls: calls };
               })
             );
