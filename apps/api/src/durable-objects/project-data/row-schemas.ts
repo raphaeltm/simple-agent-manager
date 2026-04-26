@@ -625,6 +625,17 @@ export function parseInboxMessageRow(row: unknown): {
   priority: string;
   createdAt: number;
   deliveredAt: number | null;
+  messageClass: string;
+  deliveryState: string;
+  senderType: string;
+  senderId: string | null;
+  ackRequired: boolean;
+  ackedAt: number | null;
+  ackTimeoutMs: number | null;
+  expiresAt: number | null;
+  deliveryAttempts: number;
+  lastDeliveryAt: number | null;
+  metadata: unknown;
 } {
   const r = parseRow(MailboxMessageRowSchema, row, 'inbox_message');
   return {
@@ -636,6 +647,17 @@ export function parseInboxMessageRow(row: unknown): {
     priority: r.priority,
     createdAt: r.created_at,
     deliveredAt: r.delivered_at,
+    messageClass: r.message_class,
+    deliveryState: r.delivery_state,
+    senderType: r.sender_type,
+    senderId: r.sender_id,
+    ackRequired: r.ack_required === 1,
+    ackedAt: r.acked_at,
+    ackTimeoutMs: r.ack_timeout_ms,
+    expiresAt: r.expires_at,
+    deliveryAttempts: r.delivery_attempts,
+    lastDeliveryAt: r.last_delivery_at,
+    metadata: r.metadata ? JSON.parse(r.metadata) : null,
   };
 }
 

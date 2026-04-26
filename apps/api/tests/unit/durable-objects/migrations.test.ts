@@ -202,7 +202,8 @@ describe('DO Migrations', () => {
       // knowledge_entities: 2 (entity_type, updated_at) from migration 016
       // knowledge_observations: 3 (entity_id+active, source_type, last_confirmed) from migration 016
       // knowledge_relations: 1 (source_entity, target_entity combined) from migration 016
-      expect(indexes.length).toBe(27);
+      // session_inbox: 3 (delivery_sweep, target_state, expires) from migration 017
+      expect(indexes.length).toBe(30);
     });
   });
 });

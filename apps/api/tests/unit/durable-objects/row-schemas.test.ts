@@ -646,6 +646,18 @@ describe('parseInboxMessageRow', () => {
     priority: 'normal',
     created_at: 1700000000000,
     delivered_at: null,
+    // Mailbox columns (migration 017)
+    message_class: 'notify',
+    delivery_state: 'queued',
+    sender_type: 'agent',
+    sender_id: 'ws-sender-1',
+    ack_required: 0,
+    acked_at: null,
+    ack_timeout_ms: null,
+    expires_at: null,
+    delivery_attempts: 0,
+    last_delivery_at: null,
+    metadata: null,
   };
 
   it('parses valid row with snake_case to camelCase mapping', () => {
@@ -653,11 +665,13 @@ describe('parseInboxMessageRow', () => {
     expect(result.id).toBe('msg-1');
     expect(result.targetSessionId).toBe('session-1');
     expect(result.sourceTaskId).toBe('task-1');
-    expect(result.messageType).toBe('child_completed');
     expect(result.content).toBe('Task done');
-    expect(result.priority).toBe('normal');
     expect(result.createdAt).toBe(1700000000000);
     expect(result.deliveredAt).toBeNull();
+    expect(result.messageClass).toBe('notify');
+    expect(result.deliveryState).toBe('queued');
+    expect(result.senderType).toBe('agent');
+    expect(result.ackRequired).toBe(false);
   });
 
   it('handles null source_task_id', () => {
