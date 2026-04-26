@@ -178,24 +178,30 @@ function transitionState(
   }
 
   const now = Date.now();
-  const updates: Record<string, unknown> = { delivery_state: toState };
 
   if (toState === 'delivered') {
-    updates.delivered_at = now;
-    updates.delivery_attempts = msg.deliveryAttempts + 1;
-    updates.last_delivery_at = now;
+    sql.exec(
+      `UPDATE session_inbox SET delivery_state = ?, delivered_at = ?, delivery_attempts = ?, last_delivery_at = ? WHERE id = ?`,
+      toState,
+      now,
+      msg.deliveryAttempts + 1,
+      now,
+      messageId,
+    );
   } else if (toState === 'acked') {
-    updates.acked_at = now;
+    sql.exec(
+      `UPDATE session_inbox SET delivery_state = ?, acked_at = ? WHERE id = ?`,
+      toState,
+      now,
+      messageId,
+    );
+  } else {
+    sql.exec(
+      `UPDATE session_inbox SET delivery_state = ? WHERE id = ?`,
+      toState,
+      messageId,
+    );
   }
-
-  const setClauses = Object.keys(updates).map((k) => `${k} = ?`).join(', ');
-  const values = Object.values(updates);
-
-  sql.exec(
-    `UPDATE session_inbox SET ${setClauses} WHERE id = ?`,
-    ...values,
-    messageId,
-  );
 
   return true;
 }
