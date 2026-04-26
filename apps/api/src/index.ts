@@ -4,6 +4,7 @@ export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectData } from './durable-objects/project-data';
+export { ProjectOrchestrator } from './durable-objects/project-orchestrator';
 export { TaskRunner } from './durable-objects/task-runner';
 export { TrialCounter } from './durable-objects/trial-counter';
 export { TrialEventBus } from './durable-objects/trial-event-bus';

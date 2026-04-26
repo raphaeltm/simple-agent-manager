@@ -133,6 +133,11 @@ class_name = "TrialEventBus"
 name = "TRIAL_ORCHESTRATOR"
 class_name = "TrialOrchestrator"
 
+# Durable Object for per-project orchestration (one DO per projectId)
+[[durable_objects.bindings]]
+name = "PROJECT_ORCHESTRATOR"
+class_name = "ProjectOrchestrator"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -168,6 +173,10 @@ new_classes = ["TrialEventBus"]  # In-memory only — no SQLite storage needed f
 [[migrations]]
 tag = "v9"
 new_sqlite_classes = ["TrialOrchestrator"]  # Alarm-driven trial provisioning; SQLite-backed per Cloudflare recommendation for new DO classes
+
+[[migrations]]
+tag = "v10"
+new_sqlite_classes = ["ProjectOrchestrator"]  # Per-project orchestration brain; SQLite-backed for scheduling state and decision log
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

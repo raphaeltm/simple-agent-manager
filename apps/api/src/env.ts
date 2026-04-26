@@ -44,6 +44,7 @@ export interface Env {
   TRIAL_COUNTER: DurableObjectNamespace;
   TRIAL_EVENT_BUS: DurableObjectNamespace;
   TRIAL_ORCHESTRATOR: DurableObjectNamespace;
+  PROJECT_ORCHESTRATOR: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -317,6 +318,14 @@ export interface Env {
   HANDOFF_MAX_SUGGESTED_ACTIONS?: string;          // Max suggested actions per handoff (default: 20)
   MISSION_LIST_PAGE_SIZE?: string;                 // Default mission list page size (default: 20)
   MISSION_LIST_MAX_PAGE_SIZE?: string;             // Max mission list page size (default: 100)
+  // Project Orchestrator (Phase 3)
+  ORCHESTRATOR_SCHEDULING_INTERVAL_MS?: string;    // Scheduling loop interval (default: 30000)
+  ORCHESTRATOR_STALL_TIMEOUT_MS?: string;          // Stall detection threshold (default: 1200000)
+  ORCHESTRATOR_MAX_DISPATCHES_PER_CYCLE?: string;  // Max dispatches per cycle (default: 5)
+  ORCHESTRATOR_MAX_ACTIVE_TASKS_PER_MISSION?: string; // Max active tasks per mission (default: 5)
+  ORCHESTRATOR_DECISION_LOG_MAX_ENTRIES?: string;  // Max decision log entries (default: 500)
+  ORCHESTRATOR_RECENT_DECISIONS_LIMIT?: string;    // Recent decisions in status (default: 20)
+  ORCHESTRATOR_QUEUE_MAX_ENTRIES?: string;         // Max scheduling queue entries (default: 100)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;
