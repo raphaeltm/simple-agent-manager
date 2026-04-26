@@ -56,6 +56,7 @@ import {
   handleReplaceLibraryFile,
   handleUploadToLibrary,
 } from './library-tools';
+import { handleAckMessage, handleGetPendingMessages, handleSendDurableMessage } from './mailbox-tools';
 import {
   handleCreateMission,
   handleGetHandoff,
@@ -64,13 +65,6 @@ import {
   handlePublishHandoff,
   handlePublishMissionState,
 } from './mission-tools';
-import {
-  handleDownloadLibraryFile,
-  handleListLibraryFiles,
-  handleReplaceLibraryFile,
-  handleUploadToLibrary,
-} from './library-tools';
-import { handleAckMessage, handleGetPendingMessages, handleSendDurableMessage } from './mailbox-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
