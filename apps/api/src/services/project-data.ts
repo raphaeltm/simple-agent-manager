@@ -636,6 +636,82 @@ export async function flagKnowledgeContradiction(
 }
 
 // =========================================================================
+// Agent Mailbox (Durable Messaging)
+// =========================================================================
+
+import type { AgentMailboxMessage, DeliveryState, MessageClass } from '@simple-agent-manager/shared';
+
+export async function enqueueMailboxMessage(
+  env: Env,
+  projectId: string,
+  opts: {
+    targetSessionId: string;
+    sourceTaskId: string | null;
+    senderType: 'agent' | 'orchestrator' | 'system' | 'human';
+    senderId: string | null;
+    messageClass: MessageClass;
+    content: string;
+    metadata?: Record<string, unknown> | null;
+    ackTimeoutMs?: number | null;
+    ttlMs?: number | null;
+    maxMessages?: number;
+  },
+): Promise<AgentMailboxMessage> {
+  const stub = await getStub(env, projectId);
+  return stub.enqueueMailboxMessage(opts);
+}
+
+export async function getPendingMailboxMessages(
+  env: Env, projectId: string, targetSessionId: string, limit?: number,
+): Promise<AgentMailboxMessage[]> {
+  const stub = await getStub(env, projectId);
+  return stub.getPendingMailboxMessages(targetSessionId, limit);
+}
+
+export async function getMailboxMessage(
+  env: Env, projectId: string, messageId: string,
+): Promise<AgentMailboxMessage | null> {
+  const stub = await getStub(env, projectId);
+  return stub.getMailboxMessage(messageId);
+}
+
+export async function markMailboxMessageDelivered(
+  env: Env, projectId: string, messageId: string,
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.markMailboxMessageDelivered(messageId);
+}
+
+export async function acknowledgeMailboxMessage(
+  env: Env, projectId: string, messageId: string,
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.acknowledgeMailboxMessage(messageId);
+}
+
+export async function listMailboxMessages(
+  env: Env, projectId: string,
+  opts?: { targetSessionId?: string; deliveryState?: DeliveryState; messageClass?: MessageClass; limit?: number; offset?: number },
+): Promise<{ messages: AgentMailboxMessage[]; total: number }> {
+  const stub = await getStub(env, projectId);
+  return stub.listMailboxMessages(opts);
+}
+
+export async function cancelMailboxMessage(
+  env: Env, projectId: string, messageId: string,
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.cancelMailboxMessage(messageId);
+}
+
+export async function getMailboxStats(
+  env: Env, projectId: string,
+): Promise<Record<string, number>> {
+  const stub = await getStub(env, projectId);
+  return stub.getMailboxStats();
+}
+
+// =========================================================================
 // WebSocket
 // =========================================================================
 

@@ -22,6 +22,7 @@ import * as commands from './commands';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
+import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messages from './messages';
 import * as sessions from './sessions';
@@ -349,6 +350,12 @@ export class ProjectData extends DurableObject<Env> {
       (taskId) => idleCleanup.completeTaskInD1(this.env.DATABASE, taskId),
       (workspaceId) => idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId),
       (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());
+
+    // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
+    const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
+    const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
+    mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+
     await this.recalculateAlarm();
   }
 
@@ -499,6 +506,63 @@ export class ProjectData extends DurableObject<Env> {
     return knowledge.flagContradiction(this.sql, this.env, existingObservationId, newObservation, sourceSessionId);
   }
 
+  // --- Agent Mailbox (Durable Messaging) ---
+
+  async enqueueMailboxMessage(opts: Parameters<typeof mailbox.enqueueMessage>[1]): Promise<ReturnType<typeof mailbox.enqueueMessage>> {
+    const msg = mailbox.enqueueMessage(this.sql, opts);
+    this.broadcastEvent('mailbox.enqueued', { messageId: msg.id, messageClass: msg.messageClass, targetSessionId: msg.targetSessionId });
+    this.recalculateAlarm().catch((err) =>
+      log.warn('schedule_mailbox_alarm_failed', { messageId: msg.id, error: err instanceof Error ? err.message : String(err) }),
+    );
+    return msg;
+  }
+
+  async getPendingMailboxMessages(targetSessionId: string, limit?: number) {
+    return mailbox.getPendingMessages(this.sql, targetSessionId, limit);
+  }
+
+  async getMailboxMessage(messageId: string) {
+    return mailbox.getMessage(this.sql, messageId);
+  }
+
+  async markMailboxMessageDelivered(messageId: string): Promise<boolean> {
+    const result = mailbox.markDelivered(this.sql, messageId);
+    if (result) this.broadcastEvent('mailbox.delivered', { messageId });
+    return result;
+  }
+
+  async acknowledgeMailboxMessage(messageId: string): Promise<boolean> {
+    const result = mailbox.acknowledgeMessage(this.sql, messageId);
+    if (result) this.broadcastEvent('mailbox.acked', { messageId });
+    return result;
+  }
+
+  async expireStaleMailboxMessages(maxAttempts: number): Promise<number> {
+    return mailbox.expireStaleMessages(this.sql, maxAttempts);
+  }
+
+  async getUnackedMailboxMessages(defaultAckTimeoutMs: number) {
+    return mailbox.getUnackedMessages(this.sql, defaultAckTimeoutMs);
+  }
+
+  async requeueMailboxMessage(messageId: string): Promise<boolean> {
+    return mailbox.requeueForRedelivery(this.sql, messageId);
+  }
+
+  async listMailboxMessages(opts?: Parameters<typeof mailbox.listMessages>[1]) {
+    return mailbox.listMessages(this.sql, opts);
+  }
+
+  async cancelMailboxMessage(messageId: string): Promise<boolean> {
+    const result = mailbox.cancelMessage(this.sql, messageId);
+    if (result) this.broadcastEvent('mailbox.cancelled', { messageId });
+    return result;
+  }
+
+  async getMailboxStats() {
+    return mailbox.getMailboxStats(this.sql);
+  }
+
   // --- Internal Helpers ---
 
   private addBaseDomain(row: Record<string, unknown>): Record<string, unknown> {
@@ -510,7 +574,9 @@ export class ProjectData extends DurableObject<Env> {
   private async recalculateAlarm(): Promise<void> {
     const { idleCleanupTime, workspaceIdleCheckTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
     const heartbeatTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
-    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime].filter((t): t is number => t !== null);
+    const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
+    const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
+    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime].filter((t): t is number => t !== null);
     if (candidates.length > 0) await this.ctx.storage.setAlarm(Math.min(...candidates));
     else await this.ctx.storage.deleteAlarm();
   }

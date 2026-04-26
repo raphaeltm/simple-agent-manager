@@ -366,5 +366,28 @@ export {
   KNOWLEDGE_SOURCE_TYPES,
 } from './knowledge';
 
+// Agent Mailbox (Durable Messaging)
+export type {
+  AckMessageRequest,
+  AckMessageResponse,
+  AgentMailboxMessage,
+  DeliveryState,
+  GetPendingMessagesResponse,
+  ListMailboxResponse,
+  MessageClass,
+  SendDurableMessageRequest,
+  SendDurableMessageResponse,
+  SenderType,
+} from './mailbox';
+export {
+  DELIVERY_STATE_TRANSITIONS,
+  DELIVERY_STATES,
+  DELIVERY_TERMINAL_STATES,
+  DURABLE_MESSAGE_CLASSES,
+  MAILBOX_DEFAULTS,
+  MESSAGE_CLASSES,
+  SENDER_TYPES,
+} from './mailbox';
+
 // API Error
 export type { ApiError } from './api-error';

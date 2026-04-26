@@ -259,6 +259,13 @@ export interface Env {
   ORCHESTRATOR_DEPENDENCY_MAX_EDGES?: string;      // Max dependency edges per project (default: 50)
   ORCHESTRATOR_STOP_GRACE_MS?: string;             // Grace period before hard stop after warning (default: 5000)
   ORCHESTRATOR_MESSAGE_MAX_LENGTH?: string;        // Max length for injected messages to child agents (default: 32768)
+  // Durable mailbox (Phase 1 orchestrator messaging)
+  MAILBOX_ACK_TIMEOUT_MS?: string;                 // Ack timeout before re-delivery (default: 300000)
+  MAILBOX_REDELIVERY_MAX_ATTEMPTS?: string;        // Max delivery attempts before expiry (default: 5)
+  MAILBOX_TTL_MS?: string;                         // Default message TTL (default: 3600000)
+  MAILBOX_DELIVERY_POLL_INTERVAL_MS?: string;      // DO alarm sweep interval (default: 30000)
+  MAILBOX_MAX_MESSAGES_PER_PROJECT?: string;       // Max active messages per project (default: 1000)
+  MAILBOX_MESSAGE_MAX_LENGTH?: string;             // Max message content length (default: 32768)
   // MCP get_session_messages limits
   MCP_MESSAGE_LIST_LIMIT?: string;                 // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string;                   // Max raw tokens per request (default: 200)

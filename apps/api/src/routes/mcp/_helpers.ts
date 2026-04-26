@@ -104,6 +104,13 @@ const DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES = 50;
 const DEFAULT_ORCHESTRATOR_STOP_GRACE_MS = 5000;
 /** Max length for injected messages to child agents. Override via ORCHESTRATOR_MESSAGE_MAX_LENGTH env var. */
 const DEFAULT_ORCHESTRATOR_MESSAGE_MAX_LENGTH = 32_768;
+/** Agent mailbox defaults (durable messaging). Override via MAILBOX_* env vars. */
+const DEFAULT_MAILBOX_ACK_TIMEOUT_MS = 300_000; // 5 min
+const DEFAULT_MAILBOX_REDELIVERY_MAX_ATTEMPTS = 5;
+const DEFAULT_MAILBOX_TTL_MS = 3_600_000; // 1 hour
+const DEFAULT_MAILBOX_DELIVERY_POLL_INTERVAL_MS = 30_000; // 30s
+const DEFAULT_MAILBOX_MAX_MESSAGES_PER_PROJECT = 1_000;
+const DEFAULT_MAILBOX_MESSAGE_MAX_LENGTH = 32_768;
 /** Knowledge graph defaults. Override via KNOWLEDGE_* env vars. */
 const DEFAULT_KNOWLEDGE_MAX_ENTITIES = 500;
 const DEFAULT_KNOWLEDGE_MAX_OBSERVATIONS = 100;
@@ -155,6 +162,13 @@ export function getMcpLimits(env: Env) {
     knowledgeObservationMaxLength: parsePositiveInt(env.KNOWLEDGE_OBSERVATION_MAX_LENGTH, DEFAULT_KNOWLEDGE_OBSERVATION_MAX_LENGTH),
     knowledgeEntityNameMaxLength: parsePositiveInt(env.KNOWLEDGE_ENTITY_NAME_MAX_LENGTH, DEFAULT_KNOWLEDGE_ENTITY_NAME_MAX_LENGTH),
     knowledgeDescriptionMaxLength: parsePositiveInt(env.KNOWLEDGE_DESCRIPTION_MAX_LENGTH, DEFAULT_KNOWLEDGE_DESCRIPTION_MAX_LENGTH),
+    // Mailbox (durable messaging)
+    mailboxAckTimeoutMs: parsePositiveInt(env.MAILBOX_ACK_TIMEOUT_MS, DEFAULT_MAILBOX_ACK_TIMEOUT_MS),
+    mailboxRedeliveryMaxAttempts: parsePositiveInt(env.MAILBOX_REDELIVERY_MAX_ATTEMPTS, DEFAULT_MAILBOX_REDELIVERY_MAX_ATTEMPTS),
+    mailboxTtlMs: parsePositiveInt(env.MAILBOX_TTL_MS, DEFAULT_MAILBOX_TTL_MS),
+    mailboxDeliveryPollIntervalMs: parsePositiveInt(env.MAILBOX_DELIVERY_POLL_INTERVAL_MS, DEFAULT_MAILBOX_DELIVERY_POLL_INTERVAL_MS),
+    mailboxMaxMessagesPerProject: parsePositiveInt(env.MAILBOX_MAX_MESSAGES_PER_PROJECT, DEFAULT_MAILBOX_MAX_MESSAGES_PER_PROJECT),
+    mailboxMessageMaxLength: parsePositiveInt(env.MAILBOX_MESSAGE_MAX_LENGTH, DEFAULT_MAILBOX_MESSAGE_MAX_LENGTH),
   };
 }
 
