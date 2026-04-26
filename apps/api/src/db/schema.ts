@@ -526,7 +526,9 @@ export const tasks = sqliteTable(
     ),
     projectCreatedAtIdx: index('idx_tasks_project_created_at').on(table.projectId, table.createdAt),
     projectUserIdx: index('idx_tasks_project_user').on(table.projectId, table.userId),
-    missionIdIdx: index('idx_tasks_mission_id').on(table.missionId),
+    missionIdIdx: index('idx_tasks_mission_id')
+      .on(table.missionId)
+      .where(sql`mission_id IS NOT NULL`),
   })
 );
 
