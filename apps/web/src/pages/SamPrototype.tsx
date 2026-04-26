@@ -4,16 +4,16 @@ import {
   LayoutDashboard,
   Send,
   ArrowLeft,
-  Circle,
   GitBranch,
   Clock,
-  CheckCircle2,
   AlertTriangle,
   Loader2,
   ChevronRight,
-  Zap,
   Bot,
+  Wrench,
 } from 'lucide-react';
+
+import { API_URL } from '../lib/api/client';
 
 /* ═══════════════════════════════════════════════════════════════
    WebGL Shader Background
@@ -204,67 +204,15 @@ const MOCK_PROJECTS: MockProject[] = [
   },
 ];
 
-interface MockMessage {
+/** Chat message for the SAM UI. */
+interface ChatMessage {
   id: string;
   role: 'user' | 'sam';
   content: string;
   timestamp: string;
-  card?: MockCard;
+  toolCalls?: Array<{ name: string; result?: unknown }>;
+  isStreaming?: boolean;
 }
-
-interface MockCard {
-  type: 'mission-status' | 'project-summary' | 'action-confirm';
-  data: Record<string, unknown>;
-}
-
-const MOCK_MESSAGES: MockMessage[] = [
-  {
-    id: '1', role: 'sam', content: "Good morning, Raphael. Here's your overnight summary:", timestamp: '9:00 AM',
-    card: {
-      type: 'project-summary',
-      data: {
-        completed: 2, inProgress: 3, needsAttention: 1,
-        highlights: [
-          'Auth refactor PR ready for review (SAM project)',
-          'CI pipeline broken on Mobile App — dependency conflict',
-          'Blog post draft completed and pushed',
-        ],
-      },
-    },
-  },
-  { id: '2', role: 'user', content: "What's going on with the Mobile App CI?", timestamp: '9:02 AM' },
-  {
-    id: '3', role: 'sam', timestamp: '9:02 AM',
-    content: "The Mobile App CI started failing at 3:47 AM after a dependency update. The root cause is a version conflict between react-native@0.76 and @react-navigation/native@7.x. Two agents were working on feature branches and are now paused.\n\nI can fix the dependency conflict and unblock the agents. Should I proceed?",
-    card: {
-      type: 'action-confirm',
-      data: { action: 'Fix dependency conflict in Mobile App', impact: 'Unblocks 2 paused agents', estimate: '~10 min' },
-    },
-  },
-  { id: '4', role: 'user', content: 'Yes, go ahead.', timestamp: '9:03 AM' },
-  {
-    id: '5', role: 'sam', timestamp: '9:03 AM',
-    content: "On it. I've dispatched a task to fix the dependency conflict. I'll let you know when it's resolved and the agents resume.",
-    card: {
-      type: 'mission-status',
-      data: {
-        name: 'Fix Mobile App CI',
-        status: 'running',
-        tasks: [
-          { name: 'Diagnose dependency conflict', status: 'completed' },
-          { name: 'Update package versions', status: 'running' },
-          { name: 'Verify CI passes', status: 'pending' },
-          { name: 'Resume paused agents', status: 'pending' },
-        ],
-      },
-    },
-  },
-  { id: '6', role: 'user', content: 'How is the auth refactor going on the main SAM project?', timestamp: '9:05 AM' },
-  {
-    id: '7', role: 'sam', timestamp: '9:05 AM',
-    content: "The auth refactor is 80% complete. The agent has finished refactoring the middleware and updating tests. Remaining work: update the OAuth callback handler and run the full integration suite. Estimated completion in about 20 minutes.\n\nThe agent hasn't hit any blockers — it's been a clean run.",
-  },
-];
 
 /* ═══════════════════════════════════════════════════════════════
    Glass + Glow Styles (inline)
@@ -387,88 +335,16 @@ const ProjectNode: FC<{ project: MockProject; onTap: () => void }> = ({ project,
   );
 };
 
-/* ── Card Components ── */
-const SummaryCard: FC<{ data: Record<string, unknown> }> = ({ data }) => {
-  const highlights = (data.highlights as string[]) || [];
-  return (
-    <div className="mt-2.5 p-3 rounded-lg" style={glass.card}>
-      <div className="flex gap-4 mb-3">
-        {[
-          { val: data.completed, label: 'Done', color: '#34d399' },
-          { val: data.inProgress, label: 'Running', color: '#3cb480' },
-          { val: data.needsAttention, label: 'Attention', color: '#f59e0b' },
-        ].map((item) => (
-          <div key={item.label} className="text-center">
-            <div className="text-lg font-bold" style={{ color: item.color }}>{String(item.val)}</div>
-            <div className="text-xs text-white/40">{item.label}</div>
-          </div>
-        ))}
-      </div>
-      <ul className="space-y-1.5">
-        {highlights.map((h, i) => (
-          <li key={i} className="text-xs text-white/50 flex items-start gap-2">
-            <Circle className="w-1.5 h-1.5 mt-1.5 fill-white/30 shrink-0" />
-            {h}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-};
-
-const ActionCard: FC<{ data: Record<string, unknown> }> = ({ data }) => (
-  <div className="mt-2.5 p-3 rounded-lg" style={{ ...glass.card, border: '1px solid rgba(60, 180, 120, 0.25)' }}>
-    <div className="flex items-center gap-2 mb-1">
-      <Zap className="w-4 h-4" style={{ color: '#3cb480' }} />
-      <span className="text-sm font-medium text-white/90">{String(data.action)}</span>
-    </div>
-    <div className="text-xs text-white/40 mb-3">{String(data.impact)} &middot; {String(data.estimate)}</div>
-    <div className="flex gap-2">
-      <button
-        type="button"
-        className="px-4 py-1.5 text-xs font-medium rounded-lg text-white transition-all"
-        style={{ background: 'rgba(60, 180, 120, 0.3)', border: '1px solid rgba(60, 180, 120, 0.4)', ...glow.accent }}
-      >
-        Approve
-      </button>
-      <button
-        type="button"
-        className="px-4 py-1.5 text-xs font-medium rounded-lg text-white/60 transition-colors"
-        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
-      >
-        More info
-      </button>
-    </div>
+/* ── Tool Call Chip ── */
+const ToolCallChip: FC<{ name: string; result?: unknown }> = ({ name }) => (
+  <div className="inline-flex items-center gap-1.5 px-2 py-1 mt-1 mr-1 rounded-md text-xs" style={glass.card}>
+    <Wrench className="w-3 h-3" style={{ color: '#3cb480' }} />
+    <span className="text-white/60 font-mono">{name}</span>
   </div>
 );
 
-const MissionCard: FC<{ data: Record<string, unknown> }> = ({ data }) => {
-  const tasks = (data.tasks as Array<{ name: string; status: string }>) || [];
-  const statusIcon = (s: string) => {
-    if (s === 'completed') return <CheckCircle2 className="w-3.5 h-3.5" style={{ color: '#34d399' }} />;
-    if (s === 'running') return <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: '#3cb480' }} />;
-    return <Circle className="w-3.5 h-3.5 text-white/20" />;
-  };
-  return (
-    <div className="mt-2.5 p-3 rounded-lg" style={glass.card}>
-      <div className="flex items-center gap-2 mb-2.5">
-        <Loader2 className="w-4 h-4 animate-spin" style={{ color: '#3cb480' }} />
-        <span className="text-sm font-medium text-white/90">{String(data.name)}</span>
-      </div>
-      <div className="space-y-2">
-        {tasks.map((t, i) => (
-          <div key={i} className="flex items-center gap-2 text-xs">
-            {statusIcon(t.status)}
-            <span className={t.status === 'completed' ? 'text-white/30 line-through' : 'text-white/70'}>{t.name}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
 /* ── Message Bubble ── */
-const MessageBubble: FC<{ msg: MockMessage }> = ({ msg }) => {
+const MessageBubble: FC<{ msg: ChatMessage }> = ({ msg }) => {
   const isSam = msg.role === 'sam';
   return (
     <div className={`flex ${isSam ? 'justify-start' : 'justify-end'} mb-4`}>
@@ -483,16 +359,21 @@ const MessageBubble: FC<{ msg: MockMessage }> = ({ msg }) => {
             </div>
             <span className="text-xs font-medium" style={{ color: '#3cb480' }}>SAM</span>
             <span className="text-xs text-white/30">{msg.timestamp}</span>
+            {msg.isStreaming && <Loader2 className="w-3 h-3 animate-spin" style={{ color: '#3cb480' }} />}
           </div>
         )}
         <div
-          className="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed"
+          className="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap"
           style={isSam ? { ...glass.samBubble, borderTopLeftRadius: '4px' } : { ...glass.userBubble, borderTopRightRadius: '4px', color: 'rgba(255,255,255,0.9)' }}
         >
           <span className={isSam ? 'text-white/80' : ''}>{msg.content}</span>
-          {msg.card?.type === 'project-summary' && <SummaryCard data={msg.card.data} />}
-          {msg.card?.type === 'action-confirm' && <ActionCard data={msg.card.data} />}
-          {msg.card?.type === 'mission-status' && <MissionCard data={msg.card.data} />}
+          {msg.toolCalls && msg.toolCalls.length > 0 && (
+            <div className="mt-2 flex flex-wrap">
+              {msg.toolCalls.map((tc, i) => (
+                <ToolCallChip key={i} name={tc.name} result={tc.result} />
+              ))}
+            </div>
+          )}
         </div>
         {!isSam && <div className="text-xs text-white/25 text-right mt-1">{msg.timestamp}</div>}
       </div>
@@ -599,9 +480,12 @@ export function SamPrototype() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState<'chat' | 'overview'>('chat');
   const [inputValue, setInputValue] = useState('');
-  const [messages, setMessages] = useState<MockMessage[]>(MOCK_MESSAGES);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [selectedProject, setSelectedProject] = useState<MockProject | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useWebGLBackground(canvasRef);
 
@@ -609,28 +493,143 @@ export function SamPrototype() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = useCallback(() => {
-    if (!inputValue.trim()) return;
-    const newMsg: MockMessage = {
-      id: String(Date.now()),
+  /** Send a message to SAM and stream the response via SSE. */
+  const handleSend = useCallback(async () => {
+    const text = inputValue.trim();
+    if (!text || isSending) return;
+
+    setInputValue('');
+    setIsSending(true);
+
+    // Add user message
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
       role: 'user',
-      content: inputValue.trim(),
+      content: text,
       timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
     };
-    setMessages((prev) => [...prev, newMsg]);
-    setInputValue('');
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now() + 1),
-          role: 'sam',
-          content: "I'm on it. Let me look into that and get back to you with details. (This is a prototype — responses are simulated.)",
-          timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-        },
-      ]);
-    }, 1200);
-  }, [inputValue]);
+    setMessages((prev) => [...prev, userMsg]);
+
+    // Create SAM placeholder message for streaming
+    const samMsgId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: samMsgId,
+        role: 'sam',
+        content: '',
+        timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+        toolCalls: [],
+        isStreaming: true,
+      },
+    ]);
+
+    try {
+      abortRef.current = new AbortController();
+      const response = await fetch(`${API_URL}/api/sam/chat`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId,
+          message: text,
+        }),
+        signal: abortRef.current.signal,
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error((errData as { error?: string }).error || `HTTP ${response.status}`);
+      }
+
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (!data || data === '[DONE]') continue;
+
+          let event: Record<string, unknown>;
+          try {
+            event = JSON.parse(data) as Record<string, unknown>;
+          } catch {
+            continue;
+          }
+
+          const eventType = event.type as string;
+
+          if (eventType === 'conversation_started') {
+            setConversationId(event.conversationId as string);
+          } else if (eventType === 'text_delta') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === samMsgId ? { ...m, content: m.content + (event.content as string) } : m
+              )
+            );
+          } else if (eventType === 'tool_start') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === samMsgId
+                  ? { ...m, toolCalls: [...(m.toolCalls || []), { name: event.tool as string }] }
+                  : m
+              )
+            );
+          } else if (eventType === 'tool_result') {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== samMsgId) return m;
+                const calls = [...(m.toolCalls || [])];
+                const idx = calls.findIndex((tc) => tc.name === event.tool && !tc.result);
+                if (idx >= 0) calls[idx] = { ...calls[idx], result: event.result };
+                return { ...m, toolCalls: calls };
+              })
+            );
+          } else if (eventType === 'error') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === samMsgId
+                  ? { ...m, content: m.content + `\n\n**Error:** ${event.message as string}`, isStreaming: false }
+                  : m
+              )
+            );
+          } else if (eventType === 'done') {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === samMsgId ? { ...m, isStreaming: false } : m))
+            );
+          }
+        }
+      }
+
+      // Ensure streaming flag is cleared
+      setMessages((prev) =>
+        prev.map((m) => (m.id === samMsgId ? { ...m, isStreaming: false } : m))
+      );
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === samMsgId
+            ? { ...m, content: m.content || `Failed to get response: ${(err as Error).message}`, isStreaming: false }
+            : m
+        )
+      );
+    } finally {
+      setIsSending(false);
+      abortRef.current = null;
+    }
+  }, [inputValue, isSending, conversationId]);
 
   const handleAskAboutProject = useCallback((name: string) => {
     setSelectedProject(null);
@@ -690,15 +689,15 @@ export function SamPrototype() {
                 <button
                   type="button"
                   onClick={handleSend}
-                  disabled={!inputValue.trim()}
+                  disabled={!inputValue.trim() || isSending}
                   className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                   style={{
-                    background: inputValue.trim() ? 'rgba(60, 180, 120, 0.3)' : 'rgba(255,255,255,0.05)',
+                    background: inputValue.trim() && !isSending ? 'rgba(60, 180, 120, 0.3)' : 'rgba(255,255,255,0.05)',
                     border: '1px solid rgba(60, 180, 120, 0.25)',
-                    ...(inputValue.trim() ? glow.accent : {}),
+                    ...(inputValue.trim() && !isSending ? glow.accent : {}),
                   }}
                 >
-                  <Send className="w-4 h-4" />
+                  {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>
               </div>
             </div>

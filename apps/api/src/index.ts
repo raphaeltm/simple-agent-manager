@@ -8,6 +8,7 @@ export { ProjectOrchestrator } from './durable-objects/project-orchestrator';
 export { TaskRunner } from './durable-objects/task-runner';
 export { TrialCounter } from './durable-objects/trial-counter';
 export { TrialEventBus } from './durable-objects/trial-event-bus';
+export { SamSession } from './durable-objects/sam-session';
 export { TrialOrchestrator } from './durable-objects/trial-orchestrator';
 export type { Env } from './env';
 
@@ -63,6 +64,7 @@ import { deploymentIdentityTokenRoute,gcpDeployCallbackRoute, projectDeploymentR
 import { projectsRoutes } from './routes/projects';
 import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { providersRoutes } from './routes/providers';
+import { samRoutes } from './routes/sam';
 import { smokeTestTokenRoutes } from './routes/smoke-test-tokens';
 import { tasksRoutes } from './routes/tasks';
 import { terminalRoutes } from './routes/terminal';
@@ -416,6 +418,7 @@ app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/usage', usageRoutes);
 app.route('/api/account-map', accountMapRoutes);
 app.route('/api/dashboard', dashboardRoutes);
+app.route('/api/sam', samRoutes);
 app.route('/api/notifications', notificationRoutes);
 app.route('/api', trialRoutes);
 app.route('/api/trial', trialOnboardingRoutes);
