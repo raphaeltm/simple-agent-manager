@@ -51,6 +51,12 @@ import {
   handleUpdateKnowledge,
 } from './knowledge-tools';
 import {
+  handleDownloadLibraryFile,
+  handleListLibraryFiles,
+  handleReplaceLibraryFile,
+  handleUploadToLibrary,
+} from './library-tools';
+import {
   handleCreateMission,
   handleGetHandoff,
   handleGetMission,

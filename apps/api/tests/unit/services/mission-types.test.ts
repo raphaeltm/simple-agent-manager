@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   isMissionStateEntryType,
   isMissionStatus,
@@ -8,6 +6,7 @@ import {
   MISSION_STATUSES,
   SCHEDULER_STATES,
 } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 describe('Mission type guards', () => {
   describe('isMissionStatus', () => {
