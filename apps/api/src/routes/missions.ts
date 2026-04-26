@@ -31,9 +31,11 @@ missionRoutes.get('/', async (c) => {
   if (!projectId) throw errors.badRequest('Missing projectId');
   await requireOwnedProject(db, projectId, auth.user.id);
 
+  const pageSize = Number(c.env.MISSION_LIST_PAGE_SIZE) || DEFAULT_MISSION_LIST_PAGE_SIZE;
+  const maxPageSize = Number(c.env.MISSION_LIST_MAX_PAGE_SIZE) || DEFAULT_MISSION_LIST_MAX_PAGE_SIZE;
   const limit = Math.min(
-    parseInt(c.req.query('limit') ?? '', 10) || DEFAULT_MISSION_LIST_PAGE_SIZE,
-    DEFAULT_MISSION_LIST_MAX_PAGE_SIZE,
+    parseInt(c.req.query('limit') ?? '', 10) || pageSize,
+    maxPageSize,
   );
   const offset = Math.max(parseInt(c.req.query('offset') ?? '', 10) || 0, 0);
   const status = c.req.query('status');

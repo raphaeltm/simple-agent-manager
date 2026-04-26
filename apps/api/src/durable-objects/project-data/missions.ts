@@ -1,21 +1,13 @@
 /**
  * Mission State Entries & Handoff Packets — per-project DO storage for mission orchestration.
  */
-import type { MissionStateEntryType } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_HANDOFF_MAX_ARTIFACT_REFS,
-  DEFAULT_HANDOFF_MAX_FACTS,
-  DEFAULT_HANDOFF_MAX_OPEN_QUESTIONS,
-  DEFAULT_HANDOFF_MAX_SUGGESTED_ACTIONS,
-  DEFAULT_HANDOFF_SUMMARY_MAX_LENGTH,
-  DEFAULT_MISSION_MAX_HANDOFFS,
-  DEFAULT_MISSION_MAX_STATE_ENTRIES,
-  DEFAULT_MISSION_STATE_CONTENT_MAX_LENGTH,
-  DEFAULT_MISSION_STATE_TITLE_MAX_LENGTH,
+import type {
+  HandoffLimits,
+  MissionStateEntryType,
+  MissionStateLimits,
 } from '@simple-agent-manager/shared';
 
-import { parseCountCnt } from './row-schemas';
-import { parseHandoffPacketRow, parseMissionStateEntryRow } from './row-schemas';
+import { parseCountCnt, parseHandoffPacketRow, parseMissionStateEntryRow } from './row-schemas';
 import { generateId } from './types';
 
 // ─── Mission State Entries ──────────────────────────────────────────────────
@@ -27,6 +19,7 @@ export function createMissionStateEntry(
   title: string,
   content: string | null,
   sourceTaskId: string | null,
+  limits: MissionStateLimits,
 ): { id: string; createdAt: number } {
   // Enforce limits
   const count = parseCountCnt(
@@ -36,20 +29,20 @@ export function createMissionStateEntry(
     ).toArray()[0],
     'mission_state_entry_count',
   );
-  if (count >= DEFAULT_MISSION_MAX_STATE_ENTRIES) {
+  if (count >= limits.maxStateEntries) {
     throw new Error(
-      `Maximum state entries per mission (${DEFAULT_MISSION_MAX_STATE_ENTRIES}) reached`,
+      `Maximum state entries per mission (${limits.maxStateEntries}) reached`,
     );
   }
 
-  if (title.length > DEFAULT_MISSION_STATE_TITLE_MAX_LENGTH) {
+  if (title.length > limits.stateTitleMaxLength) {
     throw new Error(
-      `Title exceeds maximum length (${DEFAULT_MISSION_STATE_TITLE_MAX_LENGTH})`,
+      `Title exceeds maximum length (${limits.stateTitleMaxLength})`,
     );
   }
-  if (content && content.length > DEFAULT_MISSION_STATE_CONTENT_MAX_LENGTH) {
+  if (content && content.length > limits.stateContentMaxLength) {
     throw new Error(
-      `Content exceeds maximum length (${DEFAULT_MISSION_STATE_CONTENT_MAX_LENGTH})`,
+      `Content exceeds maximum length (${limits.stateContentMaxLength})`,
     );
   }
 
@@ -98,15 +91,16 @@ export function updateMissionStateEntry(
   sql: SqlStorage,
   entryId: string,
   updates: { title?: string; content?: string | null },
+  limits: MissionStateLimits,
 ) {
-  if (updates.title && updates.title.length > DEFAULT_MISSION_STATE_TITLE_MAX_LENGTH) {
+  if (updates.title && updates.title.length > limits.stateTitleMaxLength) {
     throw new Error(
-      `Title exceeds maximum length (${DEFAULT_MISSION_STATE_TITLE_MAX_LENGTH})`,
+      `Title exceeds maximum length (${limits.stateTitleMaxLength})`,
     );
   }
-  if (updates.content && updates.content.length > DEFAULT_MISSION_STATE_CONTENT_MAX_LENGTH) {
+  if (updates.content && updates.content.length > limits.stateContentMaxLength) {
     throw new Error(
-      `Content exceeds maximum length (${DEFAULT_MISSION_STATE_CONTENT_MAX_LENGTH})`,
+      `Content exceeds maximum length (${limits.stateContentMaxLength})`,
     );
   }
 
@@ -139,7 +133,7 @@ export function deleteMissionStateEntry(sql: SqlStorage, entryId: string): boole
   return true;
 }
 
-// ─── Handoff Packets ────────────────────────────────────────────────────────
+// ─── Handoff Packets ─────────���──────────────────────────────────────────────
 
 export function createHandoffPacket(
   sql: SqlStorage,
@@ -151,6 +145,7 @@ export function createHandoffPacket(
   openQuestions: string[],
   artifactRefs: unknown[],
   suggestedActions: string[],
+  limits: HandoffLimits,
 ): { id: string; createdAt: number } {
   // Enforce limits
   const count = parseCountCnt(
@@ -160,33 +155,33 @@ export function createHandoffPacket(
     ).toArray()[0],
     'handoff_packet_count',
   );
-  if (count >= DEFAULT_MISSION_MAX_HANDOFFS) {
+  if (count >= limits.maxHandoffs) {
     throw new Error(
-      `Maximum handoff packets per mission (${DEFAULT_MISSION_MAX_HANDOFFS}) reached`,
+      `Maximum handoff packets per mission (${limits.maxHandoffs}) reached`,
     );
   }
 
-  if (summary.length > DEFAULT_HANDOFF_SUMMARY_MAX_LENGTH) {
+  if (summary.length > limits.summaryMaxLength) {
     throw new Error(
-      `Summary exceeds maximum length (${DEFAULT_HANDOFF_SUMMARY_MAX_LENGTH})`,
+      `Summary exceeds maximum length (${limits.summaryMaxLength})`,
     );
   }
-  if (facts.length > DEFAULT_HANDOFF_MAX_FACTS) {
-    throw new Error(`Maximum facts per handoff (${DEFAULT_HANDOFF_MAX_FACTS}) exceeded`);
+  if (facts.length > limits.maxFacts) {
+    throw new Error(`Maximum facts per handoff (${limits.maxFacts}) exceeded`);
   }
-  if (openQuestions.length > DEFAULT_HANDOFF_MAX_OPEN_QUESTIONS) {
+  if (openQuestions.length > limits.maxOpenQuestions) {
     throw new Error(
-      `Maximum open questions per handoff (${DEFAULT_HANDOFF_MAX_OPEN_QUESTIONS}) exceeded`,
+      `Maximum open questions per handoff (${limits.maxOpenQuestions}) exceeded`,
     );
   }
-  if (artifactRefs.length > DEFAULT_HANDOFF_MAX_ARTIFACT_REFS) {
+  if (artifactRefs.length > limits.maxArtifactRefs) {
     throw new Error(
-      `Maximum artifact refs per handoff (${DEFAULT_HANDOFF_MAX_ARTIFACT_REFS}) exceeded`,
+      `Maximum artifact refs per handoff (${limits.maxArtifactRefs}) exceeded`,
     );
   }
-  if (suggestedActions.length > DEFAULT_HANDOFF_MAX_SUGGESTED_ACTIONS) {
+  if (suggestedActions.length > limits.maxSuggestedActions) {
     throw new Error(
-      `Maximum suggested actions per handoff (${DEFAULT_HANDOFF_MAX_SUGGESTED_ACTIONS}) exceeded`,
+      `Maximum suggested actions per handoff (${limits.maxSuggestedActions}) exceeded`,
     );
   }
 

@@ -6,6 +6,11 @@
  *
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
+import {
+  resolveHandoffLimits,
+  resolveMissionStateLimits,
+} from '@simple-agent-manager/shared';
+
 import type { ProjectData } from '../durable-objects/project-data';
 import type { Env } from '../env';
 
@@ -722,7 +727,8 @@ export async function createMissionStateEntry(
   title: string, content: string | null, sourceTaskId: string | null,
 ) {
   const stub = await getStub(env, projectId);
-  return stub.createMissionStateEntry(missionId, entryType, title, content, sourceTaskId);
+  const limits = resolveMissionStateLimits(env);
+  return stub.createMissionStateEntry(missionId, entryType, title, content, sourceTaskId, limits);
 }
 
 export async function getMissionStateEntries(
@@ -742,7 +748,8 @@ export async function updateMissionStateEntry(
   updates: { title?: string; content?: string | null },
 ) {
   const stub = await getStub(env, projectId);
-  return stub.updateMissionStateEntry(entryId, updates);
+  const limits = resolveMissionStateLimits(env);
+  return stub.updateMissionStateEntry(entryId, updates, limits);
 }
 
 export async function deleteMissionStateEntry(env: Env, projectId: string, entryId: string) {
@@ -755,7 +762,8 @@ export async function createHandoffPacket(
   summary: string, facts: unknown[], openQuestions: string[], artifactRefs: unknown[], suggestedActions: string[],
 ) {
   const stub = await getStub(env, projectId);
-  return stub.createHandoffPacket(missionId, fromTaskId, toTaskId, summary, facts, openQuestions, artifactRefs, suggestedActions);
+  const limits = resolveHandoffLimits(env);
+  return stub.createHandoffPacket(missionId, fromTaskId, toTaskId, summary, facts, openQuestions, artifactRefs, suggestedActions, limits);
 }
 
 export async function getHandoffPackets(env: Env, projectId: string, missionId: string) {

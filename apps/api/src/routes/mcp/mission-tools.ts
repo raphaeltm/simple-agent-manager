@@ -5,9 +5,7 @@
  * State entries and handoff packets live in ProjectData DO (per-project, high-write).
  */
 import {
-  DEFAULT_MISSION_DESCRIPTION_MAX_LENGTH,
   DEFAULT_MISSION_MAX_PER_PROJECT,
-  DEFAULT_MISSION_TITLE_MAX_LENGTH,
   isMissionStateEntryType,
   MISSION_STATE_ENTRY_TYPES,
 } from '@simple-agent-manager/shared';
@@ -31,13 +29,16 @@ export async function handleCreateMission(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
+  const titleMaxLen = Number(env.MISSION_TITLE_MAX_LENGTH) || 200;
+  const descMaxLen = Number(env.MISSION_DESCRIPTION_MAX_LENGTH) || 5000;
+
   const title = typeof params.title === 'string'
-    ? sanitizeUserInput(params.title.trim()).slice(0, DEFAULT_MISSION_TITLE_MAX_LENGTH)
+    ? sanitizeUserInput(params.title.trim()).slice(0, titleMaxLen)
     : '';
   if (!title) return jsonRpcError(requestId, INVALID_PARAMS, 'title is required');
 
   const description = typeof params.description === 'string'
-    ? sanitizeUserInput(params.description.trim()).slice(0, DEFAULT_MISSION_DESCRIPTION_MAX_LENGTH)
+    ? sanitizeUserInput(params.description.trim()).slice(0, descMaxLen)
     : null;
 
   const budgetConfig = params.budgetConfig && typeof params.budgetConfig === 'object'
@@ -127,8 +128,10 @@ export async function handlePublishMissionState(
       `Invalid entryType. Valid: ${MISSION_STATE_ENTRY_TYPES.join(', ')}`);
   }
 
+  const stateTitleMaxLen = Number(env.MISSION_STATE_TITLE_MAX_LENGTH) || 200;
+
   const title = typeof params.title === 'string'
-    ? sanitizeUserInput(params.title.trim()).slice(0, DEFAULT_MISSION_TITLE_MAX_LENGTH)
+    ? sanitizeUserInput(params.title.trim()).slice(0, stateTitleMaxLen)
     : '';
   if (!title) return jsonRpcError(requestId, INVALID_PARAMS, 'title is required');
 

@@ -241,6 +241,7 @@ export {
 } from './trial-orchestrator';
 
 // Missions (Phase 2: Orchestration Primitives)
+export type { HandoffLimits, MissionStateLimits } from './missions';
 export {
   DEFAULT_HANDOFF_MAX_ARTIFACT_REFS,
   DEFAULT_HANDOFF_MAX_FACTS,
@@ -256,6 +257,8 @@ export {
   DEFAULT_MISSION_STATE_CONTENT_MAX_LENGTH,
   DEFAULT_MISSION_STATE_TITLE_MAX_LENGTH,
   DEFAULT_MISSION_TITLE_MAX_LENGTH,
+  resolveHandoffLimits,
+  resolveMissionStateLimits,
 } from './missions';
 
 // Notifications

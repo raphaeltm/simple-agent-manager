@@ -44,3 +44,54 @@ export const DEFAULT_MISSION_LIST_PAGE_SIZE = 20;
 
 /** Maximum page size for mission list queries. Override via MISSION_LIST_MAX_PAGE_SIZE env var. */
 export const DEFAULT_MISSION_LIST_MAX_PAGE_SIZE = 100;
+
+// =============================================================================
+// Resolved Limits (threaded from env → service layer → DO pure functions)
+// =============================================================================
+
+export interface MissionStateLimits {
+  maxStateEntries: number;
+  stateTitleMaxLength: number;
+  stateContentMaxLength: number;
+}
+
+export interface HandoffLimits {
+  maxHandoffs: number;
+  summaryMaxLength: number;
+  maxFacts: number;
+  maxOpenQuestions: number;
+  maxArtifactRefs: number;
+  maxSuggestedActions: number;
+}
+
+/** Resolve mission state limits from env vars, falling back to defaults. */
+export function resolveMissionStateLimits(env: {
+  MISSION_MAX_STATE_ENTRIES?: string;
+  MISSION_STATE_TITLE_MAX_LENGTH?: string;
+  MISSION_STATE_CONTENT_MAX_LENGTH?: string;
+}): MissionStateLimits {
+  return {
+    maxStateEntries: Number(env.MISSION_MAX_STATE_ENTRIES) || DEFAULT_MISSION_MAX_STATE_ENTRIES,
+    stateTitleMaxLength: Number(env.MISSION_STATE_TITLE_MAX_LENGTH) || DEFAULT_MISSION_STATE_TITLE_MAX_LENGTH,
+    stateContentMaxLength: Number(env.MISSION_STATE_CONTENT_MAX_LENGTH) || DEFAULT_MISSION_STATE_CONTENT_MAX_LENGTH,
+  };
+}
+
+/** Resolve handoff limits from env vars, falling back to defaults. */
+export function resolveHandoffLimits(env: {
+  MISSION_MAX_HANDOFFS?: string;
+  HANDOFF_SUMMARY_MAX_LENGTH?: string;
+  HANDOFF_MAX_FACTS?: string;
+  HANDOFF_MAX_OPEN_QUESTIONS?: string;
+  HANDOFF_MAX_ARTIFACT_REFS?: string;
+  HANDOFF_MAX_SUGGESTED_ACTIONS?: string;
+}): HandoffLimits {
+  return {
+    maxHandoffs: Number(env.MISSION_MAX_HANDOFFS) || DEFAULT_MISSION_MAX_HANDOFFS,
+    summaryMaxLength: Number(env.HANDOFF_SUMMARY_MAX_LENGTH) || DEFAULT_HANDOFF_SUMMARY_MAX_LENGTH,
+    maxFacts: Number(env.HANDOFF_MAX_FACTS) || DEFAULT_HANDOFF_MAX_FACTS,
+    maxOpenQuestions: Number(env.HANDOFF_MAX_OPEN_QUESTIONS) || DEFAULT_HANDOFF_MAX_OPEN_QUESTIONS,
+    maxArtifactRefs: Number(env.HANDOFF_MAX_ARTIFACT_REFS) || DEFAULT_HANDOFF_MAX_ARTIFACT_REFS,
+    maxSuggestedActions: Number(env.HANDOFF_MAX_SUGGESTED_ACTIONS) || DEFAULT_HANDOFF_MAX_SUGGESTED_ACTIONS,
+  };
+}
