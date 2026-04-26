@@ -331,7 +331,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('resume_mission');
       expect(toolNames).toContain('cancel_mission');
       expect(toolNames).toContain('override_task_state');
-      expect(body.result.tools).toHaveLength(76);
+      expect(body.result.tools).toHaveLength(81);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

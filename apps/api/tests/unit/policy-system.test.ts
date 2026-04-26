@@ -7,8 +7,6 @@
  * - Policy limits resolution from env vars
  * - Configurable defaults via env
  */
-import { describe, expect, it } from 'vitest';
-
 import {
   isPolicyCategory,
   isPolicySource,
@@ -17,6 +15,7 @@ import {
   POLICY_SOURCES,
   resolvePolicyLimits,
 } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 import {
   parsePolicyRow,
