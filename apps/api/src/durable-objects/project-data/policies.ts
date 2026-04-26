@@ -111,33 +111,18 @@ export function updatePolicy(
   if (!existing) return false;
 
   const now = Date.now();
-  const setClauses: string[] = ['updated_at = ?'];
-  const params: (string | number)[] = [now];
 
-  if (updates.title !== undefined) {
-    setClauses.push('title = ?');
-    params.push(updates.title);
-  }
-  if (updates.content !== undefined) {
-    setClauses.push('content = ?');
-    params.push(updates.content);
-  }
-  if (updates.category !== undefined) {
-    setClauses.push('category = ?');
-    params.push(updates.category);
-  }
-  if (updates.active !== undefined) {
-    setClauses.push('active = ?');
-    params.push(updates.active ? 1 : 0);
-  }
-  if (updates.confidence !== undefined) {
-    setClauses.push('confidence = ?');
-    params.push(updates.confidence);
-  }
-
+  // Update all columns using COALESCE-style approach to avoid dynamic SQL.
+  // Each field falls back to its existing value when not provided.
   sql.exec(
-    `UPDATE project_policies SET ${setClauses.join(', ')} WHERE id = ?`,
-    ...params, policyId,
+    'UPDATE project_policies SET title = ?, content = ?, category = ?, active = ?, confidence = ?, updated_at = ? WHERE id = ?',
+    updates.title ?? existing.title,
+    updates.content ?? existing.content,
+    updates.category ?? existing.category,
+    updates.active !== undefined ? (updates.active ? 1 : 0) : (existing.active ? 1 : 0),
+    updates.confidence ?? existing.confidence,
+    now,
+    policyId,
   );
   return true;
 }
