@@ -66,6 +66,14 @@ import {
   handlePublishMissionState,
 } from './mission-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
+import {
+  handleCancelMission as handleCancelMissionOrch,
+  handleGetOrchestratorStatus,
+  handleGetSchedulingQueue,
+  handleOverrideTaskState,
+  handlePauseMission as handlePauseMissionOrch,
+  handleResumeMission as handleResumeMissionOrch,
+} from './orchestrator-lifecycle-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
   handleAddDependency,
@@ -342,6 +350,19 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handlePublishHandoff(requestId, toolArgs, tokenData, c.env));
         case 'get_handoff':
           return c.json(await handleGetHandoff(requestId, toolArgs, tokenData, c.env));
+        // ─── Orchestrator lifecycle tools ──────────────────────────────
+        case 'get_orchestrator_status':
+          return c.json(await handleGetOrchestratorStatus(requestId, toolArgs, tokenData, c.env));
+        case 'get_scheduling_queue':
+          return c.json(await handleGetSchedulingQueue(requestId, toolArgs, tokenData, c.env));
+        case 'pause_mission':
+          return c.json(await handlePauseMissionOrch(requestId, toolArgs, tokenData, c.env));
+        case 'resume_mission':
+          return c.json(await handleResumeMissionOrch(requestId, toolArgs, tokenData, c.env));
+        case 'cancel_mission':
+          return c.json(await handleCancelMissionOrch(requestId, toolArgs, tokenData, c.env));
+        case 'override_task_state':
+          return c.json(await handleOverrideTaskState(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }
