@@ -3,6 +3,71 @@
  */
 
 export const ORCHESTRATION_TOOLS = [
+  // ─── Durable messaging tools ───────────────────────────────────────
+  {
+    name: 'send_durable_message',
+    description:
+      'Send a durable message to a child task\'s agent. The message is persisted in the mailbox and will be delivered ' +
+      'even if the child agent is busy. Message classes control urgency: "notify" (best-effort), "deliver" (durable, ack optional), ' +
+      '"interrupt" (preempts current work), "preempt_and_replan" (requires ack + replanning), ' +
+      '"shutdown_with_final_prompt" (delivers final message, then terminates the agent). ' +
+      'Returns the message ID and delivery state.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        targetTaskId: {
+          type: 'string',
+          description: 'The child task ID to send the message to',
+        },
+        message: {
+          type: 'string',
+          description: 'The message content to deliver (max 32768 chars)',
+        },
+        messageClass: {
+          type: 'string',
+          enum: ['notify', 'deliver', 'interrupt', 'preempt_and_replan', 'shutdown_with_final_prompt'],
+          description: 'Message urgency class (default: "deliver")',
+        },
+        metadata: {
+          type: 'object',
+          description: 'Optional metadata to attach to the message (JSON object)',
+        },
+      },
+      required: ['targetTaskId', 'message'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_pending_messages',
+    description:
+      'Get all unacknowledged messages for the calling agent\'s session, ordered by urgency ' +
+      '(shutdown_with_final_prompt first, then preempt_and_replan, interrupt, deliver, notify). ' +
+      'Messages are automatically marked as "delivered" when retrieved. ' +
+      'Call this at turn boundaries to check for orchestrator directives.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'ack_message',
+    description:
+      'Acknowledge receipt and processing of a durable message. Required for all message classes except "notify". ' +
+      'Unacknowledged messages will be re-delivered after the ack timeout. ' +
+      'Call this after you have acted on the message content.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        messageId: {
+          type: 'string',
+          description: 'The message ID to acknowledge',
+        },
+      },
+      required: ['messageId'],
+      additionalProperties: false,
+    },
+  },
   // ─── Orchestration tools (agent-to-agent communication & control) ───
   {
     name: 'send_message_to_subtask',

@@ -397,3 +397,53 @@ export function getMailboxStats(sql: SqlStorage): Record<string, number> {
 
   return stats;
 }
+
+// ─── Delivery sweep (alarm-driven) ─────────────────────────────────────────
+
+/**
+ * Run a delivery sweep: expire stale messages, re-queue unacked messages.
+ * Called from the DO alarm handler.
+ */
+export function runDeliverySweep(
+  sql: SqlStorage,
+  defaultAckTimeoutMs: number,
+  maxAttempts: number,
+): { expired: number; requeued: number } {
+  // 1. Expire stale messages (TTL exceeded or max attempts reached)
+  const expired = expireStaleMessages(sql, maxAttempts);
+
+  // 2. Re-queue unacked messages for re-delivery
+  const unacked = getUnackedMessages(sql, defaultAckTimeoutMs);
+  let requeued = 0;
+  for (const msg of unacked) {
+    if (requeueForRedelivery(sql, msg.id)) requeued++;
+  }
+
+  if (expired > 0 || requeued > 0) {
+    log.info('mailbox.delivery_sweep', { expired, requeued });
+  }
+
+  return { expired, requeued };
+}
+
+/**
+ * Compute the next alarm time for the mailbox delivery sweep.
+ * Returns null if no messages need attention.
+ */
+export function computeMailboxAlarmTime(
+  sql: SqlStorage,
+  pollIntervalMs: number,
+): number | null {
+  // Check if there are any queued or delivered messages that need attention
+  const [row] = sql
+    .exec(
+      `SELECT COUNT(*) as cnt FROM session_inbox
+       WHERE delivery_state IN ('queued', 'delivered')`,
+    )
+    .toArray();
+
+  const count = (row as { cnt: number })?.cnt ?? 0;
+  if (count === 0) return null;
+
+  return Date.now() + pollIntervalMs;
+}

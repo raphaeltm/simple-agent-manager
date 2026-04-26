@@ -57,6 +57,7 @@ import {
   handleUploadToLibrary,
 } from './library-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
+import { handleAckMessage, handleGetPendingMessages, handleSendDurableMessage } from './mailbox-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
   handleAddDependency,
@@ -194,6 +195,13 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleRequestHumanInput(requestId, toolArgs, tokenData, c.env));
         case 'dispatch_task':
           return c.json(await handleDispatchTask(requestId, toolArgs, tokenData, c.env));
+        // ─── Durable messaging tools ──────────────────────────────────
+        case 'send_durable_message':
+          return c.json(await handleSendDurableMessage(requestId, toolArgs, tokenData, c.env));
+        case 'get_pending_messages':
+          return c.json(await handleGetPendingMessages(requestId, toolArgs, tokenData, c.env));
+        case 'ack_message':
+          return c.json(await handleAckMessage(requestId, toolArgs, tokenData, c.env));
         case 'send_message_to_subtask':
           return c.json(await handleSendMessageToSubtask(requestId, toolArgs, tokenData, c.env));
         case 'stop_subtask':

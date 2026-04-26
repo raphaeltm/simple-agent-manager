@@ -13,6 +13,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { sendPromptToAgentOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
+import * as projectDataService from '../../services/project-data';
 import {
   ACTIVE_STATUSES,
   getMcpLimits,
@@ -249,12 +250,48 @@ export async function handleSendMessageToSubtask(
 
     // Handle 409 — agent is busy (HostPrompting state)
     if (errorMessage.includes('409')) {
-      log.info('mcp.send_message_to_subtask.agent_busy', {
+      log.info('mcp.send_message_to_subtask.agent_busy_queuing', {
         parentTaskId: tokenData.taskId,
         childTaskId: taskId,
         agentSessionId: agentSession.id,
       });
 
+      // Queue for delivery at next turn boundary instead of returning failure
+      const [ws] = await db
+        .select({ chatSessionId: schema.workspaces.chatSessionId })
+        .from(schema.workspaces)
+        .where(eq(schema.workspaces.id, workspace.id))
+        .limit(1);
+
+      const chatSessionId = ws?.chatSessionId;
+      if (chatSessionId) {
+        try {
+          const msg = await projectDataService.enqueueMailboxMessage(env, resolution.task.projectId, {
+            targetSessionId: chatSessionId,
+            sourceTaskId: tokenData.taskId ?? null,
+            senderType: 'agent',
+            senderId: tokenData.workspaceId,
+            messageClass: 'notify',
+            content: message,
+            metadata: null,
+          });
+
+          return jsonRpcSuccess(requestId, {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ delivered: false, queued: true, messageId: msg.id, reason: 'agent_busy' }),
+            }],
+          });
+        } catch (queueErr) {
+          log.warn('mcp.send_message_to_subtask.queue_fallback_failed', {
+            parentTaskId: tokenData.taskId,
+            childTaskId: taskId,
+            error: queueErr instanceof Error ? queueErr.message : String(queueErr),
+          });
+        }
+      }
+
+      // Fallback: return the old response shape if queuing fails
       return jsonRpcSuccess(requestId, {
         content: [{
           type: 'text',
