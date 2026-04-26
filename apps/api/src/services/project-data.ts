@@ -640,54 +640,10 @@ export async function flagKnowledgeContradiction(
   return stub.flagKnowledgeContradiction(existingObservationId, newObservation, sourceSessionId);
 }
 
-// =========================================================================
-// Project Policies (Phase 4: Policy Propagation)
-// =========================================================================
+// ── Project Policies (Phase 4: Policy Propagation) ───────────────────────
+export { createPolicy, getActivePolicies, getPolicy, listPolicies, removePolicy, updatePolicy } from './project-data-policies';
 
-import type { PolicyCategory, PolicySource } from '@simple-agent-manager/shared';
-
-export async function createPolicy(
-  env: Env, projectId: string,
-  category: PolicyCategory, title: string, content: string,
-  source: PolicySource, sourceSessionId: string | null, confidence: number,
-) {
-  const stub = await getStub(env, projectId);
-  return stub.createPolicy(category, title, content, source, sourceSessionId, confidence);
-}
-
-export async function getPolicy(env: Env, projectId: string, policyId: string) {
-  const stub = await getStub(env, projectId);
-  return stub.getPolicy(policyId);
-}
-
-export async function listPolicies(
-  env: Env, projectId: string, category: string | null, activeOnly: boolean, limit: number, offset: number,
-) {
-  const stub = await getStub(env, projectId);
-  return stub.listPolicies(category, activeOnly, limit, offset);
-}
-
-export async function updatePolicy(
-  env: Env, projectId: string, policyId: string,
-  updates: { title?: string; content?: string; category?: PolicyCategory; active?: boolean; confidence?: number },
-) {
-  const stub = await getStub(env, projectId);
-  return stub.updatePolicy(policyId, updates);
-}
-
-export async function removePolicy(env: Env, projectId: string, policyId: string) {
-  const stub = await getStub(env, projectId);
-  return stub.removePolicy(policyId);
-}
-
-export async function getActivePolicies(env: Env, projectId: string) {
-  const stub = await getStub(env, projectId);
-  return stub.getActivePolicies();
-}
-
-// =========================================================================
-// Agent Mailbox (Durable Messaging)
-// =========================================================================
+// ── Agent Mailbox (Durable Messaging) ────────────────────────────────────
 
 import type { AgentMailboxMessage, DeliveryState, MessageClass } from '@simple-agent-manager/shared';
 
@@ -761,11 +717,7 @@ export async function getMailboxStats(
   return stub.getMailboxStats();
 }
 
-// =========================================================================
-// WebSocket
-// =========================================================================
-// Mission State & Handoffs
-// =========================================================================
+// ── Mission State & Handoffs ──────────────────────────────────────────────
 
 export async function createMissionStateEntry(
   env: Env, projectId: string, missionId: string, entryType: string,
