@@ -80,7 +80,7 @@ export const ORCHESTRATOR_LIFECYCLE_TOOLS = [
     description:
       'Override a task\'s scheduler state manually. Use when the orchestrator\'s computed state ' +
       'is incorrect or when you need to force a task into a specific state. ' +
-      'Allowed states: schedulable, blocked_human, cancelled, failed.',
+      'Allowed states: schedulable, blocked_human, blocked_resource, cancelled.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -95,7 +95,7 @@ export const ORCHESTRATOR_LIFECYCLE_TOOLS = [
         newState: {
           type: 'string',
           description: 'The new scheduler state',
-          enum: ['schedulable', 'blocked_human', 'cancelled', 'failed'],
+          enum: ['schedulable', 'blocked_human', 'blocked_resource', 'cancelled'],
         },
         reason: {
           type: 'string',
