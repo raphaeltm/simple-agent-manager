@@ -66,6 +66,12 @@ import {
   handlePublishMissionState,
 } from './mission-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
+import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
+import {
+  handleAddDependency,
+  handleRemovePendingSubtask,
+  handleRetrySubtask,
+} from './orchestration-tools';
 import {
   handleCancelMission as handleCancelMissionOrch,
   handleGetOrchestratorStatus,
@@ -74,12 +80,6 @@ import {
   handlePauseMission as handlePauseMissionOrch,
   handleResumeMission as handleResumeMissionOrch,
 } from './orchestrator-lifecycle-tools';
-import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
-import {
-  handleAddDependency,
-  handleRemovePendingSubtask,
-  handleRetrySubtask,
-} from './orchestration-tools';
 import {
   handleCreateAgentProfile,
   handleDeleteAgentProfile,
