@@ -39,6 +39,7 @@ import { Projects } from './pages/Projects';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
+import { SamPrototype } from './pages/SamPrototype';
 import { Settings } from './pages/Settings';
 import { SettingsAgents } from './pages/SettingsAgents';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
@@ -81,6 +82,8 @@ export default function App() {
           <Route path="/try/cap-exceeded" element={<TryCapExceeded />} />
           <Route path="/try/waitlist/thanks" element={<TryWaitlistThanks />} />
           <Route path="/try/:trialId" element={<TryDiscovery />} />
+          {/* SAM prototype — public, no auth */}
+          <Route path="/sam" element={<SamPrototype />} />
           {/* Harness for Playwright audits — mounts trial components with mock data */}
           <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
           {/* Protected routes with AppShell (persistent navigation) */}

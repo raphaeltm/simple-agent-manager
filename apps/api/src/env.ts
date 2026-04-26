@@ -45,6 +45,7 @@ export interface Env {
   TRIAL_EVENT_BUS: DurableObjectNamespace;
   TRIAL_ORCHESTRATOR: DurableObjectNamespace;
   PROJECT_ORCHESTRATOR: DurableObjectNamespace;
+  SAM_SESSION: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -564,4 +565,15 @@ export interface Env {
   ARTIFACTS_TOKEN_TTL_SECONDS?: string;
   /** Max Artifacts repos per user (default: 50). */
   ARTIFACTS_MAX_REPOS_PER_USER?: string;
+  // SAM Agent (Top-Level Agent) configuration
+  SAM_MODEL?: string;                              // LLM model (default: claude-sonnet-4-20250514)
+  SAM_MAX_TOKENS?: string;                         // Max output tokens per turn (default: 4096)
+  SAM_MAX_TURNS?: string;                          // Max tool-use loop iterations (default: 20)
+  SAM_SYSTEM_PROMPT_APPEND?: string;               // Additional system prompt text
+  SAM_RATE_LIMIT_RPM?: string;                     // Max messages per minute per user (default: 30)
+  SAM_RATE_LIMIT_WINDOW_SECONDS?: string;          // Rate limit window in seconds (default: 60)
+  SAM_MAX_CONVERSATIONS?: string;                  // Max conversations per user (default: 100)
+  SAM_MAX_MESSAGES_PER_CONVERSATION?: string;      // Max messages per conversation (default: 500)
+  SAM_CONVERSATION_CONTEXT_WINDOW?: string;        // Messages sent to LLM per turn (default: 50)
+  SAM_AIG_SOURCE?: string;                         // AI Gateway metadata source tag (default: sam)
 }

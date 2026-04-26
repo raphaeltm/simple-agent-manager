@@ -138,6 +138,11 @@ class_name = "TrialOrchestrator"
 name = "PROJECT_ORCHESTRATOR"
 class_name = "ProjectOrchestrator"
 
+# Durable Object for per-user SAM agent session (one DO per userId)
+[[durable_objects.bindings]]
+name = "SAM_SESSION"
+class_name = "SamSession"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -177,6 +182,10 @@ new_sqlite_classes = ["TrialOrchestrator"]  # Alarm-driven trial provisioning; S
 [[migrations]]
 tag = "v10"
 new_sqlite_classes = ["ProjectOrchestrator"]  # Per-project orchestration brain; SQLite-backed for scheduling state and decision log
+
+[[migrations]]
+tag = "v11"
+new_sqlite_classes = ["SamSession"]  # Per-user SAM agent; SQLite-backed for conversation history
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
