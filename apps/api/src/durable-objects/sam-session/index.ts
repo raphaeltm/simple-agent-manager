@@ -101,6 +101,20 @@ export class SamSession extends DurableObject<AppEnv> {
         return await this.handleChat(request);
       }
 
+      // GET /debug — diagnostic env check
+      if (method === 'GET' && path === '/debug') {
+        const env = this.env as unknown as Record<string, unknown>;
+        const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
+        return new Response(JSON.stringify({
+          model: config.model,
+          hasApiToken: !!env.CF_API_TOKEN,
+          hasAccountId: !!env.CF_ACCOUNT_ID,
+          hasGatewayId: !!env.AI_GATEWAY_ID,
+          accountIdLen: typeof env.CF_ACCOUNT_ID === 'string' ? env.CF_ACCOUNT_ID.length : 0,
+          gatewayIdLen: typeof env.AI_GATEWAY_ID === 'string' ? (env.AI_GATEWAY_ID as string).length : 0,
+        }), { headers: { 'content-type': 'application/json' } });
+      }
+
       // GET /ping — diagnostic SSE test
       if (method === 'GET' && path === '/ping') {
         const { readable, writable } = new TransformStream<Uint8Array>();

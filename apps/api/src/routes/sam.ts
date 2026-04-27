@@ -55,6 +55,15 @@ app.post('/chat', async (c) => {
   });
 });
 
+/** GET /debug — diagnostic env check. */
+app.get('/debug', async (c) => {
+  const userId = c.get('auth').user.id;
+  const stub = getSamSession(c.env, userId);
+  const response = await stub.fetch('https://sam-session/debug');
+  const data = await response.json();
+  return c.json(data);
+});
+
 /** GET /ping — diagnostic SSE test. */
 app.get('/ping', async (c) => {
   const userId = c.get('auth').user.id;
