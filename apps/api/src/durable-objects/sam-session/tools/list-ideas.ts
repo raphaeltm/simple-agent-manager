@@ -5,6 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
+import type { Env } from '../../../env';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 const DEFAULT_LIMIT = 20;
@@ -40,16 +41,17 @@ export async function listIdeas(
   input: { projectId: string; status?: string; limit?: number },
   ctx: ToolContext,
 ): Promise<unknown> {
-  const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
+  const env = ctx.env as unknown as Env;
+  const db = drizzle(env.DATABASE, { schema });
 
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
   }
 
-  const maxLimit = Number((ctx.env as Record<string, unknown>).SAM_IDEA_LIST_MAX_LIMIT) || DEFAULT_MAX_LIMIT;
+  const maxLimit = Number(env.SAM_IDEA_LIST_MAX_LIMIT) || DEFAULT_MAX_LIMIT;
   const limit = Math.min(Math.max(1, Math.round(input.limit || DEFAULT_LIMIT)), maxLimit);
   const status = input.status?.trim() || 'draft';
-  const snippetLen = Number((ctx.env as Record<string, unknown>).SAM_IDEA_SNIPPET_LENGTH) || DEFAULT_SNIPPET_LENGTH;
+  const snippetLen = Number(env.SAM_IDEA_SNIPPET_LENGTH) || DEFAULT_SNIPPET_LENGTH;
 
   // Verify ownership
   const [project] = await db
