@@ -165,15 +165,13 @@ describe('search_knowledge', () => {
   });
 
   it('searches all projects when projectId omitted', async () => {
-    // Cross-project search: first raw() call is the user projects query (.all()),
-    // so the queue must start with all-projects rows.
     const projects = [
       { id: 'proj-1', name: 'Project 1' },
       { id: 'proj-2', name: 'Project 2' },
     ];
     const db = mockD1({
       rawResults: [
-        projects.map(p => [p.id, p.name]), // user projects query
+        projects.map(p => [p.id, p.name]),
       ],
     });
     const ctx: ToolContext = {
@@ -189,13 +187,59 @@ describe('search_knowledge', () => {
       userId: 'user-123',
     };
 
-    mockSearchKnowledgeObservations.mockResolvedValue([
-      { id: 'obs-1', content: 'result', confidence: 0.8, entityName: 'E1', entityType: 'context' },
-    ]);
+    mockSearchKnowledgeObservations
+      .mockResolvedValueOnce([{ id: 'obs-1', content: 'from proj-1', confidence: 0.9, entityName: 'E1', entityType: 'context' }])
+      .mockResolvedValueOnce([{ id: 'obs-2', content: 'from proj-2', confidence: 0.5, entityName: 'E2', entityType: 'preference' }]);
 
     const result = await searchKnowledge({ query: 'test' }, ctx) as Record<string, unknown>;
     expect(result.projectsSearched).toBe(2);
     expect(mockSearchKnowledgeObservations).toHaveBeenCalledTimes(2);
+
+    // C-1 fix: verify each project was searched with distinct projectId
+    const calls = mockSearchKnowledgeObservations.mock.calls;
+    const searchedProjectIds = calls.map((c: unknown[]) => c[1]);
+    expect(searchedProjectIds).toContain('proj-1');
+    expect(searchedProjectIds).toContain('proj-2');
+
+    // Verify results sorted by confidence descending
+    const results = result.results as Array<Record<string, unknown>>;
+    expect(results.length).toBe(2);
+    expect((results[0] as Record<string, unknown>).confidence).toBe(0.9);
+    expect((results[1] as Record<string, unknown>).confidence).toBe(0.5);
+  });
+
+  it('continues searching when one project DO fails', async () => {
+    // C-2 fix: per-project failure should be swallowed, other results returned
+    const projects = [
+      { id: 'proj-ok', name: 'OK Project' },
+      { id: 'proj-fail', name: 'Failing Project' },
+    ];
+    const db = mockD1({
+      rawResults: [
+        projects.map(p => [p.id, p.name]),
+      ],
+    });
+    const ctx: ToolContext = {
+      env: {
+        DATABASE: db as unknown,
+        PROJECT_DATA: {
+          idFromName: vi.fn().mockReturnValue('do-id'),
+          get: vi.fn().mockReturnValue({
+            ensureProjectId: vi.fn().mockResolvedValue(undefined),
+          }),
+        },
+      } as Record<string, unknown>,
+      userId: 'user-123',
+    };
+
+    mockSearchKnowledgeObservations
+      .mockResolvedValueOnce([{ id: 'obs-1', content: 'good result', confidence: 0.8, entityName: 'E1', entityType: 'context' }])
+      .mockRejectedValueOnce(new Error('DO unavailable'));
+
+    const result = await searchKnowledge({ query: 'test' }, ctx) as Record<string, unknown>;
+    expect(result.projectsSearched).toBe(2);
+    const results = result.results as unknown[];
+    expect(results.length).toBe(1);
   });
 
   it('is registered in toolHandlers via executeTool', async () => {
@@ -329,6 +373,55 @@ describe('add_knowledge', () => {
     expect(mockAddKnowledgeObservation).toHaveBeenCalledTimes(2);
   });
 
+  it('defaults sourceType to explicit with confidence 0.9', async () => {
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+    mockGetKnowledgeEntityByName.mockResolvedValue(null);
+    mockCreateKnowledgeEntity.mockResolvedValue({ id: 'ent-1', createdAt: 1234 });
+    mockAddKnowledgeObservation.mockResolvedValue({ id: 'obs-1', createdAt: 1234 });
+
+    const result = await addKnowledge(
+      { projectId: 'proj-1', entityName: 'Test', entityType: 'context', observations: ['fact'] },
+      ctx,
+    ) as Record<string, unknown>;
+
+    expect(result.sourceType).toBe('explicit');
+    expect(result.confidence).toBe(0.9);
+    // Verify the observation was created with correct confidence and sourceType
+    expect(mockAddKnowledgeObservation).toHaveBeenCalledWith(
+      expect.anything(), 'proj-1', 'ent-1', 'fact', 0.9, 'explicit', null,
+    );
+  });
+
+  it('uses inferred sourceType with confidence 0.7', async () => {
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+    mockGetKnowledgeEntityByName.mockResolvedValue(null);
+    mockCreateKnowledgeEntity.mockResolvedValue({ id: 'ent-1', createdAt: 1234 });
+    mockAddKnowledgeObservation.mockResolvedValue({ id: 'obs-1', createdAt: 1234 });
+
+    const result = await addKnowledge(
+      { projectId: 'proj-1', entityName: 'Test', entityType: 'context', observations: ['inferred fact'], sourceType: 'inferred' },
+      ctx,
+    ) as Record<string, unknown>;
+
+    expect(result.sourceType).toBe('inferred');
+    expect(result.confidence).toBe(0.7);
+  });
+
+  it('skips whitespace-only observations', async () => {
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+    mockGetKnowledgeEntityByName.mockResolvedValue(null);
+    mockCreateKnowledgeEntity.mockResolvedValue({ id: 'ent-1', createdAt: 1234 });
+    mockAddKnowledgeObservation.mockResolvedValue({ id: 'obs-1', createdAt: 1234 });
+
+    const result = await addKnowledge(
+      { projectId: 'proj-1', entityName: 'Test', entityType: 'context', observations: ['   ', 'real fact', ''] },
+      ctx,
+    ) as Record<string, unknown>;
+
+    expect(result.observationsAdded).toBe(1);
+    expect(mockAddKnowledgeObservation).toHaveBeenCalledTimes(1);
+  });
+
   it('reuses existing entity', async () => {
     const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
     mockGetKnowledgeEntityByName.mockResolvedValue({ id: 'ent-existing' });
@@ -389,6 +482,24 @@ describe('list_policies', () => {
     expect(result.projectId).toBe('proj-1');
     expect(result.total).toBe(1);
     expect(mockListPoliciesFn).toHaveBeenCalled();
+  });
+
+  it('passes valid category filter to service', async () => {
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+    mockListPoliciesFn.mockResolvedValue({ policies: [], total: 0 });
+
+    await listPolicies({ projectId: 'proj-1', category: 'rule' }, ctx);
+    const calls = mockListPoliciesFn.mock.calls;
+    expect(calls[0][2]).toBe('rule'); // category arg
+  });
+
+  it('ignores invalid category and passes null', async () => {
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+    mockListPoliciesFn.mockResolvedValue({ policies: [], total: 0 });
+
+    await listPolicies({ projectId: 'proj-1', category: 'bogus' }, ctx);
+    const calls = mockListPoliciesFn.mock.calls;
+    expect(calls[0][2]).toBeNull(); // category arg
   });
 
   it('is registered in toolHandlers via executeTool', async () => {
@@ -468,7 +579,13 @@ describe('add_policy', () => {
     expect(result.id).toBe('pol-new');
     expect(result.category).toBe('rule');
     expect(result.title).toBe('No force push');
-    expect(mockCreatePolicy).toHaveBeenCalled();
+    expect(result.createdAt).toBe('2026-04-27T00:00:00Z');
+    // H-3 fix: verify createPolicy called with correct positional args
+    // createPolicy(env, projectId, category, title, content, source, sourceSessionId, confidence)
+    expect(mockCreatePolicy).toHaveBeenCalledWith(
+      expect.anything(), 'proj-1', 'rule', 'No force push', 'Never force push to main',
+      'explicit', null, expect.any(Number),
+    );
   });
 
   it('is registered in toolHandlers via executeTool', async () => {
