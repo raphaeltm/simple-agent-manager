@@ -52,7 +52,7 @@ export async function sendMessageToSubtask(
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
   const taskId = input.taskId.trim();
-  const maxLen = Number((env as unknown as Record<string, unknown>).SAM_MESSAGE_MAX_LENGTH) || DEFAULT_MAX_MESSAGE_LENGTH;
+  const maxLen = Number(env.SAM_MESSAGE_MAX_LENGTH) || DEFAULT_MAX_MESSAGE_LENGTH;
   const message = input.message.trim().slice(0, maxLen);
 
   // Look up task with ownership verification
