@@ -17,22 +17,22 @@ SAM currently lacks knowledge graph and policy management tools. Users cannot as
 
 ## Implementation Checklist
 
-- [ ] Create `tools/search-knowledge.ts` — search knowledge graph across one or all projects
-- [ ] Create `tools/get-project-knowledge.ts` — list knowledge entities in a project
-- [ ] Create `tools/add-knowledge.ts` — add knowledge entity/observation to a project
-- [ ] Create `tools/list-policies.ts` — list active policies for a project
-- [ ] Create `tools/add-policy.ts` — add a policy to a project
-- [ ] Register all 5 tools in `tools/index.ts` (SAM_TOOLS array + toolHandlers map)
-- [ ] Update `SAM_SYSTEM_PROMPT` in `agent-loop.ts` with Knowledge and Policy tool descriptions
-- [ ] Write unit tests covering parameter validation, ownership rejection, cross-project search, and executeTool dispatch
+- [x] Create `tools/search-knowledge.ts` — search knowledge graph across one or all projects
+- [x] Create `tools/get-project-knowledge.ts` — list knowledge entities in a project
+- [x] Create `tools/add-knowledge.ts` — add knowledge entity/observation to a project
+- [x] Create `tools/list-policies.ts` — list active policies for a project
+- [x] Create `tools/add-policy.ts` — add a policy to a project
+- [x] Register all 5 tools in `tools/index.ts` (SAM_TOOLS array + toolHandlers map)
+- [x] Update `SAM_SYSTEM_PROMPT` in `agent-loop.ts` with Knowledge and Policy tool descriptions
+- [x] Write unit tests covering parameter validation, ownership rejection, cross-project search, and executeTool dispatch
 
 ## Acceptance Criteria
 
-- [ ] All 5 tools are registered and callable via `executeTool`
-- [ ] All tools verify project ownership via D1 before accessing ProjectData DO
-- [ ] `search_knowledge` supports cross-project search when `projectId` is omitted (queries all user projects)
-- [ ] `add_knowledge` creates entity if not existing, adds observation
-- [ ] `add_policy` validates category enum
-- [ ] Unit tests cover: missing params, invalid params, unowned project rejection, successful execution, cross-project search, executeTool dispatch
-- [ ] System prompt updated with Knowledge and Policy tool categories
-- [ ] All quality gates pass (lint, typecheck, test, build)
+- [x] All 5 tools are registered and callable via `executeTool`
+- [x] All tools verify project ownership via D1 before accessing ProjectData DO
+- [x] `search_knowledge` supports cross-project search when `projectId` is omitted (queries all user projects)
+- [x] `add_knowledge` creates entity if not existing, adds observation
+- [x] `add_policy` validates category enum
+- [x] Unit tests cover: missing params, invalid params, unowned project rejection, successful execution, cross-project search, executeTool dispatch
+- [x] System prompt updated with Knowledge and Policy tool categories
+- [x] All quality gates pass (lint, typecheck, test, build)

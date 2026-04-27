@@ -582,4 +582,13 @@ export interface Env {
   SAM_HISTORY_LOAD_LIMIT?: string;                 // Max messages loaded on page mount (default: 200)
   SAM_LLM_TIMEOUT_MS?: string;                     // LLM call timeout in ms (default: 120000)
   SAM_DISPATCH_MAX_DESCRIPTION_LENGTH?: string;    // Max task description length for SAM dispatch (default: 32000)
+  SAM_MESSAGE_MAX_LENGTH?: string;                 // Max message length for send_message_to_subtask (default: 32000)
+  SAM_IDEA_TITLE_MAX_LENGTH?: string;              // Max length for SAM-created idea title (default: 200)
+  SAM_IDEA_DESCRIPTION_MAX_LENGTH?: string;        // Max length for SAM-created idea description (default: 5000)
+  SAM_MAX_IDEAS_PER_PROJECT?: string;              // Max draft ideas per project via SAM (default: 500)
+  SAM_IDEA_LIST_MAX_LIMIT?: string;                // Max ideas returned by list_ideas (default: 50)
+  SAM_IDEA_SNIPPET_LENGTH?: string;                // Description snippet length in idea lists (default: 200)
+  SAM_IDEA_SEARCH_MAX_LIMIT?: string;              // Max results from find_related_ideas (default: 50)
+  SAM_CI_RUNS_LIMIT?: string;                      // Max GitHub Actions runs to fetch (default: 5)
+  SAM_GITHUB_TIMEOUT_MS?: string;                  // GitHub API timeout in ms (default: 10000)
 }
