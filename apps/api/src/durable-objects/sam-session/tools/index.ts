@@ -1,5 +1,9 @@
 import type { AnthropicToolDef, CollectedToolCall, ToolContext } from '../types';
+import { createMission, createMissionDef } from './create-mission';
+import { dispatchTask, dispatchTaskDef } from './dispatch-task';
+import { getMission, getMissionDef } from './get-mission';
 import { getProjectStatus, getProjectStatusDef } from './get-project-status';
+import { getTaskDetails, getTaskDetailsDef } from './get-task-details';
 import { listProjects, listProjectsDef } from './list-projects';
 import { searchConversationHistory, searchConversationHistoryDef } from './search-conversation-history';
 import { searchTasks, searchTasksDef } from './search-tasks';
@@ -10,6 +14,10 @@ export const SAM_TOOLS: AnthropicToolDef[] = [
   getProjectStatusDef,
   searchTasksDef,
   searchConversationHistoryDef,
+  dispatchTaskDef,
+  getTaskDetailsDef,
+  createMissionDef,
+  getMissionDef,
 ];
 
 type ToolHandler = (input: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
@@ -19,6 +27,10 @@ const toolHandlers: Record<string, ToolHandler> = {
   get_project_status: getProjectStatus as ToolHandler,
   search_tasks: searchTasks as ToolHandler,
   search_conversation_history: searchConversationHistory as ToolHandler,
+  dispatch_task: dispatchTask as unknown as ToolHandler,
+  get_task_details: getTaskDetails as ToolHandler,
+  create_mission: createMission as ToolHandler,
+  get_mission: getMission as ToolHandler,
 };
 
 /** Execute a tool call and return the result (or error message on failure). */
