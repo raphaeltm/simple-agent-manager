@@ -95,11 +95,12 @@ This wastes staging quota, wastes CI minutes, wastes your budget, and frequently
 
 ### Required Procedure When Staging Behavior Is Wrong
 
-1. **Identify the layer that's failing.** Is it the browser? API Worker? Durable Object? VM agent? Cloud-init? Agent subprocess inside the container?
-2. **Pull logs for that layer before changing anything.** (Sources below.)
-3. **Read the logs in full** — not just the first error line. The root cause is often several messages before the visible symptom.
-4. **Form a hypothesis grounded in a specific log line.** If you can't quote a log line that justifies your next change, you are still guessing.
-5. **Only then change code.**
+1. **Query staging infrastructure directly via the Cloudflare API.** Before reading logs, before changing code, use `CF_TOKEN` to check the actual state: query D1 for data/migration status, read KV for feature flags, check DNS records. This takes seconds and often reveals the issue immediately. See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet.
+2. **Identify the layer that's failing.** Is it the browser? API Worker? Durable Object? VM agent? Cloud-init? Agent subprocess inside the container?
+3. **Pull logs for that layer before changing anything.** (Sources below.)
+4. **Read the logs in full** — not just the first error line. The root cause is often several messages before the visible symptom.
+5. **Form a hypothesis grounded in a specific log line or CF API query result.** If you can't quote a log line or query result that justifies your next change, you are still guessing.
+6. **Only then change code.**
 
 ### Where the Logs Actually Live
 
@@ -114,6 +115,9 @@ This wastes staging quota, wastes CI minutes, wastes your budget, and frequently
 | **Container stdout/stderr** | `ssh root@<node-ip> docker logs <container-id> --tail 500` — container IDs come from VM agent workspace metadata |
 | **Cloud-init** | `ssh root@<node-ip> cat /var/log/cloud-init-output.log` and `/var/log/cloud-init.log` |
 | **Analytics / events** | Admin UI → `/admin/analytics` or direct Workers Analytics Engine query |
+| **D1 database state** | Direct query via CF API: `curl -s -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" -d '{"sql":"<query>"}' "https://api.cloudflare.com/client/v4/accounts/c4e4aebd980b626f6af43ac6b1edcede/d1/database/1cfaf5d4-8226-47d8-bf26-6ba727ce5718/query"` |
+| **KV state (feature flags, rate limits)** | Direct read via CF API — see `.claude/rules/32-cf-api-debugging.md` |
+| **DNS records** | Direct query via CF API — see `.claude/rules/32-cf-api-debugging.md` |
 
 ### VM-Specific Failure Playbook
 

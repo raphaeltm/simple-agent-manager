@@ -233,6 +233,8 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 ### 6a. Standard Verification (All Code Changes)
 
+> **Use the Cloudflare API throughout this phase.** You have direct access to staging infrastructure via `$CF_TOKEN`. Query D1 to verify migrations and data, read KV to check feature flags, inspect DNS for workspace routing — all without navigating the admin UI. This is faster and more precise than Playwright-based observation. See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet and copy-paste commands.
+
 1. **Check for existing staging deployments** before triggering your own:
    ```bash
    gh run list --workflow=deploy-staging.yml --status=in_progress --status=queued --json databaseId,status,createdAt,headBranch
@@ -257,13 +259,19 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 4. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
 
-5. **Verify the changed behavior works end-to-end:**
+5. **Query staging state via Cloudflare API** before testing in the browser:
+   - **After migration changes**: query D1 `d1_migrations` table and verify new tables/columns exist
+   - **After KV-dependent changes**: read KV keys to confirm expected values
+   - **After DNS/routing changes**: query DNS records to verify workspace subdomains
+   - This catches data-layer issues instantly — don't wait until a Playwright test fails to discover the migration didn't run
+
+6. **Verify the changed behavior works end-to-end:**
    - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
    - **API/backend changes**: verify affected endpoints respond correctly and downstream behavior works through the UI
 
-6. **Report findings** to the user with evidence (screenshots or Playwright observations).
+7. **Report findings** to the user with evidence (screenshots, Playwright observations, or CF API query results).
 
-7. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
+8. **If issues are found**: query D1/KV/DNS via CF API to understand the actual state BEFORE changing code. Then fix, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
 
 ### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
 
