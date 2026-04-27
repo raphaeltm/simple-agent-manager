@@ -257,6 +257,8 @@ async function callLLM(
     ? buildWorkersAIGatewayUrl(env)
     : buildWorkersAIGatewayUrl(env); // fallback to Workers AI gateway for unknown models
 
+  log.info('sam.llm_call', { model, url, messageCount: messages.length, hasTools: tools.length > 0 });
+
   return fetch(url, {
     method: 'POST',
     headers: {

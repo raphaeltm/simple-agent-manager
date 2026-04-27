@@ -51,7 +51,7 @@ vi.mock('../../../src/services/platform-credentials', () => ({
 
 describe('SAM Constants and Config', () => {
   it('has correct default values', () => {
-    expect(DEFAULT_SAM_MODEL).toBe('@cf/google/gemma-4-26b-a4b-it');
+    expect(DEFAULT_SAM_MODEL).toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
     expect(DEFAULT_SAM_MAX_TOKENS).toBe(4096);
     expect(DEFAULT_SAM_MAX_TURNS).toBe(20);
     expect(DEFAULT_SAM_RATE_LIMIT_RPM).toBe(30);
