@@ -11,7 +11,6 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { API_URL } from '../lib/api/client';
-
 import type { ChatMessage, MockProject } from './sam-prototype/components';
 import {
   glass,
