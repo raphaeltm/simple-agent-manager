@@ -39,7 +39,7 @@ AI_PROXY_ENABLED = "true"
 AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
 AI_GATEWAY_ID = "sam"
 # SAM Agent — set model to Workers AI for zero-config usage (no API key needed)
-SAM_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+SAM_MODEL = "@cf/google/gemma-4-26b-a4b-it"
 # Triggers (Event-Driven Agent Triggers)
 MAX_TRIGGERS_PER_PROJECT = "10"
 CRON_MIN_INTERVAL_MINUTES = "15"
