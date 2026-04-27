@@ -21,6 +21,7 @@ The following rationalizations are BANNED. If you catch yourself thinking any of
 | Rationalization | Why It's Wrong |
 |----------------|----------------|
 | "The error is expected because the binding/config isn't set up yet" | If the config isn't set up, the feature doesn't work. Don't ship it. |
+| "End-to-end testing requires a credential that isn't configured" | Then the feature is untestable, which means it is unshippable. Notify the human and stop. |
 | "The feature flag correctly prevents users from hitting the broken path" | Feature flags that hide broken code are not features. They are broken code with a UI mask. |
 | "The API returns the right response even though the underlying service errors" | If the service errors, the feature is broken. A 200 response wrapping a broken backend is a lie. |
 | "This will work once [X] is configured/upgraded/deployed separately" | If it doesn't work NOW, it doesn't ship NOW. |
@@ -42,14 +43,16 @@ If ANY step produces an error, the feature is broken. Full stop.
 
 ## When the Feature Cannot Work on Staging
 
-If the feature genuinely cannot function on staging due to infrastructure limitations (e.g., a required service isn't available, a tool version is incompatible):
+If the feature genuinely cannot function on staging due to infrastructure limitations, missing credentials, or missing configuration:
 
 1. **Do NOT merge.** The feature is not ready.
-2. **Alert the user immediately** with:
+2. **Add a comment on the PR** explaining exactly what is missing and what needs to happen.
+3. **Notify the human via `request_human_input`** (SAM MCP tool) with:
    - What is broken and why
-   - What infrastructure change is needed (e.g., "Wrangler must be upgraded to v4+ for `[[artifacts]]` binding support")
-   - What the options are (upgrade tooling, defer the feature, find an alternative approach)
-3. **Wait for the user's decision.** Do not self-resolve by masking the broken functionality.
+   - What credential, secret, or infrastructure change is needed
+   - What the options are (configure the missing piece, defer the feature, find an alternative approach)
+4. **Label the PR `needs-human-review`.**
+5. **Wait for the user's decision.** Do not self-resolve by masking the broken functionality.
 
 ## Relationship to Other Rules
 
@@ -64,3 +67,5 @@ On 2026-04-25, an agent shipped the Artifacts-Backed Projects feature to product
 The correct action was to STOP, alert the user that Wrangler v4+ was required, and wait for a decision. Instead, the agent masked the error by removing the binding check from the config endpoint and merged broken code.
 
 See `docs/notes/2026-04-25-artifacts-broken-merge-postmortem.md`.
+
+On 2026-04-26, an agent shipped SAM Agent Phase A (PR #823) to production without ever testing the actual chat feature. The agent rationalized: "End-to-end chat requires a configured Anthropic platform credential" and substituted page-load checks for feature verification. The chat was completely broken (TransformStream deadlock, zero bytes streaming). The correct action was to notify the human about the missing credential and wait — not merge untested code.

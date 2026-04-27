@@ -188,13 +188,22 @@ Match the verification to what the PR actually changes:
 
 These are baseline regression checks. They do NOT verify that the specific fix or feature works on the live environment.
 
-### If You Cannot Verify the Feature
+### If You Cannot Verify the Feature (Credential / Config Blocker)
 
-If the feature genuinely cannot be tested on staging (e.g., requires credentials that aren't configured), you MUST:
-1. Explicitly state what is blocked and why
-2. Ask the human whether to proceed or wait
-3. Do NOT merge without human approval for the gap
-4. Do NOT substitute page-load checks as if they verify the feature
+If the feature genuinely cannot be tested on staging (e.g., requires credentials, secrets, or infrastructure that aren't configured), you MUST:
+
+1. **Do NOT merge.** A feature that cannot be verified cannot ship.
+2. **Add a comment on the PR** explaining exactly what is missing (credential name, secret, service) and what needs to be configured.
+3. **Notify the human via `request_human_input`** (SAM MCP tool) with a clear description of the blocker and what action is needed.
+4. **Label the PR `needs-human-review`** so it is visible in the PR list.
+5. **Stop.** The human decides whether to configure the missing piece and retry, or defer the feature.
+6. Do NOT substitute page-load checks as if they verify the feature.
+
+"Missing credentials" is never a valid reason to skip feature verification — it means the feature is **untestable**, which means it is **unshippable**. This applies even if the UI renders correctly, API endpoints respond, and unit tests pass.
+
+#### Incident Reference
+
+On 2026-04-26, PR #823 (SAM Agent Phase A) was merged after the agent rationalized: "End-to-end chat requires a configured Anthropic platform credential... the chat would return a graceful error." The agent verified page loads and API responses but never sent a chat message. The feature was completely broken in production (TransformStream deadlock, zero bytes streaming). The correct action was to stop and ask the human to configure the credential.
 
 ## Zero Errors During Feature Verification (ABSOLUTE)
 
