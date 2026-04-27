@@ -101,6 +101,19 @@ export class SamSession extends DurableObject<AppEnv> {
         return await this.handleChat(request);
       }
 
+      // GET /ping — diagnostic SSE test
+      if (method === 'GET' && path === '/ping') {
+        const { readable, writable } = new TransformStream<Uint8Array>();
+        const w = writable.getWriter();
+        this.ctx.waitUntil((async () => {
+          await w.write(new TextEncoder().encode(`data: {"type":"pong","time":"${new Date().toISOString()}"}\n\n`));
+          await w.close();
+        })());
+        return new Response(readable, {
+          headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        });
+      }
+
       // GET /conversations — list conversations
       if (method === 'GET' && path === '/conversations') {
         return this.handleListConversations();
