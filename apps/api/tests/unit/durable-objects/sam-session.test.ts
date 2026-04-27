@@ -13,6 +13,8 @@
 import {
   DEFAULT_SAM_AIG_SOURCE,
   DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
+  DEFAULT_SAM_FTS_ENABLED,
+  DEFAULT_SAM_HISTORY_LOAD_LIMIT,
   DEFAULT_SAM_MAX_CONVERSATIONS,
   DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION,
   DEFAULT_SAM_MAX_TOKENS,
@@ -20,13 +22,17 @@ import {
   DEFAULT_SAM_MODEL,
   DEFAULT_SAM_RATE_LIMIT_RPM,
   DEFAULT_SAM_RATE_LIMIT_WINDOW_SECONDS,
+  DEFAULT_SAM_SEARCH_LIMIT,
+  DEFAULT_SAM_SEARCH_MAX_LIMIT,
   resolveSamConfig,
   SAM_ANTHROPIC_VERSION,
 } from '@simple-agent-manager/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runAgentLoop } from '../../../src/durable-objects/sam-session/agent-loop';
+import { buildFtsQuery, extractSnippet } from '../../../src/durable-objects/sam-session/index';
 import { executeTool } from '../../../src/durable-objects/sam-session/tools';
+import { searchConversationHistory } from '../../../src/durable-objects/sam-session/tools/search-conversation-history';
 import type { CollectedToolCall, MessageRow, ToolContext } from '../../../src/durable-objects/sam-session/types';
 
 // Mock cloudflare:workers (vitest hoists vi.mock calls automatically)
@@ -63,6 +69,10 @@ describe('SAM Constants and Config', () => {
     expect(DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW).toBe(50);
     expect(DEFAULT_SAM_AIG_SOURCE).toBe('sam');
     expect(SAM_ANTHROPIC_VERSION).toBe('2023-06-01');
+    expect(DEFAULT_SAM_FTS_ENABLED).toBe(true);
+    expect(DEFAULT_SAM_SEARCH_LIMIT).toBe(10);
+    expect(DEFAULT_SAM_SEARCH_MAX_LIMIT).toBe(50);
+    expect(DEFAULT_SAM_HISTORY_LOAD_LIMIT).toBe(200);
   });
 
   it('resolves config from env vars', () => {
@@ -97,6 +107,24 @@ describe('SAM Constants and Config', () => {
     expect(config.rateLimitWindowSeconds).toBe(DEFAULT_SAM_RATE_LIMIT_WINDOW_SECONDS);
     expect(config.systemPromptAppend).toBe('');
     expect(config.aigSource).toBe(DEFAULT_SAM_AIG_SOURCE);
+    expect(config.ftsEnabled).toBe(true);
+    expect(config.searchLimit).toBe(DEFAULT_SAM_SEARCH_LIMIT);
+    expect(config.searchMaxLimit).toBe(DEFAULT_SAM_SEARCH_MAX_LIMIT);
+    expect(config.historyLoadLimit).toBe(DEFAULT_SAM_HISTORY_LOAD_LIMIT);
+  });
+
+  it('resolves FTS and search config from env', () => {
+    const config = resolveSamConfig({
+      SAM_FTS_ENABLED: 'false',
+      SAM_SEARCH_LIMIT: '20',
+      SAM_SEARCH_MAX_LIMIT: '100',
+      SAM_HISTORY_LOAD_LIMIT: '500',
+    });
+
+    expect(config.ftsEnabled).toBe(false);
+    expect(config.searchLimit).toBe(20);
+    expect(config.searchMaxLimit).toBe(100);
+    expect(config.historyLoadLimit).toBe(500);
   });
 
   it('handles non-numeric env values gracefully', () => {
@@ -200,7 +228,7 @@ describe('SAM Tool Definitions', () => {
   it('exports tool definitions in Anthropic native format', async () => {
     const { SAM_TOOLS } = await import('../../../src/durable-objects/sam-session/tools');
 
-    expect(SAM_TOOLS).toHaveLength(3);
+    expect(SAM_TOOLS).toHaveLength(4);
 
     for (const tool of SAM_TOOLS) {
       expect(tool).toHaveProperty('name');
@@ -214,6 +242,7 @@ describe('SAM Tool Definitions', () => {
     expect(names).toContain('list_projects');
     expect(names).toContain('get_project_status');
     expect(names).toContain('search_tasks');
+    expect(names).toContain('search_conversation_history');
   });
 
   it('get_project_status requires projectId', async () => {
@@ -221,6 +250,113 @@ describe('SAM Tool Definitions', () => {
     const getProjectStatus = SAM_TOOLS.find((t) => t.name === 'get_project_status');
 
     expect(getProjectStatus?.input_schema.required).toContain('projectId');
+  });
+});
+
+describe('buildFtsQuery', () => {
+  it('wraps each word in double quotes', () => {
+    expect(buildFtsQuery('hello world')).toBe('"hello" "world"');
+  });
+
+  it('returns null for empty input', () => {
+    expect(buildFtsQuery('')).toBeNull();
+    expect(buildFtsQuery('   ')).toBeNull();
+  });
+
+  it('escapes double quotes within words', () => {
+    expect(buildFtsQuery('say "hello"')).toBe('"say" """hello"""');
+  });
+
+  it('handles single word', () => {
+    expect(buildFtsQuery('testing')).toBe('"testing"');
+  });
+
+  it('strips extra whitespace', () => {
+    expect(buildFtsQuery('  a   b  ')).toBe('"a" "b"');
+  });
+});
+
+describe('extractSnippet', () => {
+  it('returns snippet around first match', () => {
+    const content = 'A'.repeat(200) + 'MATCH' + 'B'.repeat(200);
+    const snippet = extractSnippet(content, 'MATCH');
+    expect(snippet).toContain('MATCH');
+    expect(snippet.startsWith('...')).toBe(true);
+    expect(snippet.endsWith('...')).toBe(true);
+    expect(snippet.length).toBeLessThan(content.length);
+  });
+
+  it('returns start of content when no match', () => {
+    const content = 'Hello world this is a test message';
+    const snippet = extractSnippet(content, 'zzzzz');
+    expect(snippet).toBe(content);
+  });
+
+  it('truncates long content when no match', () => {
+    const content = 'X'.repeat(300);
+    const snippet = extractSnippet(content, 'nomatch');
+    expect(snippet.length).toBe(203); // 200 + '...'
+    expect(snippet.endsWith('...')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    const content = 'Hello World Test';
+    const snippet = extractSnippet(content, 'hello');
+    expect(snippet).toContain('Hello');
+  });
+
+  it('does not prefix with ... when match is near start', () => {
+    const content = 'Hello World Test';
+    const snippet = extractSnippet(content, 'Hello');
+    expect(snippet.startsWith('...')).toBe(false);
+  });
+});
+
+describe('search_conversation_history tool', () => {
+  it('returns error for empty query', async () => {
+    const ctx: ToolContext = { env: {} as Record<string, unknown>, userId: 'u1' };
+    const result = await searchConversationHistory({ query: '' }, ctx);
+    expect(result).toEqual({ error: 'Query is required' });
+  });
+
+  it('returns error when searchMessages not available', async () => {
+    const ctx: ToolContext = { env: {} as Record<string, unknown>, userId: 'u1' };
+    const result = await searchConversationHistory({ query: 'test' }, ctx);
+    expect(result).toEqual({ error: 'Search is not available in this context' });
+  });
+
+  it('calls searchMessages and returns results', async () => {
+    const mockResults = [
+      { snippet: 'test snippet', role: 'user', sequence: 1, createdAt: '2026-01-01' },
+    ];
+    const ctx: ToolContext = {
+      env: {} as Record<string, unknown>,
+      userId: 'u1',
+      searchMessages: vi.fn().mockReturnValue(mockResults),
+    };
+    const result = await searchConversationHistory({ query: 'test', limit: 5 }, ctx);
+    expect(ctx.searchMessages).toHaveBeenCalledWith('test', 5);
+    expect(result).toEqual({ results: mockResults, count: 1, query: 'test' });
+  });
+
+  it('caps limit at 50', async () => {
+    const ctx: ToolContext = {
+      env: {} as Record<string, unknown>,
+      userId: 'u1',
+      searchMessages: vi.fn().mockReturnValue([]),
+    };
+    await searchConversationHistory({ query: 'test', limit: 999 }, ctx);
+    expect(ctx.searchMessages).toHaveBeenCalledWith('test', 50);
+  });
+
+  it('defaults limit to 10', async () => {
+    const ctx: ToolContext = {
+      env: {} as Record<string, unknown>,
+      userId: 'u1',
+      searchMessages: vi.fn().mockReturnValue([]),
+    };
+    await searchConversationHistory({ query: 'test' }, ctx);
+    expect(ctx.searchMessages).toHaveBeenCalledWith('test', 10);
   });
 });
 

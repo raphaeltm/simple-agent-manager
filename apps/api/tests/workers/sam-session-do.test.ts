@@ -192,6 +192,146 @@ describe('SamSession DO — Rate Limiting', () => {
   });
 });
 
+describe('SamSession DO — Search', () => {
+  it('returns 400 for empty search query', async () => {
+    const stub = getSamSession('test-user-search-empty');
+    const resp = await stub.fetch('https://sam-session/search?query=');
+    expect(resp.status).toBe(400);
+    const body = await resp.json() as { error: string };
+    expect(body.error).toBe('Query is required');
+  });
+
+  it('searches persisted messages and returns results', async () => {
+    const stub = getSamSession('test-user-search-basic');
+
+    // Create a conversation with a message containing unique text
+    const chatResp = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Tell me about XYZZY_UNIQUE_SEARCH_TOKEN',
+        userId: 'test-user-search-basic',
+      }),
+    });
+    expect(chatResp.status).toBe(200);
+    await chatResp.text(); // drain SSE
+
+    // Search for the unique token
+    const searchResp = await stub.fetch('https://sam-session/search?query=XYZZY_UNIQUE_SEARCH_TOKEN');
+    expect(searchResp.status).toBe(200);
+    const body = await searchResp.json() as { results: Array<{ snippet: string; role: string }> };
+    expect(body.results.length).toBeGreaterThanOrEqual(1);
+    expect(body.results[0]!.snippet).toContain('XYZZY_UNIQUE_SEARCH_TOKEN');
+    expect(body.results[0]!.role).toBe('user');
+  });
+
+  it('respects search limit parameter', async () => {
+    const stub = getSamSession('test-user-search-limit');
+
+    // Create multiple conversations with same keyword
+    for (let i = 0; i < 5; i++) {
+      const resp = await stub.fetch('https://sam-session/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          message: `REPEATABLE_KEYWORD iteration ${i}`,
+          userId: 'test-user-search-limit',
+        }),
+      });
+      await resp.text();
+    }
+
+    const searchResp = await stub.fetch('https://sam-session/search?query=REPEATABLE_KEYWORD&limit=2');
+    expect(searchResp.status).toBe(200);
+    const body = await searchResp.json() as { results: Array<{ snippet: string }> };
+    expect(body.results.length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('SamSession DO — Type Filter and Message Limit', () => {
+  it('filters conversations by type', async () => {
+    const stub = getSamSession('test-user-type-filter');
+
+    // Create a conversation (default type is "human")
+    const chatResp = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Hello for type filter test',
+        userId: 'test-user-type-filter',
+      }),
+    });
+    await chatResp.text();
+
+    // List with type=human should return it
+    const humanResp = await stub.fetch('https://sam-session/conversations?type=human');
+    const humanData = await humanResp.json() as { conversations: Array<{ type: string }> };
+    expect(humanData.conversations.length).toBeGreaterThanOrEqual(1);
+    for (const c of humanData.conversations) {
+      expect(c.type).toBe('human');
+    }
+
+    // List with type=agent should return none (no agent conversations created)
+    const agentResp = await stub.fetch('https://sam-session/conversations?type=agent');
+    const agentData = await agentResp.json() as { conversations: Array<{ type: string }> };
+    expect(agentData.conversations.length).toBe(0);
+  });
+
+  it('returns type column in conversation list', async () => {
+    const stub = getSamSession('test-user-type-column');
+
+    const chatResp = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Type column test',
+        userId: 'test-user-type-column',
+      }),
+    });
+    await chatResp.text();
+
+    const listResp = await stub.fetch('https://sam-session/conversations');
+    const data = await listResp.json() as { conversations: Array<{ id: string; type: string }> };
+    expect(data.conversations.length).toBeGreaterThanOrEqual(1);
+    expect(data.conversations[0]!.type).toBe('human');
+  });
+
+  it('respects limit param on GET /conversations/:id/messages', async () => {
+    const stub = getSamSession('test-user-msg-limit');
+
+    // Create a conversation and send multiple messages
+    const resp1 = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Msg A', userId: 'test-user-msg-limit' }),
+    });
+    const text1 = await resp1.text();
+    const match = text1.match(/"conversationId":"([^"]+)"/);
+    const convId = match?.[1];
+    expect(convId).toBeTruthy();
+
+    // Send more messages
+    for (const msg of ['Msg B', 'Msg C', 'Msg D']) {
+      const r = await stub.fetch('https://sam-session/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversationId: convId, message: msg, userId: 'test-user-msg-limit' }),
+      });
+      await r.text();
+    }
+
+    // Request with limit=2
+    const limitResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages?limit=2`);
+    const limitData = await limitResp.json() as { messages: Array<{ content: string }> };
+    expect(limitData.messages.length).toBe(2);
+
+    // Request without limit should return more
+    const allResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages`);
+    const allData = await allResp.json() as { messages: Array<{ content: string }> };
+    expect(allData.messages.length).toBeGreaterThan(2);
+  });
+});
+
 describe('SamSession DO — Validation', () => {
   it('returns 400 for empty message', async () => {
     const stub = getSamSession('test-user-validation');
