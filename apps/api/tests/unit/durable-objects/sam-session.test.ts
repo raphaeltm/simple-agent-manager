@@ -51,7 +51,7 @@ vi.mock('../../../src/services/platform-credentials', () => ({
 
 describe('SAM Constants and Config', () => {
   it('has correct default values', () => {
-    expect(DEFAULT_SAM_MODEL).toBe('claude-sonnet-4-20250514');
+    expect(DEFAULT_SAM_MODEL).toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
     expect(DEFAULT_SAM_MAX_TOKENS).toBe(4096);
     expect(DEFAULT_SAM_MAX_TURNS).toBe(20);
     expect(DEFAULT_SAM_RATE_LIMIT_RPM).toBe(30);
@@ -294,7 +294,7 @@ describe('Agent Loop — Streaming', () => {
     const { writer, events } = createCollectingWriter();
     const persisted: Array<{ role: string; content: string }> = [];
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -373,7 +373,7 @@ describe('Agent Loop — Streaming', () => {
     const { writer, events } = createCollectingWriter();
     const persisted: Array<{ role: string; content: string }> = [];
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -429,7 +429,7 @@ describe('Agent Loop — Streaming', () => {
 
     const { writer, events } = createCollectingWriter();
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -478,7 +478,7 @@ describe('Agent Loop — Streaming', () => {
 
     const { writer, events } = createCollectingWriter();
 
-    const config = resolveSamConfig({ SAM_MAX_TURNS: '3' });
+    const config = resolveSamConfig({ SAM_MAX_TURNS: '3', SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -537,7 +537,7 @@ describe('Agent Loop — Streaming', () => {
 
     const { writer } = createCollectingWriter();
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -548,17 +548,22 @@ describe('Agent Loop — Streaming', () => {
     await writer.close();
 
     // Verify the fetch body includes history + new message
+    // Since SAM_MODEL is claude-*, the request is translated to Anthropic format
     const fetchCall = fetchMock.mock.calls[0]!;
     const fetchBody = JSON.parse(fetchCall[1]!.body as string) as {
       messages: Array<{ role: string; content: unknown }>;
+      system?: string;
     };
 
-    // Should have: history user, history assistant, new user = 3 messages
+    // System message is extracted to top-level `system` field in Anthropic format
+    expect(fetchBody.system).toBeDefined();
+    // Should have: history user, history assistant, new user = 3 messages (no system in messages)
     expect(fetchBody.messages.length).toBe(3);
     expect(fetchBody.messages[0]!.role).toBe('user');
-    expect(fetchBody.messages[0]!.content).toBe('Previous question');
+    // Anthropic format wraps content as [{type: "text", text: "..."}]
+    expect(fetchBody.messages[0]!.content).toEqual([{ type: 'text', text: 'Previous question' }]);
     expect(fetchBody.messages[1]!.role).toBe('assistant');
     expect(fetchBody.messages[2]!.role).toBe('user');
-    expect(fetchBody.messages[2]!.content).toBe('New question');
+    expect(fetchBody.messages[2]!.content).toEqual([{ type: 'text', text: 'New question' }]);
   });
 });

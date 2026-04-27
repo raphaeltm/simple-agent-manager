@@ -101,6 +101,33 @@ export class SamSession extends DurableObject<AppEnv> {
         return await this.handleChat(request);
       }
 
+      // GET /debug — diagnostic env check
+      if (method === 'GET' && path === '/debug') {
+        const env = this.env as unknown as Record<string, unknown>;
+        const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
+        return new Response(JSON.stringify({
+          model: config.model,
+          hasApiToken: !!env.CF_API_TOKEN,
+          hasAccountId: !!env.CF_ACCOUNT_ID,
+          hasGatewayId: !!env.AI_GATEWAY_ID,
+          accountIdLen: typeof env.CF_ACCOUNT_ID === 'string' ? env.CF_ACCOUNT_ID.length : 0,
+          gatewayIdLen: typeof env.AI_GATEWAY_ID === 'string' ? (env.AI_GATEWAY_ID as string).length : 0,
+        }), { headers: { 'content-type': 'application/json' } });
+      }
+
+      // GET /ping — diagnostic SSE test
+      if (method === 'GET' && path === '/ping') {
+        const { readable, writable } = new TransformStream<Uint8Array>();
+        const w = writable.getWriter();
+        this.ctx.waitUntil((async () => {
+          await w.write(new TextEncoder().encode(`data: {"type":"pong","time":"${new Date().toISOString()}"}\n\n`));
+          await w.close();
+        })());
+        return new Response(readable, {
+          headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        });
+      }
+
       // GET /conversations — list conversations
       if (method === 'GET' && path === '/conversations') {
         return this.handleListConversations();
@@ -131,6 +158,14 @@ export class SamSession extends DurableObject<AppEnv> {
 
   /** Handle POST /chat — run the agent loop and stream SSE. */
   private async handleChat(request: Request): Promise<Response> {
+    log.info('sam_session.chat_start', { phase: 'parsing_body' });
+
+    // Temporary diagnostic: check if env vars are present
+    const hasApiToken = !!(this.env as unknown as Record<string, unknown>).CF_API_TOKEN;
+    const hasAccountId = !!(this.env as unknown as Record<string, unknown>).CF_ACCOUNT_ID;
+    const hasGatewayId = !!(this.env as unknown as Record<string, unknown>).AI_GATEWAY_ID;
+    log.info('sam_session.env_check', { hasApiToken, hasAccountId, hasGatewayId });
+
     const body = (await request.json()) as {
       conversationId?: string;
       message: string;
@@ -145,7 +180,9 @@ export class SamSession extends DurableObject<AppEnv> {
     }
 
     const userId = body.userId;
+    log.info('sam_session.chat_start', { phase: 'resolving_config', userId });
     const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
+    log.info('sam_session.chat_config', { model: config.model, maxTurns: config.maxTurns });
 
     // Rate limit check
     const rateLimitResponse = this.checkRateLimit(config.rateLimitRpm, config.rateLimitWindowSeconds);
@@ -190,6 +227,7 @@ export class SamSession extends DurableObject<AppEnv> {
     this.ctx.waitUntil(
       (async () => {
         try {
+          log.info('sam_session.agent_loop_start', { conversationId, model: config.model });
           await runAgentLoop(
             conversationId!,
             historyRows,
@@ -202,10 +240,12 @@ export class SamSession extends DurableObject<AppEnv> {
               this.persistMessage(convId, role, content, toolCallsJson, toolCallId);
             },
           );
+          log.info('sam_session.agent_loop_done', { conversationId });
         } catch (err) {
           log.error('sam_session.agent_loop_error', {
             conversationId,
             error: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack : undefined,
           });
           try {
             await writer.write(encodeSseEvent({

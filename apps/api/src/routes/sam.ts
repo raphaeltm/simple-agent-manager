@@ -55,6 +55,31 @@ app.post('/chat', async (c) => {
   });
 });
 
+/** GET /debug — diagnostic env check. */
+app.get('/debug', async (c) => {
+  const userId = c.get('auth').user.id;
+  const stub = getSamSession(c.env, userId);
+  const response = await stub.fetch('https://sam-session/debug');
+  const data = await response.json();
+  return c.json(data);
+});
+
+/** GET /ping — diagnostic SSE test. */
+app.get('/ping', async (c) => {
+  const userId = c.get('auth').user.id;
+  const stub = getSamSession(c.env, userId);
+  const response = await stub.fetch('https://sam-session/ping');
+  if (!response.body) {
+    return c.json({ error: 'No response' }, 500);
+  }
+  return new Response(response.body, {
+    headers: {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+    },
+  });
+});
+
 /** GET /conversations — list conversations. */
 app.get('/conversations', async (c) => {
   const userId = c.get('auth').user.id;
