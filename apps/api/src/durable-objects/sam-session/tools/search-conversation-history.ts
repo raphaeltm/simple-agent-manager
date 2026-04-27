@@ -1,3 +1,8 @@
+import {
+  DEFAULT_SAM_SEARCH_LIMIT,
+  DEFAULT_SAM_SEARCH_MAX_LIMIT,
+} from '@simple-agent-manager/shared';
+
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 export const searchConversationHistoryDef: AnthropicToolDef = {
@@ -9,11 +14,11 @@ export const searchConversationHistoryDef: AnthropicToolDef = {
     properties: {
       query: {
         type: 'string',
-        description: 'Search query — keywords or phrases to find in past messages.',
+        description: `Search query — keywords or phrases to find in past messages.`,
       },
       limit: {
         type: 'number',
-        description: 'Max results to return. Defaults to 10.',
+        description: `Max results to return. Defaults to ${DEFAULT_SAM_SEARCH_LIMIT}.`,
       },
     },
     required: ['query'],
@@ -32,7 +37,7 @@ export async function searchConversationHistory(
     return { error: 'Search is not available in this context' };
   }
 
-  const limit = Math.min(input.limit || 10, 50);
+  const limit = Math.min(input.limit || DEFAULT_SAM_SEARCH_LIMIT, DEFAULT_SAM_SEARCH_MAX_LIMIT);
   const results = ctx.searchMessages(input.query, limit);
 
   return {

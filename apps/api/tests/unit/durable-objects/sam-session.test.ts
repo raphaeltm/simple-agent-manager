@@ -339,24 +339,24 @@ describe('search_conversation_history tool', () => {
     expect(result).toEqual({ results: mockResults, count: 1, query: 'test' });
   });
 
-  it('caps limit at 50', async () => {
+  it('caps limit at DEFAULT_SAM_SEARCH_MAX_LIMIT', async () => {
     const ctx: ToolContext = {
       env: {} as Record<string, unknown>,
       userId: 'u1',
       searchMessages: vi.fn().mockReturnValue([]),
     };
     await searchConversationHistory({ query: 'test', limit: 999 }, ctx);
-    expect(ctx.searchMessages).toHaveBeenCalledWith('test', 50);
+    expect(ctx.searchMessages).toHaveBeenCalledWith('test', DEFAULT_SAM_SEARCH_MAX_LIMIT);
   });
 
-  it('defaults limit to 10', async () => {
+  it('defaults limit to DEFAULT_SAM_SEARCH_LIMIT', async () => {
     const ctx: ToolContext = {
       env: {} as Record<string, unknown>,
       userId: 'u1',
       searchMessages: vi.fn().mockReturnValue([]),
     };
     await searchConversationHistory({ query: 'test' }, ctx);
-    expect(ctx.searchMessages).toHaveBeenCalledWith('test', 10);
+    expect(ctx.searchMessages).toHaveBeenCalledWith('test', DEFAULT_SAM_SEARCH_LIMIT);
   });
 });
 

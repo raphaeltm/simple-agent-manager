@@ -326,10 +326,24 @@ export class SamSession extends DurableObject<AppEnv> {
     const countResult = this.sql.exec('SELECT COUNT(*) as cnt FROM conversations').toArray();
     const count = Number(countResult[0]?.cnt ?? 0);
     if (count >= maxConversations) {
-      // Delete the oldest conversation
-      this.sql.exec(
-        'DELETE FROM conversations WHERE id = (SELECT id FROM conversations ORDER BY updated_at ASC LIMIT 1)'
-      );
+      // Clean FTS5 entries before CASCADE deletes messages (FTS5 external-content
+      // tables don't auto-sync on DELETE — we must remove entries manually)
+      const oldestId = this.sql.exec(
+        'SELECT id FROM conversations ORDER BY updated_at ASC LIMIT 1'
+      ).toArray()[0]?.id;
+      if (oldestId) {
+        try {
+          this.sql.exec(
+            `DELETE FROM messages_fts WHERE rowid IN (
+              SELECT rowid FROM messages WHERE conversation_id = ?
+            )`,
+            String(oldestId)
+          );
+        } catch {
+          // FTS5 cleanup failure is non-fatal
+        }
+        this.sql.exec('DELETE FROM conversations WHERE id = ?', String(oldestId));
+      }
     }
 
     this.sql.exec(
