@@ -144,6 +144,14 @@ export class SamSession extends DurableObject<AppEnv> {
 
   /** Handle POST /chat — run the agent loop and stream SSE. */
   private async handleChat(request: Request): Promise<Response> {
+    log.info('sam_session.chat_start', { phase: 'parsing_body' });
+
+    // Temporary diagnostic: check if env vars are present
+    const hasApiToken = !!(this.env as unknown as Record<string, unknown>).CF_API_TOKEN;
+    const hasAccountId = !!(this.env as unknown as Record<string, unknown>).CF_ACCOUNT_ID;
+    const hasGatewayId = !!(this.env as unknown as Record<string, unknown>).AI_GATEWAY_ID;
+    log.info('sam_session.env_check', { hasApiToken, hasAccountId, hasGatewayId });
+
     const body = (await request.json()) as {
       conversationId?: string;
       message: string;
@@ -158,7 +166,9 @@ export class SamSession extends DurableObject<AppEnv> {
     }
 
     const userId = body.userId;
+    log.info('sam_session.chat_start', { phase: 'resolving_config', userId });
     const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
+    log.info('sam_session.chat_config', { model: config.model, maxTurns: config.maxTurns });
 
     // Rate limit check
     const rateLimitResponse = this.checkRateLimit(config.rateLimitRpm, config.rateLimitWindowSeconds);
@@ -203,6 +213,7 @@ export class SamSession extends DurableObject<AppEnv> {
     this.ctx.waitUntil(
       (async () => {
         try {
+          log.info('sam_session.agent_loop_start', { conversationId, model: config.model });
           await runAgentLoop(
             conversationId!,
             historyRows,
@@ -215,10 +226,12 @@ export class SamSession extends DurableObject<AppEnv> {
               this.persistMessage(convId, role, content, toolCallsJson, toolCallId);
             },
           );
+          log.info('sam_session.agent_loop_done', { conversationId });
         } catch (err) {
           log.error('sam_session.agent_loop_error', {
             conversationId,
             error: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack : undefined,
           });
           try {
             await writer.write(encodeSseEvent({
