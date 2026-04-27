@@ -183,13 +183,13 @@ export class SamSession extends DurableObject<AppEnv> {
     const { readable, writable } = new TransformStream<Uint8Array>();
     const writer = writable.getWriter();
 
-    // Send conversationId as first event
-    await writer.write(encodeSseEvent({ type: 'conversation_started', conversationId }));
-
-    // Run agent loop in background
+    // Run agent loop in background (conversation_started is written here,
+    // AFTER the Response is returned, to avoid a TransformStream deadlock —
+    // await writer.write() blocks if no consumer is reading the readable side yet).
     this.ctx.waitUntil(
       (async () => {
         try {
+          await writer.write(encodeSseEvent({ type: 'conversation_started', conversationId }));
           await runAgentLoop(
             conversationId!,
             historyRows,
