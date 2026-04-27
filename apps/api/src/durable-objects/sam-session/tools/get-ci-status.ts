@@ -151,7 +151,7 @@ export async function getCiStatus(
     });
     return {
       status: 'error',
-      note: `Failed to fetch CI status: ${err instanceof Error ? err.message : String(err)}`,
+      note: 'Failed to fetch CI status. The GitHub API may be unreachable or the token may be invalid.',
     };
   }
 }
@@ -176,6 +176,7 @@ async function getUserGitHubToken(
         and(
           eq(schema.credentials.userId, userId),
           eq(schema.credentials.provider, 'github'),
+          eq(schema.credentials.isActive, true),
         ),
       )
       .limit(1);

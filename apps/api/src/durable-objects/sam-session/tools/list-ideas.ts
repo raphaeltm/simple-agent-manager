@@ -1,7 +1,7 @@
 /**
  * SAM list_ideas tool — list draft ideas in a project.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
@@ -50,7 +50,9 @@ export async function listIdeas(
 
   const maxLimit = Number(env.SAM_IDEA_LIST_MAX_LIMIT) || DEFAULT_MAX_LIMIT;
   const limit = Math.min(Math.max(1, Math.round(input.limit || DEFAULT_LIMIT)), maxLimit);
-  const status = input.status?.trim() || 'draft';
+  const VALID_STATUSES = ['draft', 'ready', 'completed', 'cancelled'];
+  const rawStatus = input.status?.trim() || 'draft';
+  const status = VALID_STATUSES.includes(rawStatus) ? rawStatus : 'draft';
   const snippetLen = Number(env.SAM_IDEA_SNIPPET_LENGTH) || DEFAULT_SNIPPET_LENGTH;
 
   // Verify ownership
@@ -86,7 +88,7 @@ export async function listIdeas(
         eq(schema.tasks.status, status),
       ),
     )
-    .orderBy(schema.tasks.updatedAt)
+    .orderBy(desc(schema.tasks.updatedAt))
     .limit(limit);
 
   return {

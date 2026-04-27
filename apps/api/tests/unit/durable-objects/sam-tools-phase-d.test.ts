@@ -52,6 +52,9 @@ function mockD1(options: {
   allResults?: Record<string, unknown>[];
   runChanges?: number;
 } = {}) {
+  // Drizzle ORM calls stmt.bind(...).raw(true) to get row arrays, then maps to objects.
+  // We must return arrays-of-arrays matching the column order Drizzle expects.
+  const allResultArrays = (options.allResults ?? []).map((row) => Object.values(row));
   const mockStatement = {
     bind: vi.fn().mockReturnThis(),
     first: vi.fn().mockResolvedValue(options.firstResult ?? null),
@@ -59,6 +62,7 @@ function mockD1(options: {
       results: options.allResults ?? [],
       success: true,
     }),
+    raw: vi.fn().mockResolvedValue(allResultArrays),
     run: vi.fn().mockResolvedValue({
       success: true,
       meta: { changes: options.runChanges ?? 1 },
@@ -139,8 +143,7 @@ describe('create_idea', () => {
     };
     const result = await executeTool(toolCall, ctx);
     const r = result as { error?: string };
-    expect(r.error).toBeDefined();
-    expect(r.error).not.toContain('Unknown tool');
+    expect(r.error).toBe('Project not found or not owned by you.');
   });
 });
 
@@ -245,6 +248,110 @@ describe('get_orchestrator_status', () => {
     const r = result as { error?: string };
     expect(r.error).toBeDefined();
     expect(r.error).not.toContain('Unknown tool');
+  });
+});
+
+// ─── create_idea (success paths) ──────────────────────────────────────────────
+
+describe('create_idea — success paths', () => {
+  it('creates idea when project is owned', async () => {
+    // Drizzle calls prepare().bind().all() for the SELECT ownership check,
+    // then prepare().bind().first() for the COUNT, then prepare().bind().run() for INSERT.
+    // Our mock D1 returns firstResult for first() and allResults for all().
+    const ctx = buildCtx({
+      // Ownership SELECT returns a project row via all()
+      dbAllResults: [{ id: 'proj-1' }],
+      // COUNT query via first() returns below limit
+      dbFirstResult: { cnt: 5 },
+    });
+    const result = (await createIdea(
+      { projectId: 'proj-1', title: 'My cool idea', description: 'Details here', priority: 3 },
+      ctx,
+    )) as Record<string, unknown>;
+
+    expect(result.ideaId).toBeDefined();
+    expect(result.title).toBe('My cool idea');
+    expect(result.status).toBe('draft');
+    expect(result.priority).toBe(3);
+    expect(result.message).toBe('Idea created successfully.');
+  });
+
+  it('clamps priority to 0-10 range', async () => {
+    const ctx = buildCtx({
+      dbAllResults: [{ id: 'proj-1' }],
+      dbFirstResult: { cnt: 0 },
+    });
+    const result = (await createIdea(
+      { projectId: 'proj-1', title: 'Test', priority: 99 },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(result.priority).toBe(10);
+  });
+});
+
+// ─── get_ci_status (branch paths) ────────────────────────────────────────────
+
+describe('get_ci_status — branch paths', () => {
+  it('returns no_repository when project has no repository', async () => {
+    const ctx = buildCtx({
+      // Ownership query returns project with no repository
+      dbAllResults: [{ id: 'proj-1', repository: null, defaultBranch: 'main' }],
+    });
+    const result = (await getCiStatus({ projectId: 'proj-1' }, ctx)) as Record<string, unknown>;
+    expect(result.status).toBe('no_repository');
+  });
+
+  it('returns error for invalid repository format', async () => {
+    const ctx = buildCtx({
+      dbAllResults: [{ id: 'proj-1', repository: 'not a valid repo!', defaultBranch: 'main' }],
+    });
+    const result = (await getCiStatus({ projectId: 'proj-1' }, ctx)) as Record<string, unknown>;
+    expect(result.error).toBe('Invalid repository format.');
+  });
+
+  it('returns no_credentials when decrypt fails (no valid token)', async () => {
+    const { decrypt } = await import('../../../src/services/encryption');
+    const mockDecrypt = decrypt as ReturnType<typeof vi.fn>;
+    // Make decrypt throw to simulate credential resolution failure
+    mockDecrypt.mockRejectedValueOnce(new Error('decrypt failed'));
+
+    const ctx = buildCtx({
+      dbAllResults: [{ id: 'proj-1', repository: 'owner/repo', defaultBranch: 'main' }],
+    });
+    const result = (await getCiStatus({ projectId: 'proj-1' }, ctx)) as Record<string, unknown>;
+    expect(result.status).toBe('no_credentials');
+  });
+});
+
+// ─── get_orchestrator_status (error path) ────────────────────────────────────
+
+describe('get_orchestrator_status — error path', () => {
+  it('returns graceful error when orchestrator DO throws', async () => {
+    const ctx = buildCtx({
+      dbAllResults: [{ id: 'proj-1' }],
+    });
+    // Override the orchestrator stub to throw
+    const orchStub = (ctx.env as Record<string, unknown>).PROJECT_ORCHESTRATOR as Record<string, unknown>;
+    (orchStub.get as ReturnType<typeof vi.fn>).mockReturnValue({
+      getStatus: vi.fn().mockRejectedValue(new Error('DO unavailable')),
+      getSchedulingQueue: vi.fn().mockRejectedValue(new Error('DO unavailable')),
+    });
+
+    const result = (await getOrchestratorStatus({ projectId: 'proj-1' }, ctx)) as Record<string, unknown>;
+    expect(result.orchestrator).toBeNull();
+    expect(result.note).toContain('not available');
+  });
+});
+
+// ─── SAM_TOOLS array verification ─────────────────────────────────────────────
+
+describe('SAM_TOOLS array', () => {
+  it('contains all Phase D tool definitions', async () => {
+    const { SAM_TOOLS } = await import('../../../src/durable-objects/sam-session/tools');
+    const toolNames = SAM_TOOLS.map((t) => t.name);
+    for (const name of ['create_idea', 'list_ideas', 'find_related_ideas', 'get_ci_status', 'get_orchestrator_status']) {
+      expect(toolNames).toContain(name);
+    }
   });
 });
 

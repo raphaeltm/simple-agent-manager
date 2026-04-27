@@ -74,12 +74,14 @@ export async function findRelatedIdeas(
   }
 
   // LIKE search on title and description (draft ideas only)
-  const searchPattern = `%${input.query.trim()}%`;
+  // Escape LIKE metacharacters to prevent semantic mismatch
+  const escaped = input.query.trim().replace(/[%_\\]/g, '\\$&');
+  const searchPattern = `%${escaped}%`;
   const results = await env.DATABASE.prepare(
     `SELECT id, title, description, status, priority, updated_at
      FROM tasks
      WHERE project_id = ? AND status = 'draft'
-       AND (title LIKE ? OR description LIKE ?)
+       AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')
      ORDER BY updated_at DESC
      LIMIT ?`,
   ).bind(input.projectId, searchPattern, searchPattern, limit)
