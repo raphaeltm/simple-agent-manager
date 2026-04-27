@@ -6,7 +6,9 @@
  * - Tool execution dispatch and error handling
  * - SAM config resolution from env vars
  * - Agent loop streaming with mocked Anthropic response
- * - Anthropic message format conversion
+ * - Agent loop streaming with mocked OpenAI (Workers AI) response
+ * - Message format conversion (history rows → OpenAI format)
+ * - Fetch timeout handling
  */
 import {
   DEFAULT_SAM_AIG_SOURCE,
@@ -76,6 +78,13 @@ describe('SAM Constants and Config', () => {
     // Defaults for unset values
     expect(config.rateLimitRpm).toBe(DEFAULT_SAM_RATE_LIMIT_RPM);
     expect(config.aigSource).toBe(DEFAULT_SAM_AIG_SOURCE);
+  });
+
+  it('resolves Workers AI model from env', () => {
+    const config = resolveSamConfig({
+      SAM_MODEL: '@cf/meta/llama-4-scout-17b-16e-instruct',
+    });
+    expect(config.model).toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
   });
 
   it('uses defaults when no env vars set', () => {
@@ -216,13 +225,27 @@ describe('SAM Tool Definitions', () => {
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   Agent Loop Tests — mock fetch to return synthetic Anthropic SSE
+   Agent Loop Tests — mock fetch to return synthetic SSE streams
    ═══════════════════════════════════════════════════════════════ */
 
 /** Build a synthetic Anthropic SSE stream from events. */
 function buildAnthropicSseStream(events: Array<Record<string, unknown>>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const lines = events.map((e) => `event: ${(e.type as string) || 'message'}\ndata: ${JSON.stringify(e)}\n\n`);
+  const body = lines.join('');
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(body));
+      controller.close();
+    },
+  });
+}
+
+/** Build a synthetic OpenAI SSE stream from chunks. */
+function buildOpenAISseStream(chunks: Array<Record<string, unknown>>): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const lines = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`);
+  lines.push('data: [DONE]\n\n');
   const body = lines.join('');
   return new ReadableStream({
     start(controller) {
@@ -267,13 +290,12 @@ function createCollectingWriter(): {
   return { writer, events };
 }
 
-describe('Agent Loop — Streaming', () => {
+describe('Agent Loop — Anthropic Streaming', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it('emits text_delta and done events for a simple text response', async () => {
-    // Mock fetch to return an Anthropic streaming response with text only
     const anthropicEvents = [
       { type: 'message_start', message: { id: 'msg_1', role: 'assistant' } },
       { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
@@ -314,28 +336,22 @@ describe('Agent Loop — Streaming', () => {
       },
     );
     await writer.close();
-
-    // Wait a tick for the reader to process
     await new Promise((r) => setTimeout(r, 50));
 
-    // Should have text_delta events
     const textDeltas = events.filter((e) => e.type === 'text_delta');
     expect(textDeltas.length).toBe(2);
     expect(textDeltas[0]!.content).toBe('Hello!');
     expect(textDeltas[1]!.content).toBe(' How can I help?');
 
-    // Should end with done
     const doneEvents = events.filter((e) => e.type === 'done');
     expect(doneEvents.length).toBe(1);
 
-    // Should persist assistant message
     expect(persisted.length).toBe(1);
     expect(persisted[0]!.role).toBe('assistant');
     expect(persisted[0]!.content).toBe('Hello! How can I help?');
   });
 
   it('emits tool_start, tool_result events for tool use response', async () => {
-    // First call: Anthropic returns a tool_use block
     const firstCallEvents = [
       { type: 'message_start', message: { id: 'msg_2', role: 'assistant' } },
       { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name: 'list_projects' } },
@@ -345,7 +361,6 @@ describe('Agent Loop — Streaming', () => {
       { type: 'message_stop' },
     ];
 
-    // Second call: Anthropic returns text after tool result
     const secondCallEvents = [
       { type: 'message_start', message: { id: 'msg_3', role: 'assistant' } },
       { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
@@ -395,31 +410,26 @@ describe('Agent Loop — Streaming', () => {
     await writer.close();
     await new Promise((r) => setTimeout(r, 50));
 
-    // Should have tool_start
     const toolStarts = events.filter((e) => e.type === 'tool_start');
     expect(toolStarts.length).toBe(1);
     expect(toolStarts[0]!.tool).toBe('list_projects');
 
-    // Should have tool_result
     const toolResults = events.filter((e) => e.type === 'tool_result');
     expect(toolResults.length).toBe(1);
     expect(toolResults[0]!.tool).toBe('list_projects');
 
-    // Should have text after tool execution
     const textDeltas = events.filter((e) => e.type === 'text_delta');
     expect(textDeltas.length).toBeGreaterThan(0);
 
-    // Should end with done
     expect(events.filter((e) => e.type === 'done').length).toBe(1);
 
-    // Should have persisted: assistant (tool call), tool_result, assistant (text)
     expect(persisted.length).toBe(3);
     expect(persisted[0]!.role).toBe('assistant');
     expect(persisted[1]!.role).toBe('tool_result');
     expect(persisted[2]!.role).toBe('assistant');
   });
 
-  it('emits error event when Anthropic returns non-200', async () => {
+  it('emits error event when API returns non-200', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response('{"error":{"message":"Invalid API key"}}', {
         status: 401,
@@ -455,7 +465,6 @@ describe('Agent Loop — Streaming', () => {
   });
 
   it('respects maxTurns limit', async () => {
-    // Create events that always return tool_use, forcing continued loops
     const toolUseEvents = [
       { type: 'message_start', message: { id: 'msg_loop', role: 'assistant' } },
       { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_loop', name: 'list_projects' } },
@@ -466,7 +475,6 @@ describe('Agent Loop — Streaming', () => {
     ];
 
     const fetchMock = vi.spyOn(globalThis, 'fetch');
-    // Return tool_use for every call (maxTurns + safety margin)
     for (let i = 0; i < 5; i++) {
       fetchMock.mockResolvedValueOnce(
         new Response(buildAnthropicSseStream(toolUseEvents), {
@@ -498,16 +506,14 @@ describe('Agent Loop — Streaming', () => {
     await writer.close();
     await new Promise((r) => setTimeout(r, 50));
 
-    // Should have an error about max turns
     const errors = events.filter((e) => e.type === 'error');
     expect(errors.length).toBe(1);
     expect((errors[0]!.message as string)).toContain('Maximum tool iterations');
 
-    // fetch should have been called exactly 3 times (maxTurns)
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('converts history rows to Anthropic message format', async () => {
+  it('converts history rows to message format', async () => {
     const history: MessageRow[] = [
       {
         id: 'h1', conversation_id: 'c1', role: 'user', content: 'Previous question',
@@ -547,7 +553,7 @@ describe('Agent Loop — Streaming', () => {
     await runAgentLoop('conv-hist', history, 'New question', config, mockEnv, 'user-1', writer, () => {});
     await writer.close();
 
-    // Verify the fetch body includes history + new message
+    // Verify the fetch body includes history + new message (Anthropic format)
     const fetchCall = fetchMock.mock.calls[0]!;
     const fetchBody = JSON.parse(fetchCall[1]!.body as string) as {
       messages: Array<{ role: string; content: unknown }>;
@@ -560,5 +566,219 @@ describe('Agent Loop — Streaming', () => {
     expect(fetchBody.messages[1]!.role).toBe('assistant');
     expect(fetchBody.messages[2]!.role).toBe('user');
     expect(fetchBody.messages[2]!.content).toBe('New question');
+  });
+});
+
+describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('emits text_delta and done events for Workers AI text response', async () => {
+    const openAIChunks = [
+      { id: 'chatcmpl-1', choices: [{ index: 0, delta: { role: 'assistant', content: '' } }] },
+      { id: 'chatcmpl-1', choices: [{ index: 0, delta: { content: 'Hello from ' } }] },
+      { id: 'chatcmpl-1', choices: [{ index: 0, delta: { content: 'Workers AI!' } }] },
+      { id: 'chatcmpl-1', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+    ];
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(buildOpenAISseStream(openAIChunks), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    );
+
+    const { writer, events } = createCollectingWriter();
+    const persisted: Array<{ role: string; content: string }> = [];
+
+    const config = resolveSamConfig({ SAM_MODEL: '@cf/meta/llama-4-scout-17b-16e-instruct' });
+    const mockEnv = {
+      DATABASE: {},
+      AI_GATEWAY_ID: 'test-gw',
+      CF_ACCOUNT_ID: 'test-acct',
+      CF_API_TOKEN: 'test-token',
+    } as unknown as Parameters<typeof runAgentLoop>[4];
+
+    await runAgentLoop(
+      'conv-wai-1',
+      [],
+      'Hi SAM',
+      config,
+      mockEnv,
+      'user-1',
+      writer,
+      (_convId, role, content) => {
+        persisted.push({ role, content });
+      },
+    );
+    await writer.close();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const textDeltas = events.filter((e) => e.type === 'text_delta');
+    expect(textDeltas.length).toBe(2);
+    expect(textDeltas[0]!.content).toBe('Hello from ');
+    expect(textDeltas[1]!.content).toBe('Workers AI!');
+
+    expect(events.filter((e) => e.type === 'done').length).toBe(1);
+
+    expect(persisted.length).toBe(1);
+    expect(persisted[0]!.role).toBe('assistant');
+    expect(persisted[0]!.content).toBe('Hello from Workers AI!');
+  });
+
+  it('routes Workers AI requests to the correct gateway URL', async () => {
+    const openAIChunks = [
+      { id: 'chatcmpl-1', choices: [{ index: 0, delta: { content: 'Ok' }, finish_reason: 'stop' }] },
+    ];
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(buildOpenAISseStream(openAIChunks), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    );
+
+    const { writer } = createCollectingWriter();
+
+    const config = resolveSamConfig({ SAM_MODEL: '@cf/meta/llama-4-scout-17b-16e-instruct' });
+    const mockEnv = {
+      DATABASE: {},
+      AI_GATEWAY_ID: 'my-gateway',
+      CF_ACCOUNT_ID: 'my-account',
+      CF_API_TOKEN: 'my-token',
+    } as unknown as Parameters<typeof runAgentLoop>[4];
+
+    await runAgentLoop('conv-url', [], 'Test', config, mockEnv, 'user-1', writer, () => {});
+    await writer.close();
+
+    const fetchCall = fetchMock.mock.calls[0]!;
+    const url = fetchCall[0] as string;
+    expect(url).toContain('gateway.ai.cloudflare.com');
+    expect(url).toContain('my-account');
+    expect(url).toContain('my-gateway');
+    expect(url).toContain('workers-ai');
+
+    const headers = fetchCall[1]!.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer my-token');
+  });
+
+  it('handles Workers AI tool calls in OpenAI format', async () => {
+    // First call: tool_calls in delta
+    const firstCallChunks = [
+      { id: 'chatcmpl-2', choices: [{ index: 0, delta: { role: 'assistant', content: null, tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'list_projects', arguments: '' } }] } }] },
+      { id: 'chatcmpl-2', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{}' } }] } }] },
+      { id: 'chatcmpl-2', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+    ];
+
+    // Second call: text response after tool result
+    const secondCallChunks = [
+      { id: 'chatcmpl-3', choices: [{ index: 0, delta: { content: 'Found your projects.' }, finish_reason: 'stop' }] },
+    ];
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(buildOpenAISseStream(firstCallChunks), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(buildOpenAISseStream(secondCallChunks), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      );
+
+    const { writer, events } = createCollectingWriter();
+    const persisted: Array<{ role: string; content: string }> = [];
+
+    const config = resolveSamConfig({ SAM_MODEL: '@cf/meta/llama-4-scout-17b-16e-instruct' });
+    const mockEnv = {
+      DATABASE: {},
+      AI_GATEWAY_ID: 'gw',
+      CF_ACCOUNT_ID: 'acct',
+      CF_API_TOKEN: 'tok',
+    } as unknown as Parameters<typeof runAgentLoop>[4];
+
+    await runAgentLoop(
+      'conv-wai-tool',
+      [],
+      'Show my projects',
+      config,
+      mockEnv,
+      'user-1',
+      writer,
+      (_convId, role, content) => {
+        persisted.push({ role, content });
+      },
+    );
+    await writer.close();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const toolStarts = events.filter((e) => e.type === 'tool_start');
+    expect(toolStarts.length).toBe(1);
+    expect(toolStarts[0]!.tool).toBe('list_projects');
+
+    const toolResults = events.filter((e) => e.type === 'tool_result');
+    expect(toolResults.length).toBe(1);
+
+    expect(events.filter((e) => e.type === 'done').length).toBe(1);
+
+    // assistant (tool call), tool_result, assistant (text)
+    expect(persisted.length).toBe(3);
+    expect(persisted[0]!.role).toBe('assistant');
+    expect(persisted[1]!.role).toBe('tool_result');
+    expect(persisted[2]!.role).toBe('assistant');
+  });
+});
+
+describe('Agent Loop — Fetch Error Handling', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('emits error event when fetch throws (network error)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('Network error'));
+
+    const { writer, events } = createCollectingWriter();
+
+    const config = resolveSamConfig({});
+    const mockEnv = {
+      DATABASE: {},
+      AI_GATEWAY_ID: '',
+      CF_ACCOUNT_ID: '',
+    } as unknown as Parameters<typeof runAgentLoop>[4];
+
+    await runAgentLoop('conv-err', [], 'Hello', config, mockEnv, 'user-1', writer, () => {});
+    await writer.close();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const errors = events.filter((e) => e.type === 'error');
+    expect(errors.length).toBe(1);
+    expect((errors[0]!.message as string)).toContain('Failed to reach AI service');
+  });
+
+  it('emits timeout error when fetch is aborted', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new DOMException('The operation was aborted', 'AbortError'));
+
+    const { writer, events } = createCollectingWriter();
+
+    const config = resolveSamConfig({});
+    const mockEnv = {
+      DATABASE: {},
+      AI_GATEWAY_ID: '',
+      CF_ACCOUNT_ID: '',
+      SAM_LLM_TIMEOUT_MS: '100',
+    } as unknown as Parameters<typeof runAgentLoop>[4];
+
+    await runAgentLoop('conv-timeout', [], 'Hello', config, mockEnv, 'user-1', writer, () => {});
+    await writer.close();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const errors = events.filter((e) => e.type === 'error');
+    expect(errors.length).toBe(1);
+    expect((errors[0]!.message as string)).toContain('timed out');
   });
 });
