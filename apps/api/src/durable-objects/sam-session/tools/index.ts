@@ -1,4 +1,6 @@
 import type { AnthropicToolDef, CollectedToolCall, ToolContext } from '../types';
+import { addKnowledge, addKnowledgeDef } from './add-knowledge';
+import { addPolicy, addPolicyDef } from './add-policy';
 import { cancelMission, cancelMissionDef } from './cancel-mission';
 import { createIdea, createIdeaDef } from './create-idea';
 import { createMission, createMissionDef } from './create-mission';
@@ -7,14 +9,17 @@ import { findRelatedIdeas, findRelatedIdeasDef } from './find-related-ideas';
 import { getCiStatus, getCiStatusDef } from './get-ci-status';
 import { getMission, getMissionDef } from './get-mission';
 import { getOrchestratorStatus, getOrchestratorStatusDef } from './get-orchestrator-status';
+import { getProjectKnowledge, getProjectKnowledgeDef } from './get-project-knowledge';
 import { getProjectStatus, getProjectStatusDef } from './get-project-status';
 import { getTaskDetails, getTaskDetailsDef } from './get-task-details';
 import { listIdeas, listIdeasDef } from './list-ideas';
+import { listPolicies, listPoliciesDef } from './list-policies';
 import { listProjects, listProjectsDef } from './list-projects';
 import { pauseMission, pauseMissionDef } from './pause-mission';
 import { resumeMission, resumeMissionDef } from './resume-mission';
 import { retrySubtask, retrySubtaskDef } from './retry-subtask';
 import { searchConversationHistory, searchConversationHistoryDef } from './search-conversation-history';
+import { searchKnowledge, searchKnowledgeDef } from './search-knowledge';
 import { searchTasks, searchTasksDef } from './search-tasks';
 import { sendMessageToSubtask, sendMessageToSubtaskDef } from './send-message-to-subtask';
 import { stopSubtask, stopSubtaskDef } from './stop-subtask';
@@ -40,6 +45,11 @@ export const SAM_TOOLS: AnthropicToolDef[] = [
   findRelatedIdeasDef,
   getCiStatusDef,
   getOrchestratorStatusDef,
+  searchKnowledgeDef,
+  getProjectKnowledgeDef,
+  addKnowledgeDef,
+  listPoliciesDef,
+  addPolicyDef,
 ];
 
 type ToolHandler = (input: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
@@ -64,6 +74,11 @@ const toolHandlers: Record<string, ToolHandler> = {
   find_related_ideas: findRelatedIdeas as ToolHandler,
   get_ci_status: getCiStatus as ToolHandler,
   get_orchestrator_status: getOrchestratorStatus as ToolHandler,
+  search_knowledge: searchKnowledge as ToolHandler,
+  get_project_knowledge: getProjectKnowledge as ToolHandler,
+  add_knowledge: addKnowledge as ToolHandler,
+  list_policies: listPolicies as ToolHandler,
+  add_policy: addPolicy as ToolHandler,
 };
 
 /** Execute a tool call and return the result (or error message on failure). */
