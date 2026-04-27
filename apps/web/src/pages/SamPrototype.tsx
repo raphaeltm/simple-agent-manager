@@ -32,9 +32,9 @@ const FRAGMENT_SHADER = `
   precision mediump float;
   uniform float u_time;        // accumulated time (JS controls speed)
   uniform vec2 u_resolution;
-  uniform float u_amplitude;   // 0.0 = silent, 1.0 = loud — brightness only
+  uniform float u_amplitude;   // 0.0 = silent, 1.0 = loud
 
-  // Simplex-ish noise
+  /* ── Simplex noise ── */
   vec3 mod289(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
   vec2 mod289(vec2 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
   vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
@@ -62,43 +62,92 @@ const FRAGMENT_SHADER = `
     return 130.0 * dot(m, g);
   }
 
+  /* ── Fractal Brownian Motion (3 octaves) ── */
+  float fbm(vec2 p) {
+    float f = 0.0;
+    f += 0.5000 * snoise(p); p *= 2.02;
+    f += 0.2500 * snoise(p); p *= 2.03;
+    f += 0.1250 * snoise(p);
+    return f / 0.875;  // normalize to roughly -1..1
+  }
+
+  /* ── 2D curl of a noise field (divergence-free velocity) ── */
+  vec2 curlNoise(vec2 p) {
+    float eps = 0.01;
+    float dny = fbm(vec2(p.x, p.y + eps)) - fbm(vec2(p.x, p.y - eps));
+    float dnx = fbm(vec2(p.x + eps, p.y)) - fbm(vec2(p.x - eps, p.y));
+    return vec2(dny, -dnx) / (2.0 * eps);
+  }
+
   void main() {
     vec2 uv = gl_FragCoord.xy / u_resolution.xy;
     float aspect = u_resolution.x / u_resolution.y;
     vec2 p = vec2(uv.x * aspect, uv.y);
 
-    // u_time is accumulated in JS with variable speed — use directly
     float t = u_time;
-
-    // Noise layers — same pattern, smooth continuous motion
-    float n1 = snoise(p * 1.5 + vec2(t * 0.3, t * 0.2)) * 0.5 + 0.5;
-    float n2 = snoise(p * 3.0 + vec2(-t * 0.5, t * 0.4)) * 0.5 + 0.5;
-    float n3 = snoise(p * 6.0 + vec2(t * 0.7, -t * 0.3)) * 0.5 + 0.5;
-
-    float combined = n1 * 0.6 + n2 * 0.3 + n3 * 0.1;
-
-    // Amplitude ONLY affects brightness — not pattern position
     float amp = u_amplitude;
 
-    // Base palette is brighter than before; amplitude boosts further
-    vec3 color1 = vec3(0.0, 0.08 + amp * 0.06, 0.05 + amp * 0.04);
-    vec3 color2 = vec3(0.0, 0.18 + amp * 0.22, 0.12 + amp * 0.16);
-    vec3 color3 = vec3(0.04 + amp * 0.12, 0.30 + amp * 0.45, 0.18 + amp * 0.35);
+    // ── Step 1: Curl noise advection ──
+    // Compute a divergence-free velocity field and use it to displace
+    // the coordinates. This gives fluid-like swirling motion.
+    vec2 curl = curlNoise(p * 1.2 + vec2(t * 0.4, t * 0.3));
+    // Curl displacement strength: base flow + amplitude boost
+    float curlStrength = 0.06 + amp * 0.04;
+    vec2 advected = p + curl * curlStrength;
 
+    // ── Step 2: Domain warping (Inigo Quilez technique) ──
+    // Feed noise into itself for organic, ink-in-water distortion.
+    // Warp intensity increases with amplitude for more turbulence.
+    float warpAmt = 3.0 + amp * 1.5;
+
+    // First warp layer: two independent fbm channels offset by magic constants
+    vec2 q = vec2(
+      fbm(advected * 1.4 + vec2(0.0, 0.0) + vec2(t * 0.2, t * 0.15)),
+      fbm(advected * 1.4 + vec2(5.2, 1.3) + vec2(t * 0.15, -t * 0.1))
+    );
+
+    // Second warp layer: warps the already-warped coordinates
+    vec2 r = vec2(
+      fbm(advected * 1.4 + warpAmt * q + vec2(1.7, 9.2) + vec2(t * 0.12, t * 0.1)),
+      fbm(advected * 1.4 + warpAmt * q + vec2(8.3, 2.8) + vec2(-t * 0.08, t * 0.14))
+    );
+
+    // Final evaluation through the double-warped field
+    float f = fbm(advected * 1.4 + warpAmt * r);
+
+    // Normalize to 0..1 range (fbm returns roughly -1..1)
+    float combined = f * 0.5 + 0.5;
+
+    // Use the warp displacement as a secondary color channel
+    // q length indicates how much distortion is happening at each point
+    float warpMagnitude = length(q);
+
+    // ── Coloring ──
+    // Three-tone palette — base dark, mid teal, bright accent
+    vec3 color1 = vec3(0.0, 0.08 + amp * 0.06, 0.05 + amp * 0.04);
+    vec3 color2 = vec3(0.0, 0.20 + amp * 0.20, 0.13 + amp * 0.14);
+    vec3 color3 = vec3(0.05 + amp * 0.12, 0.35 + amp * 0.40, 0.22 + amp * 0.30);
+
+    // Base color from the warped noise field
     vec3 color = mix(color1, color2, combined);
 
-    // Bright spots — more and stronger with amplitude
-    float brightThreshold = 0.60 - amp * 0.20;
-    float bright = smoothstep(brightThreshold, 0.85, combined);
-    float brightIntensity = 0.6 + amp * 2.0;
+    // Bright filaments where the noise field peaks
+    float brightThreshold = 0.58 - amp * 0.18;
+    float bright = smoothstep(brightThreshold, 0.82, combined);
+    float brightIntensity = 0.7 + amp * 1.8;
     color = mix(color, color3, bright * brightIntensity);
 
-    // Broad glow that lifts the whole image when speaking
-    float glow = smoothstep(0.2, 0.6, combined) * amp * 0.4;
-    color += vec3(0.03, 0.18, 0.10) * glow;
+    // Secondary color variation from warp magnitude —
+    // areas of high distortion get a slightly different tint (more blue-green)
+    vec3 warpTint = vec3(0.01, 0.12 + amp * 0.15, 0.10 + amp * 0.10);
+    color += warpTint * smoothstep(0.3, 0.8, warpMagnitude) * (0.3 + amp * 0.4);
+
+    // Broad glow lift when speaking
+    float glow = smoothstep(0.15, 0.55, combined) * amp * 0.35;
+    color += vec3(0.03, 0.16, 0.09) * glow;
 
     // Vignette — opens up when loud
-    float vignetteStrength = 0.8 - amp * 0.35;
+    float vignetteStrength = 0.75 - amp * 0.30;
     float vignette = 1.0 - length(uv - 0.5) * vignetteStrength;
     color *= vignette;
 
