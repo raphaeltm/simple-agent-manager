@@ -88,6 +88,10 @@ export const dispatchTaskDef: AnthropicToolDef = {
         type: 'string',
         description: 'Agent profile ID or name to use for configuration.',
       },
+      missionId: {
+        type: 'string',
+        description: 'Mission ID to associate this task with. Use after create_mission.',
+      },
     },
     required: ['projectId', 'description'],
   },
@@ -103,6 +107,7 @@ interface DispatchTaskInput {
   branch?: string;
   taskMode?: string;
   agentProfileId?: string;
+  missionId?: string;
 }
 
 export async function dispatchTask(
@@ -120,7 +125,7 @@ export async function dispatchTask(
     return { error: 'description is required.' };
   }
 
-  const maxDescLen = parseInt(String((env as unknown as Record<string, string>).SAM_DISPATCH_MAX_DESCRIPTION_LENGTH) || '', 10) || DEFAULT_MAX_DESCRIPTION_LENGTH;
+  const maxDescLen = Number(env.SAM_DISPATCH_MAX_DESCRIPTION_LENGTH) || DEFAULT_MAX_DESCRIPTION_LENGTH;
   const description = input.description.trim().slice(0, maxDescLen);
 
   // ── Validate optional params (before any DB access) ───────────────────
@@ -225,9 +230,7 @@ export async function dispatchTask(
 
   // ── Generate title and branch name ────────────────────────────────────
   const titleConfig = getTaskTitleConfig(env);
-  const [taskTitle] = await Promise.all([
-    generateTaskTitle(env.AI, description, titleConfig),
-  ]);
+  const taskTitle = await generateTaskTitle(env.AI, description, titleConfig);
 
   const taskId = ulid();
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
@@ -243,16 +246,16 @@ export async function dispatchTask(
   await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint,
+     task_mode, agent_profile_hint, mission_id,
      created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', ?, 0, ?, ?,
-     ?, ?,
+     ?, ?, ?,
      ?, ?)`,
   ).bind(
     taskId, input.projectId, ctx.userId,
     taskTitle, description, priority, branchName,
     ctx.userId,
-    resolvedTaskMode, resolvedProfile?.profileId ?? null,
+    resolvedTaskMode, resolvedProfile?.profileId ?? null, input.missionId?.trim() || null,
     now, now,
   ).run();
 

@@ -581,4 +581,5 @@ export interface Env {
   SAM_SEARCH_MAX_LIMIT?: string;                   // Max allowed search results (default: 50)
   SAM_HISTORY_LOAD_LIMIT?: string;                 // Max messages loaded on page mount (default: 200)
   SAM_LLM_TIMEOUT_MS?: string;                     // LLM call timeout in ms (default: 120000)
+  SAM_DISPATCH_MAX_DESCRIPTION_LENGTH?: string;    // Max task description length for SAM dispatch (default: 32000)
 }

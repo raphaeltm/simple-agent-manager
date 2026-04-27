@@ -11,6 +11,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
+import { ulid } from '../../../lib/ulid';
 import * as orchestratorService from '../../../services/project-orchestrator';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
@@ -57,8 +58,8 @@ export async function createMission(
     return { error: 'title is required.' };
   }
 
-  const titleMaxLen = parseInt(String((env as unknown as Record<string, string>).MISSION_TITLE_MAX_LENGTH) || '', 10) || DEFAULT_TITLE_MAX_LENGTH;
-  const descMaxLen = parseInt(String((env as unknown as Record<string, string>).MISSION_DESCRIPTION_MAX_LENGTH) || '', 10) || DEFAULT_DESCRIPTION_MAX_LENGTH;
+  const titleMaxLen = Number(env.MISSION_TITLE_MAX_LENGTH) || DEFAULT_TITLE_MAX_LENGTH;
+  const descMaxLen = Number(env.MISSION_DESCRIPTION_MAX_LENGTH) || DEFAULT_DESCRIPTION_MAX_LENGTH;
 
   const title = input.title.trim().slice(0, titleMaxLen);
   const description = input.description?.trim().slice(0, descMaxLen) ?? null;
@@ -80,7 +81,7 @@ export async function createMission(
   }
 
   // ── Enforce per-project limit ─────────────────────────────────────────
-  const maxPerProject = parseInt(String((env as unknown as Record<string, string>).MISSION_MAX_PER_PROJECT) || '', 10) || DEFAULT_MISSION_MAX_PER_PROJECT;
+  const maxPerProject = Number(env.MISSION_MAX_PER_PROJECT) || DEFAULT_MISSION_MAX_PER_PROJECT;
   const countRow = await env.DATABASE.prepare(
     'SELECT COUNT(*) as cnt FROM missions WHERE project_id = ?',
   ).bind(input.projectId).first<{ cnt: number }>();
@@ -89,7 +90,7 @@ export async function createMission(
   }
 
   // ── Insert mission ────────────────────────────────────────────────────
-  const id = crypto.randomUUID();
+  const id = ulid();
   const now = new Date().toISOString();
   await env.DATABASE.prepare(
     `INSERT INTO missions (id, project_id, user_id, title, description, status, created_at, updated_at)
