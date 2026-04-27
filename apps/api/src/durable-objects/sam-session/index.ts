@@ -6,6 +6,7 @@
  */
 import {
   DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
+  DEFAULT_SAM_HISTORY_LOAD_LIMIT,
   DEFAULT_SAM_MAX_CONVERSATIONS,
   DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION,
   resolveSamConfig,
@@ -72,6 +73,46 @@ function migrate(sql: SqlStorage): void {
     sql.exec(`INSERT INTO rate_limits (id, window_start, request_count) VALUES (1, 0, 0)`);
     sql.exec(`INSERT INTO sam_migrations (name) VALUES ('002-rate-limits')`);
   }
+
+  if (!applied.has('003-fts-and-type')) {
+    // Forward-compatible columns for Phase 3 (project agent threads)
+    sql.exec(`ALTER TABLE conversations ADD COLUMN type TEXT NOT NULL DEFAULT 'human'`);
+    sql.exec(`ALTER TABLE conversations ADD COLUMN linked_session_id TEXT`);
+    sql.exec(`ALTER TABLE conversations ADD COLUMN linked_project_id TEXT`);
+
+    // FTS5 virtual table for full-text search on message content
+    sql.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+      USING fts5(content, content='messages', content_rowid='rowid', tokenize='unicode61')
+    `);
+
+    // Backfill existing messages into FTS5
+    sql.exec(`
+      INSERT INTO messages_fts(rowid, content)
+      SELECT rowid, content FROM messages WHERE content != ''
+    `);
+
+    sql.exec(`INSERT INTO sam_migrations (name) VALUES ('003-fts-and-type')`);
+  }
+}
+
+/** Build an FTS5 query from user input — wraps each word in double quotes. */
+export function buildFtsQuery(query: string): string | null {
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+  return words.map((w) => `"${w.replace(/"/g, '""')}"`).join(' ');
+}
+
+/** Extract a context-windowed snippet around the first match. */
+export function extractSnippet(content: string, query: string): string {
+  const lowerContent = content.toLowerCase();
+  const matchIdx = lowerContent.indexOf(query.toLowerCase());
+  if (matchIdx === -1) {
+    return content.slice(0, 200) + (content.length > 200 ? '...' : '');
+  }
+  const start = Math.max(0, matchIdx - 80);
+  const end = Math.min(content.length, matchIdx + query.length + 120);
+  return (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
 }
 
 /** Encode an SSE event as unnamed data frame. */
@@ -103,13 +144,22 @@ export class SamSession extends DurableObject<AppEnv> {
 
       // GET /conversations — list conversations
       if (method === 'GET' && path === '/conversations') {
-        return this.handleListConversations();
+        const typeFilter = url.searchParams.get('type');
+        return this.handleListConversations(typeFilter);
+      }
+
+      // GET /search — full-text search messages
+      if (method === 'GET' && path === '/search') {
+        const query = url.searchParams.get('query') || '';
+        const limit = parseInt(url.searchParams.get('limit') || '', 10) || undefined;
+        return this.handleSearch(query, limit);
       }
 
       // GET /conversations/:id/messages — get messages for a conversation
       const messagesMatch = path.match(/^\/conversations\/([^/]+)\/messages$/);
       if (method === 'GET' && messagesMatch) {
-        return this.handleGetMessages(messagesMatch[1]!);
+        const limit = parseInt(url.searchParams.get('limit') || '', 10) || undefined;
+        return this.handleGetMessages(messagesMatch[1]!, limit);
       }
 
       return new Response(JSON.stringify({ error: 'Not found' }), {
@@ -201,6 +251,7 @@ export class SamSession extends DurableObject<AppEnv> {
             (convId, role, content, toolCallsJson, toolCallId) => {
               this.persistMessage(convId, role, content, toolCallsJson, toolCallId);
             },
+            (query, limit) => this.searchMessages(query, limit, config.ftsEnabled),
           );
         } catch (err) {
           log.error('sam_session.agent_loop_error', {
@@ -228,13 +279,22 @@ export class SamSession extends DurableObject<AppEnv> {
     });
   }
 
-  /** Handle GET /conversations — list all conversations. */
-  private handleListConversations(): Response {
+  /** Handle GET /conversations — list conversations, optionally filtered by type. */
+  private handleListConversations(typeFilter: string | null): Response {
     const maxConversations = Number(this.env.SAM_MAX_CONVERSATIONS) || DEFAULT_SAM_MAX_CONVERSATIONS;
-    const rows = this.sql.exec(
-      'SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?',
-      maxConversations
-    ).toArray() as unknown as ConversationRow[];
+    let rows: ConversationRow[];
+    if (typeFilter) {
+      rows = this.sql.exec(
+        'SELECT id, title, type, created_at, updated_at FROM conversations WHERE type = ? ORDER BY updated_at DESC LIMIT ?',
+        typeFilter,
+        maxConversations
+      ).toArray() as unknown as ConversationRow[];
+    } else {
+      rows = this.sql.exec(
+        'SELECT id, title, type, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?',
+        maxConversations
+      ).toArray() as unknown as ConversationRow[];
+    }
 
     return new Response(JSON.stringify({ conversations: rows }), {
       headers: { 'content-type': 'application/json' },
@@ -242,8 +302,11 @@ export class SamSession extends DurableObject<AppEnv> {
   }
 
   /** Handle GET /conversations/:id/messages — get messages for a conversation. */
-  private handleGetMessages(conversationId: string): Response {
-    const maxMessages = Number(this.env.SAM_MAX_MESSAGES_PER_CONVERSATION) || DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION;
+  private handleGetMessages(conversationId: string, requestedLimit?: number): Response {
+    const historyLimit = Number(this.env.SAM_HISTORY_LOAD_LIMIT) || DEFAULT_SAM_HISTORY_LOAD_LIMIT;
+    const maxMessages = requestedLimit
+      ? Math.min(requestedLimit, Number(this.env.SAM_MAX_MESSAGES_PER_CONVERSATION) || DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION)
+      : historyLimit;
     const rows = this.sql.exec(
       `SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence, created_at
        FROM messages WHERE conversation_id = ? ORDER BY sequence ASC LIMIT ?`,
@@ -305,6 +368,24 @@ export class SamSession extends DurableObject<AppEnv> {
         toolCallId ?? null,
         nextSeq
       );
+
+      // Sync content to FTS5 index
+      if (content) {
+        try {
+          const rowid = this.sql.exec(
+            'SELECT rowid FROM messages WHERE id = ?', id
+          ).toArray()[0]?.rowid;
+          if (rowid != null) {
+            this.sql.exec(
+              'INSERT INTO messages_fts(rowid, content) VALUES (?, ?)',
+              rowid as number,
+              content
+            );
+          }
+        } catch {
+          // FTS5 sync failure is non-fatal — search may miss this message
+        }
+      }
 
       // Update conversation timestamp
       this.sql.exec(
@@ -371,6 +452,98 @@ export class SamSession extends DurableObject<AppEnv> {
       'UPDATE rate_limits SET request_count = request_count + 1 WHERE id = 1'
     );
     return null;
+  }
+
+  /** Handle GET /search — full-text search across messages. */
+  private handleSearch(query: string, requestedLimit?: number): Response {
+    if (!query.trim()) {
+      return new Response(JSON.stringify({ error: 'Query is required' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
+    const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
+    const limit = Math.min(
+      requestedLimit || config.searchLimit,
+      config.searchMaxLimit
+    );
+
+    const results = this.searchMessages(query, limit, config.ftsEnabled);
+    return new Response(JSON.stringify({ results }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  /**
+   * Search messages using two-tier strategy: FTS5 MATCH first, LIKE fallback.
+   * Public so the search_conversation_history tool can call it directly.
+   */
+  searchMessages(
+    query: string,
+    limit: number,
+    ftsEnabled: boolean = true,
+  ): Array<{ snippet: string; role: string; sequence: number; createdAt: string }> {
+    const results: Array<{ snippet: string; role: string; sequence: number; createdAt: string }> = [];
+
+    if (ftsEnabled) {
+      const ftsQuery = buildFtsQuery(query);
+      if (ftsQuery) {
+        try {
+          const rows = this.sql.exec(
+            `SELECT m.role, m.content, m.sequence, m.created_at
+             FROM messages_fts f
+             JOIN messages m ON m.rowid = f.rowid
+             WHERE f.messages_fts MATCH ?
+             ORDER BY rank
+             LIMIT ?`,
+            ftsQuery,
+            limit
+          ).toArray();
+          for (const row of rows) {
+            results.push({
+              snippet: extractSnippet(String(row.content), query),
+              role: String(row.role),
+              sequence: Number(row.sequence),
+              createdAt: String(row.created_at),
+            });
+          }
+        } catch (e) {
+          log.error('sam_session.fts5_search_failed', { error: String(e) });
+        }
+      }
+    }
+
+    // LIKE fallback if FTS5 returned fewer results than requested
+    if (results.length < limit) {
+      const remaining = limit - results.length;
+      const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
+      const rows = this.sql.exec(
+        `SELECT role, content, sequence, created_at
+         FROM messages
+         WHERE content LIKE ? ESCAPE '\\'
+         ORDER BY created_at DESC
+         LIMIT ?`,
+        `%${escapedQuery}%`,
+        remaining
+      ).toArray();
+
+      // De-duplicate: skip rows already found by FTS5 (compare by sequence)
+      const seenSequences = new Set(results.map((r) => r.sequence));
+      for (const row of rows) {
+        const seq = Number(row.sequence);
+        if (seenSequences.has(seq)) continue;
+        seenSequences.add(seq);
+        results.push({
+          snippet: extractSnippet(String(row.content), query),
+          role: String(row.role),
+          sequence: seq,
+          createdAt: String(row.created_at),
+        });
+      }
+    }
+
+    return results;
   }
 
   /** Load conversation history for the agent loop. */

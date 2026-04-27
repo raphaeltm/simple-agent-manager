@@ -30,6 +30,18 @@ export const DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW = 50;
 /** Source tag in cf-aig-metadata for AI Gateway filtering. */
 export const DEFAULT_SAM_AIG_SOURCE = 'sam';
 
+/** Whether FTS5 full-text search is enabled. */
+export const DEFAULT_SAM_FTS_ENABLED = true;
+
+/** Default number of search results returned. */
+export const DEFAULT_SAM_SEARCH_LIMIT = 10;
+
+/** Maximum number of search results allowed. */
+export const DEFAULT_SAM_SEARCH_MAX_LIMIT = 50;
+
+/** Maximum messages loaded on page mount (history). */
+export const DEFAULT_SAM_HISTORY_LOAD_LIMIT = 200;
+
 /** Anthropic API version header. */
 export const SAM_ANTHROPIC_VERSION = '2023-06-01';
 
@@ -45,6 +57,10 @@ export interface SamConfig {
   contextWindow: number;
   aigSource: string;
   systemPromptAppend: string;
+  ftsEnabled: boolean;
+  searchLimit: number;
+  searchMaxLimit: number;
+  historyLoadLimit: number;
 }
 
 export function resolveSamConfig(env: Record<string, string | undefined>): SamConfig {
@@ -59,5 +75,9 @@ export function resolveSamConfig(env: Record<string, string | undefined>): SamCo
     contextWindow: parseInt(env.SAM_CONVERSATION_CONTEXT_WINDOW || '', 10) || DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
     aigSource: env.SAM_AIG_SOURCE || DEFAULT_SAM_AIG_SOURCE,
     systemPromptAppend: env.SAM_SYSTEM_PROMPT_APPEND || '',
+    ftsEnabled: env.SAM_FTS_ENABLED !== 'false',
+    searchLimit: parseInt(env.SAM_SEARCH_LIMIT || '', 10) || DEFAULT_SAM_SEARCH_LIMIT,
+    searchMaxLimit: parseInt(env.SAM_SEARCH_MAX_LIMIT || '', 10) || DEFAULT_SAM_SEARCH_MAX_LIMIT,
+    historyLoadLimit: parseInt(env.SAM_HISTORY_LOAD_LIMIT || '', 10) || DEFAULT_SAM_HISTORY_LOAD_LIMIT,
   };
 }

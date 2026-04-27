@@ -24,6 +24,16 @@ import {
 import { useVoiceInput } from './sam-prototype/voice-input';
 import { useWebGLBackground } from './sam-prototype/webgl-background';
 
+function formatTimestamp(isoOrDatetime: string): string {
+  try {
+    const d = new Date(isoOrDatetime);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
 export function SamPrototype() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const amplitudeRef = useRef(0);
@@ -33,6 +43,7 @@ export function SamPrototype() {
   const [selectedProject, setSelectedProject] = useState<MockProject | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -64,6 +75,110 @@ export function SamPrototype() {
   useEffect(() => {
     resizeTextarea();
   }, [inputValue, resizeTextarea]);
+
+  // Load existing conversation on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const convResp = await fetch(`${API_URL}/api/sam/conversations?type=human`, {
+          credentials: 'include',
+        });
+        if (!convResp.ok || cancelled) {
+          setIsLoadingHistory(false);
+          return;
+        }
+        const convData = (await convResp.json()) as {
+          conversations: Array<{ id: string; title: string | null }>;
+        };
+        if (cancelled) return;
+
+        const conv = convData.conversations[0]; // most recent human conversation
+        if (!conv) {
+          setIsLoadingHistory(false);
+          return;
+        }
+
+        setConversationId(conv.id);
+
+        const msgResp = await fetch(
+          `${API_URL}/api/sam/conversations/${conv.id}/messages?limit=200`,
+          { credentials: 'include' },
+        );
+        if (!msgResp.ok || cancelled) {
+          setIsLoadingHistory(false);
+          return;
+        }
+        const msgData = (await msgResp.json()) as {
+          messages: Array<{
+            id: string;
+            role: string;
+            content: string;
+            tool_calls_json: string | null;
+            tool_call_id: string | null;
+            sequence: number;
+            created_at: string;
+          }>;
+        };
+        if (cancelled) return;
+
+        // Map backend messages to ChatMessage format
+        // Group: assistant messages with tool_calls followed by tool_result messages
+        const mapped: ChatMessage[] = [];
+        for (const row of msgData.messages) {
+          if (row.role === 'user') {
+            mapped.push({
+              id: row.id,
+              role: 'user',
+              content: row.content,
+              timestamp: formatTimestamp(row.created_at),
+            });
+          } else if (row.role === 'assistant') {
+            let toolCalls: Array<{ name: string; result?: unknown }> | undefined;
+            if (row.tool_calls_json) {
+              try {
+                const parsed = JSON.parse(row.tool_calls_json) as Array<{
+                  id: string;
+                  name: string;
+                  input: unknown;
+                }>;
+                toolCalls = parsed.map((tc) => ({ name: tc.name }));
+              } catch {
+                // ignore parse errors
+              }
+            }
+            mapped.push({
+              id: row.id,
+              role: 'sam',
+              content: row.content,
+              timestamp: formatTimestamp(row.created_at),
+              toolCalls,
+            });
+          } else if (row.role === 'tool_result' && row.tool_call_id) {
+            // Attach tool result to the most recent sam message's matching tool call
+            const lastSam = [...mapped].reverse().find((m) => m.role === 'sam' && m.toolCalls);
+            if (lastSam?.toolCalls) {
+              const pendingCall = lastSam.toolCalls.find((tc) => !tc.result);
+              if (pendingCall) {
+                try {
+                  pendingCall.result = JSON.parse(row.content);
+                } catch {
+                  pendingCall.result = row.content;
+                }
+              }
+            }
+          }
+        }
+
+        setMessages(mapped);
+      } catch {
+        // Silently handle — user just sees empty chat
+      } finally {
+        if (!cancelled) setIsLoadingHistory(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -296,9 +411,15 @@ export function SamPrototype() {
             }`}
           >
             <div className="flex-1 overflow-y-auto px-4 py-4">
-              {messages.map((msg) => (
-                <MessageBubble key={msg.id} msg={msg} />
-              ))}
+              {isLoadingHistory ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'rgba(60, 180, 120, 0.5)' }} />
+                </div>
+              ) : (
+                messages.map((msg) => (
+                  <MessageBubble key={msg.id} msg={msg} />
+                ))
+              )}
               <div ref={messagesEndRef} />
             </div>
 

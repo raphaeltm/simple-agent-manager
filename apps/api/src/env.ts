@@ -576,4 +576,9 @@ export interface Env {
   SAM_MAX_MESSAGES_PER_CONVERSATION?: string;      // Max messages per conversation (default: 500)
   SAM_CONVERSATION_CONTEXT_WINDOW?: string;        // Messages sent to LLM per turn (default: 50)
   SAM_AIG_SOURCE?: string;                         // AI Gateway metadata source tag (default: sam)
+  SAM_FTS_ENABLED?: string;                        // Kill switch for FTS5 search (default: true)
+  SAM_SEARCH_LIMIT?: string;                       // Default search results (default: 10)
+  SAM_SEARCH_MAX_LIMIT?: string;                   // Max allowed search results (default: 50)
+  SAM_HISTORY_LOAD_LIMIT?: string;                 // Max messages loaded on page mount (default: 200)
+  SAM_LLM_TIMEOUT_MS?: string;                     // LLM call timeout in ms (default: 120000)
 }

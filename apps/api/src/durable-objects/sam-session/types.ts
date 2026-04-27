@@ -11,8 +11,11 @@ export type SamSseEvent =
 export interface ConversationRow {
   id: string;
   title: string | null;
+  type: string;
   created_at: string;
   updated_at: string;
+  linked_session_id: string | null;
+  linked_project_id: string | null;
 }
 
 /** Message row from SQLite. */
@@ -59,10 +62,19 @@ export interface AnthropicToolDef {
   };
 }
 
+/** Search result from FTS5 / LIKE search. */
+export interface SearchResult {
+  snippet: string;
+  role: string;
+  sequence: number;
+  createdAt: string;
+}
+
 /** Tool execution context passed to tool handlers. */
 export interface ToolContext {
   env: Record<string, unknown>;
   userId: string;
+  searchMessages?: (query: string, limit: number) => SearchResult[];
 }
 
 /** A collected tool call from the streaming response. */
