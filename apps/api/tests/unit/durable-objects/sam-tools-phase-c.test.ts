@@ -154,10 +154,9 @@ describe('search_knowledge', () => {
 
   it('searches single project when projectId provided', async () => {
     const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
-    mockSearchKnowledgeObservations.mockResolvedValue({
-      results: [{ observation: { id: 'obs-1', content: 'test fact', confidence: 0.9 }, entityName: 'User', entityType: 'preference' }],
-      total: 1,
-    });
+    mockSearchKnowledgeObservations.mockResolvedValue([
+      { id: 'obs-1', content: 'test fact', confidence: 0.9, entityName: 'User', entityType: 'preference' },
+    ]);
 
     const result = await searchKnowledge({ query: 'test', projectId: 'proj-1' }, ctx) as Record<string, unknown>;
     expect(result.projectId).toBe('proj-1');
@@ -190,10 +189,9 @@ describe('search_knowledge', () => {
       userId: 'user-123',
     };
 
-    mockSearchKnowledgeObservations.mockResolvedValue({
-      results: [{ observation: { id: 'obs-1', content: 'result', confidence: 0.8 }, entityName: 'E1', entityType: 'context' }],
-      total: 1,
-    });
+    mockSearchKnowledgeObservations.mockResolvedValue([
+      { id: 'obs-1', content: 'result', confidence: 0.8, entityName: 'E1', entityType: 'context' },
+    ]);
 
     const result = await searchKnowledge({ query: 'test' }, ctx) as Record<string, unknown>;
     expect(result.projectsSearched).toBe(2);
