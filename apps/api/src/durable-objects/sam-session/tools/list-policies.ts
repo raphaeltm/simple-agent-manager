@@ -66,7 +66,7 @@ export async function listPolicies(
   const limits = resolvePolicyLimits(env);
 
   const result = await projectDataService.listPolicies(
-    env, input.projectId, category, true, limits.listPageSize, 0,
+    env, input.projectId, category, true, limits.maxPerProject, 0,
   );
 
   return {

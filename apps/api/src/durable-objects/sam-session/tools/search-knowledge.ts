@@ -89,11 +89,13 @@ export async function searchKnowledge(
     };
   }
 
-  // Cross-project search: query all user projects
+  // Cross-project search: query active user projects only
+  const MAX_CROSS_PROJECT = 100;
   const userProjects = await db
     .select({ id: schema.projects.id, name: schema.projects.name })
     .from(schema.projects)
-    .where(eq(schema.projects.userId, ctx.userId));
+    .where(and(eq(schema.projects.userId, ctx.userId), eq(schema.projects.status, 'active')))
+    .limit(MAX_CROSS_PROJECT);
 
   if (userProjects.length === 0) {
     return { results: [], total: 0 };

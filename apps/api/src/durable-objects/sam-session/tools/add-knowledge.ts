@@ -12,6 +12,7 @@ import type { AnthropicToolDef, ToolContext } from '../types';
 
 const MAX_OBSERVATION_LENGTH = 1000;
 const MAX_ENTITY_NAME_LENGTH = 200;
+const MAX_OBSERVATIONS_PER_CALL = 20;
 
 export const addKnowledgeDef: AnthropicToolDef = {
   name: 'add_knowledge',
@@ -77,6 +78,9 @@ export async function addKnowledge(
   }
   if (!Array.isArray(input.observations) || input.observations.length === 0) {
     return { error: 'observations must be a non-empty array of strings.' };
+  }
+  if (input.observations.length > MAX_OBSERVATIONS_PER_CALL) {
+    return { error: `observations array may not exceed ${MAX_OBSERVATIONS_PER_CALL} items per call.` };
   }
 
   const env = ctx.env as unknown as Env;
