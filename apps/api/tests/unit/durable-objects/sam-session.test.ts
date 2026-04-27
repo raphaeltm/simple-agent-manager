@@ -51,7 +51,7 @@ vi.mock('../../../src/services/platform-credentials', () => ({
 
 describe('SAM Constants and Config', () => {
   it('has correct default values', () => {
-    expect(DEFAULT_SAM_MODEL).toBe('claude-sonnet-4-20250514');
+    expect(DEFAULT_SAM_MODEL).toBe('@cf/google/gemma-4-26b-a4b-it');
     expect(DEFAULT_SAM_MAX_TOKENS).toBe(4096);
     expect(DEFAULT_SAM_MAX_TURNS).toBe(20);
     expect(DEFAULT_SAM_RATE_LIMIT_RPM).toBe(30);
@@ -294,7 +294,7 @@ describe('Agent Loop — Streaming', () => {
     const { writer, events } = createCollectingWriter();
     const persisted: Array<{ role: string; content: string }> = [];
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -373,7 +373,7 @@ describe('Agent Loop — Streaming', () => {
     const { writer, events } = createCollectingWriter();
     const persisted: Array<{ role: string; content: string }> = [];
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -429,7 +429,7 @@ describe('Agent Loop — Streaming', () => {
 
     const { writer, events } = createCollectingWriter();
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -478,7 +478,7 @@ describe('Agent Loop — Streaming', () => {
 
     const { writer, events } = createCollectingWriter();
 
-    const config = resolveSamConfig({ SAM_MAX_TURNS: '3' });
+    const config = resolveSamConfig({ SAM_MAX_TURNS: '3', SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -537,7 +537,7 @@ describe('Agent Loop — Streaming', () => {
 
     const { writer } = createCollectingWriter();
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-4-20250514' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',

@@ -4,7 +4,7 @@
  */
 
 /** Default LLM model for SAM agent loop. */
-export const DEFAULT_SAM_MODEL = 'claude-sonnet-4-20250514';
+export const DEFAULT_SAM_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 /** Max output tokens per LLM turn. */
 export const DEFAULT_SAM_MAX_TOKENS = 4096;
