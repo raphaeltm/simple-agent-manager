@@ -94,6 +94,7 @@ function mockD1(options: {
       results: options.allResults ?? [],
       success: true,
     }),
+    raw: vi.fn().mockResolvedValue([]),
     run: vi.fn().mockResolvedValue({
       success: true,
       meta: { changes: options.runChanges ?? 1 },
@@ -101,8 +102,26 @@ function mockD1(options: {
   };
   return {
     prepare: vi.fn().mockReturnValue(mockStatement),
+    batch: vi.fn().mockResolvedValue([]),
     _statement: mockStatement,
   };
+}
+
+/**
+ * Queue a D1 query result for the next Drizzle call.
+ * Drizzle D1 uses .raw() for field-mapped selects (returns T[][]) and
+ * .all() for untyped selects (returns { results: T[] }).
+ * Row values MUST be in the same order as the .select() fields.
+ */
+function queueD1Result(
+  stmt: ReturnType<typeof mockD1>['_statement'],
+  rows: Record<string, unknown>[],
+) {
+  // .all() path (for queries without field mapping)
+  stmt.all.mockResolvedValueOnce({ results: rows, success: true });
+  // .raw() path (for queries WITH field mapping — Drizzle D1 uses this)
+  const rawRows = rows.map((r) => Object.values(r));
+  stmt.raw.mockResolvedValueOnce(rawRows);
 }
 
 function buildCtx(overrides: {
@@ -172,6 +191,31 @@ describe('stop_subtask', () => {
     expect(r.error).toBeDefined();
     expect(r.error).not.toContain('Unknown tool');
   });
+
+  it('rejects non-active task status', async () => {
+    const ctx = buildCtx();
+    // Task found but in completed status — should reject
+    queueD1Result(ctx._db._statement, [
+      { id: 'task-1', status: 'completed', workspace_id: null, project_id: 'proj-1', title: 'Done Task' },
+    ]);
+    const result = await stopSubtask({ taskId: 'task-1' }, ctx);
+    const r = result as { error?: string };
+    expect(r.error).toContain("'completed'");
+    expect(r.error).toContain('only active tasks');
+  });
+
+  it('stops an owned running task without workspace', async () => {
+    const ctx = buildCtx();
+    // Task found, running, no workspace — should stop successfully
+    queueD1Result(ctx._db._statement, [
+      { id: 'task-1', status: 'running', workspace_id: null, project_id: 'proj-1', title: 'Test Task' },
+    ]);
+    const result = await stopSubtask({ taskId: 'task-1' }, ctx);
+    const r = result as Record<string, unknown>;
+    expect(r.stopped).toBe(true);
+    expect(r.taskId).toBe('task-1');
+    expect(r.previousStatus).toBe('running');
+  });
 });
 
 // ─── retry_subtask ────────────────────────────────────────────────────────────
@@ -194,6 +238,17 @@ describe('retry_subtask', () => {
     const r = result as { error?: string };
     expect(r.error).toBeDefined();
     expect(r.error).not.toContain('Unknown tool');
+  });
+
+  it('rejects non-retryable task status', async () => {
+    const ctx = buildCtx();
+    queueD1Result(ctx._db._statement, [
+      { id: 'task-1', status: 'running', description: 'Test', project_id: 'proj-1', mission_id: null, task_mode: 'task', agent_profile_hint: null, name: 'Proj', repository: 'owner/repo', installation_id: 'inst-1', default_branch: 'main', default_vm_size: null, default_provider: null, default_location: null, default_workspace_profile: null, default_agent_type: null, agent_defaults: null, task_execution_timeout_ms: null, max_workspaces_per_node: null, node_cpu_threshold_percent: null, node_memory_threshold_percent: null, warm_node_timeout_ms: null },
+    ]);
+    const result = await retrySubtask({ taskId: 'task-1' }, ctx);
+    const r = result as { error?: string };
+    expect(r.error).toContain("'running'");
+    expect(r.error).toContain('only failed or cancelled');
   });
 });
 
@@ -224,6 +279,29 @@ describe('send_message_to_subtask', () => {
     expect(r.error).toBeDefined();
     expect(r.error).not.toContain('Unknown tool');
   });
+
+  it('rejects non-active task status', async () => {
+    const ctx = buildCtx();
+    // Task found but completed — values order: id, status, workspaceId, projectId, title
+    queueD1Result(ctx._db._statement, [
+      { id: 'task-1', status: 'completed', workspace_id: 'ws-1', project_id: 'proj-1', title: 'Done' },
+    ]);
+    const result = await sendMessageToSubtask({ taskId: 'task-1', message: 'hello' }, ctx);
+    const r = result as { error?: string };
+    expect(r.error).toContain("'completed'");
+    expect(r.error).toContain('only active tasks');
+  });
+
+  it('rejects task with no workspace', async () => {
+    const ctx = buildCtx();
+    // Active task but no workspace yet — values order: id, status, workspaceId, projectId, title
+    queueD1Result(ctx._db._statement, [
+      { id: 'task-1', status: 'running', workspace_id: null, project_id: 'proj-1', title: 'Running' },
+    ]);
+    const result = await sendMessageToSubtask({ taskId: 'task-1', message: 'hello' }, ctx);
+    const r = result as { error?: string };
+    expect(r.error).toContain('no workspace');
+  });
 });
 
 // ─── cancel_mission ───────────────────────────────────────────────────────────
@@ -246,6 +324,18 @@ describe('cancel_mission', () => {
     const r = result as { error?: string };
     expect(r.error).toBeDefined();
     expect(r.error).not.toContain('Unknown tool');
+  });
+
+  it('cancels an owned mission', async () => {
+    const ctx = buildCtx();
+    // Mission query — values order: id, status, projectId, title
+    queueD1Result(ctx._db._statement, [
+      { id: 'mission-1', status: 'active', project_id: 'proj-1', title: 'Test Mission' },
+    ]);
+    const result = await cancelMission({ missionId: 'mission-1' }, ctx);
+    const r = result as Record<string, unknown>;
+    expect(r.cancelled).toBe(true);
+    expect(r.missionId).toBe('mission-1');
   });
 });
 
@@ -270,6 +360,17 @@ describe('pause_mission', () => {
     expect(r.error).toBeDefined();
     expect(r.error).not.toContain('Unknown tool');
   });
+
+  it('pauses an owned mission', async () => {
+    const ctx = buildCtx();
+    queueD1Result(ctx._db._statement, [
+      { id: 'mission-1', status: 'active', project_id: 'proj-1', title: 'Test Mission' },
+    ]);
+    const result = await pauseMission({ missionId: 'mission-1' }, ctx);
+    const r = result as Record<string, unknown>;
+    expect(r.paused).toBe(true);
+    expect(r.missionId).toBe('mission-1');
+  });
 });
 
 // ─── resume_mission ───────────────────────────────────────────────────────────
@@ -292,6 +393,17 @@ describe('resume_mission', () => {
     const r = result as { error?: string };
     expect(r.error).toBeDefined();
     expect(r.error).not.toContain('Unknown tool');
+  });
+
+  it('resumes an owned mission', async () => {
+    const ctx = buildCtx();
+    queueD1Result(ctx._db._statement, [
+      { id: 'mission-1', status: 'paused', project_id: 'proj-1', title: 'Test Mission' },
+    ]);
+    const result = await resumeMission({ missionId: 'mission-1' }, ctx);
+    const r = result as Record<string, unknown>;
+    expect(r.resumed).toBe(true);
+    expect(r.missionId).toBe('mission-1');
   });
 });
 

@@ -200,6 +200,6 @@ export async function sendMessageToSubtask(
       error: errorMessage,
     });
 
-    return { error: `Failed to send message: ${errorMessage}` };
+    return { error: 'Failed to send message to the agent. The error has been logged.' };
   }
 }

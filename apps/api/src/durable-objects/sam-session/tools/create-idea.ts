@@ -89,7 +89,7 @@ export async function createIdea(
   // Enforce per-project limit
   const countRow = await env.DATABASE.prepare(
     "SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND status = 'draft'",
-  ).bind(input.projectId).first<{ cnt: number }>();
+  ).bind(project.id).first<{ cnt: number }>();
   if (countRow && countRow.cnt >= maxIdeas) {
     return { error: `Maximum ideas per project (${maxIdeas}) reached.` };
   }
@@ -100,11 +100,11 @@ export async function createIdea(
   await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?)`,
-  ).bind(id, input.projectId, ctx.userId, title, description, priority, ctx.userId, now, now).run();
+  ).bind(id, project.id, ctx.userId, title, description, priority, ctx.userId, now, now).run();
 
   log.info('sam.create_idea.created', {
     ideaId: id,
-    projectId: input.projectId,
+    projectId: project.id,
     title,
   });
 

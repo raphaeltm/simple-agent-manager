@@ -1,0 +1,95 @@
+- generic [ref=e5]:
+  - banner [ref=e6]:
+    - link [ref=e7] [cursor=pointer]:
+      - /url: /dashboard
+      - img [ref=e8]
+    - generic [ref=e10]:
+      - img [ref=e12]
+      - heading "SAM" [level=1] [ref=e15]
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - img [ref=e20]
+      - generic [ref=e23]:
+        - textbox "Ask SAM anything..." [ref=e24]
+        - button "Start voice input" [ref=e25] [cursor=pointer]:
+          - img [ref=e26]
+        - button [disabled] [ref=e29]:
+          - img [ref=e30]
+    - generic [ref=e33]:
+      - generic [ref=e34]:
+        - generic [ref=e37]: 2 active
+        - generic [ref=e38]:
+          - img [ref=e39]
+          - generic [ref=e41]: 1 attention
+        - generic [ref=e42]:
+          - img [ref=e43]
+          - generic [ref=e46]: 6 agents
+      - generic [ref=e47]:
+        - 'button "SAM 3 3 agents running: auth refactor, policy tests, blog post. Auth agent 80% done. sam/auth-refactor 2 min ago" [ref=e48] [cursor=pointer]':
+          - generic [ref=e49]:
+            - generic [ref=e53]: SAM
+            - generic [ref=e54]:
+              - img [ref=e55]
+              - text: "3"
+            - img [ref=e58]
+          - paragraph [ref=e60]: "3 agents running: auth refactor, policy tests, blog post. Auth agent 80% done."
+          - generic [ref=e61]:
+            - generic [ref=e62]:
+              - img [ref=e63]
+              - generic [ref=e67]: sam/auth-refactor
+            - generic [ref=e68]:
+              - img [ref=e69]
+              - text: 2 min ago
+        - button "Marketing Site All clear. Last PR merged 1h ago. No active tasks. 1h ago" [ref=e72] [cursor=pointer]:
+          - generic [ref=e73]:
+            - generic [ref=e76]: Marketing Site
+            - img [ref=e77]
+          - paragraph [ref=e79]: All clear. Last PR merged 1h ago. No active tasks.
+          - generic [ref=e81]:
+            - img [ref=e82]
+            - text: 1h ago
+        - button "Mobile App 2 CI failing on main. 2 agents paused waiting for dependency fix. sam/fix-ci-pipeline 5 min ago" [ref=e85] [cursor=pointer]:
+          - generic [ref=e86]:
+            - generic [ref=e90]: Mobile App
+            - generic [ref=e91]:
+              - img [ref=e92]
+              - text: "2"
+            - img [ref=e95]
+          - paragraph [ref=e97]: CI failing on main. 2 agents paused waiting for dependency fix.
+          - generic [ref=e98]:
+            - generic [ref=e99]:
+              - img [ref=e100]
+              - generic [ref=e104]: sam/fix-ci-pipeline
+            - generic [ref=e105]:
+              - img [ref=e106]
+              - text: 5 min ago
+        - button "Shared Types No recent activity. Last change 3 days ago. 3d ago" [ref=e109] [cursor=pointer]:
+          - generic [ref=e110]:
+            - generic [ref=e113]: Shared Types
+            - img [ref=e114]
+          - paragraph [ref=e116]: No recent activity. Last change 3 days ago.
+          - generic [ref=e118]:
+            - img [ref=e119]
+            - text: 3d ago
+        - button "VM Agent 1 1 agent implementing browser sidecar improvements. 60% through checklist. sam/neko-perf 30s ago" [ref=e122] [cursor=pointer]:
+          - generic [ref=e123]:
+            - generic [ref=e127]: VM Agent
+            - generic [ref=e128]:
+              - img [ref=e129]
+              - text: "1"
+            - img [ref=e132]
+          - paragraph [ref=e134]: 1 agent implementing browser sidecar improvements. 60% through checklist.
+          - generic [ref=e135]:
+            - generic [ref=e136]:
+              - img [ref=e137]
+              - generic [ref=e141]: sam/neko-perf
+            - generic [ref=e142]:
+              - img [ref=e143]
+              - text: 30s ago
+  - generic [ref=e147]:
+    - button "Chat" [ref=e148] [cursor=pointer]:
+      - img [ref=e149]
+      - text: Chat
+    - button "Overview" [ref=e152] [cursor=pointer]:
+      - img [ref=e153]
+      - text: Overview

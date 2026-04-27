@@ -118,17 +118,18 @@ export async function stopSubtask(
     }
   }
 
-  // Mark task as cancelled
+  // Mark task as cancelled (batched for atomicity)
   const now = new Date().toISOString();
   try {
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'cancelled', error_message = 'Stopped by user via SAM', updated_at = ?, completed_at = ? WHERE id = ?`,
-    ).bind(now, now, taskId).run();
-
-    await env.DATABASE.prepare(
-      `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-       VALUES (?, ?, ?, 'cancelled', 'user', ?, 'Stopped via SAM', ?)`,
-    ).bind(ulid(), taskId, task.status, ctx.userId, now).run();
+    await env.DATABASE.batch([
+      env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'cancelled', error_message = 'Stopped by user via SAM', updated_at = ?, completed_at = ? WHERE id = ?`,
+      ).bind(now, now, taskId),
+      env.DATABASE.prepare(
+        `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+         VALUES (?, ?, ?, 'cancelled', 'user', ?, 'Stopped via SAM', ?)`,
+      ).bind(ulid(), taskId, task.status, ctx.userId, now),
+    ]);
   } catch (err) {
     log.error('sam.stop_subtask.status_update_failed', {
       taskId,
