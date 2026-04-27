@@ -30,9 +30,9 @@ const VERTEX_SHADER = `
 
 const FRAGMENT_SHADER = `
   precision mediump float;
-  uniform float u_time;
+  uniform float u_time;        // accumulated time (JS controls speed)
   uniform vec2 u_resolution;
-  uniform float u_amplitude;   // 0.0 = silent, 1.0 = loud
+  uniform float u_amplitude;   // 0.0 = silent, 1.0 = loud — brightness only
 
   // Simplex-ish noise
   vec3 mod289(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
@@ -67,41 +67,38 @@ const FRAGMENT_SHADER = `
     float aspect = u_resolution.x / u_resolution.y;
     vec2 p = vec2(uv.x * aspect, uv.y);
 
-    // Amplitude drives speed: silent=0.08, loud=0.35
-    float speed = 0.08 + u_amplitude * 0.27;
-    float t = u_time * speed;
+    // u_time is accumulated in JS with variable speed — use directly
+    float t = u_time;
 
-    // Layer 1: large slow swirls — speed multipliers scale with amplitude
-    float speedMult = 1.0 + u_amplitude * 2.5;
-    float n1 = snoise(p * 1.5 + vec2(t * 0.3 * speedMult, t * 0.2 * speedMult)) * 0.5 + 0.5;
-    // Layer 2: medium detail
-    float n2 = snoise(p * 3.0 + vec2(-t * 0.5 * speedMult, t * 0.4 * speedMult)) * 0.5 + 0.5;
-    // Layer 3: fine detail
-    float n3 = snoise(p * 6.0 + vec2(t * 0.7 * speedMult, -t * 0.3 * speedMult)) * 0.5 + 0.5;
+    // Noise layers — same pattern, smooth continuous motion
+    float n1 = snoise(p * 1.5 + vec2(t * 0.3, t * 0.2)) * 0.5 + 0.5;
+    float n2 = snoise(p * 3.0 + vec2(-t * 0.5, t * 0.4)) * 0.5 + 0.5;
+    float n3 = snoise(p * 6.0 + vec2(t * 0.7, -t * 0.3)) * 0.5 + 0.5;
 
     float combined = n1 * 0.6 + n2 * 0.3 + n3 * 0.1;
 
-    // Color palette — brightens with amplitude
+    // Amplitude ONLY affects brightness — not pattern position
     float amp = u_amplitude;
-    vec3 color1 = vec3(0.0, 0.06 + amp * 0.04, 0.04 + amp * 0.02);
-    vec3 color2 = vec3(0.0, 0.15 + amp * 0.15, 0.10 + amp * 0.10);
-    vec3 color3 = vec3(0.02 + amp * 0.08, 0.25 + amp * 0.35, 0.15 + amp * 0.25);
+
+    // Base palette is brighter than before; amplitude boosts further
+    vec3 color1 = vec3(0.0, 0.08 + amp * 0.06, 0.05 + amp * 0.04);
+    vec3 color2 = vec3(0.0, 0.18 + amp * 0.22, 0.12 + amp * 0.16);
+    vec3 color3 = vec3(0.04 + amp * 0.12, 0.30 + amp * 0.45, 0.18 + amp * 0.35);
 
     vec3 color = mix(color1, color2, combined);
 
-    // Bright spots — threshold lowers with amplitude (more bright spots when loud)
-    float brightThreshold = 0.65 - amp * 0.25;
+    // Bright spots — more and stronger with amplitude
+    float brightThreshold = 0.60 - amp * 0.20;
     float bright = smoothstep(brightThreshold, 0.85, combined);
-    // Bright intensity increases with amplitude
-    float brightIntensity = 0.5 + amp * 1.5;
+    float brightIntensity = 0.6 + amp * 2.0;
     color = mix(color, color3, bright * brightIntensity);
 
-    // Extra glow layer when amplitude is high
-    float glow = smoothstep(0.3, 0.7, combined) * amp * 0.3;
-    color += vec3(0.02, 0.15, 0.08) * glow;
+    // Broad glow that lifts the whole image when speaking
+    float glow = smoothstep(0.2, 0.6, combined) * amp * 0.4;
+    color += vec3(0.03, 0.18, 0.10) * glow;
 
-    // Subtle vignette (less vignette when loud — opens up)
-    float vignetteStrength = 0.8 - amp * 0.3;
+    // Vignette — opens up when loud
+    float vignetteStrength = 0.8 - amp * 0.35;
     float vignette = 1.0 - length(uv - 0.5) * vignetteStrength;
     color *= vignette;
 
@@ -151,8 +148,9 @@ function useWebGLBackground(
     const ampLoc = gl.getUniformLocation(program, 'u_amplitude');
 
     let animId: number;
-    const startTime = performance.now();
-
+    let prevTimestamp = performance.now();
+    // Accumulated time — JS controls speed so the shader pattern never jumps
+    let accumulatedTime = 0;
     // Smoothed amplitude for shader (avoids jitter)
     let smoothedAmp = 0;
 
@@ -164,8 +162,11 @@ function useWebGLBackground(
     }
 
     function render() {
-      const elapsed = (performance.now() - startTime) / 1000;
-      // Smooth the amplitude for the shader — fast attack, slow decay
+      const now = performance.now();
+      const deltaSeconds = Math.min((now - prevTimestamp) / 1000, 0.1); // cap to avoid huge jumps on tab-switch
+      prevTimestamp = now;
+
+      // Smooth the amplitude — fast attack, slow decay
       const target = amplitudeRef.current ?? 0;
       if (target > smoothedAmp) {
         smoothedAmp += (target - smoothedAmp) * 0.3; // fast attack
@@ -173,7 +174,12 @@ function useWebGLBackground(
         smoothedAmp += (target - smoothedAmp) * 0.05; // slow decay
       }
 
-      gl!.uniform1f(timeLoc, elapsed);
+      // Accumulate time: base speed + amplitude boost
+      // Base 0.08, max ~0.32 when loud — pattern smoothly accelerates
+      const speed = 0.08 + smoothedAmp * 0.24;
+      accumulatedTime += deltaSeconds * speed;
+
+      gl!.uniform1f(timeLoc, accumulatedTime);
       gl!.uniform2f(resLoc, canvas!.width, canvas!.height);
       gl!.uniform1f(ampLoc, smoothedAmp);
       gl!.drawArrays(gl!.TRIANGLE_STRIP, 0, 4);
@@ -797,6 +803,7 @@ export function SamPrototype() {
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useWebGLBackground(canvasRef, amplitudeRef);
 
@@ -811,6 +818,20 @@ export function SamPrototype() {
       [],
     ),
   });
+
+  // Auto-resize textarea: shrink to content, max ~3.5 lines (~84px at 14px font/1.5 line-height)
+  const resizeTextarea = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = '0px'; // collapse to measure scrollHeight
+    // Single line = ~21px, 3.5 lines ~ 74px. Clamp to max.
+    const maxHeight = 84;
+    ta.style.height = `${Math.min(ta.scrollHeight, maxHeight)}px`;
+  }, []);
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [inputValue, resizeTextarea]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1071,22 +1092,30 @@ export function SamPrototype() {
                   <span className="text-xs text-white/50">Transcribing...</span>
                 </div>
               )}
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
+              <div className="flex items-end gap-2">
+                <textarea
+                  ref={textareaRef}
+                  rows={1}
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
                   placeholder={
                     voice.state === 'recording'
                       ? 'Speak now...'
                       : 'Ask SAM anything...'
                   }
-                  className="flex-1 px-4 py-3 text-sm rounded-xl text-white placeholder:text-white/25 focus:outline-none focus:ring-1"
+                  className="flex-1 px-4 py-3 text-sm rounded-xl text-white placeholder:text-white/25 focus:outline-none focus:ring-1 resize-none overflow-hidden leading-snug"
                   style={
                     {
                       ...glass.input,
                       focusRingColor: 'rgba(60, 180, 120, 0.3)',
+                      transition: 'height 0.15s ease-out',
+                      minHeight: '44px',
                     } as React.CSSProperties
                   }
                 />
