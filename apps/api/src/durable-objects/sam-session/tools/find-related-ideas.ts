@@ -84,7 +84,7 @@ export async function findRelatedIdeas(
        AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')
      ORDER BY updated_at DESC
      LIMIT ?`,
-  ).bind(input.projectId, searchPattern, searchPattern, limit)
+  ).bind(project.id, searchPattern, searchPattern, limit)
     .all<{
       id: string;
       title: string;

@@ -102,6 +102,7 @@ function mockD1(options: {
   };
   return {
     prepare: vi.fn().mockReturnValue(mockStatement),
+    batch: vi.fn().mockResolvedValue([]),
     _statement: mockStatement,
   };
 }

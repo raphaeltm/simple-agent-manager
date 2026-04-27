@@ -155,29 +155,29 @@ export async function retrySubtask(
 
   const now = new Date().toISOString();
 
-  // Insert new task
-  await env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, title, description,
-     status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, mission_id,
-     created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
-     ?, ?, ?,
-     ?, ?)`,
-  ).bind(
-    newTaskId, original.projectId, ctx.userId,
-    taskTitle, description, 0, branchName,
-    ctx.userId,
-    resolvedTaskMode, original.agentProfileHint ?? null, original.missionId ?? null,
-    now, now,
-  ).run();
-
-  // Record status event
-  await env.DATABASE.prepare(
-    `INSERT INTO task_status_events (id, task_id, from_status, to_status,
-     actor_type, actor_id, reason, created_at)
-     VALUES (?, ?, NULL, 'queued', 'user', ?, ?, ?)`,
-  ).bind(ulid(), newTaskId, ctx.userId, `Retry of task ${taskId} via SAM`, now).run();
+  // Insert new task + status event (batched for atomicity)
+  await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `INSERT INTO tasks (id, project_id, user_id, title, description,
+       status, execution_step, priority, dispatch_depth, output_branch, created_by,
+       task_mode, agent_profile_hint, mission_id,
+       created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
+       ?, ?, ?,
+       ?, ?)`,
+    ).bind(
+      newTaskId, original.projectId, ctx.userId,
+      taskTitle, description, 0, branchName,
+      ctx.userId,
+      resolvedTaskMode, original.agentProfileHint ?? null, original.missionId ?? null,
+      now, now,
+    ),
+    env.DATABASE.prepare(
+      `INSERT INTO task_status_events (id, task_id, from_status, to_status,
+       actor_type, actor_id, reason, created_at)
+       VALUES (?, ?, NULL, 'queued', 'user', ?, ?, ?)`,
+    ).bind(ulid(), newTaskId, ctx.userId, `Retry of task ${taskId} via SAM`, now),
+  ]);
 
   // Create chat session
   let sessionId: string;
@@ -193,7 +193,7 @@ export async function retrySubtask(
     await env.DATABASE.prepare(
       `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`,
     ).bind(`Session creation failed: ${errorMsg}`, new Date().toISOString(), newTaskId).run();
-    return { error: `Failed to create chat session: ${errorMsg}` };
+    return { error: 'Failed to create chat session for the retried task. The error has been logged.' };
   }
 
   // Start TaskRunner DO
@@ -248,7 +248,7 @@ export async function retrySubtask(
     await env.DATABASE.prepare(
       `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`,
     ).bind(`Task runner startup failed: ${errorMsg}`, new Date().toISOString(), newTaskId).run();
-    return { error: `Failed to start task runner: ${errorMsg}` };
+    return { error: 'Failed to start task runner for the retried task. The error has been logged.' };
   }
 
   const appDomain = `app.${env.BASE_DOMAIN}`;
