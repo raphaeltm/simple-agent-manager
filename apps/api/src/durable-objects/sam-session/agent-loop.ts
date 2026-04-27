@@ -1,6 +1,12 @@
 /**
- * SAM agent loop — calls Claude via AI Gateway, processes streaming response,
- * executes tools, and streams SSE events to the browser.
+ * SAM agent loop — unified OpenAI-format code path routed through AI Gateway.
+ *
+ * Internally uses OpenAI chat-completions format. The AI Gateway endpoint is
+ * selected by model prefix:
+ *   - @cf/* or @hf/*  → Workers AI  (OpenAI-native)
+ *   - claude-*         → Anthropic   (translated at the boundary)
+ *
+ * Swapping models/providers is a config change (SAM_MODEL env var), not a code change.
  */
 import {
   SAM_ANTHROPIC_VERSION,
@@ -13,13 +19,16 @@ import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
 import { executeTool, SAM_TOOLS } from './tools';
 import type {
-  AnthropicContentBlock,
-  AnthropicToolResultBlock,
+  AnthropicToolDef,
   CollectedToolCall,
   MessageRow,
   SamSseEvent,
   ToolContext,
 } from './types';
+
+// =============================================================================
+// System prompt
+// =============================================================================
 
 const SAM_SYSTEM_PROMPT = `You are SAM — Simple Agent Manager. You are a senior engineering manager who orchestrates AI coding agents across multiple projects.
 
@@ -42,13 +51,106 @@ You have access to all of the user's projects, tasks, missions, and agents. You 
 - You don't make up project status — you check with tools
 - You don't take action without confirming — dispatch, cancel, and policy changes are confirmed first`;
 
-/** Encode an SSE event as unnamed data frame. */
+// =============================================================================
+// SSE encoding
+// =============================================================================
+
 function encodeSseEvent(event: SamSseEvent): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
 }
 
-/** Build AI Gateway URL for Anthropic Messages API. */
-function buildAnthropicUrl(env: Env): string {
+// =============================================================================
+// Model detection
+// =============================================================================
+
+function isAnthropicModel(model: string): boolean {
+  return model.startsWith('claude-');
+}
+
+function isWorkersAIModel(model: string): boolean {
+  return model.startsWith('@cf/') || model.startsWith('@hf/');
+}
+
+// =============================================================================
+// OpenAI message types (canonical internal format)
+// =============================================================================
+
+interface OpenAIMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content?: string | null;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }>;
+  tool_call_id?: string;
+}
+
+interface OpenAITool {
+  type: 'function';
+  function: { name: string; description: string; parameters: unknown };
+}
+
+// =============================================================================
+// Format converters
+// =============================================================================
+
+/** Convert Anthropic-format tool definitions to OpenAI function-calling format. */
+function toOpenAITools(tools: AnthropicToolDef[]): OpenAITool[] {
+  return tools.map((t) => ({
+    type: 'function' as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.input_schema,
+    },
+  }));
+}
+
+/** Convert stored message rows to OpenAI messages. */
+function toOpenAIMessages(rows: MessageRow[]): OpenAIMessage[] {
+  const messages: OpenAIMessage[] = [];
+  for (const row of rows) {
+    if (row.role === 'user') {
+      messages.push({ role: 'user', content: row.content });
+    } else if (row.role === 'assistant') {
+      const msg: OpenAIMessage = { role: 'assistant', content: row.content || null };
+      if (row.tool_calls_json) {
+        try {
+          const toolCalls = JSON.parse(row.tool_calls_json) as CollectedToolCall[];
+          msg.tool_calls = toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+          }));
+          if (!msg.content) msg.content = null;
+        } catch { /* ignore parse errors */ }
+      }
+      messages.push(msg);
+    } else if (row.role === 'tool_result') {
+      messages.push({
+        role: 'tool',
+        content: row.content,
+        tool_call_id: row.tool_call_id || '',
+      });
+    }
+  }
+  return messages;
+}
+
+// =============================================================================
+// Gateway URL builders
+// =============================================================================
+
+function buildWorkersAIGatewayUrl(env: Env): string {
+  const gatewayId = env.AI_GATEWAY_ID;
+  if (gatewayId) {
+    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
+  }
+  return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
+}
+
+function buildAnthropicGatewayUrl(env: Env): string {
   const gatewayId = env.AI_GATEWAY_ID;
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages`;
@@ -56,7 +158,10 @@ function buildAnthropicUrl(env: Env): string {
   return 'https://api.anthropic.com/v1/messages';
 }
 
-/** Get platform Anthropic API key. */
+// =============================================================================
+// Credential helpers
+// =============================================================================
+
 async function getAnthropicApiKey(env: Env): Promise<string> {
   const { drizzle } = await import('drizzle-orm/d1');
   const db = drizzle(env.DATABASE);
@@ -68,86 +173,153 @@ async function getAnthropicApiKey(env: Env): Promise<string> {
   return cred.credential;
 }
 
-/** Convert stored message rows to Anthropic messages format. */
-function toAnthropicMessages(
-  rows: MessageRow[],
-): Array<{ role: string; content: string | AnthropicContentBlock[] | AnthropicToolResultBlock[] }> {
-  const messages: Array<{ role: string; content: string | AnthropicContentBlock[] | AnthropicToolResultBlock[] }> = [];
+// =============================================================================
+// LLM call — routes to Workers AI or Anthropic based on model prefix
+// =============================================================================
 
-  for (const row of rows) {
-    if (row.role === 'user') {
-      messages.push({ role: 'user', content: row.content });
-    } else if (row.role === 'assistant') {
-      const content: AnthropicContentBlock[] = [];
-      if (row.content) {
-        content.push({ type: 'text', text: row.content });
-      }
-      if (row.tool_calls_json) {
-        try {
-          const toolCalls = JSON.parse(row.tool_calls_json) as CollectedToolCall[];
-          for (const tc of toolCalls) {
-            content.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
-          }
-        } catch { /* ignore parse errors */ }
-      }
-      messages.push({ role: 'assistant', content });
-    } else if (row.role === 'tool_result') {
-      messages.push({
-        role: 'user',
-        content: [{
-          type: 'tool_result',
-          tool_use_id: row.tool_call_id || '',
-          content: row.content,
-        }],
-      });
-    }
-  }
+/** Default fetch timeout for LLM calls (configurable via SAM_LLM_TIMEOUT_MS). */
+const DEFAULT_LLM_TIMEOUT_MS = 120_000;
 
-  return messages;
-}
-
-/** Call Anthropic Messages API via AI Gateway with streaming. */
-async function callAnthropic(
+async function callLLM(
   env: Env,
   config: SamConfig,
-  messages: Array<{ role: string; content: unknown }>,
+  messages: OpenAIMessage[],
   userId: string,
   conversationId: string,
 ): Promise<Response> {
-  const apiKey = await getAnthropicApiKey(env);
-  const url = buildAnthropicUrl(env);
-
+  const model = config.model;
   const systemPrompt = config.systemPromptAppend
     ? `${SAM_SYSTEM_PROMPT}\n\n${config.systemPromptAppend}`
     : SAM_SYSTEM_PROMPT;
 
+  const openAITools = toOpenAITools(SAM_TOOLS);
+  const aigMetadata = JSON.stringify({
+    source: config.aigSource,
+    userId,
+    conversationId,
+  });
+
+  // Timeout to prevent hanging fetches inside DOs
+  const timeoutMs = parseInt(String((env as unknown as Record<string, string>).SAM_LLM_TIMEOUT_MS) || '', 10) || DEFAULT_LLM_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    if (isAnthropicModel(model)) {
+      return await callAnthropicLLM(env, model, systemPrompt, messages, openAITools, aigMetadata, config.maxTokens, controller.signal);
+    } else if (isWorkersAIModel(model)) {
+      return await callWorkersAILLM(env, model, systemPrompt, messages, openAITools, aigMetadata, config.maxTokens, controller.signal);
+    } else {
+      throw new Error(`Unknown model provider for model: ${model}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Call Anthropic Messages API, translating from OpenAI format at the boundary. */
+async function callAnthropicLLM(
+  env: Env,
+  model: string,
+  systemPrompt: string,
+  messages: OpenAIMessage[],
+  _openAITools: OpenAITool[],
+  aigMetadata: string,
+  maxTokens: number,
+  signal: AbortSignal,
+): Promise<Response> {
+  const apiKey = await getAnthropicApiKey(env);
+  const url = buildAnthropicGatewayUrl(env);
+
+  // Convert OpenAI messages to Anthropic format
+  const anthropicMessages = messages
+    .filter((m) => m.role !== 'system')
+    .map((m) => {
+      if (m.role === 'user') {
+        return { role: 'user' as const, content: m.content || '' };
+      } else if (m.role === 'assistant') {
+        const content: Array<Record<string, unknown>> = [];
+        if (m.content) content.push({ type: 'text', text: m.content });
+        if (m.tool_calls) {
+          for (const tc of m.tool_calls) {
+            let input: unknown = {};
+            try { input = JSON.parse(tc.function.arguments); } catch { /* empty */ }
+            content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input });
+          }
+        }
+        return { role: 'assistant' as const, content };
+      } else if (m.role === 'tool') {
+        return {
+          role: 'user' as const,
+          content: [{ type: 'tool_result', tool_use_id: m.tool_call_id || '', content: m.content || '' }],
+        };
+      }
+      return { role: 'user' as const, content: m.content || '' };
+    });
+
   return fetch(url, {
     method: 'POST',
+    signal,
     headers: {
       'x-api-key': apiKey,
       'anthropic-version': SAM_ANTHROPIC_VERSION,
       'content-type': 'application/json',
-      'cf-aig-metadata': JSON.stringify({
-        source: config.aigSource,
-        userId,
-        conversationId,
-      }),
+      'cf-aig-metadata': aigMetadata,
     },
     body: JSON.stringify({
-      model: config.model,
-      max_tokens: config.maxTokens,
+      model,
+      max_tokens: maxTokens,
       system: systemPrompt,
-      messages,
+      messages: anthropicMessages,
       tools: SAM_TOOLS,
       stream: true,
     }),
   });
 }
 
+/** Call Workers AI via AI Gateway (OpenAI-compatible). */
+async function callWorkersAILLM(
+  env: Env,
+  model: string,
+  systemPrompt: string,
+  messages: OpenAIMessage[],
+  openAITools: OpenAITool[],
+  aigMetadata: string,
+  maxTokens: number,
+  signal: AbortSignal,
+): Promise<Response> {
+  const url = buildWorkersAIGatewayUrl(env);
+
+  const fullMessages: OpenAIMessage[] = [
+    { role: 'system', content: systemPrompt },
+    ...messages,
+  ];
+
+  return fetch(url, {
+    method: 'POST',
+    signal,
+    headers: {
+      'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+      'Content-Type': 'application/json',
+      'cf-aig-metadata': aigMetadata,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      messages: fullMessages,
+      tools: openAITools.length > 0 ? openAITools : undefined,
+      stream: true,
+    }),
+  });
+}
+
+// =============================================================================
+// Stream parsers
+// =============================================================================
+
 /**
- * Process the Anthropic streaming response.
- * Writes SSE events to the writer and collects tool calls.
- * Returns the accumulated text and tool calls.
+ * Process an Anthropic SSE stream (native Anthropic event format).
+ * Writes SAM SSE events to the writer and collects tool calls.
  */
 async function processAnthropicStream(
   response: Response,
@@ -163,7 +335,6 @@ async function processAnthropicStream(
   let textContent = '';
   const toolCalls: CollectedToolCall[] = [];
 
-  // Track current tool call being built
   let currentToolId = '';
   let currentToolName = '';
   let currentToolInputJson = '';
@@ -235,7 +406,119 @@ async function processAnthropicStream(
 }
 
 /**
- * Run the SAM agent loop: call Claude, process tool calls, repeat until done.
+ * Process an OpenAI-format SSE stream (Workers AI / OpenAI-compatible).
+ * Writes SAM SSE events to the writer and collects tool calls.
+ */
+async function processOpenAIStream(
+  response: Response,
+  writer: WritableStreamDefaultWriter<Uint8Array>,
+): Promise<{ textContent: string; toolCalls: CollectedToolCall[] }> {
+  if (!response.body) {
+    throw new Error('No response body from LLM');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let textContent = '';
+  const toolCalls: CollectedToolCall[] = [];
+
+  const toolCallBuilders = new Map<number, { id: string; name: string; args: string }>();
+
+  let streamDone = false;
+  while (!streamDone) {
+    const { done, value } = await reader.read();
+    if (done) { streamDone = true; break; }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') continue;
+
+      let chunk: Record<string, unknown>;
+      try {
+        chunk = JSON.parse(data) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
+      const firstChoice = choices?.[0];
+      if (!firstChoice) continue;
+
+      const delta = firstChoice.delta as Record<string, unknown> | undefined;
+      if (!delta) continue;
+
+      // Text content
+      if (delta.content && typeof delta.content === 'string') {
+        textContent += delta.content;
+        await writer.write(encodeSseEvent({ type: 'text_delta', content: delta.content }));
+      }
+
+      // Tool calls (streamed as deltas with index)
+      const deltaToolCalls = delta.tool_calls as Array<Record<string, unknown>> | undefined;
+      if (deltaToolCalls) {
+        for (const dtc of deltaToolCalls) {
+          const index = (dtc.index as number) ?? 0;
+          const fn = dtc.function as Record<string, unknown> | undefined;
+
+          if (!toolCallBuilders.has(index)) {
+            const id = (dtc.id as string) || `call_${crypto.randomUUID().slice(0, 8)}`;
+            const name = (fn?.name as string) || '';
+            toolCallBuilders.set(index, { id, name, args: '' });
+            if (name) {
+              await writer.write(encodeSseEvent({ type: 'tool_start', tool: name, input: {} }));
+            }
+          }
+
+          const builder = toolCallBuilders.get(index)!;
+          if (fn?.name && typeof fn.name === 'string' && !builder.name) {
+            builder.name = fn.name;
+            await writer.write(encodeSseEvent({ type: 'tool_start', tool: builder.name, input: {} }));
+          }
+          if (fn?.arguments && typeof fn.arguments === 'string') {
+            builder.args += fn.arguments;
+          }
+        }
+      }
+
+      // Finalize tool calls on finish_reason
+      const finishReason = firstChoice.finish_reason as string | undefined;
+      if (finishReason === 'tool_calls' || finishReason === 'stop') {
+        for (const [, builder] of toolCallBuilders) {
+          if (builder.name) {
+            let input: Record<string, unknown> = {};
+            try { input = JSON.parse(builder.args) as Record<string, unknown>; } catch { /* empty */ }
+            toolCalls.push({ id: builder.id, name: builder.name, input });
+          }
+        }
+        toolCallBuilders.clear();
+      }
+    }
+  }
+
+  // Finalize remaining builders (stream ended without explicit finish_reason)
+  for (const [, builder] of toolCallBuilders) {
+    if (builder.name) {
+      let input: Record<string, unknown> = {};
+      try { input = JSON.parse(builder.args) as Record<string, unknown>; } catch { /* empty */ }
+      toolCalls.push({ id: builder.id, name: builder.name, input });
+    }
+  }
+
+  return { textContent, toolCalls };
+}
+
+// =============================================================================
+// Agent loop
+// =============================================================================
+
+/**
+ * Run the SAM agent loop: call LLM, process tool calls, repeat until done.
  * Streams SSE events to the writer throughout.
  */
 export async function runAgentLoop(
@@ -254,13 +537,13 @@ export async function runAgentLoop(
     toolCallId?: string | null,
   ) => void,
 ): Promise<void> {
-  // Build messages from history + new user message
-  const messages: Array<{ role: string; content: unknown }> = [
-    ...toAnthropicMessages(historyRows),
+  const messages: OpenAIMessage[] = [
+    ...toOpenAIMessages(historyRows),
     { role: 'user', content: userMessage },
   ];
 
   const toolCtx: ToolContext = { env: env as unknown as Record<string, unknown>, userId };
+  const useAnthropicParser = isAnthropicModel(config.model);
 
   let turnCount = 0;
   let continueLoop = true;
@@ -269,19 +552,57 @@ export async function runAgentLoop(
     continueLoop = false;
     turnCount++;
 
-    const response = await callAnthropic(env, config, messages, userId, conversationId);
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      log.error('sam.anthropic_error', { status: response.status, body: errorText.slice(0, 500) });
+    let response: Response;
+    try {
+      response = await callLLM(env, config, messages, userId, conversationId);
+    } catch (fetchErr) {
+      const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      const isTimeout = errMsg.includes('abort');
+      log.error('sam.llm_fetch_error', {
+        model: config.model,
+        error: errMsg,
+        isTimeout,
+      });
       await writer.write(encodeSseEvent({
         type: 'error',
-        message: `Claude API error (${response.status}). Please try again.`,
+        message: isTimeout
+          ? 'AI request timed out. Please try again.'
+          : 'Failed to reach AI service. Please try again.',
       }));
       break;
     }
 
-    const { textContent, toolCalls } = await processAnthropicStream(response, writer);
+    log.info('sam.llm_response', { status: response.status, hasBody: !!response.body, model: config.model });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      log.error('sam.llm_error', { status: response.status, body: errorText.slice(0, 500), model: config.model });
+      await writer.write(encodeSseEvent({
+        type: 'error',
+        message: `AI error (${response.status}). Please try again.`,
+      }));
+      break;
+    }
+
+    let textContent: string;
+    let toolCalls: CollectedToolCall[];
+    try {
+      const result = useAnthropicParser
+        ? await processAnthropicStream(response, writer)
+        : await processOpenAIStream(response, writer);
+      textContent = result.textContent;
+      toolCalls = result.toolCalls;
+    } catch (streamErr) {
+      log.error('sam.stream_error', {
+        model: config.model,
+        error: streamErr instanceof Error ? streamErr.message : String(streamErr),
+      });
+      await writer.write(encodeSseEvent({
+        type: 'error',
+        message: 'Error processing AI response. Please try again.',
+      }));
+      break;
+    }
 
     // Persist assistant message
     persistMessage(
@@ -291,38 +612,33 @@ export async function runAgentLoop(
       toolCalls.length > 0 ? JSON.stringify(toolCalls) : null,
     );
 
-    // If tool calls, execute and continue
     if (toolCalls.length > 0) {
-      // Build the assistant content block for the messages array
-      const assistantContent: AnthropicContentBlock[] = [];
-      if (textContent) {
-        assistantContent.push({ type: 'text', text: textContent });
-      }
-      for (const tc of toolCalls) {
-        assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
-      }
-      messages.push({ role: 'assistant', content: assistantContent });
+      // Add assistant message with tool_calls to the conversation
+      messages.push({
+        role: 'assistant',
+        content: textContent || null,
+        tool_calls: toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+        })),
+      });
 
-      // Execute each tool and build tool results
-      const toolResults: AnthropicToolResultBlock[] = [];
+      // Execute each tool and add results
       for (const tc of toolCalls) {
         const result = await executeTool(tc, toolCtx);
         const resultStr = JSON.stringify(result);
 
         await writer.write(encodeSseEvent({ type: 'tool_result', tool: tc.name, result }));
-
-        // Persist tool result
         persistMessage(conversationId, 'tool_result', resultStr, null, tc.id);
 
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: tc.id,
+        messages.push({
+          role: 'tool',
           content: resultStr,
+          tool_call_id: tc.id,
         });
       }
 
-      // Add tool results as a user message for next turn
-      messages.push({ role: 'user', content: toolResults });
       continueLoop = true;
     }
   }
