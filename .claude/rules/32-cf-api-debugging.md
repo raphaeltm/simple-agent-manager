@@ -110,6 +110,21 @@ curl -s -H "Authorization: Bearer $CF_TOKEN" \
   "https://api.cloudflare.com/client/v4/accounts/c4e4aebd980b626f6af43ac6b1edcede/workers/scripts"
 ```
 
+## Node Debug Package (For VM Issues)
+
+For any VM/workspace/node issue, the **debug package** is the single most useful tool. It bundles 17 diagnostic sources into one tar.gz — no SSH required:
+
+```bash
+# Download via authenticated API call
+curl -s -b "session=<cookie>" \
+  "https://api.sammy.party/api/nodes/<nodeId>/debug-package" -o debug.tar.gz
+tar xzf debug.tar.gz
+```
+
+Contents: `cloud-init.log`, `cloud-init-output.log`, `journald-full.log` (50k lines), `vm-agent.log`, `docker-logs.json`, `docker-ps.txt`, `docker-inspect-all.json`, `system-info.json`, `events-*.db`, `metrics-*.db`, `provisioning-timings.txt`, `boot-events.json`, `dmesg.log`, `syslog.log`, `iptables.txt`, `network.txt`, `disk-usage.txt`, `processes.txt`, `manifest.json`.
+
+**Always download the debug package before SSHing into a VM.** It has everything you'd get from 15+ separate SSH commands.
+
 ## When to Use CF API vs Other Tools
 
 | Scenario | Use CF API | Not This |
@@ -121,6 +136,8 @@ curl -s -H "Authorization: Bearer $CF_TOKEN" \
 | **Verify binary upload** | List R2 objects | Re-run the deploy |
 | **Check rate limit state** | Read/delete KV rate limit keys | Wait for the window to expire |
 | **Flip a feature flag for testing** | Write KV value | Redeploy with different config |
+| **Debug any VM issue** | Download debug package (`/api/nodes/:id/debug-package`) | SSH in and run commands manually |
+| **Check provisioning speed** | `provisioning-timings.txt` in debug package | SSH + journalctl + grep |
 
 ## Integration with Development Loop
 
