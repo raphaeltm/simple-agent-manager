@@ -49,7 +49,12 @@ You have access to all of the user's projects, tasks, missions, and agents. You 
 ## What you don't do
 - You don't write code yourself — you delegate to agents who do
 - You don't make up project status — you check with tools
-- You don't take action without confirming — dispatch, cancel, and policy changes are confirmed first`;
+- You don't take action without confirming — dispatch, cancel, and policy changes are confirmed first
+
+## Conversation memory
+- Your conversation with the user persists across page refreshes
+- If the user references something from earlier that is not in your current context, use the search_conversation_history tool to find it
+- This is especially useful for recalling past decisions, preferences, or discussions`;
 
 // =============================================================================
 // SSE encoding
@@ -536,13 +541,14 @@ export async function runAgentLoop(
     toolCallsJson?: string | null,
     toolCallId?: string | null,
   ) => void,
+  searchMessages?: (query: string, limit: number) => Array<{ snippet: string; role: string; sequence: number; createdAt: string }>,
 ): Promise<void> {
   const messages: OpenAIMessage[] = [
     ...toOpenAIMessages(historyRows),
     { role: 'user', content: userMessage },
   ];
 
-  const toolCtx: ToolContext = { env: env as unknown as Record<string, unknown>, userId };
+  const toolCtx: ToolContext = { env: env as unknown as Record<string, unknown>, userId, searchMessages };
   const useAnthropicParser = isAnthropicModel(config.model);
 
   let turnCount = 0;
