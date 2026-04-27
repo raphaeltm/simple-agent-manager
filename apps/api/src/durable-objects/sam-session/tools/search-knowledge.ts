@@ -82,10 +82,13 @@ export async function searchKnowledge(
       env, input.projectId, query, entityType, null, limit,
     );
 
+    // searchKnowledgeObservations returns an array directly
+    const resultsArray = Array.isArray(results) ? results : [];
+
     return {
       projectId: input.projectId,
-      results: results.results,
-      total: results.total,
+      results: resultsArray,
+      total: resultsArray.length,
     };
   }
 
@@ -106,7 +109,8 @@ export async function searchKnowledge(
       const results = await projectDataService.searchKnowledgeObservations(
         env, p.id, query, entityType, null, perProjectLimit,
       );
-      return results.results.map((r) => ({
+      const arr = Array.isArray(results) ? results : [];
+      return arr.map((r: Record<string, unknown>) => ({
         ...r,
         projectId: p.id,
         projectName: p.name,
@@ -119,7 +123,11 @@ export async function searchKnowledge(
   const allResults = (await Promise.all(searchPromises)).flat();
 
   // Sort by confidence descending, take top `limit`
-  allResults.sort((a, b) => (b.observation?.confidence ?? 0) - (a.observation?.confidence ?? 0));
+  allResults.sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
+    const aConf = (a.observation as Record<string, unknown>)?.confidence as number ?? 0;
+    const bConf = (b.observation as Record<string, unknown>)?.confidence as number ?? 0;
+    return bConf - aConf;
+  });
   const trimmed = allResults.slice(0, limit);
 
   return {
