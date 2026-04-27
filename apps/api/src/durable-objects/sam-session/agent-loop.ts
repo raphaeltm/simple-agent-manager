@@ -421,7 +421,22 @@ export async function runAgentLoop(
     continueLoop = false;
     turnCount++;
 
-    const response = await callLLM(env, config, messages, userId, conversationId);
+    let response: Response;
+    try {
+      response = await callLLM(env, config, messages, userId, conversationId);
+    } catch (fetchErr) {
+      log.error('sam.llm_fetch_error', {
+        model: config.model,
+        error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+      });
+      await writer.write(encodeSseEvent({
+        type: 'error',
+        message: 'Failed to reach AI service. Please try again.',
+      }));
+      break;
+    }
+
+    log.info('sam.llm_response', { status: response.status, hasBody: !!response.body, model: config.model });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');
@@ -433,7 +448,21 @@ export async function runAgentLoop(
       break;
     }
 
-    const { textContent, toolCalls } = await processStream(response, writer);
+    let textContent: string;
+    let toolCalls: CollectedToolCall[];
+    try {
+      ({ textContent, toolCalls } = await processStream(response, writer));
+    } catch (streamErr) {
+      log.error('sam.stream_error', {
+        model: config.model,
+        error: streamErr instanceof Error ? streamErr.message : String(streamErr),
+      });
+      await writer.write(encodeSseEvent({
+        type: 'error',
+        message: 'Error processing AI response. Please try again.',
+      }));
+      break;
+    }
 
     // Persist assistant message
     persistMessage(
