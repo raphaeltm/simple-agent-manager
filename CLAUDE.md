@@ -62,9 +62,9 @@ When the user mentions **app, dashboard, projects, settings, or UI** → look in
 **Local-first, Cloudflare-integrated.** Prove as much of a feature as you can locally before touching staging. Local iteration takes seconds; staging iteration takes minutes and burns VM quota. Staging is for things that genuinely require real infrastructure (OAuth callbacks, DNS, VM provisioning, edge TLS) — not for discovering whether your code compiles.
 
 1. **Prototype and test locally first** — unit tests, Miniflare integration tests, local Vite dev server, Playwright visual audits. Hybrid loops (local UI against staging API, or local API against staging VM agent) are encouraged. See `.claude/rules/29-local-first-debugging.md`.
-2. **Deploy to staging only when local verification is exhausted** — when the remaining work genuinely needs real OAuth, DNS, or VMs. Partial-feature staging deploys are fine for end-to-end plumbing while the rest is still developed locally.
-3. **Test on Cloudflare** — real D1, KV, Workers, VMs.
-4. **When something fails on staging, READ THE LOGS before changing any code** — `wrangler tail`, `/admin/logs`, `/admin/errors`, the Node detail page's log stream, `journalctl -u vm-agent` via SSH, `docker logs` for containers. Never guess-and-redeploy. See `.claude/rules/29-local-first-debugging.md` for the log location matrix.
+2. **Deploy to staging only when local verification is exhausted** — when the remaining work genuinely needs real OAuth, DNS, or VMs. Partial-feature staging deploys are fine for end-to-end plumbing while the rest is still developed locally. Staging deploys take ~7 minutes via `gh workflow run deploy-staging.yml`.
+3. **Query staging directly via Cloudflare API** — use `$CF_TOKEN` to query D1 (SQL), read/write KV, check DNS records, and inspect Workers. This is the fastest way to verify deploys, debug issues, and understand staging state. **Always check infrastructure state via CF API before guessing at fixes.** See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet.
+4. **When something fails on staging, QUERY THEN READ LOGS before changing any code** — first query D1/KV/DNS via CF API to understand the data state, then use `wrangler tail`, `/admin/logs`, `/admin/errors`, the Node detail page's log stream, `journalctl -u vm-agent` via SSH, `docker logs` for containers. Never guess-and-redeploy. See `.claude/rules/29-local-first-debugging.md` for the log location matrix.
 5. Merge to main — triggers production deployment.
 
 Full local-development guide: `docs/guides/local-development.md`.
@@ -199,6 +199,7 @@ When you discover bugs or errors during testing — even if unrelated to your cu
 - **Build errors**: Run builds in dependency order (see Build Order above)
 - **Test failures**: Check Miniflare bindings are configured in `vitest.config.ts`
 - **Type errors**: Run `pnpm typecheck` from root to see all issues
+- **Staging issues**: Query staging state directly via `$CF_TOKEN` and the Cloudflare API — D1 SQL queries, KV reads, DNS checks. See `.claude/rules/32-cf-api-debugging.md` for copy-paste commands. **Always query before guessing.**
 
 ## Task Tracking
 

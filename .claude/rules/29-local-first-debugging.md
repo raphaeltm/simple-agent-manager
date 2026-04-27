@@ -95,11 +95,12 @@ This wastes staging quota, wastes CI minutes, wastes your budget, and frequently
 
 ### Required Procedure When Staging Behavior Is Wrong
 
-1. **Identify the layer that's failing.** Is it the browser? API Worker? Durable Object? VM agent? Cloud-init? Agent subprocess inside the container?
-2. **Pull logs for that layer before changing anything.** (Sources below.)
-3. **Read the logs in full** — not just the first error line. The root cause is often several messages before the visible symptom.
-4. **Form a hypothesis grounded in a specific log line.** If you can't quote a log line that justifies your next change, you are still guessing.
-5. **Only then change code.**
+1. **Query staging infrastructure directly via the Cloudflare API.** Before reading logs, before changing code, use `CF_TOKEN` to check the actual state: query D1 for data/migration status, read KV for feature flags, check DNS records. This takes seconds and often reveals the issue immediately. See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet.
+2. **Identify the layer that's failing.** Is it the browser? API Worker? Durable Object? VM agent? Cloud-init? Agent subprocess inside the container?
+3. **Pull logs for that layer before changing anything.** (Sources below.)
+4. **Read the logs in full** — not just the first error line. The root cause is often several messages before the visible symptom.
+5. **Form a hypothesis grounded in a specific log line or CF API query result.** If you can't quote a log line or query result that justifies your next change, you are still guessing.
+6. **Only then change code.**
 
 ### Where the Logs Actually Live
 
@@ -114,16 +115,29 @@ This wastes staging quota, wastes CI minutes, wastes your budget, and frequently
 | **Container stdout/stderr** | `ssh root@<node-ip> docker logs <container-id> --tail 500` — container IDs come from VM agent workspace metadata |
 | **Cloud-init** | `ssh root@<node-ip> cat /var/log/cloud-init-output.log` and `/var/log/cloud-init.log` |
 | **Analytics / events** | Admin UI → `/admin/analytics` or direct Workers Analytics Engine query |
+| **VM debug package (everything)** | `GET /api/nodes/:id/debug-package` — single tar.gz with cloud-init logs, journald, docker logs, system info, events DB, metrics DB, provisioning timings, network config, firewall rules, disk usage, process tree. **Use this first for any VM issue.** |
+| **D1 database state** | Direct query via CF API: `curl -s -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" -d '{"sql":"<query>"}' "https://api.cloudflare.com/client/v4/accounts/c4e4aebd980b626f6af43ac6b1edcede/d1/database/1cfaf5d4-8226-47d8-bf26-6ba727ce5718/query"` |
+| **KV state (feature flags, rate limits)** | Direct read via CF API — see `.claude/rules/32-cf-api-debugging.md` |
+| **DNS records** | Direct query via CF API — see `.claude/rules/32-cf-api-debugging.md` |
 
 ### VM-Specific Failure Playbook
 
 When a workspace/node misbehaves on staging:
 
-1. **Check VM agent heartbeats first** via `/admin/overview` or `/admin/stream` — if heartbeats aren't arriving, the problem is cloud-init, networking, or TLS. Do NOT edit API Worker code until you've confirmed heartbeats are flowing.
-2. **Pull cloud-init output** via SSH before assuming the agent is at fault — a broken cloud-init template produces an agent that never starts.
-3. **Read the VM agent journald log** (`journalctl -u vm-agent`) in full — the agent logs its startup sequence including certificate load, network config, and endpoint registration.
-4. **For container / agent failures**, read the container logs via `docker logs` — the Claude Code / Codex process writes its own stderr there.
-5. **For ACP / session failures**, correlate the sessionId across API Worker logs, VM agent logs, and container logs — the same ID should appear in all three.
+1. **Download the debug package first.** This is the single most useful debugging tool for VM issues. It bundles everything into one tar.gz — no SSH required:
+   ```bash
+   # Download the debug package for a node (requires auth cookie)
+   # Via staging API:
+   curl -s -b "session=<cookie>" "https://api.sammy.party/api/nodes/<nodeId>/debug-package" -o debug.tar.gz
+   tar xzf debug.tar.gz
+   ```
+   The archive contains: cloud-init logs, full journald (50k lines), VM agent logs, Docker container logs, docker ps/inspect, system info, events DB, metrics DB, provisioning timings, boot events, dmesg, syslog, iptables rules, network config (IP/routes/sockets), disk usage, and full process tree. This is everything you'd get from 15+ separate SSH commands in one download.
+
+2. **Check VM agent heartbeats** via `/admin/overview` or `/admin/stream` — if heartbeats aren't arriving, the problem is cloud-init, networking, or TLS. Do NOT edit API Worker code until you've confirmed heartbeats are flowing.
+3. **If you don't have an auth cookie**, SSH is the fallback: `ssh root@<node-ip> journalctl -u vm-agent -n 500 --no-pager` for agent logs, `docker logs <container-id>` for container logs, `cat /var/log/cloud-init-output.log` for provisioning.
+4. **For container / agent failures**, check `docker-logs.json` in the debug package or `docker logs` via SSH — the Claude Code / Codex process writes its own stderr there.
+5. **For ACP / session failures**, correlate the sessionId across API Worker logs (wrangler tail), VM agent logs (`vm-agent.log` in the debug package), and container logs (`docker-logs.json`) — the same ID should appear in all three.
+6. **For slow boot issues**, check `provisioning-timings.txt` in the debug package — it shows per-step durations and total wall-clock time for the entire provisioning sequence.
 
 ### Control Plane Failure Playbook
 
