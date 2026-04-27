@@ -1,10 +1,15 @@
 import type { AnthropicToolDef, CollectedToolCall, ToolContext } from '../types';
 import { cancelMission, cancelMissionDef } from './cancel-mission';
+import { createIdea, createIdeaDef } from './create-idea';
 import { createMission, createMissionDef } from './create-mission';
 import { dispatchTask, dispatchTaskDef } from './dispatch-task';
+import { findRelatedIdeas, findRelatedIdeasDef } from './find-related-ideas';
+import { getCiStatus, getCiStatusDef } from './get-ci-status';
 import { getMission, getMissionDef } from './get-mission';
+import { getOrchestratorStatus, getOrchestratorStatusDef } from './get-orchestrator-status';
 import { getProjectStatus, getProjectStatusDef } from './get-project-status';
 import { getTaskDetails, getTaskDetailsDef } from './get-task-details';
+import { listIdeas, listIdeasDef } from './list-ideas';
 import { listProjects, listProjectsDef } from './list-projects';
 import { pauseMission, pauseMissionDef } from './pause-mission';
 import { resumeMission, resumeMissionDef } from './resume-mission';
@@ -30,6 +35,11 @@ export const SAM_TOOLS: AnthropicToolDef[] = [
   cancelMissionDef,
   pauseMissionDef,
   resumeMissionDef,
+  createIdeaDef,
+  listIdeasDef,
+  findRelatedIdeasDef,
+  getCiStatusDef,
+  getOrchestratorStatusDef,
 ];
 
 type ToolHandler = (input: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
@@ -49,6 +59,11 @@ const toolHandlers: Record<string, ToolHandler> = {
   cancel_mission: cancelMission as ToolHandler,
   pause_mission: pauseMission as ToolHandler,
   resume_mission: resumeMission as ToolHandler,
+  create_idea: createIdea as ToolHandler,
+  list_ideas: listIdeas as ToolHandler,
+  find_related_ideas: findRelatedIdeas as ToolHandler,
+  get_ci_status: getCiStatus as ToolHandler,
+  get_orchestrator_status: getOrchestratorStatus as ToolHandler,
 };
 
 /** Execute a tool call and return the result (or error message on failure). */
