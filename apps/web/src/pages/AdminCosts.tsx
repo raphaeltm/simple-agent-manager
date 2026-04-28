@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 
-import type { CostSummaryResponse } from '../lib/api';
+import type { CostByModel, CostSummaryResponse } from '../lib/api';
 import { fetchAdminCosts } from '../lib/api';
 
 // ---------------------------------------------------------------------------
@@ -239,8 +239,8 @@ export function AdminCosts() {
                     tickFormatter={(v: number) => formatCost(v)}
                   />
                   <Tooltip
-                    formatter={(value: number) => [formatCost(value), 'Cost']}
-                    labelFormatter={(label: string) => label}
+                    formatter={(value) => [formatCost(Number(value)), 'Cost']}
+                    labelFormatter={(label) => String(label)}
                     contentStyle={{
                       background: 'var(--sam-color-surface-primary)',
                       border: '1px solid var(--sam-color-border-default)',
@@ -273,7 +273,7 @@ export function AdminCosts() {
               <div className="w-full mb-3" style={{ height: Math.max(100, llm.byModel.length * 40) }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={llm.byModel.map((m) => ({ ...m, label: shortModel(m.model) }))}
+                    data={llm.byModel.map((m: CostByModel) => ({ ...m, label: shortModel(m.model) }))}
                     layout="vertical"
                     margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
                   >
@@ -294,7 +294,7 @@ export function AdminCosts() {
                       tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }}
                     />
                     <Tooltip
-                      formatter={(value: number) => [formatCost(value), 'Cost']}
+                      formatter={(value) => [formatCost(Number(value)), 'Cost']}
                       contentStyle={{
                         background: 'var(--sam-color-surface-primary)',
                         border: '1px solid var(--sam-color-border-default)',
@@ -318,7 +318,7 @@ export function AdminCosts() {
                     </tr>
                   </thead>
                   <tbody>
-                    {llm.byModel.map((m, i) => (
+                    {llm.byModel.map((m: CostByModel, i: number) => (
                       <tr key={m.model} className="border-b border-border-default last:border-0">
                         <td className="py-2 pr-3">
                           <span
@@ -363,7 +363,7 @@ export function AdminCosts() {
                     </tr>
                   </thead>
                   <tbody>
-                    {llm.byUser.slice(0, 20).map((u) => (
+                    {llm.byUser.slice(0, 20).map((u: CostSummaryResponse['llm']['byUser'][number]) => (
                       <tr key={u.userId} className="border-b border-border-default last:border-0">
                         <td className="py-2 pr-3">
                           <span

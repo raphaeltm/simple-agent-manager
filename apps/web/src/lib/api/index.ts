@@ -1,4 +1,4 @@
-export type { AdminErrorsFilter, AdminLogQueryParams,AIProxyConfigResponse } from './admin';
+export type { AdminErrorsFilter, AdminLogQueryParams,AIProxyConfigResponse, CostByModel, CostSummaryResponse } from './admin';
 export type {
   AiUsageByDay,
   AiUsageByModel,
@@ -27,6 +27,7 @@ export {
   createPlatformCredential,
   deletePlatformCredential,
   fetchAdminComputeUsage,
+  fetchAdminCosts,
   fetchAdminDefaultQuota,
   fetchAdminErrors,
   fetchAdminErrorTrends,
