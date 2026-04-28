@@ -66,12 +66,13 @@ describe('SamMarkdown', () => {
     expect(bq!.textContent).toContain('This is a quote');
   });
 
-  it('renders links with target=_blank', () => {
+  it('renders links with target=_blank and screen-reader cue', () => {
     render(<SamMarkdown content="[Click here](https://example.com)" />);
-    const link = screen.getByRole('link', { name: 'Click here' });
+    const link = screen.getByRole('link', { name: /Click here/i });
     expect(link).toHaveAttribute('href', 'https://example.com');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link.querySelector('.sr-only')).toHaveTextContent('(opens in new tab)');
   });
 
   it('renders task list checkboxes', () => {
@@ -200,11 +201,11 @@ describe('CopyButton execCommand fallback', () => {
 });
 
 describe('SamMarkdown accessibility', () => {
-  it('code block has role="region" and aria-label', () => {
+  it('code block has role="group" and aria-label', () => {
     const md = '```typescript\nconst x = 1;\n```';
     render(<SamMarkdown content={md} />);
 
-    const region = screen.getByRole('region', { name: /typescript code block/i });
+    const region = screen.getByRole('group', { name: /typescript code block/i });
     expect(region).toBeInTheDocument();
   });
 
@@ -213,7 +214,7 @@ describe('SamMarkdown accessibility', () => {
     const md = '```text\nplain text\n```';
     render(<SamMarkdown content={md} />);
 
-    const region = screen.getByRole('region', { name: /text code block/i });
+    const region = screen.getByRole('group', { name: /text code block/i });
     expect(region).toBeInTheDocument();
   });
 });

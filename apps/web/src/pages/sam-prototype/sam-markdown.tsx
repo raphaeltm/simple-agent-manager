@@ -14,35 +14,41 @@ import remarkGfm from 'remark-gfm';
 // Stable remark plugins array
 const REMARK_PLUGINS = [remarkGfm];
 
+/** execCommand('copy') fallback for non-HTTPS or permission-denied contexts. */
+function execCommandCopy(text: string): boolean {
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Copy-to-clipboard button for code blocks. */
 function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
 
+  const onSuccess = useCallback(() => {
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, []);
+
   const handleCopy = useCallback(() => {
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(code).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+      navigator.clipboard.writeText(code).then(onSuccess).catch(() => {
+        if (execCommandCopy(code)) onSuccess();
       });
     } else {
-      try {
-        const textarea = document.createElement('textarea');
-        textarea.value = code;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        const ok = document.execCommand('copy');
-        document.body.removeChild(textarea);
-        if (ok) {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        }
-      } catch {
-        // execCommand not supported — silently fail
-      }
+      if (execCommandCopy(code)) onSuccess();
     }
-  }, [code]);
+  }, [code, onSuccess]);
 
   return (
     <button
@@ -67,7 +73,7 @@ function CopyButton({ code }: { code: string }) {
 /** Syntax-highlighted code block with green glass frame. */
 function SamCodeBlock({ code, language }: { code: string; language: string }) {
   return (
-    <div className="sam-code-block" role="region" aria-label={`${language || 'text'} code block`}>
+    <div className="sam-code-block" role="group" aria-label={`${language || 'text'} code block`}>
       <div className="sam-code-header">
         <span className="sam-code-lang">{language || 'text'}</span>
         <CopyButton code={code} />
@@ -140,6 +146,7 @@ const SAM_MARKDOWN_COMPONENTS: Components = {
   a: ({ href, children }) => (
     <a href={href} target="_blank" rel="noopener noreferrer">
       {children}
+      <span className="sr-only"> (opens in new tab)</span>
     </a>
   ),
 };
