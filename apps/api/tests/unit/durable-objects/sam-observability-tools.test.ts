@@ -57,13 +57,32 @@ vi.mock('../../../src/services/project-data', () => ({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Valid project row for ownership checks. */
+const OWNED_PROJECT = {
+  id: 'proj-1',
+  repository: 'owner/repo',
+  defaultBranch: 'main',
+  installationId: null,
+};
+
+/** Credential row for GitHub token resolution. */
+const GITHUB_CREDENTIAL = {
+  encryptedToken: 'enc-token',
+  iv: 'test-iv',
+};
+
 function mockD1(options: {
-  firstResult?: Record<string, unknown> | null;
+  firstResults?: (Record<string, unknown> | null)[];
   allResults?: Record<string, unknown>[];
 } = {}) {
+  const firstQueue = [...(options.firstResults ?? [null])];
   const mockStatement = {
     bind: vi.fn().mockReturnThis(),
-    first: vi.fn().mockResolvedValue(options.firstResult ?? null),
+    first: vi.fn().mockImplementation(() => Promise.resolve(firstQueue.shift() ?? null)),
+    raw: vi.fn().mockImplementation(() => {
+      const row = firstQueue.shift() ?? null;
+      return Promise.resolve(row ? [Object.values(row)] : []);
+    }),
     all: vi.fn().mockResolvedValue({
       results: options.allResults ?? [],
       success: true,
@@ -78,11 +97,14 @@ function mockD1(options: {
 
 function buildCtx(overrides: {
   dbFirstResult?: Record<string, unknown> | null;
+  dbFirstResults?: (Record<string, unknown> | null)[];
   dbAllResults?: Record<string, unknown>[];
   userId?: string;
 } = {}): ToolContext {
+  const firstResults = overrides.dbFirstResults
+    ?? (overrides.dbFirstResult !== undefined ? [overrides.dbFirstResult] : [null]);
   const db = mockD1({
-    firstResult: overrides.dbFirstResult,
+    firstResults,
     allResults: overrides.dbAllResults,
   });
 
@@ -133,6 +155,20 @@ describe('list_sessions', () => {
     expect(result).toEqual({ error: 'projectId is required.' });
   });
 
+  it('rejects unowned project', async () => {
+    const ctx = buildCtx({ dbFirstResult: null });
+    const result = await listSessions({ projectId: 'not-mine' }, ctx);
+    expect(result).toEqual({ error: 'Project not found or not owned by you.' });
+  });
+
+  it('returns sessions for owned project', async () => {
+    mockListSessions.mockResolvedValueOnce({ sessions: [{ id: 's1', topic: 'Test' }], total: 1 });
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    const result = await listSessions({ projectId: 'proj-1' }, ctx) as { sessions: unknown[]; total: number };
+    expect(result.sessions).toHaveLength(1);
+    expect(result.total).toBe(1);
+  });
+
   it('dispatches via executeTool', async () => {
     const ctx = buildCtx();
     const toolCall: CollectedToolCall = {
@@ -160,6 +196,32 @@ describe('get_session_messages', () => {
     const ctx = buildCtx();
     const result = await getSessionMessages({ projectId: 'p1', sessionId: '' }, ctx);
     expect(result).toEqual({ error: 'sessionId is required.' });
+  });
+
+  it('rejects unowned project', async () => {
+    const ctx = buildCtx({ dbFirstResult: null });
+    const result = await getSessionMessages({ projectId: 'not-mine', sessionId: 's1' }, ctx);
+    expect(result).toEqual({ error: 'Project not found or not owned by you.' });
+  });
+
+  it('returns messages for owned project session', async () => {
+    mockGetSession.mockResolvedValueOnce({ id: 's1', topic: 'Test', taskId: 't1', status: 'running' });
+    mockGetMessages.mockResolvedValueOnce({
+      messages: [
+        { id: 'm1', role: 'user', content: 'hello', createdAt: 1 },
+        { id: 'm2', role: 'assistant', content: 'hi', createdAt: 2 },
+      ],
+      hasMore: false,
+    });
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    const result = await getSessionMessages({ projectId: 'proj-1', sessionId: 's1' }, ctx) as {
+      sessionId: string;
+      messages: unknown[];
+      messageCount: number;
+    };
+    expect(result.sessionId).toBe('s1');
+    expect(result.messageCount).toBe(2);
+    expect(result.messages).toHaveLength(2);
   });
 
   it('dispatches via executeTool', async () => {
@@ -197,6 +259,38 @@ describe('search_task_messages', () => {
     expect(result).toEqual({ error: 'query must be at least 2 characters.' });
   });
 
+  it('rejects unowned project', async () => {
+    const ctx = buildCtx({ dbFirstResult: null });
+    const result = await searchTaskMessages({ projectId: 'not-mine', query: 'test query' }, ctx);
+    expect(result).toEqual({ error: 'Project not found or not owned by you.' });
+  });
+
+  it('searches messages for owned project', async () => {
+    mockSearchMessages.mockResolvedValueOnce([
+      { id: 'm1', sessionId: 's1', sessionTopic: 'Topic', sessionTaskId: 't1', role: 'assistant', snippet: 'found it', createdAt: '2026-01-01' },
+    ]);
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    const result = await searchTaskMessages({ projectId: 'proj-1', query: 'test query' }, ctx) as {
+      results: unknown[];
+      count: number;
+      query: string;
+    };
+    expect(result.count).toBe(1);
+    expect(result.query).toBe('test query');
+    expect(result.results).toHaveLength(1);
+  });
+
+  it('resolves taskId to sessionId before searching', async () => {
+    mockListSessions.mockResolvedValueOnce({ sessions: [{ id: 'resolved-session' }], total: 1 });
+    mockSearchMessages.mockResolvedValueOnce([]);
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    await searchTaskMessages({ projectId: 'proj-1', query: 'test', taskId: 'task-123' }, ctx);
+    expect(mockListSessions).toHaveBeenCalled();
+    expect(mockSearchMessages).toHaveBeenCalledWith(
+      expect.anything(), 'proj-1', 'test', 'resolved-session', null, expect.any(Number),
+    );
+  });
+
   it('dispatches via executeTool', async () => {
     const ctx = buildCtx();
     const toolCall: CollectedToolCall = {
@@ -226,6 +320,19 @@ describe('search_code', () => {
     expect(result).toEqual({ error: 'query is required.' });
   });
 
+  it('rejects unowned project', async () => {
+    const ctx = buildCtx({ dbFirstResult: null });
+    const result = await searchCode({ projectId: 'not-mine', query: 'test' }, ctx);
+    expect(result).toEqual({ error: 'Project not found or not owned by you.' });
+  });
+
+  it('returns no_credentials when GitHub token unavailable', async () => {
+    // First call: ownership check passes. Second call: credential query returns null.
+    const ctx = buildCtx({ dbFirstResults: [OWNED_PROJECT, null] });
+    const result = await searchCode({ projectId: 'proj-1', query: 'test' }, ctx) as { status: string };
+    expect(result.status).toBe('no_credentials');
+  });
+
   it('dispatches via executeTool', async () => {
     const ctx = buildCtx();
     const toolCall: CollectedToolCall = {
@@ -247,6 +354,24 @@ describe('get_file_content', () => {
     const ctx = buildCtx();
     const result = await getFileContent({ projectId: '', path: 'src/index.ts' }, ctx);
     expect(result).toEqual({ error: 'projectId is required.' });
+  });
+
+  it('rejects unowned project', async () => {
+    const ctx = buildCtx({ dbFirstResult: null });
+    const result = await getFileContent({ projectId: 'not-mine', path: 'README.md' }, ctx);
+    expect(result).toEqual({ error: 'Project not found or not owned by you.' });
+  });
+
+  it('rejects path traversal sequences', async () => {
+    const ctx = buildCtx({ dbFirstResults: [OWNED_PROJECT, GITHUB_CREDENTIAL] });
+    const result = await getFileContent({ projectId: 'proj-1', path: '../../etc/passwd' }, ctx);
+    expect(result).toEqual({ error: 'Path traversal sequences are not allowed.' });
+  });
+
+  it('returns no_credentials when GitHub token unavailable', async () => {
+    const ctx = buildCtx({ dbFirstResults: [OWNED_PROJECT, null] });
+    const result = await getFileContent({ projectId: 'proj-1', path: 'README.md' }, ctx) as { status: string };
+    expect(result.status).toBe('no_credentials');
   });
 
   it('dispatches via executeTool', async () => {
