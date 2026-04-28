@@ -25,16 +25,22 @@ function CopyButton({ code }: { code: string }) {
         setTimeout(() => setCopied(false), 1500);
       });
     } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = code;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = code;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (ok) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }
+      } catch {
+        // execCommand not supported — silently fail
+      }
     }
   }, [code]);
 

@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SamMarkdown } from '../../../src/pages/sam-prototype/sam-markdown';
 
@@ -143,6 +143,59 @@ describe('CopyButton (via SamMarkdown)', () => {
     svgs.forEach((svg) => {
       expect(svg.getAttribute('aria-hidden')).toBe('true');
     });
+  });
+});
+
+describe('CopyButton execCommand fallback', () => {
+  const originalClipboard = navigator.clipboard;
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: originalClipboard,
+      writable: true,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+  });
+
+  it('uses execCommand fallback when navigator.clipboard is unavailable', async () => {
+    const execMock = vi.fn().mockReturnValue(true);
+    document.execCommand = execMock;
+
+    const md = '```js\nconst x = 1;\n```';
+    render(<SamMarkdown content={md} />);
+
+    // Override clipboard AFTER render but before click
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+
+    const btn = screen.getByRole('button', { name: /copy code to clipboard/i });
+    fireEvent.click(btn);
+
+    expect(execMock).toHaveBeenCalledWith('copy');
+    expect(await screen.findByRole('button', { name: /copied to clipboard/i })).toBeInTheDocument();
+  });
+
+  it('does not show Copied when execCommand returns false', async () => {
+    document.execCommand = vi.fn().mockReturnValue(false);
+
+    const md = '```js\nconst x = 1;\n```';
+    render(<SamMarkdown content={md} />);
+
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+
+    const btn = screen.getByRole('button', { name: /copy code to clipboard/i });
+    fireEvent.click(btn);
+
+    // Should still show "Copy", not "Copied"
+    expect(screen.getByRole('button', { name: /copy code to clipboard/i })).toBeInTheDocument();
   });
 });
 
