@@ -4,15 +4,14 @@
  *
  * Mounts at /api/admin/costs (registered in index.ts).
  */
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { drizzle } from 'drizzle-orm/d1';
-
-import * as schema from '../db/schema';
 import { getAllUsersNodeUsageSummary } from '../services/node-usage';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +22,8 @@ import { getAllUsersNodeUsageSummary } from '../services/node-usage';
 const DEFAULT_PAGE_SIZE = 50;
 /** Maximum pages to iterate when aggregating. */
 const DEFAULT_MAX_PAGES = 20;
+/** Hard cap on max pages to prevent Workers CPU timeout. */
+const MAX_PAGES_HARD_CAP = 20;
 
 const VALID_PERIODS = ['current-month', '30d', '90d'] as const;
 type Period = (typeof VALID_PERIODS)[number];
@@ -61,7 +62,7 @@ function getPeriodInfo(period: Period): {
 
   const days = period === '30d' ? 30 : 90;
   const start = new Date(now);
-  start.setDate(start.getDate() - days);
+  start.setUTCDate(start.getUTCDate() - days);
   return {
     startDate: start.toISOString(),
     daysElapsed: days,
@@ -123,6 +124,7 @@ async function fetchGatewayLogs(
     log.error('admin_costs.gateway_api_error', {
       status: resp.status,
       body: body.slice(0, 500),
+      url: url.replace(/Bearer\s+\S+/g, 'Bearer [REDACTED]'),
     });
     throw errors.internal(`AI Gateway API error (${resp.status})`);
   }
@@ -224,8 +226,10 @@ adminCostRoutes.get('/', async (c) => {
   if (gatewayId) {
     const pageSize =
       parseInt(c.env.AI_USAGE_PAGE_SIZE || '', 10) || DEFAULT_PAGE_SIZE;
-    const maxPages =
-      parseInt(c.env.AI_USAGE_MAX_PAGES || '', 10) || DEFAULT_MAX_PAGES;
+    const maxPages = Math.min(
+      parseInt(c.env.AI_USAGE_MAX_PAGES || '', 10) || DEFAULT_MAX_PAGES,
+      MAX_PAGES_HARD_CAP,
+    );
 
     for (let page = 1; page <= maxPages; page++) {
       const params = new URLSearchParams({

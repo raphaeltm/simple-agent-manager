@@ -33,10 +33,11 @@ function formatTokens(n: number): string {
 }
 
 function shortModel(model: string): string {
-  return model
+  const cleaned = model
     .replace(/^@cf\/[^/]+\//, '')
-    .replace(/^claude-/, 'claude ')
-    .slice(0, 30);
+    .replace(/^claude-/, 'claude ');
+  if (cleaned.length > 30) return `${cleaned.slice(0, 27)}...`;
+  return cleaned;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,15 +58,14 @@ function PeriodSelector({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="flex gap-1" role="radiogroup" aria-label="Cost period">
+    <div className="flex gap-1" aria-label="Cost period">
       {PERIODS.map((p) => (
         <button
           key={p.value}
           type="button"
-          role="radio"
-          aria-checked={value === p.value}
+          aria-pressed={value === p.value}
           onClick={() => onChange(p.value)}
-          className={`px-3 py-1.5 text-xs rounded-md transition-colors min-h-[36px] ${
+          className={`px-3 py-2 text-xs rounded-md transition-colors min-h-[44px] ${
             value === p.value
               ? 'bg-accent-muted text-accent-fg font-medium'
               : 'bg-surface-secondary text-fg-muted hover:text-fg-primary'
@@ -84,11 +84,11 @@ function PeriodSelector({
 
 const BAR_COLORS = [
   'var(--sam-color-accent-primary, #16a34a)',
-  '#60a5fa',
-  '#a78bfa',
+  'var(--sam-color-info, #60a5fa)',
+  'var(--sam-color-purple, #a78bfa)',
   'var(--sam-color-warning, #f59e0b)',
-  '#ec4899',
-  '#14b8a6',
+  'var(--sam-color-pink, #ec4899)',
+  'var(--sam-color-teal, #14b8a6)',
 ];
 
 function KpiCard({
@@ -126,14 +126,16 @@ function KpiCard({
 export function AdminCosts() {
   const [data, setData] = useState<CostSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState('current-month');
   const hasLoadedRef = useRef(false);
 
   const loadData = useCallback(
-    async (showLoading = true) => {
+    async () => {
       try {
-        if (showLoading && !hasLoadedRef.current) setLoading(true);
+        if (!hasLoadedRef.current) setLoading(true);
+        else setRefreshing(true);
         setError(null);
         const res = await fetchAdminCosts(period);
         setData(res);
@@ -142,6 +144,7 @@ export function AdminCosts() {
         setError(err instanceof Error ? err.message : 'Failed to load cost data');
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
     },
     [period],
@@ -176,17 +179,28 @@ export function AdminCosts() {
 
   const { llm, projection, compute } = data;
   const combinedCost = llm.totalCostUsd + compute.estimatedCostUsd;
+  const hasLlmData = llm.totalRequests > 0;
+  const hasComputeData = compute.totalNodeHours > 0;
 
   return (
     <div className="flex flex-col gap-4 min-w-0 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h2 className="text-xl font-bold text-fg-primary m-0">Cost Monitor</h2>
-          <p className="text-sm text-fg-muted m-0 mt-0.5">{data.periodLabel}</p>
+        <div className="flex items-center gap-2">
+          <div>
+            <h2 className="text-xl font-bold text-fg-primary m-0">Cost Monitor</h2>
+            <p className="text-sm text-fg-muted m-0 mt-0.5">{data.periodLabel}</p>
+          </div>
+          {refreshing && <Spinner />}
         </div>
         <PeriodSelector value={period} onChange={setPeriod} />
       </div>
+
+      {error && data && (
+        <div className="text-sm text-danger-fg bg-danger-muted/10 border border-danger-muted rounded-md px-3 py-2">
+          Failed to refresh: {error}
+        </div>
+      )}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -290,8 +304,8 @@ export function AdminCosts() {
                     <YAxis
                       type="category"
                       dataKey="label"
-                      width={120}
-                      tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }}
+                      width={80}
+                      tick={{ fontSize: 10, fill: 'var(--sam-color-fg-muted)' }}
                     />
                     <Tooltip
                       formatter={(value) => [formatCost(Number(value)), 'Cost']}
@@ -308,7 +322,7 @@ export function AdminCosts() {
               </div>
               {/* Table */}
               <div className="overflow-x-auto -mx-4 px-4">
-                <table className="w-full text-sm min-w-[320px]">
+                <table className="w-full text-sm min-w-[320px]" aria-label="Cost breakdown by model">
                   <thead>
                     <tr className="border-b border-border-default text-fg-muted text-xs">
                       <th className="text-left py-2 pr-3">Model</th>
@@ -324,8 +338,11 @@ export function AdminCosts() {
                           <span
                             className="inline-block w-2 h-2 rounded-full mr-2"
                             style={{ backgroundColor: BAR_COLORS[i % BAR_COLORS.length] }}
+                            aria-hidden="true"
                           />
-                          <span className="text-fg-primary text-xs">{shortModel(m.model)}</span>
+                          <span className="text-fg-primary text-xs" title={m.model}>
+                            {shortModel(m.model)}
+                          </span>
                           <span className="text-fg-muted ml-1 text-xs">({m.provider})</span>
                         </td>
                         <td className="text-right py-2 px-2 text-fg-secondary tabular-nums">
@@ -352,7 +369,7 @@ export function AdminCosts() {
             <div className="p-4">
               <h3 className="text-sm font-semibold text-fg-primary mb-3">LLM Cost by User</h3>
               <div className="overflow-x-auto -mx-4 px-4">
-                <table className="w-full text-sm min-w-[320px]">
+                <table className="w-full text-sm min-w-[320px]" aria-label="LLM cost breakdown by user">
                   <thead>
                     <tr className="border-b border-border-default text-fg-muted text-xs">
                       <th className="text-left py-2 pr-3">User</th>
@@ -370,7 +387,7 @@ export function AdminCosts() {
                             className="text-fg-primary font-mono text-xs truncate inline-block max-w-[120px]"
                             title={u.userId}
                           >
-                            {u.userId.slice(0, 12)}...
+                            {u.userId.length > 12 ? `${u.userId.slice(0, 12)}...` : u.userId}
                           </span>
                         </td>
                         <td className="text-right py-2 px-2 text-fg-secondary tabular-nums">
@@ -396,7 +413,7 @@ export function AdminCosts() {
       </div>
 
       {/* Empty state */}
-      {llm.totalRequests === 0 && compute.totalNodeHours === 0 && (
+      {!hasLlmData && !hasComputeData && (
         <Card>
           <div className="p-6 text-center">
             <Body className="text-fg-muted">

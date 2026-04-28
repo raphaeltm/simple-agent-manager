@@ -218,6 +218,117 @@ describe('admin-costs routes', () => {
     expect(body.compute.vcpuHourCostUsd).toBe(0.01);
   });
 
+  it('aggregates across multiple pages', async () => {
+    const page1Entries = Array.from({ length: 50 }, (_, i) =>
+      makeLogEntry({ id: `log-p1-${i}`, cost: 0.01 }),
+    );
+    const page2Entries = [
+      makeLogEntry({ id: 'log-p2-0', cost: 0.05 }),
+    ];
+
+    mockFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: page1Entries,
+            result_info: { page: 1, per_page: 50, count: 50, total_count: 51, total_pages: 2 },
+            success: true,
+            errors: [],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: page2Entries,
+            result_info: { page: 2, per_page: 50, count: 1, total_count: 51, total_pages: 2 },
+            success: true,
+            errors: [],
+          }),
+          { status: 200 },
+        ),
+      );
+
+    const app = createApp();
+    const res = await app.request('/api/admin/costs');
+    const body = await res.json();
+
+    expect(body.llm.totalRequests).toBe(51);
+    expect(body.llm.totalCostUsd).toBeCloseTo(50 * 0.01 + 0.05);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns 500 when AI Gateway API returns an error', async () => {
+    mockFetch.mockResolvedValue(
+      new Response('Gateway error', { status: 502 }),
+    );
+
+    const app = createApp();
+    const res = await app.request('/api/admin/costs');
+    expect(res.status).toBe(500);
+  });
+
+  it('returns LLM data even when compute query fails', async () => {
+    const { getAllUsersNodeUsageSummary } = await import(
+      '../../../src/services/node-usage'
+    );
+    (getAllUsersNodeUsageSummary as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('D1 unavailable'),
+    );
+
+    mockFetch.mockResolvedValue(
+      makeGatewayResponse([makeLogEntry({ cost: 0.05 })]),
+    );
+
+    const app = createApp();
+    const res = await app.request('/api/admin/costs');
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.llm.totalRequests).toBe(1);
+    expect(body.llm.totalCostUsd).toBeCloseTo(0.05);
+    expect(body.compute.totalNodeHours).toBe(0);
+    expect(body.compute.totalVcpuHours).toBe(0);
+    expect(body.compute.estimatedCostUsd).toBe(0);
+  });
+
+  it('handles entries with null metadata gracefully', async () => {
+    mockFetch.mockResolvedValue(
+      makeGatewayResponse([
+        makeLogEntry({ cost: 0.05, metadata: null }),
+        makeLogEntry({ id: 'log-2', cost: 0.10, metadata: {} }),
+      ]),
+    );
+
+    const app = createApp();
+    const res = await app.request('/api/admin/costs');
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.llm.totalRequests).toBe(2);
+    expect(body.llm.totalCostUsd).toBeCloseTo(0.15);
+    // Neither entry has userId, so byUser should be empty
+    expect(body.llm.byUser).toHaveLength(0);
+  });
+
+  it('tracks cached and error request counts', async () => {
+    mockFetch.mockResolvedValue(
+      makeGatewayResponse([
+        makeLogEntry({ cost: 0.01, cached: true }),
+        makeLogEntry({ id: 'log-2', cost: 0.02, success: false }),
+        makeLogEntry({ id: 'log-3', cost: 0.03 }),
+      ]),
+    );
+
+    const app = createApp();
+    const res = await app.request('/api/admin/costs');
+    const body = await res.json();
+
+    expect(body.llm.cachedRequests).toBe(1);
+    expect(body.llm.errorRequests).toBe(1);
+  });
+
   it('aggregates by day correctly', async () => {
     mockFetch.mockResolvedValue(
       makeGatewayResponse([
