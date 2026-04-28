@@ -164,7 +164,7 @@ A typical SAM deployment stays within the free tier for small to medium usage.
 
 ### User VM Costs
 
-VMs are billed to each user's own cloud provider account. SAM supports Hetzner and Scaleway.
+VMs are billed to each user's own cloud provider account. SAM supports Hetzner, Scaleway, and GCP.
 
 **Hetzner:**
 

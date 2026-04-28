@@ -68,7 +68,7 @@ Warm node pooling only applies to nodes that were auto-provisioned for idea exec
 
 ## Providers
 
-A **provider** is a cloud infrastructure abstraction. SAM currently supports two providers:
+A **provider** is a cloud infrastructure abstraction. SAM currently supports three providers:
 
 ### Hetzner Cloud
 
@@ -89,6 +89,16 @@ A **provider** is a cloud infrastructure abstraction. SAM currently supports two
 | Large | GP1-S | 8 vCPU, 32GB RAM, 600GB disk | ~$0.084/hr |
 
 **Locations**: Paris (3 zones), Amsterdam (3 zones), Warsaw (2 zones)
+
+### Google Cloud Platform (GCP)
+
+| Size | Machine Type | Specs | Monthly Cost |
+|------|------------|-------|-------------|
+| Small | e2-medium | 1 vCPU, 4GB RAM, 50GB disk | ~$25/mo |
+| Medium | e2-standard-2 | 2 vCPU, 8GB RAM, 50GB disk | ~$49/mo |
+| Large | e2-standard-4 | 4 vCPU, 16GB RAM, 50GB disk | ~$97/mo |
+
+**Locations**: Iowa (US), South Carolina (US), Oregon (US), Belgium (EU), Frankfurt (DE), London (GB), Singapore, Tokyo (JP)
 
 ### Provider Selection
 
@@ -153,7 +163,7 @@ See the [Idea Execution guide](/docs/guides/idea-execution/) for full details.
 
 An **agent session** is an AI coding agent conversation running inside a workspace container. Sessions use the **Agent Communication Protocol (ACP)** to communicate between the browser and the agent process.
 
-SAM supports four AI coding agents:
+SAM supports five AI coding agents:
 
 | Agent | Provider | API Key Variable |
 |-------|----------|-----------------|
@@ -161,6 +171,7 @@ SAM supports four AI coding agents:
 | **OpenAI Codex** | OpenAI | `OPENAI_API_KEY` |
 | **Google Gemini** | Google | `GEMINI_API_KEY` |
 | **Mistral Vibe** | Mistral | `MISTRAL_API_KEY` |
+| **OpenCode** | Scaleway | `SCW_SECRET_KEY` |
 
 Sessions support:
 - Streaming responses (real-time output as the agent works)
