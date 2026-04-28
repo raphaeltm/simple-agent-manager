@@ -1,0 +1,290 @@
+/* ═══════════════════════════════════════════════════════════════
+   SAM Chat Markdown — green glass theme for rendered markdown
+   inside SAM message bubbles.
+   ═══════════════════════════════════════════════════════════════ */
+
+.sam-markdown > *:first-child { margin-top: 0; }
+.sam-markdown > *:last-child { margin-bottom: 0; }
+
+/* ── Headings ──────────────────────────────────────────────── */
+.sam-markdown h1 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 20px 0 12px;
+  color: #fff;
+  line-height: 1.25;
+}
+
+.sam-markdown h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 20px 0 10px;
+  color: #fff;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(60, 180, 120, 0.12);
+}
+
+.sam-markdown h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 18px 0 8px;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.sam-markdown h4 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 14px 0 6px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.sam-markdown h5,
+.sam-markdown h6 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 12px 0 6px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Paragraphs ────────────────────────────────────────────── */
+.sam-markdown p {
+  margin: 10px 0;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.92rem;
+  line-height: 1.65;
+}
+
+/* ── Links ─────────────────────────────────────────────────── */
+.sam-markdown a {
+  color: rgba(60, 180, 120, 1);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+.sam-markdown a:hover {
+  border-bottom-color: rgba(60, 180, 120, 1);
+}
+
+/* ── Inline formatting ─────────────────────────────────────── */
+.sam-markdown strong { color: #fff; font-weight: 600; }
+.sam-markdown em { font-style: italic; }
+.sam-markdown del { color: rgba(255, 255, 255, 0.4); }
+
+/* ── Lists ─────────────────────────────────────────────────── */
+.sam-markdown ul,
+.sam-markdown ol {
+  margin: 10px 0;
+  padding-left: 22px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.92rem;
+}
+
+.sam-markdown li { margin: 4px 0; }
+.sam-markdown li > ul,
+.sam-markdown li > ol { margin: 2px 0; }
+
+.sam-markdown ul { list-style: none; }
+.sam-markdown ul > li { position: relative; }
+
+.sam-markdown ul > li::before {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: 10px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(60, 180, 120, 1);
+  box-shadow: 0 0 5px rgba(40, 160, 100, 0.15);
+}
+
+.sam-markdown ul > li > ul > li::before {
+  background: rgba(60, 180, 120, 0.5);
+  box-shadow: none;
+  width: 4px;
+  height: 4px;
+}
+
+.sam-markdown ul > li > ul > li > ul > li::before {
+  background: rgba(255, 255, 255, 0.4);
+  width: 3px;
+  height: 3px;
+}
+
+.sam-markdown ol { list-style: decimal; }
+.sam-markdown ol > li::marker { color: rgba(60, 180, 120, 1); font-weight: 600; }
+
+/* ── Task lists ────────────────────────────────────────────── */
+.sam-markdown li:has(> input[type='checkbox']) { list-style: none; }
+.sam-markdown li:has(> input[type='checkbox'])::before { display: none; }
+
+.sam-markdown input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(60, 180, 120, 0.35);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.2);
+  vertical-align: middle;
+  margin-right: 6px;
+  position: relative;
+  cursor: default;
+}
+
+.sam-markdown input[type='checkbox']:checked {
+  background: linear-gradient(135deg, rgba(40, 160, 100, 0.6), rgba(60, 180, 120, 0.4));
+  border-color: transparent;
+}
+
+.sam-markdown input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0px;
+  width: 4px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* ── Tables ────────────────────────────────────────────────── */
+.sam-markdown table {
+  width: 100%;
+  margin: 12px 0;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  display: block;
+  overflow-x: auto;
+}
+
+.sam-markdown thead,
+.sam-markdown tbody {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.sam-markdown th {
+  text-align: left;
+  padding: 8px 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid rgba(60, 180, 120, 0.2);
+  background: rgba(60, 180, 120, 0.04);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sam-markdown td {
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(60, 180, 120, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.sam-markdown tbody tr:hover {
+  background: rgba(60, 180, 120, 0.04);
+}
+
+.sam-markdown tbody tr:last-child td { border-bottom: none; }
+
+/* ── Blockquotes ───────────────────────────────────────────── */
+.sam-markdown blockquote {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-left: 3px solid rgba(60, 180, 120, 0.5);
+  background: rgba(60, 180, 120, 0.04);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.9rem;
+}
+
+.sam-markdown blockquote blockquote {
+  margin: 8px 0 0;
+  background: rgba(60, 180, 120, 0.02);
+  border-left-color: rgba(255, 255, 255, 0.4);
+}
+
+.sam-markdown blockquote p {
+  margin: 6px 0;
+}
+.sam-markdown blockquote p:first-child { margin-top: 0; }
+.sam-markdown blockquote p:last-child { margin-bottom: 0; }
+
+/* ── Horizontal rules ──────────────────────────────────────── */
+.sam-markdown hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(60, 180, 120, 0.12), transparent);
+  margin: 20px 0;
+}
+
+/* ── Images ────────────────────────────────────────────────── */
+.sam-markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid rgba(60, 180, 120, 0.12);
+  margin: 12px 0;
+}
+
+/* ── Code block wrapper ────────────────────────────────────── */
+.sam-code-block {
+  margin: 12px -18px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(60, 180, 120, 0.12);
+  box-shadow: 0 0 10px rgba(40, 160, 100, 0.06);
+  transition: box-shadow 0.3s, border-color 0.3s;
+}
+
+.sam-code-block:hover {
+  box-shadow: 0 0 16px rgba(40, 160, 100, 0.12);
+  border-color: rgba(60, 180, 120, 0.25);
+}
+
+.sam-code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(60, 180, 120, 0.12);
+}
+
+.sam-code-lang {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.sam-copy-btn {
+  background: rgba(60, 180, 120, 0.08);
+  border: 1px solid rgba(60, 180, 120, 0.12);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.sam-copy-btn:hover {
+  background: rgba(60, 180, 120, 0.15);
+  color: rgba(60, 180, 120, 1);
+  border-color: rgba(60, 180, 120, 0.25);
+}
+
+/* ── Mobile ────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .sam-code-block { margin: 10px -14px; }
+  .sam-markdown table { font-size: 0.78rem; }
+  .sam-markdown th, .sam-markdown td { padding: 6px 8px; }
+}

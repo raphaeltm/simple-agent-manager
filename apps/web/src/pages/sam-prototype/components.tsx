@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import type { FC } from 'react';
 
+import { SamMarkdown } from './sam-markdown';
+
 /* ===================================================================
    Types
    =================================================================== */
@@ -260,7 +262,7 @@ export const MessageBubble: FC<{ msg: ChatMessage }> = ({ msg }) => {
           </div>
         )}
         <div
-          className="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap"
+          className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${isSam ? '' : 'whitespace-pre-wrap'}`}
           style={
             isSam
               ? { ...glass.samBubble, borderTopLeftRadius: '4px' }
@@ -271,7 +273,11 @@ export const MessageBubble: FC<{ msg: ChatMessage }> = ({ msg }) => {
                 }
           }
         >
-          <span className={isSam ? 'text-white/80' : ''}>{msg.content}</span>
+          {isSam ? (
+            <SamMarkdown content={msg.content} />
+          ) : (
+            <span>{msg.content}</span>
+          )}
           {msg.toolCalls && msg.toolCalls.length > 0 && (
             <div className="mt-2 flex flex-wrap">
               {msg.toolCalls.map((tc, i) => (
