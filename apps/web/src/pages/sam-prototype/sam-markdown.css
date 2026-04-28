@@ -36,7 +36,7 @@
   font-size: 0.95rem;
   font-weight: 600;
   margin: 14px 0 6px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .sam-markdown h5,
@@ -44,7 +44,7 @@
   font-size: 0.85rem;
   font-weight: 600;
   margin: 12px 0 6px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.65);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -60,18 +60,23 @@
 /* ── Links ─────────────────────────────────────────────────── */
 .sam-markdown a {
   color: rgba(60, 180, 120, 1);
-  text-decoration: none;
-  border-bottom: 1px solid transparent;
-  transition: border-color 0.2s;
+  text-decoration: underline;
+  text-decoration-color: rgba(60, 180, 120, 0.4);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 0.2s;
 }
 .sam-markdown a:hover {
-  border-bottom-color: rgba(60, 180, 120, 1);
+  text-decoration-color: rgba(60, 180, 120, 1);
+}
+.sam-markdown a:focus-visible {
+  outline: 2px solid rgba(60, 180, 120, 1);
+  outline-offset: 2px;
 }
 
 /* ── Inline formatting ─────────────────────────────────────── */
 .sam-markdown strong { color: #fff; font-weight: 600; }
 .sam-markdown em { font-style: italic; }
-.sam-markdown del { color: rgba(255, 255, 255, 0.4); }
+.sam-markdown del { color: rgba(255, 255, 255, 0.6); }
 
 /* ── Lists ─────────────────────────────────────────────────── */
 .sam-markdown ul,
@@ -166,7 +171,6 @@
 .sam-markdown tbody {
   display: table;
   width: 100%;
-  table-layout: fixed;
 }
 
 .sam-markdown th {
@@ -261,16 +265,17 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .sam-copy-btn {
   background: rgba(60, 180, 120, 0.08);
   border: 1px solid rgba(60, 180, 120, 0.12);
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.65);
   font-size: 0.7rem;
-  padding: 2px 8px;
+  min-height: 44px;
+  padding: 4px 10px;
   cursor: pointer;
   transition: all 0.2s;
   font-family: inherit;
@@ -280,6 +285,11 @@
   background: rgba(60, 180, 120, 0.15);
   color: rgba(60, 180, 120, 1);
   border-color: rgba(60, 180, 120, 0.25);
+}
+
+.sam-copy-btn:focus-visible {
+  outline: 2px solid rgba(60, 180, 120, 1);
+  outline-offset: 2px;
 }
 
 /* ── Mobile ────────────────────────────────────────────────── */

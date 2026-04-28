@@ -14,26 +14,56 @@ import remarkGfm from 'remark-gfm';
 // Stable remark plugins array
 const REMARK_PLUGINS = [remarkGfm];
 
+/** execCommand('copy') fallback for non-HTTPS or permission-denied contexts. */
+function execCommandCopy(text: string): boolean {
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Copy-to-clipboard button for code blocks. */
 function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
 
+  const onSuccess = useCallback(() => {
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, []);
+
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [code]);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(code).then(onSuccess).catch(() => {
+        if (execCommandCopy(code)) onSuccess();
+      });
+    } else {
+      if (execCommandCopy(code)) onSuccess();
+    }
+  }, [code, onSuccess]);
 
   return (
-    <button type="button" className="sam-copy-btn" onClick={handleCopy}>
+    <button
+      type="button"
+      className="sam-copy-btn"
+      onClick={handleCopy}
+      aria-label={copied ? 'Copied to clipboard' : 'Copy code to clipboard'}
+    >
       {copied ? (
         <span className="inline-flex items-center gap-1">
-          <Check className="w-3 h-3" /> Copied
+          <Check className="w-3 h-3" aria-hidden="true" /> Copied
         </span>
       ) : (
         <span className="inline-flex items-center gap-1">
-          <Copy className="w-3 h-3" /> Copy
+          <Copy className="w-3 h-3" aria-hidden="true" /> Copy
         </span>
       )}
     </button>
@@ -43,7 +73,7 @@ function CopyButton({ code }: { code: string }) {
 /** Syntax-highlighted code block with green glass frame. */
 function SamCodeBlock({ code, language }: { code: string; language: string }) {
   return (
-    <div className="sam-code-block">
+    <div className="sam-code-block" role="group" aria-label={`${language || 'text'} code block`}>
       <div className="sam-code-header">
         <span className="sam-code-lang">{language || 'text'}</span>
         <CopyButton code={code} />
@@ -116,6 +146,7 @@ const SAM_MARKDOWN_COMPONENTS: Components = {
   a: ({ href, children }) => (
     <a href={href} target="_blank" rel="noopener noreferrer">
       {children}
+      <span className="sr-only"> (opens in new tab)</span>
     </a>
   ),
 };

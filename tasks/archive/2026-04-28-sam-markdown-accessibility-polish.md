@@ -32,15 +32,15 @@ The ui-ux-specialist review of the SAM chat markdown renderer (PR #836) identifi
 
 ## Implementation Checklist
 
-- [ ] Fix contrast ratios in `sam-markdown.css` (h4, h5/h6, del, copy button)
-- [ ] Add focus-visible outlines for copy button and links in CSS
-- [ ] Increase copy button touch target size
-- [ ] Add aria-label to CopyButton component (dynamic based on copied state)
-- [ ] Add aria-hidden to decorative icons in CopyButton
-- [ ] Add role="region" and aria-label to sam-code-block wrapper
-- [ ] Remove table-layout: fixed from thead/tbody
-- [ ] Add execCommand('copy') fallback in CopyButton
-- [ ] Run unit tests and verify all pass
+- [x] Fix contrast ratios in `sam-markdown.css` (h4, h5/h6, del, copy button)
+- [x] Add focus-visible outlines for copy button and links in CSS
+- [x] Increase copy button touch target size
+- [x] Add aria-label to CopyButton component (dynamic based on copied state)
+- [x] Add aria-hidden to decorative icons in CopyButton
+- [x] Add role="region" and aria-label to sam-code-block wrapper
+- [x] Remove table-layout: fixed from thead/tbody
+- [x] Add execCommand('copy') fallback in CopyButton
+- [x] Run unit tests and verify all pass
 - [ ] Verify on staging
 
 ## Acceptance Criteria

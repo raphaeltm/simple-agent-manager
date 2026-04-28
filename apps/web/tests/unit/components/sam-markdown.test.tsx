@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SamMarkdown } from '../../../src/pages/sam-prototype/sam-markdown';
 
@@ -66,12 +66,13 @@ describe('SamMarkdown', () => {
     expect(bq!.textContent).toContain('This is a quote');
   });
 
-  it('renders links with target=_blank', () => {
+  it('renders links with target=_blank and screen-reader cue', () => {
     render(<SamMarkdown content="[Click here](https://example.com)" />);
-    const link = screen.getByRole('link', { name: 'Click here' });
+    const link = screen.getByRole('link', { name: /Click here/i });
     expect(link).toHaveAttribute('href', 'https://example.com');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link.querySelector('.sr-only')).toHaveTextContent('(opens in new tab)');
   });
 
   it('renders task list checkboxes', () => {
@@ -120,5 +121,100 @@ describe('CopyButton (via SamMarkdown)', () => {
 
     const buttons = screen.getAllByRole('button', { name: /copy/i });
     expect(buttons.length).toBe(2);
+  });
+
+  it('copy button has aria-label that updates on click', async () => {
+    const md = '```js\nconst x = 1;\n```';
+    render(<SamMarkdown content={md} />);
+
+    const user = userEvent.setup();
+    const btn = screen.getByRole('button', { name: 'Copy code to clipboard' });
+    expect(btn).toBeInTheDocument();
+
+    await user.click(btn);
+
+    expect(await screen.findByRole('button', { name: 'Copied to clipboard' })).toBeInTheDocument();
+  });
+
+  it('decorative icons have aria-hidden', () => {
+    const md = '```js\nconst x = 1;\n```';
+    const { container } = render(<SamMarkdown content={md} />);
+
+    const svgs = container.querySelectorAll('.sam-copy-btn svg');
+    svgs.forEach((svg) => {
+      expect(svg.getAttribute('aria-hidden')).toBe('true');
+    });
+  });
+});
+
+describe('CopyButton execCommand fallback', () => {
+  const originalClipboard = navigator.clipboard;
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: originalClipboard,
+      writable: true,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+  });
+
+  it('uses execCommand fallback when navigator.clipboard is unavailable', async () => {
+    const execMock = vi.fn().mockReturnValue(true);
+    document.execCommand = execMock;
+
+    const md = '```js\nconst x = 1;\n```';
+    render(<SamMarkdown content={md} />);
+
+    // Override clipboard AFTER render but before click
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+
+    const btn = screen.getByRole('button', { name: /copy code to clipboard/i });
+    fireEvent.click(btn);
+
+    expect(execMock).toHaveBeenCalledWith('copy');
+    expect(await screen.findByRole('button', { name: /copied to clipboard/i })).toBeInTheDocument();
+  });
+
+  it('does not show Copied when execCommand returns false', async () => {
+    document.execCommand = vi.fn().mockReturnValue(false);
+
+    const md = '```js\nconst x = 1;\n```';
+    render(<SamMarkdown content={md} />);
+
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+
+    const btn = screen.getByRole('button', { name: /copy code to clipboard/i });
+    fireEvent.click(btn);
+
+    // Should still show "Copy", not "Copied"
+    expect(screen.getByRole('button', { name: /copy code to clipboard/i })).toBeInTheDocument();
+  });
+});
+
+describe('SamMarkdown accessibility', () => {
+  it('code block has role="group" and aria-label', () => {
+    const md = '```typescript\nconst x = 1;\n```';
+    render(<SamMarkdown content={md} />);
+
+    const region = screen.getByRole('group', { name: /typescript code block/i });
+    expect(region).toBeInTheDocument();
+  });
+
+  it('code block without language gets "text code block" label', () => {
+    // react-markdown adds class="language-undefined" for bare fences
+    const md = '```text\nplain text\n```';
+    render(<SamMarkdown content={md} />);
+
+    const region = screen.getByRole('group', { name: /text code block/i });
+    expect(region).toBeInTheDocument();
   });
 });
