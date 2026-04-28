@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SAM - Markdown Rendering Prototype</title>
+
+  <!-- marked.js for markdown parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
+  <!-- highlight.js for code syntax highlighting -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark-dimmed.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/typescript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/sql.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/css.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green: #3cb480;
+      --green-dim: rgba(60, 180, 120, 0.15);
+      --green-border: rgba(60, 180, 120, 0.12);
+      --green-glow: rgba(60, 180, 120, 0.25);
+      --bg-deep: #020805;
+      --bg-bubble-sam: rgba(12, 30, 20, 0.6);
+      --bg-bubble-user: rgba(30, 120, 80, 0.35);
+      --text-primary: rgba(255,255,255,0.85);
+      --text-secondary: rgba(255,255,255,0.55);
+      --text-dim: rgba(255,255,255,0.3);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Layout */
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      max-width: 768px;
+      margin: 0 auto;
+    }
+
+    .header {
+      flex-shrink: 0;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(5, 12, 8, 0.7);
+      backdrop-filter: blur(24px) saturate(1.4);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      border-bottom: 1px solid rgba(60, 180, 120, 0.1);
+    }
+
+    .header .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--green-dim);
+      box-shadow: 0 0 12px rgba(60, 180, 120, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .header .avatar svg { width: 16px; height: 16px; color: var(--green); }
+
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.9);
+    }
+
+    .header .badge {
+      margin-left: auto;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(60, 180, 120, 0.15);
+      border: 1px solid rgba(60, 180, 120, 0.2);
+      color: var(--green);
+      font-weight: 500;
+    }
+
+    /* Messages container */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      scroll-behavior: smooth;
+    }
+
+    /* Message wrapper */
+    .message {
+      display: flex;
+      margin-bottom: 20px;
+    }
+    .message.user { justify-content: flex-end; }
+    .message.sam { justify-content: flex-start; }
+
+    .message-inner { max-width: 88%; }
+
+    /* SAM label row */
+    .sam-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .sam-label .mini-avatar {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: rgba(60, 180, 120, 0.2);
+      box-shadow: 0 0 8px rgba(60, 180, 120, 0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .sam-label .mini-avatar svg { width: 12px; height: 12px; color: var(--green); }
+    .sam-label .name { font-size: 12px; font-weight: 600; color: var(--green); }
+    .sam-label .time { font-size: 11px; color: var(--text-dim); }
+
+    /* Bubble */
+    .bubble {
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.6;
+      overflow-wrap: break-word;
+      word-break: break-word;
+    }
+
+    .bubble.sam {
+      background: var(--bg-bubble-sam);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--green-border);
+      border-top-left-radius: 4px;
+      color: rgba(255,255,255,0.8);
+    }
+
+    .bubble.user {
+      background: var(--bg-bubble-user);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(60, 180, 120, 0.25);
+      border-top-right-radius: 4px;
+      color: rgba(255,255,255,0.9);
+    }
+
+    .user-time {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-align: right;
+      margin-top: 4px;
+    }
+
+    /* Tool call chips */
+    .tool-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 8px;
+    }
+    .tool-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      background: rgba(8, 25, 16, 0.5);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(60, 180, 120, 0.1);
+      color: rgba(255,255,255,0.5);
+    }
+    .tool-chip svg { width: 12px; height: 12px; color: var(--green); }
+
+    /* ===================================================================
+       Markdown Prose Styles (inside .bubble.sam .prose)
+       =================================================================== */
+    .prose { }
+
+    /* Paragraphs */
+    .prose p { margin: 0 0 12px 0; }
+    .prose p:last-child { margin-bottom: 0; }
+
+    /* Headings */
+    .prose h1, .prose h2, .prose h3, .prose h4 {
+      color: rgba(255,255,255,0.92);
+      font-weight: 600;
+      margin: 16px 0 8px 0;
+      line-height: 1.35;
+    }
+    .prose > :first-child { margin-top: 0; }
+    .prose h1 { font-size: 1.25em; }
+    .prose h2 { font-size: 1.15em; }
+    .prose h3 { font-size: 1.05em; }
+    .prose h4 { font-size: 1em; color: rgba(255,255,255,0.8); }
+
+    /* Bold & italic */
+    .prose strong { color: rgba(255,255,255,0.95); font-weight: 600; }
+    .prose em { color: rgba(255,255,255,0.75); font-style: italic; }
+
+    /* Links */
+    .prose a {
+      color: var(--green);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      text-decoration-color: rgba(60, 180, 120, 0.4);
+    }
+    .prose a:hover {
+      text-decoration-color: var(--green);
+    }
+
+    /* Inline code */
+    .prose code:not(pre code) {
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 0.88em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(60, 180, 120, 0.1);
+      border: 1px solid rgba(60, 180, 120, 0.15);
+      color: rgba(220, 240, 230, 0.9);
+    }
+
+    /* Code blocks */
+    .prose pre {
+      margin: 12px 0;
+      padding: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(3, 10, 6, 0.7);
+      border: 1px solid rgba(60, 180, 120, 0.1);
+    }
+
+    .prose pre .code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      color: rgba(255,255,255,0.35);
+      background: rgba(60, 180, 120, 0.05);
+      border-bottom: 1px solid rgba(60, 180, 120, 0.08);
+    }
+
+    .prose pre .copy-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 10px;
+      color: rgba(255,255,255,0.4);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .prose pre .copy-btn:hover {
+      background: rgba(60, 180, 120, 0.15);
+      color: rgba(255,255,255,0.7);
+      border-color: rgba(60, 180, 120, 0.3);
+    }
+
+    .prose pre code {
+      display: block;
+      padding: 12px;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 12.5px;
+      line-height: 1.55;
+      overflow-x: auto;
+      color: rgba(220, 235, 228, 0.85);
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Lists */
+    .prose ul, .prose ol {
+      margin: 8px 0 12px 0;
+      padding-left: 20px;
+    }
+    .prose ul { list-style-type: disc; }
+    .prose ol { list-style-type: decimal; }
+    .prose li {
+      margin: 4px 0;
+      color: rgba(255,255,255,0.75);
+    }
+    .prose li::marker {
+      color: rgba(60, 180, 120, 0.5);
+    }
+
+    /* Nested lists */
+    .prose li ul, .prose li ol {
+      margin: 4px 0 4px 0;
+    }
+    .prose li ul { list-style-type: circle; }
+
+    /* Task lists (checkboxes) */
+    .prose ul.contains-task-list {
+      list-style: none;
+      padding-left: 4px;
+    }
+    .prose .task-list-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .prose .task-list-item input[type="checkbox"] {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border: 1.5px solid rgba(60, 180, 120, 0.4);
+      border-radius: 3px;
+      background: transparent;
+      margin-top: 4px;
+      flex-shrink: 0;
+      position: relative;
+      cursor: default;
+    }
+    .prose .task-list-item input[type="checkbox"]:checked {
+      background: rgba(60, 180, 120, 0.3);
+      border-color: var(--green);
+    }
+    .prose .task-list-item input[type="checkbox"]:checked::after {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 1px;
+      width: 5px;
+      height: 9px;
+      border: solid var(--green);
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+
+    /* Blockquotes */
+    .prose blockquote {
+      margin: 12px 0;
+      padding: 8px 14px;
+      border-left: 3px solid rgba(60, 180, 120, 0.4);
+      background: rgba(60, 180, 120, 0.05);
+      border-radius: 0 8px 8px 0;
+      color: rgba(255,255,255,0.65);
+    }
+    .prose blockquote p { margin: 4px 0; }
+    .prose blockquote blockquote {
+      margin: 8px 0;
+      border-left-color: rgba(60, 180, 120, 0.25);
+    }
+
+    /* Horizontal rule */
+    .prose hr {
+      border: none;
+      height: 1px;
+      background: rgba(60, 180, 120, 0.15);
+      margin: 16px 0;
+    }
+
+    /* Tables */
+    .prose table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 13px;
+      overflow-x: auto;
+      display: block;
+    }
+    .prose thead th {
+      text-align: left;
+      padding: 8px 10px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.8);
+      border-bottom: 2px solid rgba(60, 180, 120, 0.2);
+      background: rgba(60, 180, 120, 0.06);
+      white-space: nowrap;
+    }
+    .prose tbody td {
+      padding: 6px 10px;
+      border-bottom: 1px solid rgba(60, 180, 120, 0.08);
+      color: rgba(255,255,255,0.65);
+    }
+    .prose tbody tr:hover td {
+      background: rgba(60, 180, 120, 0.04);
+    }
+
+    /* Images */
+    .prose img {
+      max-width: 100%;
+      border-radius: 8px;
+      margin: 8px 0;
+      border: 1px solid rgba(60, 180, 120, 0.1);
+    }
+
+    /* Strikethrough */
+    .prose del {
+      color: rgba(255,255,255,0.35);
+      text-decoration-color: rgba(255,255,255,0.25);
+    }
+
+    /* Definition-like: bold term patterns */
+    .prose p > strong:first-child {
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    /* Scrollbar (webkit) */
+    .messages::-webkit-scrollbar { width: 6px; }
+    .messages::-webkit-scrollbar-track { background: transparent; }
+    .messages::-webkit-scrollbar-thumb {
+      background: rgba(60, 180, 120, 0.15);
+      border-radius: 3px;
+    }
+    .messages::-webkit-scrollbar-thumb:hover {
+      background: rgba(60, 180, 120, 0.25);
+    }
+
+    .prose pre code::-webkit-scrollbar { height: 4px; }
+    .prose pre code::-webkit-scrollbar-track { background: transparent; }
+    .prose pre code::-webkit-scrollbar-thumb {
+      background: rgba(60, 180, 120, 0.2);
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="app">
+  <header class="header">
+    <div class="avatar">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+    </div>
+    <h1>SAM</h1>
+    <span class="badge">Markdown Prototype</span>
+  </header>
+
+  <div class="messages" id="messages"></div>
+</div>
+
+<script>
+// ===================================================================
+// Configure marked
+// ===================================================================
+const renderer = new marked.Renderer();
+
+// Custom code block renderer: add language header + copy button
+renderer.code = function({ text, lang }) {
+  const language = lang || '';
+  const highlighted = language && hljs.getLanguage(language)
+    ? hljs.highlight(text, { language }).value
+    : escapeHtml(text);
+  const header = language
+    ? `<div class="code-header"><span>${language}</span><button class="copy-btn" onclick="copyCode(this)">copy</button></div>`
+    : `<div class="code-header"><span>code</span><button class="copy-btn" onclick="copyCode(this)">copy</button></div>`;
+  return `<pre>${header}<code class="hljs">${highlighted}</code></pre>`;
+};
+
+// Task list support
+renderer.listitem = function({ text, task, checked }) {
+  if (task) {
+    return `<li class="task-list-item"><input type="checkbox" disabled ${checked ? 'checked' : ''} /><span>${text}</span></li>`;
+  }
+  return `<li>${text}</li>`;
+};
+
+renderer.list = function({ body, ordered, start }) {
+  const tag = ordered ? 'ol' : 'ul';
+  const startAttr = ordered && start !== 1 ? ` start="${start}"` : '';
+  const cls = body.includes('task-list-item') ? ' class="contains-task-list"' : '';
+  return `<${tag}${startAttr}${cls}>${body}</${tag}>`;
+};
+
+marked.setOptions({
+  renderer,
+  gfm: true,
+  breaks: false,
+});
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function copyCode(btn) {
+  const code = btn.closest('pre').querySelector('code').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    btn.textContent = 'copied!';
+    setTimeout(() => { btn.textContent = 'copy'; }, 1500);
+  });
+}
+
+// ===================================================================
+// Render markdown content safely inside a bubble
+// ===================================================================
+function renderMarkdown(md) {
+  return marked.parse(md);
+}
+
+// ===================================================================
+// Mock conversation data
+// ===================================================================
+const MESSAGES = [
+  {
+    role: 'user',
+    content: 'Hey SAM, can you explain how the task runner works? I want to understand the full lifecycle.',
+    time: '2:14 PM',
+  },
+  {
+    role: 'sam',
+    time: '2:14 PM',
+    tools: ['search_knowledge', 'get_project_knowledge'],
+    content: `## Task Runner Lifecycle
+
+The task runner is the core orchestration primitive in SAM. Here's how it works end-to-end:
+
+### 1. Task Submission
+
+When a user submits a task (via the chat UI or API), the system:
+
+- Creates a \`task\` row in D1 with status \`pending\`
+- Resolves agent configuration using the **precedence chain**: explicit override > agent profile > project default > platform default
+- Generates a descriptive branch name like \`sam/fix-auth-middleware-01kq98\`
+
+### 2. Node Selection & Provisioning
+
+The runner selects a node using this priority:
+
+1. **Warm nodes** -- reuse an existing idle node (fastest, ~5s)
+2. **Existing nodes** with capacity -- add a workspace to a running VM
+3. **New provisioning** -- spin up a fresh Hetzner VM (~90s)
+
+> **Note:** Different users never share the same node. This is a hard security isolation requirement.
+
+### 3. Workspace Creation
+
+Once a node is ready:
+
+\`\`\`typescript
+// TaskRunner DO handles the full lifecycle
+async function handleWorkspaceCreation(task: Task) {
+  const workspace = await createWorkspace({
+    nodeId: task.nodeId,
+    projectId: task.projectId,
+    branch: task.branch,
+    vmSize: resolveVmSize(task),
+  });
+
+  // Wait for devcontainer to build
+  await waitForWorkspaceReady(workspace.id);
+
+  // Then start the agent session
+  await startAgentSession(workspace.id, task);
+}
+\`\`\`
+
+### 4. Agent Execution
+
+The agent runs inside a devcontainer with:
+
+- Full git access (cloned repo + branch)
+- MCP tools for interacting with the platform
+- Claude Code or Codex, depending on agent type
+
+### 5. Completion & Cleanup
+
+When the agent finishes:
+
+- The workspace pushes commits and creates a PR
+- The node enters **warm pool** for 30 minutes (configurable via \`NODE_WARM_TIMEOUT_MS\`)
+- Task status updates to \`completed\` or \`failed\`
+
+---
+
+Here's a quick reference for the task states:
+
+| State | Meaning |
+|-------|---------|
+| \`pending\` | Submitted, awaiting node |
+| \`provisioning\` | Node being created |
+| \`running\` | Agent is executing |
+| \`completed\` | Work finished successfully |
+| \`failed\` | Error during execution |
+| \`cancelled\` | Manually cancelled |
+
+Would you like me to dive deeper into any of these phases?`,
+  },
+  {
+    role: 'user',
+    content: 'Yeah tell me more about warm nodes and the configuration options',
+    time: '2:16 PM',
+  },
+  {
+    role: 'sam',
+    time: '2:16 PM',
+    tools: ['search_knowledge'],
+    content: `## Warm Node Pooling
+
+After a task completes, the node doesn't get destroyed immediately. Instead it enters a **warm** state where it can be reused for the next task -- this cuts provisioning time from ~90s down to ~5s.
+
+### How It Works
+
+The lifecycle is managed by the \`NodeLifecycle\` Durable Object:
+
+\`\`\`
+active --> warm (idle timeout starts)
+              |
+              |--> reused (back to active)
+              |
+              +--> destroying (timeout expired)
+\`\`\`
+
+There's a **three-layer defense** against orphaned nodes:
+
+1. **DO alarm** -- the primary mechanism, fires at \`NODE_WARM_TIMEOUT_MS\`
+2. **Cron sweep** -- backup that catches nodes whose DO alarm didn't fire
+3. **Max lifetime** -- hard cap regardless of reuse
+
+### Configuration
+
+All of these are configurable per-project or globally:
+
+\`\`\`bash
+# Global defaults (environment variables)
+NODE_WARM_TIMEOUT_MS=1800000        # 30 minutes
+MAX_WORKSPACES_PER_NODE=4           # capacity limit
+NODE_CPU_THRESHOLD_PERCENT=80       # scheduling threshold
+NODE_MEMORY_THRESHOLD_PERCENT=85    # scheduling threshold
+\`\`\`
+
+You can also set **per-project overrides** in the project settings UI under "Scaling Parameters":
+
+- \`warmNodeTimeoutMs\` -- how long to keep nodes warm
+- \`maxConcurrentTasks\` -- max parallel tasks
+- \`maxWorkspacesPerNode\` -- density limit
+- \`taskExecutionTimeoutMs\` -- hard timeout per task
+
+> **Pro tip:** For projects with bursty workloads, set a longer warm timeout. For cost-sensitive projects, set it shorter or to \`0\` (immediate destroy).
+
+### Resolution Chain
+
+The config resolves in order:
+
+1. **Explicit task override** (if the dispatch call specifies it)
+2. **Agent profile** (if the task uses a named profile)
+3. **Project default** (set in project settings)
+4. **Platform default** (environment variable or hardcoded constant)
+
+This is implemented in \`resolveProjectScalingConfig()\`:
+
+\`\`\`typescript
+export function resolveProjectScalingConfig(
+  project: ProjectRow,
+  env: Env,
+): ScalingConfig {
+  return {
+    warmNodeTimeoutMs:
+      project.warmNodeTimeoutMs
+      ?? parseIntEnv(env.NODE_WARM_TIMEOUT_MS)
+      ?? DEFAULT_WARM_TIMEOUT_MS,
+    maxConcurrentTasks:
+      project.maxConcurrentTasks
+      ?? parseIntEnv(env.MAX_CONCURRENT_TASKS)
+      ?? DEFAULT_MAX_CONCURRENT_TASKS,
+    // ... etc
+  };
+}
+\`\`\``,
+  },
+  {
+    role: 'user',
+    content: 'Can you show me the different markdown elements we should support? I want to see everything rendered nicely.',
+    time: '2:18 PM',
+  },
+  {
+    role: 'sam',
+    time: '2:18 PM',
+    content: `## Markdown Rendering Showcase
+
+Here's a comprehensive demo of every element we should support well.
+
+### Text Formatting
+
+Regular text with **bold**, *italic*, ***bold italic***, and ~~strikethrough~~. You can also use \`inline code\` for technical terms like \`NodeLifecycle\` or \`dispatch_task\`.
+
+### Links
+
+Check out the [SAM documentation](https://simple-agent-manager.org/docs) or the [GitHub repo](https://github.com/raphaeltm/simple-agent-manager).
+
+### Blockquotes
+
+> This is a simple blockquote. Useful for highlighting important notes or warnings.
+
+> **Warning:** Nested blockquotes should also render well:
+>
+> > This is a nested quote inside the outer one.
+> > It can span multiple lines.
+>
+> Back to the outer level.
+
+### Ordered & Unordered Lists
+
+**Unordered:**
+
+- First item
+- Second item with longer text that might wrap to the next line on mobile devices
+- Third item
+  - Nested item A
+  - Nested item B
+    - Deeply nested item
+
+**Ordered:**
+
+1. Step one: clone the repository
+2. Step two: install dependencies with \`pnpm install\`
+3. Step three: run the dev server
+4. Step four: open the browser
+
+### Task Lists
+
+- [x] Implement markdown parser
+- [x] Add syntax highlighting
+- [ ] Style blockquotes
+- [ ] Test on mobile viewports
+- [ ] Integrate with production chat component
+
+### Tables
+
+| Feature | Status | Priority |
+|---------|--------|----------|
+| Markdown rendering | In progress | **High** |
+| Code highlighting | Done | High |
+| Task lists | Done | Medium |
+| Table support | Done | Medium |
+| Image embedding | Planned | Low |
+
+### Code Blocks
+
+**TypeScript:**
+
+\`\`\`typescript
+interface TaskConfig {
+  agentType: 'claude-code' | 'codex';
+  model?: string;
+  maxTurns?: number;
+  timeoutMinutes?: number;
+  permissionMode: 'full' | 'plan-only' | 'read-only';
+}
+
+async function dispatchTask(
+  projectId: string,
+  description: string,
+  config?: Partial<TaskConfig>,
+): Promise<Task> {
+  const resolved = resolveConfig(projectId, config);
+  const task = await db.insert(tasks).values({
+    projectId,
+    description,
+    ...resolved,
+    status: 'pending',
+  });
+  return task;
+}
+\`\`\`
+
+**Go:**
+
+\`\`\`go
+func (s *SessionHost) HandlePrompt(ctx context.Context, prompt string) error {
+    cmd := exec.CommandContext(ctx, s.agentBinary, "--prompt", prompt)
+    cmd.Dir = s.workDir
+    cmd.Env = append(os.Environ(),
+        "ANTHROPIC_API_KEY="+s.apiKey,
+        "MCP_SERVER_URL="+s.mcpURL,
+    )
+
+    stdout, err := cmd.StdoutPipe()
+    if err != nil {
+        return fmt.Errorf("stdout pipe: %w", err)
+    }
+
+    if err := cmd.Start(); err != nil {
+        return fmt.Errorf("start agent: %w", err)
+    }
+
+    go s.streamOutput(stdout)
+    return cmd.Wait()
+}
+\`\`\`
+
+**Bash:**
+
+\`\`\`bash
+# Deploy to staging
+gh workflow run deploy-staging.yml --ref feature/markdown-rendering
+
+# Watch the deployment
+sleep 5
+gh run list --workflow=deploy-staging.yml --branch=feature/markdown-rendering --limit=1
+\`\`\`
+
+**SQL:**
+
+\`\`\`sql
+SELECT
+  p.name AS project,
+  COUNT(t.id) AS total_tasks,
+  SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS completed,
+  ROUND(AVG(t.execution_time_ms) / 1000.0, 1) AS avg_seconds
+FROM projects p
+JOIN tasks t ON t.project_id = p.id
+WHERE t.created_at > datetime('now', '-7 days')
+GROUP BY p.id
+ORDER BY total_tasks DESC;
+\`\`\`
+
+**JSON:**
+
+\`\`\`json
+{
+  "task": {
+    "id": "01KQ988XXQQ133KZJ0JVREF3T3",
+    "status": "running",
+    "agent": "claude-code",
+    "branch": "sam/fix-auth-middleware-01kq98",
+    "progress": {
+      "phase": "implementation",
+      "checklist_completed": 4,
+      "checklist_total": 7
+    }
+  }
+}
+\`\`\`
+
+### Horizontal Rules
+
+Content above the rule.
+
+---
+
+Content below the rule.
+
+### Mixed Content
+
+Here's a practical example combining multiple elements. When debugging a task failure, SAM might respond like this:
+
+> **Task \`01KQ98...\` failed** at the \`agent_session\` step.
+
+The error log shows:
+
+\`\`\`bash
+Error: ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect
+\`\`\`
+
+**Root cause:** The MCP server wasn't started before the agent tried to connect. This happens when:
+
+1. The \`vm-agent\` starts the agent session *before* confirming the MCP endpoint is healthy
+2. The health check timeout (\`MCP_HEALTH_TIMEOUT_MS\`) is too short for cold starts
+
+**Fix:** Increase the timeout or add a retry with backoff:
+
+\`\`\`typescript
+const MCP_HEALTH_TIMEOUT_MS = env.MCP_HEALTH_TIMEOUT_MS ?? 10000;
+
+await retry(
+  () => healthCheck(mcpUrl),
+  { maxRetries: 3, baseDelayMs: 1000 },
+);
+\`\`\`
+
+- [x] Identified root cause
+- [x] Implemented retry logic
+- [ ] Deploy and verify on staging`,
+  },
+  {
+    role: 'user',
+    content: 'That looks great! What about YAML and Python code blocks?',
+    time: '2:20 PM',
+  },
+  {
+    role: 'sam',
+    time: '2:20 PM',
+    content: `Sure! Here are a few more language examples:
+
+**YAML (cloud-init template):**
+
+\`\`\`yaml
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+  - curl
+  - git
+
+write_files:
+  - path: /etc/systemd/system/vm-agent.service
+    content: |
+      [Unit]
+      Description=SAM VM Agent
+      After=network.target docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=simple
+      ExecStart=/opt/sam/vm-agent
+      Restart=always
+      RestartSec=5
+      Environment=PORT=8443
+      Environment=TLS_CERT_PATH=/etc/ssl/vm-agent/cert.pem
+      Environment=TLS_KEY_PATH=/etc/ssl/vm-agent/key.pem
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable --now vm-agent
+\`\`\`
+
+**Python (analytics script):**
+
+\`\`\`python
+import asyncio
+from datetime import datetime, timedelta
+from collections import defaultdict
+
+async def compute_retention_cohorts(
+    db: Database,
+    weeks: int = 12,
+) -> list[dict]:
+    """Compute weekly retention cohorts from signup + activity data."""
+    cohorts = []
+    now = datetime.utcnow()
+
+    for week_offset in range(weeks):
+        cohort_start = now - timedelta(weeks=week_offset + 1)
+        cohort_end = cohort_start + timedelta(weeks=1)
+
+        # Users who signed up in this week
+        signups = await db.query(
+            "SELECT id FROM users WHERE created_at BETWEEN ? AND ?",
+            [cohort_start.isoformat(), cohort_end.isoformat()],
+        )
+        signup_ids = {row["id"] for row in signups}
+
+        if not signup_ids:
+            continue
+
+        # Check activity in each subsequent week
+        retention = []
+        for future_week in range(week_offset + 1):
+            check_start = cohort_end + timedelta(weeks=future_week)
+            check_end = check_start + timedelta(weeks=1)
+
+            active = await db.query(
+                "SELECT DISTINCT user_id FROM events "
+                "WHERE user_id IN (?) AND created_at BETWEEN ? AND ?",
+                [list(signup_ids), check_start.isoformat(), check_end.isoformat()],
+            )
+            retention.append(len(active) / len(signup_ids) * 100)
+
+        cohorts.append({
+            "week": cohort_start.strftime("%Y-W%U"),
+            "signups": len(signup_ids),
+            "retention": retention,
+        })
+
+    return cohorts
+\`\`\`
+
+**CSS (design tokens):**
+
+\`\`\`css
+:root {
+  /* SAM Green palette */
+  --sam-green-50: #ecfdf5;
+  --sam-green-100: #d1fae5;
+  --sam-green-200: #a7f3d0;
+  --sam-green-500: #3cb480;
+  --sam-green-600: #059669;
+  --sam-green-900: #064e3b;
+
+  /* Glass effects */
+  --glass-bg: rgba(10, 20, 16, 0.55);
+  --glass-blur: blur(20px) saturate(1.3);
+  --glass-border: 1px solid rgba(60, 180, 120, 0.12);
+
+  /* Z-index scale */
+  --z-base: 0;
+  --z-dropdown: 10;
+  --z-modal: 20;
+  --z-toast: 30;
+  --z-player: 15;
+}
+\`\`\`
+
+Each language gets proper syntax highlighting courtesy of highlight.js. The code blocks are scrollable horizontally on mobile, and each one has a copy button in the header.`,
+  },
+];
+
+// ===================================================================
+// Render all messages
+// ===================================================================
+const container = document.getElementById('messages');
+
+function botIcon() {
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
+}
+
+function wrenchIcon() {
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+}
+
+MESSAGES.forEach(msg => {
+  const wrapper = document.createElement('div');
+  wrapper.className = `message ${msg.role === 'user' ? 'user' : 'sam'}`;
+
+  const inner = document.createElement('div');
+  inner.className = 'message-inner';
+
+  if (msg.role === 'sam') {
+    // SAM label
+    const label = document.createElement('div');
+    label.className = 'sam-label';
+    label.innerHTML = `
+      <div class="mini-avatar">${botIcon()}</div>
+      <span class="name">SAM</span>
+      <span class="time">${msg.time}</span>
+    `;
+    inner.appendChild(label);
+
+    // Bubble with markdown
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble sam';
+
+    const prose = document.createElement('div');
+    prose.className = 'prose';
+    prose.innerHTML = renderMarkdown(msg.content);
+    bubble.appendChild(prose);
+
+    // Tool call chips
+    if (msg.tools && msg.tools.length > 0) {
+      const chips = document.createElement('div');
+      chips.className = 'tool-chips';
+      msg.tools.forEach(t => {
+        chips.innerHTML += `<span class="tool-chip">${wrenchIcon()} ${t}</span>`;
+      });
+      bubble.appendChild(chips);
+    }
+
+    inner.appendChild(bubble);
+  } else {
+    // User bubble (plain text)
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble user';
+    bubble.textContent = msg.content;
+    inner.appendChild(bubble);
+
+    const time = document.createElement('div');
+    time.className = 'user-time';
+    time.textContent = msg.time;
+    inner.appendChild(time);
+  }
+
+  wrapper.appendChild(inner);
+  container.appendChild(wrapper);
+});
+
+// Scroll to bottom
+container.scrollTop = container.scrollHeight;
+</script>
+</body>
+</html>
