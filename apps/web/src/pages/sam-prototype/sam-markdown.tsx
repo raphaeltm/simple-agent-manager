@@ -19,21 +19,39 @@ function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(code).then(() => {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(code).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      });
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = code;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }
   }, [code]);
 
   return (
-    <button type="button" className="sam-copy-btn" onClick={handleCopy}>
+    <button
+      type="button"
+      className="sam-copy-btn"
+      onClick={handleCopy}
+      aria-label={copied ? 'Copied to clipboard' : 'Copy code to clipboard'}
+    >
       {copied ? (
         <span className="inline-flex items-center gap-1">
-          <Check className="w-3 h-3" /> Copied
+          <Check className="w-3 h-3" aria-hidden="true" /> Copied
         </span>
       ) : (
         <span className="inline-flex items-center gap-1">
-          <Copy className="w-3 h-3" /> Copy
+          <Copy className="w-3 h-3" aria-hidden="true" /> Copy
         </span>
       )}
     </button>
@@ -43,7 +61,7 @@ function CopyButton({ code }: { code: string }) {
 /** Syntax-highlighted code block with green glass frame. */
 function SamCodeBlock({ code, language }: { code: string; language: string }) {
   return (
-    <div className="sam-code-block">
+    <div className="sam-code-block" role="region" aria-label={`${language || 'text'} code block`}>
       <div className="sam-code-header">
         <span className="sam-code-lang">{language || 'text'}</span>
         <CopyButton code={code} />

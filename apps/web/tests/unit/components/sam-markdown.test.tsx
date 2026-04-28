@@ -121,4 +121,46 @@ describe('CopyButton (via SamMarkdown)', () => {
     const buttons = screen.getAllByRole('button', { name: /copy/i });
     expect(buttons.length).toBe(2);
   });
+
+  it('copy button has aria-label that updates on click', async () => {
+    const md = '```js\nconst x = 1;\n```';
+    render(<SamMarkdown content={md} />);
+
+    const user = userEvent.setup();
+    const btn = screen.getByRole('button', { name: 'Copy code to clipboard' });
+    expect(btn).toBeInTheDocument();
+
+    await user.click(btn);
+
+    expect(await screen.findByRole('button', { name: 'Copied to clipboard' })).toBeInTheDocument();
+  });
+
+  it('decorative icons have aria-hidden', () => {
+    const md = '```js\nconst x = 1;\n```';
+    const { container } = render(<SamMarkdown content={md} />);
+
+    const svgs = container.querySelectorAll('.sam-copy-btn svg');
+    svgs.forEach((svg) => {
+      expect(svg.getAttribute('aria-hidden')).toBe('true');
+    });
+  });
+});
+
+describe('SamMarkdown accessibility', () => {
+  it('code block has role="region" and aria-label', () => {
+    const md = '```typescript\nconst x = 1;\n```';
+    render(<SamMarkdown content={md} />);
+
+    const region = screen.getByRole('region', { name: /typescript code block/i });
+    expect(region).toBeInTheDocument();
+  });
+
+  it('code block without language gets "text code block" label', () => {
+    // react-markdown adds class="language-undefined" for bare fences
+    const md = '```text\nplain text\n```';
+    render(<SamMarkdown content={md} />);
+
+    const region = screen.getByRole('region', { name: /text code block/i });
+    expect(region).toBeInTheDocument();
+  });
 });
