@@ -19,11 +19,11 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env as AppEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
-import { runAgentLoop } from '../sam-session/agent-loop';
 import { buildFtsQuery, extractSnippet } from '../sam-session';
+import { runAgentLoop } from '../sam-session/agent-loop';
 import type { ConversationRow, MessageRow, SamSseEvent } from '../sam-session/types';
 import { PROJECT_AGENT_SYSTEM_PROMPT } from './system-prompt';
-import { PROJECT_AGENT_TOOLS, executeProjectTool } from './tools';
+import { executeProjectTool,PROJECT_AGENT_TOOLS } from './tools';
 
 const log = createModuleLogger('project_agent');
 

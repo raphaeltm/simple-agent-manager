@@ -11,7 +11,6 @@ import {
 import type { FC } from 'react';
 
 import type { ChatMessage } from '../../hooks/useAgentChat';
-
 import { SamMarkdown } from './sam-markdown';
 
 /* ===================================================================

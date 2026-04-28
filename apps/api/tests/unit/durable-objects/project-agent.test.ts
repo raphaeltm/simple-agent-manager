@@ -9,7 +9,6 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import type { CollectedToolCall, ToolContext } from '../../../src/durable-objects/sam-session/types';
 
 // Mock cloudflare:workers
 vi.mock('cloudflare:workers', () => ({
