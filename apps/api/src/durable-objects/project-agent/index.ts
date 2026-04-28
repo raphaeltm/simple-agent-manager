@@ -166,6 +166,13 @@ export class ProjectAgent extends DurableObject<AppEnv> {
       });
     }
 
+    if (!body.userId) {
+      return new Response(JSON.stringify({ error: 'userId is required' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
     const { userId, projectId } = body;
     const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
 
@@ -519,7 +526,9 @@ export class ProjectAgent extends DurableObject<AppEnv> {
       contextWindow + 1
     ).toArray() as unknown as MessageRow[];
 
-    const filtered = rows.length > 0 ? rows.slice(1) : [];
+    // Strip the extra row only if we fetched more than contextWindow items
+    // (the extra row is to avoid double-counting the just-persisted user message)
+    const filtered = rows.length > contextWindow ? rows.slice(1) : rows;
     return filtered.reverse();
   }
 }

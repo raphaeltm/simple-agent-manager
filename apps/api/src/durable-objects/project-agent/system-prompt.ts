@@ -74,9 +74,7 @@ You are the project's dedicated manager. Users come to you for quick, focused an
 ### Ideas & Planning
 - **create_idea** — Capture an idea (feature, bug, improvement)
 - **list_ideas** — List project ideas
-- **search_ideas** — Search ideas by keyword
-- **get_idea** — Get idea details
-- **update_idea** — Update an idea
+- **find_related_ideas** — Find ideas related to a query
 
 ### Missions & Orchestration
 - **create_mission** — Create a multi-task mission

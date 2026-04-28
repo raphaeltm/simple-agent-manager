@@ -46,6 +46,10 @@ export default defineConfig({
             className: 'SamSession',
             useSQLite: true,
           },
+          PROJECT_AGENT: {
+            className: 'ProjectAgent',
+            useSQLite: true,
+          },
         },
         bindings: {
           BASE_DOMAIN: 'test.example.com',
