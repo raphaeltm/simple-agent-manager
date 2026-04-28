@@ -592,4 +592,13 @@ export interface Env {
   SAM_IDEA_SEARCH_MAX_LIMIT?: string;              // Max results from find_related_ideas (default: 50)
   SAM_CI_RUNS_LIMIT?: string;                      // Max GitHub Actions runs to fetch (default: 5)
   SAM_GITHUB_TIMEOUT_MS?: string;                  // GitHub API timeout in ms (default: 10000)
+  SAM_SESSION_MESSAGES_LIMIT?: string;             // Default messages per get_session_messages (default: 50)
+  SAM_SESSION_MESSAGES_MAX_LIMIT?: string;         // Max messages per get_session_messages (default: 200)
+  SAM_SESSION_LIST_LIMIT?: string;                 // Default sessions per list_sessions (default: 20)
+  SAM_SESSION_LIST_MAX_LIMIT?: string;             // Max sessions per list_sessions (default: 100)
+  SAM_TASK_MESSAGE_SEARCH_LIMIT?: string;          // Default results per search_task_messages (default: 10)
+  SAM_TASK_MESSAGE_SEARCH_MAX_LIMIT?: string;      // Max results per search_task_messages (default: 50)
+  SAM_CODE_SEARCH_LIMIT?: string;                  // Default results per search_code (default: 10)
+  SAM_CODE_SEARCH_MAX_LIMIT?: string;              // Max results per search_code (default: 30)
+  SAM_FILE_CONTENT_MAX_BYTES?: string;             // Max file size for get_file_content (default: 1048576)
 }

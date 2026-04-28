@@ -4,19 +4,13 @@
  * Resolves the user's GitHub token from encrypted credentials, then queries
  * the GitHub Actions API for recent workflow runs on the default branch.
  */
-import { and, eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-
-import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
-import { getCredentialEncryptionKey } from '../../../lib/secrets';
-import { decrypt } from '../../../services/encryption';
 import type { AnthropicToolDef, ToolContext } from '../types';
+import { getUserGitHubToken, parseRepository, resolveProjectWithOwnership } from './helpers';
 
 const DEFAULT_CI_RUNS_LIMIT = 5;
 const DEFAULT_GITHUB_TIMEOUT_MS = 10_000;
-const REPO_FORMAT_RE = /^[\w.-]+\/[\w.-]+$/;
 
 export const getCiStatusDef: AnthropicToolDef = {
   name: 'get_ci_status',
@@ -40,28 +34,13 @@ export async function getCiStatus(
   ctx: ToolContext,
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
-  const db = drizzle(env.DATABASE, { schema });
 
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
   }
 
   // Verify ownership and get repository info
-  const [project] = await db
-    .select({
-      id: schema.projects.id,
-      repository: schema.projects.repository,
-      defaultBranch: schema.projects.defaultBranch,
-    })
-    .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
-    .limit(1);
-
+  const project = await resolveProjectWithOwnership(input.projectId.trim(), ctx);
   if (!project) {
     return { error: 'Project not found or not owned by you.' };
   }
@@ -70,12 +49,13 @@ export async function getCiStatus(
     return { status: 'no_repository', note: 'No repository configured for this project.' };
   }
 
-  if (!REPO_FORMAT_RE.test(project.repository)) {
+  const parsed = parseRepository(project.repository);
+  if (!parsed) {
     return { error: 'Invalid repository format.' };
   }
 
   // Resolve GitHub token from user credentials
-  const ghToken = await getUserGitHubToken(db, ctx.userId, env);
+  const ghToken = await getUserGitHubToken(ctx.userId, env);
   if (!ghToken) {
     return {
       status: 'no_credentials',
@@ -153,40 +133,5 @@ export async function getCiStatus(
       status: 'error',
       note: 'Failed to fetch CI status. The GitHub API may be unreachable or the token may be invalid.',
     };
-  }
-}
-
-/**
- * Get the user's GitHub token from encrypted credentials.
- * Returns null if not available.
- */
-async function getUserGitHubToken(
-  db: ReturnType<typeof drizzle>,
-  userId: string,
-  env: Env,
-): Promise<string | null> {
-  try {
-    const [cred] = await db
-      .select({
-        encryptedToken: schema.credentials.encryptedToken,
-        iv: schema.credentials.iv,
-      })
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          eq(schema.credentials.provider, 'github'),
-          eq(schema.credentials.isActive, true),
-        ),
-      )
-      .limit(1);
-
-    if (!cred) return null;
-
-    const encryptionKey = getCredentialEncryptionKey(env);
-    return await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
-  } catch (e) {
-    log.warn('sam.get_ci_status.github_token_failed', { userId, error: String(e) });
-    return null;
   }
 }

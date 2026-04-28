@@ -7,19 +7,24 @@ import { createMission, createMissionDef } from './create-mission';
 import { dispatchTask, dispatchTaskDef } from './dispatch-task';
 import { findRelatedIdeas, findRelatedIdeasDef } from './find-related-ideas';
 import { getCiStatus, getCiStatusDef } from './get-ci-status';
+import { getFileContent, getFileContentDef } from './get-file-content';
 import { getMission, getMissionDef } from './get-mission';
 import { getOrchestratorStatus, getOrchestratorStatusDef } from './get-orchestrator-status';
 import { getProjectKnowledge, getProjectKnowledgeDef } from './get-project-knowledge';
 import { getProjectStatus, getProjectStatusDef } from './get-project-status';
+import { getSessionMessages, getSessionMessagesDef } from './get-session-messages';
 import { getTaskDetails, getTaskDetailsDef } from './get-task-details';
 import { listIdeas, listIdeasDef } from './list-ideas';
 import { listPolicies, listPoliciesDef } from './list-policies';
 import { listProjects, listProjectsDef } from './list-projects';
+import { listSessions, listSessionsDef } from './list-sessions';
 import { pauseMission, pauseMissionDef } from './pause-mission';
 import { resumeMission, resumeMissionDef } from './resume-mission';
 import { retrySubtask, retrySubtaskDef } from './retry-subtask';
+import { searchCode, searchCodeDef } from './search-code';
 import { searchConversationHistory, searchConversationHistoryDef } from './search-conversation-history';
 import { searchKnowledge, searchKnowledgeDef } from './search-knowledge';
+import { searchTaskMessages, searchTaskMessagesDef } from './search-task-messages';
 import { searchTasks, searchTasksDef } from './search-tasks';
 import { sendMessageToSubtask, sendMessageToSubtaskDef } from './send-message-to-subtask';
 import { stopSubtask, stopSubtaskDef } from './stop-subtask';
@@ -50,6 +55,13 @@ export const SAM_TOOLS: AnthropicToolDef[] = [
   addKnowledgeDef,
   listPoliciesDef,
   addPolicyDef,
+  // Observability: task message search
+  listSessionsDef,
+  getSessionMessagesDef,
+  searchTaskMessagesDef,
+  // Codebase contextual search
+  searchCodeDef,
+  getFileContentDef,
 ];
 
 type ToolHandler = (input: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
@@ -79,6 +91,13 @@ const toolHandlers: Record<string, ToolHandler> = {
   add_knowledge: addKnowledge as ToolHandler,
   list_policies: listPolicies as ToolHandler,
   add_policy: addPolicy as ToolHandler,
+  // Observability: task message search
+  list_sessions: listSessions as ToolHandler,
+  get_session_messages: getSessionMessages as ToolHandler,
+  search_task_messages: searchTaskMessages as ToolHandler,
+  // Codebase contextual search
+  search_code: searchCode as ToolHandler,
+  get_file_content: getFileContent as ToolHandler,
 };
 
 /** Execute a tool call and return the result (or error message on failure). */
