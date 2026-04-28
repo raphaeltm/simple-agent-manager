@@ -13,6 +13,7 @@ import { AdminAIProxy } from './pages/AdminAIProxy';
 import { AdminAnalytics } from './pages/AdminAnalytics';
 import { AdminComputeQuotas } from './pages/AdminComputeQuotas';
 import { AdminComputeUsage } from './pages/AdminComputeUsage';
+import { AdminCosts } from './pages/AdminCosts';
 import { AdminErrors } from './pages/AdminErrors';
 import { AdminLogs } from './pages/AdminLogs';
 import { AdminOverview } from './pages/AdminOverview';
@@ -134,6 +135,7 @@ export default function App() {
               <Route path="users" element={<AdminUsers />} />
               <Route path="credentials" element={<AdminPlatformCredentials />} />
               <Route path="ai-proxy" element={<AdminAIProxy />} />
+              <Route path="costs" element={<AdminCosts />} />
               <Route path="usage" element={<AdminComputeUsage />} />
               <Route path="quotas" element={<AdminComputeQuotas />} />
               <Route path="errors" element={<AdminErrors />} />
