@@ -81,6 +81,7 @@ function createMockEnv(prepareResponses: Map<string, { results: unknown[]; chang
       prepare: vi.fn().mockReturnValue(mockPreparedStatement()),
     } as unknown as D1Database,
     TASK_RUN_MAX_EXECUTION_MS: '14400000', // 4 hours
+    TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8 hours
     TASK_STUCK_QUEUED_TIMEOUT_MS: '600000', // 10 min
     TASK_STUCK_DELEGATED_TIMEOUT_MS: '1860000', // 31 min
     NODE_HEARTBEAT_STALE_SECONDS: '180', // 3 min
@@ -191,6 +192,99 @@ describe('recoverStuckTasks', () => {
         'failed',
         expect.stringContaining('max execution time'),
       );
+    });
+
+    it('fails in_progress tasks past hard timeout even with recent heartbeat', async () => {
+      const now = Date.now();
+      // Task started 9 hours ago (past 8h hard timeout)
+      const startedAt = new Date(now - 9 * 60 * 60 * 1000).toISOString();
+      const updatedAt = new Date(now - 9 * 60 * 60 * 1000).toISOString();
+      // Heartbeat 30 seconds ago (recent — would normally cause skip)
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-hard',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: updatedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      // Workspace lookup for node_id
+      responses.set('node_id FROM workspaces', {
+        results: [{ node_id: 'node-1' }],
+      });
+      // Heartbeat check — recent (but should be ignored due to hard timeout)
+      responses.set('last_heartbeat_at FROM nodes', {
+        results: [{ last_heartbeat_at: recentHeartbeat }],
+      });
+      // Workspace status for diagnostics
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      // Node status for diagnostics
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
+      });
+      // Task update (mark as failed)
+      responses.set('UPDATE tasks SET status = \'failed\'', {
+        results: [],
+        changes: 1,
+      });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      // Hard timeout must override the heartbeat skip
+      expect(result.failedInProgress).toBe(1);
+      expect(result.heartbeatSkipped).toBe(0);
+    });
+
+    it('still allows heartbeat skip between soft and hard timeout', async () => {
+      const now = Date.now();
+      // Task started 5 hours ago (past 4h soft timeout, but before 8h hard timeout)
+      const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      const updatedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      // Heartbeat 30 seconds ago (recent)
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-grace',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: updatedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('node_id FROM workspaces', {
+        results: [{ node_id: 'node-1' }],
+      });
+      responses.set('last_heartbeat_at FROM nodes', {
+        results: [{ last_heartbeat_at: recentHeartbeat }],
+      });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      // Between soft and hard timeout with recent heartbeat — should still skip
+      expect(result.heartbeatSkipped).toBe(1);
+      expect(result.failedInProgress).toBe(0);
     });
 
     it('fails in_progress tasks with no node (no heartbeat to check)', async () => {

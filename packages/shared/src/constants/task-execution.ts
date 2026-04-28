@@ -22,6 +22,15 @@ export const DEFAULT_TASK_RUN_CLEANUP_DELAY_MS = 5000;
 /** Default max execution time (ms) for a task before it's considered stuck. Override via TASK_RUN_MAX_EXECUTION_MS env var. */
 export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 4 * 60 * 60 * 1000; // 4 hours
 
+/**
+ * Absolute hard timeout (ms) for task execution — enforced regardless of node heartbeat status.
+ * The soft timeout (TASK_RUN_MAX_EXECUTION_MS) can be bypassed when the node has a recent heartbeat,
+ * which allows legitimately long-running tasks to continue. This hard timeout is the safety net:
+ * no task may run longer than this, even if the VM is perfectly healthy.
+ * Override via TASK_RUN_HARD_TIMEOUT_MS env var.
+ */
+export const DEFAULT_TASK_RUN_HARD_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours
+
 /** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var.
  * Must be > TASK_RUNNER_AGENT_READY_TIMEOUT_MS (15 min) to avoid the stuck-task cron killing tasks
  * that are legitimately waiting for cloud-init to finish. Cloud-init takes 8-12 min on Hetzner.

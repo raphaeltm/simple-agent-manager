@@ -20,6 +20,7 @@
  */
 import {
   DEFAULT_NODE_HEARTBEAT_STALE_SECONDS,
+  DEFAULT_TASK_RUN_HARD_TIMEOUT_MS,
   DEFAULT_TASK_RUN_MAX_EXECUTION_MS,
   DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS,
   DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS,
@@ -193,6 +194,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   const queuedTimeoutMs = parseMs(env.TASK_STUCK_QUEUED_TIMEOUT_MS, DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS);
   const delegatedTimeoutMs = parseMs(env.TASK_STUCK_DELEGATED_TIMEOUT_MS, DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS);
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
+  const hardTimeoutMs = parseMs(env.TASK_RUN_HARD_TIMEOUT_MS, DEFAULT_TASK_RUN_HARD_TIMEOUT_MS);
 
   // Find stuck tasks via raw SQL — include workspace_id and auto_provisioned_node_id
   // for diagnostic context capture.
@@ -243,8 +245,18 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
         const executionMs = now.getTime() - startedAt;
         if (executionMs > maxExecutionMs) {
-          // Before failing, check if the VM agent is still alive via heartbeat.
-          // A recent heartbeat means the agent is actively working — don't kill it.
+          // Hard timeout: absolute ceiling that cannot be bypassed by heartbeat.
+          // A healthy node heartbeat only means the VM is alive — not that the task
+          // is making progress. Without this, a stalled task on a healthy node runs
+          // indefinitely (the bug that caused 8+ hour stuck tasks).
+          if (executionMs > hardTimeoutMs) {
+            isStuck = true;
+            reason = `Task exceeded hard timeout of ${Math.round(hardTimeoutMs / 60000)} minutes (running ${Math.round(executionMs / 60000)} min). Hard timeout is enforced regardless of node heartbeat status.${stepInfo}`;
+            break;
+          }
+
+          // Soft timeout: check if the VM agent is still alive via heartbeat.
+          // A recent heartbeat grants a grace period up to the hard timeout.
           const nodeIdToCheck = await getTaskNodeId(env, task);
           if (nodeIdToCheck) {
             const staleSeconds = parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
@@ -255,18 +267,20 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                 nodeId: nodeIdToCheck,
                 executionMs,
                 maxExecutionMs,
+                hardTimeoutMs,
               });
 
               await persistError(env.OBSERVABILITY_DATABASE, {
                 source: 'api',
                 level: 'info',
-                message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min)`,
+                message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min, hard timeout at ${Math.round(hardTimeoutMs / 60000)} min)`,
                 context: {
                   recoveryType: 'stuck_task_heartbeat_skip',
                   taskId: task.id,
                   nodeId: nodeIdToCheck,
                   executionMs,
                   maxExecutionMs,
+                  hardTimeoutMs,
                 },
                 userId: task.user_id,
                 nodeId: nodeIdToCheck,
