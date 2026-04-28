@@ -59,9 +59,13 @@ export function ProjectAgentChat() {
       </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div
+        className="flex-1 overflow-y-auto px-4 py-4"
+        aria-live="polite"
+        aria-label="Conversation"
+      >
         {chat.isLoadingHistory ? (
-          <div className="flex items-center justify-center py-8">
+          <div className="flex items-center justify-center py-8" role="status" aria-label="Loading conversation history">
             <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'rgba(60, 180, 120, 0.5)' }} />
           </div>
         ) : chat.messages.length === 0 ? (
@@ -105,11 +109,12 @@ export function ProjectAgentChat() {
               }
             }}
             placeholder={`Ask ${agentLabel} anything...`}
-            className="flex-1 px-4 py-3 text-sm rounded-xl text-white placeholder:text-white/25 focus:outline-none focus:ring-1 resize-none overflow-hidden leading-snug"
+            aria-label={`Message ${agentLabel}`}
+            aria-multiline="true"
+            className="flex-1 px-4 py-3 text-sm rounded-xl text-white placeholder:text-white/25 outline-none resize-none overflow-hidden leading-snug focus-visible:ring-1 focus-visible:ring-[rgba(60,180,120,0.5)]"
             style={
               {
                 ...glass.input,
-                focusRingColor: 'rgba(60, 180, 120, 0.3)',
                 transition: 'height 0.15s ease-out',
                 minHeight: '44px',
               } as React.CSSProperties
@@ -119,6 +124,7 @@ export function ProjectAgentChat() {
             type="button"
             onClick={() => void chat.handleSend()}
             disabled={!chat.inputValue.trim() || chat.isSending}
+            aria-label={chat.isSending ? 'Sending message…' : 'Send message'}
             className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
             style={{
               background:
@@ -130,9 +136,9 @@ export function ProjectAgentChat() {
             }}
           >
             {chat.isSending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
             ) : (
-              <Send className="w-4 h-4" />
+              <Send className="w-4 h-4" aria-hidden="true" />
             )}
           </button>
         </div>

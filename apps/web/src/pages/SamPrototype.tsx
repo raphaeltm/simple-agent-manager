@@ -34,6 +34,9 @@ export function SamPrototype() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const chat = useAgentChat({ apiBase: '/api/sam' });
+  // Destructure setInputValue so the stable React state setter reference is captured,
+  // not the entire chat object (which is a new object reference on every render).
+  const { setInputValue: setChatInputValue } = chat;
 
   useWebGLBackground(canvasRef, amplitudeRef);
 
@@ -43,9 +46,9 @@ export function SamPrototype() {
     amplitudeRef,
     onTranscription: useCallback(
       (text: string) => {
-        chat.setInputValue((prev: string) => (prev ? `${prev} ${text}` : text));
+        setChatInputValue((prev: string) => (prev ? `${prev} ${text}` : text));
       },
-      [chat],
+      [setChatInputValue],
     ),
   });
 
@@ -69,8 +72,8 @@ export function SamPrototype() {
   const handleAskAboutProject = useCallback((name: string) => {
     setSelectedProject(null);
     setView('chat');
-    chat.setInputValue(`Tell me more about ${name}`);
-  }, [chat]);
+    setChatInputValue(`Tell me more about ${name}`);
+  }, [setChatInputValue]);
 
   // Mic button style based on voice state
   const micButtonStyle: React.CSSProperties = (() => {
@@ -141,9 +144,9 @@ export function SamPrototype() {
               view === 'chat' ? 'translate-x-0' : '-translate-x-full'
             }`}
           >
-            <div className="flex-1 overflow-y-auto px-4 py-4">
+            <div className="flex-1 overflow-y-auto px-4 py-4" aria-live="polite" aria-label="Conversation">
               {chat.isLoadingHistory ? (
-                <div className="flex items-center justify-center py-8">
+                <div className="flex items-center justify-center py-8" role="status" aria-label="Loading conversation history">
                   <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'rgba(60, 180, 120, 0.5)' }} />
                 </div>
               ) : (
@@ -193,11 +196,12 @@ export function SamPrototype() {
                       ? 'Speak now...'
                       : 'Ask SAM anything...'
                   }
-                  className="flex-1 px-4 py-3 text-sm rounded-xl text-white placeholder:text-white/25 focus:outline-none focus:ring-1 resize-none overflow-hidden leading-snug"
+                  aria-label="Message SAM"
+                  aria-multiline="true"
+                  className="flex-1 px-4 py-3 text-sm rounded-xl text-white placeholder:text-white/25 outline-none resize-none overflow-hidden leading-snug focus-visible:ring-1 focus-visible:ring-[rgba(60,180,120,0.5)]"
                   style={
                     {
                       ...glass.input,
-                      focusRingColor: 'rgba(60, 180, 120, 0.3)',
                       transition: 'height 0.15s ease-out',
                       minHeight: '44px',
                     } as React.CSSProperties
@@ -236,6 +240,7 @@ export function SamPrototype() {
                   type="button"
                   onClick={() => void chat.handleSend()}
                   disabled={!chat.inputValue.trim() || chat.isSending}
+                  aria-label={chat.isSending ? 'Sending message…' : 'Send message'}
                   className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                   style={{
                     background:
@@ -247,9 +252,9 @@ export function SamPrototype() {
                   }}
                 >
                   {chat.isSending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
                   ) : (
-                    <Send className="w-4 h-4" />
+                    <Send className="w-4 h-4" aria-hidden="true" />
                   )}
                 </button>
               </div>
@@ -285,22 +290,28 @@ export function SamPrototype() {
         {/* Floating bottom tab bar */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30">
           <div
+            role="tablist"
+            aria-label="View"
             className="flex rounded-2xl overflow-hidden"
             style={{ ...glass.tabBar, ...glow.green }}
           >
             <button
+              role="tab"
               type="button"
               onClick={() => setView('chat')}
+              aria-selected={view === 'chat'}
+              aria-controls="sam-chat-panel"
               className="flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all"
               style={{
                 color: view === 'chat' ? '#3cb480' : 'rgba(255,255,255,0.4)',
                 background: view === 'chat' ? 'rgba(60, 180, 120, 0.12)' : 'transparent',
               }}
             >
-              <MessageSquare className="w-4.5 h-4.5" />
+              <MessageSquare className="w-4.5 h-4.5" aria-hidden="true" />
               Chat
             </button>
             <div
+              aria-hidden="true"
               style={{
                 width: '1px',
                 background: 'rgba(60, 180, 120, 0.15)',
@@ -308,8 +319,11 @@ export function SamPrototype() {
               }}
             />
             <button
+              role="tab"
               type="button"
               onClick={() => setView('overview')}
+              aria-selected={view === 'overview'}
+              aria-controls="sam-overview-panel"
               className="flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all"
               style={{
                 color: view === 'overview' ? '#3cb480' : 'rgba(255,255,255,0.4)',
@@ -317,7 +331,7 @@ export function SamPrototype() {
                   view === 'overview' ? 'rgba(60, 180, 120, 0.12)' : 'transparent',
               }}
             >
-              <LayoutDashboard className="w-4.5 h-4.5" />
+              <LayoutDashboard className="w-4.5 h-4.5" aria-hidden="true" />
               Overview
             </button>
           </div>
