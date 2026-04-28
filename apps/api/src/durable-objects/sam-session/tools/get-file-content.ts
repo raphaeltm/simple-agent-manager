@@ -83,11 +83,16 @@ export async function getFileContent(
   const ref = input.ref?.trim() || project.defaultBranch || 'main';
   const filePath = input.path.trim().replace(/^\/+/, ''); // strip leading slashes
 
+  if (filePath.includes('..')) {
+    return { error: 'Path traversal sequences are not allowed.' };
+  }
+
   const timeoutMs = Number(env.SAM_GITHUB_TIMEOUT_MS) || DEFAULT_GITHUB_TIMEOUT_MS;
   const maxBytes = Number(env.SAM_FILE_CONTENT_MAX_BYTES) || DEFAULT_MAX_BYTES;
 
   try {
-    const apiUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/contents/${encodeURIComponent(filePath)}?ref=${encodeURIComponent(ref)}`;
+    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+    const apiUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`;
 
     const res = await fetch(apiUrl, {
       headers: {

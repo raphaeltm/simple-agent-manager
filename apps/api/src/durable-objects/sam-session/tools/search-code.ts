@@ -100,7 +100,7 @@ export async function searchCode(
     searchQuery += ` path:${input.path.trim()}`;
   }
   if (input.extension?.trim()) {
-    searchQuery += ` language:${input.extension.trim()}`;
+    searchQuery += ` extension:${input.extension.trim()}`;
   }
 
   // Resolve limits
@@ -116,7 +116,7 @@ export async function searchCode(
     const res = await fetch(apiUrl, {
       headers: {
         Authorization: `Bearer ${ghToken}`,
-        Accept: 'application/vnd.github+json',
+        Accept: 'application/vnd.github.text-match+json',
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'SAM/1.0',
       },

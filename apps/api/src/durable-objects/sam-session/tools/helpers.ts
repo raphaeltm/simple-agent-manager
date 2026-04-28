@@ -3,7 +3,7 @@
  *
  * Extracts common patterns: project ownership verification, GitHub token resolution.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
@@ -86,6 +86,7 @@ export async function getUserGitHubToken(
           eq(schema.credentials.userId, userId),
           eq(schema.credentials.provider, 'github'),
           eq(schema.credentials.isActive, true),
+          isNull(schema.credentials.projectId),
         ),
       )
       .limit(1);
