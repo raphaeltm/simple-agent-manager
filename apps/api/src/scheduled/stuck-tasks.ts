@@ -196,6 +196,14 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
   const hardTimeoutMs = parseMs(env.TASK_RUN_HARD_TIMEOUT_MS, DEFAULT_TASK_RUN_HARD_TIMEOUT_MS);
 
+  if (hardTimeoutMs <= maxExecutionMs) {
+    log.warn('stuck_task.misconfigured_hard_timeout', {
+      hardTimeoutMs,
+      maxExecutionMs,
+      message: 'TASK_RUN_HARD_TIMEOUT_MS is <= TASK_RUN_MAX_EXECUTION_MS — heartbeat grace window is effectively zero',
+    });
+  }
+
   // Find stuck tasks via raw SQL — include workspace_id and auto_provisioned_node_id
   // for diagnostic context capture.
   const stuckTasks = await env.DATABASE.prepare(
