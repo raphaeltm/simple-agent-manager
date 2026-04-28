@@ -53,7 +53,10 @@ function mockPreparedStatement(results: unknown[] = [], changes = 1) {
   };
 }
 
-function createMockEnv(prepareResponses: Map<string, { results: unknown[]; changes?: number }> = new Map()): Env {
+function createMockEnv(
+  prepareResponses: Map<string, { results: unknown[]; changes?: number }> = new Map(),
+  envOverrides: Partial<Record<string, string>> = {},
+): Env {
   const mockDb = {
     prepare: vi.fn((sql: string) => {
       for (const [substring, config] of prepareResponses.entries()) {
@@ -81,10 +84,12 @@ function createMockEnv(prepareResponses: Map<string, { results: unknown[]; chang
       prepare: vi.fn().mockReturnValue(mockPreparedStatement()),
     } as unknown as D1Database,
     TASK_RUN_MAX_EXECUTION_MS: '14400000', // 4 hours
+    TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8 hours
     TASK_STUCK_QUEUED_TIMEOUT_MS: '600000', // 10 min
     TASK_STUCK_DELEGATED_TIMEOUT_MS: '1860000', // 31 min
     NODE_HEARTBEAT_STALE_SECONDS: '180', // 3 min
     TASK_RUNNER: mockTaskRunnerDO,
+    ...envOverrides,
   } as unknown as Env;
 }
 
@@ -285,6 +290,13 @@ describe('recoverStuckTasks', () => {
       // Hard timeout should override the heartbeat grace
       expect(result.failedInProgress).toBe(1);
       expect(result.heartbeatSkipped).toBe(0);
+
+      // Verify heartbeat was NOT consulted — the hard timeout short-circuits
+      const db = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> };
+      const heartbeatCall = db.prepare.mock.calls.find(
+        ([sql]: [string]) => sql.includes('last_heartbeat_at'),
+      );
+      expect(heartbeatCall).toBeUndefined();
     });
 
     it('preserves heartbeat grace between soft and hard timeout', async () => {
@@ -417,10 +429,11 @@ describe('recoverStuckTasks', () => {
         changes: 1,
       });
 
-      const env = createMockEnv(responses);
       // Override hard timeout to 2 hours and soft timeout to 1 hour
-      (env as Record<string, unknown>).TASK_RUN_HARD_TIMEOUT_MS = '7200000';
-      (env as Record<string, unknown>).TASK_RUN_MAX_EXECUTION_MS = '3600000';
+      const env = createMockEnv(responses, {
+        TASK_RUN_HARD_TIMEOUT_MS: '7200000',
+        TASK_RUN_MAX_EXECUTION_MS: '3600000',
+      });
       const result = await recoverStuckTasks(env);
 
       // 3h task > 2h custom hard timeout — killed despite fresh heartbeat
