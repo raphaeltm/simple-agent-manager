@@ -32,6 +32,7 @@ import { Nodes } from './pages/Nodes';
 import { Project } from './pages/Project';
 import { ProjectChat } from './pages/project-chat';
 import { ProjectActivity } from './pages/ProjectActivity';
+import { ProjectAgentChat } from './pages/ProjectAgentChat';
 import { ProjectCreate } from './pages/ProjectCreate';
 import { ProjectLibrary } from './pages/ProjectLibrary';
 import { ProjectNotifications } from './pages/ProjectNotifications';
@@ -99,6 +100,7 @@ export default function App() {
               <Route index element={<Navigate to="chat" replace />} />
               <Route path="chat" element={<ProjectChat />} />
               <Route path="chat/:sessionId" element={<ProjectChat />} />
+              <Route path="agent" element={<ProjectAgentChat />} />
               <Route path="library" element={<ProjectLibrary />} />
               <Route path="ideas" element={<IdeasPage />} />
               <Route path="knowledge" element={<KnowledgePage />} />

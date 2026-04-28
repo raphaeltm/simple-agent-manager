@@ -25,7 +25,7 @@ export function Project() {
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
 
   // Chat routes get a full-bleed layout (no PageLayout wrapper)
-  const isChatRoute = /\/chat(\/|$)/.test(location.pathname);
+  const isChatRoute = /\/(chat|agent)(\/|$)/.test(location.pathname);
 
   const loadProject = useCallback(async () => {
     if (!projectId) return;

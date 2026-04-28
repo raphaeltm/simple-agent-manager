@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import type { FC } from 'react';
 
+import type { ChatMessage } from '../../hooks/useAgentChat';
+
 import { SamMarkdown } from './sam-markdown';
 
 /* ===================================================================
@@ -28,14 +30,7 @@ export interface MockProject {
   agents: number;
 }
 
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'sam';
-  content: string;
-  timestamp: string;
-  toolCalls?: Array<{ name: string; result?: unknown }>;
-  isStreaming?: boolean;
-}
+export type { ChatMessage } from '../../hooks/useAgentChat';
 
 /* ===================================================================
    Mock Data
@@ -236,12 +231,12 @@ const ToolCallChip: FC<{ name: string; result?: unknown }> = ({ name }) => (
   </div>
 );
 
-export const MessageBubble: FC<{ msg: ChatMessage }> = ({ msg }) => {
-  const isSam = msg.role === 'sam';
+export const MessageBubble: FC<{ msg: ChatMessage; agentLabel?: string }> = ({ msg, agentLabel = 'SAM' }) => {
+  const isAgent = msg.role === 'agent';
   return (
-    <div className={`flex ${isSam ? 'justify-start' : 'justify-end'} mb-4`}>
+    <div className={`flex ${isAgent ? 'justify-start' : 'justify-end'} mb-4`}>
       <div className="max-w-[85%]">
-        {isSam && (
+        {isAgent && (
           <div className="flex items-center gap-1.5 mb-1.5">
             <div
               className="w-5 h-5 rounded-full flex items-center justify-center"
@@ -253,7 +248,7 @@ export const MessageBubble: FC<{ msg: ChatMessage }> = ({ msg }) => {
               <Bot className="w-3 h-3" style={{ color: '#3cb480' }} />
             </div>
             <span className="text-xs font-medium" style={{ color: '#3cb480' }}>
-              SAM
+              {agentLabel}
             </span>
             <span className="text-xs text-white/30">{msg.timestamp}</span>
             {msg.isStreaming && (
@@ -262,9 +257,9 @@ export const MessageBubble: FC<{ msg: ChatMessage }> = ({ msg }) => {
           </div>
         )}
         <div
-          className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${isSam ? '' : 'whitespace-pre-wrap'}`}
+          className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${isAgent ? '' : 'whitespace-pre-wrap'}`}
           style={
-            isSam
+            isAgent
               ? { ...glass.samBubble, borderTopLeftRadius: '4px' }
               : {
                   ...glass.userBubble,
@@ -273,7 +268,7 @@ export const MessageBubble: FC<{ msg: ChatMessage }> = ({ msg }) => {
                 }
           }
         >
-          {isSam ? (
+          {isAgent ? (
             <SamMarkdown content={msg.content} />
           ) : (
             <span>{msg.content}</span>
@@ -286,7 +281,7 @@ export const MessageBubble: FC<{ msg: ChatMessage }> = ({ msg }) => {
             </div>
           )}
         </div>
-        {!isSam && <div className="text-xs text-white/25 text-right mt-1">{msg.timestamp}</div>}
+        {!isAgent && <div className="text-xs text-white/25 text-right mt-1">{msg.timestamp}</div>}
       </div>
     </div>
   );

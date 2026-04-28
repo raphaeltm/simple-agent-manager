@@ -44,6 +44,7 @@ export const GLOBAL_NAV_ITEMS: NavItem[] = [
 /** Project sub-nav items — paths are relative to /projects/:id/ */
 export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
+  { label: 'Agent', path: 'agent', icon: <Bot size={18} /> },
   { label: 'Library', path: 'library', icon: <FolderOpen size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
   { label: 'Knowledge', path: 'knowledge', icon: <Brain size={18} /> },
