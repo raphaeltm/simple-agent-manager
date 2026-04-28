@@ -141,6 +141,7 @@ export interface Env {
   BUILTIN_PROFILE_OPUS_MODEL?: string;
   // Task execution timeout (stuck task recovery)
   TASK_RUN_MAX_EXECUTION_MS?: string;
+  TASK_RUN_HARD_TIMEOUT_MS?: string;
   TASK_STUCK_QUEUED_TIMEOUT_MS?: string;
   TASK_STUCK_DELEGATED_TIMEOUT_MS?: string;
   // ACP configuration (passed to VMs via environment)

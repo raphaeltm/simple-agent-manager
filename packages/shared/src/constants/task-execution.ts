@@ -19,8 +19,16 @@ export const DEFAULT_TASK_RUN_CLEANUP_DELAY_MS = 5000;
 // Task Execution Timeout (Stuck Task Recovery)
 // =============================================================================
 
-/** Default max execution time (ms) for a task before it's considered stuck. Override via TASK_RUN_MAX_EXECUTION_MS env var. */
+/** Soft timeout (ms): tasks past this threshold are checked against the VM agent heartbeat.
+ * If the heartbeat is recent, recovery is deferred up to the hard timeout (TASK_RUN_HARD_TIMEOUT_MS).
+ * Override via TASK_RUN_MAX_EXECUTION_MS env var. */
 export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+/** Absolute hard timeout (ms) — tasks are killed regardless of node heartbeat status.
+ * The soft timeout (TASK_RUN_MAX_EXECUTION_MS) allows heartbeat-based grace for the
+ * window between soft and hard timeout. Past the hard timeout, no grace is given.
+ * Override via TASK_RUN_HARD_TIMEOUT_MS env var. */
+export const DEFAULT_TASK_RUN_HARD_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours
 
 /** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var.
  * Must be > TASK_RUNNER_AGENT_READY_TIMEOUT_MS (15 min) to avoid the stuck-task cron killing tasks

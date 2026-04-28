@@ -53,7 +53,10 @@ function mockPreparedStatement(results: unknown[] = [], changes = 1) {
   };
 }
 
-function createMockEnv(prepareResponses: Map<string, { results: unknown[]; changes?: number }> = new Map()): Env {
+function createMockEnv(
+  prepareResponses: Map<string, { results: unknown[]; changes?: number }> = new Map(),
+  envOverrides: Partial<Record<string, string>> = {},
+): Env {
   const mockDb = {
     prepare: vi.fn((sql: string) => {
       for (const [substring, config] of prepareResponses.entries()) {
@@ -81,10 +84,12 @@ function createMockEnv(prepareResponses: Map<string, { results: unknown[]; chang
       prepare: vi.fn().mockReturnValue(mockPreparedStatement()),
     } as unknown as D1Database,
     TASK_RUN_MAX_EXECUTION_MS: '14400000', // 4 hours
+    TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8 hours
     TASK_STUCK_QUEUED_TIMEOUT_MS: '600000', // 10 min
     TASK_STUCK_DELEGATED_TIMEOUT_MS: '1860000', // 31 min
     NODE_HEARTBEAT_STALE_SECONDS: '180', // 3 min
     TASK_RUNNER: mockTaskRunnerDO,
+    ...envOverrides,
   } as unknown as Env;
 }
 
@@ -227,6 +232,211 @@ describe('recoverStuckTasks', () => {
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
 
+      expect(result.failedInProgress).toBe(1);
+      expect(result.heartbeatSkipped).toBe(0);
+    });
+  });
+
+  describe('hard timeout enforcement', () => {
+    it('kills tasks past hard timeout even with fresh heartbeat', async () => {
+      const now = Date.now();
+      // Task started 9 hours ago (past 8h hard timeout)
+      const startedAt = new Date(now - 9 * 60 * 60 * 1000).toISOString();
+      const updatedAt = new Date(now - 9 * 60 * 60 * 1000).toISOString();
+      // Heartbeat 30 seconds ago (recent — would normally cause a skip)
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-hard',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: updatedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      // Workspace lookup — should NOT be called because hard timeout short-circuits
+      responses.set('node_id FROM workspaces', {
+        results: [{ node_id: 'node-1' }],
+      });
+      // Heartbeat check — should NOT be reached
+      responses.set('last_heartbeat_at FROM nodes', {
+        results: [{ last_heartbeat_at: recentHeartbeat }],
+      });
+      // Workspace status for diagnostics
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      // Node status for diagnostics
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
+      });
+      // Task update (mark as failed)
+      responses.set('UPDATE tasks SET status = \'failed\'', {
+        results: [],
+        changes: 1,
+      });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      // Hard timeout should override the heartbeat grace
+      expect(result.failedInProgress).toBe(1);
+      expect(result.heartbeatSkipped).toBe(0);
+
+      // Verify heartbeat was NOT consulted — the hard timeout short-circuits
+      const db = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> };
+      const heartbeatCall = db.prepare.mock.calls.find(
+        ([sql]: [string]) => sql.includes('last_heartbeat_at'),
+      );
+      expect(heartbeatCall).toBeUndefined();
+    });
+
+    it('preserves heartbeat grace between soft and hard timeout', async () => {
+      const now = Date.now();
+      // Task started 5 hours ago (past 4h soft, before 8h hard)
+      const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      const updatedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      // Heartbeat 30 seconds ago (recent)
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-grace',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: updatedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('node_id FROM workspaces', {
+        results: [{ node_id: 'node-1' }],
+      });
+      responses.set('last_heartbeat_at FROM nodes', {
+        results: [{ last_heartbeat_at: recentHeartbeat }],
+      });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      // In the 4h-8h window with fresh heartbeat, task should be skipped (grace period)
+      expect(result.heartbeatSkipped).toBe(1);
+      expect(result.failedInProgress).toBe(0);
+    });
+
+    it('terminates tasks in soft-hard window with stale heartbeat', async () => {
+      const now = Date.now();
+      // Task started 5 hours ago (past 4h soft, before 8h hard)
+      const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      const updatedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      // Heartbeat 10 minutes ago (stale, > 180 seconds)
+      const staleHeartbeat = new Date(now - 10 * 60 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-stale-grace',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: updatedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('node_id FROM workspaces', {
+        results: [{ node_id: 'node-1' }],
+      });
+      responses.set('last_heartbeat_at FROM nodes', {
+        results: [{ last_heartbeat_at: staleHeartbeat }],
+      });
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
+      });
+      responses.set('UPDATE tasks SET status = \'failed\'', {
+        results: [],
+        changes: 1,
+      });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      // Stale heartbeat in the 4h-8h window — task should be terminated
+      expect(result.failedInProgress).toBe(1);
+      expect(result.heartbeatSkipped).toBe(0);
+    });
+
+    it('respects custom hard timeout from env var', async () => {
+      const now = Date.now();
+      // Custom hard timeout: 2 hours (7200000ms)
+      // Task started 3 hours ago — past custom hard timeout
+      const startedAt = new Date(now - 3 * 60 * 60 * 1000).toISOString();
+      const updatedAt = new Date(now - 3 * 60 * 60 * 1000).toISOString();
+      // Fresh heartbeat — would normally grant grace
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-custom',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: updatedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('node_id FROM workspaces', {
+        results: [{ node_id: 'node-1' }],
+      });
+      responses.set('last_heartbeat_at FROM nodes', {
+        results: [{ last_heartbeat_at: recentHeartbeat }],
+      });
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
+      });
+      responses.set('UPDATE tasks SET status = \'failed\'', {
+        results: [],
+        changes: 1,
+      });
+
+      // Override hard timeout to 2 hours and soft timeout to 1 hour
+      const env = createMockEnv(responses, {
+        TASK_RUN_HARD_TIMEOUT_MS: '7200000',
+        TASK_RUN_MAX_EXECUTION_MS: '3600000',
+      });
+      const result = await recoverStuckTasks(env);
+
+      // 3h task > 2h custom hard timeout — killed despite fresh heartbeat
       expect(result.failedInProgress).toBe(1);
       expect(result.heartbeatSkipped).toBe(0);
     });
