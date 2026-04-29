@@ -46,7 +46,7 @@ export interface ChatSessionResponse {
     outputSummary?: string | null;
     finalizedAt?: string | null;
     /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
-    taskMode?: string | null;
+    taskMode?: 'task' | 'conversation' | null;
     /** Agent profile name hint (human-readable label from dispatch). */
     agentProfileHint?: string | null;
   };

@@ -7,7 +7,7 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
-import { isTaskExecutionStep } from '@simple-agent-manager/shared';
+import { isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -152,7 +152,7 @@ chatRoutes.get('/:sessionId', async (c) => {
           outputPrUrl: taskRow.outputPrUrl,
           outputSummary: taskRow.outputSummary ?? null,
           finalizedAt: taskRow.finalizedAt ?? null,
-          taskMode: (taskRow.taskMode as 'task' | 'conversation') ?? null,
+          taskMode: isTaskMode(taskRow.taskMode) ? taskRow.taskMode : null,
           agentProfileHint: taskRow.agentProfileHint ?? null,
         };
       }

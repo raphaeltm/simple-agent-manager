@@ -144,9 +144,11 @@ export {
   EXECUTION_STEP_LABELS,
   EXECUTION_STEP_ORDER,
   isTaskExecutionStep,
+  isTaskMode,
   isTaskStatus,
   SAFE_FILENAME_REGEX,
   TASK_EXECUTION_STEPS,
+  TASK_MODES,
   TASK_STATUSES,
 } from './task';
 
