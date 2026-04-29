@@ -156,7 +156,7 @@ export function ProjectAgentChat() {
         <div className="shrink-0 px-4 pt-2 pb-4">
           {/* Voice error message */}
           {voice.errorMsg && (
-            <div className="text-xs text-red-400/80 text-center mb-2">{voice.errorMsg}</div>
+            <div role="alert" className="text-xs text-red-400/80 text-center mb-2">{voice.errorMsg}</div>
           )}
           {/* Recording indicator */}
           {voice.state === 'recording' && (
@@ -212,9 +212,11 @@ export function ProjectAgentChat() {
                   ? 'Stop recording'
                   : voice.state === 'processing'
                     ? 'Transcribing audio...'
-                    : 'Start voice input'
+                    : voice.state === 'error'
+                      ? 'Voice input error — try again'
+                      : 'Start voice input'
               }
-              className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0"
+              className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
               style={micButtonStyle}
             >
               {voice.state === 'recording' ? (
@@ -231,7 +233,7 @@ export function ProjectAgentChat() {
               onClick={() => void chat.handleSend()}
               disabled={!chat.inputValue.trim() || chat.isSending}
               aria-label={chat.isSending ? 'Sending message...' : 'Send message'}
-              className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0"
+              className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
               style={{
                 background:
                   chat.inputValue.trim() && !chat.isSending
