@@ -331,26 +331,26 @@ export function SessionHeader({
 
           {/* Agent info — type, mode, profile */}
           {(session.agentType || taskEmbed?.taskMode || taskEmbed?.agentProfileHint) && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted min-w-0">
               {session.agentType && (
                 <span className="inline-flex items-center gap-1">
-                  <Bot size={11} className="opacity-60" />
+                  <Bot size={11} className="opacity-60" aria-hidden="true" />
                   <span className="font-medium text-fg-primary">{formatAgentType(session.agentType)}</span>
                 </span>
               )}
               {taskEmbed?.taskMode && (
                 <span className="inline-flex items-center gap-1">
                   {taskEmbed.taskMode === 'conversation'
-                    ? <MessageSquare size={11} className="opacity-60" />
-                    : <Cpu size={11} className="opacity-60" />
+                    ? <MessageSquare size={11} className="opacity-60" aria-hidden="true" />
+                    : <Cpu size={11} className="opacity-60" aria-hidden="true" />
                   }
                   {formatTaskMode(taskEmbed.taskMode)}
                 </span>
               )}
               {taskEmbed?.agentProfileHint && (
-                <span className="inline-flex items-center gap-1">
-                  <User2 size={11} className="opacity-60" />
-                  {taskEmbed.agentProfileHint}
+                <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
+                  <User2 size={11} className="opacity-60 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{taskEmbed.agentProfileHint}</span>
                 </span>
               )}
             </div>
