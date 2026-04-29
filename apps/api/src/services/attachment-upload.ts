@@ -11,31 +11,22 @@ import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-
-// ---------------------------------------------------------------------------
-// Configuration helpers (NaN-safe parseInt with fallback to defaults)
-// ---------------------------------------------------------------------------
-
-function parseIntOrDefault(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = parseInt(value, 10);
-  return isNaN(parsed) || parsed <= 0 ? fallback : parsed;
-}
+import { parsePositiveInt } from '../lib/route-helpers';
 
 function getMaxBytes(env: Env): number {
-  return parseIntOrDefault(env.ATTACHMENT_UPLOAD_MAX_BYTES, ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES);
+  return parsePositiveInt(env.ATTACHMENT_UPLOAD_MAX_BYTES, ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES);
 }
 
 function getBatchMaxBytes(env: Env): number {
-  return parseIntOrDefault(env.ATTACHMENT_UPLOAD_BATCH_MAX_BYTES, ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES);
+  return parsePositiveInt(env.ATTACHMENT_UPLOAD_BATCH_MAX_BYTES, ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES);
 }
 
 function getMaxFiles(env: Env): number {
-  return parseIntOrDefault(env.ATTACHMENT_MAX_FILES, ATTACHMENT_DEFAULTS.MAX_FILES);
+  return parsePositiveInt(env.ATTACHMENT_MAX_FILES, ATTACHMENT_DEFAULTS.MAX_FILES);
 }
 
 function getPresignExpiry(env: Env): number {
-  return parseIntOrDefault(env.ATTACHMENT_PRESIGN_EXPIRY_SECONDS, ATTACHMENT_DEFAULTS.PRESIGN_EXPIRY_SECONDS);
+  return parsePositiveInt(env.ATTACHMENT_PRESIGN_EXPIRY_SECONDS, ATTACHMENT_DEFAULTS.PRESIGN_EXPIRY_SECONDS);
 }
 
 // ---------------------------------------------------------------------------

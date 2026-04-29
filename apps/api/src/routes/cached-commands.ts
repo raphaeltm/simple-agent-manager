@@ -8,6 +8,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
@@ -19,11 +20,6 @@ const DEFAULT_MAX_CACHED_COMMANDS = 200;
 const DEFAULT_MAX_AGENT_TYPE_LENGTH = 64;
 const DEFAULT_MAX_COMMAND_NAME_LENGTH = 128;
 const DEFAULT_MAX_COMMAND_DESC_LENGTH = 512;
-
-function parseIntSafe(value: string | undefined, fallback: number): number {
-  const parsed = parseInt(value || '', 10);
-  return isNaN(parsed) || parsed <= 0 ? fallback : parsed;
-}
 
 const cachedCommandRoutes = new Hono<{ Bindings: Env }>();
 
@@ -43,7 +39,7 @@ cachedCommandRoutes.get('/', async (c) => {
   await requireOwnedProject(db, projectId, userId);
 
   const agentType = c.req.query('agentType') || undefined;
-  const maxAgentTypeLen = parseIntSafe(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH, DEFAULT_MAX_AGENT_TYPE_LENGTH);
+  const maxAgentTypeLen = parsePositiveInt(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH, DEFAULT_MAX_AGENT_TYPE_LENGTH);
   if (agentType && agentType.length > maxAgentTypeLen) {
     throw errors.badRequest('agentType exceeds maximum length');
   }
@@ -67,10 +63,10 @@ cachedCommandRoutes.post('/', jsonValidator(SaveCachedCommandsSchema), async (c)
   const body = c.req.valid('json');
 
   // Configurable limits (Constitution Principle XI)
-  const maxAgentTypeLen = parseIntSafe(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH, DEFAULT_MAX_AGENT_TYPE_LENGTH);
-  const maxCommands = parseIntSafe(c.env.CACHED_COMMANDS_MAX_PER_AGENT, DEFAULT_MAX_CACHED_COMMANDS);
-  const maxNameLen = parseIntSafe(c.env.CACHED_COMMANDS_MAX_NAME_LENGTH, DEFAULT_MAX_COMMAND_NAME_LENGTH);
-  const maxDescLen = parseIntSafe(c.env.CACHED_COMMANDS_MAX_DESC_LENGTH, DEFAULT_MAX_COMMAND_DESC_LENGTH);
+  const maxAgentTypeLen = parsePositiveInt(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH, DEFAULT_MAX_AGENT_TYPE_LENGTH);
+  const maxCommands = parsePositiveInt(c.env.CACHED_COMMANDS_MAX_PER_AGENT, DEFAULT_MAX_CACHED_COMMANDS);
+  const maxNameLen = parsePositiveInt(c.env.CACHED_COMMANDS_MAX_NAME_LENGTH, DEFAULT_MAX_COMMAND_NAME_LENGTH);
+  const maxDescLen = parsePositiveInt(c.env.CACHED_COMMANDS_MAX_DESC_LENGTH, DEFAULT_MAX_COMMAND_DESC_LENGTH);
 
   if (body.agentType.length > maxAgentTypeLen) {
     throw errors.badRequest('agentType exceeds maximum length');
