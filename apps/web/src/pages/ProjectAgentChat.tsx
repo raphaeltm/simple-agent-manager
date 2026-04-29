@@ -93,6 +93,7 @@ export function ProjectAgentChat() {
         ref={canvasRef}
         className="absolute inset-0 w-full h-full"
         style={{ zIndex: 0 }}
+        aria-hidden="true"
       />
 
       {/* Content layer */}
@@ -154,26 +155,28 @@ export function ProjectAgentChat() {
 
         {/* Input area */}
         <div className="shrink-0 px-4 pt-2 pb-4">
-          {/* Voice error message */}
-          {voice.errorMsg && (
-            <div className="text-xs text-red-400/80 text-center mb-2">{voice.errorMsg}</div>
-          )}
-          {/* Recording indicator */}
-          {voice.state === 'recording' && (
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{ backgroundColor: '#3cb480', boxShadow: '0 0 8px rgba(60, 180, 120, 0.6)' }}
-              />
-              <span className="text-xs text-white/50">Listening... tap mic to stop</span>
-            </div>
-          )}
-          {voice.state === 'processing' && (
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <Loader2 className="w-3 h-3 animate-spin" style={{ color: '#3cb480' }} />
-              <span className="text-xs text-white/50">Transcribing...</span>
-            </div>
-          )}
+          {/* Voice status — live region for screen-reader announcements */}
+          <div aria-live="assertive" aria-atomic="true">
+            {voice.errorMsg && (
+              <div className="text-xs text-red-400/80 text-center mb-2">{voice.errorMsg}</div>
+            )}
+            {voice.state === 'recording' && (
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <div
+                  className="w-2 h-2 rounded-full animate-pulse"
+                  style={{ backgroundColor: '#3cb480', boxShadow: '0 0 8px rgba(60, 180, 120, 0.6)' }}
+                  aria-hidden="true"
+                />
+                <span className="text-xs text-white/50">Listening... tap mic to stop</span>
+              </div>
+            )}
+            {voice.state === 'processing' && (
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <Loader2 className="w-3 h-3 animate-spin" style={{ color: '#3cb480' }} aria-hidden="true" />
+                <span className="text-xs text-white/50">Transcribing...</span>
+              </div>
+            )}
+          </div>
           <div className="flex items-end gap-2">
             <textarea
               ref={textareaRef}
@@ -207,7 +210,7 @@ export function ProjectAgentChat() {
               type="button"
               onClick={voice.toggle}
               disabled={voice.state === 'processing' || chat.isSending}
-              className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              className="p-3.5 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               style={micButtonStyle}
               title={
                 voice.state === 'recording'
@@ -219,7 +222,9 @@ export function ProjectAgentChat() {
               aria-label={
                 voice.state === 'recording'
                   ? 'Stop recording'
-                  : 'Start voice input'
+                  : voice.state === 'processing'
+                    ? 'Transcribing, please wait'
+                    : 'Start voice input'
               }
             >
               {voice.state === 'recording' ? (
@@ -236,7 +241,7 @@ export function ProjectAgentChat() {
               onClick={() => void chat.handleSend()}
               disabled={!chat.inputValue.trim() || chat.isSending}
               aria-label={chat.isSending ? 'Sending message…' : 'Send message'}
-              className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              className="p-3.5 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               style={{
                 background:
                   chat.inputValue.trim() && !chat.isSending
