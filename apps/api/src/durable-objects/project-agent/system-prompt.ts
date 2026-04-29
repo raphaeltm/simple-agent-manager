@@ -93,5 +93,4 @@ You are the project's dedicated manager. Users come to you for quick, focused an
 
 ## Conversation memory
 - Your conversations persist across page refreshes
-- If the user references something from earlier, use search_conversation_history to find it
 - Store important project decisions and context in the knowledge graph so they persist across conversations`;
