@@ -19,6 +19,7 @@ vi.mock('drizzle-orm/d1', () => ({
 vi.mock('@simple-agent-manager/shared', () => ({
   DEFAULT_WORKSPACE_PROFILE: 'full',
   isTaskExecutionStep: () => true,
+  isTaskMode: (v: unknown) => v === 'task' || v === 'conversation',
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
