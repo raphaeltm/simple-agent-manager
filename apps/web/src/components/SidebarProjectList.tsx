@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import type { ProjectSummary } from '@simple-agent-manager/shared';
+import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { type ChangeEvent, useCallback, useMemo, useState } from 'react';
 
 const FOCUS_RING =
@@ -9,6 +9,7 @@ const FOCUS_RING =
 const DEFAULT_MAX_VISIBLE = 8;
 const MAX_VISIBLE = parseInt(
   import.meta.env.VITE_SIDEBAR_PROJECT_LIST_MAX_VISIBLE || String(DEFAULT_MAX_VISIBLE),
+  10,
 );
 
 function relativeTime(dateStr: string | null | undefined): string {
@@ -70,12 +71,12 @@ export function SidebarProjectList({
   const sectionId = 'sidebar-projects-panel';
 
   return (
-    <div className={isMobile ? 'mt-2' : 'mt-2'}>
+    <div className="mt-2">
       {/* Section header */}
       <button
         onClick={() => setOpen(!open)}
         className={`flex items-center gap-2 w-full ${
-          isMobile ? 'px-5 py-2.5' : 'px-3 py-2'
+          isMobile ? 'px-5 py-2.5 min-h-11' : 'px-3 py-2'
         } bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-[120ms] ${FOCUS_RING}`}
         aria-expanded={open}
         aria-controls={sectionId}
@@ -85,7 +86,7 @@ export function SidebarProjectList({
       </button>
 
       {open && (
-        <div id={sectionId}>
+        <div id={sectionId} role="region" aria-label="Recent Projects">
           {/* Filter input */}
           <div className={`${isMobile ? 'px-4' : 'px-2'} py-1`}>
             <div className="relative">
@@ -108,7 +109,9 @@ export function SidebarProjectList({
                 <button
                   onClick={clearFilter}
                   aria-label="Clear filter"
-                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-6 h-6 bg-transparent border-none text-fg-muted cursor-pointer rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors ${FOCUS_RING}`}
+                  className={`absolute right-0.5 top-1/2 -translate-y-1/2 flex items-center justify-center ${
+                    isMobile ? 'w-10 h-10' : 'w-7 h-7'
+                  } bg-transparent border-none text-fg-muted cursor-pointer rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors ${FOCUS_RING}`}
                 >
                   <X size={14} />
                 </button>
@@ -126,7 +129,7 @@ export function SidebarProjectList({
                 Loading...
               </div>
             ) : filtered.length === 0 ? (
-              <div className={`${isMobile ? 'px-5' : 'px-3'} py-3 text-sm text-fg-muted`}>
+              <div className={`${isMobile ? 'px-5' : 'px-3'} py-3 text-sm text-fg-muted`} role="status" aria-live="polite">
                 {filter ? `No projects match "${filter}"` : 'No projects yet'}
               </div>
             ) : (
@@ -154,7 +157,7 @@ export function SidebarProjectList({
                       className="flex items-center justify-center w-6 h-6 rounded-sm bg-inset border border-border-default text-xs font-bold text-fg-muted shrink-0"
                       aria-hidden="true"
                     >
-                      {project.name.charAt(0).toUpperCase()}
+                      {[...project.name][0]?.toUpperCase() ?? '?'}
                     </span>
 
                     {/* Project name */}
@@ -187,7 +190,7 @@ export function SidebarProjectList({
 
           {/* Show count if filtered */}
           {filter && filtered.length > 0 && (
-            <div className={`${isMobile ? 'px-5' : 'px-3'} py-1 text-[11px] text-fg-muted`}>
+            <div className={`${isMobile ? 'px-5' : 'px-3'} py-1 text-[11px] text-fg-muted`} role="status" aria-live="polite">
               {filtered.length} of {projects.length} projects
             </div>
           )}
