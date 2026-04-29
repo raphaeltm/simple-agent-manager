@@ -4,6 +4,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useProjectList } from '../hooks/useProjectData';
 import { signOut } from '../lib/auth';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
 import { useAuth } from './AuthProvider';
@@ -13,6 +14,7 @@ import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
 import { extractProjectId, GLOBAL_NAV_ITEMS, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { NotificationCenter } from './NotificationCenter';
 import { RecentChatsDropdown } from './RecentChatsDropdown';
+import { SidebarProjectList } from './SidebarProjectList';
 
 interface AppShellContextValue {
   setProjectName: (name: string | undefined) => void;
@@ -37,6 +39,10 @@ export function AppShell({ children }: AppShellProps) {
   const [projectName, setProjectNameState] = useState<string | undefined>(undefined);
   const [showGlobalNav, setShowGlobalNav] = useState(false);
   const commandPalette = useGlobalCommandPalette();
+  const { projects: sidebarProjects, loading: sidebarProjectsLoading } = useProjectList({
+    limit: 50,
+    pollInterval: 60000,
+  });
 
   const setProjectName = useCallback((name: string | undefined) => {
     setProjectNameState(name);
@@ -89,6 +95,40 @@ export function AppShell({ children }: AppShellProps) {
       ],
     };
   }, [isSuperadmin]);
+
+  const handleProjectNavigate = useCallback(
+    (path: string) => {
+      navigate(path);
+      setDrawerOpen(false);
+    },
+    [navigate],
+  );
+
+  const mobileProjectListSection = useMemo(
+    () => (
+      <SidebarProjectList
+        projects={sidebarProjects}
+        loading={sidebarProjectsLoading}
+        currentProjectId={projectId}
+        onNavigate={handleProjectNavigate}
+        variant="mobile"
+      />
+    ),
+    [sidebarProjects, sidebarProjectsLoading, projectId, handleProjectNavigate],
+  );
+
+  const desktopProjectListSection = useMemo(
+    () => (
+      <SidebarProjectList
+        projects={sidebarProjects}
+        loading={sidebarProjectsLoading}
+        currentProjectId={projectId}
+        onNavigate={handleProjectNavigate}
+        variant="desktop"
+      />
+    ),
+    [sidebarProjects, sidebarProjectsLoading, projectId, handleProjectNavigate],
+  );
 
   // Close drawer and reset nav toggle on route change
   useEffect(() => {
@@ -172,6 +212,7 @@ export function AppShell({ children }: AppShellProps) {
             onSignOut={handleSignOut}
             projectName={projectId ? (projectName || 'Project') : undefined}
             infraSection={mobileInfraSection}
+            projectListSection={mobileProjectListSection}
             showGlobalNav={showGlobalNav}
             onToggleGlobalNav={projectId ? handleToggleGlobalNav : undefined}
           />
@@ -212,6 +253,7 @@ export function AppShell({ children }: AppShellProps) {
           projectName={projectName}
           showGlobalNav={showGlobalNav}
           onToggleGlobalNav={handleToggleGlobalNav}
+          projectListSection={desktopProjectListSection}
         />
         {user && (
           <div className="mt-auto p-3 border-t border-border-default flex items-center gap-2">

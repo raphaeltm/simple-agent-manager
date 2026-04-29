@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, LogOut } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
@@ -24,6 +25,8 @@ interface MobileNavDrawerProps {
   onSignOut: () => void;
   projectName?: string;
   infraSection?: InfraSection;
+  /** Rendered below Infrastructure in both default and global panels */
+  projectListSection?: ReactNode;
   showGlobalNav?: boolean;
   onToggleGlobalNav?: () => void;
 }
@@ -45,6 +48,7 @@ export function MobileNavDrawer({
   onSignOut,
   projectName,
   infraSection,
+  projectListSection,
   showGlobalNav,
   onToggleGlobalNav,
 }: MobileNavDrawerProps) {
@@ -223,6 +227,9 @@ export function MobileNavDrawer({
                   )}
                 </div>
               )}
+
+              {/* Project list — only in non-toggle mode (global nav) */}
+              {!canToggle && projectListSection}
             </div>
 
             {/* Panel 2: Global nav items (only rendered when toggle is available) */}
@@ -287,6 +294,9 @@ export function MobileNavDrawer({
                     )}
                   </div>
                 )}
+
+                {/* Project list — in global view within project context */}
+                {projectListSection}
               </div>
             )}
           </div>

@@ -20,6 +20,7 @@ import {
   Shield,
   UserCog,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
 
@@ -83,9 +84,11 @@ interface NavSidebarProps {
   projectName?: string;
   showGlobalNav?: boolean;
   onToggleGlobalNav?: () => void;
+  /** Rendered below Infrastructure in global nav views */
+  projectListSection?: ReactNode;
 }
 
-export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlobalNav }: NavSidebarProps) {
+export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlobalNav, projectListSection }: NavSidebarProps) {
   const location = useLocation();
   const { isSuperadmin } = useAuth();
   const [infraOpen, setInfraOpen] = useState(false);
@@ -225,6 +228,9 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
                 )}
               </div>
             )}
+
+            {/* Project list — in global panel within project context */}
+            {projectListSection}
           </nav>
         </div>
       </div>
@@ -296,6 +302,9 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
           )}
         </div>
       )}
+
+      {/* Project list — in standalone global nav */}
+      {projectListSection}
     </nav>
   );
 }
