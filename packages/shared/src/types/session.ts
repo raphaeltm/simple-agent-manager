@@ -1,4 +1,4 @@
-import type { TaskExecutionStep, TaskStatus } from './task';
+import type { TaskExecutionStep, TaskMode, TaskStatus } from './task';
 
 // =============================================================================
 // Chat Sessions
@@ -36,6 +36,10 @@ export interface ChatSessionTaskEmbed {
   outputPrUrl: string | null;
   outputSummary: string | null;
   finalizedAt: string | null;
+  /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
+  taskMode?: TaskMode | null;
+  /** Agent profile name hint (human-readable label from dispatch). */
+  agentProfileHint?: string | null;
 }
 
 export interface ChatSessionDetail extends ChatSession {
