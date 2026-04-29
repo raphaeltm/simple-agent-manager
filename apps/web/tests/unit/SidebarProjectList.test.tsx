@@ -1,8 +1,7 @@
-import { render, screen, within } from '@testing-library/react';
+import type { ProjectSummary } from '@simple-agent-manager/shared';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-
-import type { ProjectSummary } from '@simple-agent-manager/shared';
 
 import { SidebarProjectList } from '../../src/components/SidebarProjectList';
 
