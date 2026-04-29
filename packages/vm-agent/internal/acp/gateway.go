@@ -564,21 +564,55 @@ func resolveContainerHomeDir(ctx context.Context, containerID, user string) (str
 	return "/root", nil
 }
 
-func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
-	if err := validateAuthFilePath(authFilePath); err != nil {
-		return err
+// resolveAuthFileTargetPath resolves the absolute target path for a relative
+// auth/config file inside a container. When the relative path starts with
+// ".codex/" and the container has CODEX_HOME set, the file is placed under
+// $CODEX_HOME instead of $HOME — this matches where the Codex CLI actually
+// looks for its configuration.
+func resolveAuthFileTargetPath(ctx context.Context, containerID, user, authFilePath string) (string, error) {
+	// Check for CODEX_HOME override when the path targets the .codex directory.
+	if strings.HasPrefix(authFilePath, ".codex/") || authFilePath == ".codex" {
+		codexHome, _, err := execInContainer(ctx, containerID, user, "", "printenv", "CODEX_HOME")
+		if err == nil {
+			trimmed := strings.TrimSpace(codexHome)
+			if trimmed != "" {
+				// authFilePath is e.g. ".codex/auth.json" — strip the ".codex/" prefix
+				// and join with CODEX_HOME to get the absolute path.
+				rel := strings.TrimPrefix(authFilePath, ".codex/")
+				if rel == ".codex" {
+					rel = ""
+				}
+				target := path.Join(trimmed, rel)
+				slog.Debug("Resolved auth file path via CODEX_HOME",
+					"codexHome", trimmed,
+					"authFilePath", authFilePath,
+					"targetPath", target)
+				return target, nil
+			}
+		}
 	}
 
+	// Default: resolve relative to the user's home directory.
 	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
 	if err != nil {
-		// resolveContainerHomeDir should always return a path, but handle error defensively
 		slog.Warn("resolveContainerHomeDir returned error, falling back to /root",
 			"error", err,
 			"container", containerID,
 			"user", user)
 		homeDir = "/root"
 	}
-	targetPath := path.Join(homeDir, authFilePath)
+	return path.Join(homeDir, authFilePath), nil
+}
+
+func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
+	if err := validateAuthFilePath(authFilePath); err != nil {
+		return err
+	}
+
+	targetPath, err := resolveAuthFileTargetPath(ctx, containerID, user, authFilePath)
+	if err != nil {
+		return fmt.Errorf("resolve auth file target path: %w", err)
+	}
 	parentDir := path.Dir(targetPath)
 
 	if _, stderr, err := execInContainer(ctx, containerID, user, "", "mkdir", "-p", parentDir); err != nil {
@@ -628,16 +662,10 @@ func readAuthFileFromContainer(ctx context.Context, containerID, user, authFileP
 		return "", err
 	}
 
-	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	targetPath, err := resolveAuthFileTargetPath(ctx, containerID, user, authFilePath)
 	if err != nil {
-		// resolveContainerHomeDir should always return a path, but handle error defensively
-		slog.Warn("resolveContainerHomeDir returned error, falling back to /root",
-			"error", err,
-			"container", containerID,
-			"user", user)
-		homeDir = "/root"
+		return "", fmt.Errorf("resolve auth file target path: %w", err)
 	}
-	targetPath := path.Join(homeDir, authFilePath)
 
 	dockerArgs := []string{"exec"}
 	if user != "" {
@@ -1320,16 +1348,10 @@ func readOptionalFileFromContainer(ctx context.Context, containerID, user, fileP
 		return "", fmt.Errorf("invalid filePath: %q", filePath)
 	}
 
-	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
+	targetPath, err := resolveAuthFileTargetPath(ctx, containerID, user, filePath)
 	if err != nil {
-		// resolveContainerHomeDir should always return a path, but handle error defensively
-		slog.Warn("resolveContainerHomeDir returned error in readOptionalFileFromContainer, falling back to /root",
-			"error", err,
-			"container", containerID,
-			"user", user)
-		homeDir = "/root"
+		return "", fmt.Errorf("resolve file target path: %w", err)
 	}
-	targetPath := path.Join(homeDir, filePath)
 
 	// Check if file exists first
 	dockerArgs := []string{"exec"}
