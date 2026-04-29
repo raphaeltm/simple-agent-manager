@@ -73,8 +73,8 @@ catalogs:
       specifier: 10.1.0
       version: 10.1.0
     react-router:
-      specifier: 7.6.1
-      version: 7.6.1
+      specifier: 7.14.2
+      version: 7.14.2
     react-virtuoso:
       specifier: 4.18.3
       version: 4.18.3
@@ -327,7 +327,7 @@ importers:
         version: 10.1.0(@types/react@19.1.6)(react@19.1.0)
       react-router:
         specifier: 'catalog:'
-        version: 7.6.1(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+        version: 7.14.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       react-simple-maps:
         specifier: 3.0.0
         version: 3.0.0(prop-types@15.8.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
@@ -671,7 +671,7 @@ importers:
         version: 19.1.0(react@19.1.0)
       react-router:
         specifier: 'catalog:'
-        version: 7.6.1(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+        version: 7.14.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -7119,8 +7119,8 @@ packages:
     resolution: {integrity: sha512-QgT5//D3jfjJb6Gsjxv0Slpj23ip+HtOpnNgnb2S5zU3CB26G/IDPGoy4RJB42wzFE46DRsstbW6tKHoKbhAxw==}
     engines: {node: '>=0.10.0'}
 
-  react-router@7.6.1:
-    resolution: {integrity: sha512-hPJXXxHJZEsPFNVbtATH7+MMX43UDeOauz+EAU4cgqTn7ojdI9qQORqS8Z0qmDlL1TclO/6jLRYUEtbWidtdHQ==}
+  react-router@7.14.2:
+    resolution: {integrity: sha512-yCqNne6I8IB6rVCH7XUvlBK7/QKyqypBFGv+8dj4QBFJiiRX+FG7/nkdAvGElyvVZ/HQP5N19wzteuTARXi5Gw==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       react: '>=18'
@@ -15925,7 +15925,7 @@ snapshots:
 
   react-refresh@0.18.0: {}
 
-  react-router@7.6.1(react-dom@19.1.0(react@19.1.0))(react@19.1.0):
+  react-router@7.14.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0):
     dependencies:
       cookie: 1.1.1
       react: 19.1.0
