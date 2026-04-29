@@ -1,5 +1,8 @@
 /**
- * SAM agent loop — unified OpenAI-format code path routed through AI Gateway.
+ * Agent loop — unified OpenAI-format code path routed through AI Gateway.
+ *
+ * Reusable by both SamSession (per-user) and ProjectAgent (per-project) DOs.
+ * Callers provide their own system prompt, tool definitions, and tool executor.
  *
  * Internally uses OpenAI chat-completions format. The AI Gateway endpoint is
  * selected by model prefix:
@@ -17,7 +20,6 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
-import { executeTool, SAM_TOOLS } from './tools';
 import type {
   AnthropicToolDef,
   CollectedToolCall,
@@ -30,7 +32,7 @@ import type {
 // System prompt
 // =============================================================================
 
-const SAM_SYSTEM_PROMPT = `You are SAM — Simple Agent Manager. You are a senior engineering manager who orchestrates AI coding agents across multiple projects.
+export const SAM_SYSTEM_PROMPT = `You are SAM — Simple Agent Manager. You are a senior engineering manager who orchestrates AI coding agents across multiple projects.
 
 You have access to all of the user's projects, tasks, missions, and agents. You can dispatch work, check progress, coordinate multi-project efforts, and answer questions about what's happening across their engineering organization.
 
@@ -243,13 +245,15 @@ async function callLLM(
   messages: OpenAIMessage[],
   userId: string,
   conversationId: string,
+  baseSystemPrompt: string,
+  tools: AnthropicToolDef[],
 ): Promise<Response> {
   const model = config.model;
   const systemPrompt = config.systemPromptAppend
-    ? `${SAM_SYSTEM_PROMPT}\n\n${config.systemPromptAppend}`
-    : SAM_SYSTEM_PROMPT;
+    ? `${baseSystemPrompt}\n\n${config.systemPromptAppend}`
+    : baseSystemPrompt;
 
-  const openAITools = toOpenAITools(SAM_TOOLS);
+  const openAITools = toOpenAITools(tools);
   const aigMetadata = JSON.stringify({
     source: config.aigSource,
     userId,
@@ -263,7 +267,7 @@ async function callLLM(
 
   try {
     if (isAnthropicModel(model)) {
-      return await callAnthropicLLM(env, model, systemPrompt, messages, openAITools, aigMetadata, config.maxTokens, controller.signal);
+      return await callAnthropicLLM(env, model, systemPrompt, messages, openAITools, aigMetadata, config.maxTokens, controller.signal, tools);
     } else if (isWorkersAIModel(model)) {
       return await callWorkersAILLM(env, model, systemPrompt, messages, openAITools, aigMetadata, config.maxTokens, controller.signal);
     } else {
@@ -284,6 +288,7 @@ async function callAnthropicLLM(
   aigMetadata: string,
   maxTokens: number,
   signal: AbortSignal,
+  anthropicTools: AnthropicToolDef[],
 ): Promise<Response> {
   const apiKey = await getAnthropicApiKey(env);
   const url = buildAnthropicGatewayUrl(env);
@@ -328,7 +333,7 @@ async function callAnthropicLLM(
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: anthropicMessages,
-      tools: SAM_TOOLS,
+      tools: anthropicTools,
       stream: true,
     }),
   });
@@ -574,9 +579,23 @@ async function processOpenAIStream(
 // Agent loop
 // =============================================================================
 
+/** Configuration for a customized agent loop. */
+export interface AgentLoopOptions {
+  /** System prompt for the agent. */
+  systemPrompt: string;
+  /** Tool definitions in Anthropic native format. */
+  tools: AnthropicToolDef[];
+  /** Custom tool executor. */
+  executeTool: (toolCall: CollectedToolCall, ctx: ToolContext) => Promise<unknown>;
+  /** Extra fields to merge into the ToolContext. */
+  toolContextExtras?: Record<string, unknown>;
+}
+
 /**
- * Run the SAM agent loop: call LLM, process tool calls, repeat until done.
+ * Run an agent loop: call LLM, process tool calls, repeat until done.
  * Streams SSE events to the writer throughout.
+ *
+ * Used by both SamSession (per-user) and ProjectAgent (per-project).
  */
 export async function runAgentLoop(
   conversationId: string,
@@ -594,13 +613,22 @@ export async function runAgentLoop(
     toolCallId?: string | null,
   ) => void,
   searchMessages?: (query: string, limit: number) => Array<{ snippet: string; role: string; sequence: number; createdAt: string }>,
+  options?: AgentLoopOptions,
 ): Promise<void> {
   const messages: OpenAIMessage[] = [
     ...toOpenAIMessages(historyRows),
     { role: 'user', content: userMessage },
   ];
 
-  const toolCtx: ToolContext = { env: env as unknown as Record<string, unknown>, userId, searchMessages };
+  const systemPrompt = options?.systemPrompt ?? SAM_SYSTEM_PROMPT;
+  const tools = options?.tools ?? [];
+  const executeToolFn = options?.executeTool ?? (async () => ({ error: 'No tool executor configured' }));
+  const toolCtx: ToolContext = {
+    env: env as unknown as Record<string, unknown>,
+    userId,
+    searchMessages,
+    ...options?.toolContextExtras,
+  };
   const useAnthropicParser = isAnthropicModel(config.model);
 
   let turnCount = 0;
@@ -612,7 +640,7 @@ export async function runAgentLoop(
 
     let response: Response;
     try {
-      response = await callLLM(env, config, messages, userId, conversationId);
+      response = await callLLM(env, config, messages, userId, conversationId, systemPrompt, tools);
     } catch (fetchErr) {
       const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
       const isTimeout = errMsg.includes('abort');
@@ -684,7 +712,7 @@ export async function runAgentLoop(
 
       // Execute each tool and add results
       for (const tc of toolCalls) {
-        const result = await executeTool(tc, toolCtx);
+        const result = await executeToolFn(tc, toolCtx);
         const resultStr = JSON.stringify(result);
 
         await writer.write(encodeSseEvent({ type: 'tool_result', tool: tc.name, result }));

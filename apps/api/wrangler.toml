@@ -145,6 +145,11 @@ class_name = "ProjectOrchestrator"
 name = "SAM_SESSION"
 class_name = "SamSession"
 
+# Durable Object for per-project AI technical lead (one DO per projectId)
+[[durable_objects.bindings]]
+name = "PROJECT_AGENT"
+class_name = "ProjectAgent"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -188,6 +193,10 @@ new_sqlite_classes = ["ProjectOrchestrator"]  # Per-project orchestration brain;
 [[migrations]]
 tag = "v11"
 new_sqlite_classes = ["SamSession"]  # Per-user SAM agent; SQLite-backed for conversation history
+
+[[migrations]]
+tag = "v12"
+new_sqlite_classes = ["ProjectAgent"]  # Per-project AI tech lead; SQLite-backed for conversation history
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

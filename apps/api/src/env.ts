@@ -46,6 +46,7 @@ export interface Env {
   TRIAL_ORCHESTRATOR: DurableObjectNamespace;
   PROJECT_ORCHESTRATOR: DurableObjectNamespace;
   SAM_SESSION: DurableObjectNamespace;
+  PROJECT_AGENT: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;

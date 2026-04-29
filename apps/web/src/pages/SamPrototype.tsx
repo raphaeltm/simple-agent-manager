@@ -10,8 +10,9 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useAgentChat } from '../hooks/useAgentChat';
 import { API_URL } from '../lib/api/client';
-import type { ChatMessage, MockProject } from './sam-prototype/components';
+import type { MockProject } from './sam-prototype/components';
 import {
   glass,
   glow,
@@ -24,29 +25,18 @@ import {
 import { useVoiceInput } from './sam-prototype/voice-input';
 import { useWebGLBackground } from './sam-prototype/webgl-background';
 
-function formatTimestamp(isoOrDatetime: string): string {
-  try {
-    const d = new Date(isoOrDatetime);
-    if (isNaN(d.getTime())) return '';
-    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
-
 export function SamPrototype() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const amplitudeRef = useRef(0);
   const [view, setView] = useState<'chat' | 'overview'>('chat');
-  const [inputValue, setInputValue] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [selectedProject, setSelectedProject] = useState<MockProject | null>(null);
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [isSending, setIsSending] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const chat = useAgentChat({ apiBase: '/api/sam' });
+  // Destructure setInputValue so the stable React state setter reference is captured,
+  // not the entire chat object (which is a new object reference on every render).
+  const { setInputValue: setChatInputValue } = chat;
 
   useWebGLBackground(canvasRef, amplitudeRef);
 
@@ -56,9 +46,9 @@ export function SamPrototype() {
     amplitudeRef,
     onTranscription: useCallback(
       (text: string) => {
-        setInputValue((prev) => (prev ? `${prev} ${text}` : text));
+        setChatInputValue((prev: string) => (prev ? `${prev} ${text}` : text));
       },
-      [],
+      [setChatInputValue],
     ),
   });
 
@@ -66,280 +56,24 @@ export function SamPrototype() {
   const resizeTextarea = useCallback(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = '0px'; // collapse to measure scrollHeight
-    // Single line = ~21px, 3.5 lines ~ 74px. Clamp to max.
+    ta.style.height = '0px';
     const maxHeight = 84;
     ta.style.height = `${Math.min(ta.scrollHeight, maxHeight)}px`;
   }, []);
 
   useEffect(() => {
     resizeTextarea();
-  }, [inputValue, resizeTextarea]);
-
-  // Load existing conversation on mount
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const convResp = await fetch(`${API_URL}/api/sam/conversations?type=human`, {
-          credentials: 'include',
-        });
-        if (!convResp.ok || cancelled) {
-          setIsLoadingHistory(false);
-          return;
-        }
-        const convData = (await convResp.json()) as {
-          conversations: Array<{ id: string; title: string | null }>;
-        };
-        if (cancelled) return;
-
-        const conv = convData.conversations[0]; // most recent human conversation
-        if (!conv) {
-          setIsLoadingHistory(false);
-          return;
-        }
-
-        setConversationId(conv.id);
-
-        const msgResp = await fetch(
-          `${API_URL}/api/sam/conversations/${conv.id}/messages?limit=200`,
-          { credentials: 'include' },
-        );
-        if (!msgResp.ok || cancelled) {
-          setIsLoadingHistory(false);
-          return;
-        }
-        const msgData = (await msgResp.json()) as {
-          messages: Array<{
-            id: string;
-            role: string;
-            content: string;
-            tool_calls_json: string | null;
-            tool_call_id: string | null;
-            sequence: number;
-            created_at: string;
-          }>;
-        };
-        if (cancelled) return;
-
-        // Map backend messages to ChatMessage format
-        // Group: assistant messages with tool_calls followed by tool_result messages
-        const mapped: ChatMessage[] = [];
-        for (const row of msgData.messages) {
-          if (row.role === 'user') {
-            mapped.push({
-              id: row.id,
-              role: 'user',
-              content: row.content,
-              timestamp: formatTimestamp(row.created_at),
-            });
-          } else if (row.role === 'assistant') {
-            let toolCalls: Array<{ name: string; result?: unknown }> | undefined;
-            if (row.tool_calls_json) {
-              try {
-                const parsed = JSON.parse(row.tool_calls_json) as Array<{
-                  id: string;
-                  name: string;
-                  input: unknown;
-                }>;
-                toolCalls = parsed.map((tc) => ({ name: tc.name }));
-              } catch {
-                // ignore parse errors
-              }
-            }
-            mapped.push({
-              id: row.id,
-              role: 'sam',
-              content: row.content,
-              timestamp: formatTimestamp(row.created_at),
-              toolCalls,
-            });
-          } else if (row.role === 'tool_result' && row.tool_call_id) {
-            // Attach tool result to the most recent sam message's matching tool call
-            const lastSam = [...mapped].reverse().find((m) => m.role === 'sam' && m.toolCalls);
-            if (lastSam?.toolCalls) {
-              const pendingCall = lastSam.toolCalls.find((tc) => !tc.result);
-              if (pendingCall) {
-                try {
-                  pendingCall.result = JSON.parse(row.content);
-                } catch {
-                  pendingCall.result = row.content;
-                }
-              }
-            }
-          }
-        }
-
-        setMessages(mapped);
-      } catch {
-        // Silently handle — user just sees empty chat
-      } finally {
-        if (!cancelled) setIsLoadingHistory(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chat.inputValue, resizeTextarea]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  /** Send a message to SAM and stream the response via SSE. */
-  const handleSend = useCallback(async () => {
-    const text = inputValue.trim();
-    if (!text || isSending) return;
-
-    setInputValue('');
-    setIsSending(true);
-
-    const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: text,
-      timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-
-    const samMsgId = crypto.randomUUID();
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: samMsgId,
-        role: 'sam',
-        content: '',
-        timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-        toolCalls: [],
-        isStreaming: true,
-      },
-    ]);
-
-    try {
-      abortRef.current = new AbortController();
-      const response = await fetch(`${API_URL}/api/sam/chat`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId, message: text }),
-        signal: abortRef.current.signal,
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error((errData as { error?: string }).error || `HTTP ${response.status}`);
-      }
-
-      if (!response.body) throw new Error('No response body');
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let streamDone = false;
-
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-        if (done) {
-          streamDone = true;
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (!data || data === '[DONE]') continue;
-
-          let event: Record<string, unknown>;
-          try {
-            event = JSON.parse(data) as Record<string, unknown>;
-          } catch {
-            continue;
-          }
-
-          const eventType = event.type as string;
-
-          if (eventType === 'conversation_started') {
-            setConversationId(event.conversationId as string);
-          } else if (eventType === 'text_delta') {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === samMsgId
-                  ? { ...m, content: m.content + (event.content as string) }
-                  : m,
-              ),
-            );
-          } else if (eventType === 'tool_start') {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === samMsgId
-                  ? {
-                      ...m,
-                      toolCalls: [...(m.toolCalls || []), { name: event.tool as string }],
-                    }
-                  : m,
-              ),
-            );
-          } else if (eventType === 'tool_result') {
-            setMessages((prev) =>
-              prev.map((m) => {
-                if (m.id !== samMsgId) return m;
-                const calls = [...(m.toolCalls || [])];
-                const idx = calls.findIndex((tc) => tc.name === event.tool && !tc.result);
-                if (idx >= 0) calls[idx] = { name: calls[idx]!.name, result: event.result };
-                return { ...m, toolCalls: calls };
-              }),
-            );
-          } else if (eventType === 'error') {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === samMsgId
-                  ? {
-                      ...m,
-                      content:
-                        m.content + `\n\n**Error:** ${event.message as string}`,
-                      isStreaming: false,
-                    }
-                  : m,
-              ),
-            );
-          } else if (eventType === 'done') {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === samMsgId ? { ...m, isStreaming: false } : m)),
-            );
-          }
-        }
-      }
-
-      setMessages((prev) =>
-        prev.map((m) => (m.id === samMsgId ? { ...m, isStreaming: false } : m)),
-      );
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') return;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === samMsgId
-            ? {
-                ...m,
-                content:
-                  m.content || `Failed to get response: ${(err as Error).message}`,
-                isStreaming: false,
-              }
-            : m,
-        ),
-      );
-    } finally {
-      setIsSending(false);
-      abortRef.current = null;
-    }
-  }, [inputValue, isSending, conversationId]);
+  }, [chat.messages]);
 
   const handleAskAboutProject = useCallback((name: string) => {
     setSelectedProject(null);
     setView('chat');
-    setInputValue(`Tell me more about ${name}`);
-  }, []);
+    setChatInputValue(`Tell me more about ${name}`);
+  }, [setChatInputValue]);
 
   // Mic button style based on voice state
   const micButtonStyle: React.CSSProperties = (() => {
@@ -410,14 +144,14 @@ export function SamPrototype() {
               view === 'chat' ? 'translate-x-0' : '-translate-x-full'
             }`}
           >
-            <div className="flex-1 overflow-y-auto px-4 py-4">
-              {isLoadingHistory ? (
-                <div className="flex items-center justify-center py-8">
+            <div className="flex-1 overflow-y-auto px-4 py-4" aria-live="polite" aria-label="Conversation">
+              {chat.isLoadingHistory ? (
+                <div className="flex items-center justify-center py-8" role="status" aria-label="Loading conversation history">
                   <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'rgba(60, 180, 120, 0.5)' }} />
                 </div>
               ) : (
-                messages.map((msg) => (
-                  <MessageBubble key={msg.id} msg={msg} />
+                chat.messages.map((msg) => (
+                  <MessageBubble key={msg.id} msg={msg} agentLabel="SAM" />
                 ))
               )}
               <div ref={messagesEndRef} />
@@ -449,12 +183,12 @@ export function SamPrototype() {
                 <textarea
                   ref={textareaRef}
                   rows={1}
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
+                  value={chat.inputValue}
+                  onChange={(e) => chat.setInputValue(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      handleSend();
+                      void chat.handleSend();
                     }
                   }}
                   placeholder={
@@ -462,11 +196,12 @@ export function SamPrototype() {
                       ? 'Speak now...'
                       : 'Ask SAM anything...'
                   }
-                  className="flex-1 px-4 py-3 text-sm rounded-xl text-white placeholder:text-white/25 focus:outline-none focus:ring-1 resize-none overflow-hidden leading-snug"
+                  aria-label="Message SAM"
+                  aria-multiline="true"
+                  className="flex-1 px-4 py-3 text-sm rounded-xl text-white placeholder:text-white/25 outline-none resize-none overflow-hidden leading-snug focus-visible:ring-1 focus-visible:ring-[rgba(60,180,120,0.5)]"
                   style={
                     {
                       ...glass.input,
-                      focusRingColor: 'rgba(60, 180, 120, 0.3)',
                       transition: 'height 0.15s ease-out',
                       minHeight: '44px',
                     } as React.CSSProperties
@@ -476,7 +211,7 @@ export function SamPrototype() {
                 <button
                   type="button"
                   onClick={voice.toggle}
-                  disabled={voice.state === 'processing' || isSending}
+                  disabled={voice.state === 'processing' || chat.isSending}
                   className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                   style={micButtonStyle}
                   title={
@@ -503,22 +238,23 @@ export function SamPrototype() {
                 {/* Send button */}
                 <button
                   type="button"
-                  onClick={handleSend}
-                  disabled={!inputValue.trim() || isSending}
+                  onClick={() => void chat.handleSend()}
+                  disabled={!chat.inputValue.trim() || chat.isSending}
+                  aria-label={chat.isSending ? 'Sending message…' : 'Send message'}
                   className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                   style={{
                     background:
-                      inputValue.trim() && !isSending
+                      chat.inputValue.trim() && !chat.isSending
                         ? 'rgba(60, 180, 120, 0.3)'
                         : 'rgba(255,255,255,0.05)',
                     border: '1px solid rgba(60, 180, 120, 0.25)',
-                    ...(inputValue.trim() && !isSending ? glow.accent : {}),
+                    ...(chat.inputValue.trim() && !chat.isSending ? glow.accent : {}),
                   }}
                 >
-                  {isSending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                  {chat.isSending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
                   ) : (
-                    <Send className="w-4 h-4" />
+                    <Send className="w-4 h-4" aria-hidden="true" />
                   )}
                 </button>
               </div>
@@ -554,22 +290,28 @@ export function SamPrototype() {
         {/* Floating bottom tab bar */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30">
           <div
+            role="tablist"
+            aria-label="View"
             className="flex rounded-2xl overflow-hidden"
             style={{ ...glass.tabBar, ...glow.green }}
           >
             <button
+              role="tab"
               type="button"
               onClick={() => setView('chat')}
+              aria-selected={view === 'chat'}
+              aria-controls="sam-chat-panel"
               className="flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all"
               style={{
                 color: view === 'chat' ? '#3cb480' : 'rgba(255,255,255,0.4)',
                 background: view === 'chat' ? 'rgba(60, 180, 120, 0.12)' : 'transparent',
               }}
             >
-              <MessageSquare className="w-4.5 h-4.5" />
+              <MessageSquare className="w-4.5 h-4.5" aria-hidden="true" />
               Chat
             </button>
             <div
+              aria-hidden="true"
               style={{
                 width: '1px',
                 background: 'rgba(60, 180, 120, 0.15)',
@@ -577,8 +319,11 @@ export function SamPrototype() {
               }}
             />
             <button
+              role="tab"
               type="button"
               onClick={() => setView('overview')}
+              aria-selected={view === 'overview'}
+              aria-controls="sam-overview-panel"
               className="flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all"
               style={{
                 color: view === 'overview' ? '#3cb480' : 'rgba(255,255,255,0.4)',
@@ -586,7 +331,7 @@ export function SamPrototype() {
                   view === 'overview' ? 'rgba(60, 180, 120, 0.12)' : 'transparent',
               }}
             >
-              <LayoutDashboard className="w-4.5 h-4.5" />
+              <LayoutDashboard className="w-4.5 h-4.5" aria-hidden="true" />
               Overview
             </button>
           </div>

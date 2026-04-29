@@ -75,6 +75,8 @@ export interface ToolContext {
   env: Record<string, unknown>;
   userId: string;
   searchMessages?: (query: string, limit: number) => SearchResult[];
+  /** Set when running inside a ProjectAgent DO — tools can use this to skip projectId input. */
+  projectId?: string;
 }
 
 /** A collected tool call from the streaming response. */
