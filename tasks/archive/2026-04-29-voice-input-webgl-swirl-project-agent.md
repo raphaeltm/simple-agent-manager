@@ -22,21 +22,21 @@ The Project Agent chat (`ProjectAgentChat.tsx`) lacks voice input and the animat
 
 ## Implementation Checklist
 
-- [ ] Add WebGL canvas background to ProjectAgentChat (behind content, absolute positioned)
-- [ ] Wire up `useWebGLBackground` hook with canvas ref and amplitude ref
-- [ ] Wire up `useVoiceInput` hook with transcribe URL and amplitude ref
-- [ ] Add mic button to input area (between textarea and send button, matching SAM style)
-- [ ] Add voice state indicators (recording dot, processing spinner, error message)
-- [ ] Import required icons (Mic, Square from lucide-react)
-- [ ] Update placeholder text when recording ("Speak now...")
+- [x] Add WebGL canvas background to ProjectAgentChat (behind content, absolute positioned)
+- [x] Wire up `useWebGLBackground` hook with canvas ref and amplitude ref
+- [x] Wire up `useVoiceInput` hook with transcribe URL and amplitude ref
+- [x] Add mic button to input area (between textarea and send button, matching SAM style)
+- [x] Add voice state indicators (recording dot, processing spinner, error message)
+- [x] Import required icons (Mic, Square from lucide-react)
+- [x] Update placeholder text when recording ("Speak now...")
 - [ ] Ensure no horizontal overflow on mobile (375px)
 
 ## Acceptance Criteria
 
-- [ ] Project Agent chat has the same WebGL swirl background as SAM top-level chat
-- [ ] Voice input button (mic) appears in the input area
-- [ ] Tapping mic records audio and transcribes to text input
-- [ ] WebGL swirl responds to voice amplitude during recording
-- [ ] Recording/processing/error states display correctly
+- [x] Project Agent chat has the same WebGL swirl background as SAM top-level chat
+- [x] Voice input button (mic) appears in the input area
+- [x] Tapping mic records audio and transcribes to text input
+- [x] WebGL swirl responds to voice amplitude during recording
+- [x] Recording/processing/error states display correctly
 - [ ] No horizontal overflow on mobile viewports
-- [ ] Existing send functionality unchanged
+- [x] Existing send functionality unchanged
