@@ -33,6 +33,8 @@ export interface ChatSessionResponse {
   cleanupAt?: number | null;
   /** Active agent session ID (ULID) from D1, used for ACP WebSocket routing. */
   agentSessionId?: string | null;
+  /** Agent type from ACP session (e.g., 'claude-code', 'openai-codex'). */
+  agentType?: string | null;
   /** Embedded task summary (populated in session detail response). */
   task?: {
     id: string;
@@ -43,6 +45,10 @@ export interface ChatSessionResponse {
     outputPrUrl?: string | null;
     outputSummary?: string | null;
     finalizedAt?: string | null;
+    /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
+    taskMode?: 'task' | 'conversation' | null;
+    /** Agent profile name hint (human-readable label from dispatch). */
+    agentProfileHint?: string | null;
   };
 }
 

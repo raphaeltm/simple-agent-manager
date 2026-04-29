@@ -1,4 +1,4 @@
-import type { TaskExecutionStep, TaskStatus } from './task';
+import type { TaskExecutionStep, TaskMode, TaskStatus } from './task';
 
 // =============================================================================
 // Chat Sessions
@@ -25,6 +25,10 @@ export interface ChatSession {
   isTerminated: boolean;
   /** Computed: derived from workspaceId + BASE_DOMAIN */
   workspaceUrl: string | null;
+  /** Active ACP session ID (ULID), used for ACP WebSocket routing. */
+  agentSessionId?: string | null;
+  /** Agent type from ACP session (e.g., 'claude-code', 'openai-codex'). */
+  agentType?: string | null;
 }
 
 export interface ChatSessionTaskEmbed {
@@ -36,6 +40,10 @@ export interface ChatSessionTaskEmbed {
   outputPrUrl: string | null;
   outputSummary: string | null;
   finalizedAt: string | null;
+  /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
+  taskMode?: TaskMode | null;
+  /** Agent profile name hint (human-readable label from dispatch). */
+  agentProfileHint?: string | null;
 }
 
 export interface ChatSessionDetail extends ChatSession {

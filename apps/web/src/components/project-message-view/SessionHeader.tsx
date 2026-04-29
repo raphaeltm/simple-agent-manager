@@ -1,7 +1,7 @@
 import type { DetectedPort, NodeResponse, TaskDetailResponse, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
-import { Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Copy, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Hash, MapPin, RotateCcw, Server, Tag, Timer } from 'lucide-react';
+import { Bot, Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Copy, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Hash, MapPin, MessageSquare, RotateCcw, Server, Tag, Timer, User2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
@@ -91,6 +91,20 @@ function formatExecutionStep(step: string | null | undefined): string | null {
     awaiting_followup: 'Awaiting follow-up',
   };
   return labels[step] ?? step.replace(/_/g, ' ');
+}
+
+/** Human-readable agent type label. */
+function formatAgentType(agentType: string): string {
+  const labels: Record<string, string> = {
+    'claude-code': 'Claude Code',
+    'openai-codex': 'OpenAI Codex',
+  };
+  return labels[agentType] ?? agentType;
+}
+
+/** Human-readable task mode label. */
+function formatTaskMode(mode: string): string {
+  return mode === 'conversation' ? 'Conversation' : 'Task';
 }
 
 /** Collapsible session header — shows title + state dot, with expandable details. */
@@ -314,6 +328,33 @@ export function SessionHeader({
               )}
             </div>
           </div>
+
+          {/* Agent info — type, mode, profile */}
+          {(session.agentType || taskEmbed?.taskMode || taskEmbed?.agentProfileHint) && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted min-w-0">
+              {session.agentType && (
+                <span className="inline-flex items-center gap-1">
+                  <Bot size={11} className="opacity-60" aria-hidden="true" />
+                  <span className="font-medium text-fg-primary">{formatAgentType(session.agentType)}</span>
+                </span>
+              )}
+              {taskEmbed?.taskMode && (
+                <span className="inline-flex items-center gap-1">
+                  {taskEmbed.taskMode === 'conversation'
+                    ? <MessageSquare size={11} className="opacity-60" aria-hidden="true" />
+                    : <Cpu size={11} className="opacity-60" aria-hidden="true" />
+                  }
+                  {formatTaskMode(taskEmbed.taskMode)}
+                </span>
+              )}
+              {taskEmbed?.agentProfileHint && (
+                <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
+                  <User2 size={11} className="opacity-60 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{taskEmbed.agentProfileHint}</span>
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Task execution status + timing */}
           {(taskEmbed?.id || session.startedAt) && (

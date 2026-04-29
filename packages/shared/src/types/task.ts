@@ -23,7 +23,14 @@ export function isTaskStatus(value: unknown): value is TaskStatus {
   return typeof value === 'string' && (TASK_STATUSES as readonly string[]).includes(value);
 }
 
-export type TaskMode = 'task' | 'conversation';
+export const TASK_MODES = ['task', 'conversation'] as const;
+
+export type TaskMode = (typeof TASK_MODES)[number];
+
+/** Runtime type guard for TaskMode values from untrusted sources (e.g. database rows). */
+export function isTaskMode(value: unknown): value is TaskMode {
+  return typeof value === 'string' && (TASK_MODES as readonly string[]).includes(value);
+}
 
 /**
  * Tracks where the task runner is during async execution.

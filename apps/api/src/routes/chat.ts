@@ -7,7 +7,7 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
-import { isTaskExecutionStep } from '@simple-agent-manager/shared';
+import { isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -135,6 +135,8 @@ chatRoutes.get('/:sessionId', async (c) => {
           outputPrUrl: schema.tasks.outputPrUrl,
           outputSummary: schema.tasks.outputSummary,
           finalizedAt: schema.tasks.finalizedAt,
+          taskMode: schema.tasks.taskMode,
+          agentProfileHint: schema.tasks.agentProfileHint,
         })
         .from(schema.tasks)
         .where(eq(schema.tasks.id, taskId))
@@ -150,6 +152,8 @@ chatRoutes.get('/:sessionId', async (c) => {
           outputPrUrl: taskRow.outputPrUrl,
           outputSummary: taskRow.outputSummary ?? null,
           finalizedAt: taskRow.finalizedAt ?? null,
+          taskMode: isTaskMode(taskRow.taskMode) ? taskRow.taskMode : null,
+          agentProfileHint: taskRow.agentProfileHint ?? null,
         };
       }
     } catch {
@@ -169,12 +173,14 @@ chatRoutes.get('/:sessionId', async (c) => {
   // original ACP session ID linked to this chat session to preserve
   // conversation context.
   let agentSessionId: string | null = null;
+  let agentType: string | null = null;
   try {
     const acpSessions = await projectDataService.listAcpSessions(c.env, projectId, {
       chatSessionId: sessionId,
       limit: 1,
     });
     agentSessionId = acpSessions.sessions[0]?.id ?? null;
+    agentType = acpSessions.sessions[0]?.agentType ?? null;
   } catch (err) {
     // ACP session lookup failure is non-fatal — UI falls back to the chat
     // session ID and can still load persisted history from the DO.
@@ -186,7 +192,7 @@ chatRoutes.get('/:sessionId', async (c) => {
   }
 
   return c.json({
-    session: { ...session, agentSessionId, task },
+    session: { ...session, agentSessionId, agentType, task },
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
   });
