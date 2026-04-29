@@ -25,6 +25,10 @@ export interface ChatSession {
   isTerminated: boolean;
   /** Computed: derived from workspaceId + BASE_DOMAIN */
   workspaceUrl: string | null;
+  /** Active ACP session ID (ULID), used for ACP WebSocket routing. */
+  agentSessionId?: string | null;
+  /** Agent type from ACP session (e.g., 'claude-code', 'openai-codex'). */
+  agentType?: string | null;
 }
 
 export interface ChatSessionTaskEmbed {
