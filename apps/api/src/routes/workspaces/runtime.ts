@@ -89,7 +89,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     // Resolve default model: KV (admin-set) > env var > shared constant
     let defaultModel: string;
     if (isClaudeCode) {
-      defaultModel = (c.env as Record<string, string>).AI_PROXY_DEFAULT_ANTHROPIC_MODEL ?? DEFAULT_AI_PROXY_ANTHROPIC_MODEL;
+      defaultModel = c.env.AI_PROXY_DEFAULT_ANTHROPIC_MODEL ?? DEFAULT_AI_PROXY_ANTHROPIC_MODEL;
     } else {
       defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
       try {
