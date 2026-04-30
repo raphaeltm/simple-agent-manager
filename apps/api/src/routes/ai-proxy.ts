@@ -417,9 +417,14 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       anthropicAuthHeaders = auth.headers;
       billingMode = auth.billingMode;
     } catch (err) {
+      log.error('ai_proxy.auth_resolution_failed', {
+        userId,
+        workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return c.json({
         error: {
-          message: err instanceof Error ? err.message : 'Failed to resolve upstream authentication',
+          message: 'AI proxy authentication is not configured. Contact your administrator.',
           type: 'server_error',
         },
       }, 503);

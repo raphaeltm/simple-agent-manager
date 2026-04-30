@@ -15,6 +15,7 @@ import {
   type BillingMode,
   DEFAULT_AI_PROXY_MODEL,
   PLATFORM_AI_MODELS,
+  VALID_BILLING_MODES,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -46,8 +47,6 @@ async function hasAnthropicCredential(env: Env): Promise<boolean> {
     return false;
   }
 }
-
-const VALID_BILLING_MODES: BillingMode[] = ['unified', 'platform-key', 'auto'];
 
 /**
  * GET /api/admin/ai-proxy/config
@@ -184,6 +183,7 @@ adminAIProxyRoutes.patch('/config', async (c) => {
  */
 adminAIProxyRoutes.delete('/config', async (c) => {
   await c.env.KV.delete(AI_PROXY_DEFAULT_MODEL_KV_KEY);
+  await c.env.KV.delete(AI_PROXY_BILLING_MODE_KV_KEY);
 
   log.info('admin.ai_proxy.config_reset', {});
 

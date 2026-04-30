@@ -174,6 +174,9 @@ export const AI_PROXY_BILLING_MODE_KV_KEY = 'platform:ai-proxy:billing-mode';
  * Override via AI_PROXY_BILLING_MODE env var. Default: 'auto'. */
 export type BillingMode = 'unified' | 'platform-key' | 'auto';
 
+/** All valid billing modes — single source of truth for validation. */
+export const VALID_BILLING_MODES: readonly BillingMode[] = ['unified', 'platform-key', 'auto'] as const;
+
 /** Default billing mode. Override via AI_PROXY_BILLING_MODE env var. */
 export const DEFAULT_AI_PROXY_BILLING_MODE: BillingMode = 'auto';
 

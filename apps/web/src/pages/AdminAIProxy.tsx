@@ -103,7 +103,7 @@ export function AdminAIProxy() {
 
   if (!config) {
     return (
-      <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+      <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
         {error || 'Failed to load config'}
       </div>
     );
@@ -119,7 +119,7 @@ export function AdminAIProxy() {
       </Body>
 
       {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+        <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
           {error}
         </div>
       )}
@@ -127,8 +127,8 @@ export function AdminAIProxy() {
       {/* Billing Mode */}
       <Card>
         <div className="space-y-4 p-4">
-          <div>
-            <label className="mb-2 block text-sm font-medium">Billing Mode</label>
+          <fieldset>
+            <legend className="mb-2 block text-sm font-medium">Billing Mode</legend>
             <div className="space-y-2">
               {BILLING_MODE_OPTIONS.map((option) => (
                 <label
@@ -153,7 +153,7 @@ export function AdminAIProxy() {
                 </label>
               ))}
             </div>
-          </div>
+          </fieldset>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[var(--sam-text-secondary)]">
             <span>
@@ -161,7 +161,7 @@ export function AdminAIProxy() {
               <span className={config.hasCfApiToken
                 ? 'font-medium text-green-600 dark:text-green-400'
                 : 'font-medium text-yellow-600 dark:text-yellow-400'}>
-                {config.hasCfApiToken ? 'configured' : 'not configured'}
+                {config.hasCfApiToken ? '● configured' : '○ not configured'}
               </span>
             </span>
             <span>
@@ -169,7 +169,7 @@ export function AdminAIProxy() {
               <span className={config.hasAnthropicCredential
                 ? 'font-medium text-green-600 dark:text-green-400'
                 : 'font-medium text-yellow-600 dark:text-yellow-400'}>
-                {config.hasAnthropicCredential ? 'configured' : 'not configured'}
+                {config.hasAnthropicCredential ? '● configured' : '○ not configured'}
               </span>
             </span>
           </div>

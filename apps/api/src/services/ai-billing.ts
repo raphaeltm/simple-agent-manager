@@ -10,6 +10,7 @@ import {
   AI_PROXY_BILLING_MODE_KV_KEY,
   type BillingMode,
   DEFAULT_AI_PROXY_BILLING_MODE,
+  VALID_BILLING_MODES,
 } from '@simple-agent-manager/shared';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -41,7 +42,7 @@ export async function resolveBillingMode(env: Env): Promise<BillingMode> {
 }
 
 function isValidBillingMode(value: string): value is BillingMode {
-  return value === 'unified' || value === 'platform-key' || value === 'auto';
+  return (VALID_BILLING_MODES as readonly string[]).includes(value);
 }
 
 /**
