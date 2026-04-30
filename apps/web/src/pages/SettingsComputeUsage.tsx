@@ -91,8 +91,9 @@ function AiUsageSection() {
             <button
               key={opt.value}
               type="button"
+              aria-pressed={period === opt.value}
               onClick={() => handlePeriodChange(opt.value)}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`px-3 py-2.5 rounded-md text-sm font-medium transition-colors min-h-[44px] ${
                 period === opt.value
                   ? 'bg-accent-emphasis text-fg-on-accent'
                   : 'bg-surface text-fg-muted hover:bg-surface-hover border border-border-default'
@@ -153,7 +154,7 @@ function AiUsageSection() {
           {data.byModel.length > 0 && (
             <Card className="p-4 overflow-hidden min-w-0">
               <CardTitle className="mb-3">By Model</CardTitle>
-              <div className="space-y-0">
+              <div>
                 {data.byModel.map((m) => (
                   <div
                     key={m.model}
@@ -167,8 +168,8 @@ function AiUsageSection() {
                       <span>{m.requests.toLocaleString()} req</span>
                       <span>{formatTokens(m.inputTokens)} in</span>
                       <span>{formatTokens(m.outputTokens)} out</span>
-                      {m.cachedRequests > 0 && <span className="text-success">{m.cachedRequests} cached</span>}
-                      {m.errorRequests > 0 && <span className="text-error">{m.errorRequests} err</span>}
+                      {m.cachedRequests > 0 && <span className="text-accent-fg">{m.cachedRequests} cached</span>}
+                      {m.errorRequests > 0 && <span className="text-danger-fg" title={`${m.errorRequests} error requests`}>{m.errorRequests} err</span>}
                     </div>
                   </div>
                 ))}
@@ -188,7 +189,7 @@ function AiUsageSection() {
                       <span className="text-xs text-fg-muted tabular-nums w-20 flex-shrink-0">
                         {d.date.slice(5)}
                       </span>
-                      <div className="flex-1 min-w-0 h-4 bg-surface rounded overflow-hidden">
+                      <div className="flex-1 min-w-0 h-4 bg-surface-hover rounded overflow-hidden" role="presentation">
                         <div
                           className="h-full bg-accent-emphasis rounded"
                           style={{ width: `${Math.max(1, (d.costUsd / maxCost) * 100)}%` }}
