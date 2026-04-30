@@ -986,29 +986,46 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 			}
 		}
 	} else if cred.inferenceConfig != nil && cred.inferenceConfig.APIKeySource == "callback-token" {
-		// Platform AI proxy: use the workspace callback token as the API key
-		// and inject the proxy base URL for OpenCode's openai-compatible provider.
+		// Platform AI proxy: use the workspace callback token as the API key.
 		if h.config.CallbackToken == "" {
 			return fmt.Errorf("platform AI proxy configured but CallbackToken is empty for workspace %s", h.config.WorkspaceID)
 		}
-		envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+cred.inferenceConfig.BaseURL)
-		envVars = append(envVars, "OPENCODE_PLATFORM_API_KEY="+h.config.CallbackToken)
-		// Force provider to "platform" so buildOpencodeConfig generates the right config
-		if settings == nil {
-			settings = &agentSettingsPayload{}
+
+		if agentType == "claude-code" && cred.inferenceConfig.Provider == "anthropic-proxy" {
+			// Claude Code: inject ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN for custom proxy.
+			// Claude Code appends /v1/messages to ANTHROPIC_BASE_URL automatically.
+			// ANTHROPIC_AUTH_TOKEN is used instead of ANTHROPIC_API_KEY for proxy auth.
+			envVars = append(envVars, "ANTHROPIC_BASE_URL="+cred.inferenceConfig.BaseURL)
+			envVars = append(envVars, "ANTHROPIC_AUTH_TOKEN="+h.config.CallbackToken)
+			if cred.inferenceConfig.Model != "" {
+				envVars = append(envVars, "ANTHROPIC_MODEL="+cred.inferenceConfig.Model)
+			}
+			slog.Info("Claude Code AI proxy credential injected",
+				"baseURL", cred.inferenceConfig.BaseURL,
+				"model", cred.inferenceConfig.Model,
+				"callbackTokenLen", len(h.config.CallbackToken),
+				"workspaceId", h.config.WorkspaceID)
+		} else {
+			// OpenCode: inject openai-compatible proxy env vars.
+			envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+cred.inferenceConfig.BaseURL)
+			envVars = append(envVars, "OPENCODE_PLATFORM_API_KEY="+h.config.CallbackToken)
+			// Force provider to "platform" so buildOpencodeConfig generates the right config
+			if settings == nil {
+				settings = &agentSettingsPayload{}
+			}
+			settings.OpencodeProvider = "platform"
+			if settings.Model == "" && cred.inferenceConfig.Model != "" {
+				// Strip @cf/ prefix — see stripCFPrefix() doc comment.
+				settings.Model = stripCFPrefix(cred.inferenceConfig.Model)
+			}
+			slog.Info("OpenCode AI proxy credential injected",
+				"baseURL", cred.inferenceConfig.BaseURL,
+				"model", cred.inferenceConfig.Model,
+				"settingsModel", settings.Model,
+				"settingsProvider", settings.OpencodeProvider,
+				"callbackTokenLen", len(h.config.CallbackToken),
+				"workspaceId", h.config.WorkspaceID)
 		}
-		settings.OpencodeProvider = "platform"
-		if settings.Model == "" && cred.inferenceConfig.Model != "" {
-			// Strip @cf/ prefix — see stripCFPrefix() doc comment.
-			settings.Model = stripCFPrefix(cred.inferenceConfig.Model)
-		}
-		slog.Info("Platform AI proxy credential injected",
-			"baseURL", cred.inferenceConfig.BaseURL,
-			"model", cred.inferenceConfig.Model,
-			"settingsModel", settings.Model,
-			"settingsProvider", settings.OpencodeProvider,
-			"callbackTokenLen", len(h.config.CallbackToken),
-			"workspaceId", h.config.WorkspaceID)
 	} else {
 		envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
 	}

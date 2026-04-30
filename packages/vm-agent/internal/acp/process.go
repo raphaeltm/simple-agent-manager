@@ -91,6 +91,7 @@ func parseEnvExportLines(content string) []string {
 // not appear in docker exec command-line arguments (visible in /proc/*/cmdline).
 var secretEnvNames = map[string]bool{
 	"ANTHROPIC_API_KEY":        true,
+	"ANTHROPIC_AUTH_TOKEN":     true,
 	"CLAUDE_CODE_OAUTH_TOKEN":  true,
 	"OPENAI_API_KEY":           true,
 	"GH_TOKEN":                 true,
