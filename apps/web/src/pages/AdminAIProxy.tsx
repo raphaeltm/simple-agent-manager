@@ -157,7 +157,7 @@ export function AdminAIProxy() {
             >
               {sortedTiers.map((tier) => (
                 <optgroup key={tier} label={TIER_LABELS[tier] ?? tier}>
-                  {modelsByTier[tier].map((model) => (
+                  {modelsByTier[tier]?.map((model) => (
                     <option
                       key={model.id}
                       value={model.id}
@@ -252,7 +252,7 @@ export function AdminAIProxy() {
                   </span>
                 </div>
                 <div className="space-y-1">
-                  {modelsByTier[tier].map((model) => (
+                  {modelsByTier[tier]?.map((model) => (
                     <div
                       key={model.id}
                       className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-[var(--sam-border)] px-3 py-2 text-sm"
