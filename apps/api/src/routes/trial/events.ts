@@ -20,6 +20,7 @@ import { Hono } from 'hono';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { parsePositiveInt } from '../../lib/route-helpers';
 import { errors } from '../../middleware/error';
 import {
   checkRateLimit,
@@ -87,9 +88,9 @@ eventsRoutes.get('/:trialId/events', async (c) => {
   }
 
   // Build SSE stream
-  const heartbeatMs = parseIntSafe(c.env.TRIAL_SSE_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS);
-  const pollTimeoutMs = parseIntSafe(c.env.TRIAL_SSE_POLL_TIMEOUT_MS, DEFAULT_POLL_TIMEOUT_MS);
-  const maxDurationMs = parseIntSafe(c.env.TRIAL_SSE_MAX_DURATION_MS, DEFAULT_MAX_DURATION_MS);
+  const heartbeatMs = parsePositiveInt(c.env.TRIAL_SSE_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS);
+  const pollTimeoutMs = parsePositiveInt(c.env.TRIAL_SSE_POLL_TIMEOUT_MS, DEFAULT_POLL_TIMEOUT_MS);
+  const maxDurationMs = parsePositiveInt(c.env.TRIAL_SSE_MAX_DURATION_MS, DEFAULT_MAX_DURATION_MS);
 
   const encoder = new TextEncoder();
   const busStub = c.env.TRIAL_EVENT_BUS.get(c.env.TRIAL_EVENT_BUS.idFromName(trialId));
@@ -204,11 +205,6 @@ function parseCookie(header: string, name: string): string | null {
   return null;
 }
 
-function parseIntSafe(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
 
 export function formatSse(data: unknown): string {
   // Emit as the default ("message") SSE event so that EventSource consumers

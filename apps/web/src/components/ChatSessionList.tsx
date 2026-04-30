@@ -1,33 +1,11 @@
 import { EmptyState, StatusBadge } from '@simple-agent-manager/ui';
 
 import type { ChatSessionResponse } from '../lib/api';
+import { formatDuration, formatRelativeTime } from '../lib/time-utils';
 
 interface ChatSessionListProps {
   sessions: ChatSessionResponse[];
   onSelect: (sessionId: string) => void;
-}
-
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
-
-function formatDuration(startedAt: number, endedAt: number | null): string {
-  const end = endedAt ?? Date.now();
-  const diff = end - startedAt;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return '<1m';
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
 export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
