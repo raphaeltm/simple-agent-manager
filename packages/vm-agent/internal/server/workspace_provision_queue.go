@@ -77,22 +77,52 @@ func (s *Server) enqueueOrStartWorkspaceProvision(req workspaceProvisionRequest)
 		return false
 	}
 
+	if req.runtime != nil {
+		for index, queued := range s.provisionQueue {
+			if queued.runtime != nil && queued.runtime.ID == req.runtime.ID {
+				s.provisionQueue[index] = req
+				queueDepth := len(s.provisionQueue)
+				s.provisionGateMu.Unlock()
+				s.appendWorkspaceProvisionQueueEvent(req, "workspace.queue_coalesced", "Workspace provisioning request coalesced with existing queued request", queueDepth, nil)
+				return false
+			}
+		}
+	}
+
+	queueMax := 20
+	if s.config != nil && s.config.WorkspaceProvisionQueueMax > 0 {
+		queueMax = s.config.WorkspaceProvisionQueueMax
+	}
+	if len(s.provisionQueue) >= queueMax {
+		queueDepth := len(s.provisionQueue)
+		s.provisionGateMu.Unlock()
+		s.failQueuedWorkspaceProvision(req, fmt.Errorf("workspace provisioning queue is full: depth %d, max %d", queueDepth, queueMax))
+		return false
+	}
+
 	s.provisionQueue = append(s.provisionQueue, req)
 	queueDepth := len(s.provisionQueue)
 	s.provisionGateMu.Unlock()
 
-	if req.runtime != nil {
-		detail := copyEventDetail(req.detail)
-		detail["workspaceId"] = req.runtime.ID
-		detail["queueDepth"] = queueDepth
-		detail["reason"] = "system_provisioning_in_progress"
-		s.appendNodeEvent(req.runtime.ID, "info", "workspace.queued", "Workspace provisioning queued until node provisioning completes", detail)
-		slog.Info("Workspace provisioning queued until system provisioning completes",
-			"workspace", req.runtime.ID,
-			"queueDepth", queueDepth)
-	}
+	s.appendWorkspaceProvisionQueueEvent(req, "workspace.queued", "Workspace provisioning queued until node provisioning completes", queueDepth, nil)
 
 	return false
+}
+
+func (s *Server) appendWorkspaceProvisionQueueEvent(req workspaceProvisionRequest, eventType, message string, queueDepth int, extra map[string]interface{}) {
+	if req.runtime == nil {
+		return
+	}
+
+	detail := copyEventDetail(req.detail)
+	detail["workspaceId"] = req.runtime.ID
+	detail["queueDepth"] = queueDepth
+	detail["reason"] = "system_provisioning_in_progress"
+	for key, value := range extra {
+		detail[key] = value
+	}
+	s.appendNodeEvent(req.runtime.ID, "info", eventType, message, detail)
+	slog.Info(message, "workspace", req.runtime.ID, "queueDepth", queueDepth)
 }
 
 func (s *Server) failQueuedWorkspaceProvision(req workspaceProvisionRequest, err error) {

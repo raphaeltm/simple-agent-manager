@@ -398,6 +398,20 @@ func TestVMAgentPortOverride(t *testing.T) {
 	}
 }
 
+func TestWorkspaceProvisionQueueMaxOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("WORKSPACE_PROVISION_QUEUE_MAX", "7")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.WorkspaceProvisionQueueMax != 7 {
+		t.Fatalf("WorkspaceProvisionQueueMax=%d, want 7", cfg.WorkspaceProvisionQueueMax)
+	}
+}
+
 func TestACPPhaseTimeoutsDefault(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
@@ -460,14 +474,15 @@ func splitFirst(s, sep string) []string {
 // validConfig returns a Config with all required fields set to valid values.
 func validConfig() *Config {
 	return &Config{
-		Port:            8080,
-		ControlPlaneURL: "https://api.example.com",
-		NodeID:          "node-1",
-		SessionMaxCount: 100,
-		DefaultRows:     24,
-		DefaultCols:     80,
-		WSReadBufferSize:  1024,
-		WSWriteBufferSize: 1024,
+		Port:                       8080,
+		ControlPlaneURL:            "https://api.example.com",
+		NodeID:                     "node-1",
+		SessionMaxCount:            100,
+		DefaultRows:                24,
+		DefaultCols:                80,
+		WSReadBufferSize:           1024,
+		WSWriteBufferSize:          1024,
+		WorkspaceProvisionQueueMax: 20,
 	}
 }
 
@@ -568,6 +583,19 @@ func TestValidateSessionMaxCount(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "SESSION_MAX_COUNT") {
 		t.Fatalf("expected SESSION_MAX_COUNT error, got: %v", err)
+	}
+}
+
+func TestValidateWorkspaceProvisionQueueMax(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.WorkspaceProvisionQueueMax = 0
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for WorkspaceProvisionQueueMax = 0")
+	}
+	if !strings.Contains(err.Error(), "WORKSPACE_PROVISION_QUEUE_MAX") {
+		t.Fatalf("expected WORKSPACE_PROVISION_QUEUE_MAX error, got: %v", err)
 	}
 }
 

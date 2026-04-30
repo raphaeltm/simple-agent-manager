@@ -86,21 +86,64 @@ func TestQueuedWorkspaceProvisionFailsWhenSystemProvisioningFails(t *testing.T) 
 	assertWorkspaceEvent(t, s, runtime.ID, "workspace.provisioning_failed")
 }
 
+func TestWorkspaceProvisionQueueCoalescesDuplicateWorkspace(t *testing.T) {
+	s := newQueueTestServer("http://127.0.0.1")
+	runtime := newQueueTestRuntime("WS_DUPLICATE")
+	s.workspaces[runtime.ID] = runtime
+
+	s.BlockWorkspaceProvisioning()
+	s.startWorkspaceProvision(runtime, "workspace.failed", "Workspace failed", "workspace.created", "Workspace created", map[string]interface{}{"attempt": 1})
+	s.startWorkspaceProvision(runtime, "workspace.failed", "Workspace failed", "workspace.created", "Workspace created", map[string]interface{}{"attempt": 2})
+
+	if got := len(s.provisionQueue); got != 1 {
+		t.Fatalf("provisionQueue length = %d, want 1", got)
+	}
+	if got := s.provisionQueue[0].detail["attempt"]; got != 2 {
+		t.Fatalf("queued detail attempt = %v, want latest attempt 2", got)
+	}
+	assertWorkspaceEvent(t, s, runtime.ID, "workspace.queue_coalesced")
+}
+
+func TestWorkspaceProvisionQueueRejectsOverflow(t *testing.T) {
+	s := newQueueTestServer("http://127.0.0.1")
+	s.config.WorkspaceProvisionQueueMax = 1
+	first := newQueueTestRuntime("WS_FIRST")
+	second := newQueueTestRuntime("WS_SECOND")
+	s.workspaces[first.ID] = first
+	s.workspaces[second.ID] = second
+
+	s.BlockWorkspaceProvisioning()
+	s.startWorkspaceProvision(first, "workspace.provisioning_failed", "Workspace provisioning failed", "workspace.created", "Workspace created", nil)
+	s.startWorkspaceProvision(second, "workspace.provisioning_failed", "Workspace provisioning failed", "workspace.created", "Workspace created", nil)
+
+	if got := len(s.provisionQueue); got != 1 {
+		t.Fatalf("provisionQueue length = %d, want 1", got)
+	}
+	if got := first.Status; got != "creating" {
+		t.Fatalf("first runtime.Status = %q, want creating", got)
+	}
+	if got := second.Status; got != "error" {
+		t.Fatalf("second runtime.Status = %q, want error", got)
+	}
+	assertWorkspaceEvent(t, s, second.ID, "workspace.provisioning_failed")
+}
+
 func newQueueTestServer(controlPlaneURL string) *Server {
 	return &Server{
 		config: &config.Config{
-			NodeID:              "NODE_TEST",
-			ControlPlaneURL:     controlPlaneURL,
-			CallbackToken:       "callback-token",
-			ContainerMode:       true,
-			WorkspaceDir:        "/workspace",
-			DefaultShell:        "/bin/bash",
-			DefaultRows:         24,
-			DefaultCols:         80,
-			ContainerLabelKey:   "devcontainer.local_folder",
-			PTYOutputBufferSize: 1024,
-			HTTPCallbackTimeout: time.Second,
-			BootstrapTimeout:    5 * time.Second,
+			NodeID:                     "NODE_TEST",
+			ControlPlaneURL:            controlPlaneURL,
+			CallbackToken:              "callback-token",
+			ContainerMode:              true,
+			WorkspaceDir:               "/workspace",
+			DefaultShell:               "/bin/bash",
+			DefaultRows:                24,
+			DefaultCols:                80,
+			ContainerLabelKey:          "devcontainer.local_folder",
+			PTYOutputBufferSize:        1024,
+			HTTPCallbackTimeout:        time.Second,
+			BootstrapTimeout:           5 * time.Second,
+			WorkspaceProvisionQueueMax: 20,
 		},
 		workspaces:          make(map[string]*WorkspaceRuntime),
 		nodeEvents:          make([]EventRecord, 0, 16),

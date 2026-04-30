@@ -73,10 +73,10 @@ type Config struct {
 	HeartbeatInterval time.Duration
 
 	// HTTP server timeouts
-	HTTPReadTimeout      time.Duration
-	HTTPWriteTimeout     time.Duration
-	HTTPIdleTimeout      time.Duration
-	HTTPCallbackTimeout  time.Duration // timeout for outbound HTTP callbacks to the control plane
+	HTTPReadTimeout     time.Duration
+	HTTPWriteTimeout    time.Duration
+	HTTPIdleTimeout     time.Duration
+	HTTPCallbackTimeout time.Duration // timeout for outbound HTTP callbacks to the control plane
 
 	// WebSocket settings
 	WSReadBufferSize  int
@@ -96,16 +96,16 @@ type Config struct {
 	ACPInitializeTimeoutMs   int // Per-phase timeout for Initialize RPC; 0 = use ACPInitTimeoutMs (default: 0)
 	ACPNewSessionTimeoutMs   int // Per-phase timeout for NewSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
 	ACPLoadSessionTimeoutMs  int // Per-phase timeout for LoadSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
-	ACPReconnectDelayMs   int
-	ACPReconnectTimeoutMs int
-	ACPMaxRestartAttempts int
-	ACPMessageBufferSize  int           // Max buffered messages per SessionHost for late-join replay
-	ACPViewerSendBuffer   int           // Per-viewer send channel buffer size
-	ACPPingInterval       time.Duration // WebSocket ping interval (default: 30s)
-	ACPPongTimeout        time.Duration // WebSocket pong deadline after ping (default: 10s)
-	ACPPromptTimeout      time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
-	ACPTaskPromptTimeout  time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 6h)
-	ACPPromptCancelGrace  time.Duration // Wait after cancel before force-stop fallback (default: 5s)
+	ACPReconnectDelayMs      int
+	ACPReconnectTimeoutMs    int
+	ACPMaxRestartAttempts    int
+	ACPMessageBufferSize     int           // Max buffered messages per SessionHost for late-join replay
+	ACPViewerSendBuffer      int           // Per-viewer send channel buffer size
+	ACPPingInterval          time.Duration // WebSocket ping interval (default: 30s)
+	ACPPongTimeout           time.Duration // WebSocket pong deadline after ping (default: 10s)
+	ACPPromptTimeout         time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
+	ACPTaskPromptTimeout     time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 6h)
+	ACPPromptCancelGrace     time.Duration // Wait after cancel before force-stop fallback (default: 5s)
 	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
 	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
 	ACPHeartbeatInterval     time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
@@ -141,9 +141,9 @@ type Config struct {
 	TaskMode      string // Task execution mode: "task" or "conversation" (env: TASK_MODE, default: "task")
 
 	// Persistence settings - configurable per constitution principle XI
-	PersistenceDBPath string // SQLite database path for session state persistence
-	EventStoreDBPath  string // SQLite database path for persistent event logs
-	MetricsDBPath     string // SQLite database path for resource metrics snapshots
+	PersistenceDBPath string        // SQLite database path for session state persistence
+	EventStoreDBPath  string        // SQLite database path for persistent event logs
+	MetricsDBPath     string        // SQLite database path for resource metrics snapshots
 	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
 
 	// Git integration settings - configurable per constitution principle XI
@@ -170,6 +170,7 @@ type Config struct {
 
 	// Callback retry settings - configurable per constitution principle XI
 	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 10s)
+	WorkspaceProvisionQueueMax    int           // Max workspace provisions queued while system provisioning is blocked (env: WORKSPACE_PROVISION_QUEUE_MAX, default: 20)
 
 	// Error reporting settings - configurable per constitution principle XI
 	ErrorReportFlushInterval time.Duration // Background flush interval (default: 30s)
@@ -183,7 +184,7 @@ type Config struct {
 	SysInfoCacheTTL       time.Duration // Cache TTL for system info responses (default: 5s)
 
 	// Log reader/stream settings - configurable per constitution principle XI
-	LogReaderTimeout     time.Duration // Timeout for journalctl read commands (default: 30s)
+	LogReaderTimeout      time.Duration // Timeout for journalctl read commands (default: 30s)
 	LogStreamPingInterval time.Duration // WebSocket ping interval for log stream (default: 30s)
 	LogStreamPongTimeout  time.Duration // WebSocket pong deadline for log stream (default: 90s)
 
@@ -283,20 +284,20 @@ func Load() (*Config, error) {
 		PTYOutputBufferSize:  getEnvInt("PTY_OUTPUT_BUFFER_SIZE", 262144), // 256 KB default
 
 		// ACP settings - configurable per constitution principle XI
-		ACPInitTimeoutMs:        getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
-		ACPInitializeTimeoutMs:  getEnvInt("ACP_INITIALIZE_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
-		ACPNewSessionTimeoutMs:  getEnvInt("ACP_NEW_SESSION_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
-		ACPLoadSessionTimeoutMs: getEnvInt("ACP_LOAD_SESSION_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
-		ACPReconnectDelayMs:   getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
-		ACPReconnectTimeoutMs: getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
-		ACPMaxRestartAttempts: getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
-		ACPMessageBufferSize:  getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
-		ACPViewerSendBuffer:   getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
-		ACPPingInterval:       getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
-		ACPPongTimeout:        getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
-		ACPPromptTimeout:      getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
-		ACPTaskPromptTimeout:  getEnvDuration("ACP_TASK_PROMPT_TIMEOUT", 6*time.Hour),
-		ACPPromptCancelGrace:  getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
+		ACPInitTimeoutMs:         getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
+		ACPInitializeTimeoutMs:   getEnvInt("ACP_INITIALIZE_TIMEOUT_MS", 0),   // 0 = use ACPInitTimeoutMs
+		ACPNewSessionTimeoutMs:   getEnvInt("ACP_NEW_SESSION_TIMEOUT_MS", 0),  // 0 = use ACPInitTimeoutMs
+		ACPLoadSessionTimeoutMs:  getEnvInt("ACP_LOAD_SESSION_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
+		ACPReconnectDelayMs:      getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
+		ACPReconnectTimeoutMs:    getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
+		ACPMaxRestartAttempts:    getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
+		ACPMessageBufferSize:     getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
+		ACPViewerSendBuffer:      getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
+		ACPPingInterval:          getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
+		ACPPongTimeout:           getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
+		ACPPromptTimeout:         getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
+		ACPTaskPromptTimeout:     getEnvDuration("ACP_TASK_PROMPT_TIMEOUT", 6*time.Hour),
+		ACPPromptCancelGrace:     getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
 		ACPIdleSuspendTimeout:    getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
 		ACPNotifSerializeTimeout: getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
 		ACPHeartbeatInterval:     getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),
@@ -353,13 +354,14 @@ func Load() (*Config, error) {
 
 		// File transfer settings
 		FileUploadMaxBytes:      getEnvInt64("FILE_UPLOAD_MAX_BYTES", 50*1024*1024),        // 50 MB
-		FileUploadBatchMaxBytes: getEnvInt64("FILE_UPLOAD_BATCH_MAX_BYTES", 250*1024*1024),  // 250 MB
+		FileUploadBatchMaxBytes: getEnvInt64("FILE_UPLOAD_BATCH_MAX_BYTES", 250*1024*1024), // 250 MB
 		FileUploadTimeout:       getEnvDuration("FILE_UPLOAD_TIMEOUT", 120*time.Second),
 		FileDownloadTimeout:     getEnvDuration("FILE_DOWNLOAD_TIMEOUT", 60*time.Second),
-		FileDownloadMaxBytes:    getEnvInt64("FILE_DOWNLOAD_MAX_BYTES", 50*1024*1024),       // 50 MB
+		FileDownloadMaxBytes:    getEnvInt64("FILE_DOWNLOAD_MAX_BYTES", 50*1024*1024), // 50 MB
 
 		// Callback retry settings - configurable per constitution principle XI
 		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", 10*time.Second),
+		WorkspaceProvisionQueueMax:    getEnvInt("WORKSPACE_PROVISION_QUEUE_MAX", 20),
 
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval: getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
@@ -593,4 +595,3 @@ func deriveAllowedOrigins(controlPlaneURL string) []string {
 		"https://*." + baseDomain, // Allow workspace subdomains
 	}
 }
-

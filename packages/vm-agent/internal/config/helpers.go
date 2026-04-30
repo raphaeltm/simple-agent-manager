@@ -222,6 +222,9 @@ func (c *Config) Validate() error {
 	if c.DefaultCols < 1 {
 		errs = append(errs, fmt.Errorf("DEFAULT_COLS must be > 0, got %d", c.DefaultCols))
 	}
+	if c.WorkspaceProvisionQueueMax < 1 {
+		errs = append(errs, fmt.Errorf("WORKSPACE_PROVISION_QUEUE_MAX must be > 0, got %d", c.WorkspaceProvisionQueueMax))
+	}
 
 	// WebSocket buffer sizes
 	if c.WSReadBufferSize < 1 {
