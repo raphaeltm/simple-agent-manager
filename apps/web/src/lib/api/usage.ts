@@ -1,4 +1,4 @@
-import type { ComputeUsageResponse, UserQuotaStatusResponse } from '@simple-agent-manager/shared';
+import type { ComputeUsageResponse, UserAiUsageResponse, UserQuotaStatusResponse } from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -10,4 +10,9 @@ export async function fetchComputeUsage(): Promise<ComputeUsageResponse> {
 /** Fetch current user's quota status. */
 export async function fetchUserQuotaStatus(): Promise<UserQuotaStatusResponse> {
   return request<UserQuotaStatusResponse>('/api/usage/quota');
+}
+
+/** Fetch current user's SAM-managed AI Gateway LLM usage. */
+export async function fetchUserAiUsage(period: string = 'current-month'): Promise<UserAiUsageResponse> {
+  return request<UserAiUsageResponse>(`/api/usage/ai?period=${encodeURIComponent(period)}`);
 }

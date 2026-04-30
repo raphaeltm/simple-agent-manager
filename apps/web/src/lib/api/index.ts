@@ -257,7 +257,7 @@ export {
   testTrigger,
   updateTrigger,
 } from './triggers';
-export { fetchComputeUsage, fetchUserQuotaStatus } from './usage';
+export { fetchComputeUsage, fetchUserAiUsage, fetchUserQuotaStatus } from './usage';
 export {
   createAgentSession,
   createWorkspace,

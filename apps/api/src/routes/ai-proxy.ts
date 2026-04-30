@@ -143,6 +143,7 @@ async function forwardToWorkersAI(
       'Authorization': `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
+      'cf-aig-collect-log': 'false',
     },
     body: JSON.stringify(gatewayBody),
   });
@@ -194,6 +195,7 @@ async function forwardToAnthropic(
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
+      'cf-aig-collect-log': 'false',
     },
     body: JSON.stringify(anthropicRequest),
   });
