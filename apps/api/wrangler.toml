@@ -250,3 +250,4 @@ crons = ["*/5 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 # - R2_ACCESS_KEY_ID (optional — R2 S3-compatible API token key ID, enables task attachment presigned uploads)
 # - R2_SECRET_ACCESS_KEY (optional — R2 S3-compatible API token secret, enables task attachment presigned uploads)
 # - TRIAL_CLAIM_TOKEN_SECRET (required when trials are enabled — HMAC secret for sam_trial_claim / sam_trial_fingerprint cookies. 32+ bytes base64.)
+# - CF_AIG_TOKEN (optional — Cloudflare AI Gateway Unified Billing token; enables OpenAI/Anthropic models without separate API keys)
