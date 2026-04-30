@@ -13,6 +13,7 @@ import {
   buildAnthropicCountTokensUrl,
   buildAnthropicGatewayUrl,
   extractCallbackToken,
+  isAnthropicModel,
 } from '../../../src/services/ai-proxy-shared';
 
 // =============================================================================
@@ -134,10 +135,6 @@ describe('AIProxyAuthError', () => {
 // =============================================================================
 
 describe('Anthropic model validation', () => {
-  function isAnthropicModel(modelId: string): boolean {
-    return modelId.startsWith('claude-');
-  }
-
   it('accepts claude-* models', () => {
     expect(isAnthropicModel('claude-sonnet-4-20250514')).toBe(true);
     expect(isAnthropicModel('claude-haiku-4-5-20251001')).toBe(true);

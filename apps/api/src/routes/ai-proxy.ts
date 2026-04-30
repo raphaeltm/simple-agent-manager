@@ -37,6 +37,7 @@ import {
   buildAIGatewayMetadata,
   buildAnthropicGatewayUrl,
   extractCallbackToken,
+  isAnthropicModel,
   resolveAnthropicApiKey,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
@@ -47,11 +48,6 @@ const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 // =============================================================================
 // Model Routing
 // =============================================================================
-
-/** Check if a model ID is an Anthropic model (requires format translation). */
-function isAnthropicModel(modelId: string): boolean {
-  return modelId.startsWith('claude-');
-}
 
 /** Parse allowed models from env or use defaults, normalizing prefixes. */
 function getAllowedModels(env: Env): Set<string> {
@@ -446,4 +442,4 @@ aiProxyRoutes.get('/models', async (c) => {
 });
 
 // Export for testing
-export { aiProxyRoutes, isAnthropicModel, resolveModelId };
+export { aiProxyRoutes, resolveModelId };

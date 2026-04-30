@@ -54,8 +54,8 @@ export async function verifyAIProxyAuth(
 ): Promise<AIProxyAuthResult> {
   const tokenPayload = await verifyCallbackToken(token, env);
 
-  // Reject node-scoped tokens — only workspace-scoped tokens allowed
-  if (tokenPayload.scope === 'node') {
+  // Only workspace-scoped tokens are allowed (allowlist, not blocklist)
+  if (tokenPayload.scope !== 'workspace') {
     throw new AIProxyAuthError('Insufficient token scope', 403);
   }
 
@@ -89,6 +89,15 @@ export async function verifyAIProxyAuth(
     projectId: workspace.projectId,
     trialId,
   };
+}
+
+// =============================================================================
+// Model Validation
+// =============================================================================
+
+/** Check if a model ID is an Anthropic model (requires claude-* prefix). */
+export function isAnthropicModel(modelId: string): boolean {
+  return modelId.startsWith('claude-');
 }
 
 export class AIProxyAuthError extends Error {

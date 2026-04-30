@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { isAnthropicModel, resolveModelId } from '../../../src/routes/ai-proxy';
+import { resolveModelId } from '../../../src/routes/ai-proxy';
+import { isAnthropicModel } from '../../../src/services/ai-proxy-shared';
 
 // =============================================================================
 // Model Allowlist Parsing (extracted logic test)
