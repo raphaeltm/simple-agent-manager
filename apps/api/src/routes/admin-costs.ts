@@ -12,10 +12,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import {
+  type GatewayPeriod,
   getGatewayPeriodBounds,
   getPeriodLabel,
   iterateGatewayLogs,
-  type GatewayPeriod,
 } from '../services/ai-gateway-logs';
 import { getAllUsersNodeUsageSummary } from '../services/node-usage';
 
