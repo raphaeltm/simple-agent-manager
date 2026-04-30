@@ -37,9 +37,9 @@ SAM idea: `01KQEMP59T86QN6WHAT05JK4AK`
 - [x] Ensure normal post-provisioning `POST /workspaces` behavior still starts immediately.
 - [x] Add unit tests proving queued workspace requests do not start devcontainer/container setup before readiness is released.
 - [x] Add unit tests proving queued requests drain after readiness and fail on provisioning failure.
-- [ ] Update docs if any debug/health behavior changes.
+- [x] Update docs if any debug/health behavior changes. No docs required: `/health` and boot-log behavior remain unchanged.
 - [x] Run local Go tests for VM-agent server/provisioning behavior.
-- [ ] Run repo quality checks required by `/do`.
+- [x] Run repo quality checks required by `/do`.
 - [ ] Deploy to staging, delete existing nodes first, provision a fresh VM, and verify a workspace can be created without racing Docker restart.
 - [ ] If staging cannot validate the race/fix with a real VM, pause for human review before PR merge.
 
