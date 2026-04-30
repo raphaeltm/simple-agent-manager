@@ -120,43 +120,108 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
  * the AI_PROXY_DEFAULT_MODEL env var. */
 export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
+/** Budget tier for platform AI models. */
+export type PlatformAIModelTier = 'free' | 'standard' | 'premium';
+
 /** Platform AI model metadata for UI dropdowns and allowed-model derivation. */
 export interface PlatformAIModel {
-  /** Model ID (Workers AI uses @cf/ prefix; Anthropic uses claude-* IDs) */
+  /** Model ID (Workers AI uses @cf/ prefix; Anthropic uses claude-* IDs; OpenAI uses gpt-* IDs) */
   id: string;
   /** Human-friendly display label */
   label: string;
   /** Whether this is the default model */
   isDefault?: boolean;
   /** Provider for the model (determines routing in AI proxy) */
-  provider: 'workers-ai' | 'anthropic';
+  provider: 'workers-ai' | 'anthropic' | 'openai';
+  /** Budget tier: free (Workers AI free tier), standard, or premium */
+  tier: PlatformAIModelTier;
+  /** Approximate cost per 1K input tokens (USD) for budget estimation. Actual costs from AI Gateway logs. */
+  costPer1kInputTokens: number;
+  /** Approximate cost per 1K output tokens (USD) for budget estimation. Actual costs from AI Gateway logs. */
+  costPer1kOutputTokens: number;
 }
 
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
  * string and the UI dropdown both derive from this list.
- * Includes both Workers AI (free, Cloudflare-hosted) and Anthropic (requires ANTHROPIC_API_KEY). */
+ * Includes Workers AI (free, Cloudflare-hosted), Anthropic, and OpenAI
+ * models routed through Cloudflare AI Gateway with Unified Billing. */
 export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
+  // --- Workers AI (free tier) ---
   {
     id: '@cf/meta/llama-4-scout-17b-16e-instruct',
     label: 'Llama 4 Scout 17B',
     isDefault: true,
     provider: 'workers-ai',
-  },
-  {
-    id: 'claude-haiku-4-5-20251001',
-    label: 'Claude Haiku 4.5',
-    provider: 'anthropic',
+    tier: 'free',
+    costPer1kInputTokens: 0,
+    costPer1kOutputTokens: 0,
   },
   {
     id: '@cf/qwen/qwen3-30b-a3b-fp8',
     label: 'Qwen 3 30B',
     provider: 'workers-ai',
+    tier: 'free',
+    costPer1kInputTokens: 0,
+    costPer1kOutputTokens: 0,
   },
   {
     id: '@cf/google/gemma-3-12b-it',
     label: 'Gemma 3 12B',
     provider: 'workers-ai',
+    tier: 'free',
+    costPer1kInputTokens: 0,
+    costPer1kOutputTokens: 0,
+  },
+  // --- Anthropic (via AI Gateway) ---
+  {
+    id: 'claude-haiku-4-5-20251001',
+    label: 'Claude Haiku 4.5',
+    provider: 'anthropic',
+    tier: 'standard',
+    costPer1kInputTokens: 0.0008,
+    costPer1kOutputTokens: 0.004,
+  },
+  {
+    id: 'claude-sonnet-4-6',
+    label: 'Claude Sonnet 4.6',
+    provider: 'anthropic',
+    tier: 'standard',
+    costPer1kInputTokens: 0.003,
+    costPer1kOutputTokens: 0.015,
+  },
+  {
+    id: 'claude-opus-4-6',
+    label: 'Claude Opus 4.6',
+    provider: 'anthropic',
+    tier: 'premium',
+    costPer1kInputTokens: 0.015,
+    costPer1kOutputTokens: 0.075,
+  },
+  // --- OpenAI (via AI Gateway) ---
+  {
+    id: 'gpt-4.1-mini',
+    label: 'GPT-4.1 Mini',
+    provider: 'openai',
+    tier: 'standard',
+    costPer1kInputTokens: 0.0004,
+    costPer1kOutputTokens: 0.0016,
+  },
+  {
+    id: 'gpt-4.1',
+    label: 'GPT-4.1',
+    provider: 'openai',
+    tier: 'standard',
+    costPer1kInputTokens: 0.002,
+    costPer1kOutputTokens: 0.008,
+  },
+  {
+    id: 'gpt-5.2',
+    label: 'GPT-5.2',
+    provider: 'openai',
+    tier: 'premium',
+    costPer1kInputTokens: 0.01,
+    costPer1kOutputTokens: 0.04,
   },
 ];
 
