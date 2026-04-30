@@ -345,3 +345,4 @@ describe('PLATFORM_AI_MODELS catalog', () => {
     }
   });
 });
+
