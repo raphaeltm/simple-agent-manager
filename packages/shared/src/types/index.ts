@@ -450,5 +450,12 @@ export {
   POLICY_SOURCES,
 } from './policy';
 
+// User AI Usage
+export type {
+  UserAiUsageByDay,
+  UserAiUsageByModel,
+  UserAiUsageResponse,
+} from './ai-usage';
+
 // API Error
 export type { ApiError } from './api-error';

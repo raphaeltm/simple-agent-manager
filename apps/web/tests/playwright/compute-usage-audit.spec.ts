@@ -291,6 +291,15 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       return respond(200, userDetailData);
     }
 
+    // AI usage — GET /api/usage/ai (empty for compute-focused tests)
+    if (path === '/api/usage/ai') {
+      return respond(200, {
+        totalCostUsd: 0, totalRequests: 0, totalInputTokens: 0, totalOutputTokens: 0,
+        cachedRequests: 0, errorRequests: 0, byModel: [], byDay: [],
+        period: 'current-month', periodLabel: 'April 2026',
+      });
+    }
+
     // Settings compute usage — GET /api/usage/compute (unchanged)
     if (path === '/api/usage/compute') {
       if (options.computeUsageError) return respond(500, { error: 'Failed to fetch' });
