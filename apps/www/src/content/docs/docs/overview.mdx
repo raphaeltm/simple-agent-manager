@@ -5,7 +5,7 @@ description: Simple Agent Manager — ephemeral AI coding environments on Cloudf
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-**Simple Agent Manager (SAM)** is an open-source platform for running ephemeral AI coding agent environments. It provisions cloud VMs, sets up devcontainers, and gives you a browser-based interface with your choice of AI coding agent — Claude Code, OpenAI Codex, Google Gemini, or Mistral Vibe.
+**Simple Agent Manager (SAM)** is an open-source platform for running ephemeral AI coding agent environments. It provisions cloud VMs, sets up devcontainers, and gives you a browser-based interface with your choice of AI coding agent — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe, or OpenCode.
 
 ## Why SAM?
 
@@ -13,7 +13,7 @@ AI coding agents need real development environments — not sandboxes. SAM gives
 
 <CardGrid>
   <Card title="Bring Your Own Cloud" icon="cloud">
-    You provide your Hetzner or Scaleway API token. VMs run on your infrastructure, billed to your account. The platform never stores your cloud credentials as environment variables.
+    You provide your Hetzner, Scaleway, or GCP API token. VMs run on your infrastructure, billed to your account. The platform never stores your cloud credentials as environment variables.
   </Card>
   <Card title="Serverless Control Plane" icon="rocket">
     The API runs on Cloudflare Workers — zero infrastructure to manage. D1 for storage, KV for sessions, R2 for binaries, Durable Objects for real-time chat.
@@ -29,7 +29,7 @@ AI coding agents need real development environments — not sandboxes. SAM gives
 ## How It Works
 
 1. **Sign in** with GitHub via the web UI
-2. **Add your cloud provider token** in Settings (Hetzner or Scaleway)
+2. **Add your cloud provider token** in Settings (Hetzner, Scaleway, or GCP)
 3. **Configure agent credentials** — add API keys for your preferred AI coding agents
 4. **Install the GitHub App** on your repositories
 5. **Create a project** — link a GitHub repo to start working
@@ -39,8 +39,8 @@ AI coding agents need real development environments — not sandboxes. SAM gives
 
 ## Key Features
 
-- **Multi-provider support** — Hetzner Cloud and Scaleway with unified VM size abstraction
-- **Four AI agents** — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe
+- **Multi-provider support** — Hetzner Cloud, Scaleway, and GCP with unified VM size abstraction
+- **Five AI agents** — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe, OpenCode
 - **Idea execution** — describe what you want, SAM handles the rest with warm node pooling for fast reuse
 - **Chat-first UX** — project pages are chat interfaces with real-time streaming
 - **File browsing in chat** — browse, view, and diff workspace files without leaving the conversation

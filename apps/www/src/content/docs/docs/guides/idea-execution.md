@@ -23,7 +23,7 @@ When executing an idea, you can optionally specify:
 | Option | Description | Default |
 |--------|-------------|---------|
 | **VM Size** | small, medium, or large | Project default |
-| **Provider** | Hetzner or Scaleway | Project default provider |
+| **Provider** | Hetzner, Scaleway, or GCP | Project default provider |
 | **Agent Type** | Which AI agent to use | Project default agent |
 | **Workspace Profile** | `full` or `lightweight` | `full` |
 | **Node** | Reuse a specific existing node | Auto-select |

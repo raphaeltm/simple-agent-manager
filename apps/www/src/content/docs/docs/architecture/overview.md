@@ -3,7 +3,7 @@ title: Architecture Overview
 description: How SAM's components fit together — from the browser to the VM terminal.
 ---
 
-SAM is a serverless platform for ephemeral AI coding environments. The architecture splits into three layers: **edge** (Cloudflare), **compute** (cloud VMs — Hetzner or Scaleway), and **external services** (GitHub, DNS).
+SAM is a serverless platform for ephemeral AI coding environments. The architecture splits into three layers: **edge** (Cloudflare), **compute** (cloud VMs — Hetzner, Scaleway, or GCP), and **external services** (GitHub, DNS).
 
 ## High-Level Architecture
 
@@ -40,7 +40,7 @@ SAM is a serverless platform for ephemeral AI coding environments. The architect
           │ HTTP/WSS (proxied via DNS-only records)
           ▼
 ┌─────────────────────────────────────────────────────────┐
-│              Cloud VM (Hetzner or Scaleway)               │
+│         Cloud VM (Hetzner, Scaleway, or GCP)              │
 │                                                          │
 │  ┌───────────────────────────────────────┐              │
 │  │ VM Agent (Go, :8443)                  │              │
@@ -255,4 +255,4 @@ CI runs lint, typecheck, tests, and build on every push. The deploy workflow onl
 | Dynamic DNS per workspace | Instant subdomain resolution; cleaned up on stop |
 | Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes |
 | No credentials in cloud-init | Bootstrap tokens for secure credential injection |
-| Multi-provider abstraction | Unified VM size/lifecycle API across Hetzner and Scaleway |
+| Multi-provider abstraction | Unified VM size/lifecycle API across Hetzner, Scaleway, and GCP |
