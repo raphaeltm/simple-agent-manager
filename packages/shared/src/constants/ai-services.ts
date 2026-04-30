@@ -163,6 +163,20 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
 /** KV key for the admin-configured default model. Stored by the admin AI proxy config endpoint. */
 export const AI_PROXY_DEFAULT_MODEL_KV_KEY = 'platform:ai-proxy:default-model';
 
+/** KV key for the admin-configured billing mode. */
+export const AI_PROXY_BILLING_MODE_KV_KEY = 'platform:ai-proxy:billing-mode';
+
+/** Billing mode for AI proxy upstream authentication.
+ * - 'unified': Use Cloudflare Unified Billing (cf-aig-authorization header with CF_API_TOKEN)
+ * - 'platform-key': Use stored platform API key (x-api-key header, current behavior)
+ * - 'auto': Try unified billing first, fall back to platform key if CF_API_TOKEN is missing
+ *
+ * Override via AI_PROXY_BILLING_MODE env var. Default: 'auto'. */
+export type BillingMode = 'unified' | 'platform-key' | 'auto';
+
+/** Default billing mode. Override via AI_PROXY_BILLING_MODE env var. */
+export const DEFAULT_AI_PROXY_BILLING_MODE: BillingMode = 'auto';
+
 /** Admin AI proxy configuration (stored in KV, managed via admin UI). */
 export interface AIProxyConfig {
   /** Admin-selected default model ID */

@@ -1,4 +1,4 @@
-export type { AdminErrorsFilter, AdminLogQueryParams,AIProxyConfigResponse, CostByModel, CostSummaryResponse } from './admin';
+export type { AdminErrorsFilter, AdminLogQueryParams, AIProxyConfigResponse, BillingMode, CostByModel, CostSummaryResponse } from './admin';
 export type {
   AiUsageByDay,
   AiUsageByModel,
@@ -55,6 +55,7 @@ export {
   resetAIProxyConfig,
   updateAdminDefaultQuota,
   updateAdminUserQuota,
+  updateAIProxyBillingMode,
   updateAIProxyConfig,
   updatePlatformCredential,
 } from './admin';

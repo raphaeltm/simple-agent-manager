@@ -27,16 +27,15 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import {
   createAnthropicToOpenAIStream,
   translateRequestToAnthropic,
   translateResponseToOpenAI,
 } from '../services/ai-anthropic-translate';
+import { resolveUpstreamAuth } from '../services/ai-billing';
 import { checkTokenBudget } from '../services/ai-token-budget';
 import { verifyCallbackToken } from '../services/jwt';
-import { getPlatformAgentCredential } from '../services/platform-credentials';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -190,7 +189,7 @@ async function forwardToAnthropic(
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string,
-  anthropicApiKey: string,
+  authHeaders: Record<string, string>,
 ): Promise<Response> {
 
   // Translate OpenAI format → Anthropic Messages format
@@ -200,7 +199,7 @@ async function forwardToAnthropic(
   const response = await fetch(gatewayUrl, {
     method: 'POST',
     headers: {
-      'x-api-key': anthropicApiKey,
+      ...authHeaders,
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
@@ -409,18 +408,18 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   const isAnthropic = isAnthropicModel(modelId);
 
-  // For Anthropic models, resolve the API key from platform credentials (admin-managed).
-  // The key is stored as a platform credential for agent type 'claude-code' since
-  // that's the agent type that uses Anthropic API keys.
-  let anthropicApiKey: string | undefined;
+  // For Anthropic models, resolve upstream auth via billing mode (unified/platform-key/auto).
+  let anthropicAuthHeaders: Record<string, string> | undefined;
+  let billingMode: string | undefined;
   if (isAnthropic) {
-    const encryptionKey = getCredentialEncryptionKey(c.env);
-    const platformCred = await getPlatformAgentCredential(db, 'claude-code', encryptionKey);
-    anthropicApiKey = platformCred?.credential;
-    if (!anthropicApiKey) {
+    try {
+      const auth = await resolveUpstreamAuth(c.env, db);
+      anthropicAuthHeaders = auth.headers;
+      billingMode = auth.billingMode;
+    } catch (err) {
       return c.json({
         error: {
-          message: 'No Anthropic API key configured. An admin must add a Claude Code platform credential.',
+          message: err instanceof Error ? err.message : 'Failed to resolve upstream authentication',
           type: 'server_error',
         },
       }, 503);
@@ -432,6 +431,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     workspaceId,
     modelId,
     provider: isAnthropic ? 'anthropic' : 'workers-ai',
+    billingMode: billingMode ?? 'n/a',
     messageCount: (body.messages as unknown[]).length,
     hasTools: !!body.tools,
     stream: !!body.stream,
@@ -440,7 +440,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   try {
     const response = isAnthropic
-      ? await forwardToAnthropic(c.env, body, modelId, aigMetadata, anthropicApiKey!)
+      ? await forwardToAnthropic(c.env, body, modelId, aigMetadata, anthropicAuthHeaders!)
       : await forwardToWorkersAI(c.env, body, modelId, aigMetadata);
 
     log.info('ai_proxy.response', {
@@ -448,6 +448,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       workspaceId,
       modelId,
       provider: isAnthropic ? 'anthropic' : 'workers-ai',
+      billingMode: billingMode ?? 'n/a',
       status: response.status,
     });
 

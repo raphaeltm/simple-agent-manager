@@ -4,10 +4,30 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   type AIProxyConfigResponse,
+  type BillingMode,
   fetchAIProxyConfig,
   resetAIProxyConfig,
+  updateAIProxyBillingMode,
   updateAIProxyConfig,
 } from '../lib/api';
+
+const BILLING_MODE_OPTIONS: Array<{ value: BillingMode; label: string; description: string }> = [
+  {
+    value: 'auto',
+    label: 'Auto',
+    description: 'Use Unified Billing when CF API token is available, otherwise fall back to platform API key.',
+  },
+  {
+    value: 'unified',
+    label: 'Unified Billing',
+    description: 'Route all requests through Cloudflare credits. Requires CF_API_TOKEN.',
+  },
+  {
+    value: 'platform-key',
+    label: 'Platform Key',
+    description: 'Use a stored Anthropic API key for authentication.',
+  },
+];
 
 export function AdminAIProxy() {
   const [config, setConfig] = useState<AIProxyConfigResponse | null>(null);
@@ -47,6 +67,19 @@ export function AdminAIProxy() {
     }
   };
 
+  const handleBillingModeChange = async (mode: BillingMode) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await updateAIProxyBillingMode(mode);
+      await fetchConfig();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update billing mode');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleReset = async () => {
     setSaving(true);
     setError(null);
@@ -81,7 +114,7 @@ export function AdminAIProxy() {
   return (
     <div className="space-y-6">
       <Body>
-        Configure the default AI model for the platform inference proxy. This model is used when
+        Configure the default AI model and billing mode for the platform inference proxy. This model is used when
         users don&apos;t have their own agent credentials — e.g., during trials or onboarding.
       </Body>
 
@@ -91,6 +124,59 @@ export function AdminAIProxy() {
         </div>
       )}
 
+      {/* Billing Mode */}
+      <Card>
+        <div className="space-y-4 p-4">
+          <div>
+            <label className="mb-2 block text-sm font-medium">Billing Mode</label>
+            <div className="space-y-2">
+              {BILLING_MODE_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className="flex cursor-pointer items-start gap-3 rounded-md border border-[var(--sam-border)] p-3 transition-colors hover:bg-[var(--sam-bg-secondary)]"
+                >
+                  <input
+                    type="radio"
+                    name="billingMode"
+                    value={option.value}
+                    checked={config.billingMode === option.value}
+                    onChange={() => handleBillingModeChange(option.value)}
+                    disabled={saving}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium">{option.label}</span>
+                    <p className="mt-0.5 text-xs text-[var(--sam-text-secondary)]">
+                      {option.description}
+                    </p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[var(--sam-text-secondary)]">
+            <span>
+              CF API Token:{' '}
+              <span className={config.hasCfApiToken
+                ? 'font-medium text-green-600 dark:text-green-400'
+                : 'font-medium text-yellow-600 dark:text-yellow-400'}>
+                {config.hasCfApiToken ? 'configured' : 'not configured'}
+              </span>
+            </span>
+            <span>
+              Anthropic key:{' '}
+              <span className={config.hasAnthropicCredential
+                ? 'font-medium text-green-600 dark:text-green-400'
+                : 'font-medium text-yellow-600 dark:text-yellow-400'}>
+                {config.hasAnthropicCredential ? 'configured' : 'not configured'}
+              </span>
+            </span>
+          </div>
+        </div>
+      </Card>
+
+      {/* Default Model */}
       <Card>
         <div className="space-y-4 p-4">
           <div>
@@ -111,13 +197,13 @@ export function AdminAIProxy() {
                 >
                   {model.label}
                   {model.provider === 'anthropic' ? ' (Anthropic)' : ' (Workers AI — free)'}
-                  {!model.available ? ' — requires API key' : ''}
+                  {!model.available ? ' — requires credential' : ''}
                 </option>
               ))}
             </select>
             <p className="mt-1.5 text-xs text-[var(--sam-text-secondary)]">
               Workers AI models are free and require no API key.
-              Anthropic models require a Claude Code credential on the{' '}
+              Anthropic models require either Unified Billing (CF API token) or a Claude Code credential on the{' '}
               <a href="/admin/credentials" className="text-[var(--sam-accent)] underline">
                 Credentials
               </a>{' '}
@@ -135,14 +221,6 @@ export function AdminAIProxy() {
             {config.updatedAt && (
               <span>Last updated: {new Date(config.updatedAt).toLocaleString()}</span>
             )}
-            <span>
-              Anthropic key:{' '}
-              <span className={config.hasAnthropicCredential
-                ? 'font-medium text-green-600 dark:text-green-400'
-                : 'font-medium text-yellow-600 dark:text-yellow-400'}>
-                {config.hasAnthropicCredential ? 'configured' : 'not configured'}
-              </span>
-            </span>
           </div>
 
           <div className="flex gap-2">
