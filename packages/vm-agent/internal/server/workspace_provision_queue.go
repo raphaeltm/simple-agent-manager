@@ -64,27 +64,32 @@ func (s *Server) FailWorkspaceProvisioning(err error) {
 
 func (s *Server) enqueueOrStartWorkspaceProvision(req workspaceProvisionRequest) bool {
 	s.provisionGateMu.Lock()
-	defer s.provisionGateMu.Unlock()
 
 	if s.provisionReady {
+		s.provisionGateMu.Unlock()
 		return true
 	}
 
 	if s.provisionErr != nil {
-		go s.failQueuedWorkspaceProvision(req, s.provisionErr)
+		err := s.provisionErr
+		s.provisionGateMu.Unlock()
+		go s.failQueuedWorkspaceProvision(req, err)
 		return false
 	}
 
 	s.provisionQueue = append(s.provisionQueue, req)
+	queueDepth := len(s.provisionQueue)
+	s.provisionGateMu.Unlock()
+
 	if req.runtime != nil {
 		detail := copyEventDetail(req.detail)
 		detail["workspaceId"] = req.runtime.ID
-		detail["queueDepth"] = len(s.provisionQueue)
+		detail["queueDepth"] = queueDepth
 		detail["reason"] = "system_provisioning_in_progress"
 		s.appendNodeEvent(req.runtime.ID, "info", "workspace.queued", "Workspace provisioning queued until node provisioning completes", detail)
 		slog.Info("Workspace provisioning queued until system provisioning completes",
 			"workspace", req.runtime.ID,
-			"queueDepth", len(s.provisionQueue))
+			"queueDepth", queueDepth)
 	}
 
 	return false
