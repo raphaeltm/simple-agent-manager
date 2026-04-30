@@ -139,18 +139,20 @@ func (s *Server) failQueuedWorkspaceProvision(req workspaceProvisionRequest, err
 	errorMsg := fmt.Sprintf("node system provisioning failed before workspace provisioning could start: %v", err)
 	s.casWorkspaceStatus(req.runtime.ID, []string{"creating"}, "error")
 
-	callbackToken := s.callbackTokenForWorkspace(req.runtime.ID)
-	if callbackToken != "" {
-		if callbackErr := s.notifyWorkspaceProvisioningFailed(context.Background(), req.runtime.ID, callbackToken, errorMsg); callbackErr != nil {
-			slog.Error("Provisioning-failed callback error", "workspace", req.runtime.ID, "error", callbackErr)
-		}
-	}
-
 	failureDetail := copyEventDetail(req.detail)
 	failureDetail["workspaceId"] = req.runtime.ID
 	failureDetail["error"] = errorMsg
 	failureDetail["queued"] = true
 	s.appendNodeEvent(req.runtime.ID, "error", req.failureType, req.failureMessage, failureDetail)
+
+	callbackToken := s.callbackTokenForWorkspace(req.runtime.ID)
+	if callbackToken != "" {
+		go func(workspaceID, token, message string) {
+			if callbackErr := s.notifyWorkspaceProvisioningFailed(context.Background(), workspaceID, token, message); callbackErr != nil {
+				slog.Error("Provisioning-failed callback error", "workspace", workspaceID, "error", callbackErr)
+			}
+		}(req.runtime.ID, callbackToken, errorMsg)
+	}
 }
 
 func copyEventDetail(detail map[string]interface{}) map[string]interface{} {

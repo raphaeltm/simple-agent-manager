@@ -72,7 +72,9 @@ func TestQueuedWorkspaceProvisionFailsWhenSystemProvisioningFails(t *testing.T) 
 	}
 
 	s := newQueueTestServer("http://127.0.0.1")
+	s.config.CallbackToken = ""
 	runtime := newQueueTestRuntime("WS_FAILED")
+	runtime.CallbackToken = ""
 	s.workspaces[runtime.ID] = runtime
 
 	s.BlockWorkspaceProvisioning()
@@ -80,9 +82,72 @@ func TestQueuedWorkspaceProvisionFailsWhenSystemProvisioningFails(t *testing.T) 
 
 	s.FailWorkspaceProvisioning(errors.New("docker install failed"))
 
-	if got := runtime.Status; got != "error" {
+	if got := workspaceStatus(s, runtime.ID); got != "error" {
 		t.Fatalf("runtime.Status = %q, want error", got)
 	}
+	assertWorkspaceEvent(t, s, runtime.ID, "workspace.provisioning_failed")
+}
+
+func TestWorkspaceProvisionStartsImmediatelyWhenSystemProvisioningReady(t *testing.T) {
+	originalPrepare := prepareWorkspaceForRuntime
+	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
+
+	started := make(chan struct{}, 1)
+	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState, _ *bootlog.Reporter) (bool, error) {
+		started <- struct{}{}
+		return false, nil
+	}
+
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/WS_READY/git-token":
+			_, _ = w.Write([]byte(`{"token":"ghs_test","expiresAt":"2026-12-31T00:00:00Z"}`))
+		case "/api/workspaces/WS_READY/runtime-assets":
+			_, _ = w.Write([]byte(`{"workspaceId":"WS_READY","envVars":[],"files":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
+	s := newQueueTestServer(controlPlane.URL)
+	runtime := newQueueTestRuntime("WS_READY")
+	s.workspaces[runtime.ID] = runtime
+
+	s.startWorkspaceProvision(runtime, "workspace.failed", "Workspace failed", "workspace.created", "Workspace created", nil)
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("workspace provisioning did not start immediately when system provisioning was ready")
+	}
+	if got := len(s.provisionQueue); got != 0 {
+		t.Fatalf("provisionQueue length = %d, want 0", got)
+	}
+}
+
+func TestWorkspaceProvisionFailsImmediatelyAfterSystemProvisioningFailure(t *testing.T) {
+	originalPrepare := prepareWorkspaceForRuntime
+	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
+
+	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState, _ *bootlog.Reporter) (bool, error) {
+		t.Fatal("workspace provisioning should not start after system provisioning failure")
+		return false, nil
+	}
+
+	s := newQueueTestServer("http://127.0.0.1")
+	s.config.CallbackToken = ""
+	runtime := newQueueTestRuntime("WS_AFTER_FAILURE")
+	runtime.CallbackToken = ""
+	s.workspaces[runtime.ID] = runtime
+
+	s.BlockWorkspaceProvisioning()
+	s.FailWorkspaceProvisioning(errors.New("docker restart failed"))
+	s.startWorkspaceProvision(runtime, "workspace.provisioning_failed", "Workspace provisioning failed", "workspace.created", "Workspace created", nil)
+
+	assertEventually(t, 2*time.Second, func() bool {
+		return workspaceStatus(s, runtime.ID) == "error"
+	})
 	assertWorkspaceEvent(t, s, runtime.ID, "workspace.provisioning_failed")
 }
 
@@ -104,11 +169,35 @@ func TestWorkspaceProvisionQueueCoalescesDuplicateWorkspace(t *testing.T) {
 	assertWorkspaceEvent(t, s, runtime.ID, "workspace.queue_coalesced")
 }
 
+func assertEventually(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition was not met before timeout")
+}
+
+func workspaceStatus(s *Server, workspaceID string) string {
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	if runtime, ok := s.workspaces[workspaceID]; ok {
+		return runtime.Status
+	}
+	return ""
+}
+
 func TestWorkspaceProvisionQueueRejectsOverflow(t *testing.T) {
 	s := newQueueTestServer("http://127.0.0.1")
+	s.config.CallbackToken = ""
 	s.config.WorkspaceProvisionQueueMax = 1
 	first := newQueueTestRuntime("WS_FIRST")
 	second := newQueueTestRuntime("WS_SECOND")
+	second.CallbackToken = ""
 	s.workspaces[first.ID] = first
 	s.workspaces[second.ID] = second
 
@@ -119,10 +208,10 @@ func TestWorkspaceProvisionQueueRejectsOverflow(t *testing.T) {
 	if got := len(s.provisionQueue); got != 1 {
 		t.Fatalf("provisionQueue length = %d, want 1", got)
 	}
-	if got := first.Status; got != "creating" {
+	if got := workspaceStatus(s, first.ID); got != "creating" {
 		t.Fatalf("first runtime.Status = %q, want creating", got)
 	}
-	if got := second.Status; got != "error" {
+	if got := workspaceStatus(s, second.ID); got != "error" {
 		t.Fatalf("second runtime.Status = %q, want error", got)
 	}
 	assertWorkspaceEvent(t, s, second.ID, "workspace.provisioning_failed")
