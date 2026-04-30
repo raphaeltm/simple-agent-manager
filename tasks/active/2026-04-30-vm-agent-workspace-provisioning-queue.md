@@ -29,16 +29,16 @@ SAM idea: `01KQEMP59T86QN6WHAT05JK4AK`
 
 ## Implementation Checklist
 
-- [ ] Add a VM-agent provisioning readiness gate owned by `server.Server` or a small injected helper.
-- [ ] Keep early HTTP server startup unchanged for `/health` and boot logs.
-- [ ] Change `POST /workspaces` so requests received before provisioning completes are persisted as `creating`, emit a clear queue event, and enqueue the existing workspace provision request instead of starting Docker/devcontainer work immediately.
-- [ ] Drain queued workspace provisions in FIFO order when system provisioning completes.
-- [ ] If system provisioning fails, fail queued workspace provisions with actionable detail instead of hanging indefinitely.
-- [ ] Ensure normal post-provisioning `POST /workspaces` behavior still starts immediately.
-- [ ] Add unit tests proving queued workspace requests do not start devcontainer/container setup before readiness is released.
-- [ ] Add unit tests proving queued requests drain after readiness and fail on provisioning failure.
+- [x] Add a VM-agent provisioning readiness gate owned by `server.Server` or a small injected helper.
+- [x] Keep early HTTP server startup unchanged for `/health` and boot logs.
+- [x] Change `POST /workspaces` so requests received before provisioning completes are persisted as `creating`, emit a clear queue event, and enqueue the existing workspace provision request instead of starting Docker/devcontainer work immediately.
+- [x] Drain queued workspace provisions in FIFO order when system provisioning completes.
+- [x] If system provisioning fails, fail queued workspace provisions with actionable detail instead of hanging indefinitely.
+- [x] Ensure normal post-provisioning `POST /workspaces` behavior still starts immediately.
+- [x] Add unit tests proving queued workspace requests do not start devcontainer/container setup before readiness is released.
+- [x] Add unit tests proving queued requests drain after readiness and fail on provisioning failure.
 - [ ] Update docs if any debug/health behavior changes.
-- [ ] Run local Go tests for VM-agent server/provisioning behavior.
+- [x] Run local Go tests for VM-agent server/provisioning behavior.
 - [ ] Run repo quality checks required by `/do`.
 - [ ] Deploy to staging, delete existing nodes first, provision a fresh VM, and verify a workspace can be created without racing Docker restart.
 - [ ] If staging cannot validate the race/fix with a real VM, pause for human review before PR merge.

@@ -54,6 +54,10 @@ func main() {
 	// Wire broadcaster for real-time WebSocket delivery of boot logs
 	reporter.SetBroadcaster(srv.GetBootLogBroadcaster())
 
+	// HTTP starts before system provisioning so health and boot logs are visible,
+	// but workspace creation must wait until Docker is stable.
+	srv.BlockWorkspaceProvisioning()
+
 	// Handle shutdown signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -82,12 +86,14 @@ func main() {
 		slog.Error("System provisioning failed", "error", provisionErr,
 			"phase", provisionStatus.Phase,
 			"completedSteps", countCompleted(provisionStatus.Steps))
+		srv.FailWorkspaceProvisioning(provisionErr)
 		// Don't exit — the agent should keep running for diagnostics.
 		// Bootstrap will likely fail (no devcontainer CLI), but the agent
 		// stays up so we can download logs and debug.
 	} else {
 		slog.Info("System provisioning completed",
 			"duration", provisionStatus.CompletedAt.Sub(provisionStatus.StartedAt).Round(time.Millisecond))
+		srv.CompleteWorkspaceProvisioning()
 	}
 
 	// Send node-ready callback AFTER provisioning. This tells the control plane

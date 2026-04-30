@@ -246,6 +246,22 @@ func (s *Server) startWorkspaceProvision(
 	successMessage string,
 	detail map[string]interface{},
 ) {
+	req := workspaceProvisionRequest{
+		runtime:        runtime,
+		failureType:    failureType,
+		failureMessage: failureMessage,
+		successType:    successType,
+		successMessage: successMessage,
+		detail:         detail,
+	}
+	if !s.enqueueOrStartWorkspaceProvision(req) {
+		return
+	}
+	s.startWorkspaceProvisionNow(req)
+}
+
+func (s *Server) startWorkspaceProvisionNow(req workspaceProvisionRequest) {
+	runtime := req.runtime
 	go func() {
 		recoveryMode, err := s.provisionWorkspaceRuntime(context.Background(), runtime)
 
@@ -275,15 +291,15 @@ func (s *Server) startWorkspaceProvision(
 					"callbackError", cbErr.Err,
 				)
 
-				successDetail := make(map[string]interface{}, len(detail)+2)
-				for key, value := range detail {
+				successDetail := make(map[string]interface{}, len(req.detail)+2)
+				for key, value := range req.detail {
 					successDetail[key] = value
 				}
 				successDetail["callbackPending"] = true
 				if nextStatus == "recovery" {
 					successDetail["recoveryMode"] = true
 				}
-				s.appendNodeEvent(runtime.ID, "warn", successType, successMessage+" (callback pending)", successDetail)
+				s.appendNodeEvent(runtime.ID, "warn", req.successType, req.successMessage+" (callback pending)", successDetail)
 
 				// Start port scanner — workspace is functional
 				s.StartPortScanner(runtime.ID)
@@ -306,8 +322,8 @@ func (s *Server) startWorkspaceProvision(
 				}
 			}
 
-			failureDetail := make(map[string]interface{}, len(detail)+2)
-			for key, value := range detail {
+			failureDetail := make(map[string]interface{}, len(req.detail)+2)
+			for key, value := range req.detail {
 				failureDetail[key] = value
 			}
 			failureDetail["error"] = errorMsg
@@ -315,7 +331,7 @@ func (s *Server) startWorkspaceProvision(
 				failureDetail["resourceDiagnostics"] = diag
 			}
 
-			s.appendNodeEvent(runtime.ID, "error", failureType, failureMessage, failureDetail)
+			s.appendNodeEvent(runtime.ID, "error", req.failureType, req.failureMessage, failureDetail)
 			return
 		}
 
@@ -331,8 +347,8 @@ func (s *Server) startWorkspaceProvision(
 			return
 		}
 
-		successDetail := make(map[string]interface{}, len(detail)+1)
-		for key, value := range detail {
+		successDetail := make(map[string]interface{}, len(req.detail)+1)
+		for key, value := range req.detail {
 			successDetail[key] = value
 		}
 		if recoveryMode {
@@ -340,7 +356,7 @@ func (s *Server) startWorkspaceProvision(
 			successDetail["recoveryMode"] = true
 		}
 
-		s.appendNodeEvent(runtime.ID, "info", successType, successMessage, successDetail)
+		s.appendNodeEvent(runtime.ID, "info", req.successType, req.successMessage, successDetail)
 
 		// Start port scanner for the newly provisioned workspace.
 		// This is the dynamic-workspace counterpart to the boot-time scanner
@@ -689,7 +705,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		SessionID     string `json:"sessionId"`
 		Label         string `json:"label"`
 		ChatSessionID string `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
-		ProjectID     string `json:"projectId"`      // Project ID for late-init of message reporter (manual nodes)
+		ProjectID     string `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -778,7 +794,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	var body struct {
 		AgentType        string               `json:"agentType"`
 		InitialPrompt    string               `json:"initialPrompt"`
-		McpServers       []acp.McpServerEntry  `json:"mcpServers,omitempty"`
+		McpServers       []acp.McpServerEntry `json:"mcpServers,omitempty"`
 		Model            string               `json:"model,omitempty"`
 		PermissionMode   string               `json:"permissionMode,omitempty"`
 		OpencodeProvider string               `json:"opencodeProvider,omitempty"`

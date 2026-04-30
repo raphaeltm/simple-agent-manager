@@ -78,6 +78,10 @@ type Server struct {
 	portScanners        map[string]*ports.Scanner
 	portDiscoveries     map[string]*container.Discovery // per-workspace container discovery
 	bootstrapComplete   atomic.Bool
+	provisionGateMu     sync.Mutex
+	provisionReady      bool
+	provisionErr        error
+	provisionQueue      []workspaceProvisionRequest
 	callbackTokenMu     sync.RWMutex
 	callbackToken       string
 	httpClient          *http.Client // shared HTTP client with timeout for control-plane callbacks
@@ -104,24 +108,24 @@ func (s *Server) controlPlaneHTTPClient(timeout time.Duration) *http.Client {
 }
 
 type WorkspaceRuntime struct {
-	ID                  string
-	Repository          string
-	Branch              string
-	Status              string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	WorkspaceDir        string
-	ContainerLabelValue string
-	ContainerWorkDir    string
-	ContainerUser       string
-	CallbackToken       string
-	ProjectID           string
-	GitUserName         string
-	GitUserEmail        string
-	GitHubID            string
-	Lightweight              bool   // Skip devcontainer build, use fallback image for faster startup
-	DevcontainerConfigName   string // Named devcontainer config (subdirectory under .devcontainer/)
-	PTY                      *pty.Manager
+	ID                     string
+	Repository             string
+	Branch                 string
+	Status                 string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	WorkspaceDir           string
+	ContainerLabelValue    string
+	ContainerWorkDir       string
+	ContainerUser          string
+	CallbackToken          string
+	ProjectID              string
+	GitUserName            string
+	GitUserEmail           string
+	GitHubID               string
+	Lightweight            bool   // Skip devcontainer build, use fallback image for faster startup
+	DevcontainerConfigName string // Named devcontainer config (subdirectory under .devcontainer/)
+	PTY                    *pty.Manager
 
 	// ReadyCallbackPending is true when the workspace provisioned successfully but
 	// the workspace-ready callback to the control plane failed (e.g., transient
@@ -404,6 +408,7 @@ func New(cfg *config.Config) (*Server, error) {
 		containerDiscovery:  containerDiscoveryInstance,
 		portScanners:        make(map[string]*ports.Scanner),
 		portDiscoveries:     make(map[string]*container.Discovery),
+		provisionReady:      true,
 		callbackToken:       cfg.CallbackToken,
 		httpClient:          config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 		done:                make(chan struct{}),
