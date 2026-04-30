@@ -20,23 +20,27 @@ import {
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
 } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import {
   createAnthropicToOpenAIStream,
   translateRequestToAnthropic,
   translateResponseToOpenAI,
 } from '../services/ai-anthropic-translate';
+import {
+  AIProxyAuthError,
+  buildAIGatewayMetadata,
+  buildAnthropicGatewayUrl,
+  extractCallbackToken,
+  resolveAnthropicApiKey,
+  verifyAIProxyAuth,
+} from '../services/ai-proxy-shared';
 import { checkTokenBudget } from '../services/ai-token-budget';
-import { verifyCallbackToken } from '../services/jwt';
-import { getPlatformAgentCredential } from '../services/platform-credentials';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -100,16 +104,6 @@ function buildWorkersAIUrl(env: Env): string {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
   }
   return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
-}
-
-/** Build upstream URL for Anthropic Messages API via AI Gateway. */
-function buildAnthropicUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
-  if (gatewayId) {
-    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages`;
-  }
-  // Fallback: direct Anthropic API (no gateway monitoring)
-  return 'https://api.anthropic.com/v1/messages';
 }
 
 // =============================================================================
@@ -195,7 +189,7 @@ async function forwardToAnthropic(
 
   // Translate OpenAI format → Anthropic Messages format
   const anthropicRequest = translateRequestToAnthropic(body, modelId);
-  const gatewayUrl = buildAnthropicUrl(env);
+  const gatewayUrl = buildAnthropicGatewayUrl(env);
 
   const response = await fetch(gatewayUrl, {
     method: 'POST',
@@ -269,53 +263,24 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     return c.json({ error: { message: 'AI proxy is disabled', type: 'service_unavailable' } }, 503);
   }
 
-  // --- Auth: extract Bearer token from Authorization header ---
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
+  // --- Auth: extract token from Authorization: Bearer header ---
+  const token = extractCallbackToken(c.req.header('Authorization'), undefined);
+  if (!token) {
     return c.json({ error: { message: 'Missing or invalid Authorization header', type: 'invalid_request_error' } }, 401);
   }
-  const token = authHeader.slice(7);
 
-  let tokenPayload: { workspace: string; scope?: string };
+  const db = drizzle(c.env.DATABASE, { schema });
+  let auth;
   try {
-    tokenPayload = await verifyCallbackToken(token, c.env);
-  } catch {
+    auth = await verifyAIProxyAuth(token, c.env, db);
+  } catch (err) {
+    if (err instanceof AIProxyAuthError) {
+      return c.json({ error: { message: err.message, type: 'invalid_request_error' } }, err.statusCode as 401 | 403 | 404);
+    }
     return c.json({ error: { message: 'Invalid or expired token', type: 'invalid_request_error' } }, 401);
   }
 
-  // Reject node-scoped tokens — only workspace-scoped tokens allowed
-  if (tokenPayload.scope === 'node') {
-    return c.json({ error: { message: 'Insufficient token scope', type: 'invalid_request_error' } }, 403);
-  }
-
-  const workspaceId = tokenPayload.workspace;
-
-  // --- Resolve workspaceId → userId + projectId ---
-  const db = drizzle(c.env.DATABASE, { schema });
-  const workspace = await db
-    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .get();
-
-  if (!workspace?.userId) {
-    log.error('ai_proxy.workspace_not_found', { workspaceId });
-    return c.json({ error: { message: 'Workspace not found', type: 'invalid_request_error' } }, 404);
-  }
-
-  const userId = workspace.userId;
-  const projectId = workspace.projectId;
-
-  // Check if this workspace belongs to a trial
-  let trialId: string | undefined;
-  if (projectId) {
-    const trial = await db
-      .select({ id: schema.trials.id })
-      .from(schema.trials)
-      .where(eq(schema.trials.projectId, projectId))
-      .get();
-    trialId = trial?.id;
-  }
+  const { userId, workspaceId, projectId, trialId } = auth;
 
   // --- Rate limit: per-user RPM ---
   const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
@@ -397,11 +362,11 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   }
 
   // --- Per-user metadata for AI Gateway analytics ---
-  const aigMetadata = JSON.stringify({
+  const aigMetadata = buildAIGatewayMetadata({
     userId,
     workspaceId,
-    projectId: projectId ?? undefined,
-    trialId: trialId ?? undefined,
+    projectId,
+    trialId,
     modelId,
     stream: !!body.stream,
     hasTools: !!body.tools,
@@ -410,14 +375,10 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   const isAnthropic = isAnthropicModel(modelId);
 
   // For Anthropic models, resolve the API key from platform credentials (admin-managed).
-  // The key is stored as a platform credential for agent type 'claude-code' since
-  // that's the agent type that uses Anthropic API keys.
   let anthropicApiKey: string | undefined;
   if (isAnthropic) {
-    const encryptionKey = getCredentialEncryptionKey(c.env);
-    const platformCred = await getPlatformAgentCredential(db, 'claude-code', encryptionKey);
-    anthropicApiKey = platformCred?.credential;
-    if (!anthropicApiKey) {
+    const key = await resolveAnthropicApiKey(db, c.env);
+    if (!key) {
       return c.json({
         error: {
           message: 'No Anthropic API key configured. An admin must add a Claude Code platform credential.',
@@ -425,6 +386,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         },
       }, 503);
     }
+    anthropicApiKey = key;
   }
 
   log.info('ai_proxy.forward', {
