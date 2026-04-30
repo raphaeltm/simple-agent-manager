@@ -34,9 +34,11 @@ SAM idea: `01KQEMP59T86QN6WHAT05JK4AK`
 - [x] Change `POST /workspaces` so requests received before provisioning completes are persisted as `creating`, emit a clear queue event, and enqueue the existing workspace provision request instead of starting Docker/devcontainer work immediately.
 - [x] Drain queued workspace provisions in FIFO order when system provisioning completes.
 - [x] If system provisioning fails, fail queued workspace provisions with actionable detail instead of hanging indefinitely.
+- [x] Coalesce duplicate queued requests by workspace ID and cap queue depth with `WORKSPACE_PROVISION_QUEUE_MAX`.
 - [x] Ensure normal post-provisioning `POST /workspaces` behavior still starts immediately.
 - [x] Add unit tests proving queued workspace requests do not start devcontainer/container setup before readiness is released.
 - [x] Add unit tests proving queued requests drain after readiness and fail on provisioning failure.
+- [x] Add unit tests for duplicate coalescing and queue overflow failure.
 - [x] Update docs if any debug/health behavior changes. No docs required: `/health` and boot-log behavior remain unchanged.
 - [x] Run local Go tests for VM-agent server/provisioning behavior.
 - [x] Run repo quality checks required by `/do`.
