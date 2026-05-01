@@ -34,13 +34,13 @@ import {
   translateRequestToAnthropic,
   translateResponseToOpenAI,
 } from '../services/ai-anthropic-translate';
+import { type UpstreamAuth, resolveUnifiedBillingToken, resolveUpstreamAuth } from '../services/ai-billing';
 import {
   AIProxyAuthError,
   buildAIGatewayMetadata,
   buildAnthropicGatewayUrl,
   extractCallbackToken,
   isAnthropicModel,
-  resolveAnthropicApiKey,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkTokenBudget } from '../services/ai-token-budget';
@@ -208,7 +208,7 @@ async function forwardToAnthropic(
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string,
-  anthropicApiKey: string,
+  upstreamAuth: UpstreamAuth,
 ): Promise<Response> {
 
   // Translate OpenAI format → Anthropic Messages format
@@ -218,7 +218,7 @@ async function forwardToAnthropic(
   const response = await fetch(gatewayUrl, {
     method: 'POST',
     headers: {
-      'x-api-key': anthropicApiKey,
+      ...upstreamAuth.headers,
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
@@ -284,19 +284,16 @@ async function forwardToOpenAI(
   const gatewayBody = { ...body, model: modelId };
 
   // Use cf-aig-authorization for Unified Billing when available, otherwise standard Bearer
-  const authHeader = env.CF_AIG_TOKEN
-    ? undefined
-    : `Bearer ${openaiApiKey}`;
+  const cfToken = resolveUnifiedBillingToken(env);
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'cf-aig-metadata': aigMetadata,
   };
-  if (env.CF_AIG_TOKEN) {
-    headers['cf-aig-authorization'] = `Bearer ${env.CF_AIG_TOKEN}`;
-  }
-  if (authHeader) {
-    headers['Authorization'] = authHeader;
+  if (cfToken) {
+    headers['cf-aig-authorization'] = `Bearer ${cfToken}`;
+  } else {
+    headers['Authorization'] = `Bearer ${openaiApiKey}`;
   }
 
   const response = await fetch(gatewayUrl, {
@@ -459,25 +456,25 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   const provider = getModelProvider(modelId);
 
-  // For Anthropic models, resolve the API key from platform credentials (admin-managed).
-  // Unified Billing via CF_AIG_TOKEN can also be used (no separate key needed).
-  let anthropicApiKey: string | undefined;
-  if (provider === 'anthropic' && !c.env.CF_AIG_TOKEN) {
-    const key = await resolveAnthropicApiKey(db, c.env);
-    if (!key) {
+  // For Anthropic models, resolve upstream auth (Unified Billing or platform key).
+  let anthropicAuth: UpstreamAuth | undefined;
+  if (provider === 'anthropic') {
+    try {
+      anthropicAuth = await resolveUpstreamAuth(c.env, db);
+    } catch (err) {
       return c.json({
         error: {
-          message: 'No Anthropic API key configured. An admin must add a Claude Code platform credential or configure Unified Billing.',
+          message: err instanceof Error ? err.message : 'No Anthropic API key configured.',
           type: 'server_error',
         },
       }, 503);
     }
-    anthropicApiKey = key;
   }
 
   // For OpenAI models, resolve the API key from platform credentials or Unified Billing.
+  const cfToken = resolveUnifiedBillingToken(c.env);
   let openaiApiKey: string | undefined;
-  if (provider === 'openai' && !c.env.CF_AIG_TOKEN) {
+  if (provider === 'openai' && !cfToken) {
     const encryptionKey = getCredentialEncryptionKey(c.env);
     const platformCred = await getPlatformAgentCredential(db, 'codex', encryptionKey);
     openaiApiKey = platformCred?.credential;
@@ -505,7 +502,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   try {
     let response: Response;
     if (provider === 'anthropic') {
-      response = await forwardToAnthropic(c.env, body, modelId, aigMetadata, anthropicApiKey ?? '');
+      response = await forwardToAnthropic(c.env, body, modelId, aigMetadata, anthropicAuth!);
     } else if (provider === 'openai') {
       response = await forwardToOpenAI(c.env, body, modelId, aigMetadata, openaiApiKey ?? '');
     } else {

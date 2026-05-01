@@ -9,6 +9,8 @@
  * Auth: x-api-key header (workspace callback token) — matches Claude Code's auth format.
  * Rate limit: per-user RPM via KV (shared with OpenAI proxy — same user budget).
  * Token budget: per-user daily limits via KV.
+ * Billing: resolves upstream auth via resolveUpstreamAuth() — supports Unified Billing
+ * (cf-aig-authorization) and platform API key (x-api-key) modes.
  *
  * Mount point: app.route('/ai/anthropic/v1', aiProxyAnthropicRoutes) in index.ts.
  */
@@ -23,6 +25,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
+import { resolveUpstreamAuth } from '../services/ai-billing';
 import {
   AIProxyAuthError,
   buildAIGatewayMetadata,
@@ -30,7 +33,6 @@ import {
   buildAnthropicGatewayUrl,
   extractCallbackToken,
   isAnthropicModel,
-  resolveAnthropicApiKey,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkTokenBudget } from '../services/ai-token-budget';
@@ -140,11 +142,13 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
   }
 
-  // --- Resolve platform Anthropic API key ---
-  const anthropicApiKey = await resolveAnthropicApiKey(db, c.env);
-  if (!anthropicApiKey) {
+  // --- Resolve upstream auth (Unified Billing or platform key) ---
+  let upstreamAuth;
+  try {
+    upstreamAuth = await resolveUpstreamAuth(c.env, db);
+  } catch (err) {
     return anthropicError(
-      'No Anthropic API key configured. An admin must add a Claude Code platform credential.',
+      err instanceof Error ? err.message : 'No Anthropic API key configured.',
       'api_error',
       503,
     );
@@ -164,7 +168,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
 
   // --- Build upstream headers ---
   const upstreamHeaders: Record<string, string> = {
-    'x-api-key': anthropicApiKey,
+    ...upstreamAuth.headers,
     'Content-Type': 'application/json',
     'cf-aig-metadata': aigMetadata,
   };
@@ -187,6 +191,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     userId,
     workspaceId,
     modelId,
+    billingMode: upstreamAuth.billingMode,
     stream: isStreaming,
     hasTools: Array.isArray(body.tools) && body.tools.length > 0,
   });
@@ -331,11 +336,13 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
   }
 
-  // --- Resolve platform Anthropic API key ---
-  const anthropicApiKey = await resolveAnthropicApiKey(db, c.env);
-  if (!anthropicApiKey) {
+  // --- Resolve upstream auth (Unified Billing or platform key) ---
+  let upstreamAuth;
+  try {
+    upstreamAuth = await resolveUpstreamAuth(c.env, db);
+  } catch (err) {
     return anthropicError(
-      'No Anthropic API key configured. An admin must add a Claude Code platform credential.',
+      err instanceof Error ? err.message : 'No Anthropic API key configured.',
       'api_error',
       503,
     );
@@ -343,7 +350,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
 
   // --- Build upstream headers ---
   const upstreamHeaders: Record<string, string> = {
-    'x-api-key': anthropicApiKey,
+    ...upstreamAuth.headers,
     'Content-Type': 'application/json',
   };
 

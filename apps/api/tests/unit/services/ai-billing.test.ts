@@ -1,11 +1,12 @@
 /**
  * Unit tests for the AI billing mode resolution helper.
  *
- * Tests all billing mode branches: unified, platform-key, auto (with and without CF_AIG_TOKEN).
+ * Tests all billing mode branches: unified, platform-key, auto
+ * (with CF_AIG_TOKEN, CF_API_TOKEN fallback, and neither).
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { resolveBillingMode, resolveUpstreamAuth } from '../../../src/services/ai-billing';
+import { resolveBillingMode, resolveUnifiedBillingToken, resolveUpstreamAuth } from '../../../src/services/ai-billing';
 
 // =============================================================================
 // Mock helpers
@@ -21,12 +22,14 @@ function mockKV(overrides: Record<string, string> = {}) {
 
 function mockEnv(overrides: Partial<{
   CF_AIG_TOKEN: string;
+  CF_API_TOKEN: string;
   AI_PROXY_BILLING_MODE: string;
   ENCRYPTION_KEY: string;
   KV: KVNamespace;
 }> = {}) {
   return {
     CF_AIG_TOKEN: overrides.CF_AIG_TOKEN ?? 'test-cf-token',
+    CF_API_TOKEN: overrides.CF_API_TOKEN ?? 'test-cf-api-token',
     AI_PROXY_BILLING_MODE: overrides.AI_PROXY_BILLING_MODE,
     ENCRYPTION_KEY: overrides.ENCRYPTION_KEY ?? 'test-key',
     KV: overrides.KV ?? mockKV(),
@@ -47,6 +50,30 @@ vi.mock('../../../src/lib/secrets', () => ({
 import { getPlatformAgentCredential } from '../../../src/services/platform-credentials';
 
 const mockGetPlatformCred = vi.mocked(getPlatformAgentCredential);
+
+// =============================================================================
+// resolveUnifiedBillingToken
+// =============================================================================
+
+describe('resolveUnifiedBillingToken', () => {
+  it('prefers CF_AIG_TOKEN over CF_API_TOKEN', () => {
+    const env = mockEnv({ CF_AIG_TOKEN: 'aig-token', CF_API_TOKEN: 'api-token' });
+    expect(resolveUnifiedBillingToken(env)).toBe('aig-token');
+  });
+
+  it('falls back to CF_API_TOKEN when CF_AIG_TOKEN is absent', () => {
+    const env = mockEnv({ CF_API_TOKEN: 'api-token' });
+    (env as Record<string, unknown>).CF_AIG_TOKEN = undefined;
+    expect(resolveUnifiedBillingToken(env)).toBe('api-token');
+  });
+
+  it('returns undefined when both tokens are absent', () => {
+    const env = mockEnv();
+    (env as Record<string, unknown>).CF_AIG_TOKEN = undefined;
+    (env as Record<string, unknown>).CF_API_TOKEN = undefined;
+    expect(resolveUnifiedBillingToken(env)).toBeUndefined();
+  });
+});
 
 // =============================================================================
 // resolveBillingMode
@@ -97,17 +124,31 @@ describe('resolveUpstreamAuth — unified mode', () => {
     expect(result.billingMode).toBe('unified');
   });
 
-  it('throws when unified mode is set but CF_AIG_TOKEN is missing', async () => {
+  it('falls back to CF_API_TOKEN when CF_AIG_TOKEN is missing', async () => {
     const env = mockEnv({
       AI_PROXY_BILLING_MODE: 'unified',
-      CF_AIG_TOKEN: undefined as unknown as string,
+      CF_API_TOKEN: 'my-api-token',
     });
-    // Explicitly clear CF_AIG_TOKEN
     (env as Record<string, unknown>).CF_AIG_TOKEN = undefined;
     const db = {} as Parameters<typeof resolveUpstreamAuth>[1];
 
+    const result = await resolveUpstreamAuth(env, db);
+
+    expect(result.headers['cf-aig-authorization']).toBe('Bearer my-api-token');
+    expect(result.headers['x-api-key']).toBeUndefined();
+    expect(result.billingMode).toBe('unified');
+  });
+
+  it('throws when unified mode is set but no CF token is available', async () => {
+    const env = mockEnv({
+      AI_PROXY_BILLING_MODE: 'unified',
+    });
+    (env as Record<string, unknown>).CF_AIG_TOKEN = undefined;
+    (env as Record<string, unknown>).CF_API_TOKEN = undefined;
+    const db = {} as Parameters<typeof resolveUpstreamAuth>[1];
+
     await expect(resolveUpstreamAuth(env, db)).rejects.toThrow(
-      'Unified Billing enabled but CF_AIG_TOKEN is not configured',
+      'no CF token is configured',
     );
   });
 });
@@ -161,14 +202,27 @@ describe('resolveUpstreamAuth — auto mode', () => {
     expect(result.billingMode).toBe('unified');
   });
 
-  it('falls back to platform key when CF_AIG_TOKEN is missing', async () => {
+  it('uses unified billing via CF_API_TOKEN when CF_AIG_TOKEN is absent', async () => {
+    const env = mockEnv({ CF_API_TOKEN: 'auto-api-token' });
+    (env as Record<string, unknown>).CF_AIG_TOKEN = undefined;
+    const db = {} as Parameters<typeof resolveUpstreamAuth>[1];
+
+    const result = await resolveUpstreamAuth(env, db);
+
+    expect(result.headers['cf-aig-authorization']).toBe('Bearer auto-api-token');
+    expect(result.headers['x-api-key']).toBeUndefined();
+    expect(result.billingMode).toBe('unified');
+  });
+
+  it('falls back to platform key when no CF token is available', async () => {
     mockGetPlatformCred.mockResolvedValueOnce({
       credential: 'sk-ant-fallback-key',
       credentialKind: 'api-key',
     });
 
-    const env = mockEnv({ CF_AIG_TOKEN: undefined as unknown as string });
+    const env = mockEnv();
     (env as Record<string, unknown>).CF_AIG_TOKEN = undefined;
+    (env as Record<string, unknown>).CF_API_TOKEN = undefined;
     const db = {} as Parameters<typeof resolveUpstreamAuth>[1];
 
     const result = await resolveUpstreamAuth(env, db);
@@ -178,11 +232,12 @@ describe('resolveUpstreamAuth — auto mode', () => {
     expect(result.billingMode).toBe('platform-key');
   });
 
-  it('throws when both CF_AIG_TOKEN and platform credential are missing', async () => {
+  it('throws when no CF token and no platform credential are available', async () => {
     mockGetPlatformCred.mockResolvedValueOnce(null);
 
-    const env = mockEnv({ CF_AIG_TOKEN: undefined as unknown as string });
+    const env = mockEnv();
     (env as Record<string, unknown>).CF_AIG_TOKEN = undefined;
+    (env as Record<string, unknown>).CF_API_TOKEN = undefined;
     const db = {} as Parameters<typeof resolveUpstreamAuth>[1];
 
     await expect(resolveUpstreamAuth(env, db)).rejects.toThrow(

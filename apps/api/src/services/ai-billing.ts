@@ -2,9 +2,10 @@
  * AI proxy billing mode resolution.
  *
  * Determines which upstream authentication to use for AI Gateway requests:
- * - Unified Billing: `cf-aig-authorization: Bearer <CF_AIG_TOKEN>` (Cloudflare credits)
+ * - Unified Billing: `cf-aig-authorization: Bearer <token>` (Cloudflare credits)
+ *   Token resolution: CF_AIG_TOKEN (explicit) > CF_API_TOKEN (already a Worker secret)
  * - Platform Key: `x-api-key: <stored-api-key>` (admin-managed provider credential)
- * - Auto: try unified first, fall back to platform key if CF_AIG_TOKEN is absent
+ * - Auto: try unified first, fall back to platform key if no CF token is available
  */
 import {
   AI_PROXY_BILLING_MODE_KV_KEY,
@@ -46,34 +47,43 @@ function isValidBillingMode(value: string): value is BillingMode {
 }
 
 /**
- * Resolve upstream authentication headers for Anthropic model requests.
+ * Resolve the Cloudflare token for Unified Billing.
+ * Prefers the explicit CF_AIG_TOKEN, falls back to CF_API_TOKEN (already a Worker secret).
+ */
+export function resolveUnifiedBillingToken(env: Env): string | undefined {
+  return env.CF_AIG_TOKEN ?? env.CF_API_TOKEN ?? undefined;
+}
+
+/**
+ * Resolve upstream authentication headers for AI Gateway requests.
  *
  * Resolution order depends on billing mode:
- * - 'unified': Use CF_AIG_TOKEN via cf-aig-authorization header. Error if token missing.
+ * - 'unified': Use CF token via cf-aig-authorization header. Error if no token available.
  * - 'platform-key': Use stored platform credential via x-api-key header. Error if missing.
- * - 'auto' (default): Try unified if CF_AIG_TOKEN exists, else fall back to platform key.
+ * - 'auto' (default): Try unified if a CF token exists, else fall back to platform key.
  */
 export async function resolveUpstreamAuth(
   env: Env,
   db: ReturnType<typeof drizzle>,
 ): Promise<UpstreamAuth> {
   const mode = await resolveBillingMode(env);
+  const cfToken = resolveUnifiedBillingToken(env);
 
   if (mode === 'unified') {
-    if (!env.CF_AIG_TOKEN) {
-      throw new Error('Unified Billing enabled but CF_AIG_TOKEN is not configured');
+    if (!cfToken) {
+      throw new Error('Unified Billing enabled but no CF token is configured (set CF_AIG_TOKEN or CF_API_TOKEN)');
     }
     return {
-      headers: { 'cf-aig-authorization': `Bearer ${env.CF_AIG_TOKEN}` },
+      headers: { 'cf-aig-authorization': `Bearer ${cfToken}` },
       billingMode: 'unified',
     };
   }
 
   if (mode === 'auto') {
-    // Try unified first if CF_AIG_TOKEN is available
-    if (env.CF_AIG_TOKEN) {
+    // Try unified first if a CF token is available
+    if (cfToken) {
       return {
-        headers: { 'cf-aig-authorization': `Bearer ${env.CF_AIG_TOKEN}` },
+        headers: { 'cf-aig-authorization': `Bearer ${cfToken}` },
         billingMode: 'unified',
       };
     }
