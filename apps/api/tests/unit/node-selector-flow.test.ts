@@ -14,7 +14,7 @@ import {
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
 } from '@simple-agent-manager/shared';
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { nodeHasCapacity, scoreNodeLoad } from '../../src/services/node-selector';
 
@@ -123,16 +123,17 @@ describe('selectNodeForTaskRun warm pool path', () => {
       selectorSource.indexOf('Step 0'),
       selectorSource.indexOf('sortedWarm')
     );
-    expect(warmQuery).toContain("eq(schema.nodes.userId, userId)");
+    expect(warmQuery).toContain('eq(schema.nodes.userId, userId)');
     expect(warmQuery).toContain("eq(schema.nodes.status, 'running')");
-    expect(warmQuery).toContain("isNotNull(schema.nodes.warmSince)");
+    expect(warmQuery).toContain('isNotNull(schema.nodes.warmSince)');
   });
 
   it('sorts warm nodes by size match first, then location match', () => {
     const sortSection = selectorSource.slice(
-      selectorSource.indexOf('sortedWarm = warmNodes.sort'),
+      selectorSource.indexOf('const sortedWarm = warmNodes'),
       selectorSource.indexOf('for (const warmNode')
     );
+    expect(sortSection).toContain('canSatisfyVmSize(node.vmSize, preferredSize)');
     // Size match is compared first
     expect(sortSection).toContain('aSizeMatch');
     expect(sortSection).toContain('bSizeMatch');
@@ -158,7 +159,7 @@ describe('selectNodeForTaskRun warm pool path', () => {
     // Re-queries D1 to verify node is still running and warm
     expect(warmSection).toContain('freshNode');
     expect(warmSection).toContain("freshNode.status !== 'running'");
-    expect(warmSection).toContain("!freshNode.warmSince");
+    expect(warmSection).toContain('!freshNode.warmSince');
     expect(warmSection).toContain('continue');
   });
 
@@ -191,9 +192,7 @@ describe('selectNodeForTaskRun warm pool path', () => {
 
   it('falls through to capacity-based selection after all warm claims fail', () => {
     // After the warm node loop, the regular node query runs
-    const afterWarmLoop = selectorSource.slice(
-      selectorSource.indexOf('Get all running nodes')
-    );
+    const afterWarmLoop = selectorSource.slice(selectorSource.indexOf('Get all running nodes'));
     expect(afterWarmLoop).toContain('.select()');
   });
 });
@@ -204,49 +203,38 @@ describe('selectNodeForTaskRun warm pool path', () => {
 
 describe('selectNodeForTaskRun capacity path', () => {
   it('queries all running nodes for the user', () => {
-    const capacitySection = selectorSource.slice(
-      selectorSource.indexOf('Get all running nodes')
-    );
-    expect(capacitySection).toContain("eq(schema.nodes.userId, userId)");
+    const capacitySection = selectorSource.slice(selectorSource.indexOf('Get all running nodes'));
+    expect(capacitySection).toContain('eq(schema.nodes.userId, userId)');
     expect(capacitySection).toContain("eq(schema.nodes.status, 'running')");
   });
 
   it('returns null when no running nodes exist', () => {
-    const capacitySection = selectorSource.slice(
-      selectorSource.indexOf('Get all running nodes')
-    );
+    const capacitySection = selectorSource.slice(selectorSource.indexOf('Get all running nodes'));
     expect(capacitySection).toContain('nodes.length === 0');
     expect(capacitySection).toContain('return null');
   });
 
   it('skips unhealthy nodes', () => {
-    const capacitySection = selectorSource.slice(
-      selectorSource.indexOf('Get all running nodes')
-    );
+    const capacitySection = selectorSource.slice(selectorSource.indexOf('Get all running nodes'));
     expect(capacitySection).toContain("node.healthStatus === 'unhealthy'");
     expect(capacitySection).toContain('continue');
   });
 
   it('counts active workspaces per node (running, creating, recovery)', () => {
-    const capacitySection = selectorSource.slice(
-      selectorSource.indexOf('Get all running nodes')
-    );
+    const capacitySection = selectorSource.slice(selectorSource.indexOf('Get all running nodes'));
     expect(capacitySection).toContain('count()');
     expect(capacitySection).toContain("'running', 'creating', 'recovery'");
   });
 
   it('filters candidates by nodeHasCapacity', () => {
-    const capacitySection = selectorSource.slice(
-      selectorSource.indexOf('Get all running nodes')
-    );
+    const capacitySection = selectorSource.slice(selectorSource.indexOf('Get all running nodes'));
+    expect(capacitySection).toContain('canSatisfyVmSize(node.vmSize, preferredSize)');
     expect(capacitySection).toContain('nodeHasCapacity(');
     expect(capacitySection).toContain('candidates.push(candidate)');
   });
 
   it('returns null when no candidates have capacity', () => {
-    const capacitySection = selectorSource.slice(
-      selectorSource.indexOf('Get all running nodes')
-    );
+    const capacitySection = selectorSource.slice(selectorSource.indexOf('Get all running nodes'));
     expect(capacitySection).toContain('candidates.length === 0');
     expect(capacitySection).toContain('return null');
   });
@@ -334,7 +322,7 @@ describe('parseMetrics (internal)', () => {
 
   it('returns null for non-object parsed values', () => {
     expect(selectorSource).toContain("typeof parsed === 'object'");
-    expect(selectorSource).toContain("parsed !== null");
+    expect(selectorSource).toContain('parsed !== null');
   });
 });
 
@@ -351,7 +339,7 @@ describe('selectNodeForTaskRun edge cases', () => {
   it('handles preferred size and location being undefined in warm sort', () => {
     // The ternary checks if preferredSize is defined before comparing
     const warmSort = selectorSource.slice(
-      selectorSource.indexOf('sortedWarm = warmNodes.sort'),
+      selectorSource.indexOf('const sortedWarm = warmNodes'),
       selectorSource.indexOf('for (const warmNode')
     );
     expect(warmSort).toContain('preferredSize &&');
@@ -387,7 +375,7 @@ describe('workspace count limit (MAX_WORKSPACES_PER_NODE)', () => {
   });
 
   it('NodeSelectorEnv includes MAX_WORKSPACES_PER_NODE', () => {
-    expect(selectorSource).toContain("MAX_WORKSPACES_PER_NODE?: string");
+    expect(selectorSource).toContain('MAX_WORKSPACES_PER_NODE?: string');
   });
 
   it('reads MAX_WORKSPACES_PER_NODE from env with fallback to default', () => {
@@ -396,9 +384,7 @@ describe('workspace count limit (MAX_WORKSPACES_PER_NODE)', () => {
   });
 
   it('rejects nodes where activeCount >= maxWorkspacesPerNode before checking metrics', () => {
-    const capacitySection = selectorSource.slice(
-      selectorSource.indexOf('Get all running nodes')
-    );
+    const capacitySection = selectorSource.slice(selectorSource.indexOf('Get all running nodes'));
     // The workspace count check must appear before nodeHasCapacity
     const wsCheckIdx = capacitySection.indexOf('activeCount >= maxWorkspacesPerNode');
     const metricsCheckIdx = capacitySection.indexOf('nodeHasCapacity(');
@@ -427,7 +413,9 @@ const taskRunnerSource = [
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',
-].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
+]
+  .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
+  .join('\n');
 
 describe('TaskRunner findNodeWithCapacity workspace count limit', () => {
   it('imports DEFAULT_MAX_WORKSPACES_PER_NODE', () => {
@@ -435,16 +423,12 @@ describe('TaskRunner findNodeWithCapacity workspace count limit', () => {
   });
 
   it('reads MAX_WORKSPACES_PER_NODE from env', () => {
-    const section = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('findNodeWithCapacity')
-    );
+    const section = taskRunnerSource.slice(taskRunnerSource.indexOf('findNodeWithCapacity'));
     expect(section).toContain('MAX_WORKSPACES_PER_NODE');
   });
 
   it('queries workspace count per node and rejects at capacity', () => {
-    const section = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('findNodeWithCapacity')
-    );
+    const section = taskRunnerSource.slice(taskRunnerSource.indexOf('findNodeWithCapacity'));
     expect(section).toContain("status IN ('running', 'creating', 'recovery')");
     expect(section).toContain('>= maxWorkspaces');
   });

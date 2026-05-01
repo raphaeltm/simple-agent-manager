@@ -2,6 +2,7 @@
 
 // VM Sizes
 export {
+  canSatisfyVmSize,
   DEFAULT_VM_SIZE_VCPUS,
   getVcpuCount,
   PROVIDER_VM_SIZE_VCPUS,
@@ -9,7 +10,7 @@ export {
 } from './vm-sizes';
 
 // Providers & Locations
-export type { LocationMeta,ProviderHelpMeta } from './providers';
+export type { LocationMeta, ProviderHelpMeta } from './providers';
 export {
   getDefaultLocationForProvider,
   getLocationsForProvider,
@@ -23,7 +24,7 @@ export {
 } from './providers';
 
 // Status
-export { STATUS_COLORS,STATUS_LABELS } from './status';
+export { STATUS_COLORS, STATUS_LABELS } from './status';
 
 // Defaults & Limits
 export {
@@ -92,7 +93,7 @@ export {
 } from './node-pooling';
 
 // Scaling Parameters
-export type { ScalingParamKey,ScalingParamMeta } from './scaling';
+export type { ScalingParamKey, ScalingParamMeta } from './scaling';
 export {
   DEFAULT_MAX_CONCURRENT_TASKS,
   DEFAULT_MAX_DISPATCH_DEPTH,

@@ -1,5 +1,6 @@
 import type { NodeMetrics } from '@simple-agent-manager/shared';
 import {
+  canSatisfyVmSize,
   DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
@@ -155,15 +156,17 @@ export async function selectNodeForTaskRun(
         )
       );
 
-    // Try each warm node, preferring matching size/location
-    const sortedWarm = warmNodes.sort((a, b) => {
-      const aSizeMatch = preferredSize && a.vmSize === preferredSize ? 1 : 0;
-      const bSizeMatch = preferredSize && b.vmSize === preferredSize ? 1 : 0;
-      if (aSizeMatch !== bSizeMatch) return bSizeMatch - aSizeMatch;
-      const aLocMatch = preferredLocation && a.vmLocation === preferredLocation ? 1 : 0;
-      const bLocMatch = preferredLocation && b.vmLocation === preferredLocation ? 1 : 0;
-      return bLocMatch - aLocMatch;
-    });
+    // Try each warm node that can satisfy the requested size, preferring exact size/location.
+    const sortedWarm = warmNodes
+      .filter((node) => canSatisfyVmSize(node.vmSize, preferredSize))
+      .sort((a, b) => {
+        const aSizeMatch = preferredSize && a.vmSize === preferredSize ? 1 : 0;
+        const bSizeMatch = preferredSize && b.vmSize === preferredSize ? 1 : 0;
+        if (aSizeMatch !== bSizeMatch) return bSizeMatch - aSizeMatch;
+        const aLocMatch = preferredLocation && a.vmLocation === preferredLocation ? 1 : 0;
+        const bLocMatch = preferredLocation && b.vmLocation === preferredLocation ? 1 : 0;
+        return bLocMatch - aLocMatch;
+      });
 
     for (const warmNode of sortedWarm) {
       try {
@@ -220,12 +223,7 @@ export async function selectNodeForTaskRun(
   const nodes = await db
     .select()
     .from(schema.nodes)
-    .where(
-      and(
-        eq(schema.nodes.userId, userId),
-        eq(schema.nodes.status, 'running')
-      )
-    );
+    .where(and(eq(schema.nodes.userId, userId), eq(schema.nodes.status, 'running')));
 
   if (nodes.length === 0) {
     return null;
@@ -236,6 +234,9 @@ export async function selectNodeForTaskRun(
   for (const node of nodes) {
     // Skip unhealthy nodes
     if (node.healthStatus === 'unhealthy') {
+      continue;
+    }
+    if (!canSatisfyVmSize(node.vmSize, preferredSize)) {
       continue;
     }
 
