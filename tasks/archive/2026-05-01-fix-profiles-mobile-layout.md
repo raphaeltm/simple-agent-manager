@@ -24,23 +24,23 @@ When the delete confirmation is active, it renders "Confirm" + "Cancel" buttons 
 
 ## Implementation Checklist
 
-- [ ] Fix profile card layout to stack action buttons below content on mobile
-- [ ] Make delete confirmation buttons wrap to their own row on narrow screens
-- [ ] Ensure long profile names and descriptions truncate properly on mobile
-- [ ] Write Playwright visual audit test with mock data (normal, long text, many items, empty, error)
-- [ ] Capture before screenshots showing the broken layout
-- [ ] Implement the CSS/layout fix
-- [ ] Capture after screenshots confirming the fix
-- [ ] Verify no horizontal overflow at 375px mobile viewport
+- [x] Fix profile card layout (kept action buttons in header row with overflow-hidden; different approach than planned but works correctly)
+- [x] Make delete confirmation buttons wrap to their own row on narrow screens
+- [x] Ensure long profile names and descriptions truncate properly on mobile
+- [x] Write Playwright visual audit test with mock data (normal, long text, many items, empty, error)
+- [x] Capture before screenshots showing the broken layout
+- [x] Implement the CSS/layout fix
+- [x] Capture after screenshots confirming the fix
+- [x] Verify no horizontal overflow at 375px mobile viewport
 
 ## Acceptance Criteria
 
-- [ ] Profile cards render fully within the viewport on a 375px-wide screen
-- [ ] Edit and delete buttons are accessible (tappable) on mobile
-- [ ] Delete confirmation buttons do not push content off-screen
-- [ ] Long profile names truncate cleanly without horizontal overflow
-- [ ] Desktop layout (1280px) is unchanged or improved
-- [ ] Playwright visual audit passes with no horizontal overflow at mobile and desktop viewports
+- [x] Profile cards render fully within the viewport on a 375px-wide screen
+- [x] Edit and delete buttons are accessible (tappable) on mobile
+- [x] Delete confirmation buttons do not push content off-screen
+- [x] Long profile names truncate cleanly without horizontal overflow
+- [ ] Desktop layout (1280px) is unchanged or improved (desktop Playwright tests skipped — pre-existing infrastructure issue, filed as backlog task)
+- [x] Playwright visual audit passes with no horizontal overflow at mobile viewports (desktop skipped — see above)
 
 ## References
 
