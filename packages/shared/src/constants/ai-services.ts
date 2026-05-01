@@ -120,6 +120,10 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
  * the AI_PROXY_DEFAULT_MODEL env var. */
 export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
+/** Default model for Anthropic proxy fallback (Claude Code agent).
+ * Override via AI_PROXY_DEFAULT_ANTHROPIC_MODEL env var. */
+export const DEFAULT_AI_PROXY_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+
 /** Budget tier for platform AI models. */
 export type PlatformAIModelTier = 'free' | 'standard' | 'premium';
 
