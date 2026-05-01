@@ -2,8 +2,10 @@
  * Shared helpers for AI proxy endpoints (OpenAI-compatible and Anthropic-native).
  *
  * Extracted to avoid duplication between ai-proxy.ts and ai-proxy-anthropic.ts.
- * Covers: auth verification, workspace resolution, rate limiting, token budget,
- * metadata injection, and Anthropic API key resolution.
+ * Covers: auth verification, workspace resolution, model validation,
+ * metadata injection, and upstream URL builders.
+ *
+ * Upstream auth resolution (Unified Billing vs platform key) lives in ai-billing.ts.
  */
 import { eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
@@ -11,9 +13,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getCredentialEncryptionKey } from '../lib/secrets';
 import { verifyCallbackToken } from './jwt';
-import { getPlatformAgentCredential } from './platform-credentials';
 
 // =============================================================================
 // Auth: Callback Token Verification + Workspace Resolution
@@ -108,23 +108,6 @@ export class AIProxyAuthError extends Error {
     super(message);
     this.name = 'AIProxyAuthError';
   }
-}
-
-// =============================================================================
-// Anthropic API Key Resolution
-// =============================================================================
-
-/**
- * Resolve the platform Anthropic API key from platform credentials.
- * Returns null if no credential is configured.
- */
-export async function resolveAnthropicApiKey(
-  db: ReturnType<typeof drizzle>,
-  env: Env,
-): Promise<string | null> {
-  const encryptionKey = getCredentialEncryptionKey(env);
-  const platformCred = await getPlatformAgentCredential(db, 'claude-code', encryptionKey);
-  return platformCred?.credential ?? null;
 }
 
 // =============================================================================
