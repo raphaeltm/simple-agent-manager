@@ -26,7 +26,8 @@ The intended behavior is minimum-capacity semantics: smaller work may run on lar
 - [x] Reject explicitly selected preferred nodes that are smaller than requested.
 - [x] Add tests proving larger nodes satisfy smaller requests and smaller nodes do not satisfy larger requests.
 - [x] Run focused tests and typechecks.
-- [ ] Complete `/do` validation, specialist review, and staging verification.
+- [x] Run full lint/typecheck/test validation.
+- [ ] Complete `/do` specialist review and staging verification.
 
 ## Acceptance Criteria
 
@@ -38,10 +39,19 @@ The intended behavior is minimum-capacity semantics: smaller work may run on lar
 - [x] Explicit preferred node selection cannot bypass the minimum-size rule.
 - [ ] Staging verification confirms the changed behavior or provides concrete evidence if full VM provisioning is blocked.
 
+## Validation Log
+
+- 2026-05-01: Focused builds/tests/typechecks passed for `shared`, `providers`, `cloud-init`, and `api`.
+- 2026-05-01: `pnpm lint` passed with existing warnings.
+- 2026-05-01: `pnpm typecheck` passed.
+- 2026-05-01: Initial `pnpm test` run exposed an unrelated `ButtonGroup` assertion that depended on CSS zero-value serialization.
+- 2026-05-01: Fixed the `ButtonGroup` test to accept equivalent `0` / `0px` style serialization.
+- 2026-05-01: `pnpm --filter @simple-agent-manager/ui test -- ButtonGroup` passed.
+- 2026-05-01: Full `pnpm test` rerun passed: 19 packages successful.
+
 ## References
 
 - `.claude/rules/02-quality-gates.md`
 - `.claude/rules/10-e2e-verification.md`
 - `.claude/rules/13-staging-verification.md`
 - `.claude/rules/32-cf-api-debugging.md`
-
