@@ -14,7 +14,7 @@ The intended behavior is minimum-capacity semantics: smaller work may run on lar
 - Hetzner provider maps abstract `large` to `cx43` in `packages/providers/src/hetzner.ts`.
 - The bug is in reuse selection: warm and existing nodes sort by exact size match but do not reject undersized nodes.
 - Staging D1 inspection on 2026-05-01 found no project currently set to `default_vm_size = 'large'`, so the exact reported incident could not be confirmed from persisted staging state.
-- Task records do not persist the resolved requested VM size, which makes post-hoc auditing harder.
+- Task records do not persist the resolved requested VM size, which makes post-hoc auditing harder. Deferred to `tasks/backlog/2026-05-01-persist-task-requested-vm-size.md` because the current bug fix is scoped to enforcing minimum-size node selection.
 
 ## Implementation Checklist
 
@@ -28,6 +28,7 @@ The intended behavior is minimum-capacity semantics: smaller work may run on lar
 - [x] Add behavioral tests for standalone selector VM-size filtering.
 - [x] Add behavioral tests for TaskRunner preferred, warm, and existing node VM-size filtering.
 - [x] Add bug-fix post-mortem and process rule update.
+- [x] Defer resolved requested VM-size audit persistence to a backlog task.
 - [x] Run focused tests and typechecks.
 - [x] Run full lint/typecheck/test validation.
 - [x] Complete `/do` specialist review and staging verification.
