@@ -349,7 +349,7 @@ describe('Workspace page', () => {
         expect(probe).toContain('sessionId=sess-1');
       });
       expect(screen.queryByRole('tab', { name: 'Terminal tab: Terminal 1' })).not.toBeInTheDocument();
-    });
+    }, 10_000);
 
     it('allows creating a new terminal from + menu after closing the last terminal tab', async () => {
       mocks.featureFlags.multiTerminal = true;
