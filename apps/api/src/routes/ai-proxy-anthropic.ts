@@ -285,7 +285,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     return anthropicError('Invalid or expired API key', 'authentication_error', 401);
   }
 
-  const { userId } = auth;
+  const { userId, workspaceId, projectId, trialId } = auth;
 
   // --- Rate limit: per-user RPM (shared key with messages endpoint) ---
   const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
@@ -348,10 +348,22 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     );
   }
 
+  // --- Build metadata for AI Gateway analytics ---
+  const aigMetadata = buildAIGatewayMetadata({
+    userId,
+    workspaceId,
+    projectId,
+    trialId,
+    modelId,
+    stream: false,
+    hasTools: false,
+  });
+
   // --- Build upstream headers ---
   const upstreamHeaders: Record<string, string> = {
     ...upstreamAuth.headers,
     'Content-Type': 'application/json',
+    'cf-aig-metadata': aigMetadata,
   };
 
   const anthropicVersion = c.req.header('anthropic-version');

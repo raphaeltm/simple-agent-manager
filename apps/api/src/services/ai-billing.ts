@@ -16,6 +16,7 @@ import {
 import type { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getPlatformAgentCredential } from './platform-credentials';
 
@@ -68,6 +69,13 @@ export async function resolveUpstreamAuth(
 ): Promise<UpstreamAuth> {
   const mode = await resolveBillingMode(env);
   const cfToken = resolveUnifiedBillingToken(env);
+
+  // Warn when falling back to the high-privilege CF_API_TOKEN
+  if (cfToken && !env.CF_AIG_TOKEN && env.CF_API_TOKEN) {
+    log.warn('ai_billing.unified.using_platform_token', {
+      message: 'CF_AIG_TOKEN not set — falling back to CF_API_TOKEN for AI Gateway. Set CF_AIG_TOKEN for least-privilege billing.',
+    });
+  }
 
   if (mode === 'unified') {
     if (!cfToken) {
