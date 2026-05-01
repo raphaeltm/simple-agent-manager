@@ -9,7 +9,7 @@
  * - No user credential → apiKeySource: 'callback-token' (platform proxy, existing)
  */
 import { Hono } from 'hono';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // --- Mock dependencies ---
 

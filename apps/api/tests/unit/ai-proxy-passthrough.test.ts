@@ -4,7 +4,7 @@
  * Tests the URL-path-based proxy auth routes that enable universal usage tracking.
  */
 import { Hono } from 'hono';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // --- Mock dependencies ---
 
