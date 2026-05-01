@@ -115,7 +115,7 @@ jobs:
         id: pulumi_login
         continue-on-error: true
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.names.outputs.prefix) }}"
           R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
           pulumi login "s3://${BUCKET_NAME}?endpoint=${R2_ENDPOINT}&region=auto"
           echo "status=ok" >> "$GITHUB_OUTPUT"
@@ -734,7 +734,7 @@ jobs:
       - name: Write Job Summary
         if: always()
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.names.outputs.prefix) }}"
 
           if [ "$INPUT_DRY_RUN" = "true" ]; then
             echo "## Teardown Preview (Dry Run) — $INPUT_ENVIRONMENT" >> "$GITHUB_STEP_SUMMARY"
