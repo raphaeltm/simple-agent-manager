@@ -203,6 +203,7 @@ export {
   PLATFORM_AI_MODELS,
   type PlatformAIModel,
   VALID_BILLING_MODES,
+  type PlatformAIModelTier,
 } from './ai-services';
 
 // Agent Settings

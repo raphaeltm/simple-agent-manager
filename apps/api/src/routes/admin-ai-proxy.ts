@@ -34,18 +34,36 @@ const adminAIProxyRoutes = new Hono<{ Bindings: Env }>();
 adminAIProxyRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
 /**
- * Check whether an Anthropic platform credential exists and is enabled.
- * Anthropic models require this to be present before they can be selected.
+ * Check whether a platform credential exists for a given agent type.
  */
-async function hasAnthropicCredential(env: Env): Promise<boolean> {
+async function hasPlatformCredential(env: Env, agentType: string): Promise<boolean> {
   try {
     const db = drizzle(env.DATABASE, { schema });
     const encryptionKey = getCredentialEncryptionKey(env);
-    const cred = await getPlatformAgentCredential(db, 'claude-code', encryptionKey);
+    const cred = await getPlatformAgentCredential(db, agentType, encryptionKey);
     return !!cred?.credential;
   } catch {
     return false;
   }
+}
+
+/**
+ * Determine availability for a model based on its provider and configured credentials.
+ * Models are available if:
+ * - Workers AI: always available (free, no key needed)
+ * - Anthropic: requires Claude Code platform credential OR Unified Billing token
+ * - OpenAI: requires Codex platform credential OR Unified Billing token
+ */
+function isModelAvailable(
+  provider: string,
+  hasAnthropic: boolean,
+  hasOpenAI: boolean,
+  hasUnifiedBilling: boolean,
+): boolean {
+  if (provider === 'workers-ai') return true;
+  if (provider === 'anthropic') return hasAnthropic || hasUnifiedBilling;
+  if (provider === 'openai') return hasOpenAI || hasUnifiedBilling;
+  return false;
 }
 
 /**
@@ -54,16 +72,18 @@ async function hasAnthropicCredential(env: Env): Promise<boolean> {
  * Returns the current AI proxy configuration including:
  * - The active default model (KV override > env var > shared constant)
  * - The active billing mode (KV override > env var > default)
- * - Available models with provider info and availability status
- * - Whether an Anthropic credential is configured
- * - Whether CF_API_TOKEN is configured (boolean only, never expose the value)
+ * - Available models with provider info, tier, cost, and availability status
+ * - Credential status for each provider
  */
 adminAIProxyRoutes.get('/config', async (c) => {
   const kvConfig = await c.env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY);
   const parsed: AIProxyConfig | null = kvConfig ? JSON.parse(kvConfig) : null;
 
-  const hasAnthropic = await hasAnthropicCredential(c.env);
-  const hasCfApiToken = !!c.env.CF_API_TOKEN;
+  const [hasAnthropic, hasOpenAI] = await Promise.all([
+    hasPlatformCredential(c.env, 'claude-code'),
+    hasPlatformCredential(c.env, 'codex'),
+  ]);
+  const hasUnifiedBilling = !!c.env.CF_AIG_TOKEN;
   const billingMode = await resolveBillingMode(c.env);
 
   // Effective default: KV override > env var > shared constant
@@ -71,13 +91,9 @@ adminAIProxyRoutes.get('/config', async (c) => {
     ?? c.env.AI_PROXY_DEFAULT_MODEL
     ?? DEFAULT_AI_PROXY_MODEL;
 
-  // With unified billing, Anthropic models are available if either CF_API_TOKEN
-  // or a platform credential is configured
-  const anthropicAvailable = hasCfApiToken || hasAnthropic;
-
   const models = PLATFORM_AI_MODELS.map((m) => ({
     ...m,
-    available: m.provider === 'workers-ai' || anthropicAvailable,
+    available: isModelAvailable(m.provider, hasAnthropic, hasOpenAI, hasUnifiedBilling),
   }));
 
   return c.json({
@@ -85,7 +101,8 @@ adminAIProxyRoutes.get('/config', async (c) => {
     source: parsed ? 'admin' as const : (c.env.AI_PROXY_DEFAULT_MODEL ? 'env' as const : 'default' as const),
     updatedAt: parsed?.updatedAt ?? null,
     hasAnthropicCredential: hasAnthropic,
-    hasCfApiToken,
+    hasOpenAICredential: hasOpenAI,
+    hasUnifiedBilling,
     billingMode,
     models,
   });
@@ -96,7 +113,7 @@ adminAIProxyRoutes.get('/config', async (c) => {
  *
  * Update the default model. Validates that:
  * - The model ID is in the PLATFORM_AI_MODELS list
- * - If an Anthropic model is selected, either a platform credential or CF_API_TOKEN exists
+ * - If a paid provider model is selected, a credential or Unified Billing is configured
  */
 adminAIProxyRoutes.put('/config', async (c) => {
   const body = await c.req.json<{ defaultModel: string }>();
@@ -110,14 +127,26 @@ adminAIProxyRoutes.put('/config', async (c) => {
     throw errors.badRequest(`Unknown model: ${body.defaultModel}. Available: ${PLATFORM_AI_MODELS.map((m) => m.id).join(', ')}`);
   }
 
-  // Anthropic models require either unified billing (CF_API_TOKEN) or platform credential
-  if (model.provider === 'anthropic') {
-    const hasAnthropic = await hasAnthropicCredential(c.env);
-    const hasCfApiToken = !!c.env.CF_API_TOKEN;
-    if (!hasAnthropic && !hasCfApiToken) {
+  const hasUnifiedBilling = !!c.env.CF_AIG_TOKEN;
+
+  // Anthropic models require a platform credential or Unified Billing
+  if (model.provider === 'anthropic' && !hasUnifiedBilling) {
+    const hasAnthropic = await hasPlatformCredential(c.env, 'claude-code');
+    if (!hasAnthropic) {
       throw errors.badRequest(
-        'Cannot select an Anthropic model without either a CF API token (Unified Billing) or a Claude Code platform credential. '
-        + 'Configure Unified Billing or add a credential on the Credentials tab first.',
+        'Cannot select an Anthropic model without a Claude Code platform credential or Unified Billing. '
+        + 'Add a credential on the Credentials tab first.',
+      );
+    }
+  }
+
+  // OpenAI models require a platform credential or Unified Billing
+  if (model.provider === 'openai' && !hasUnifiedBilling) {
+    const hasOpenAI = await hasPlatformCredential(c.env, 'codex');
+    if (!hasOpenAI) {
+      throw errors.badRequest(
+        'Cannot select an OpenAI model without a Codex platform credential or Unified Billing. '
+        + 'Add a credential on the Credentials tab first.',
       );
     }
   }
@@ -132,6 +161,7 @@ adminAIProxyRoutes.put('/config', async (c) => {
   log.info('admin.ai_proxy.config_updated', {
     defaultModel: body.defaultModel,
     provider: model.provider,
+    tier: model.tier,
   });
 
   return c.json({
@@ -158,10 +188,10 @@ adminAIProxyRoutes.patch('/config', async (c) => {
   }
 
   // Validate that unified billing can work with available credentials
-  if (body.billingMode === 'unified' && !c.env.CF_API_TOKEN) {
+  if (body.billingMode === 'unified' && !c.env.CF_AIG_TOKEN) {
     throw errors.badRequest(
-      'Cannot set billing mode to "unified" without CF_API_TOKEN configured. '
-      + 'Set CF_API_TOKEN as a Worker secret first, or use "auto" mode.',
+      'Cannot set billing mode to "unified" without CF_AIG_TOKEN configured. '
+      + 'Set CF_AIG_TOKEN as a Worker secret first, or use "auto" mode.',
     );
   }
 
