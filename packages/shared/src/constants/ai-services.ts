@@ -281,3 +281,22 @@ export const DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS = 120_000;
 
 /** Default rate limit window in seconds. Override via AI_PROXY_RATE_LIMIT_WINDOW_SECONDS env var. */
 export const DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS = 60;
+
+// =============================================================================
+// User Budget Settings
+// =============================================================================
+
+/** Default alert threshold percentage for budget warnings. Override via AI_USAGE_ALERT_THRESHOLD_PERCENT env var. */
+export const DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT = 80;
+
+/** KV key prefix for user budget settings. */
+export const AI_BUDGET_SETTINGS_KV_PREFIX = 'ai-budget-settings';
+
+/** Maximum allowed daily token limit a user can set. Override via AI_USAGE_MAX_DAILY_TOKEN_LIMIT env var. */
+export const DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT = 10_000_000;
+
+/** Maximum allowed monthly cost cap (USD) a user can set. Override via AI_USAGE_MAX_MONTHLY_COST_CAP_USD env var. */
+export const DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD = 10_000;
+
+/** TTL in seconds for budget settings cache (avoid reading KV on every proxy request). Override via AI_USAGE_BUDGET_CHECK_CACHE_SECONDS env var. */
+export const DEFAULT_AI_USAGE_BUDGET_CHECK_CACHE_SECONDS = 60;

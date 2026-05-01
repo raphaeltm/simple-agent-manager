@@ -452,6 +452,9 @@ export {
 
 // User AI Usage
 export type {
+  UpdateAiBudgetRequest,
+  UserAiBudgetResponse,
+  UserAiBudgetSettings,
   UserAiUsageByDay,
   UserAiUsageByModel,
   UserAiUsageResponse,
