@@ -333,6 +333,8 @@ export async function fetchAdminCosts(period?: string): Promise<CostSummaryRespo
 // Admin AI Proxy Config
 // =============================================================================
 
+export type BillingMode = 'unified' | 'platform-key' | 'auto';
+
 export interface AIProxyConfigResponse {
   defaultModel: string;
   source: 'admin' | 'env' | 'default';
@@ -340,6 +342,7 @@ export interface AIProxyConfigResponse {
   hasAnthropicCredential: boolean;
   hasOpenAICredential: boolean;
   hasUnifiedBilling: boolean;
+  billingMode: BillingMode;
   models: Array<{
     id: string;
     label: string;
@@ -364,6 +367,15 @@ export async function updateAIProxyConfig(defaultModel: string): Promise<{
   return request('/api/admin/ai-proxy/config', {
     method: 'PUT',
     body: JSON.stringify({ defaultModel }),
+  });
+}
+
+export async function updateAIProxyBillingMode(billingMode: BillingMode): Promise<{
+  billingMode: BillingMode;
+}> {
+  return request('/api/admin/ai-proxy/config', {
+    method: 'PATCH',
+    body: JSON.stringify({ billingMode }),
   });
 }
 

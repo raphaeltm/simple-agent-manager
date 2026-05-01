@@ -511,6 +511,7 @@ export interface Env {
   AI_PROXY_RATE_LIMIT_RPM?: string;                  // Requests per minute per user (default: 30)
   AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
+  AI_PROXY_BILLING_MODE?: string;                    // Billing mode: "unified" | "platform-key" | "auto" (default: auto)
   AI_GATEWAY_ID?: string;                            // Cloudflare AI Gateway ID (default: sam)
   CF_AIG_TOKEN?: string;                             // Cloudflare AI Gateway Unified Billing token (optional — enables all providers without separate keys)
   AI_USAGE_PAGE_SIZE?: string;                       // AI Gateway logs page size for admin usage aggregation (default: 100)

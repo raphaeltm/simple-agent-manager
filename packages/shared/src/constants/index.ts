@@ -157,10 +157,13 @@ export {
 
 // AI Services (Task Title, Context Summary, TTS, AI Proxy)
 export {
+  AI_PROXY_BILLING_MODE_KV_KEY,
   AI_PROXY_DEFAULT_MODEL_KV_KEY,
   type AIProxyConfig,
+  type BillingMode,
   DEFAULT_AI_PROXY_ALLOWED_MODELS,
   DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+  DEFAULT_AI_PROXY_BILLING_MODE,
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
   DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT,
   DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST,
@@ -201,6 +204,7 @@ export {
   PLATFORM_AI_MODELS,
   type PlatformAIModel,
   type PlatformAIModelTier,
+  VALID_BILLING_MODES,
 } from './ai-services';
 
 // Agent Settings

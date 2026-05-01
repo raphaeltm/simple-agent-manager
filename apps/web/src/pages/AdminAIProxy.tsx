@@ -4,10 +4,30 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   type AIProxyConfigResponse,
+  type BillingMode,
   fetchAIProxyConfig,
   resetAIProxyConfig,
+  updateAIProxyBillingMode,
   updateAIProxyConfig,
 } from '../lib/api';
+
+const BILLING_MODE_OPTIONS: Array<{ value: BillingMode; label: string; description: string }> = [
+  {
+    value: 'auto',
+    label: 'Auto',
+    description: 'Use Unified Billing when CF AIG token is available, otherwise fall back to platform API key.',
+  },
+  {
+    value: 'unified',
+    label: 'Unified Billing',
+    description: 'Route all requests through Cloudflare credits. Requires CF_AIG_TOKEN.',
+  },
+  {
+    value: 'platform-key',
+    label: 'Platform Key',
+    description: 'Use a stored provider API key for authentication.',
+  },
+];
 
 const TIER_LABELS: Record<string, string> = {
   free: 'Free Tier',
@@ -84,6 +104,19 @@ export function AdminAIProxy() {
     }
   };
 
+  const handleBillingModeChange = async (mode: BillingMode) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await updateAIProxyBillingMode(mode);
+      await fetchConfig();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update billing mode');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleReset = async () => {
     setSaving(true);
     setError(null);
@@ -107,7 +140,7 @@ export function AdminAIProxy() {
 
   if (!config) {
     return (
-      <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+      <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
         {error || 'Failed to load config'}
       </div>
     );
@@ -132,17 +165,75 @@ export function AdminAIProxy() {
   return (
     <div className="space-y-6">
       <Body>
-        Configure the default AI model for the platform inference proxy. Models are routed
+        Configure the default AI model and billing mode for the platform inference proxy. Models are routed
         through Cloudflare AI Gateway. Workers AI models are free; Anthropic and OpenAI models
         require credentials or Unified Billing.
       </Body>
 
       {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+        <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
           {error}
         </div>
       )}
 
+      {/* Billing Mode */}
+      <Card>
+        <div className="space-y-4 p-4">
+          <fieldset>
+            <legend className="mb-2 block text-sm font-medium">Billing Mode</legend>
+            <div className="space-y-2">
+              {BILLING_MODE_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className="flex cursor-pointer items-start gap-3 rounded-md border border-[var(--sam-border)] p-3 transition-colors hover:bg-[var(--sam-bg-secondary)]"
+                >
+                  <input
+                    type="radio"
+                    name="billingMode"
+                    value={option.value}
+                    checked={config.billingMode === option.value}
+                    onChange={() => handleBillingModeChange(option.value)}
+                    disabled={saving}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium">{option.label}</span>
+                    <p className="mt-0.5 text-xs text-[var(--sam-text-secondary)]">
+                      {option.description}
+                    </p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[var(--sam-text-secondary)]">
+            {config.hasUnifiedBilling && (
+              <span className="font-medium text-green-600 dark:text-green-400">
+                ● Unified Billing active
+              </span>
+            )}
+            <span>
+              Anthropic:{' '}
+              <span className={config.hasAnthropicCredential
+                ? 'font-medium text-green-600 dark:text-green-400'
+                : 'font-medium text-yellow-600 dark:text-yellow-400'}>
+                {config.hasAnthropicCredential ? '● configured' : '○ not configured'}
+              </span>
+            </span>
+            <span>
+              OpenAI:{' '}
+              <span className={config.hasOpenAICredential
+                ? 'font-medium text-green-600 dark:text-green-400'
+                : 'font-medium text-yellow-600 dark:text-yellow-400'}>
+                {config.hasOpenAICredential ? '● configured' : '○ not configured'}
+              </span>
+            </span>
+          </div>
+        </div>
+      </Card>
+
+      {/* Default Model */}
       <Card>
         <div className="space-y-4 p-4">
           <div>
@@ -191,27 +282,6 @@ export function AdminAIProxy() {
             </span>
             {config.updatedAt && (
               <span>Last updated: {new Date(config.updatedAt).toLocaleString()}</span>
-            )}
-            <span>
-              Anthropic:{' '}
-              <span className={config.hasAnthropicCredential
-                ? 'font-medium text-green-600 dark:text-green-400'
-                : 'font-medium text-yellow-600 dark:text-yellow-400'}>
-                {config.hasAnthropicCredential ? 'configured' : 'not configured'}
-              </span>
-            </span>
-            <span>
-              OpenAI:{' '}
-              <span className={config.hasOpenAICredential
-                ? 'font-medium text-green-600 dark:text-green-400'
-                : 'font-medium text-yellow-600 dark:text-yellow-400'}>
-                {config.hasOpenAICredential ? 'configured' : 'not configured'}
-              </span>
-            </span>
-            {config.hasUnifiedBilling && (
-              <span className="font-medium text-green-600 dark:text-green-400">
-                Unified Billing active
-              </span>
             )}
           </div>
 
