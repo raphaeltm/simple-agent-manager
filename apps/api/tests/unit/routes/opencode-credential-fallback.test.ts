@@ -201,7 +201,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
       return [];
     });
 
-    const resp = await postAgentKey({ agentType: 'claude-code' });
+    const resp = await postAgentKey({ agentType: 'google-gemini' });
     expect(resp.status).toBe(404);
   });
 
