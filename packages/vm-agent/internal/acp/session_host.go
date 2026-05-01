@@ -985,6 +985,59 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 					"credentialKind", cred.credentialKind)
 			}
 		}
+	} else if cred.inferenceConfig != nil && cred.inferenceConfig.APIKeySource == "user-credential" {
+		// Passthrough proxy: user has their own credential, route through SAM's proxy
+		// for usage tracking. The user's credential stays in the auth header; the
+		// workspace callback token is embedded in the URL path for analytics.
+		if h.config.CallbackToken == "" {
+			return fmt.Errorf("passthrough proxy configured but CallbackToken is empty for workspace %s", h.config.WorkspaceID)
+		}
+
+		// Replace {wstoken} placeholder in the base URL with the actual callback token.
+		baseURL := strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", h.config.CallbackToken)
+
+		if agentType == "claude-code" && cred.inferenceConfig.Provider == "anthropic-passthrough" {
+			// Claude Code: set ANTHROPIC_BASE_URL to passthrough proxy, keep user's API key.
+			// Claude Code appends /v1/messages to ANTHROPIC_BASE_URL automatically.
+			envVars = append(envVars, "ANTHROPIC_BASE_URL="+baseURL)
+			envVars = append(envVars, "ANTHROPIC_API_KEY="+cred.credential)
+			if cred.inferenceConfig.Model != "" {
+				envVars = append(envVars, "ANTHROPIC_MODEL="+cred.inferenceConfig.Model)
+			}
+			slog.Info("Claude Code passthrough proxy credential injected",
+				"baseURL", baseURL,
+				"model", cred.inferenceConfig.Model,
+				"credentialLen", len(cred.credential),
+				"workspaceId", h.config.WorkspaceID)
+		} else if agentType == "openai-codex" && cred.inferenceConfig.Provider == "openai-passthrough" {
+			// Codex: set OPENAI_BASE_URL to passthrough proxy, keep user's API key.
+			envVars = append(envVars, "OPENAI_BASE_URL="+baseURL)
+			envVars = append(envVars, "OPENAI_API_KEY="+cred.credential)
+			if cred.inferenceConfig.Model != "" {
+				envVars = append(envVars, "OPENAI_MODEL="+cred.inferenceConfig.Model)
+			}
+			slog.Info("Codex passthrough proxy credential injected",
+				"baseURL", baseURL,
+				"model", cred.inferenceConfig.Model,
+				"credentialLen", len(cred.credential),
+				"workspaceId", h.config.WorkspaceID)
+		} else {
+			// OpenCode: openai-compatible passthrough proxy.
+			envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+baseURL)
+			envVars = append(envVars, "OPENCODE_PLATFORM_API_KEY="+cred.credential)
+			if settings == nil {
+				settings = &agentSettingsPayload{}
+			}
+			settings.OpencodeProvider = "platform"
+			if settings.Model == "" && cred.inferenceConfig.Model != "" {
+				settings.Model = stripCFPrefix(cred.inferenceConfig.Model)
+			}
+			slog.Info("OpenCode passthrough proxy credential injected",
+				"baseURL", baseURL,
+				"model", cred.inferenceConfig.Model,
+				"credentialLen", len(cred.credential),
+				"workspaceId", h.config.WorkspaceID)
+		}
 	} else if cred.inferenceConfig != nil && cred.inferenceConfig.APIKeySource == "callback-token" {
 		// Platform AI proxy: use the workspace callback token as the API key.
 		if h.config.CallbackToken == "" {
