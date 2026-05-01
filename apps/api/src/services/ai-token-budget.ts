@@ -10,6 +10,7 @@
  * small overages on a daily budget are acceptable.
  */
 
+import type { UpdateAiBudgetRequest, UserAiBudgetSettings } from '@simple-agent-manager/shared';
 import {
   AI_BUDGET_SETTINGS_KV_PREFIX,
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
@@ -18,7 +19,6 @@ import {
   DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
   DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
 } from '@simple-agent-manager/shared';
-import type { UpdateAiBudgetRequest, UserAiBudgetSettings } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
