@@ -215,6 +215,8 @@ function generateApiWorkerEnv(
         : {}),
       // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
       AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
+      // Analytics Engine dataset — derived from prefix so forks don't co-mingle data
+      ANALYTICS_DATASET: `${DEPLOYMENT_CONFIG.prefix}_analytics`,
       // Deployment environment — used by trial runner to choose agent type + model
       ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
     },

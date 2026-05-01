@@ -175,7 +175,7 @@ jobs:
       # ========================================
       - name: Create Pulumi State Bucket (if not exists)
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
 
           if npx wrangler r2 bucket create $BUCKET_NAME 2>&1; then
             echo "Created R2 bucket: $BUCKET_NAME"
@@ -188,7 +188,7 @@ jobs:
 
       - name: Login to Pulumi R2 Backend
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
           R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
           pulumi login "s3://${BUCKET_NAME}?endpoint=${R2_ENDPOINT}&region=auto"
         env:

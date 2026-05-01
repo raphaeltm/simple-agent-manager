@@ -58,8 +58,8 @@ jobs:
         if: ${{ env.SMOKE_TEST_TOKEN != '' }}
         env:
           SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
-          SMOKE_TEST_URL: https://app.sammy.party
-          SMOKE_TEST_API_URL: https://api.sammy.party
+          SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
+          SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
         run: npx playwright test --config=tests/smoke/playwright.config.ts
 
       - name: Skip notice (no token configured)

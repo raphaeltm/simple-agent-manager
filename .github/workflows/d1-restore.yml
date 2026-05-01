@@ -10,7 +10,7 @@ name: D1 Time Travel Restore
 #      - CF_ACCOUNT_ID: Your Cloudflare account ID
 #      - R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY: For Pulumi state access
 #      - PULUMI_CONFIG_PASSPHRASE: Your Pulumi stack passphrase
-#   3. Set the PULUMI_STATE_BUCKET variable if your bucket name differs from 'sam-pulumi-state'
+#   3. Optionally set PULUMI_STATE_BUCKET variable (defaults to {prefix}-pulumi-state)
 #
 # USAGE:
 #   gh workflow run d1-restore.yml --ref main \
@@ -90,9 +90,21 @@ jobs:
           echo "name=$STACK" >> $GITHUB_OUTPUT
           echo "Stack: $STACK for environment: ${{ inputs.environment }}"
 
+      - name: Compute Resource Prefix
+        id: prefix
+        run: |
+          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
+          if [ -n "$EXPLICIT" ]; then
+            echo "value=$EXPLICIT" >> $GITHUB_OUTPUT
+          else
+            DOMAIN="${{ vars.BASE_DOMAIN }}"
+            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
+            echo "value=s${HASH}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Login to Pulumi R2 Backend
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
           R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
           pulumi login "s3://${BUCKET_NAME}?endpoint=${R2_ENDPOINT}&region=auto"
         env:
