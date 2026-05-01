@@ -6,7 +6,7 @@
  * ensuring cf-aig-authorization is sent in unified mode and x-api-key
  * in platform-key mode, and that cf-aig-metadata is always present.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { UpstreamAuth } from '../../../src/services/ai-billing';
 import { buildAIGatewayMetadata } from '../../../src/services/ai-proxy-shared';
