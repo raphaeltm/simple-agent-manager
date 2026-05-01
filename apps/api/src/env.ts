@@ -517,6 +517,11 @@ export interface Env {
   CF_AIG_TOKEN?: string;                             // Cloudflare AI Gateway Unified Billing token (optional — enables all providers without separate keys)
   AI_USAGE_PAGE_SIZE?: string;                       // AI Gateway logs page size for admin usage aggregation (default: 100)
   AI_USAGE_MAX_PAGES?: string;                       // Max pages to iterate for AI usage aggregation (default: 20)
+  AI_USAGE_MAX_DAILY_TOKEN_LIMIT?: string;           // Max daily token limit a user can set (default: 10000000)
+  AI_USAGE_MIN_DAILY_TOKEN_LIMIT?: string;           // Min daily token limit a user can set (default: 1000)
+  AI_USAGE_MAX_MONTHLY_COST_CAP_USD?: string;        // Max monthly cost cap (USD) a user can set (default: 10000)
+  AI_USAGE_MIN_MONTHLY_COST_CAP_USD?: string;        // Min monthly cost cap (USD) a user can set (default: 0.01)
+  AI_USAGE_BUDGET_TTL_SECONDS?: string;              // KV TTL for daily budget entries (default: 90000)
   // Cost Monitoring
   COST_MONITORING_ENABLED?: string;                  // Enable/disable cost monitoring endpoint (default: true)
   COMPUTE_VCPU_HOUR_COST_USD?: string;               // Estimated cost per vCPU-hour in USD (default: 0.003)
