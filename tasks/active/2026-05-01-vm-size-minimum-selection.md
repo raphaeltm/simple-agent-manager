@@ -27,6 +27,7 @@ The intended behavior is minimum-capacity semantics: smaller work may run on lar
 - [x] Add tests proving larger nodes satisfy smaller requests and smaller nodes do not satisfy larger requests.
 - [x] Add behavioral tests for standalone selector VM-size filtering.
 - [x] Add behavioral tests for TaskRunner preferred, warm, and existing node VM-size filtering.
+- [x] Add bug-fix post-mortem and process rule update.
 - [x] Run focused tests and typechecks.
 - [x] Run full lint/typecheck/test validation.
 - [ ] Complete `/do` specialist review and staging verification.
@@ -56,6 +57,8 @@ The intended behavior is minimum-capacity semantics: smaller work may run on lar
 - 2026-05-01: `pnpm --filter @simple-agent-manager/shared test -- vm-sizes` passed with unknown requested-size fallback coverage.
 - 2026-05-01: `pnpm --filter @simple-agent-manager/shared typecheck` passed.
 - 2026-05-01: `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- 2026-05-01: Added post-mortem `docs/notes/2026-05-01-vm-size-minimum-selection-postmortem.md`.
+- 2026-05-01: Updated `.claude/rules/10-e2e-verification.md` with compatibility-constraint selection coverage requirements.
 
 ## References
 
