@@ -221,7 +221,7 @@ function AiUsageSection() {
 
 function BudgetBar({ label, used, limit, unit }: { label: string; used: number; limit: number; unit: string }) {
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
-  const barColor = pct >= 100 ? 'bg-error' : pct >= 80 ? 'bg-warning' : 'bg-accent-emphasis';
+  const barColor = pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-accent-emphasis';
 
   return (
     <div className="space-y-1">
@@ -231,7 +231,7 @@ function BudgetBar({ label, used, limit, unit }: { label: string; used: number; 
           {unit === '$' ? formatCost(used) : formatTokens(used)} / {unit === '$' ? formatCost(limit) : formatTokens(limit)}
         </span>
       </div>
-      <div className="w-full h-2 bg-surface-hover rounded-full overflow-hidden">
+      <div className="w-full h-2 bg-surface-hover rounded-full overflow-hidden" role="meter" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
         <div
           className={`h-full ${barColor} rounded-full transition-all`}
           style={{ width: `${Math.max(pct > 0 ? 1 : 0, pct)}%` }}
@@ -372,10 +372,10 @@ function BudgetSettingsSection() {
             />
           )}
           {budget.exceeded && (
-            <div className="flex items-start gap-2 p-3 bg-error/10 rounded-md border border-error/20">
-              <ShieldAlert className="w-4 h-4 text-error flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <div className="flex items-start gap-2 p-3 bg-danger-tint rounded-md border border-danger/30" role="alert" aria-live="assertive">
+              <ShieldAlert className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-hidden="true" />
               <div>
-                <Body className="text-error text-sm font-medium m-0">Budget Exceeded</Body>
+                <Body className="text-danger text-sm font-medium m-0">Budget Exceeded</Body>
                 <Body className="text-fg-muted text-sm mt-1 m-0">
                   AI proxy requests will be rejected (429) until the limit resets. Daily limits reset at midnight UTC.
                 </Body>
@@ -411,7 +411,7 @@ function BudgetSettingsSection() {
                 value={dailyInput}
                 onChange={(e) => setDailyInput(e.target.value)}
                 placeholder={budget?.effectiveLimits.dailyInputTokenLimit.toLocaleString() ?? '500,000'}
-                className="w-full px-3 py-2.5 min-h-[44px] rounded-md border border-border-default bg-surface text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-emphasis"
+                className="w-full px-3 py-2.5 min-h-[44px] rounded-md border border-border-default bg-surface text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
               />
             </div>
 
@@ -427,7 +427,7 @@ function BudgetSettingsSection() {
                 value={dailyOutput}
                 onChange={(e) => setDailyOutput(e.target.value)}
                 placeholder={budget?.effectiveLimits.dailyOutputTokenLimit.toLocaleString() ?? '200,000'}
-                className="w-full px-3 py-2.5 min-h-[44px] rounded-md border border-border-default bg-surface text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-emphasis"
+                className="w-full px-3 py-2.5 min-h-[44px] rounded-md border border-border-default bg-surface text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
               />
             </div>
 
@@ -443,7 +443,7 @@ function BudgetSettingsSection() {
                 value={monthlyCap}
                 onChange={(e) => setMonthlyCap(e.target.value)}
                 placeholder="No limit"
-                className="w-full px-3 py-2.5 min-h-[44px] rounded-md border border-border-default bg-surface text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-emphasis"
+                className="w-full px-3 py-2.5 min-h-[44px] rounded-md border border-border-default bg-surface text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
               />
             </div>
 
@@ -459,7 +459,7 @@ function BudgetSettingsSection() {
                 value={alertThreshold}
                 onChange={(e) => setAlertThreshold(e.target.value)}
                 placeholder="80"
-                className="w-full px-3 py-2.5 min-h-[44px] rounded-md border border-border-default bg-surface text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-emphasis"
+                className="w-full px-3 py-2.5 min-h-[44px] rounded-md border border-border-default bg-surface text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
               />
             </div>
           </div>
