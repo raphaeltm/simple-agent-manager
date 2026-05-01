@@ -118,6 +118,15 @@ describe('AgentsSection', () => {
     });
 
     fireEvent.click(screen.getByTestId('permission-mode-claude-code-acceptEdits'));
+
+    // Wait for the save button to become enabled (hasChanges = true) before clicking,
+    // since async state updates from loadData() can race with the radio click
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId('save-settings-claude-code') as HTMLButtonElement).disabled
+      ).toBe(false);
+    });
+
     fireEvent.click(screen.getByTestId('save-settings-claude-code'));
 
     await waitFor(() => {
