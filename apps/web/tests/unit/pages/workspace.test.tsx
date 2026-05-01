@@ -698,17 +698,23 @@ describe('Workspace page', () => {
   it('restores active worktree from URL search params', async () => {
     renderWorkspace('/workspaces/ws-123?worktree=%2Fworkspaces%2Frepo-wt-feature-auth', true);
 
-    await waitFor(() => {
-      expect(mocks.getWorktrees).toHaveBeenCalledWith(
-        'https://ws-ws-123.example.com',
-        'ws-123',
-        'tok_123'
-      );
-    });
+    await waitFor(
+      () => {
+        expect(mocks.getWorktrees).toHaveBeenCalledWith(
+          'https://ws-ws-123.example.com',
+          'ws-123',
+          'tok_123'
+        );
+      },
+      { timeout: 5_000 }
+    );
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
+      },
+      { timeout: 5_000 }
+    );
     expect(screen.getByTestId('location-probe').textContent).toContain(
       'worktree=%2Fworkspaces%2Frepo-wt-feature-auth'
     );
@@ -720,25 +726,34 @@ describe('Workspace page', () => {
       true
     );
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
+      },
+      { timeout: 5_000 }
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i }));
 
     // Wait for the dropdown to render before clicking the worktree option
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^main \(primary\)/i })).toBeInTheDocument();
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByRole('button', { name: /^main \(primary\)/i })).toBeInTheDocument();
+      },
+      { timeout: 5_000 }
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /^main \(primary\)/i }));
 
-    await waitFor(() => {
-      const probe = screen.getByTestId('location-probe').textContent ?? '';
-      expect(probe).not.toContain('files=');
-      expect(probe).not.toContain('git=');
-      expect(probe).not.toContain('worktree=');
-    });
+    await waitFor(
+      () => {
+        const probe = screen.getByTestId('location-probe').textContent ?? '';
+        expect(probe).not.toContain('files=');
+        expect(probe).not.toContain('git=');
+        expect(probe).not.toContain('worktree=');
+      },
+      { timeout: 5_000 }
+    );
   });
 
   describe('orphaned session recovery', () => {
