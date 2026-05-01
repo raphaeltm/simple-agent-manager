@@ -25,6 +25,8 @@ The intended behavior is minimum-capacity semantics: smaller work may run on lar
 - [x] Use the helper in TaskRunner existing-node filtering.
 - [x] Reject explicitly selected preferred nodes that are smaller than requested.
 - [x] Add tests proving larger nodes satisfy smaller requests and smaller nodes do not satisfy larger requests.
+- [x] Add behavioral tests for standalone selector VM-size filtering.
+- [x] Add behavioral tests for TaskRunner preferred, warm, and existing node VM-size filtering.
 - [x] Run focused tests and typechecks.
 - [x] Run full lint/typecheck/test validation.
 - [ ] Complete `/do` specialist review and staging verification.
@@ -48,6 +50,12 @@ The intended behavior is minimum-capacity semantics: smaller work may run on lar
 - 2026-05-01: Fixed the `ButtonGroup` test to accept equivalent `0` / `0px` style serialization.
 - 2026-05-01: `pnpm --filter @simple-agent-manager/ui test -- ButtonGroup` passed.
 - 2026-05-01: Full `pnpm test` rerun passed: 19 packages successful.
+- 2026-05-01: Constitution review found duplicate hardcoded VM-size rank table; replaced it with ordering derived from `DEFAULT_VM_SIZE_VCPUS`.
+- 2026-05-01: Test review found source-contract-only coverage for selector paths; added behavioral coverage for standalone selector and TaskRunner node selection.
+- 2026-05-01: `pnpm --filter @simple-agent-manager/api test -- durable-objects/task-runner-node-selection services/node-selector` passed.
+- 2026-05-01: `pnpm --filter @simple-agent-manager/shared test -- vm-sizes` passed with unknown requested-size fallback coverage.
+- 2026-05-01: `pnpm --filter @simple-agent-manager/shared typecheck` passed.
+- 2026-05-01: `pnpm --filter @simple-agent-manager/api typecheck` passed.
 
 ## References
 

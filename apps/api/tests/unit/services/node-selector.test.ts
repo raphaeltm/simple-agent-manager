@@ -9,9 +9,92 @@
  * and Durable Object stubs to verify warm pool, capacity, and fallback paths.
  */
 import type { NodeMetrics } from '@simple-agent-manager/shared';
-import { describe, expect,it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { nodeHasCapacity,scoreNodeLoad } from '../../../src/services/node-selector';
+import * as schema from '../../../src/db/schema';
+import * as nodeLifecycle from '../../../src/services/node-lifecycle';
+import {
+  nodeHasCapacity,
+  scoreNodeLoad,
+  selectNodeForTaskRun,
+} from '../../../src/services/node-selector';
+
+vi.mock('../../../src/services/node-lifecycle', () => ({
+  tryClaim: vi.fn(),
+}));
+
+type MockNode = {
+  id: string;
+  userId: string;
+  status: string;
+  healthStatus: string;
+  vmSize: string;
+  vmLocation: string;
+  lastMetrics: string | null;
+  warmSince?: number | null;
+};
+
+function createMockDb({
+  nodes,
+  warmNodes = [],
+  workspaceCount = 0,
+}: {
+  nodes: MockNode[];
+  warmNodes?: MockNode[];
+  workspaceCount?: number;
+}) {
+  return {
+    select(selection?: Record<string, unknown>) {
+      return {
+        from(table: unknown) {
+          return {
+            where() {
+              if (table === schema.workspaces) {
+                return Promise.resolve([{ count: workspaceCount }]);
+              }
+
+              if (table === schema.nodes) {
+                if (selection && 'warmSince' in selection && 'id' in selection) {
+                  return Promise.resolve(warmNodes);
+                }
+
+                if (selection && 'warmSince' in selection && 'status' in selection) {
+                  return {
+                    limit() {
+                      return Promise.resolve([{ status: 'running', warmSince: Date.now() }]);
+                    },
+                  };
+                }
+
+                return Promise.resolve(nodes);
+              }
+
+              return Promise.resolve([]);
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+function node(overrides: Partial<MockNode>): MockNode {
+  return {
+    id: 'node-default',
+    userId: 'user-1',
+    status: 'running',
+    healthStatus: 'healthy',
+    vmSize: 'medium',
+    vmLocation: 'fsn1',
+    lastMetrics: JSON.stringify({ cpuLoadAvg1: 5, memoryPercent: 10 }),
+    warmSince: null,
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.mocked(nodeLifecycle.tryClaim).mockReset();
+});
 
 // =============================================================================
 // scoreNodeLoad — pure function tests
@@ -196,5 +279,106 @@ describe('nodeHasCapacity', () => {
       // 0 < 0 is false, so nothing passes
       expect(nodeHasCapacity(metrics, 0, 0)).toBe(false);
     });
+  });
+});
+
+// =============================================================================
+// selectNodeForTaskRun — VM size minimum behavior
+// =============================================================================
+
+describe('selectNodeForTaskRun VM size minimum behavior', () => {
+  it('rejects smaller regular nodes for larger requested sizes', async () => {
+    const db = createMockDb({
+      nodes: [
+        node({ id: 'node-small', vmSize: 'small' }),
+        node({ id: 'node-medium', vmSize: 'medium' }),
+      ],
+    });
+
+    const selected = await selectNodeForTaskRun(db as never, 'user-1', {}, undefined, 'large');
+
+    expect(selected).toBeNull();
+  });
+
+  it('allows larger regular nodes to satisfy smaller requested sizes', async () => {
+    const db = createMockDb({
+      nodes: [
+        node({
+          id: 'node-large',
+          vmSize: 'large',
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20 }),
+        }),
+      ],
+    });
+
+    const selected = await selectNodeForTaskRun(db as never, 'user-1', {}, undefined, 'small');
+
+    expect(selected?.id).toBe('node-large');
+    expect(selected?.vmSize).toBe('large');
+  });
+
+  it('prefers exact regular size matches over larger satisfying nodes', async () => {
+    const db = createMockDb({
+      nodes: [
+        node({
+          id: 'node-large',
+          vmSize: 'large',
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+        }),
+        node({
+          id: 'node-medium',
+          vmSize: 'medium',
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 30, memoryPercent: 30 }),
+        }),
+      ],
+    });
+
+    const selected = await selectNodeForTaskRun(db as never, 'user-1', {}, undefined, 'medium');
+
+    expect(selected?.id).toBe('node-medium');
+  });
+
+  it('does not try to claim undersized warm nodes for larger requested sizes', async () => {
+    vi.mocked(nodeLifecycle.tryClaim).mockResolvedValue({ claimed: true });
+    const db = createMockDb({
+      nodes: [],
+      warmNodes: [
+        node({ id: 'warm-small', vmSize: 'small', warmSince: Date.now() }),
+        node({ id: 'warm-medium', vmSize: 'medium', warmSince: Date.now() }),
+      ],
+    });
+
+    const selected = await selectNodeForTaskRun(
+      db as never,
+      'user-1',
+      { NODE_LIFECYCLE: {} as DurableObjectNamespace },
+      undefined,
+      'large',
+      'task-1'
+    );
+
+    expect(selected).toBeNull();
+    expect(nodeLifecycle.tryClaim).not.toHaveBeenCalled();
+  });
+
+  it('claims a larger warm node for a smaller requested size', async () => {
+    vi.mocked(nodeLifecycle.tryClaim).mockResolvedValue({ claimed: true });
+    const db = createMockDb({
+      nodes: [],
+      warmNodes: [node({ id: 'warm-large', vmSize: 'large', warmSince: Date.now() })],
+    });
+
+    const selected = await selectNodeForTaskRun(
+      db as never,
+      'user-1',
+      { NODE_LIFECYCLE: {} as DurableObjectNamespace },
+      undefined,
+      'small',
+      'task-1'
+    );
+
+    expect(selected?.id).toBe('warm-large');
+    expect(selected?.vmSize).toBe('large');
+    expect(nodeLifecycle.tryClaim).toHaveBeenCalledWith(expect.any(Object), 'warm-large', 'task-1');
   });
 });

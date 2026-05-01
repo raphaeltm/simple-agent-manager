@@ -31,14 +31,12 @@ export const DEFAULT_VM_SIZE_VCPUS: Record<VMSize, number> = {
   large: 8,
 };
 
-const VM_SIZE_RANK: Record<VMSize, number> = {
-  small: 1,
-  medium: 2,
-  large: 3,
-};
-
 /** Fallback vCPU count when both provider map and default size map miss. */
 const VCPU_COUNT_UNKNOWN_FALLBACK = 2;
+
+function isKnownVmSize(vmSize: string | null | undefined): vmSize is VMSize {
+  return Boolean(vmSize && Object.hasOwn(DEFAULT_VM_SIZE_VCPUS, vmSize));
+}
 
 /** Resolve the vCPU count for a given VM size and optional cloud provider. */
 export function getVcpuCount(vmSize: string, cloudProvider?: string | null): number {
@@ -58,11 +56,9 @@ export function canSatisfyVmSize(
   requestedSize: string | null | undefined
 ): boolean {
   if (!requestedSize) return true;
-  const requestedRank = VM_SIZE_RANK[requestedSize as VMSize];
-  if (!requestedRank) return true;
+  if (!isKnownVmSize(requestedSize)) return true;
 
-  const candidateRank = VM_SIZE_RANK[candidateSize as VMSize];
-  if (!candidateRank) return false;
+  if (!isKnownVmSize(candidateSize)) return false;
 
-  return candidateRank >= requestedRank;
+  return DEFAULT_VM_SIZE_VCPUS[candidateSize] >= DEFAULT_VM_SIZE_VCPUS[requestedSize];
 }

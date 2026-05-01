@@ -102,5 +102,9 @@ describe('VM Size vCPU Constants', () => {
       expect(canSatisfyVmSize('tiny', 'small')).toBe(false);
       expect(canSatisfyVmSize(null, 'small')).toBe(false);
     });
+
+    it('treats unknown requested sizes as no minimum requirement', () => {
+      expect(canSatisfyVmSize('small', 'xlarge')).toBe(true);
+    });
   });
 });
