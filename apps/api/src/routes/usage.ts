@@ -23,6 +23,7 @@ import {
   type UsageByModel,
 } from '../services/ai-gateway-logs';
 import {
+  deleteUserBudgetSettings,
   getTokenUsage,
   getUserBudgetSettings,
   resolveEffectiveLimits,
@@ -276,6 +277,19 @@ usageRoutes.put('/ai/budget', requireAuth(), requireApproved(), async (c) => {
   });
 
   return c.json({ success: true, settings });
+});
+
+/**
+ * DELETE /api/usage/ai/budget — reset user's budget settings to platform defaults.
+ */
+usageRoutes.delete('/ai/budget', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+
+  await deleteUserBudgetSettings(c.env.KV, userId);
+
+  log.info('usage.budget_reset', { userId });
+
+  return c.json({ success: true });
 });
 
 export { usageRoutes };

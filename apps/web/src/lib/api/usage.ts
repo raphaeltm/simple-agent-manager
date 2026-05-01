@@ -36,3 +36,8 @@ export async function updateUserAiBudget(body: UpdateAiBudgetRequest): Promise<{
     body: JSON.stringify(body),
   });
 }
+
+/** Reset user's AI budget settings to platform defaults. */
+export async function resetUserAiBudget(): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>('/api/usage/ai/budget', { method: 'DELETE' });
+}
