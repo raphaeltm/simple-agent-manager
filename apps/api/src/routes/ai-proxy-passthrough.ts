@@ -78,14 +78,14 @@ async function verifyPassthroughAuth(
 async function checkPassthroughRateLimit(
   env: Env,
   userId: string,
-): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+): Promise<{ allowed: boolean; remaining: number; resetAt: number; limit: number }> {
   const rpmLimit = parseInt(env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
   const windowSeconds = parseInt(env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
 
   const result = await checkRateLimit(env.KV, rateLimitKey, rpmLimit, windowSeconds);
-  return { ...result, allowed: result.allowed };
+  return { ...result, allowed: result.allowed, limit: rpmLimit };
 }
 
 // =============================================================================
@@ -114,7 +114,8 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   const { userId, workspaceId, projectId, trialId } = auth;
 
   // --- Rate limit ---
-  const { allowed, remaining, resetAt } = await checkPassthroughRateLimit(c.env, userId);
+  const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(c.env, userId);
+  c.header('X-RateLimit-Limit', limit.toString());
   c.header('X-RateLimit-Remaining', remaining.toString());
   c.header('X-RateLimit-Reset', resetAt.toString());
   if (!allowed) {
@@ -263,7 +264,8 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
 
   const { userId, workspaceId, projectId, trialId } = auth;
 
-  const { allowed, remaining, resetAt } = await checkPassthroughRateLimit(c.env, userId);
+  const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(c.env, userId);
+  c.header('X-RateLimit-Limit', limit.toString());
   c.header('X-RateLimit-Remaining', remaining.toString());
   c.header('X-RateLimit-Reset', resetAt.toString());
   if (!allowed) {
@@ -362,7 +364,8 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
 
   const { userId, workspaceId, projectId, trialId } = auth;
 
-  const { allowed, remaining, resetAt } = await checkPassthroughRateLimit(c.env, userId);
+  const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(c.env, userId);
+  c.header('X-RateLimit-Limit', limit.toString());
   c.header('X-RateLimit-Remaining', remaining.toString());
   c.header('X-RateLimit-Reset', resetAt.toString());
   if (!allowed) {
