@@ -147,8 +147,13 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   try {
     upstreamAuth = await resolveUpstreamAuth(c.env, db);
   } catch (err) {
+    log.error('ai_proxy_anthropic.upstream_auth_failed', {
+      userId,
+      workspaceId,
+      reason: err instanceof Error ? err.message : String(err),
+    });
     return anthropicError(
-      err instanceof Error ? err.message : 'No Anthropic API key configured.',
+      'AI proxy is not configured. Contact an administrator.',
       'api_error',
       503,
     );
@@ -341,8 +346,12 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
   try {
     upstreamAuth = await resolveUpstreamAuth(c.env, db);
   } catch (err) {
+    log.error('ai_proxy_anthropic.count_tokens_auth_failed', {
+      userId,
+      reason: err instanceof Error ? err.message : String(err),
+    });
     return anthropicError(
-      err instanceof Error ? err.message : 'No Anthropic API key configured.',
+      'AI proxy is not configured. Contact an administrator.',
       'api_error',
       503,
     );

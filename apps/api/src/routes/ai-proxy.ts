@@ -463,9 +463,14 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     try {
       anthropicAuth = await resolveUpstreamAuth(c.env, db);
     } catch (err) {
+      log.error('ai_proxy.upstream_auth_failed', {
+        userId,
+        workspaceId,
+        reason: err instanceof Error ? err.message : String(err),
+      });
       return c.json({
         error: {
-          message: err instanceof Error ? err.message : 'No Anthropic API key configured.',
+          message: 'AI proxy is not configured. Contact an administrator.',
           type: 'server_error',
         },
       }, 503);
