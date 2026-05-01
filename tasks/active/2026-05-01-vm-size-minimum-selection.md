@@ -59,6 +59,12 @@ The intended behavior is minimum-capacity semantics: smaller work may run on lar
 - 2026-05-01: `pnpm --filter @simple-agent-manager/api typecheck` passed.
 - 2026-05-01: Added post-mortem `docs/notes/2026-05-01-vm-size-minimum-selection-postmortem.md`.
 - 2026-05-01: Updated `.claude/rules/10-e2e-verification.md` with compatibility-constraint selection coverage requirements.
+- 2026-05-01: Final full `pnpm lint` passed with existing warnings.
+- 2026-05-01: Final full `pnpm typecheck` passed.
+- 2026-05-01: Final full `pnpm test` passed: 19 packages successful.
+- 2026-05-01: Test-engineer re-check passed; prior coverage findings addressed.
+- 2026-05-01: Constitution re-check passed; prior hardcoded rank finding addressed.
+- 2026-05-01: Cloudflare review passed with no blocking findings.
 
 ## References
 
