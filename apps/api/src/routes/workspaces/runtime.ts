@@ -76,11 +76,12 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
-  // AI proxy: when enabled and agent is eligible, ALWAYS return proxy config.
+  // AI proxy: when enabled and agent is eligible, return proxy config when the
+  // credential can be forwarded to the upstream provider.
   // Two modes:
   // - No user credential → platform proxy (callback-token auth, existing behavior)
-  // - User has credential → passthrough proxy (user credential forwarded via auth headers,
-  //   wstoken in URL path for analytics/rate-limiting)
+  // - User has upstream-compatible credential → passthrough proxy (user credential
+  //   forwarded via auth headers, wstoken in URL path for analytics/rate-limiting)
   const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
   if (PROXY_ELIGIBLE_AGENTS.has(body.agentType) && aiProxyEnabled) {
     const baseDomain = c.env.BASE_DOMAIN;
@@ -104,7 +105,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       } catch { /* KV unavailable or corrupt data — use env/default */ }
     }
 
-    if (credentialData) {
+    if (credentialData && !(isClaudeCode && credentialData.credentialKind === 'oauth-token')) {
       // User has their own credential — use passthrough proxy routes.
       // URL-path auth: wstoken embedded in URL, user credential in auth headers.
       let proxyBaseUrl: string;
@@ -156,6 +157,13 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
           model: defaultModel,
           apiKeySource: 'user-credential',
         },
+      });
+    }
+
+    if (credentialData) {
+      return c.json({
+        apiKey: credentialData.credential,
+        credentialKind: credentialData.credentialKind,
       });
     }
 

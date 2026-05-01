@@ -156,6 +156,37 @@ describe('POST /workspaces/:id/agent-key — Claude Code AI proxy fallback', () 
     expect(body.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
   });
 
+  it('returns direct user credential when claude-code OAuth token exists', async () => {
+    let queryCount = 0;
+    mockDB.limit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) {
+        // workspace lookup
+        return [{ userId: 'user-1', projectId: null }];
+      }
+      if (queryCount === 2) {
+        // agent-api-key for 'claude-code' (user-scoped) → found
+        return [{
+          encryptedToken: 'encrypted-oauth-token',
+          iv: 'iv-oauth-token',
+          credentialKind: 'oauth-token',
+          isActive: true,
+        }];
+      }
+      return [];
+    });
+
+    mockDecrypt.mockResolvedValueOnce('claude-oauth-token-123');
+
+    const resp = await postAgentKey({ agentType: 'claude-code' });
+    expect(resp.status).toBe(200);
+
+    const body = await resp.json();
+    expect(body.apiKey).toBe('claude-oauth-token-123');
+    expect(body.credentialKind).toBe('oauth-token');
+    expect(body.inferenceConfig).toBeUndefined();
+  });
+
   it('returns 404 when no credential and AI proxy is disabled', async () => {
     let queryCount = 0;
     mockDB.limit.mockImplementation(() => {

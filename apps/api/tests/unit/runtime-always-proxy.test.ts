@@ -1,11 +1,12 @@
 /**
  * Runtime Always-Proxy — Unit Tests
  *
- * Tests that runtime.ts:POST /:id/agent-key ALWAYS returns inferenceConfig
- * with proxy config when AI proxy is enabled, even when user has own credentials.
+ * Tests that runtime.ts:POST /:id/agent-key returns proxy inferenceConfig
+ * when AI proxy is enabled and the selected credential can be forwarded to
+ * the upstream provider.
  *
  * Two modes:
- * - User has credential → apiKeySource: 'user-credential' (passthrough proxy)
+ * - User has upstream-compatible credential → apiKeySource: 'user-credential' (passthrough proxy)
  * - No user credential → apiKeySource: 'callback-token' (platform proxy, existing)
  */
 import { Hono } from 'hono';
@@ -222,6 +223,31 @@ describe('runtime.ts always-proxy', () => {
     expect(json.inferenceConfig.provider).toBe('anthropic-passthrough');
     expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
+  });
+
+  it('returns direct credential when user has claude-code OAuth token and proxy enabled', async () => {
+    mockDbLimit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }]; // workspace
+      return [];
+    });
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: 'claude-oauth-token',
+      credentialKind: 'oauth-token',
+      credentialSource: 'user',
+    });
+
+    const res = await postAgentKey('claude-code');
+
+    expect(res.status).toBe(200);
+    const json = await res.json() as {
+      apiKey: string;
+      credentialKind: string;
+      inferenceConfig?: unknown;
+    };
+    expect(json.apiKey).toBe('claude-oauth-token');
+    expect(json.credentialKind).toBe('oauth-token');
+    expect(json.inferenceConfig).toBeUndefined();
   });
 
   it('returns platform proxy config when user has no credential and proxy enabled', async () => {

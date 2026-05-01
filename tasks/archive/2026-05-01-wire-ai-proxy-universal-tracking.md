@@ -36,7 +36,7 @@ The fix: ALWAYS route through the AI proxy regardless of credential source. User
 
 **Phase 2 — URL-path proxy auth routes**: New routes `/ai/proxy/:wstoken/anthropic/*` and `/ai/proxy/:wstoken/openai/*` that extract the workspace token from the URL path instead of auth headers. This allows user credentials to pass through in standard auth headers (`x-api-key`, `Authorization: Bearer`).
 
-**Phase 3 — Always-proxy credential resolution**: Modify `runtime.ts` to ALWAYS return proxy config with `inferenceConfig`, even when user has own credentials. Modify `session_host.go` to support a "proxy-passthrough" mode that sets base URL but preserves user's auth header value.
+**Phase 3 — Proxy credential resolution**: Modify `runtime.ts` to return proxy config with `inferenceConfig` when AI proxy is enabled and the credential can be forwarded to the upstream provider. Modify `session_host.go` to support a "proxy-passthrough" mode that sets base URL but preserves user's auth header value. Claude Code OAuth tokens are excluded from Anthropic passthrough because they must be injected as `CLAUDE_CODE_OAUTH_TOKEN`, not forwarded as Anthropic API keys.
 
 **Phase 4 — Codex config.toml**: Handle Codex `OPENAI_BASE_URL` bug (issue #16719) if needed. May need to inject a custom provider section in config.toml.
 
@@ -53,10 +53,11 @@ The fix: ALWAYS route through the AI proxy regardless of credential source. User
 - [x] Mount new routes at `/ai/proxy/:wstoken` in `index.ts`
 - [x] Add tests for URL-path auth extraction and passthrough behavior
 
-### Phase 3: Always-Proxy Credential Resolution
+### Phase 3: Proxy Credential Resolution
 
-- [x] Modify `runtime.ts:POST /:id/agent-key` to ALWAYS return `inferenceConfig` with proxy config when `aiProxyEnabled`, regardless of whether user has own credentials
-  - When user has credentials: return `inferenceConfig` with `apiKeySource: 'user-credential'` (new mode) — VM agent will set base URL but use user's own key in auth header
+- [x] Modify `runtime.ts:POST /:id/agent-key` to return `inferenceConfig` with proxy config when `aiProxyEnabled` and the credential is upstream-compatible
+  - When user has API-key credentials: return `inferenceConfig` with `apiKeySource: 'user-credential'` (new mode) — VM agent will set base URL but use user's own key in auth header
+  - When Claude Code uses an OAuth token: return the credential directly so VM agent injects `CLAUDE_CODE_OAUTH_TOKEN`
   - When no user credentials: existing `apiKeySource: 'callback-token'` behavior unchanged
 - [x] Add `apiKeySource: 'user-credential'` to shared types if needed
 - [x] Update `session_host.go` to handle `apiKeySource == "user-credential"`:
@@ -75,7 +76,7 @@ The fix: ALWAYS route through the AI proxy regardless of credential source. User
 
 - [x] Unit tests for URL-path token extraction (ai-proxy-passthrough.test.ts — 9 tests)
 - [x] Integration tests for passthrough proxy (mock upstream, verify headers forwarded)
-- [x] Test `runtime.ts` always-proxy logic: user with credentials gets `inferenceConfig` (runtime-always-proxy.test.ts — 4 tests)
+- [x] Test `runtime.ts` proxy logic: user with upstream-compatible credentials gets `inferenceConfig`; Claude Code OAuth remains direct (runtime-always-proxy.test.ts)
 - [x] Test `runtime.ts` backward compat: user without credentials still works (callback-token mode)
 - [x] Test passthrough mode: user credential in header reaches upstream
 - [x] Updated existing fallback tests (claude-code-proxy-fallback, codex-proxy-fallback) for always-proxy behavior
