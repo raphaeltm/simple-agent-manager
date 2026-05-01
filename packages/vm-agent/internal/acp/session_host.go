@@ -997,10 +997,15 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		baseURL := strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", h.config.CallbackToken)
 
 		if agentType == "claude-code" && cred.inferenceConfig.Provider == "anthropic-passthrough" {
-			// Claude Code: set ANTHROPIC_BASE_URL to passthrough proxy, keep user's API key.
+			// Claude Code: set ANTHROPIC_BASE_URL to passthrough proxy, keep the
+			// credential in Claude Code's native env var for its credential type.
 			// Claude Code appends /v1/messages to ANTHROPIC_BASE_URL automatically.
 			envVars = append(envVars, "ANTHROPIC_BASE_URL="+baseURL)
-			envVars = append(envVars, "ANTHROPIC_API_KEY="+cred.credential)
+			if cred.credentialKind == "oauth-token" {
+				envVars = append(envVars, "CLAUDE_CODE_OAUTH_TOKEN="+cred.credential)
+			} else {
+				envVars = append(envVars, "ANTHROPIC_API_KEY="+cred.credential)
+			}
 			if cred.inferenceConfig.Model != "" {
 				envVars = append(envVars, "ANTHROPIC_MODEL="+cred.inferenceConfig.Model)
 			}

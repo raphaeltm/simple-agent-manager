@@ -225,7 +225,7 @@ describe('runtime.ts always-proxy', () => {
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
   });
 
-  it('returns direct credential when user has claude-code OAuth token and proxy enabled', async () => {
+  it('returns passthrough proxy config when user has claude-code OAuth token and proxy enabled', async () => {
     mockDbLimit.mockImplementation(() => {
       queryCount++;
       if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }]; // workspace
@@ -243,11 +243,14 @@ describe('runtime.ts always-proxy', () => {
     const json = await res.json() as {
       apiKey: string;
       credentialKind: string;
-      inferenceConfig?: unknown;
+      inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
     };
     expect(json.apiKey).toBe('claude-oauth-token');
     expect(json.credentialKind).toBe('oauth-token');
-    expect(json.inferenceConfig).toBeUndefined();
+    expect(json.inferenceConfig).toBeDefined();
+    expect(json.inferenceConfig.provider).toBe('anthropic-passthrough');
+    expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
+    expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
   });
 
   it('returns platform proxy config when user has no credential and proxy enabled', async () => {
