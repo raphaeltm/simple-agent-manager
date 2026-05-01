@@ -338,10 +338,15 @@ export interface AIProxyConfigResponse {
   source: 'admin' | 'env' | 'default';
   updatedAt: string | null;
   hasAnthropicCredential: boolean;
+  hasOpenAICredential: boolean;
+  hasUnifiedBilling: boolean;
   models: Array<{
     id: string;
     label: string;
-    provider: 'workers-ai' | 'anthropic';
+    provider: 'workers-ai' | 'anthropic' | 'openai';
+    tier: 'free' | 'standard' | 'premium';
+    costPer1kInputTokens: number;
+    costPer1kOutputTokens: number;
     isDefault?: boolean;
     available: boolean;
   }>;

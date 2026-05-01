@@ -199,6 +199,7 @@ export {
   MAX_CONTEXT_SUMMARY_BYTES,
   PLATFORM_AI_MODELS,
   type PlatformAIModel,
+  type PlatformAIModelTier,
 } from './ai-services';
 
 // Agent Settings
