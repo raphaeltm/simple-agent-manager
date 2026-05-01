@@ -25,6 +25,15 @@ Before marking a feature complete:
 - [ ] Any untestable gaps are documented with manual verification steps
 - [ ] **Port-of-pattern coverage** — when porting a multi-step pattern (VM boot, credential rotation, agent session lifecycle) from an existing consumer to a new one, the new consumer's tests MUST mock each cross-boundary target and assert **every step of the pattern fired** with the correct payload. A test that asserts "step 1 fired" but not "step 3 fired" does not prove the port is complete. See `docs/notes/2026-04-19-trial-orchestrator-agent-boot-postmortem.md` for the class of bug this prevents.
 
+### Compatibility Constraints In Selection Logic
+
+When selection logic has compatibility constraints such as VM size, provider, region, credential type, workspace profile, or protocol support, tests MUST prove the constraint is enforced as a gate before preference sorting:
+
+- Include at least one incompatible candidate that would otherwise rank well and assert it is rejected.
+- Include at least one compatible but non-exact candidate when the product semantics allow substitution, such as a larger VM satisfying a smaller requested size.
+- Exercise the production selector or step handler with representative mocked storage/service responses. Helper-only tests and source-contract assertions are not sufficient for this class of behavior.
+- If the same selection rule exists in multiple runtime paths, such as an API service path and a Durable Object path, each path needs behavioral coverage or an explicit documented reason it cannot diverge.
+
 ## Data Flow Tracing (Mandatory for Multi-Component Features)
 
 Before marking any multi-component feature complete, you MUST trace the primary data path from user input to final output. This trace must cite **specific code paths** (file:function or file:line) at each system boundary.
