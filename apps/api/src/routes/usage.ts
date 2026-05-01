@@ -1,4 +1,10 @@
-import type { UserAiUsageResponse, UserQuotaStatusResponse } from '@simple-agent-manager/shared';
+import type {
+  UpdateAiBudgetRequest,
+  UserAiBudgetResponse,
+  UserAiUsageResponse,
+  UserQuotaStatusResponse,
+} from '@simple-agent-manager/shared';
+import { DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -16,6 +22,13 @@ import {
   type UsageByDay,
   type UsageByModel,
 } from '../services/ai-gateway-logs';
+import {
+  getTokenUsage,
+  getUserBudgetSettings,
+  resolveEffectiveLimits,
+  saveUserBudgetSettings,
+  validateBudgetUpdate,
+} from '../services/ai-token-budget';
 import { checkQuotaForUser, userHasOwnCloudCredentials } from '../services/compute-quotas';
 import { getCurrentPeriodBounds, getUserUsageSummary } from '../services/compute-usage';
 
@@ -155,6 +168,114 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
   };
 
   return c.json(response);
+});
+
+// =============================================================================
+// Budget Settings
+// =============================================================================
+
+/**
+ * GET /api/usage/ai/budget — current user's budget settings + utilization.
+ */
+usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+
+  const [userSettings, dailyUsage] = await Promise.all([
+    getUserBudgetSettings(c.env.KV, userId),
+    getTokenUsage(c.env.KV, userId),
+  ]);
+
+  const effectiveLimits = resolveEffectiveLimits(userSettings, c.env);
+
+  // Get current month cost from AI Gateway (reuse the same aggregation)
+  let monthCostUsd = 0;
+  const gatewayId = c.env.AI_GATEWAY_ID;
+  if (gatewayId) {
+    const periodBounds = getGatewayPeriodBounds('current-month');
+    try {
+      await iterateGatewayLogs(c.env, gatewayId, periodBounds.startDate, (entry) => {
+        if (entry.metadata?.userId !== userId) return;
+        monthCostUsd += entry.cost || 0;
+      });
+    } catch (err) {
+      log.error('usage.budget_gateway_error', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const settings = userSettings ?? {
+    dailyInputTokenLimit: null,
+    dailyOutputTokenLimit: null,
+    monthlyCostCapUsd: null,
+    alertThresholdPercent: DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT,
+  };
+
+  const dailyInputPercent = effectiveLimits.dailyInputTokenLimit > 0
+    ? Math.min(100, (dailyUsage.inputTokens / effectiveLimits.dailyInputTokenLimit) * 100)
+    : 0;
+  const dailyOutputPercent = effectiveLimits.dailyOutputTokenLimit > 0
+    ? Math.min(100, (dailyUsage.outputTokens / effectiveLimits.dailyOutputTokenLimit) * 100)
+    : 0;
+  const monthlyCostPercent = settings.monthlyCostCapUsd !== null && settings.monthlyCostCapUsd > 0
+    ? Math.min(100, (monthCostUsd / settings.monthlyCostCapUsd) * 100)
+    : null;
+
+  const exceeded = dailyInputPercent >= 100 || dailyOutputPercent >= 100
+    || (monthlyCostPercent !== null && monthlyCostPercent >= 100);
+
+  const response: UserAiBudgetResponse = {
+    settings,
+    isCustom: userSettings !== null,
+    dailyUsage: {
+      inputTokens: dailyUsage.inputTokens,
+      outputTokens: dailyUsage.outputTokens,
+    },
+    effectiveLimits,
+    monthCostUsd,
+    utilization: {
+      dailyInputPercent: Math.round(dailyInputPercent * 10) / 10,
+      dailyOutputPercent: Math.round(dailyOutputPercent * 10) / 10,
+      monthlyCostPercent: monthlyCostPercent !== null ? Math.round(monthlyCostPercent * 10) / 10 : null,
+    },
+    exceeded,
+  };
+
+  return c.json(response);
+});
+
+/**
+ * PUT /api/usage/ai/budget — update user's budget settings.
+ */
+usageRoutes.put('/ai/budget', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+
+  let body: UpdateAiBudgetRequest;
+  try {
+    body = await c.req.json() as UpdateAiBudgetRequest;
+  } catch {
+    return c.json({ error: 'INVALID_JSON', message: 'Invalid JSON body' }, 400);
+  }
+
+  let settings;
+  try {
+    settings = validateBudgetUpdate(body, c.env);
+  } catch (err) {
+    return c.json({ error: 'VALIDATION_ERROR', message: err instanceof Error ? err.message : String(err) }, 400);
+  }
+
+  await saveUserBudgetSettings(c.env.KV, userId, settings);
+
+  log.info('usage.budget_updated', {
+    userId,
+    dailyInputTokenLimit: settings.dailyInputTokenLimit,
+    dailyOutputTokenLimit: settings.dailyOutputTokenLimit,
+    monthlyCostCapUsd: settings.monthlyCostCapUsd,
+    alertThresholdPercent: settings.alertThresholdPercent,
+  });
+
+  return c.json({ success: true, settings });
 });
 
 export { usageRoutes };

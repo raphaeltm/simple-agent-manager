@@ -258,7 +258,7 @@ export {
   testTrigger,
   updateTrigger,
 } from './triggers';
-export { fetchComputeUsage, fetchUserAiUsage, fetchUserQuotaStatus } from './usage';
+export { fetchComputeUsage, fetchUserAiBudget, fetchUserAiUsage, fetchUserQuotaStatus, updateUserAiBudget } from './usage';
 export {
   createAgentSession,
   createWorkspace,
