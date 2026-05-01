@@ -202,8 +202,8 @@ export {
   MAX_CONTEXT_SUMMARY_BYTES,
   PLATFORM_AI_MODELS,
   type PlatformAIModel,
-  VALID_BILLING_MODES,
   type PlatformAIModelTier,
+  VALID_BILLING_MODES,
 } from './ai-services';
 
 // Agent Settings
