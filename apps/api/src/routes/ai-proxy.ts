@@ -34,7 +34,8 @@ import {
   translateRequestToAnthropic,
   translateResponseToOpenAI,
 } from '../services/ai-anthropic-translate';
-import { type UpstreamAuth, resolveUnifiedBillingToken, resolveUpstreamAuth } from '../services/ai-billing';
+import type { UpstreamAuth } from '../services/ai-billing';
+import { resolveUnifiedBillingToken, resolveUpstreamAuth } from '../services/ai-billing';
 import {
   AIProxyAuthError,
   buildAIGatewayMetadata,
