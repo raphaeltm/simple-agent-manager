@@ -121,7 +121,7 @@ describe('POST /workspaces/:id/agent-key — Claude Code AI proxy fallback', () 
     expect(body.inferenceConfig.model).toBe('claude-sonnet-4-6');
   });
 
-  it('returns user credential when claude-code credential exists (no proxy fallback)', async () => {
+  it('returns user credential with passthrough proxy config when claude-code credential exists', async () => {
     let queryCount = 0;
     mockDB.limit.mockImplementation(() => {
       queryCount++;
@@ -149,8 +149,11 @@ describe('POST /workspaces/:id/agent-key — Claude Code AI proxy fallback', () 
     const body = await resp.json();
     expect(body.apiKey).toBe('sk-ant-user-key-123');
     expect(body.credentialKind).toBe('api-key');
-    // Should NOT have inferenceConfig — user credential takes precedence
-    expect(body.inferenceConfig).toBeUndefined();
+    // With always-proxy, inferenceConfig is returned with passthrough config
+    expect(body.inferenceConfig).toBeDefined();
+    expect(body.inferenceConfig.provider).toBe('anthropic-passthrough');
+    expect(body.inferenceConfig.apiKeySource).toBe('user-credential');
+    expect(body.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
   });
 
   it('returns 404 when no credential and AI proxy is disabled', async () => {

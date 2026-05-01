@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Workspace runtime routes — splitting credential resolution logic across files increases fragmentation risk. See .claude/rules/18-file-size-limits.md
 import { AI_PROXY_DEFAULT_MODEL_KV_KEY, type AIProxyConfig, type BootstrapTokenData, DEFAULT_AI_PROXY_ANTHROPIC_MODEL, DEFAULT_AI_PROXY_MODEL, DEFAULT_AI_PROXY_OPENAI_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -75,20 +76,91 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
-  // AI proxy fallback: if no user credential and the AI proxy is enabled,
-  // return platform inference config so the VM agent can use the proxy.
-  // Applies to OpenCode (openai-compatible format), Claude Code (native Anthropic format),
-  // and Codex (openai-proxy format via OPENAI_BASE_URL/OPENAI_API_KEY).
+  // AI proxy: when enabled and agent is eligible, ALWAYS return proxy config.
+  // Two modes:
+  // - No user credential → platform proxy (callback-token auth, existing behavior)
+  // - User has credential → passthrough proxy (user credential forwarded via auth headers,
+  //   wstoken in URL path for analytics/rate-limiting)
   const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
-  if (!credentialData && PROXY_ELIGIBLE_AGENTS.has(body.agentType) && aiProxyEnabled) {
+  if (PROXY_ELIGIBLE_AGENTS.has(body.agentType) && aiProxyEnabled) {
     const baseDomain = c.env.BASE_DOMAIN;
-
-    // Agent-specific proxy config:
-    // - Claude Code: native Anthropic format via anthropic-proxy
-    // - Codex: OpenAI format via openai-proxy (OPENAI_BASE_URL + OPENAI_API_KEY)
-    // - OpenCode: openai-compatible format via platform provider config
     const isClaudeCode = body.agentType === 'claude-code';
     const isCodex = body.agentType === 'openai-codex';
+
+    // Resolve default model: KV (admin-set) > env var > shared constant
+    let defaultModel: string;
+    if (isClaudeCode) {
+      defaultModel = c.env.AI_PROXY_DEFAULT_ANTHROPIC_MODEL ?? DEFAULT_AI_PROXY_ANTHROPIC_MODEL;
+    } else if (isCodex) {
+      defaultModel = c.env.AI_PROXY_DEFAULT_OPENAI_MODEL ?? DEFAULT_AI_PROXY_OPENAI_MODEL;
+    } else {
+      defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
+      try {
+        const kvConfig = await c.env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY);
+        if (kvConfig) {
+          const parsed: AIProxyConfig = JSON.parse(kvConfig);
+          if (parsed.defaultModel) defaultModel = parsed.defaultModel;
+        }
+      } catch { /* KV unavailable or corrupt data — use env/default */ }
+    }
+
+    if (credentialData) {
+      // User has their own credential — use passthrough proxy routes.
+      // URL-path auth: wstoken embedded in URL, user credential in auth headers.
+      let proxyBaseUrl: string;
+      let proxyProvider: string;
+      if (isClaudeCode) {
+        // Claude Code appends /v1/messages to ANTHROPIC_BASE_URL automatically.
+        // Passthrough route: /ai/proxy/{wstoken}/anthropic/v1/messages
+        // So base URL should be: /ai/proxy/{wstoken}/anthropic
+        // But wstoken is not known at this point — VM agent will substitute {wstoken}
+        // with the callback token at injection time.
+        proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/anthropic`;
+        proxyProvider = 'anthropic-passthrough';
+      } else if (isCodex) {
+        // Codex appends /chat/completions to OPENAI_BASE_URL.
+        // Passthrough route: /ai/proxy/{wstoken}/openai/v1/chat/completions
+        proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/openai/v1`;
+        proxyProvider = 'openai-passthrough';
+      } else {
+        // OpenCode: openai-compatible, same pattern as Codex
+        proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/openai/v1`;
+        proxyProvider = 'openai-passthrough';
+      }
+
+      log.info('agent_key.ai_proxy_passthrough', {
+        workspaceId, userId: workspace.userId, proxyBaseUrl, agentType: body.agentType,
+      });
+
+      // Track credential source on associated task
+      const taskRows = await db
+        .select({ id: schema.tasks.id })
+        .from(schema.tasks)
+        .where(eq(schema.tasks.workspaceId, workspaceId))
+        .limit(1);
+      const task = taskRows[0];
+      if (task) {
+        await db
+          .update(schema.tasks)
+          .set({ agentCredentialSource: credentialData.credentialSource })
+          .where(eq(schema.tasks.id, task.id));
+      }
+
+      return c.json({
+        apiKey: credentialData.credential,
+        credentialKind: credentialData.credentialKind,
+        credentialSource: credentialData.credentialSource,
+        inferenceConfig: {
+          provider: proxyProvider,
+          baseURL: proxyBaseUrl,
+          model: defaultModel,
+          apiKeySource: 'user-credential',
+        },
+      });
+    }
+
+    // No user credential — platform proxy mode (existing behavior).
+    // Auth via callback token in headers.
     let proxyBaseUrl: string;
     let proxyProvider: string;
     if (isClaudeCode) {
@@ -100,25 +172,6 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     } else {
       proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
       proxyProvider = 'openai-compatible';
-    }
-
-    // Resolve default model: KV (admin-set) > env var > shared constant
-    let defaultModel: string;
-    if (isClaudeCode) {
-      defaultModel = c.env.AI_PROXY_DEFAULT_ANTHROPIC_MODEL ?? DEFAULT_AI_PROXY_ANTHROPIC_MODEL;
-    } else if (isCodex) {
-      // Note: Codex model is not overridable via the admin AI proxy UI (KV).
-      // Use AI_PROXY_DEFAULT_OPENAI_MODEL env var to change the default.
-      defaultModel = c.env.AI_PROXY_DEFAULT_OPENAI_MODEL ?? DEFAULT_AI_PROXY_OPENAI_MODEL;
-    } else {
-      defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
-      try {
-        const kvConfig = await c.env.KV.get(AI_PROXY_DEFAULT_MODEL_KV_KEY);
-        if (kvConfig) {
-          const parsed: AIProxyConfig = JSON.parse(kvConfig);
-          if (parsed.defaultModel) defaultModel = parsed.defaultModel;
-        }
-      } catch { /* KV unavailable or corrupt data — use env/default */ }
     }
 
     log.info('agent_key.ai_proxy_fallback', { workspaceId, userId: workspace.userId, proxyBaseUrl, agentType: body.agentType });

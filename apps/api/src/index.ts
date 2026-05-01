@@ -41,6 +41,7 @@ import { agentSettingsRoutes } from './routes/agent-settings';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { aiProxyRoutes } from './routes/ai-proxy';
 import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
+import { aiProxyPassthroughRoutes } from './routes/ai-proxy-passthrough';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
@@ -431,6 +432,7 @@ app.route('/api/trial', trialOnboardingRoutes);
 app.route('/api/gcp', gcpRoutes);
 app.route('/ai/v1', aiProxyRoutes);
 app.route('/ai/anthropic/v1', aiProxyAnthropicRoutes);
+app.route('/ai/proxy', aiProxyPassthroughRoutes);
 app.route('/auth/google', googleAuthRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),
 // so it needs credentials: false + origin: '*' to allow VM agent requests from any origin.

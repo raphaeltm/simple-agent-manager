@@ -44,52 +44,53 @@ The fix: ALWAYS route through the AI proxy regardless of credential source. User
 
 ### Phase 2: URL-Path Proxy Routes
 
-- [ ] Create `apps/api/src/routes/ai-proxy-passthrough.ts` with:
+- [x] Create `apps/api/src/routes/ai-proxy-passthrough.ts` with:
   - `POST /anthropic/v1/messages` — extract `:wstoken`, verify via `verifyAIProxyAuth()`, forward to Anthropic gateway with user's `x-api-key` header as upstream auth
   - `POST /anthropic/v1/messages/count_tokens` — same pattern for token counting
   - `POST /openai/v1/chat/completions` — extract `:wstoken`, verify, forward to OpenAI-compat gateway
   - Shared: `cf-aig-metadata` header injection for analytics, rate limiting, token budget checks
   - Key difference from existing proxies: upstream auth uses the USER's credential from request headers (forwarded as-is) instead of `resolveUpstreamAuth()`
-- [ ] Mount new routes at `/ai/proxy/:wstoken` in `index.ts`
-- [ ] Add tests for URL-path auth extraction and passthrough behavior
+- [x] Mount new routes at `/ai/proxy/:wstoken` in `index.ts`
+- [x] Add tests for URL-path auth extraction and passthrough behavior
 
 ### Phase 3: Always-Proxy Credential Resolution
 
-- [ ] Modify `runtime.ts:POST /:id/agent-key` to ALWAYS return `inferenceConfig` with proxy config when `aiProxyEnabled`, regardless of whether user has own credentials
+- [x] Modify `runtime.ts:POST /:id/agent-key` to ALWAYS return `inferenceConfig` with proxy config when `aiProxyEnabled`, regardless of whether user has own credentials
   - When user has credentials: return `inferenceConfig` with `apiKeySource: 'user-credential'` (new mode) — VM agent will set base URL but use user's own key in auth header
   - When no user credentials: existing `apiKeySource: 'callback-token'` behavior unchanged
-- [ ] Add `apiKeySource: 'user-credential'` to shared types if needed
-- [ ] Update `session_host.go` to handle `apiKeySource == "user-credential"`:
+- [x] Add `apiKeySource: 'user-credential'` to shared types if needed
+- [x] Update `session_host.go` to handle `apiKeySource == "user-credential"`:
   - Set `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` to the proxy URL (with wstoken in path)
   - Set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` to the user's actual credential
   - The proxy route will read the user credential from the auth header and forward it upstream
-- [ ] Add `gateway.go` type updates if needed for the new `apiKeySource` value
+- [x] Add `gateway.go` type updates if needed for the new `apiKeySource` value (not needed — existing types sufficient)
 
 ### Phase 4: Codex Config.toml Handling
 
-- [ ] Investigate whether Codex respects `OPENAI_BASE_URL` in current version
-- [ ] If Codex ignores `OPENAI_BASE_URL`: extend `writeCodexConfigToContainer()` to inject a custom provider section that points to SAM's proxy
-- [ ] If Codex respects `OPENAI_BASE_URL`: no additional work needed (Phase 3 env var injection is sufficient)
+- [x] Investigate whether Codex respects `OPENAI_BASE_URL` in current version
+  - **Result**: Codex respects `OPENAI_BASE_URL` env var. No config.toml changes needed — Phase 3 env var injection is sufficient.
+- [x] If Codex respects `OPENAI_BASE_URL`: no additional work needed (Phase 3 env var injection is sufficient) ✓
 
 ### Tests
 
-- [ ] Unit tests for URL-path token extraction
-- [ ] Integration tests for passthrough proxy (mock upstream, verify headers forwarded)
-- [ ] Test `runtime.ts` always-proxy logic: user with credentials gets `inferenceConfig`
-- [ ] Test `runtime.ts` backward compat: user without credentials still works (callback-token mode)
-- [ ] Test passthrough mode: user credential in header reaches upstream
+- [x] Unit tests for URL-path token extraction (ai-proxy-passthrough.test.ts — 9 tests)
+- [x] Integration tests for passthrough proxy (mock upstream, verify headers forwarded)
+- [x] Test `runtime.ts` always-proxy logic: user with credentials gets `inferenceConfig` (runtime-always-proxy.test.ts — 4 tests)
+- [x] Test `runtime.ts` backward compat: user without credentials still works (callback-token mode)
+- [x] Test passthrough mode: user credential in header reaches upstream
+- [x] Updated existing fallback tests (claude-code-proxy-fallback, codex-proxy-fallback) for always-proxy behavior
 
 ### Documentation
 
-- [ ] Update CLAUDE.md Recent Changes section
-- [ ] Update `apps/api/.env.example` if new env vars added
+- [x] Update CLAUDE.md Recent Changes section
+- [x] Update `apps/api/.env.example` if new env vars added (no new env vars — reuses existing AI_PROXY_* vars)
 
 ## Acceptance Criteria
 
-- [ ] Users with their own API keys have all LLM calls routed through AI proxy
-- [ ] AI Gateway `cf-aig-metadata` header is present on all proxied requests (BYOK and platform)
-- [ ] User credentials are forwarded to upstream provider (not replaced by platform credentials)
-- [ ] Users without credentials still use platform proxy (existing behavior preserved)
-- [ ] Rate limiting and token budgets apply to all users (BYOK and platform)
-- [ ] No regression in existing proxy endpoints (`/ai/v1`, `/ai/anthropic/v1`)
+- [x] Users with their own API keys have all LLM calls routed through AI proxy
+- [x] AI Gateway `cf-aig-metadata` header is present on all proxied requests (BYOK and platform)
+- [x] User credentials are forwarded to upstream provider (not replaced by platform credentials)
+- [x] Users without credentials still use platform proxy (existing behavior preserved)
+- [x] Rate limiting and token budgets apply to all users (BYOK and platform)
+- [x] No regression in existing proxy endpoints (`/ai/v1`, `/ai/anthropic/v1`)
 - [ ] Staging verification: run agent session with OAuth user, verify usage appears in AI Gateway logs
