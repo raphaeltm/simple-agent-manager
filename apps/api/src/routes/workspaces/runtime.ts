@@ -27,6 +27,9 @@ import {
   verifyWorkspaceCallbackAuth,
 } from './_helpers';
 
+/** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
+const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(['opencode', 'claude-code', 'openai-codex']);
+
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
 runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (c) => {
@@ -77,8 +80,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   // Applies to OpenCode (openai-compatible format), Claude Code (native Anthropic format),
   // and Codex (openai-proxy format via OPENAI_BASE_URL/OPENAI_API_KEY).
   const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
-  const proxyEligibleAgents = new Set(['opencode', 'claude-code', 'openai-codex']);
-  if (!credentialData && proxyEligibleAgents.has(body.agentType) && aiProxyEnabled) {
+  if (!credentialData && PROXY_ELIGIBLE_AGENTS.has(body.agentType) && aiProxyEnabled) {
     const baseDomain = c.env.BASE_DOMAIN;
 
     // Agent-specific proxy config:
@@ -105,6 +107,8 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     if (isClaudeCode) {
       defaultModel = c.env.AI_PROXY_DEFAULT_ANTHROPIC_MODEL ?? DEFAULT_AI_PROXY_ANTHROPIC_MODEL;
     } else if (isCodex) {
+      // Note: Codex model is not overridable via the admin AI proxy UI (KV).
+      // Use AI_PROXY_DEFAULT_OPENAI_MODEL env var to change the default.
       defaultModel = c.env.AI_PROXY_DEFAULT_OPENAI_MODEL ?? DEFAULT_AI_PROXY_OPENAI_MODEL;
     } else {
       defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
