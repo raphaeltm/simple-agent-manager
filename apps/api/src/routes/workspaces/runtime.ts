@@ -1,4 +1,4 @@
-import { AI_PROXY_DEFAULT_MODEL_KV_KEY, type AIProxyConfig, type BootstrapTokenData, DEFAULT_AI_PROXY_ANTHROPIC_MODEL, DEFAULT_AI_PROXY_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import { AI_PROXY_DEFAULT_MODEL_KV_KEY, type AIProxyConfig, type BootstrapTokenData, DEFAULT_AI_PROXY_ANTHROPIC_MODEL, DEFAULT_AI_PROXY_MODEL, DEFAULT_AI_PROXY_OPENAI_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -74,22 +74,38 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
   // AI proxy fallback: if no user credential and the AI proxy is enabled,
   // return platform inference config so the VM agent can use the proxy.
-  // Applies to OpenCode (openai-compatible format) and Claude Code (native Anthropic format).
+  // Applies to OpenCode (openai-compatible format), Claude Code (native Anthropic format),
+  // and Codex (openai-proxy format via OPENAI_BASE_URL/OPENAI_API_KEY).
   const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
-  if (!credentialData && (body.agentType === 'opencode' || body.agentType === 'claude-code') && aiProxyEnabled) {
+  const proxyEligibleAgents = new Set(['opencode', 'claude-code', 'openai-codex']);
+  if (!credentialData && proxyEligibleAgents.has(body.agentType) && aiProxyEnabled) {
     const baseDomain = c.env.BASE_DOMAIN;
 
-    // Agent-specific proxy config: OpenCode uses openai-compatible, Claude Code uses native Anthropic
+    // Agent-specific proxy config:
+    // - Claude Code: native Anthropic format via anthropic-proxy
+    // - Codex: OpenAI format via openai-proxy (OPENAI_BASE_URL + OPENAI_API_KEY)
+    // - OpenCode: openai-compatible format via platform provider config
     const isClaudeCode = body.agentType === 'claude-code';
-    const proxyBaseUrl = isClaudeCode
-      ? `https://api.${baseDomain}/ai/anthropic`
-      : `https://api.${baseDomain}/ai/v1`;
-    const proxyProvider = isClaudeCode ? 'anthropic-proxy' : 'openai-compatible';
+    const isCodex = body.agentType === 'openai-codex';
+    let proxyBaseUrl: string;
+    let proxyProvider: string;
+    if (isClaudeCode) {
+      proxyBaseUrl = `https://api.${baseDomain}/ai/anthropic`;
+      proxyProvider = 'anthropic-proxy';
+    } else if (isCodex) {
+      proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
+      proxyProvider = 'openai-proxy';
+    } else {
+      proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
+      proxyProvider = 'openai-compatible';
+    }
 
     // Resolve default model: KV (admin-set) > env var > shared constant
     let defaultModel: string;
     if (isClaudeCode) {
       defaultModel = c.env.AI_PROXY_DEFAULT_ANTHROPIC_MODEL ?? DEFAULT_AI_PROXY_ANTHROPIC_MODEL;
+    } else if (isCodex) {
+      defaultModel = c.env.AI_PROXY_DEFAULT_OPENAI_MODEL ?? DEFAULT_AI_PROXY_OPENAI_MODEL;
     } else {
       defaultModel = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
       try {

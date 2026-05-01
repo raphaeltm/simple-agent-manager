@@ -124,6 +124,10 @@ export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
  * Override via AI_PROXY_DEFAULT_ANTHROPIC_MODEL env var. */
 export const DEFAULT_AI_PROXY_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 
+/** Default model for OpenAI proxy fallback (Codex agent).
+ * Override via AI_PROXY_DEFAULT_OPENAI_MODEL env var. */
+export const DEFAULT_AI_PROXY_OPENAI_MODEL = 'gpt-4.1';
+
 /** Budget tier for platform AI models. */
 export type PlatformAIModelTier = 'free' | 'standard' | 'premium';
 

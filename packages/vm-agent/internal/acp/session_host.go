@@ -1005,6 +1005,19 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 				"model", cred.inferenceConfig.Model,
 				"callbackTokenLen", len(h.config.CallbackToken),
 				"workspaceId", h.config.WorkspaceID)
+		} else if agentType == "openai-codex" && cred.inferenceConfig.Provider == "openai-proxy" {
+			// Codex: inject OPENAI_BASE_URL and OPENAI_API_KEY for SAM's OpenAI-format proxy.
+			// Codex appends /chat/completions to OPENAI_BASE_URL, so we set the base to /ai/v1.
+			envVars = append(envVars, "OPENAI_BASE_URL="+cred.inferenceConfig.BaseURL)
+			envVars = append(envVars, "OPENAI_API_KEY="+h.config.CallbackToken)
+			if cred.inferenceConfig.Model != "" {
+				envVars = append(envVars, "OPENAI_MODEL="+cred.inferenceConfig.Model)
+			}
+			slog.Info("Codex AI proxy credential injected",
+				"baseURL", cred.inferenceConfig.BaseURL,
+				"model", cred.inferenceConfig.Model,
+				"callbackTokenLen", len(h.config.CallbackToken),
+				"workspaceId", h.config.WorkspaceID)
 		} else {
 			// OpenCode: inject openai-compatible proxy env vars.
 			envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+cred.inferenceConfig.BaseURL)

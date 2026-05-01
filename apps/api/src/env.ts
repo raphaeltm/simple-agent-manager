@@ -504,6 +504,7 @@ export interface Env {
   AI_PROXY_ENABLED?: string;                         // Kill switch: "false" to disable (default: enabled)
   AI_PROXY_DEFAULT_MODEL?: string;                   // Default model for OpenCode (default: claude-haiku-4-5-20251001)
   AI_PROXY_DEFAULT_ANTHROPIC_MODEL?: string;         // Default model for Claude Code proxy (default: claude-sonnet-4-6)
+  AI_PROXY_DEFAULT_OPENAI_MODEL?: string;            // Default model for Codex proxy (default: gpt-4.1)
   AI_PROXY_ALLOWED_MODELS?: string;                  // Comma-separated allowed models
   AI_PROXY_DAILY_INPUT_TOKEN_LIMIT?: string;         // Per-user daily input token cap (default: 500000)
   AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT?: string;        // Per-user daily output token cap (default: 200000)
