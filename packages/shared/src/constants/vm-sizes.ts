@@ -31,6 +31,12 @@ export const DEFAULT_VM_SIZE_VCPUS: Record<VMSize, number> = {
   large: 8,
 };
 
+const VM_SIZE_RANK: Record<VMSize, number> = {
+  small: 1,
+  medium: 2,
+  large: 3,
+};
+
 /** Fallback vCPU count when both provider map and default size map miss. */
 const VCPU_COUNT_UNKNOWN_FALLBACK = 2;
 
@@ -44,4 +50,19 @@ export function getVcpuCount(vmSize: string, cloudProvider?: string | null): num
     }
   }
   return DEFAULT_VM_SIZE_VCPUS[size] ?? VCPU_COUNT_UNKNOWN_FALLBACK;
+}
+
+/** Return true when a node size has at least the requested abstract capacity. */
+export function canSatisfyVmSize(
+  candidateSize: string | null | undefined,
+  requestedSize: string | null | undefined
+): boolean {
+  if (!requestedSize) return true;
+  const requestedRank = VM_SIZE_RANK[requestedSize as VMSize];
+  if (!requestedRank) return true;
+
+  const candidateRank = VM_SIZE_RANK[candidateSize as VMSize];
+  if (!candidateRank) return false;
+
+  return candidateRank >= requestedRank;
 }
