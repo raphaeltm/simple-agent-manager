@@ -725,6 +725,12 @@ describe('Workspace page', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i }));
+
+    // Wait for the dropdown to render before clicking the worktree option
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^main \(primary\)/i })).toBeInTheDocument();
+    });
+
     fireEvent.click(screen.getByRole('button', { name: /^main \(primary\)/i }));
 
     await waitFor(() => {
