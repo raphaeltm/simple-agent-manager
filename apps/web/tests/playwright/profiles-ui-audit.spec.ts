@@ -288,8 +288,7 @@ test.describe('Profiles List — Mobile', () => {
   test('error state', async ({ page }) => {
     await setupApiMocks(page, { profilesError: true });
     await page.goto('/projects/proj-test-1/profiles');
-    // The hook catches the error and displays it via ProfileList error UI
-    await page.waitForTimeout(2000);
+    await page.waitForSelector('.text-danger', { timeout: 5000 });
     await screenshot(page, 'profiles-list-error-mobile');
     await assertNoOverflow(page);
   });
