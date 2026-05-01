@@ -105,7 +105,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       } catch { /* KV unavailable or corrupt data — use env/default */ }
     }
 
-    if (credentialData) {
+    if (credentialData && !(isClaudeCode && credentialData.credentialKind === 'oauth-token')) {
       // User has their own credential — use passthrough proxy routes.
       // URL-path auth: wstoken embedded in URL, user credential in auth headers.
       let proxyBaseUrl: string;
@@ -157,6 +157,13 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
           model: defaultModel,
           apiKeySource: 'user-credential',
         },
+      });
+    }
+
+    if (credentialData) {
+      return c.json({
+        apiKey: credentialData.credential,
+        credentialKind: credentialData.credentialKind,
       });
     }
 

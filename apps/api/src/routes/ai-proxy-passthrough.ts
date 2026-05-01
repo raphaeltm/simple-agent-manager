@@ -149,16 +149,11 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
   }
 
-  const isStreaming = body.stream === true;
-
   // --- Extract user's credential from request headers (passthrough) ---
   // The user's API key is in x-api-key or Authorization: Bearer — forward it upstream.
   const userApiKey = c.req.header('x-api-key');
   const userAuthHeader = c.req.header('Authorization');
   if (!userApiKey && !userAuthHeader) {
-    log.warn('ai_proxy_passthrough.anthropic.missing_upstream_credential', {
-      userId, workspaceId, modelId, stream: isStreaming,
-    });
     return anthropicError(
       'Missing upstream credential. Provide x-api-key or Authorization header with your API key.',
       'authentication_error', 401,
@@ -166,6 +161,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   }
 
   // --- Build metadata for AI Gateway analytics ---
+  const isStreaming = body.stream === true;
   const aigMetadata = buildAIGatewayMetadata({
     userId, workspaceId, projectId, trialId, modelId,
     stream: isStreaming,
@@ -198,7 +194,6 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     userId, workspaceId, modelId, stream: isStreaming,
     hasUserApiKey: !!userApiKey,
     hasUserAuthHeader: !!userAuthHeader,
-    userAuthScheme: userAuthHeader?.split(/\s+/, 1)[0] ?? null,
   });
 
   // --- Forward to AI Gateway ---
@@ -218,10 +213,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     if (!upstreamResponse.ok) {
       const errorText = await upstreamResponse.text();
       log.error('ai_proxy_passthrough.anthropic.upstream_error', {
-        userId, workspaceId, modelId,
         status: upstreamResponse.status,
-        cfRay: upstreamResponse.headers.get('cf-ray'),
-        gatewayRequestId: upstreamResponse.headers.get('cf-aig-request-id'),
         body: errorText.slice(0, 500),
       });
       return anthropicError(
