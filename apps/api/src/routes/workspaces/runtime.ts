@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Workspace runtime routes — splitting credential resolution logic across files increases fragmentation risk. See .claude/rules/18-file-size-limits.md
 import { AI_PROXY_DEFAULT_MODEL_KV_KEY, type AIProxyConfig, type BootstrapTokenData, DEFAULT_AI_PROXY_ANTHROPIC_MODEL, DEFAULT_AI_PROXY_MODEL, DEFAULT_AI_PROXY_OPENAI_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
