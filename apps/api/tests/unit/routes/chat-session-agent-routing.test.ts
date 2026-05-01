@@ -17,6 +17,7 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('@simple-agent-manager/shared', () => ({
+  DEFAULT_SAM_HISTORY_LOAD_LIMIT: 200,
   DEFAULT_WORKSPACE_PROFILE: 'full',
   isTaskExecutionStep: () => true,
   isTaskMode: (v: unknown) => v === 'task' || v === 'conversation',
@@ -185,6 +186,53 @@ describe('chatRoutes agent session routing', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.session.agentType).toBe('claude-code');
+  });
+
+  it('caps session detail message loads to the configured history limit', async () => {
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1?limit=5000',
+      { method: 'GET' },
+      {
+        DATABASE: {} as D1Database,
+        SAM_HISTORY_LOAD_LIMIT: '25',
+      } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      25,
+      null,
+    );
+  });
+
+  it('uses the default history limit when no session detail limit is requested', async () => {
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1',
+      { method: 'GET' },
+      { DATABASE: {} as D1Database } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      200,
+      null,
+    );
   });
 
   it('returns null agentType when ACP session has no agentType', async () => {

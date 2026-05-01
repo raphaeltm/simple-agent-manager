@@ -7,7 +7,7 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
-import { isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
+import { DEFAULT_SAM_HISTORY_LOAD_LIMIT, isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -27,6 +27,16 @@ import { isTaskStatus } from '../services/task-status';
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
 chatRoutes.use('/*', requireAuth(), requireApproved());
+
+function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
+  const configuredLimit = parseInt(env.SAM_HISTORY_LOAD_LIMIT || '', 10);
+  const maxLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
+    ? configuredLimit
+    : DEFAULT_SAM_HISTORY_LOAD_LIMIT;
+  const parsedLimit = parseInt(requestedLimit || '', 10);
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : maxLimit;
+  return Math.min(limit, maxLimit);
+}
 
 /**
  * GET /api/projects/:projectId/sessions
@@ -108,7 +118,7 @@ chatRoutes.get('/:sessionId', async (c) => {
     throw errors.notFound('Chat session');
   }
 
-  const limit = Math.min(parseInt(c.req.query('limit') || '1000', 10), 5000);
+  const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
   const beforeParam = c.req.query('before');
   const before = beforeParam ? parseInt(beforeParam, 10) : null;
 
