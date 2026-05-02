@@ -1,13 +1,16 @@
-FROM alpine:3.20
+# Cloudflare Sandbox SDK base image — includes the /container-server/sandbox
+# binary that exposes the HTTP API used by getSandbox()/exec()/readFile()/etc.
+# IMPORTANT: The image tag MUST match the @cloudflare/sandbox npm package version.
+FROM docker.io/cloudflare/sandbox:0.9.2
 
-# Install git and essential tools for agent coding tasks
-RUN apk add --no-cache git openssh-client curl jq
+# The base image already includes Node.js 20, Bun, git, curl, and common tools.
+# Add any extra tools needed for SAM agent workloads here.
+RUN apt-get update && apt-get install -y --no-install-recommends jq && \
+    rm -rf /var/lib/apt/lists/*
 
-# Create workspace directory
+# Create workspace directory (base image may already have it, but ensure it exists)
 RUN mkdir -p /workspace
-
 WORKDIR /workspace
 
-# The Sandbox SDK handles all communication — no server needed inside the container.
-# The container just needs to exist with the tools available.
-CMD ["sleep", "infinity"]
+# Do NOT override ENTRYPOINT — the base image sets ENTRYPOINT ["/container-server/sandbox"]
+# which starts the HTTP API server. CMD is optional (runs as child process of sandbox binary).
