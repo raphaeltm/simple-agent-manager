@@ -25,6 +25,7 @@ Tool calls initially render with rich detail from the live ACP WebSocket stream,
   - Existing DO path persists and broadcasts parsed `toolMetadata`; no API/DO code change was required for this bug.
 - [x] Update persisted message to conversation item reconstruction so it renders useful details from metadata and raw ACP content instead of falling back to generic labels.
 - [x] Add web tests proving persisted tool messages reconstruct the same meaningful card fields as live ACP tool messages.
+- [x] Add bug-fix postmortem and process guard for streamed-to-persisted display parity regressions.
 - [x] Run focused Go and TypeScript tests for the modified paths.
   - TypeScript focused test passed: `pnpm --filter @simple-agent-manager/web test -- chatMessagesToConversationItems.test.ts`
   - Go test could not be run in this workspace because `go` is not installed (`which go` returned no path).
