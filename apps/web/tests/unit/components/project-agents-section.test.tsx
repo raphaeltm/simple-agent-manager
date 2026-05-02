@@ -121,7 +121,12 @@ describe('ProjectAgentsSection', () => {
       screen.getByTestId('project-agent-permission-select-claude-code'),
       { target: { value: 'acceptEdits' } },
     );
-    fireEvent.click(screen.getByTestId('project-agent-save-claude-code'));
+
+    const saveButton = screen.getByTestId('project-agent-save-claude-code');
+    await waitFor(() => {
+      expect(saveButton).toBeEnabled();
+    });
+    fireEvent.click(saveButton);
 
     await waitFor(() => {
       expect(mocks.updateProject).toHaveBeenCalledWith('proj-1', {
@@ -244,7 +249,12 @@ describe('ProjectAgentsSection', () => {
       screen.getByTestId('project-agent-permission-select-claude-code'),
       { target: { value: 'acceptEdits' } },
     );
-    fireEvent.click(screen.getByTestId('project-agent-save-claude-code'));
+
+    const saveButton = screen.getByTestId('project-agent-save-claude-code');
+    await waitFor(() => {
+      expect(saveButton).toBeEnabled();
+    });
+    fireEvent.click(saveButton);
 
     await waitFor(() => {
       expect(screen.getByText('Network save failed')).toBeInTheDocument();
