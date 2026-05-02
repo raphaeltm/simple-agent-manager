@@ -49,7 +49,7 @@ describe('ButtonGroup', () => {
       </ButtonGroup>,
     );
     const middle = screen.getByText('Second');
-    expect(middle.style.borderRadius).toBe('0');
+    expect(middle.style.borderRadius).toBe('0px');
   });
 
   it('applies full border radius when only one child', () => {
