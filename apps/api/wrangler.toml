@@ -203,7 +203,7 @@ new_sqlite_classes = ["ProjectAgent"]  # Per-project AI tech lead; SQLite-backed
 # without provisioning full VMs. Admin-only prototype; not exposed to users.
 # NOTE: The Sandbox class is provided by @cloudflare/sandbox — it extends
 # DurableObject internally. We only declare the binding and container config here.
-[[containers]]
+[containers]
 class_name = "SandboxDO"
 image = "./Dockerfile.sandbox"
 instance_type = "basic"

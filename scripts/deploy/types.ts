@@ -458,7 +458,7 @@ export interface WranglerEnvConfig {
   durable_objects?: DurableObjectsConfig;
   ai?: AIBinding;
   analytics_engine_datasets?: AnalyticsEngineDatasetBinding[];
-  containers?: ContainerBinding[];
+  containers?: ContainerBinding;
   tail_consumers?: TailConsumer[];
   migrations?: MigrationEntry[];
   observability?: ObservabilityConfig;
