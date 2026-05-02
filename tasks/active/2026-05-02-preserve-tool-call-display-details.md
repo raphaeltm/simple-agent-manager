@@ -19,7 +19,7 @@ Tool calls initially render with rich detail from the live ACP WebSocket stream,
 
 ## Implementation Checklist
 
-- [x] Add VM agent coverage proving terminal/tool call metadata survives extraction with enough raw detail for persisted display.
+- [x] Verify VM agent coverage proves terminal/tool call metadata survives extraction with enough raw detail for persisted display.
   - Existing VM agent tests already assert terminal raw content is preserved as `type=terminal` with `terminalId`.
 - [x] Preserve tool call metadata through ProjectData batch persistence without dropping structured content.
   - Existing DO path persists and broadcasts parsed `toolMetadata`; no API/DO code change was required for this bug.
