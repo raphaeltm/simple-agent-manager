@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,13 +13,32 @@ import (
 	"github.com/workspace/harness/transcript"
 )
 
+// copyDir copies src directory contents to dst (for test isolation).
+func copyDir(t *testing.T, src, dst string) {
+	t.Helper()
+	filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+}
+
 // Evaluation Task 1: Read-only repo analysis
-// The agent reads files and summarizes structure without writing anything.
+// The agent reads files from testdata/fixture-repo and summarizes structure without writing anything.
 func TestEval_ReadOnlyAnalysis(t *testing.T) {
+	// Copy fixture-repo to a temp dir so the test cannot modify the checked-in fixtures.
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {\n\tprintln(\"hi\")\n}\n"), 0o644)
-	os.MkdirAll(filepath.Join(dir, "lib"), 0o755)
-	os.WriteFile(filepath.Join(dir, "lib", "util.go"), []byte("package lib\n\nfunc Add(a, b int) int { return a + b }\n"), 0o644)
+	copyDir(t, filepath.Join("..", "testdata", "fixture-repo"), dir)
 
 	provider := llm.NewMockProvider(
 		// Turn 1: list files
@@ -26,7 +46,7 @@ func TestEval_ReadOnlyAnalysis(t *testing.T) {
 			ToolCalls: []llm.ToolCall{{
 				ID:     "c1",
 				Name:   "bash",
-				Params: map[string]any{"command": "find . -name '*.go' | sort"},
+				Params: map[string]any{"command": "find . -type f | sort"},
 			}},
 		},
 		// Turn 2: read main.go
@@ -37,16 +57,16 @@ func TestEval_ReadOnlyAnalysis(t *testing.T) {
 				Params: map[string]any{"path": "main.go"},
 			}},
 		},
-		// Turn 3: read lib/util.go
+		// Turn 3: read README.md
 		&llm.Response{
 			ToolCalls: []llm.ToolCall{{
 				ID:     "c3",
 				Name:   "read_file",
-				Params: map[string]any{"path": "lib/util.go"},
+				Params: map[string]any{"path": "README.md"},
 			}},
 		},
 		// Turn 4: summarize
-		&llm.Response{Content: "This is a Go project with a main package and a lib package containing utility functions."},
+		&llm.Response{Content: "This is a minimal Go project with a main package and a README."},
 	)
 
 	registry := tools.NewRegistry()
@@ -63,10 +83,16 @@ func TestEval_ReadOnlyAnalysis(t *testing.T) {
 		t.Errorf("stop_reason = %s, want complete", result.StopReason)
 	}
 
-	// Verify no writes happened — files unchanged
+	// Verify no writes happened — fixture files unchanged
 	data, _ := os.ReadFile(filepath.Join(dir, "main.go"))
-	if !strings.Contains(string(data), "println(\"hi\")") {
+	if !strings.Contains(string(data), "Hello from fixture repo") {
 		t.Error("main.go was modified during read-only analysis")
+	}
+
+	// Verify no new files were created
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 { // main.go + README.md
+		t.Errorf("expected 2 entries in dir, got %d (extra files created during read-only analysis)", len(entries))
 	}
 
 	// Verify transcript has the expected events
