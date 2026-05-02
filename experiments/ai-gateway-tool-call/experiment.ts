@@ -152,6 +152,7 @@ function buildAigMetadata(modelId: string): string {
   return JSON.stringify({
     userId: 'experiment',
     workspaceId: 'experiment',
+    projectId: 'experiment',
     source: 'ai-gateway-tool-call-experiment',
     modelId,
   });

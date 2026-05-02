@@ -167,9 +167,12 @@ export interface PlatformAIModel {
   /** Scopes where this model is allowed to be selected. */
   allowedScopes: ModelAllowedScope[];
   /**
-   * Model identifier for the AI Gateway Unified API (`/compat/chat/completions`).
+   * Model identifier for the AI Gateway Unified API.
    * Format: `{provider}/{model-id}` (e.g., `anthropic/claude-sonnet-4-6`).
-   * Workers AI models use the Workers AI path instead; this field is null for them.
+   *
+   * Routing:
+   * - Non-null: use Unified API at `.../compat/chat/completions` with `cf-aig-authorization` header
+   * - Null (Workers AI): use `.../workers-ai/v1/chat/completions` with `Authorization` header
    */
   unifiedApiModelId: string | null;
 }

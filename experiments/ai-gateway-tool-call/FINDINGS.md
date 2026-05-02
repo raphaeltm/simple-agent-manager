@@ -122,6 +122,8 @@ The `PLATFORM_AI_MODELS` registry in `packages/shared/src/constants/ai-services.
 
 5. **Add `toolCallSupport` to model selection logic**. When the harness needs tool calling, filter to models with `excellent` or `good` support. Workers AI models with `limited` or `none` should be excluded from tool-calling flows.
 
+6. **Auth header is path-specific, not model-specific.** The Unified API path requires `cf-aig-authorization: Bearer {token}`; the Workers AI path accepts `Authorization: Bearer {token}`. The production routing layer must apply the correct header based on the resolved path, not the provider. A single `resolveUpstreamAuth()` call result cannot be used for both paths without path-awareness.
+
 ## Request/Response Shapes
 
 ### Workers AI Tool Call Request (Working)
