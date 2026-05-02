@@ -31,8 +31,12 @@ Tool calls initially render with rich detail from the live ACP WebSocket stream,
 - [x] Run local UI visual audit for persisted tool call cards on mobile and desktop.
   - Added `apps/web/tests/playwright/project-chat-tool-call-audit.spec.ts`.
   - Passed: `npx playwright test tests/playwright/project-chat-tool-call-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"`.
-- [ ] Run quality checks that are practical in this workspace and document any skipped checks.
+- [x] Run quality checks that are practical in this workspace and document any skipped checks.
   - Full `pnpm test` initially failed in unrelated `packages/ui/tests/ButtonGroup.test.tsx` because jsdom normalized `borderRadius: 0` to `0px`; fixed the assertion and the focused UI test now passes.
+  - Passed: `pnpm typecheck`.
+  - Passed: `pnpm lint` (warnings only, no errors).
+  - Passed: `pnpm test`.
+  - Passed: `pnpm build`.
 
 ## Acceptance Criteria
 
