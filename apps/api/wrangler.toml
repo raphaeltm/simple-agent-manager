@@ -45,6 +45,9 @@ MAX_TRIGGERS_PER_PROJECT = "10"
 CRON_MIN_INTERVAL_MINUTES = "15"
 CRON_TEMPLATE_MAX_LENGTH = "8000"
 TRIGGER_NAME_MAX_LENGTH = "100"
+# Cloudflare Sandbox SDK prototype (admin-only, kill switch — default disabled)
+# Set to "true" via Worker secret to enable on specific environments.
+# SANDBOX_ENABLED = "false"
 # Trial Onboarding (zero-friction URL-to-workspace)
 # See docs/guides/trial-configuration.md for the full tunable list.
 TRIAL_MONTHLY_CAP = "1500"
@@ -197,6 +200,25 @@ new_sqlite_classes = ["SamSession"]  # Per-user SAM agent; SQLite-backed for con
 [[migrations]]
 tag = "v12"
 new_sqlite_classes = ["ProjectAgent"]  # Per-project AI tech lead; SQLite-backed for conversation history
+
+# Cloudflare Sandbox SDK — experimental container runtime for SAM agents.
+# Provides exec, file I/O, git checkout, terminal/PTY, and backup/restore
+# without provisioning full VMs. Admin-only prototype; not exposed to users.
+# NOTE: The Sandbox class is provided by @cloudflare/sandbox — it extends
+# DurableObject internally. We only declare the binding and container config here.
+[[containers]]
+class_name = "SandboxDO"
+image = "./Dockerfile.sandbox"
+instance_type = "basic"
+max_instances = 3
+
+[[durable_objects.bindings]]
+name = "SANDBOX"
+class_name = "SandboxDO"
+
+[[migrations]]
+tag = "v13"
+new_sqlite_classes = ["SandboxDO"]  # Sandbox SDK container DO; SQLite-backed per CF requirement
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

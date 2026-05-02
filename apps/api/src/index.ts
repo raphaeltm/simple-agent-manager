@@ -1,5 +1,6 @@
 // Re-export Durable Object classes for Cloudflare Workers runtime
 export { AdminLogs } from './durable-objects/admin-logs';
+// Sandbox SDK DO class — re-exported from @cloudflare/sandbox (experimental prototype)
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
@@ -12,6 +13,7 @@ export { TrialCounter } from './durable-objects/trial-counter';
 export { TrialEventBus } from './durable-objects/trial-event-bus';
 export { TrialOrchestrator } from './durable-objects/trial-orchestrator';
 export type { Env } from './env';
+export { Sandbox as SandboxDO } from '@cloudflare/sandbox';
 
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -34,6 +36,7 @@ import { adminAnalyticsRoutes } from './routes/admin-analytics';
 import { adminCostRoutes } from './routes/admin-costs';
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
 import { adminQuotaRoutes } from './routes/admin-quotas';
+import { adminSandboxRoutes } from './routes/admin-sandbox';
 import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
 import { agentProfileRoutes } from './routes/agent-profiles';
@@ -422,6 +425,7 @@ app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
 app.route('/api/admin/quotas', adminQuotaRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/admin/costs', adminCostRoutes);
+app.route('/api/admin/sandbox', adminSandboxRoutes);
 app.route('/api/usage', usageRoutes);
 app.route('/api/account-map', accountMapRoutes);
 app.route('/api/dashboard', dashboardRoutes);

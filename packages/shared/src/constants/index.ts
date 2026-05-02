@@ -209,9 +209,12 @@ export {
   DEFAULT_TTS_SUMMARY_THRESHOLD,
   DEFAULT_TTS_TIMEOUT_MS,
   MAX_CONTEXT_SUMMARY_BYTES,
+  type ModelAllowedScope,
+  type ModelIntendedRole,
   PLATFORM_AI_MODELS,
   type PlatformAIModel,
   type PlatformAIModelTier,
+  type ToolCallSupport,
   VALID_BILLING_MODES,
 } from './ai-services';
 
