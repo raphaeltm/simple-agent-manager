@@ -45,6 +45,8 @@ MAX_TRIGGERS_PER_PROJECT = "10"
 CRON_MIN_INTERVAL_MINUTES = "15"
 CRON_TEMPLATE_MAX_LENGTH = "8000"
 TRIGGER_NAME_MAX_LENGTH = "100"
+# Cloudflare Sandbox SDK prototype (admin-only, kill switch)
+SANDBOX_ENABLED = "true"
 # Trial Onboarding (zero-friction URL-to-workspace)
 # See docs/guides/trial-configuration.md for the full tunable list.
 TRIAL_MONTHLY_CAP = "1500"
