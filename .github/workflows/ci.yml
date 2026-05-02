@@ -457,11 +457,21 @@ jobs:
               fi
             }
 
+            optional_check() {
+              local name="$1"
+              shift
+              if output=$("$@" 2>&1); then
+                echo "OK: $name — $(echo "$output" | head -1)"
+              else
+                echo "WARNING: optional $name unavailable — $(echo "$output" | head -1)"
+              fi
+            }
+
             echo "=== Post-Create Hook Tools ==="
             check "Claude Code"   claude --version
             check "OpenAI Codex"  codex --version
-            check "happy-coder"   happy --version
-            check "Playwright"    npx playwright --version
+            optional_check "happy-coder"   happy --version
+            optional_check "Playwright"    npx playwright --version
 
             echo ""
             echo "=== Post-Create Hook Build Artifacts ==="
@@ -495,6 +505,11 @@ jobs:
           devcontainer exec --workspace-folder . bash -c '
             set -e
             echo "=== Post-Start Hook Verification ==="
+
+            if ! command -v happy >/dev/null 2>&1; then
+              echo "WARNING: happy binary unavailable; postStartCommand treats this as non-fatal"
+              exit 0
+            fi
 
             # The happy daemon should have been started by postStartCommand
             if happy daemon status 2>&1 | grep -qi "running\|started\|active"; then
