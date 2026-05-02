@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   type ModelAllowedScope,
   PLATFORM_AI_MODELS,
-  type PlatformAIModel,
   type ToolCallSupport,
 } from '../../src/constants/ai-services';
 
