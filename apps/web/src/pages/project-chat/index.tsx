@@ -1,6 +1,6 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, LayoutGrid, List, Search, Settings, X } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ForkDialog } from '../../components/project/ForkDialog';
@@ -8,6 +8,7 @@ import { RetryDialog } from '../../components/project/RetryDialog';
 import { ProjectMessageView } from '../../components/project-message-view';
 import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { getLineageText } from './lineageUtils';
 import { ChatInput } from './ChatInput';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
 import { ProvisioningIndicator } from './ProvisioningIndicator';
@@ -19,6 +20,14 @@ export function ProjectChat() {
   const isMobile = useIsMobile();
   const state = useProjectChatState();
   const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
+
+  // Compute lineage text for the selected session (for header display)
+  const selectedLineageText = useMemo(() => {
+    if (!state.sessionId) return undefined;
+    const session = state.sessions.find((s) => s.id === state.sessionId);
+    if (!session?.taskId) return undefined;
+    return getLineageText(session.taskId, state.taskInfoMap, state.sessions);
+  }, [state.sessionId, state.sessions, state.taskInfoMap]);
 
   // Loading state
   if (state.loading && state.sessions.length === 0) {
@@ -274,6 +283,7 @@ export function ProjectChat() {
                 const s = state.sessions.find((sess) => sess.id === state.sessionId);
                 if (s?.taskId) state.setForkSession(s);
               }}
+              lineageText={selectedLineageText}
             />
             {/* Close conversation button — shown for idle sessions with a task */}
             {(() => {

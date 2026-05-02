@@ -123,6 +123,7 @@ export function SessionHeader({
   onOpenGit,
   onRetry,
   onFork,
+  lineageText,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -138,6 +139,8 @@ export function SessionHeader({
   onOpenGit?: () => void;
   onRetry?: () => void;
   onFork?: () => void;
+  /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
+  lineageText?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -199,6 +202,17 @@ export function SessionHeader({
         <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
           {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
         </span>
+
+        {/* Lineage info for retries/forks */}
+        {lineageText && (
+          <span
+            className="text-[10px] font-medium shrink-0"
+            style={{ color: 'var(--sam-color-fg-muted)' }}
+            title={lineageText}
+          >
+            {lineageText}
+          </span>
+        )}
 
         {/* Workspace profile badge — null/undefined defaults to 'Full' (matches DEFAULT_WORKSPACE_PROFILE) */}
         {workspace && (
