@@ -121,7 +121,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
   durable_objects: DurableObjectsConfig | undefined;
   ai: AIBinding | undefined;
   analytics_engine_datasets: AnalyticsEngineDatasetBinding[] | undefined;
-  containers: ContainerBinding | undefined;
+  containers: ContainerBinding[] | undefined;
   migrations: MigrationEntry[] | undefined;
   artifacts: unknown[] | undefined;
 } {
@@ -131,7 +131,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
     analytics_engine_datasets: topLevel.analytics_engine_datasets as
       | AnalyticsEngineDatasetBinding[]
       | undefined,
-    containers: topLevel.containers as ContainerBinding | undefined,
+    containers: topLevel.containers as ContainerBinding[] | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
     artifacts: topLevel.artifacts as unknown[] | undefined,
   };
