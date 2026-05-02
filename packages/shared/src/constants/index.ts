@@ -210,8 +210,11 @@ export {
   DEFAULT_TTS_TIMEOUT_MS,
   MAX_CONTEXT_SUMMARY_BYTES,
   PLATFORM_AI_MODELS,
+  type ModelAllowedScope,
+  type ModelIntendedRole,
   type PlatformAIModel,
   type PlatformAIModelTier,
+  type ToolCallSupport,
   VALID_BILLING_MODES,
 } from './ai-services';
 

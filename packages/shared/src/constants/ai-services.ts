@@ -131,7 +131,16 @@ export const DEFAULT_AI_PROXY_OPENAI_MODEL = 'gpt-4.1';
 /** Budget tier for platform AI models. */
 export type PlatformAIModelTier = 'free' | 'standard' | 'premium';
 
-/** Platform AI model metadata for UI dropdowns and allowed-model derivation. */
+/** Tool-call reliability tier for agent loop suitability. */
+export type ToolCallSupport = 'excellent' | 'good' | 'limited' | 'none';
+
+/** Intended role in the SAM agent hierarchy. */
+export type ModelIntendedRole = 'workspace-agent' | 'sam-agent' | 'project-agent' | 'utility' | 'any';
+
+/** Scopes where a model is allowed. */
+export type ModelAllowedScope = 'workspace' | 'project' | 'top-level';
+
+/** Platform AI model metadata for UI dropdowns, allowed-model derivation, and harness model selection. */
 export interface PlatformAIModel {
   /** Model ID (Workers AI uses @cf/ prefix; Anthropic uses claude-* IDs; OpenAI uses gpt-* IDs) */
   id: string;
@@ -147,6 +156,22 @@ export interface PlatformAIModel {
   costPer1kInputTokens: number;
   /** Approximate cost per 1K output tokens (USD) for budget estimation. Actual costs from AI Gateway logs. */
   costPer1kOutputTokens: number;
+  /** Context window size in tokens. */
+  contextWindow: number;
+  /** Tool-call reliability for agent loop suitability. */
+  toolCallSupport: ToolCallSupport;
+  /** Primary intended role in the SAM agent hierarchy. */
+  intendedRole: ModelIntendedRole;
+  /** Fallback group — models in the same group can substitute for each other. */
+  fallbackGroup: string;
+  /** Scopes where this model is allowed to be selected. */
+  allowedScopes: ModelAllowedScope[];
+  /**
+   * Model identifier for the AI Gateway Unified API (`/compat/chat/completions`).
+   * Format: `{provider}/{model-id}` (e.g., `anthropic/claude-sonnet-4-6`).
+   * Workers AI models use the Workers AI path instead; this field is null for them.
+   */
+  unifiedApiModelId: string | null;
 }
 
 /** Models available through the SAM Platform AI proxy.
@@ -164,6 +189,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'free',
     costPer1kInputTokens: 0,
     costPer1kOutputTokens: 0,
+    contextWindow: 131072,
+    toolCallSupport: 'limited',
+    intendedRole: 'utility',
+    fallbackGroup: 'free-general',
+    allowedScopes: ['workspace'],
+    unifiedApiModelId: null,
   },
   {
     id: '@cf/qwen/qwen3-30b-a3b-fp8',
@@ -172,6 +203,26 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'free',
     costPer1kInputTokens: 0,
     costPer1kOutputTokens: 0,
+    contextWindow: 32768,
+    toolCallSupport: 'good',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'free-coding',
+    allowedScopes: ['workspace'],
+    unifiedApiModelId: null,
+  },
+  {
+    id: '@cf/qwen/qwen2.5-coder-32b-instruct',
+    label: 'Qwen 2.5 Coder 32B',
+    provider: 'workers-ai',
+    tier: 'free',
+    costPer1kInputTokens: 0,
+    costPer1kOutputTokens: 0,
+    contextWindow: 32768,
+    toolCallSupport: 'good',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'free-coding',
+    allowedScopes: ['workspace'],
+    unifiedApiModelId: null,
   },
   {
     id: '@cf/google/gemma-3-12b-it',
@@ -180,6 +231,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'free',
     costPer1kInputTokens: 0,
     costPer1kOutputTokens: 0,
+    contextWindow: 32768,
+    toolCallSupport: 'none',
+    intendedRole: 'utility',
+    fallbackGroup: 'free-utility',
+    allowedScopes: ['workspace'],
+    unifiedApiModelId: null,
   },
   // --- Anthropic (via AI Gateway) ---
   {
@@ -189,6 +246,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'standard',
     costPer1kInputTokens: 0.0008,
     costPer1kOutputTokens: 0.004,
+    contextWindow: 200000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'utility',
+    fallbackGroup: 'anthropic-fast',
+    allowedScopes: ['workspace', 'project', 'top-level'],
+    unifiedApiModelId: 'anthropic/claude-haiku-4-5-20251001',
   },
   {
     id: 'claude-sonnet-4-6',
@@ -197,6 +260,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'standard',
     costPer1kInputTokens: 0.003,
     costPer1kOutputTokens: 0.015,
+    contextWindow: 200000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'any',
+    fallbackGroup: 'anthropic-standard',
+    allowedScopes: ['workspace', 'project', 'top-level'],
+    unifiedApiModelId: 'anthropic/claude-sonnet-4-6',
   },
   {
     id: 'claude-opus-4-6',
@@ -205,6 +274,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'premium',
     costPer1kInputTokens: 0.015,
     costPer1kOutputTokens: 0.075,
+    contextWindow: 200000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'sam-agent',
+    fallbackGroup: 'anthropic-premium',
+    allowedScopes: ['workspace', 'project', 'top-level'],
+    unifiedApiModelId: 'anthropic/claude-opus-4-6',
   },
   // --- OpenAI (via AI Gateway) ---
   {
@@ -214,6 +289,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'standard',
     costPer1kInputTokens: 0.0004,
     costPer1kOutputTokens: 0.0016,
+    contextWindow: 1047576,
+    toolCallSupport: 'excellent',
+    intendedRole: 'utility',
+    fallbackGroup: 'openai-fast',
+    allowedScopes: ['workspace', 'project'],
+    unifiedApiModelId: 'openai/gpt-4.1-mini',
   },
   {
     id: 'gpt-4.1',
@@ -222,6 +303,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'standard',
     costPer1kInputTokens: 0.002,
     costPer1kOutputTokens: 0.008,
+    contextWindow: 1047576,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'openai-standard',
+    allowedScopes: ['workspace', 'project'],
+    unifiedApiModelId: 'openai/gpt-4.1',
   },
   {
     id: 'gpt-5.2',
@@ -230,6 +317,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'premium',
     costPer1kInputTokens: 0.01,
     costPer1kOutputTokens: 0.04,
+    contextWindow: 131072,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'openai-premium',
+    allowedScopes: ['workspace', 'project'],
+    unifiedApiModelId: 'openai/gpt-5.2',
   },
 ];
 
