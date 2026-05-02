@@ -7,13 +7,13 @@ Tool calls initially render with rich detail from the live ACP WebSocket stream,
 ## Research Findings
 
 - The project message view prefers live ACP items while the agent is prompting or within the ACP grace period, then switches to DO-backed messages after `committedToDoViewRef` is set.
-  - `apps/web/src/components/project-message-view/index.tsx`
-  - `apps/web/src/components/project-message-view/useConnectionRecovery.ts`
+  - `apps/web/src/components/project-message-view/index.tsx:145-152`
+  - `apps/web/src/components/project-message-view/useConnectionRecovery.ts:119-124`
 - The VM agent extracts ACP notifications into persisted messages in `packages/vm-agent/internal/acp/message_extract.go`.
 - Tool messages are persisted through `POST /api/workspaces/:id/messages`, then into `chat_messages.content` and `chat_messages.tool_metadata`.
-  - `apps/api/src/routes/workspaces/runtime.ts`
-  - `apps/api/src/durable-objects/project-data/messages.ts`
-- Persisted messages are converted back into shared ACP conversation items in `apps/web/src/components/project-message-view/types.ts`.
+  - `apps/api/src/routes/workspaces/runtime.ts:721-732`
+  - `apps/api/src/durable-objects/project-data/messages.ts:201-210`
+- Persisted messages are converted back into shared ACP conversation items in `apps/web/src/components/project-message-view/types.ts:194-234`.
 - Previous postmortem `docs/notes/2026-03-12-message-misrouting-and-metadata-loss-postmortem.md` warns that silent metadata loss is high risk and must be tested behaviorally.
 - Previous postmortem `docs/notes/2026-03-23-disappearing-messages-postmortem.md` warns against tests that merely document broken message behavior instead of user-visible contracts.
 

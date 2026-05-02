@@ -4,11 +4,11 @@
 
 Tool calls displayed useful command details while the project chat was connected to the live ACP WebSocket stream, but the same conversation could collapse to a generic "Tool Call" label after the UI switched to ProjectData Durable Object history.
 
-The visible failure happened during persisted message reconstruction in `apps/web/src/components/project-message-view/types.ts:chatMessagesToConversationItems()`. Live ACP items were not affected because the live view used already-materialized conversation items before the persisted DO handoff in `apps/web/src/components/project-message-view/index.tsx`.
+The visible failure happened during persisted message reconstruction in `apps/web/src/components/project-message-view/types.ts:chatMessagesToConversationItems()` (`types.ts:194-234`). Live ACP items were not affected because the live view used already-materialized conversation items before the persisted DO handoff (`apps/web/src/components/project-message-view/index.tsx:145-152`; `apps/web/src/components/project-message-view/useConnectionRecovery.ts:119-124`).
 
 ## Root Cause
 
-Commit `512510d87` added the persisted tool-call deduplication path in `apps/web/src/components/project-message-view/types.ts:chatMessagesToConversationItems()`. When a later status-only update row shared the same `toolCallId`, the merge path recomputed a fallback title from missing metadata and overwrote the richer title from the initial tool-call row.
+Commit `512510d87` added the persisted tool-call deduplication path in `apps/web/src/components/project-message-view/types.ts:chatMessagesToConversationItems()` (`types.ts:223-234`). When a later status-only update row shared the same `toolCallId`, the merge path recomputed a fallback title from missing metadata and overwrote the richer title from the initial tool-call row.
 
 The broken invariant was: a status update may update status, but it must not erase previously persisted display metadata unless it carries an explicit replacement value.
 
