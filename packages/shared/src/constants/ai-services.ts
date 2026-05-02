@@ -402,3 +402,38 @@ export const DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD = 0.01;
 
 /** Default KV TTL for daily budget entries — 24h + 1h timezone buffer. Override via AI_USAGE_BUDGET_TTL_SECONDS env var. */
 export const DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS = 86_400 + 3_600;
+
+// =============================================================================
+// Sandbox Agent Configuration
+// =============================================================================
+
+/** Default model for sandbox-based agent loops. Override via SANDBOX_DEFAULT_MODEL env var. */
+export const DEFAULT_SANDBOX_MODEL = '@cf/qwen/qwen2.5-coder-32b-instruct';
+
+/** Default max turns for sandbox agent loop. Override via SANDBOX_AGENT_MAX_TURNS env var. */
+export const DEFAULT_SANDBOX_AGENT_MAX_TURNS = 20;
+
+/** Minimum tool-call support level required for agent loop participation. */
+export const AGENT_LOOP_MIN_TOOL_CALL_SUPPORT: ToolCallSupport = 'good';
+
+/**
+ * Filter models suitable for agent loop execution.
+ *
+ * Returns models with tool-call reliability >= minSupport (default: 'good')
+ * and optionally filtered by allowed scope.
+ */
+export function filterModelsForAgentLoop(
+  models: PlatformAIModel[],
+  options?: { scope?: ModelAllowedScope; minSupport?: ToolCallSupport }
+): PlatformAIModel[] {
+  const minSupport = options?.minSupport ?? AGENT_LOOP_MIN_TOOL_CALL_SUPPORT;
+  const supportLevels: ToolCallSupport[] = ['excellent', 'good', 'limited', 'none'];
+  const minIndex = supportLevels.indexOf(minSupport);
+
+  return models.filter((m) => {
+    const modelIndex = supportLevels.indexOf(m.toolCallSupport);
+    if (modelIndex > minIndex) return false;
+    if (options?.scope && !m.allowedScopes.includes(options.scope)) return false;
+    return true;
+  });
+}

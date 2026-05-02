@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  filterModelsForAgentLoop,
   type ModelAllowedScope,
   PLATFORM_AI_MODELS,
+  type PlatformAIModel,
   type ToolCallSupport,
 } from '../../src/constants/ai-services';
 
@@ -229,6 +231,120 @@ describe('AI Model Registry', () => {
       );
       // Sonnet is alone in its group (anthropic-standard) — this is valid
       expect(sameGroup.length).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('filterModelsForAgentLoop', () => {
+    const mockModels: PlatformAIModel[] = [
+      {
+        id: 'model-excellent',
+        label: 'Excellent Model',
+        provider: 'anthropic',
+        tier: 'standard',
+        costPer1kInputTokens: 0.003,
+        costPer1kOutputTokens: 0.015,
+        contextWindow: 200000,
+        toolCallSupport: 'excellent',
+        intendedRole: 'workspace-agent',
+        fallbackGroup: 'test',
+        allowedScopes: ['workspace', 'project'],
+        unifiedApiModelId: 'anthropic/test-model',
+      },
+      {
+        id: 'model-good',
+        label: 'Good Model',
+        provider: 'workers-ai',
+        tier: 'free',
+        costPer1kInputTokens: 0,
+        costPer1kOutputTokens: 0,
+        contextWindow: 32768,
+        toolCallSupport: 'good',
+        intendedRole: 'workspace-agent',
+        fallbackGroup: 'test',
+        allowedScopes: ['workspace', 'project'],
+        unifiedApiModelId: null,
+      },
+      {
+        id: 'model-limited',
+        label: 'Limited Model',
+        provider: 'workers-ai',
+        tier: 'free',
+        costPer1kInputTokens: 0,
+        costPer1kOutputTokens: 0,
+        contextWindow: 131072,
+        toolCallSupport: 'limited',
+        intendedRole: 'utility',
+        fallbackGroup: 'test',
+        allowedScopes: ['workspace'],
+        unifiedApiModelId: null,
+      },
+      {
+        id: 'model-none',
+        label: 'No Tool Model',
+        provider: 'workers-ai',
+        tier: 'free',
+        costPer1kInputTokens: 0,
+        costPer1kOutputTokens: 0,
+        contextWindow: 8192,
+        toolCallSupport: 'none',
+        intendedRole: 'utility',
+        fallbackGroup: 'test',
+        allowedScopes: ['workspace'],
+        unifiedApiModelId: null,
+      },
+    ];
+
+    it('filters to models with good or better tool-call support by default', () => {
+      const result = filterModelsForAgentLoop(mockModels);
+      expect(result).toHaveLength(2);
+      expect(result.map((m) => m.id)).toEqual(['model-excellent', 'model-good']);
+    });
+
+    it('filters to excellent only when minSupport is excellent', () => {
+      const result = filterModelsForAgentLoop(mockModels, { minSupport: 'excellent' });
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('model-excellent');
+    });
+
+    it('includes limited when minSupport is limited', () => {
+      const result = filterModelsForAgentLoop(mockModels, { minSupport: 'limited' });
+      expect(result).toHaveLength(3);
+      expect(result.map((m) => m.id)).toEqual(['model-excellent', 'model-good', 'model-limited']);
+    });
+
+    it('includes all models when minSupport is none', () => {
+      const result = filterModelsForAgentLoop(mockModels, { minSupport: 'none' });
+      expect(result).toHaveLength(4);
+    });
+
+    it('filters by scope when provided', () => {
+      const result = filterModelsForAgentLoop(mockModels, { scope: 'project' });
+      expect(result).toHaveLength(2);
+      expect(result.map((m) => m.id)).toEqual(['model-excellent', 'model-good']);
+    });
+
+    it('combines scope and minSupport filters', () => {
+      const result = filterModelsForAgentLoop(mockModels, {
+        scope: 'project',
+        minSupport: 'excellent',
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('model-excellent');
+    });
+
+    it('returns empty array when no models match', () => {
+      const result = filterModelsForAgentLoop(mockModels, { scope: 'top-level' });
+      expect(result).toHaveLength(0);
+    });
+
+    it('works with real PLATFORM_AI_MODELS registry', () => {
+      const agentModels = filterModelsForAgentLoop(PLATFORM_AI_MODELS);
+      // Should include at least one model with good+ tool calling
+      expect(agentModels.length).toBeGreaterThan(0);
+      // All returned models should have good or excellent tool-call support
+      for (const m of agentModels) {
+        expect(['excellent', 'good']).toContain(m.toolCallSupport);
+      }
     });
   });
 });

@@ -462,3 +462,11 @@ export type {
 
 // API Error
 export type { ApiError } from './api-error';
+
+// Sandbox Agent
+export type {
+  SandboxAgentConfig,
+  SandboxExecResult,
+  SandboxFileListResult,
+  SandboxFileReadResult,
+} from './sandbox';
