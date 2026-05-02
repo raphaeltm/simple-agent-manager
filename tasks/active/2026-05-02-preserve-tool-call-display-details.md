@@ -28,7 +28,9 @@ Tool calls initially render with rich detail from the live ACP WebSocket stream,
 - [x] Run focused Go and TypeScript tests for the modified paths.
   - TypeScript focused test passed: `pnpm --filter @simple-agent-manager/web test -- chatMessagesToConversationItems.test.ts`
   - Go test could not be run in this workspace because `go` is not installed (`which go` returned no path).
-- [ ] Run local UI visual audit for persisted tool call cards on mobile and desktop.
+- [x] Run local UI visual audit for persisted tool call cards on mobile and desktop.
+  - Added `apps/web/tests/playwright/project-chat-tool-call-audit.spec.ts`.
+  - Passed: `npx playwright test tests/playwright/project-chat-tool-call-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"`.
 - [ ] Run quality checks that are practical in this workspace and document any skipped checks.
 
 ## Acceptance Criteria
