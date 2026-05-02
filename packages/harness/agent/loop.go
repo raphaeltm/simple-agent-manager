@@ -85,8 +85,11 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			ToolCalls: resp.ToolCalls,
 		})
 
-		// Act + Observe: execute each tool call.
+		// Act + Observe: execute each tool call, checking cancellation between calls.
 		for _, call := range resp.ToolCalls {
+			if err := ctx.Err(); err != nil {
+				return &Result{TurnsUsed: turn, StopReason: "cancelled"}, err
+			}
 			log.Append(transcript.EventToolCall, turn, map[string]any{
 				"id":     call.ID,
 				"name":   call.Name,

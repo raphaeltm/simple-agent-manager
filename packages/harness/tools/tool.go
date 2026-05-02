@@ -61,9 +61,15 @@ func (r *Registry) Dispatch(ctx context.Context, call llm.ToolCall) llm.ToolResu
 
 	result, err := tool.Execute(ctx, call.Params)
 	if err != nil {
+		content := fmt.Sprintf("error: %s", err.Error())
+		// If the tool returned partial output alongside an error (e.g., bash
+		// with non-zero exit), prefer the richer output.
+		if result != "" {
+			content = result
+		}
 		return llm.ToolResult{
 			CallID:  call.ID,
-			Content: fmt.Sprintf("error: %s", err.Error()),
+			Content: content,
 			IsError: true,
 		}
 	}

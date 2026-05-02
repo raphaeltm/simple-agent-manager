@@ -176,8 +176,8 @@ func TestBash_FailingCommand(t *testing.T) {
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"command": "exit 1",
 	})
-	if err != nil {
-		t.Fatalf("bash tool should not return Go error for non-zero exit: %v", err)
+	if err == nil {
+		t.Fatal("bash tool should return Go error for non-zero exit")
 	}
 	if !strings.Contains(result, "exit") {
 		t.Errorf("result should contain exit info: %q", result)
@@ -197,5 +197,51 @@ func TestBash_WorkingDirectory(t *testing.T) {
 	}
 	if !strings.Contains(result, "found it") {
 		t.Errorf("command did not run in correct directory: %q", result)
+	}
+}
+
+func TestReadFile_PathTraversal(t *testing.T) {
+	dir := tmpDir(t)
+	tool := &ReadFile{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{"path": "../../etc/passwd"})
+	if err == nil {
+		t.Fatal("expected error for path traversal")
+	}
+	if !strings.Contains(err.Error(), "escapes working directory") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestReadFile_AbsolutePathRejected(t *testing.T) {
+	dir := tmpDir(t)
+	tool := &ReadFile{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{"path": "/etc/passwd"})
+	if err == nil {
+		t.Fatal("expected error for absolute path")
+	}
+}
+
+func TestWriteFile_PathTraversal(t *testing.T) {
+	dir := tmpDir(t)
+	tool := &WriteFile{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"path":    "../../tmp/evil.txt",
+		"content": "pwned",
+	})
+	if err == nil {
+		t.Fatal("expected error for path traversal")
+	}
+}
+
+func TestEditFile_PathTraversal(t *testing.T) {
+	dir := tmpDir(t)
+	tool := &EditFile{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"path":       "../../tmp/evil.txt",
+		"old_string": "foo",
+		"new_string": "bar",
+	})
+	if err == nil {
+		t.Fatal("expected error for path traversal")
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -39,7 +38,10 @@ func (t *ReadFile) Execute(_ context.Context, params map[string]any) (string, er
 		return "", fmt.Errorf("parameter 'path' must be a string")
 	}
 
-	resolved := t.resolvePath(path)
+	resolved, err := safePath(t.WorkDir, path)
+	if err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(resolved)
 	if err != nil {
 		return "", fmt.Errorf("reading %s: %w", path, err)
@@ -53,9 +55,3 @@ func (t *ReadFile) Execute(_ context.Context, params map[string]any) (string, er
 	return b.String(), nil
 }
 
-func (t *ReadFile) resolvePath(path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(t.WorkDir, path)
-}

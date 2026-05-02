@@ -51,5 +51,7 @@ func (m *MockProvider) CallMessages(n int) []Message {
 	if n >= len(m.calls) {
 		return nil
 	}
-	return m.calls[n]
+	out := make([]Message, len(m.calls[n]))
+	copy(out, m.calls[n])
+	return out
 }

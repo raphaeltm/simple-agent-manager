@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // WriteFile creates or overwrites a file.
@@ -41,7 +42,10 @@ func (t *WriteFile) Execute(_ context.Context, params map[string]any) (string, e
 		return "", err
 	}
 
-	resolved := filepath.Join(t.WorkDir, path)
+	resolved, err := safePath(t.WorkDir, path)
+	if err != nil {
+		return "", err
+	}
 
 	// Ensure parent directory exists.
 	dir := filepath.Dir(resolved)
@@ -49,7 +53,7 @@ func (t *WriteFile) Execute(_ context.Context, params map[string]any) (string, e
 		return "", fmt.Errorf("creating directory %s: %w", dir, err)
 	}
 
-	if err := os.WriteFile(resolved, []byte(content), 0o644); err != nil {
+	if err := atomicWrite(resolved, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("writing %s: %w", path, err)
 	}
 
@@ -67,4 +71,46 @@ func requireString(params map[string]any, key string) (string, error) {
 		return "", fmt.Errorf("parameter %q must be a string", key)
 	}
 	return s, nil
+}
+
+// atomicWrite writes data to a temp file then renames it, preventing partial writes.
+func atomicWrite(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".write-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // clean up on any error path
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+// safePath resolves path relative to workDir and rejects any path that escapes it.
+// Absolute paths and "../" traversals above workDir are rejected.
+func safePath(workDir, path string) (string, error) {
+	resolved := filepath.Join(workDir, path)
+	absWork, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving workdir: %w", err)
+	}
+	absResolved, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolving path: %w", err)
+	}
+	rel, err := filepath.Rel(absWork, absResolved)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("path %q escapes working directory", path)
+	}
+	return absResolved, nil
 }

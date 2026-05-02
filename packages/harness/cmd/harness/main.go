@@ -70,6 +70,9 @@ func main() {
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent error: %v\n", err)
+		if result == nil {
+			os.Exit(1)
+		}
 	}
 
 	if result != nil {

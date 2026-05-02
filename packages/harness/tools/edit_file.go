@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -52,7 +51,10 @@ func (t *EditFile) Execute(_ context.Context, params map[string]any) (string, er
 		return "", err
 	}
 
-	resolved := filepath.Join(t.WorkDir, path)
+	resolved, err := safePath(t.WorkDir, path)
+	if err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(resolved)
 	if err != nil {
 		return "", fmt.Errorf("reading %s: %w", path, err)
@@ -69,7 +71,7 @@ func (t *EditFile) Execute(_ context.Context, params map[string]any) (string, er
 	}
 
 	updated := strings.Replace(content, oldStr, newStr, 1)
-	if err := os.WriteFile(resolved, []byte(updated), 0o644); err != nil {
+	if err := atomicWrite(resolved, []byte(updated), 0o644); err != nil {
 		return "", fmt.Errorf("writing %s: %w", path, err)
 	}
 

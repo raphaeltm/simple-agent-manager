@@ -7,13 +7,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
 // DefaultBashTimeout is the default timeout for bash commands.
 const DefaultBashTimeout = 30 * time.Second
 
-// Bash executes shell commands with timeout, cancellation, and working directory sandboxing.
+// Bash executes shell commands with timeout and cancellation.
+//
+// SECURITY: This tool runs arbitrary shell commands with NO sandboxing beyond
+// setting the initial working directory. An LLM can execute any command the
+// host process can. In production, this tool MUST run inside a container or VM
+// with restricted filesystem and network access. This is acceptable for the
+// spike because SAM workspaces already run inside isolated DevContainers on VMs.
 type Bash struct {
 	WorkDir string
 	Timeout time.Duration // 0 means DefaultBashTimeout
@@ -50,12 +57,19 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	cmd.Dir = filepath.Clean(t.WorkDir)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 2 * time.Second
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err = cmd.Run()
+
+	// Kill the entire process group on context cancellation to prevent orphans.
+	if ctx.Err() != nil && cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	var result strings.Builder
 	if stdout.Len() > 0 {
@@ -76,8 +90,10 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 		if ctx.Err() == context.Canceled {
 			return result.String(), fmt.Errorf("command cancelled")
 		}
-		// Include exit code in result but return the output too.
-		return fmt.Sprintf("%s\nexit code: %s", result.String(), err.Error()), nil
+		// Non-zero exit: return output with exit code and a non-nil error
+		// so Dispatch correctly sets IsError on the ToolResult.
+		return fmt.Sprintf("%s\nexit code: %s", result.String(), err.Error()),
+			fmt.Errorf("non-zero exit: %w", err)
 	}
 
 	if result.Len() == 0 {
