@@ -19,11 +19,15 @@ Tool calls initially render with rich detail from the live ACP WebSocket stream,
 
 ## Implementation Checklist
 
-- [ ] Add VM agent coverage proving terminal/tool call metadata survives extraction with enough raw detail for persisted display.
-- [ ] Preserve tool call metadata through ProjectData batch persistence without dropping structured content.
-- [ ] Update persisted message to conversation item reconstruction so it renders useful details from metadata and raw ACP content instead of falling back to generic labels.
-- [ ] Add web tests proving persisted tool messages reconstruct the same meaningful card fields as live ACP tool messages.
-- [ ] Run focused Go and TypeScript tests for the modified paths.
+- [x] Add VM agent coverage proving terminal/tool call metadata survives extraction with enough raw detail for persisted display.
+  - Existing VM agent tests already assert terminal raw content is preserved as `type=terminal` with `terminalId`.
+- [x] Preserve tool call metadata through ProjectData batch persistence without dropping structured content.
+  - Existing DO path persists and broadcasts parsed `toolMetadata`; no API/DO code change was required for this bug.
+- [x] Update persisted message to conversation item reconstruction so it renders useful details from metadata and raw ACP content instead of falling back to generic labels.
+- [x] Add web tests proving persisted tool messages reconstruct the same meaningful card fields as live ACP tool messages.
+- [x] Run focused Go and TypeScript tests for the modified paths.
+  - TypeScript focused test passed: `pnpm --filter @simple-agent-manager/web test -- chatMessagesToConversationItems.test.ts`
+  - Go test could not be run in this workspace because `go` is not installed (`which go` returned no path).
 - [ ] Run local UI visual audit for persisted tool call cards on mobile and desktop.
 - [ ] Run quality checks that are practical in this workspace and document any skipped checks.
 

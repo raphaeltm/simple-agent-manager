@@ -277,6 +277,38 @@ describe('chatMessagesToConversationItems', () => {
     expect(items[0]).toMatchObject({ title: 'Updated title' });
   });
 
+  it('keeps the initial tool title when a status-only update omits title and kind', () => {
+    const meta1 = {
+      toolCallId: 'tc-status-only',
+      title: 'Bash: pnpm test -- --runInBand',
+      kind: 'execute',
+      status: 'in_progress',
+      content: [{ type: 'terminal', terminalId: 'term-status-only' }],
+    };
+    const meta2 = {
+      toolCallId: 'tc-status-only',
+      status: 'completed',
+    };
+    const input = [
+      msg({ role: 'tool', content: '(tool call)', toolMetadata: meta1 as unknown as null }),
+      msg({ role: 'tool', content: '(tool update)', toolMetadata: meta2 as unknown as null }),
+    ];
+    const items = chatMessagesToConversationItems(input);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      title: 'Bash: pnpm test -- --runInBand',
+      toolKind: 'execute',
+      status: 'completed',
+    });
+    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
+    expect(toolItem.content[0]).toMatchObject({
+      type: 'terminal',
+      data: { type: 'terminal', terminalId: 'term-status-only' },
+    });
+  });
+
   it('keeps separate tool_call items for different toolCallIds', () => {
     const meta1 = { toolCallId: 'tc-a', kind: 'read', status: 'completed', content: [] };
     const meta2 = { toolCallId: 'tc-b', kind: 'edit', status: 'completed', content: [] };

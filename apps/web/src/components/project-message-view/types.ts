@@ -224,9 +224,11 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       if (toolCallId && toolCallMap.has(toolCallId)) {
         const existingIdx = toolCallMap.get(toolCallId)!;
         const existing = acc[existingIdx] as { status: string; title: string; content: unknown[]; locations: unknown[]; toolKind?: string };
-        // Update with latest status, title, content, and locations
+        // Update with latest status, explicit title, content, and locations.
+        // Status-only tool_call_update rows often omit title/kind; do not let
+        // the generic fallback title erase the richer initial tool_call title.
         if (rawStatus) existing.status = status;
-        if (title !== kind) existing.title = title;
+        if (rawTitle) existing.title = rawTitle;
         if (contentItems.length > 0) existing.content = contentItems;
         if (locations.length > 0) existing.locations = locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null }));
         if (kind !== 'tool') existing.toolKind = kind;
