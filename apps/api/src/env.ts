@@ -1,3 +1,5 @@
+import type { Sandbox } from '@cloudflare/sandbox';
+
 // Cloudflare bindings type
 export interface Env {
   // D1 Database
@@ -47,6 +49,8 @@ export interface Env {
   PROJECT_ORCHESTRATOR: DurableObjectNamespace;
   SAM_SESSION: DurableObjectNamespace;
   PROJECT_AGENT: DurableObjectNamespace;
+  // Sandbox SDK (experimental — admin-only prototype for CF Containers agent runtime)
+  SANDBOX?: DurableObjectNamespace<Sandbox>;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -614,4 +618,10 @@ export interface Env {
   SAM_CODE_SEARCH_LIMIT?: string;                  // Default results per search_code (default: 10)
   SAM_CODE_SEARCH_MAX_LIMIT?: string;              // Max results per search_code (default: 30)
   SAM_FILE_CONTENT_MAX_BYTES?: string;             // Max file size for get_file_content (default: 1048576)
+
+  // Sandbox SDK (experimental — admin-only prototype)
+  SANDBOX_ENABLED?: string;                         // Kill switch for sandbox routes (default: false)
+  SANDBOX_EXEC_TIMEOUT_MS?: string;                 // Default exec timeout in ms (default: 30000)
+  SANDBOX_GIT_TIMEOUT_MS?: string;                  // Git checkout timeout in ms (default: 120000)
+  SANDBOX_SLEEP_AFTER?: string;                     // Container sleep-after duration (default: 10m)
 }

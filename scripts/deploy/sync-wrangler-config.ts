@@ -25,6 +25,7 @@ import type {
   DurableObjectsConfig,
   AIBinding,
   AnalyticsEngineDatasetBinding,
+  ContainerBinding,
   MigrationEntry,
   TailWorkerWranglerToml,
 } from './types.js';
@@ -120,6 +121,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
   durable_objects: DurableObjectsConfig | undefined;
   ai: AIBinding | undefined;
   analytics_engine_datasets: AnalyticsEngineDatasetBinding[] | undefined;
+  containers: ContainerBinding[] | undefined;
   migrations: MigrationEntry[] | undefined;
   artifacts: unknown[] | undefined;
 } {
@@ -129,6 +131,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
     analytics_engine_datasets: topLevel.analytics_engine_datasets as
       | AnalyticsEngineDatasetBinding[]
       | undefined,
+    containers: topLevel.containers as ContainerBinding[] | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
     artifacts: topLevel.artifacts as unknown[] | undefined,
   };
@@ -246,6 +249,7 @@ function generateApiWorkerEnv(
       ? { analytics_engine_datasets: staticBindings.analytics_engine_datasets }
       : {}),
     ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
+    ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
     ...(staticBindings.artifacts ? { artifacts: staticBindings.artifacts } : {}),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)

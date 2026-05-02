@@ -20,6 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1033.0",
     "@aws-sdk/s3-request-presigner": "3.1033.0",
+    "@cloudflare/sandbox": "^0.9.2",
     "@hono/node-server": "1.19.9",
     "@hono/valibot-validator": "0.6.1",
     "@mastra/core": "1.9.0",

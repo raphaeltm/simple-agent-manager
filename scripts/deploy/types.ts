@@ -436,6 +436,13 @@ export interface ObservabilityConfig {
   };
 }
 
+export interface ContainerBinding {
+  class_name: string;
+  image: string;
+  instance_type?: string;
+  max_instances?: number;
+}
+
 export interface WranglerEnvConfig {
   name?: string;
   account_id?: string;
@@ -451,6 +458,7 @@ export interface WranglerEnvConfig {
   durable_objects?: DurableObjectsConfig;
   ai?: AIBinding;
   analytics_engine_datasets?: AnalyticsEngineDatasetBinding[];
+  containers?: ContainerBinding[];
   tail_consumers?: TailConsumer[];
   migrations?: MigrationEntry[];
   observability?: ObservabilityConfig;

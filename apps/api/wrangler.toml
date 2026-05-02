@@ -198,6 +198,25 @@ new_sqlite_classes = ["SamSession"]  # Per-user SAM agent; SQLite-backed for con
 tag = "v12"
 new_sqlite_classes = ["ProjectAgent"]  # Per-project AI tech lead; SQLite-backed for conversation history
 
+# Cloudflare Sandbox SDK — experimental container runtime for SAM agents.
+# Provides exec, file I/O, git checkout, terminal/PTY, and backup/restore
+# without provisioning full VMs. Admin-only prototype; not exposed to users.
+# NOTE: The Sandbox class is provided by @cloudflare/sandbox — it extends
+# DurableObject internally. We only declare the binding and container config here.
+[[containers]]
+class_name = "SandboxDO"
+image = "./Dockerfile.sandbox"
+instance_type = "basic"
+max_instances = 3
+
+[[durable_objects.bindings]]
+name = "SANDBOX"
+class_name = "SandboxDO"
+
+[[migrations]]
+tag = "v13"
+new_sqlite_classes = ["SandboxDO"]  # Sandbox SDK container DO; SQLite-backed per CF requirement
+
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"

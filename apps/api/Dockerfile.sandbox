@@ -1,0 +1,13 @@
+FROM alpine:3.20
+
+# Install git and essential tools for agent coding tasks
+RUN apk add --no-cache git openssh-client curl jq
+
+# Create workspace directory
+RUN mkdir -p /workspace
+
+WORKDIR /workspace
+
+# The Sandbox SDK handles all communication — no server needed inside the container.
+# The container just needs to exist with the tools available.
+CMD ["sleep", "infinity"]
