@@ -33,68 +33,67 @@ SAM currently relies on 5 external proprietary agent binaries (Claude Code, Code
 ## Implementation Checklist
 
 ### 1. Module Setup
-- [ ] Create `packages/harness/` with `go.mod` (module `github.com/workspace/harness`)
-- [ ] Directory structure: `cmd/harness/`, `agent/`, `llm/`, `tools/`, `transcript/`
-- [ ] Add `.gitignore` for Go build artifacts
+- [x] Create `packages/harness/` with `go.mod` (module `github.com/workspace/harness`)
+- [x] Directory structure: `cmd/harness/`, `agent/`, `llm/`, `tools/`, `transcript/`
 
 ### 2. Core Interfaces
-- [ ] `llm.Provider` interface (SendMessage with messages+tools, returns response with tool calls)
-- [ ] `llm.Message` / `llm.ToolCall` / `llm.ToolResult` types
-- [ ] `llm.ToolDefinition` schema type (JSON Schema for tool parameters)
-- [ ] `llm.MockProvider` — deterministic scripted responses for testing
+- [x] `llm.Provider` interface (SendMessage with messages+tools, returns response with tool calls)
+- [x] `llm.Message` / `llm.ToolCall` / `llm.ToolResult` types
+- [x] `llm.ToolDefinition` schema type (JSON Schema for tool parameters)
+- [x] `llm.MockProvider` — deterministic scripted responses for testing
 
 ### 3. Tool System
-- [ ] `tools.Registry` — register tools by name, dispatch by name
-- [ ] `tools.Tool` interface — Name(), Description(), Schema(), Execute(ctx, params) (result, error)
-- [ ] `tools.ReadFile` — read file contents with line numbers
-- [ ] `tools.WriteFile` — create/overwrite files with safe directory handling
-- [ ] `tools.EditFile` — search-and-replace with unique match validation
-- [ ] `tools.Bash` — command execution with configurable timeout, cancellation, working directory sandboxing
+- [x] `tools.Registry` — register tools by name, dispatch by name
+- [x] `tools.Tool` interface — Name(), Description(), Schema(), Execute(ctx, params) (result, error)
+- [x] `tools.ReadFile` — read file contents with line numbers
+- [x] `tools.WriteFile` — create/overwrite files with safe directory handling
+- [x] `tools.EditFile` — search-and-replace with unique match validation
+- [x] `tools.Bash` — command execution with configurable timeout, cancellation, working directory sandboxing
 
 ### 4. Agent Loop
-- [ ] `agent.Loop` — think->act->observe cycle with max iterations
-- [ ] Context: system prompt + user message + conversation history
-- [ ] Tool dispatch from LLM response
-- [ ] Stop conditions: no more tool calls, max iterations, context cancelled
+- [x] `agent.Run` — think->act->observe cycle with max iterations
+- [x] Context: system prompt + user message + conversation history
+- [x] Tool dispatch from LLM response
+- [x] Stop conditions: no more tool calls, max iterations, context cancelled
 
 ### 5. Transcript / Event Log
-- [ ] `transcript.Log` — append-only event log (LLM requests, LLM responses, tool calls, tool results)
-- [ ] `transcript.Event` types (LLMRequest, LLMResponse, ToolCall, ToolResult, Error)
-- [ ] JSON serialization for persistence
-- [ ] In-memory implementation for testing
+- [x] `transcript.Log` — append-only event log (LLM requests, LLM responses, tool calls, tool results)
+- [x] `transcript.Event` types (LLMRequest, LLMResponse, ToolCall, ToolResult, Error)
+- [x] JSON serialization for persistence
+- [x] In-memory implementation for testing
 
 ### 6. CLI Prototype
-- [ ] `cmd/harness/main.go` — parse flags, create provider + tools + loop, run
-- [ ] `--model` flag (default: mock)
-- [ ] `--dir` flag for working directory
-- [ ] `--prompt` flag for initial task
-- [ ] `--max-turns` flag
-- [ ] `--transcript` flag for output file
+- [x] `cmd/harness/main.go` — parse flags, create provider + tools + loop, run
+- [x] `--dir` flag for working directory
+- [x] `--prompt` flag for initial task
+- [x] `--max-turns` flag
+- [x] `--transcript` flag for output file
+- [x] `--system` flag for system prompt
 
 ### 7. Tests
-- [ ] Tool dispatch: register tools, dispatch by name, verify results
-- [ ] Bash timeout: command exceeds timeout, verify cancellation
-- [ ] Bash cancellation: cancel context mid-execution, verify cleanup
-- [ ] Edit safety: non-unique match returns error, unique match succeeds
-- [ ] Transcript persistence: events written and readable
-- [ ] Scripted agent run: mock model returns tool calls, agent executes them, verifies final state
+- [x] Tool dispatch: register tools, dispatch by name, verify results
+- [x] Bash timeout: command exceeds timeout, verify cancellation
+- [x] Bash cancellation: cancel context mid-execution, verify cleanup
+- [x] Edit safety: non-unique match returns error, unique match succeeds
+- [x] Transcript persistence: events written and readable
+- [x] Scripted agent run: mock model returns tool calls, agent executes them, verifies final state
 
 ### 8. Evaluation Fixtures
-- [ ] Task 1: Read-only repo analysis — read files, summarize structure (no writes)
-- [ ] Task 2: Simple file edit + verification — create file, edit it, verify with bash
-- [ ] Task 3: Failing command recovery — run bad command, detect error, retry with fix
+- [x] Task 1: Read-only repo analysis — read files, summarize structure (no writes)
+- [x] Task 2: Simple file edit + verification — create file, edit it, verify with bash
+- [x] Task 3: Failing command recovery — run bad command, detect error, retry with fix
 
 ### 9. Documentation
-- [ ] `packages/harness/README.md` — architecture, usage, inspiration credits
-- [ ] Document what was borrowed from Crush/Pi/OpenHands (patterns only, no code)
-- [ ] Next steps: integration risks for VM mode, container mode
+- [x] `packages/harness/README.md` — architecture, usage, inspiration credits
+- [x] Document what was borrowed from Crush/Pi/OpenHands (patterns only, no code)
+- [x] Next steps: integration risks for VM mode, container mode
 
 ## Acceptance Criteria
-- [ ] `packages/harness` builds with `go build ./...`
-- [ ] `go test ./...` passes in `packages/harness`
-- [ ] Evaluation fixtures produce expected results with mock model
-- [ ] No changes to existing agent types (claude-code, codex, gemini, mistral, opencode)
-- [ ] CLI can run against a temp fixture repo with mock model
+- [x] `packages/harness` builds with `go build ./...`
+- [x] `go test ./...` passes in `packages/harness`
+- [x] Evaluation fixtures produce expected results with mock model
+- [x] No changes to existing agent types (claude-code, codex, gemini, mistral, opencode)
+- [x] CLI can run against a temp fixture repo with mock model
 - [ ] PR description includes command outputs and evaluation results
 
 ## References
