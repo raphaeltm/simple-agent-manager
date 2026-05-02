@@ -354,11 +354,23 @@ async function runWorkersAiToolLoop(
     while (totalTurns < maxTurns) {
       totalTurns++;
 
+      // Workers AI quirks:
+      // 1. tool_choice "auto" often produces text instead of structured tool_calls —
+      //    use "required" when we still need tool calls, switch to "auto" after both tools fired
+      // 2. content: null rejected in assistant messages — must use "" (empty string)
+      const needsMoreTools = toolCallsCompleted < 2;
+      const sanitizedMessages = messages.map((m) => {
+        if (m.role === 'assistant' && m.tool_calls?.length && m.content === null) {
+          return { ...m, content: '' };
+        }
+        return m;
+      });
+
       const body = {
         model: modelId,
-        messages,
+        messages: sanitizedMessages,
         tools: TOOLS,
-        tool_choice: 'auto',
+        tool_choice: needsMoreTools ? 'required' : 'auto',
       };
 
       const resp = await fetch(url, {
