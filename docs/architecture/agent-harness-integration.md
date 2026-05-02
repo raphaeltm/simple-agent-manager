@@ -55,9 +55,8 @@ resolveRuntime(agentContext):
 
 ```
 User message (project chat)
-  → apps/api/src/routes/chat.ts
-  → ProjectData DO: persistMessage()
-  → ProjectAgent DO: handleMessage()
+  → apps/api/src/routes/project-agent.ts
+  → ProjectAgent DO: handleChat()
   │
   ├─ [Agent loop — Mastra in DO]
   │   1. Construct messages array (system prompt + history + user message)
@@ -109,7 +108,7 @@ This ensures:
 ### Flag Resolution
 
 ```typescript
-// In any DO or route handler:
+// Intended shared helper (not yet extracted — current pattern is requireSandbox() in admin-sandbox.ts):
 function isSandboxEnabled(env: Env): boolean {
   return env.SANDBOX_ENABLED === 'true' && !!env.SANDBOX;
 }
@@ -151,7 +150,7 @@ ProjectAgent DO
 
 Not needed for the first vertical slice. The ProjectAgent DO already has direct access to SAM's internal services (knowledge, dispatch, policies) via its own bindings and context. MCP tokens are only needed when an *external* agent (running in a VM or container binary) needs to call back to SAM.
 
-When the Go harness runs in a VM (future Phase 2), it will receive an MCP token via the existing `generateMCPToken()` path in TaskRunner DO.
+When the Go harness runs in a VM (future Phase 2), it will receive an MCP token via the existing `generateMcpToken()` function (`apps/api/src/services/mcp-token.ts`), called from the task runner's agent session step.
 
 ### GitHub Token (for git operations in sandbox)
 
