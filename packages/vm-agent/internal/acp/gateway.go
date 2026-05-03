@@ -769,7 +769,7 @@ func agentInstallScript(info agentCommandInfo) string {
 		return info.installCmd
 	}
 	return fmt.Sprintf(
-		`which npm >/dev/null 2>&1 || { rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm; }; %s`,
+		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; { which npm >/dev/null 2>&1 && [ "$node_major" -ge 20 ]; } || { rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm && npm install -g n && n 22 && hash -r; }; %s`,
 		info.installCmd,
 	)
 }

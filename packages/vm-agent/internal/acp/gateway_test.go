@@ -258,6 +258,9 @@ func TestAgentInstallScriptCleansBrokenGitHubCLIRepoBeforeNpmBootstrap(t *testin
 		"rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg",
 		"apt-get update -qq",
 		"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm",
+		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"`,
+		"npm install -g n",
+		"n 22",
 		"npm install -g @zed-industries/claude-agent-acp",
 	} {
 		if !strings.Contains(script, want) {

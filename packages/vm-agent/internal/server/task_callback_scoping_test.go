@@ -59,7 +59,11 @@ func TestTaskCompletionCallbacksAreBoundToTaskAndWorkspace(t *testing.T) {
 
 	s := &Server{
 		config:        &config.Config{HTTPCallbackTimeout: 0},
-		callbackToken: "workspace-token",
+		callbackToken: "node-token",
+		workspaces: map[string]*WorkspaceRuntime{
+			"workspace-a": {ID: "workspace-a", CallbackToken: "workspace-token-a"},
+			"workspace-b": {ID: "workspace-b", CallbackToken: "workspace-token-b"},
+		},
 	}
 
 	callbackA := s.makeTaskCompletionCallback(controlPlane.URL, "project-1", "task-a", "workspace-a", config.TaskModeConversation)
@@ -77,9 +81,10 @@ func TestTaskCompletionCallbacksAreBoundToTaskAndWorkspace(t *testing.T) {
 	if !strings.Contains(requests[1].Path, "/tasks/task-b/status/callback") {
 		t.Fatalf("second callback path = %q, want task-b callback", requests[1].Path)
 	}
+	wantAuth := []string{"Bearer workspace-token-a", "Bearer workspace-token-b"}
 	for i, req := range requests {
-		if req.Authorization != "Bearer workspace-token" {
-			t.Fatalf("request %d authorization = %q, want workspace token", i, req.Authorization)
+		if req.Authorization != wantAuth[i] {
+			t.Fatalf("request %d authorization = %q, want %q", i, req.Authorization, wantAuth[i])
 		}
 		if req.Body["executionStep"] != "awaiting_followup" {
 			t.Fatalf("request %d executionStep = %v, want awaiting_followup", i, req.Body["executionStep"])

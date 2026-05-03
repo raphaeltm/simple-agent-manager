@@ -1080,7 +1080,7 @@ func (s *Server) makeTaskCompletionCallback(
 			if promptErr != nil {
 				errorMessage = promptErr.Error()
 			}
-			s.postTaskCallback(callbackURL, taskID, map[string]interface{}{
+			s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), map[string]interface{}{
 				"toStatus":     "failed",
 				"reason":       reason,
 				"errorMessage": errorMessage,
@@ -1124,19 +1124,18 @@ func (s *Server) makeTaskCompletionCallback(
 				"error":                 pushResult.Error,
 			},
 		}
-		s.postTaskCallback(callbackURL, taskID, body)
+		s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), body)
 	}
 }
 
 // postTaskCallback sends a JSON payload to the task status callback endpoint.
-func (s *Server) postTaskCallback(callbackURL, taskID string, body map[string]interface{}) {
+func (s *Server) postTaskCallback(callbackURL, taskID, token string, body map[string]interface{}) {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		slog.Error("Task callback: marshal error", "error", err)
 		return
 	}
 
-	token := s.getCallbackToken()
 	if token == "" {
 		slog.Warn("Task callback: no callback token available, skipping")
 		return
