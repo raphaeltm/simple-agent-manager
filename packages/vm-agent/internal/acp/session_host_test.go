@@ -1138,6 +1138,54 @@ func TestSessionUpdate_WithReporter_EnqueuesMessages(t *testing.T) {
 	}
 }
 
+func TestSessionUpdate_MarshalError_NonBlocking(t *testing.T) {
+	t.Parallel()
+
+	reporter := &mockMessageReporter{}
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:       "test-session",
+			WorkspaceID:     "test-workspace",
+			MessageReporter: reporter,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	client := &sessionHostClient{host: host}
+
+	notif := acpsdk.SessionNotification{
+		SessionId: "acp-sess",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tool-1",
+				Title:      "Run tool",
+				RawInput:   make(chan int),
+			},
+		},
+	}
+
+	if err := client.SessionUpdate(context.Background(), notif); err != nil {
+		t.Fatalf("SessionUpdate should not fail on marshal error: %v", err)
+	}
+
+	host.bufMu.RLock()
+	bufLen := len(host.messageBuf)
+	host.bufMu.RUnlock()
+	if bufLen != 0 {
+		t.Fatalf("expected broadcast to be skipped, got %d buffered messages", bufLen)
+	}
+
+	msgs := reporter.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected message extraction to continue, got %d enqueued messages", len(msgs))
+	}
+	if msgs[0].Role != "tool" {
+		t.Fatalf("role = %q, want tool", msgs[0].Role)
+	}
+}
+
 func TestSessionUpdate_EnqueueError_NonBlocking(t *testing.T) {
 	t.Parallel()
 
