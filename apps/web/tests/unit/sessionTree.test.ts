@@ -39,6 +39,26 @@ function makeTaskInfo(overrides: Partial<TaskInfo> = {}): TaskInfo {
   };
 }
 
+function makeRetryFixture(
+  children: Array<{ taskId: string; sessionId: string; startedAt: number }>,
+): { tasks: Map<string, TaskInfo>; sessions: ChatSessionResponse[] } {
+  return {
+    tasks: new Map<string, TaskInfo>([
+      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user' })],
+      ...children.map(({ taskId }) => [
+        taskId,
+        makeTaskInfo({ id: taskId, parentTaskId: 'tP', triggeredBy: 'user' }),
+      ] as const),
+    ]),
+    sessions: [
+      makeSession({ id: 'sP', taskId: 'tP', topic: 'Original', startedAt: 1000 }),
+      ...children.map(({ sessionId, taskId, startedAt }) =>
+        makeSession({ id: sessionId, taskId, startedAt }),
+      ),
+    ],
+  };
+}
+
 /** Collect all node ids from a forest (pre-order). */
 function collectIds(nodes: SessionTreeNode[]): string[] {
   const out: string[] = [];
@@ -142,19 +162,12 @@ describe('buildSessionTree — basic structure', () => {
 
 describe('buildSessionTree — retry/fork flattening', () => {
   it('flattens user-triggered retries to root level with lineage text', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user' })],
-      ['tR1', makeTaskInfo({ id: 'tR1', parentTaskId: 'tP', triggeredBy: 'user' })],
-      ['tR2', makeTaskInfo({ id: 'tR2', parentTaskId: 'tP', triggeredBy: 'user' })],
+    const { tasks, sessions } = makeRetryFixture([
+      { taskId: 'tR1', sessionId: 'sR1', startedAt: 2000 },
+      { taskId: 'tR2', sessionId: 'sR2', startedAt: 3000 },
     ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP', startedAt: 1000 }),
-      makeSession({ id: 'sR1', taskId: 'tR1', startedAt: 2000 }),
-      makeSession({ id: 'sR2', taskId: 'tR2', startedAt: 3000 }),
-    ];
 
     const roots = buildSessionTree(sessions, tasks);
-    // All should be roots — retries are flattened
     expect(roots).toHaveLength(3);
     const retryNode = findNode(roots, 'sR1')!;
     expect(retryNode.depth).toBe(0);
@@ -178,35 +191,23 @@ describe('buildSessionTree — retry/fork flattening', () => {
   });
 
   it('shows fork lineage text for a single derived session', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user' })],
-      ['tF', makeTaskInfo({ id: 'tF', parentTaskId: 'tP', triggeredBy: 'user' })],
+    const { tasks, sessions } = makeRetryFixture([
+      { taskId: 'tF', sessionId: 'sF', startedAt: 2000 },
     ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP', topic: 'Original', startedAt: 1000 }),
-      makeSession({ id: 'sF', taskId: 'tF', startedAt: 2000 }),
-    ];
 
     const roots = buildSessionTree(sessions, tasks);
     const forkNode = findNode(roots, 'sF')!;
-    // Single sibling = fork
     expect(forkNode.lineageText).toContain('⑂');
   });
 
   it('assigns attempt numbers for multiple retries', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user' })],
-      ['tR1', makeTaskInfo({ id: 'tR1', parentTaskId: 'tP', triggeredBy: 'user' })],
-      ['tR2', makeTaskInfo({ id: 'tR2', parentTaskId: 'tP', triggeredBy: 'user' })],
+    const { tasks, sessions } = makeRetryFixture([
+      { taskId: 'tR1', sessionId: 'sR1', startedAt: 2000 },
+      { taskId: 'tR2', sessionId: 'sR2', startedAt: 3000 },
     ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP', startedAt: 1000 }),
-      makeSession({ id: 'sR1', taskId: 'tR1', startedAt: 2000 }),
-      makeSession({ id: 'sR2', taskId: 'tR2', startedAt: 3000 }),
-    ];
 
     const roots = buildSessionTree(sessions, tasks);
-    expect(roots).toHaveLength(3); // all flattened to root
+    expect(roots).toHaveLength(3);
     const r1 = findNode(roots, 'sR1')!;
     const r2 = findNode(roots, 'sR2')!;
     expect(r1.lineageText).toBe('↩ attempt 2');
