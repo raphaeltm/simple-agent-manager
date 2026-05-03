@@ -123,7 +123,7 @@ function buildWorkersAIUrl(env: Env): string {
 function buildOpenAIUrl(env: Env): string {
   const gatewayId = env.AI_GATEWAY_ID;
   if (gatewayId) {
-    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/chat/completions`;
+    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/chat/completions`;
   }
   // Fallback: direct OpenAI API (no gateway monitoring)
   return 'https://api.openai.com/v1/chat/completions';
@@ -561,4 +561,12 @@ aiProxyRoutes.get('/models', async (c) => {
 });
 
 // Export for testing
-export { aiProxyRoutes, getModelProvider, isAnthropicModel, isOpenAIModel, normalizeModelId, resolveModelId };
+export {
+  aiProxyRoutes,
+  buildOpenAIUrl,
+  getModelProvider,
+  isAnthropicModel,
+  isOpenAIModel,
+  normalizeModelId,
+  resolveModelId,
+};

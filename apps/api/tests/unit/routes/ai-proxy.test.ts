@@ -6,12 +6,38 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildOpenAIUrl,
   getModelProvider,
   isAnthropicModel,
   isOpenAIModel,
   normalizeModelId,
   resolveModelId,
 } from '../../../src/routes/ai-proxy';
+
+// =============================================================================
+// Upstream URLs
+// =============================================================================
+
+describe('OpenAI Gateway URL', () => {
+  it('uses Cloudflare AI Gateway OpenAI provider path without an extra v1 segment', () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-id',
+      AI_GATEWAY_ID: 'sam',
+    } as Parameters<typeof buildOpenAIUrl>[0];
+
+    expect(buildOpenAIUrl(env)).toBe(
+      'https://gateway.ai.cloudflare.com/v1/account-id/sam/openai/chat/completions',
+    );
+  });
+
+  it('falls back to the direct OpenAI v1 endpoint when no gateway is configured', () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-id',
+    } as Parameters<typeof buildOpenAIUrl>[0];
+
+    expect(buildOpenAIUrl(env)).toBe('https://api.openai.com/v1/chat/completions');
+  });
+});
 
 // =============================================================================
 // Model Normalization
@@ -345,4 +371,3 @@ describe('PLATFORM_AI_MODELS catalog', () => {
     }
   });
 });
-
