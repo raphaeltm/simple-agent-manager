@@ -129,6 +129,14 @@ function buildOpenAIUrl(env: Env): string {
   return 'https://api.openai.com/v1/chat/completions';
 }
 
+/** Build auth headers for Workers AI, accounting for authenticated AI Gateway. */
+function buildWorkersAIAuthHeaders(env: Env): Record<string, string> {
+  if (env.AI_GATEWAY_ID) {
+    return { 'cf-aig-authorization': `Bearer ${resolveUnifiedBillingToken(env) ?? env.CF_API_TOKEN}` };
+  }
+  return { Authorization: `Bearer ${env.CF_API_TOKEN}` };
+}
+
 
 // =============================================================================
 // Input Token Estimation
@@ -168,7 +176,7 @@ async function forwardToWorkersAI(
   const response = await fetch(gatewayUrl, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+      ...buildWorkersAIAuthHeaders(env),
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
       'cf-aig-collect-log': 'false',
@@ -564,6 +572,7 @@ aiProxyRoutes.get('/models', async (c) => {
 export {
   aiProxyRoutes,
   buildOpenAIUrl,
+  buildWorkersAIAuthHeaders,
   getModelProvider,
   isAnthropicModel,
   isOpenAIModel,

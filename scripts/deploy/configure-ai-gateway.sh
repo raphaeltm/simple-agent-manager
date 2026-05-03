@@ -10,6 +10,7 @@
 set -euo pipefail
 
 GATEWAY_ID="${AI_GATEWAY_ID:-sam}"
+AUTHENTICATION="${AI_GATEWAY_AUTHENTICATION:-true}"
 
 echo "Ensuring AI Gateway '${GATEWAY_ID}' exists..."
 
@@ -20,6 +21,25 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 
 if [ "$HTTP_CODE" -eq 200 ]; then
   echo "AI Gateway '${GATEWAY_ID}' already exists"
+  PATCH_RESPONSE=$(curl -s -w "\n%{http_code}" \
+    -X PATCH "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai-gateway/gateways/${GATEWAY_ID}" \
+    -H "Authorization: Bearer ${CF_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"authentication\": ${AUTHENTICATION},
+      \"collect_logs\": true,
+      \"cache_ttl\": 0,
+      \"cache_invalidate_on_update\": true,
+      \"rate_limiting_interval\": 0,
+      \"rate_limiting_limit\": 0
+    }")
+  PATCH_HTTP_CODE=$(echo "$PATCH_RESPONSE" | tail -1)
+  PATCH_BODY=$(echo "$PATCH_RESPONSE" | sed '$d')
+  if [ "$PATCH_HTTP_CODE" -ge 200 ] && [ "$PATCH_HTTP_CODE" -lt 300 ]; then
+    echo "AI Gateway '${GATEWAY_ID}' updated (authentication=${AUTHENTICATION})"
+  else
+    echo "::warning::Failed to update AI Gateway (HTTP ${PATCH_HTTP_CODE}): ${PATCH_BODY}"
+  fi
   exit 0
 fi
 
@@ -31,6 +51,7 @@ RESPONSE=$(curl -s -w "\n%{http_code}" \
   -H "Content-Type: application/json" \
   -d "{
     \"id\": \"${GATEWAY_ID}\",
+    \"authentication\": ${AUTHENTICATION},
     \"collect_logs\": true,
     \"cache_ttl\": 0,
     \"cache_invalidate_on_update\": true,

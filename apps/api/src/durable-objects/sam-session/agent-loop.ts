@@ -19,6 +19,7 @@ import {
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
+import { resolveUnifiedBillingToken } from '../../services/ai-billing';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
 import type {
   AnthropicToolDef,
@@ -217,6 +218,13 @@ function buildAnthropicGatewayUrl(env: Env): string {
   return 'https://api.anthropic.com/v1/messages';
 }
 
+function buildWorkersAIAuthHeaders(env: Env): Record<string, string> {
+  if (env.AI_GATEWAY_ID) {
+    return { 'cf-aig-authorization': `Bearer ${resolveUnifiedBillingToken(env) ?? env.CF_API_TOKEN}` };
+  }
+  return { Authorization: `Bearer ${env.CF_API_TOKEN}` };
+}
+
 // =============================================================================
 // Credential helpers
 // =============================================================================
@@ -362,7 +370,7 @@ async function callWorkersAILLM(
     method: 'POST',
     signal,
     headers: {
-      'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+      ...buildWorkersAIAuthHeaders(env),
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
       'cf-aig-collect-log': 'false',

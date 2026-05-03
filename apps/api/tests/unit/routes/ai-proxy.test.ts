@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildOpenAIUrl,
+  buildWorkersAIAuthHeaders,
   getModelProvider,
   isAnthropicModel,
   isOpenAIModel,
@@ -36,6 +37,41 @@ describe('OpenAI Gateway URL', () => {
     } as Parameters<typeof buildOpenAIUrl>[0];
 
     expect(buildOpenAIUrl(env)).toBe('https://api.openai.com/v1/chat/completions');
+  });
+});
+
+describe('Workers AI upstream auth headers', () => {
+  it('uses cf-aig-authorization when routing through an authenticated AI Gateway', () => {
+    const env = {
+      AI_GATEWAY_ID: 'sam',
+      CF_API_TOKEN: 'cf-api-token',
+    } as Parameters<typeof buildWorkersAIAuthHeaders>[0];
+
+    expect(buildWorkersAIAuthHeaders(env)).toEqual({
+      'cf-aig-authorization': 'Bearer cf-api-token',
+    });
+  });
+
+  it('prefers explicit CF_AIG_TOKEN for authenticated AI Gateway calls', () => {
+    const env = {
+      AI_GATEWAY_ID: 'sam',
+      CF_AIG_TOKEN: 'aig-token',
+      CF_API_TOKEN: 'cf-api-token',
+    } as Parameters<typeof buildWorkersAIAuthHeaders>[0];
+
+    expect(buildWorkersAIAuthHeaders(env)).toEqual({
+      'cf-aig-authorization': 'Bearer aig-token',
+    });
+  });
+
+  it('uses Cloudflare API Authorization when bypassing AI Gateway', () => {
+    const env = {
+      CF_API_TOKEN: 'cf-api-token',
+    } as Parameters<typeof buildWorkersAIAuthHeaders>[0];
+
+    expect(buildWorkersAIAuthHeaders(env)).toEqual({
+      Authorization: 'Bearer cf-api-token',
+    });
   });
 });
 
