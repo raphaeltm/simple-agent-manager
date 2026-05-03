@@ -87,6 +87,7 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 - **Write a test that exercises the contract that was violated.** Not just the symptom — the invariant that should always hold.
 - **If mocks hid the bug**, the right response is often an integration or E2E test that uses real (or more realistic) dependencies. Shallow unit tests with overly permissive mocks can give false confidence.
 - **If the bug was a missing propagation** (value set in A but never forwarded to B), write a test that constructs the real lifecycle (A then B) and asserts the value arrives.
+- **If the bug involves streamed UI data that is later reconstructed from durable storage**, write a parity regression test for the persisted representation, not only the live stream. The test MUST include a partial/status-only update event and assert omitted fields do not clear previously visible metadata. See `docs/notes/2026-05-02-persisted-tool-call-title-loss-postmortem.md`.
 
 ### Destructive Cleanup State Gates
 
