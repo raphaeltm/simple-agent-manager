@@ -93,14 +93,14 @@ type ProjectRuntimeFile struct {
 // ProvisionState carries optional credential and git identity data used when
 // preparing a workspace environment outside the bootstrap-token flow.
 type ProvisionState struct {
-	GitHubToken              string
-	GitUserName              string
-	GitUserEmail             string
-	GitHubID                 string
-	ProjectEnvVars           []ProjectRuntimeEnvVar
-	ProjectFiles             []ProjectRuntimeFile
-	Lightweight              bool   // Skip devcontainer build, use fallback image for faster startup
-	DevcontainerConfigName   string // Named devcontainer config (subdirectory under .devcontainer/)
+	GitHubToken            string
+	GitUserName            string
+	GitUserEmail           string
+	GitHubID               string
+	ProjectEnvVars         []ProjectRuntimeEnvVar
+	ProjectFiles           []ProjectRuntimeFile
+	Lightweight            bool   // Skip devcontainer build, use fallback image for faster startup
+	DevcontainerConfigName string // Named devcontainer config (subdirectory under .devcontainer/)
 }
 
 // Run redeems bootstrap credentials (if configured), prepares the workspace, and signals ready.
@@ -768,7 +768,7 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 	}
 
 	slog.Info("Starting lightweight container (default image)", "workspaceDir", cfg.WorkspaceDir)
-	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath); err != nil {
+	if _, err := runLightweightDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath); err != nil {
 		return false, err
 	}
 
@@ -1436,6 +1436,26 @@ func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeN
 	return true, nil
 }
 
+// runLightweightDevcontainerWithDefault starts the fallback image without
+// injecting devcontainer Features. Lightweight mode is meant to avoid a Docker
+// build; Features force devcontainer CLI to build an extended image.
+func runLightweightDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) (bool, error) {
+	configPath, err := writeDefaultDevcontainerConfigForMode(cfg, volumeName, credHelperHostPath, false)
+	if err != nil {
+		return false, fmt.Errorf("failed to write lightweight devcontainer config: %w", err)
+	}
+	slog.Info("Using lightweight default devcontainer config", "configPath", configPath, "image", cfg.DefaultDevcontainerImage)
+
+	args := devcontainerUpArgs(cfg, configPath, "")
+	cmd := exec.CommandContext(ctx, "devcontainer", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("devcontainer up failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	return true, nil
+}
+
 // removeStaleContainers finds and removes any containers (running or stopped)
 // matching the workspace label. This is used before the fallback devcontainer
 // build to ensure a clean slate — without it, devcontainer up may reuse a
@@ -1472,6 +1492,10 @@ func removeStaleContainers(ctx context.Context, cfg *config.Config) {
 // set. When omitted, the container runs as the image's default USER (e.g., "vscode" for
 // Microsoft devcontainer images), which is the correct behavior for most images.
 func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName, credHelperHostPath string) (string, error) {
+	return writeDefaultDevcontainerConfigForMode(cfg, volumeName, credHelperHostPath, true)
+}
+
+func writeDefaultDevcontainerConfigForMode(cfg *config.Config, volumeName, credHelperHostPath string, includeDefaultFeatures bool) (string, error) {
 	configPath := cfg.DefaultDevcontainerConfigPath
 	if configPath == "" {
 		configPath = config.DefaultDevcontainerConfigPath
@@ -1512,16 +1536,21 @@ func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName, credHelperHo
 		credLines = fmt.Sprintf(",\n  \"mounts\": [\"%s\"],\n  \"containerEnv\": {\n    \"GIT_CONFIG_COUNT\": \"1\",\n    \"GIT_CONFIG_KEY_0\": \"credential.helper\",\n    \"GIT_CONFIG_VALUE_0\": \"%s\"\n  }", credentialHelperMountEntry(credHelperHostPath), credentialHelperContainerPath)
 	}
 
-	configJSON := fmt.Sprintf(`{
-  "name": "Default Workspace",
-  "image": %q,
-  "privileged": true,
+	featuresLine := ""
+	if includeDefaultFeatures {
+		featuresLine = `,
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {}
-  }%s%s%s
+  }`
+	}
+
+	configJSON := fmt.Sprintf(`{
+  "name": "Default Workspace",
+  "image": %q,
+  "privileged": true%s%s%s%s
 }
-`, image, remoteUserLine, mountLines, credLines)
+`, image, featuresLine, remoteUserLine, mountLines, credLines)
 
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write default config: %w", err)

@@ -867,6 +867,36 @@ func TestWriteDefaultDevcontainerConfig(t *testing.T) {
 	}
 }
 
+func TestWriteDefaultDevcontainerConfigForLightweightModeOmitsFeatures(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "default-devcontainer.json")
+	cfg := &config.Config{
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
+		DefaultDevcontainerConfigPath: configPath,
+	}
+
+	if _, err := writeDefaultDevcontainerConfigForMode(cfg, "", "", false); err != nil {
+		t.Fatalf("writeDefaultDevcontainerConfigForMode returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read written config: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("generated config is not valid JSON: %v\nContent:\n%s", err, string(data))
+	}
+	if _, hasFeatures := parsed["features"]; hasFeatures {
+		t.Fatalf("expected lightweight fallback config to omit features, got:\n%s", string(data))
+	}
+	if img, _ := parsed["image"].(string); img != "mcr.microsoft.com/devcontainers/base:ubuntu" {
+		t.Errorf("expected image %q, got %q", "mcr.microsoft.com/devcontainers/base:ubuntu", img)
+	}
+}
+
 func TestWriteDefaultDevcontainerConfigWithRemoteUser(t *testing.T) {
 	t.Parallel()
 
