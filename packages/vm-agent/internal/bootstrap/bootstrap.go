@@ -1683,12 +1683,16 @@ func ensureGitHubCLI(ctx context.Context, cfg *config.Config) error {
 	// This works on Debian/Ubuntu-based images (the vast majority of devcontainers).
 	// For Alpine or other distros, we fall back to a direct binary download.
 	installScript := `set -e
+cleanup_github_cli_apt() {
+  rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg
+}
+trap 'status=$?; if [ "$status" -ne 0 ]; then cleanup_github_cli_apt; fi; exit "$status"' EXIT
 # Try apt-based install first (Debian/Ubuntu)
 if command -v apt-get >/dev/null 2>&1; then
+  cleanup_github_cli_apt
   (type -p wget >/dev/null || (apt-get update && apt-get install -y wget)) && \
   mkdir -p -m 755 /etc/apt/keyrings && \
-  out=$(wget -nv -O- https://cli.github.com/packages/githubcli-archive-keyring.gpg) && \
-  echo "$out" | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+  wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
   chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
   apt-get update && apt-get install -y gh
