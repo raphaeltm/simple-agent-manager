@@ -329,6 +329,10 @@ async function forwardToOpenAI(
     log.error('ai_proxy.openai_error', {
       status: response.status,
       body: errorText.slice(0, 500),
+      gatewayUrl,
+      hasCfAigAuth: !!headers['cf-aig-authorization'],
+      hasAuthHeader: !!headers['Authorization'],
+      gatewayId: env.AI_GATEWAY_ID,
     });
     return new Response(JSON.stringify({
       error: {
