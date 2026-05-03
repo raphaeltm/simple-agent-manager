@@ -105,16 +105,23 @@ describe('AgentsSection', () => {
         },
       ],
     });
+    mocks.getAgentSettings.mockImplementation((agentType: string) =>
+      Promise.resolve(
+        makeSettings(agentType, {
+          permissionMode: agentType === 'claude-code' ? 'plan' : null,
+        }),
+      ),
+    );
     mocks.saveAgentSettings.mockResolvedValue(
       makeSettings('claude-code', { permissionMode: 'default' }),
     );
 
     render(<AgentsSection />);
     await waitFor(() => {
-      const defaultRadio = screen.getByTestId(
-        'permission-mode-claude-code-default',
+      const planRadio = screen.getByTestId(
+        'permission-mode-claude-code-plan',
       ) as HTMLInputElement;
-      expect(defaultRadio.checked).toBe(true);
+      expect(planRadio.checked).toBe(true);
     });
 
     fireEvent.click(screen.getByTestId('permission-mode-claude-code-acceptEdits'));
