@@ -209,6 +209,53 @@ All three Workers AI models successfully completed a tool-call loop (read_file �
 summarize) through the full path: harness CLI → SAM AI proxy → SAM AI Gateway →
 Workers AI → tool execution → final response.
 
+## Harness Running Inside Cloudflare Container (2026-05-03)
+
+The harness binary was cross-compiled (static, `CGO_ENABLED=0`, stripped) and
+uploaded to R2 at `experiments/harness-linux-amd64` (5.9MB). A new admin
+endpoint (`POST /api/admin/sandbox/run-harness`) orchestrates the full flow:
+
+1. Download binary from R2 (166ms)
+2. Write to container via base64 decode (573ms warm, 2.4s cold)
+3. Create test fixture files
+4. Run harness against SAM AI proxy
+
+### Results
+
+| Model | Turns | Total Time | Harness Time | Tools Used |
+|-------|-------|-----------|-------------|------------|
+| Gemma 4 26B | 2 | 5.1s (cold) | 1.8s | read_file |
+| Llama 4 Scout 17B | 2 | 3.6s (warm) | 2.5s | read_file |
+| Qwen 2.5 Coder 32B | 1 | 3.3s (warm) | 2.2s | (text-only) |
+| Llama 4 Scout 17B | 2 | 4.2s (warm) | varies | read_file, write_file, bash |
+
+### Multi-Tool Loop
+
+The harness successfully executed a multi-tool loop inside the container:
+```text
+Turn 1: read_file(main.go) + write_file(hello.txt) + bash(cat hello.txt)
+Turn 2: final summary
+```
+
+The bash tool runs real commands inside the container filesystem. The harness
+creates and reads files within the sandbox's `/workspace/test-repo/` directory.
+
+### Proven Path
+
+```text
+Go harness binary (static, 5.9MB)
+  -> running inside Cloudflare Container (sandbox SDK)
+  -> calling SAM /ai/v1/chat/completions
+  -> auth via MCP token in KV
+  -> routed through SAM AI Gateway
+  -> Workers AI model inference
+  -> tool calls executed inside the container
+  -> transcript captured and returned
+```
+
+All with zero API keys — unified billing covers Workers AI models through the
+SAM gateway.
+
 ## Unified Billing Limitation
 
 Cloudflare AI Gateway unified billing only covers Workers AI models that run on
