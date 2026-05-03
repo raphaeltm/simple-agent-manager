@@ -216,8 +216,9 @@ function generateApiWorkerEnv(
       ...(process.env.HETZNER_BASE_IMAGE
         ? { HETZNER_BASE_IMAGE: process.env.HETZNER_BASE_IMAGE }
         : {}),
-      // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
-      AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
+      // AI Gateway ID — uses the top-level wrangler.toml value (no override).
+      // The `default` gateway has authentication: true, enabling unified billing
+      // for external providers (OpenAI, Anthropic) without separate API keys.
       // Analytics Engine dataset — derived from prefix so forks don't co-mingle data
       ANALYTICS_DATASET: `${DEPLOYMENT_CONFIG.prefix}_analytics`,
       // Deployment environment — used by trial runner to choose agent type + model
