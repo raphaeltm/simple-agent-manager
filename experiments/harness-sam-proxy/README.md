@@ -35,9 +35,10 @@ The same proxy path can be used for a small OpenAI model:
 - `--api-key` must be a workspace callback token for the current workspace.
 - Workers AI models such as `@cf/google/gemma-4-26b-a4b-it` route through SAM's
   configured `AI_GATEWAY_ID` using the Workers AI gateway path.
-- OpenAI models such as `gpt-4.1-mini` route through the same SAM proxy but
-  **always require an OpenAI API key** — unified billing does NOT cover external
-  providers. See `tasks/backlog/2026-05-03-openai-unified-billing-gateway-401.md`.
+- OpenAI models such as `gpt-4.1-mini` route through the same SAM proxy and use
+  unified billing when the AI Gateway has `authentication: true` and the account
+  has AI Gateway credits. The `sam` gateway currently has `authentication: false`
+  — see `tasks/backlog/2026-05-03-openai-unified-billing-gateway-401.md`.
 
 ## Experiment Auth Option
 
@@ -162,14 +163,16 @@ cf-aig-authorization: Bearer $CF_TOKEN
 }
 ```
 
-**Root cause confirmed:** Cloudflare AI Gateway unified billing only covers
-Workers AI models. External providers (OpenAI, Google, Anthropic) always require
-their own API keys — the `cf-aig-authorization` header authenticates to the
-gateway, not to OpenAI. This is a fundamental platform limitation, not a bug.
+**Root cause:** The `sam` AI Gateway has `authentication: false`. When
+authentication is disabled, the gateway does NOT inject unified billing
+credentials for external providers — it just proxies the request through, so
+OpenAI sees no API key.
 
-For the harness experiment goal of "no API keys needed," use Workers AI models
-(Gemma 4, Llama 4, Qwen) instead. See
-`tasks/backlog/2026-05-03-openai-unified-billing-gateway-401.md`.
+The `default` gateway has `authentication: true` and OpenAI unified billing
+works through it (confirmed in a separate session after adding $10 AI Gateway
+credit). The fix is to enable `authentication: true` on the `sam` gateway.
+
+See `tasks/backlog/2026-05-03-openai-unified-billing-gateway-401.md`.
 
 ## Notes
 
@@ -256,14 +259,22 @@ Go harness binary (static, 5.9MB)
 All with zero API keys — unified billing covers Workers AI models through the
 SAM gateway.
 
-## Unified Billing Limitation
+## Unified Billing for External Providers (OpenAI, Anthropic)
 
-Cloudflare AI Gateway unified billing only covers Workers AI models that run on
-Cloudflare infrastructure. External providers (OpenAI, Google, Anthropic) always
-require their own API keys — the gateway proxies requests but does not substitute
-billing. The `cf-aig-authorization` header authenticates to the gateway itself,
-not to the upstream provider.
+Unified billing covers BOTH Workers AI models AND external providers (OpenAI,
+Anthropic, Google) — but the AI Gateway must have `authentication: true` and
+the account must have AI Gateway credits loaded ($10 was added).
 
-For the "no API keys" goal, the harness must use Workers AI models (Gemma 4,
-Llama 4, Qwen 3). For OpenAI models, a platform credential (API key) must be
-configured in SAM.
+When `authentication: true`:
+- The `cf-aig-authorization: Bearer <CF_API_TOKEN>` header authenticates the
+  caller to the gateway
+- The gateway uses account credits to pay for external provider API calls
+- No external API keys needed
+
+When `authentication: false` (current `sam` gateway state):
+- The gateway just proxies requests through without injecting billing
+- External providers see no API key and return 401
+- Workers AI still works (uses `Authorization` header directly)
+
+**To fix:** Set `authentication: true` on the `sam` gateway via CF dashboard.
+The `default` gateway already has this and OpenAI models work through it.

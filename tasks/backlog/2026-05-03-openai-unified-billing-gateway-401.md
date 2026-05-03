@@ -1,71 +1,59 @@
 # OpenAI Unified Billing Returns 401 Through SAM AI Gateway
 
-## Status: NOT A BUG — Fundamental Platform Limitation
+## Status: Gateway Authentication Misconfiguration
 
-Cloudflare AI Gateway unified billing only covers **Workers AI models** (Gemma,
-Llama, Qwen, etc.) that run on Cloudflare infrastructure. External providers
-(OpenAI, Google, Anthropic) always require their own API keys — the gateway is
-a proxy for those providers, not a billing intermediary. The `cf-aig-authorization`
-header authenticates to the gateway itself, NOT to the upstream provider.
+The `sam` AI Gateway has `authentication: false`. When authentication is
+disabled, the gateway does NOT inject unified billing credentials into upstream
+requests — it just proxies them through. External providers like OpenAI then see
+no API key and return 401.
 
-This means "no API keys + OpenAI model" is not achievable through unified billing.
-The options are:
-1. **Use Workers AI models only** (Gemma 4, Llama 4, Qwen 3) — works today, no keys needed
-2. **Provide an OpenAI API key** as a platform credential — SAM proxy forwards it upstream
-3. **Use Anthropic models** with Cloudflare's Anthropic partnership billing (if available)
+The `default` gateway has `authentication: true` and OpenAI models work through
+it with unified billing (confirmed by a separate agent session after adding $10
+AI Gateway credit to the account).
 
-## Original Problem
+## Root Cause
 
-SAM's AI proxy can route harness traffic through the configured Cloudflare AI
-Gateway, but OpenAI unified-billing requests return 401 even after using the
-documented OpenAI provider path.
+The `sam` gateway needs `authentication: true` to enable unified billing for
+external providers. With authentication enabled:
+- The `cf-aig-authorization` header authenticates the request to the gateway
+- The gateway uses the account's AI Gateway credits to pay for external
+  provider calls (OpenAI, Anthropic, Google)
+- No external API keys are needed
+
+## Fix
+
+1. Set `authentication: true` on the `sam` AI Gateway (via CF dashboard or API)
+2. The `configure-ai-gateway.sh` script already defaults to
+   `AI_GATEWAY_AUTHENTICATION=true`, but the deploy token lacks permission to
+   modify gateway settings (HTTP 404 during deploy)
 
 ## Context
 
 Discovered during the 2026-05-03 harness gateway experiment on branch
 `sam/summarize-work-done-yesterday-01kqpd`.
 
-Working path:
+Working path (Workers AI — works regardless of authentication setting):
 
 - Harness CLI calls `https://api.sammy.party/ai/v1/chat/completions`.
 - SAM AI proxy accepts the experiment MCP token.
-- Workers AI model `@cf/google/gemma-4-26b-a4b-it` completes a real tool loop
-  through the SAM Cloudflare AI Gateway.
-- Also verified: `@cf/meta/llama-4-scout-17b-16e-instruct` and
-  `@cf/qwen/qwen2.5-coder-32b-instruct` both complete tool loops successfully.
+- Workers AI models complete tool loops through the SAM AI Gateway.
+- Verified: Gemma 4, Llama 4 Scout, Qwen 2.5 Coder.
 
-Failing path:
+Failing path (OpenAI — requires `authentication: true` on gateway):
 
-- Same harness/proxy path with `model: "gpt-4.1-mini"` reaches Cloudflare AI
-  Gateway provider `openai`.
-- Gateway logs show path `chat/completions`, status `401`, success `false`.
-- A direct Gateway request with `cf-aig-authorization: Bearer $CF_TOKEN` also
-  returns OpenAI's missing API key error.
-- Staging D1 `platform_credentials` has no enabled Codex/OpenAI platform
-  credential record; only a Claude key and Hetzner token were present at time of
-  discovery.
-
-## Root Cause
-
-The 401 is **correct behavior**. OpenAI requires an OpenAI API key in the
-`Authorization` header. Cloudflare AI Gateway passes through requests to external
-providers but does not substitute billing credentials for them. Unified billing
-is a Workers AI feature only.
+- Same harness/proxy path with `model: "gpt-4.1-mini"` reaches the gateway.
+- Gateway logs show status `401` because authentication is disabled.
+- With authentication enabled (as on the `default` gateway), this works.
 
 ## Acceptance Criteria
 
-- [x] Confirm the Cloudflare account has AI Gateway unified-billing credits and
-      the correct token type/permissions for provider requests without BYOK.
-      **CONFIRMED: unified billing only covers Workers AI. External providers
-      always need their own API keys.**
-- [x] Decide whether OpenAI traffic should require unified billing only or
-      support fallback to a stored Codex/OpenAI platform credential when
-      unified billing is unavailable.
-      **DECIDED: For no-key experiments, use Workers AI models. For OpenAI,
-      a platform credential is required.**
-- [ ] Add a live or integration verification path that proves
-      `gpt-4.1-mini` (or the chosen small OpenAI model) completes through
-      SAM `/ai/v1`, the SAM Cloudflare AI Gateway, and the harness tool loop.
-      **DEFERRED: requires OpenAI API key as platform credential.**
-- [x] Update `experiments/harness-sam-proxy/README.md` with the resolved
-      OpenAI behavior.
+- [x] Confirm the Cloudflare account has AI Gateway unified-billing credits.
+      **CONFIRMED: $10 credit added to account.**
+- [ ] Enable `authentication: true` on the `sam` AI Gateway.
+      **BLOCKED: CF_TOKEN lacks AI Gateway modification permissions. Requires
+      dashboard change or token permission update.**
+- [ ] Verify `gpt-4.1-mini` completes through SAM `/ai/v1`, the SAM AI Gateway
+      (with authentication enabled), and the harness tool loop.
+- [ ] Fix deploy token permissions so `configure-ai-gateway.sh` can update the
+      gateway during deploys.
+- [x] Update `experiments/harness-sam-proxy/README.md` with findings.
