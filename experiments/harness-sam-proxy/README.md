@@ -35,8 +35,9 @@ The same proxy path can be used for a small OpenAI model:
 - `--api-key` must be a workspace callback token for the current workspace.
 - Workers AI models such as `@cf/google/gemma-4-26b-a4b-it` route through SAM's
   configured `AI_GATEWAY_ID` using the Workers AI gateway path.
-- OpenAI models such as `gpt-4.1-mini` route through the same SAM proxy and use
-  Unified Billing when `CF_AIG_TOKEN` or `CF_API_TOKEN` is configured upstream.
+- OpenAI models such as `gpt-4.1-mini` route through the same SAM proxy but
+  **always require an OpenAI API key** — unified billing does NOT cover external
+  providers. See `tasks/backlog/2026-05-03-openai-unified-billing-gateway-401.md`.
 
 ## Experiment Auth Option
 
@@ -161,12 +162,14 @@ cf-aig-authorization: Bearer $CF_TOKEN
 }
 ```
 
-That narrows the OpenAI/unified-billing problem to upstream Cloudflare Gateway
-billing/auth configuration or token behavior. The harness can reach the SAM
-proxy, and the SAM proxy can reach the SAM AI Gateway on the documented OpenAI
-provider path. The remaining experiment is whether the OpenAI route needs a
-different `cf-aig-authorization` token, Gateway authentication/credits setup, or
-a fallback to a stored OpenAI platform key when unified billing is unavailable.
+**Root cause confirmed:** Cloudflare AI Gateway unified billing only covers
+Workers AI models. External providers (OpenAI, Google, Anthropic) always require
+their own API keys — the `cf-aig-authorization` header authenticates to the
+gateway, not to OpenAI. This is a fundamental platform limitation, not a bug.
+
+For the harness experiment goal of "no API keys needed," use Workers AI models
+(Gemma 4, Llama 4, Qwen) instead. See
+`tasks/backlog/2026-05-03-openai-unified-billing-gateway-401.md`.
 
 ## Notes
 
@@ -176,3 +179,44 @@ model registry so harness experiments can select it through `/ai/v1`.
 
 Production `/ai/v1/models` did not list Gemma 4 before this branch. Staging did
 list it after deployment.
+
+### Additional Workers AI Models Tested
+
+After confirming Gemma 4 works, two more Workers AI models were tested through
+the same harness → SAM proxy → SAM AI Gateway path:
+
+**Llama 4 Scout:**
+```text
+./harness --provider openai-proxy --base-url "https://api.sammy.party/ai/v1" \
+  --api-key "$TOKEN" --model "@cf/meta/llama-4-scout-17b-16e-instruct" \
+  --tool-choice auto --max-turns 5 --dir ./testdata/fixture-repo \
+  --prompt "Use the read_file tool to read README.md, then summarize."
+
+Agent completed in 2 turns (reason: complete)
+```
+
+**Qwen 2.5 Coder:**
+```text
+./harness --provider openai-proxy --base-url "https://api.sammy.party/ai/v1" \
+  --api-key "$TOKEN" --model "@cf/qwen/qwen2.5-coder-32b-instruct" \
+  --tool-choice auto --max-turns 5 --dir ./testdata/fixture-repo \
+  --prompt "Use the read_file tool to read README.md, then summarize."
+
+Agent completed in 2 turns (reason: complete)
+```
+
+All three Workers AI models successfully completed a tool-call loop (read_file →
+summarize) through the full path: harness CLI → SAM AI proxy → SAM AI Gateway →
+Workers AI → tool execution → final response.
+
+## Unified Billing Limitation
+
+Cloudflare AI Gateway unified billing only covers Workers AI models that run on
+Cloudflare infrastructure. External providers (OpenAI, Google, Anthropic) always
+require their own API keys — the gateway proxies requests but does not substitute
+billing. The `cf-aig-authorization` header authenticates to the gateway itself,
+not to the upstream provider.
+
+For the "no API keys" goal, the harness must use Workers AI models (Gemma 4,
+Llama 4, Qwen 3). For OpenAI models, a platform credential (API key) must be
+configured in SAM.

@@ -284,4 +284,182 @@ adminSandboxRoutes.get('/exec-stream', async (c) => {
   });
 });
 
+/**
+ * PUT /api/admin/sandbox/harness — Upload harness binary to R2 for sandbox experiments.
+ *
+ * Body: raw binary (application/octet-stream)
+ * Returns: { key, size, durationMs }
+ */
+adminSandboxRoutes.put('/harness', async (c) => {
+  const body = await c.req.arrayBuffer();
+  if (!body || body.byteLength === 0) {
+    throw errors.badRequest('Request body is required (raw binary)');
+  }
+
+  const key = 'experiments/harness-linux-amd64';
+  const start = Date.now();
+  await c.env.R2.put(key, body, {
+    httpMetadata: { contentType: 'application/x-elf' },
+  });
+  const durationMs = Date.now() - start;
+
+  return c.json({ key, size: body.byteLength, durationMs });
+});
+
+/**
+ * GET /api/admin/sandbox/harness — Download harness binary from R2 (for sandbox curl).
+ *
+ * Returns: raw binary stream
+ */
+adminSandboxRoutes.get('/harness', async (c) => {
+  const obj = await c.env.R2.get('experiments/harness-linux-amd64');
+  if (!obj) {
+    throw errors.notFound('Harness binary not found in R2');
+  }
+
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(obj.size),
+    },
+  });
+});
+
+/**
+ * POST /api/admin/sandbox/run-harness — Run harness binary inside a sandbox container.
+ *
+ * Downloads the harness from R2 via the Worker, writes it into the sandbox,
+ * creates a test fixture, and runs the harness against the SAM AI proxy.
+ *
+ * Body: { model?: string, prompt?: string, maxTurns?: number, sandboxId?: string, apiKey?: string }
+ * Returns: { steps[], result, durationMs }
+ */
+adminSandboxRoutes.post('/run-harness', async (c) => {
+  requireSandbox(c.env);
+  const config = getSandboxConfig(c.env);
+
+  const body = await c.req.json<{
+    model?: string;
+    prompt?: string;
+    maxTurns?: number;
+    sandboxId?: string;
+    apiKey?: string;
+  }>();
+
+  const sandboxId = body.sandboxId || 'harness-experiment';
+  const model = body.model || '@cf/google/gemma-4-26b-a4b-it';
+  const maxTurns = body.maxTurns || 5;
+  const prompt = body.prompt || 'Use the read_file tool to read README.md, then summarize what this project contains.';
+  const apiKey = body.apiKey || '';
+
+  if (!apiKey) {
+    throw errors.badRequest('apiKey is required (MCP token or callback token for SAM AI proxy)');
+  }
+
+  const sandbox = await getSandboxInstance(c.env, sandboxId);
+  const steps: Array<{ step: string; durationMs: number; success: boolean; detail?: string }> = [];
+  const totalStart = Date.now();
+
+  // Step 1: Download harness binary from R2 and write to sandbox
+  const r2Obj = await c.env.R2.get('experiments/harness-linux-amd64');
+  if (!r2Obj) {
+    throw errors.badRequest('Harness binary not found in R2. Upload it first via PUT /api/admin/sandbox/harness');
+  }
+
+  let step1Start = Date.now();
+  const binaryData = await r2Obj.arrayBuffer();
+  // Write binary via exec: base64 decode approach
+  // Sandbox writeFile expects string, so we use exec with base64
+  const base64Chunks: string[] = [];
+  const uint8 = new Uint8Array(binaryData);
+  // Convert to base64 in chunks to avoid string length limits
+  const CHUNK_SIZE = 65536;
+  for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
+    const chunk = uint8.slice(i, i + CHUNK_SIZE);
+    // Use btoa with binary string
+    let binary = '';
+    for (let j = 0; j < chunk.length; j++) {
+      binary += String.fromCharCode(chunk[j]!);
+    }
+    base64Chunks.push(btoa(binary));
+  }
+  const fullBase64 = base64Chunks.join('');
+  steps.push({ step: 'r2_download', durationMs: Date.now() - step1Start, success: true, detail: `${binaryData.byteLength} bytes` });
+
+  // Step 2: Write base64 to file and decode in sandbox
+  step1Start = Date.now();
+  // Write base64 string to a temp file
+  await sandbox.writeFile('/tmp/harness.b64', fullBase64);
+  // Decode it
+  const decodeResult = await sandbox.exec('base64 -d /tmp/harness.b64 > /tmp/harness && chmod +x /tmp/harness && rm /tmp/harness.b64 && ls -la /tmp/harness', {
+    timeout: config.execTimeoutMs,
+  });
+  steps.push({
+    step: 'write_binary',
+    durationMs: Date.now() - step1Start,
+    success: decodeResult.success,
+    detail: decodeResult.stdout || decodeResult.stderr,
+  });
+
+  if (!decodeResult.success) {
+    return c.json({ steps, error: 'Failed to write harness binary', detail: decodeResult.stderr, durationMs: Date.now() - totalStart });
+  }
+
+  // Step 3: Create test fixture
+  step1Start = Date.now();
+  const mkdirResult = await sandbox.exec('mkdir -p /workspace/test-repo', { timeout: 5000 });
+  await sandbox.writeFile('/workspace/test-repo/README.md', '# Test Project\n\nThis is a test project for the SAM harness experiment.\nIt demonstrates the harness running inside a Cloudflare Container.\n');
+  await sandbox.writeFile('/workspace/test-repo/main.go', 'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("Hello from the test project")\n}\n');
+  steps.push({
+    step: 'create_fixture',
+    durationMs: Date.now() - step1Start,
+    success: mkdirResult.success,
+  });
+
+  // Step 4: Run the harness
+  step1Start = Date.now();
+  const baseUrl = `https://api.${c.env.BASE_DOMAIN || 'sammy.party'}/ai/v1`;
+  const harnessCmd = [
+    '/tmp/harness',
+    '--provider', 'openai-proxy',
+    '--base-url', baseUrl,
+    '--api-key', apiKey,
+    '--model', model,
+    '--tool-choice', 'auto',
+    '--max-turns', String(maxTurns),
+    '--dir', '/workspace/test-repo',
+    '--transcript', '/tmp/harness-transcript.json',
+    '--prompt', prompt,
+  ].map(arg => `'${arg.replace(/'/g, "'\\''")}'`).join(' ');
+
+  const harnessResult = await sandbox.exec(harnessCmd, {
+    timeout: 120000, // 2 min timeout for LLM calls
+  });
+  steps.push({
+    step: 'run_harness',
+    durationMs: Date.now() - step1Start,
+    success: harnessResult.success,
+    detail: (harnessResult.stdout + '\n' + harnessResult.stderr).trim(),
+  });
+
+  // Step 5: Read transcript if available
+  let transcript: string | undefined;
+  try {
+    const transcriptFile = await sandbox.readFile('/tmp/harness-transcript.json');
+    transcript = transcriptFile.content;
+  } catch {
+    // Transcript may not exist if harness failed early
+  }
+
+  return c.json({
+    steps,
+    stdout: harnessResult.stdout,
+    stderr: harnessResult.stderr,
+    exitCode: harnessResult.exitCode,
+    transcript: transcript ? JSON.parse(transcript) : undefined,
+    durationMs: Date.now() - totalStart,
+    config: { model, maxTurns, baseUrl, sandboxId },
+  });
+});
+
 export { adminSandboxRoutes };
