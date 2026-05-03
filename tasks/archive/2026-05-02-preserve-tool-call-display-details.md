@@ -28,7 +28,7 @@ Tool calls initially render with rich detail from the live ACP WebSocket stream,
 - [x] Add bug-fix postmortem and process guard for streamed-to-persisted display parity regressions.
 - [x] Run focused Go and TypeScript tests for the modified paths.
   - TypeScript focused test passed: `pnpm --filter @simple-agent-manager/web test -- chatMessagesToConversationItems.test.ts`
-  - Go test could not be run in this workspace because `go` is not installed (`which go` returned no path).
+  - Go focused test passed: `go test ./internal/acp` from `packages/vm-agent`.
 - [x] Run local UI visual audit for persisted tool call cards on mobile and desktop.
   - Added `apps/web/tests/playwright/project-chat-tool-call-audit.spec.ts`.
   - Passed: `npx playwright test tests/playwright/project-chat-tool-call-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"`.
@@ -45,4 +45,4 @@ Tool calls initially render with rich detail from the live ACP WebSocket stream,
 - Persisted terminal/tool call messages do not collapse to generic "Tool Call" when metadata contains useful detail.
 - Live ACP tool calls and persisted DO tool calls use the same mapping logic for raw ACP content where possible.
 - Regression tests cover the VM extraction path and persisted UI reconstruction path.
-- No staging deployment is performed for this task; PR is opened but not merged.
+- Staging deployment is performed before merge, and production deployment is monitored after merge.
