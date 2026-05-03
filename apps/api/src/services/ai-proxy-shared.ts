@@ -14,6 +14,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { verifyCallbackToken } from './jwt';
+import { validateMcpToken } from './mcp-token';
 
 // =============================================================================
 // Auth: Callback Token Verification + Workspace Resolution
@@ -52,7 +53,22 @@ export async function verifyAIProxyAuth(
   env: Env,
   db: ReturnType<typeof drizzle>,
 ): Promise<AIProxyAuthResult> {
-  const tokenPayload = await verifyCallbackToken(token, env);
+  let tokenPayload;
+  try {
+    tokenPayload = await verifyCallbackToken(token, env);
+  } catch (err) {
+    if (env.AI_PROXY_ACCEPT_MCP_TOKEN_FOR_HARNESS === 'true') {
+      const mcpToken = await validateMcpToken(env.KV, token);
+      if (mcpToken) {
+        return {
+          workspaceId: mcpToken.workspaceId,
+          userId: mcpToken.userId,
+          projectId: mcpToken.projectId,
+        };
+      }
+    }
+    throw err;
+  }
 
   // Only workspace-scoped tokens are allowed (allowlist, not blocklist)
   if (tokenPayload.scope !== 'workspace') {

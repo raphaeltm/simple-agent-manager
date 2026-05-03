@@ -241,6 +241,20 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     allowedScopes: ['workspace'],
     unifiedApiModelId: null,
   },
+  {
+    id: '@cf/google/gemma-4-26b-a4b-it',
+    label: 'Gemma 4 26B',
+    provider: 'workers-ai',
+    tier: 'free',
+    costPer1kInputTokens: 0,
+    costPer1kOutputTokens: 0,
+    contextWindow: 32768,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'free-coding',
+    allowedScopes: ['workspace', 'project', 'top-level'],
+    unifiedApiModelId: null,
+  },
   // --- Anthropic (via AI Gateway) ---
   {
     id: 'claude-haiku-4-5-20251001',

@@ -9,7 +9,7 @@ A minimal Go prototype proving the core agent-loop and tool architecture for a S
 ```
 packages/harness/
 ├── agent/         # Core think→act→observe loop
-├── llm/           # LLM provider abstraction + mock
+├── llm/           # LLM provider abstraction + mock + OpenAI-compatible proxy
 ├── tools/         # Tool registry + built-in tools (read, write, edit, bash)
 ├── transcript/    # Append-only event log
 ├── cmd/harness/   # CLI entry point
@@ -25,9 +25,32 @@ The agent follows a think→act→observe cycle:
 3. **Observe**: Feed tool results back into the conversation
 4. **Repeat** until the model stops calling tools or max turns is reached
 
-### Deterministic Testing
+### LLM Providers
 
 The `llm.MockProvider` enables fully deterministic tests with no network dependency. Script a sequence of responses (including tool calls) and the agent loop executes them against real tools operating on temp directories.
+
+The `llm.OpenAIProxyProvider` is the first real-model experiment path. It calls an OpenAI-compatible `/chat/completions` endpoint, which can be SAM's AI proxy:
+
+```bash
+cd packages/harness
+go run ./cmd/harness \
+  --provider openai-proxy \
+  --base-url "https://api.${SAM_BASE_DOMAIN}/ai/v1" \
+  --api-key "$SAM_AI_PROXY_TOKEN" \
+  --model "@cf/google/gemma-4-26b-a4b-it" \
+  --tool-choice auto \
+  --dir ./testdata/fixture-repo \
+  --prompt "Read README.md and summarize the project." \
+  --transcript /tmp/harness-gemma-transcript.json
+```
+
+For a small OpenAI model through the same SAM proxy, change only `--model`:
+
+```bash
+--model "gpt-4.1-mini"
+```
+
+The API key is expected to be a workspace callback token when using SAM's `/ai/v1` proxy. The proxy is responsible for routing to the configured SAM Cloudflare AI Gateway and applying Unified Billing where configured.
 
 ## Quick Start
 
@@ -86,9 +109,9 @@ All implementations are clean-room. The tool interfaces, agent loop, and transcr
 - Risk: ACP SDK protocol differences from subprocess-based agents
 
 ### Multi-Model Support (Phase 5)
-- Implement `llm.Provider` for Anthropic and OpenAI APIs
-- Route through CF AI Gateway for cost tracking
-- Risk: Tool calling format differences between providers
+- Continue experiments through SAM's `/ai/v1` proxy before wiring production paths
+- Compare Gemma and small OpenAI models through the same proxy contract
+- Risk: tool calling format differences between Workers AI and external providers
 
 ### Container Mode (Phase 3)
 - Package as lightweight Docker image for CF Containers

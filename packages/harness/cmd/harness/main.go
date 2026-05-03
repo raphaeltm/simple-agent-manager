@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/workspace/harness/agent"
 	"github.com/workspace/harness/llm"
@@ -21,6 +22,11 @@ func main() {
 		maxTurns     = flag.Int("max-turns", 10, "Maximum agent loop iterations")
 		transcriptF  = flag.String("transcript", "", "Path to write transcript JSON")
 		systemPrompt = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
+		providerMode = flag.String("provider", envOrDefault("SAM_HARNESS_PROVIDER", "mock"), "LLM provider: mock or openai-proxy")
+		baseURL      = flag.String("base-url", defaultProxyBaseURL(), "OpenAI-compatible base URL for provider=openai-proxy")
+		apiKey       = flag.String("api-key", envOrDefault("SAM_AI_PROXY_TOKEN", envOrDefault("OPENAI_API_KEY", "")), "API key/callback token for provider=openai-proxy")
+		model        = flag.String("model", envOrDefault("SAM_HARNESS_MODEL", "@cf/google/gemma-4-26b-a4b-it"), "Model for provider=openai-proxy")
+		toolChoice   = flag.String("tool-choice", envOrDefault("SAM_HARNESS_TOOL_CHOICE", "auto"), "tool_choice for provider=openai-proxy")
 	)
 	flag.Parse()
 
@@ -37,10 +43,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create mock provider (spike only supports mock mode).
-	provider := llm.NewMockProvider(
-		&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
-	)
+	provider, err := buildProvider(*providerMode, *baseURL, *apiKey, *model, *toolChoice)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating provider: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Build tool registry.
 	registry := tools.NewRegistry()
@@ -95,4 +102,42 @@ func main() {
 		}
 		fmt.Printf("Transcript written to %s (%d events)\n", *transcriptF, log.Len())
 	}
+}
+
+func buildProvider(providerMode string, baseURL string, apiKey string, model string, toolChoice string) (llm.Provider, error) {
+	switch providerMode {
+	case "mock":
+		return llm.NewMockProvider(
+			&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
+		), nil
+	case "openai-proxy":
+		return llm.NewOpenAIProxyProvider(llm.OpenAIProxyConfig{
+			BaseURL:    baseURL,
+			APIKey:     apiKey,
+			Model:      model,
+			ToolChoice: toolChoice,
+		})
+	default:
+		return nil, fmt.Errorf("unknown provider %q", providerMode)
+	}
+}
+
+func envOrDefault(name string, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func defaultProxyBaseURL() string {
+	if value := os.Getenv("OPENAI_BASE_URL"); value != "" {
+		return strings.TrimRight(value, "/")
+	}
+	if value := os.Getenv("SAM_API_URL"); value != "" {
+		return strings.TrimRight(value, "/") + "/ai/v1"
+	}
+	if value := os.Getenv("SAM_BASE_DOMAIN"); value != "" {
+		return "https://api." + value + "/ai/v1"
+	}
+	return ""
 }
