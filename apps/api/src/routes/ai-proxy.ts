@@ -129,12 +129,25 @@ function buildOpenAIUrl(env: Env): string {
   return 'https://api.openai.com/v1/chat/completions';
 }
 
-/** Build auth headers for Workers AI, accounting for authenticated AI Gateway. */
+/** Build auth headers for Workers AI via AI Gateway.
+ *
+ * Workers AI always requires `Authorization: Bearer <CF_API_TOKEN>` — even
+ * when routed through the AI Gateway.  The gateway's `cf-aig-authorization`
+ * header is an *additional* authentication layer that only applies when the
+ * gateway has `authentication: true`.  We include both so the request works
+ * regardless of the gateway's auth setting.
+ */
 function buildWorkersAIAuthHeaders(env: Env): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${env.CF_API_TOKEN}`,
+  };
   if (env.AI_GATEWAY_ID) {
-    return { 'cf-aig-authorization': `Bearer ${resolveUnifiedBillingToken(env) ?? env.CF_API_TOKEN}` };
+    const billingToken = resolveUnifiedBillingToken(env);
+    if (billingToken) {
+      headers['cf-aig-authorization'] = `Bearer ${billingToken}`;
+    }
   }
-  return { Authorization: `Bearer ${env.CF_API_TOKEN}` };
+  return headers;
 }
 
 

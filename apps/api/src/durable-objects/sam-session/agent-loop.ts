@@ -219,10 +219,16 @@ function buildAnthropicGatewayUrl(env: Env): string {
 }
 
 function buildWorkersAIAuthHeaders(env: Env): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${env.CF_API_TOKEN}`,
+  };
   if (env.AI_GATEWAY_ID) {
-    return { 'cf-aig-authorization': `Bearer ${resolveUnifiedBillingToken(env) ?? env.CF_API_TOKEN}` };
+    const billingToken = resolveUnifiedBillingToken(env);
+    if (billingToken) {
+      headers['cf-aig-authorization'] = `Bearer ${billingToken}`;
+    }
   }
-  return { Authorization: `Bearer ${env.CF_API_TOKEN}` };
+  return headers;
 }
 
 // =============================================================================

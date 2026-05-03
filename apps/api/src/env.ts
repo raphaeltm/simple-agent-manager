@@ -518,6 +518,7 @@ export interface Env {
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
   AI_PROXY_BILLING_MODE?: string;                    // Billing mode: "unified" | "platform-key" | "auto" (default: auto)
   AI_PROXY_ACCEPT_MCP_TOKEN_FOR_HARNESS?: string;    // Experiment flag: "true" allows task MCP tokens on /ai/v1 proxy
+  AI_PROXY_EXPERIMENT_SECRET?: string;               // Experiment: shared secret for harness auth bypass (dev/staging only)
   AI_GATEWAY_ID?: string;                            // Cloudflare AI Gateway ID (default: sam)
   CF_AIG_TOKEN?: string;                             // Cloudflare AI Gateway Unified Billing token (optional — enables all providers without separate keys)
   AI_USAGE_PAGE_SIZE?: string;                       // AI Gateway logs page size for admin usage aggregation (default: 100)

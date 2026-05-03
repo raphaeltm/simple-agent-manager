@@ -41,18 +41,19 @@ describe('OpenAI Gateway URL', () => {
 });
 
 describe('Workers AI upstream auth headers', () => {
-  it('uses cf-aig-authorization when routing through an authenticated AI Gateway', () => {
+  it('always includes Authorization for Workers AI, plus cf-aig-authorization when gateway is set', () => {
     const env = {
       AI_GATEWAY_ID: 'sam',
       CF_API_TOKEN: 'cf-api-token',
     } as Parameters<typeof buildWorkersAIAuthHeaders>[0];
 
     expect(buildWorkersAIAuthHeaders(env)).toEqual({
+      Authorization: 'Bearer cf-api-token',
       'cf-aig-authorization': 'Bearer cf-api-token',
     });
   });
 
-  it('prefers explicit CF_AIG_TOKEN for authenticated AI Gateway calls', () => {
+  it('prefers explicit CF_AIG_TOKEN for cf-aig-authorization', () => {
     const env = {
       AI_GATEWAY_ID: 'sam',
       CF_AIG_TOKEN: 'aig-token',
@@ -60,11 +61,12 @@ describe('Workers AI upstream auth headers', () => {
     } as Parameters<typeof buildWorkersAIAuthHeaders>[0];
 
     expect(buildWorkersAIAuthHeaders(env)).toEqual({
+      Authorization: 'Bearer cf-api-token',
       'cf-aig-authorization': 'Bearer aig-token',
     });
   });
 
-  it('uses Cloudflare API Authorization when bypassing AI Gateway', () => {
+  it('only includes Authorization when no gateway is configured', () => {
     const env = {
       CF_API_TOKEN: 'cf-api-token',
     } as Parameters<typeof buildWorkersAIAuthHeaders>[0];

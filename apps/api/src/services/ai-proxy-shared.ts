@@ -53,6 +53,18 @@ export async function verifyAIProxyAuth(
   env: Env,
   db: ReturnType<typeof drizzle>,
 ): Promise<AIProxyAuthResult> {
+  // Experiment shared-secret: skip JWT/MCP verification entirely.
+  // When AI_PROXY_EXPERIMENT_SECRET is set and the Bearer token matches,
+  // return a synthetic identity for harness experiments.
+  if (env.AI_PROXY_EXPERIMENT_SECRET && token === env.AI_PROXY_EXPERIMENT_SECRET) {
+    log.info('ai_proxy.experiment_auth', { message: 'Experiment secret accepted' });
+    return {
+      workspaceId: 'experiment',
+      userId: 'experiment',
+      projectId: null,
+    };
+  }
+
   let tokenPayload;
   try {
     tokenPayload = await verifyCallbackToken(token, env);
