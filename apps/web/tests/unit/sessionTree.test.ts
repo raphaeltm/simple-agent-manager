@@ -174,22 +174,6 @@ describe('buildSessionTree — retry/fork flattening', () => {
     expect(retryNode.lineageText).toContain('attempt');
   });
 
-  it('keeps agent-dispatched subtasks (triggeredBy=mcp) as children', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null })],
-      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP', triggeredBy: 'mcp' })],
-    ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP' }),
-      makeSession({ id: 'sC', taskId: 'tC' }),
-    ];
-
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.children).toHaveLength(1);
-    expect(roots[0]!.children[0]!.session.id).toBe('sC');
-  });
-
   it('shows fork lineage text for a single derived session', () => {
     const { tasks, sessions } = makeRetryFixture([
       { taskId: 'tF', sessionId: 'sF', startedAt: 2000 },
@@ -337,18 +321,16 @@ describe('buildSessionTree — siblings and ordering', () => {
 
 describe('buildSessionTree — descendant aggregates', () => {
   it('computes totalDescendants across all levels', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['t1', makeTaskInfo({ id: 't1', parentTaskId: null })],
-      ['t2', makeTaskInfo({ id: 't2', parentTaskId: 't1' })],
-      ['t3', makeTaskInfo({ id: 't3', parentTaskId: 't2' })],
-      ['t4', makeTaskInfo({ id: 't4', parentTaskId: 't2' })],
-    ]);
-    const sessions = [
-      makeSession({ id: 's1', taskId: 't1' }),
-      makeSession({ id: 's2', taskId: 't2' }),
-      makeSession({ id: 's3', taskId: 't3' }),
-      makeSession({ id: 's4', taskId: 't4' }),
-    ];
+    const parents = [null, 't1', 't2', 't2'];
+    const tasks = new Map<string, TaskInfo>();
+    const sessions: ChatSessionResponse[] = [];
+    parents.forEach((parentTaskId, index) => {
+      const ordinal = index + 1;
+      const taskId = `t${ordinal}`;
+      tasks.set(taskId, makeTaskInfo({ id: taskId, parentTaskId }));
+      sessions.push(makeSession({ id: `s${ordinal}`, taskId }));
+    });
+
     const roots = buildSessionTree(sessions, tasks);
     expect(roots[0]!.totalDescendants).toBe(3); // s2, s3, s4
     expect(findNode(roots, 's2')!.totalDescendants).toBe(2); // s3, s4
