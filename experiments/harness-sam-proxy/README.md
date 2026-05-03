@@ -231,6 +231,8 @@ endpoint (`POST /api/admin/sandbox/run-harness`) orchestrates the full flow:
 | Llama 4 Scout 17B | 2 | 3.6s (warm) | 2.5s | read_file |
 | Qwen 2.5 Coder 32B | 1 | 3.3s (warm) | 2.2s | (text-only) |
 | Llama 4 Scout 17B | 2 | 4.2s (warm) | varies | read_file, write_file, bash |
+| **gpt-4.1-mini** | 2 | 7.7s (warm) | 4.5s | read_file |
+| **gpt-4.1-mini** | 3 | 4.8s (warm) | varies | read_file, write_file, bash |
 
 ### Multi-Tool Loop
 
@@ -243,38 +245,64 @@ Turn 2: final summary
 The bash tool runs real commands inside the container filesystem. The harness
 creates and reads files within the sandbox's `/workspace/test-repo/` directory.
 
+### OpenAI gpt-4.1-mini in Container
+
+After fixing the `AI_GATEWAY_ID` override in `scripts/deploy/sync-wrangler-config.ts`
+(the deploy script was hardcoding the prefix-derived `sam` gateway, which has
+`authentication: false`), the harness successfully ran OpenAI gpt-4.1-mini
+inside the container:
+
+**Single-tool (read_file):**
+```text
+Agent completed in 2 turns (reason: complete)
+Total: 7.7s | Harness: 4.5s
+```
+
+**Multi-tool (read_file + write_file + bash):**
+```text
+Agent completed in 3 turns (reason: complete)
+Total: 4.8s | 3 tools executed
+```
+
+Both tests used unified billing through the `default` AI Gateway — zero
+OpenAI API keys needed.
+
 ### Proven Path
 
 ```text
-Go harness binary (static, 5.9MB)
+Go harness binary (static, 6.1MB)
   -> running inside Cloudflare Container (sandbox SDK)
   -> calling SAM /ai/v1/chat/completions
   -> auth via MCP token in KV
-  -> routed through SAM AI Gateway
-  -> Workers AI model inference
+  -> routed through "default" AI Gateway (authentication: true)
+  -> Workers AI OR OpenAI via unified billing
   -> tool calls executed inside the container
   -> transcript captured and returned
 ```
 
-All with zero API keys — unified billing covers Workers AI models through the
-SAM gateway.
+All with zero external API keys — unified billing covers both Workers AI
+models and external providers (OpenAI, Anthropic) through the AI Gateway.
 
 ## Unified Billing for External Providers (OpenAI, Anthropic)
 
 Unified billing covers BOTH Workers AI models AND external providers (OpenAI,
-Anthropic, Google) — but the AI Gateway must have `authentication: true` and
+Anthropic, Google) — the AI Gateway must have `authentication: true` and
 the account must have AI Gateway credits loaded ($10 was added).
 
-When `authentication: true`:
+When `authentication: true` (the `default` gateway — now used by SAM):
 - The `cf-aig-authorization: Bearer <CF_API_TOKEN>` header authenticates the
   caller to the gateway
 - The gateway uses account credits to pay for external provider API calls
 - No external API keys needed
 
-When `authentication: false` (current `sam` gateway state):
+When `authentication: false` (the `sam` prefix-derived gateway):
 - The gateway just proxies requests through without injecting billing
 - External providers see no API key and return 401
 - Workers AI still works (uses `Authorization` header directly)
 
-**To fix:** Set `authentication: true` on the `sam` gateway via CF dashboard.
-The `default` gateway already has this and OpenAI models work through it.
+### Deploy Script Fix
+
+The `scripts/deploy/sync-wrangler-config.ts` was overriding `AI_GATEWAY_ID`
+with `DEPLOYMENT_CONFIG.prefix` (which resolved to `"sam"`), ignoring the
+top-level wrangler.toml value. This override was removed so the checked-in
+value (`"default"`) flows through to deployed environments.
