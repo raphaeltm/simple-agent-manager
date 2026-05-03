@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -129,7 +129,7 @@ describe('SessionTreeItem — expand/collapse toggle (3a)', () => {
     expect(screen.getByText('Child session')).toBeInTheDocument();
 
     const toggle = screen.getByRole('button', {
-      name: /Hide \d+ descendant/i,
+      name: /Hide \d+ sub-tasks/i,
     });
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
@@ -138,7 +138,7 @@ describe('SessionTreeItem — expand/collapse toggle (3a)', () => {
     // After click, subtree is collapsed.
     expect(screen.queryByText('Child session')).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /Show \d+ descendant/i }),
+      screen.getByRole('button', { name: /Show \d+ sub-tasks/i }),
     ).toHaveAttribute('aria-expanded', 'false');
   });
 
@@ -156,7 +156,7 @@ describe('SessionTreeItem — expand/collapse toggle (3a)', () => {
 
     expect(screen.queryByText('Child session')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Show \d+ descendant/i }));
+    await user.click(screen.getByRole('button', { name: /Show \d+ sub-tasks/i }));
 
     expect(screen.getByText('Child session')).toBeInTheDocument();
   });
@@ -218,7 +218,7 @@ describe('SessionTreeItem — user toggle overrides search expansion (3c)', () =
     expect(screen.getByText('Fix login bug')).toBeInTheDocument();
 
     // User explicitly collapses.
-    await user.click(screen.getByRole('button', { name: /Hide \d+ descendant/i }));
+    await user.click(screen.getByRole('button', { name: /Hide \d+ sub-tasks/i }));
 
     // User's explicit collapse must win, even though the search query still
     // matches a descendant.
@@ -353,8 +353,8 @@ describe('SessionTreeItem — hover does not erase selected background (M3)', ()
 // switcheroo that confuses users.
 // ---------------------------------------------------------------------------
 
-describe('SessionTreeItem — descendant count badge', () => {
-  it('shows a single "N sub" label regardless of nesting depth', () => {
+describe('SessionTreeItem — compact expand toggle badge', () => {
+  it('shows a compact "completed/total" label for parents with children', () => {
     const grand = makeNode({
       session: makeSession({ id: 'g', topic: 'Grandchild' }),
       depth: 2,
@@ -367,13 +367,11 @@ describe('SessionTreeItem — descendant count badge', () => {
     const parent = makeNode({
       session: makeSession({ id: 'p', topic: 'Parent' }),
       children: [child],
+      completedDescendants: 0,
     });
     renderItem(parent);
 
-    // Parent row has 2 descendants (child + grandchild). The badge must read
-    // "2 sub" — not "2 NESTED" or "2 SUB" variants based on shape.
-    const parentRow = screen.getByText('Parent').closest('div')!;
-    const within_ = within(parentRow.parentElement!.parentElement!);
-    expect(within_.getByText(/2 sub/i)).toBeInTheDocument();
+    // Parent row has 2 descendants. The compact toggle shows "0/2".
+    expect(screen.getByText('0/2')).toBeInTheDocument();
   });
 });

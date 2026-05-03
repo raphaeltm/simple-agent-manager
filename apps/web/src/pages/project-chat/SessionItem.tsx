@@ -1,4 +1,4 @@
-import { GitFork, Lightbulb } from 'lucide-react';
+import { GitFork } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { ChatSessionResponse } from '../../lib/api';
@@ -7,7 +7,6 @@ import {
   getLastActivity,
   getSessionState,
   STATE_COLORS,
-  STATE_LABELS,
 } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 
@@ -18,21 +17,20 @@ export function SessionItem({
   isSelected,
   onSelect,
   onFork,
-  ideaTitle,
   variant = 'default',
   badge,
   progressBar,
   blockedBadge,
   blockedByTitle,
   ariaLabel,
+  lineageText,
 }: {
   session: ChatSessionResponse;
   isSelected: boolean;
   onSelect: (id: string) => void;
   onFork?: (session: ChatSessionResponse) => void;
-  ideaTitle?: string;
   variant?: SessionItemVariant;
-  /** Extra badge rendered next to the title (e.g., "3 SUB"). */
+  /** Extra badge rendered next to the title (e.g., expand toggle). */
   badge?: ReactNode;
   /** Progress bar rendered below the title row (e.g., sub-task completion). */
   progressBar?: ReactNode;
@@ -42,6 +40,8 @@ export function SessionItem({
   blockedByTitle?: string;
   /** Accessible label override for the select button (e.g., context-anchor annotation). */
   ariaLabel?: string;
+  /** Lineage subtitle text (e.g., "↩ attempt 3" or "⑂ forked from X"). */
+  lineageText?: string;
 }) {
   const state = getSessionState(session);
   const dotColor = blockedBadge ? 'var(--sam-color-danger, #ef4444)' : STATE_COLORS[state];
@@ -57,18 +57,16 @@ export function SessionItem({
       ? { fontSize: 13, fontWeight: 500 }
       : {};
 
-  const metaFontSize = isChild ? 10 : 11;
-
   return (
     <div
       className={
         isGrouped
           ? 'block w-full text-left transition-colors duration-100'
-          : `block w-full text-left px-3 py-2.5 border-b border-border-default transition-colors duration-100 ${isSelected ? 'bg-inset' : 'hover:bg-surface-hover'}`
+          : `block w-full text-left px-3 py-1.5 border-b border-border-default transition-colors duration-100 ${isSelected ? 'bg-inset' : 'hover:bg-surface-hover'}`
       }
       style={
         isGrouped
-          ? { padding: isChild ? '6px 10px' : '8px 10px' }
+          ? { padding: isChild ? '4px 10px' : '6px 10px' }
           : {
               borderLeft: isSelected
                 ? '3px solid var(--sam-color-accent-primary)'
@@ -82,22 +80,7 @@ export function SessionItem({
         aria-label={ariaLabel}
         className="block w-full text-left bg-transparent border-none cursor-pointer p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sam-color-focus-ring)]"
       >
-        {/* Idea tag — only for default/parent variants */}
-        {ideaTitle && !isChild && (
-          <div className="flex items-center gap-1 mb-1 pl-[calc(6px+8px)]">
-            <span
-              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap"
-              style={{
-                color: 'var(--sam-color-accent-primary)',
-                background: 'color-mix(in srgb, var(--sam-color-accent-primary) 12%, transparent)',
-              }}
-              title={`Idea: ${ideaTitle}`}
-            >
-              <Lightbulb size={10} /> {ideaTitle}
-            </span>
-          </div>
-        )}
-        <div className="flex items-center gap-2 mb-0.5">
+        <div className="flex items-center gap-1.5 mb-0.5">
           <span
             className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
             style={{ backgroundColor: dotColor }}
@@ -131,8 +114,8 @@ export function SessionItem({
           )}
         </div>
         <div
-          className="flex items-center gap-2 text-fg-muted"
-          style={{ fontSize: metaFontSize, paddingLeft: 'calc(6px + 8px)' }}
+          className="flex items-center gap-1.5 text-fg-muted"
+          style={{ fontSize: 10, paddingLeft: 'calc(6px + 6px)' }}
         >
           {blockedBadge && blockedByTitle ? (
             <span className="truncate" style={{ color: '#f87171' }}>
@@ -140,11 +123,12 @@ export function SessionItem({
             </span>
           ) : (
             <>
-              <span style={{ color: dotColor }} className="font-medium">
-                {STATE_LABELS[state]}
-              </span>
-              <span>{session.messageCount} msg{session.messageCount !== 1 ? 's' : ''}</span>
-              <span className="ml-auto">{formatRelativeTime(getLastActivity(session))}</span>
+              {lineageText && (
+                <span className="truncate" style={{ color: 'var(--sam-color-fg-muted)' }}>
+                  {lineageText}
+                </span>
+              )}
+              <span className="ml-auto shrink-0">{formatRelativeTime(getLastActivity(session))}</span>
             </>
           )}
         </div>
@@ -154,7 +138,7 @@ export function SessionItem({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onFork(session); }}
-          className="mt-1 ml-[calc(6px+8px)] flex items-center gap-1 text-xs text-accent-primary bg-transparent border border-transparent rounded-sm cursor-pointer py-1 px-1.5 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors"
+          className="mt-1 ml-[calc(6px+6px)] flex items-center gap-1 text-xs text-accent-primary bg-transparent border border-transparent rounded-sm cursor-pointer py-0.5 px-1.5 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors"
           title="Continue from this session"
         >
           <GitFork size={12} />

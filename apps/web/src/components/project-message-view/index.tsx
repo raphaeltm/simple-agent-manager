@@ -28,6 +28,8 @@ interface ProjectMessageViewProps {
   onRetry?: () => void;
   /** Called when user clicks the fork button in the session header. */
   onFork?: () => void;
+  /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
+  lineageText?: string;
 }
 
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
@@ -37,6 +39,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onSessionMutated,
   onRetry,
   onFork,
+  lineageText,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [planModalOpen, setPlanModalOpen] = useState(false);
@@ -126,6 +129,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onOpenGit={lc.handleOpenGitChanges}
           onRetry={onRetry}
           onFork={onFork}
+          lineageText={lineageText}
         />
       )}
 

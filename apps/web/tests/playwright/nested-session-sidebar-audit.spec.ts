@@ -65,7 +65,13 @@ function makeSession(id: string, taskId: string, topic: string, status = 'active
   };
 }
 
-function makeTask(id: string, title: string, parentTaskId: string | null, status = 'pending') {
+function makeTask(
+  id: string,
+  title: string,
+  parentTaskId: string | null,
+  status = 'pending',
+  triggeredBy = parentTaskId ? 'mcp' : 'user',
+) {
   return {
     id,
     title,
@@ -75,7 +81,7 @@ function makeTask(id: string, title: string, parentTaskId: string | null, status
     status,
     blocked: false,
     parentTaskId,
-    triggeredBy: 'user',
+    triggeredBy,
     createdAt: new Date(NOW - 120000).toISOString(),
     updatedAt: new Date(NOW - 30000).toISOString(),
   };
@@ -168,7 +174,9 @@ async function setupApiMocks(page: Page, fixture: Fixture) {
       return respond(200, MOCK_PROJECT);
     }
 
-    if (path === '/api/projects') return respond(200, [MOCK_PROJECT]);
+    if (path === '/api/projects') {
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    }
     return respond(200, {});
   });
 }

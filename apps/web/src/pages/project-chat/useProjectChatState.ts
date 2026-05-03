@@ -141,11 +141,21 @@ export function useProjectChatState() {
     const recent: ChatSessionResponse[] = [];
     const stale: ChatSessionResponse[] = [];
     for (const s of sessions) {
-      if (isStaleSession(s)) stale.push(s);
+      // Stopped retries/forks auto-collapse into the Older bucket.
+      // A stopped retry/fork is a terminated session whose task has a
+      // parentTaskId and was user-triggered (not agent-dispatched).
+      const isStoppedRetryOrFork = (() => {
+        if (s.status !== 'stopped' || !s.taskId) return false;
+        const info = taskInfoMap.get(s.taskId);
+        if (!info?.parentTaskId) return false;
+        return info.triggeredBy !== 'mcp'; // user/cron/webhook = retry/fork
+      })();
+
+      if (isStaleSession(s) || isStoppedRetryOrFork) stale.push(s);
       else recent.push(s);
     }
     return { recentSessions: recent, staleSessions: stale };
-  }, [sessions]);
+  }, [sessions, taskInfoMap]);
 
   const filteredRecent = useMemo(() => {
     if (!searchQuery.trim()) return recentSessions;
