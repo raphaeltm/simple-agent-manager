@@ -72,7 +72,7 @@ func buildAcpMcpServers(entries []McpServerEntry) []acpsdk.McpServer {
 			name = fmt.Sprintf("sam-mcp-%d", i)
 		}
 		servers = append(servers, acpsdk.McpServer{
-			Http: &acpsdk.McpServerHttp{
+			Http: &acpsdk.McpServerHttpInline{
 				Name: name,
 				// Type is set to "http" by McpServer.MarshalJSON regardless of this field.
 				Url:     e.URL,
@@ -1257,7 +1257,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 			Version: sysinfo.Version,
 		},
 		ClientCapabilities: acpsdk.ClientCapabilities{
-			Fs: acpsdk.FileSystemCapability{ReadTextFile: true, WriteTextFile: true},
+			Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
 		},
 	})
 	if err != nil {
@@ -1383,9 +1383,9 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 			slog.Info("ACP: skipping SetSessionModel for platform proxy (model set in config)", "model", settings.Model)
 		} else {
 			slog.Info("ACP: setting session model", "model", settings.Model)
-			if _, err := h.acpConn.SetSessionModel(ctx, acpsdk.SetSessionModelRequest{
+			if _, err := h.acpConn.UnstableSetSessionModel(ctx, acpsdk.UnstableSetSessionModelRequest{
 				SessionId: h.sessionID,
-				ModelId:   acpsdk.ModelId(settings.Model),
+				ModelId:   acpsdk.UnstableModelId(settings.Model),
 			}); err != nil {
 				slog.Warn("ACP SetSessionModel failed (non-fatal)", "model", settings.Model, "error", err)
 				h.reportLifecycle("warn", "ACP SetSessionModel failed", map[string]interface{}{
@@ -2369,9 +2369,11 @@ func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.Sessi
 		"params":  params,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to marshal session update: %w", err)
+		slog.Warn("session/update: marshal failed, skipping broadcast",
+			"error", err)
+	} else {
+		c.host.broadcastMessage(data)
 	}
-	c.host.broadcastMessage(data)
 
 	// Persist chat messages to the control plane via the message reporter.
 	if c.host.config.MessageReporter != nil {
@@ -2512,8 +2514,8 @@ func (c *sessionHostClient) CreateTerminal(_ context.Context, _ acpsdk.CreateTer
 	return acpsdk.CreateTerminalResponse{}, fmt.Errorf("CreateTerminal not supported")
 }
 
-func (c *sessionHostClient) KillTerminalCommand(_ context.Context, _ acpsdk.KillTerminalCommandRequest) (acpsdk.KillTerminalCommandResponse, error) {
-	return acpsdk.KillTerminalCommandResponse{}, fmt.Errorf("KillTerminalCommand not supported")
+func (c *sessionHostClient) KillTerminal(_ context.Context, _ acpsdk.KillTerminalRequest) (acpsdk.KillTerminalResponse, error) {
+	return acpsdk.KillTerminalResponse{}, fmt.Errorf("KillTerminal not supported")
 }
 
 func (c *sessionHostClient) TerminalOutput(_ context.Context, _ acpsdk.TerminalOutputRequest) (acpsdk.TerminalOutputResponse, error) {
