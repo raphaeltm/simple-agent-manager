@@ -1576,12 +1576,18 @@ func writeDefaultDevcontainerConfigForMode(cfg *config.Config, volumeName, credH
   }`
 	}
 
+	updateRemoteUserUIDLine := ""
+	if !includeDefaultFeatures {
+		updateRemoteUserUIDLine = `,
+  "updateRemoteUserUID": false`
+	}
+
 	configJSON := fmt.Sprintf(`{
   "name": "Default Workspace",
   "image": %q,
-  "privileged": true%s%s%s%s
+  "privileged": true%s%s%s%s%s
 }
-`, image, featuresLine, remoteUserLine, mountLines, credLines)
+`, image, featuresLine, updateRemoteUserUIDLine, remoteUserLine, mountLines, credLines)
 
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write default config: %w", err)

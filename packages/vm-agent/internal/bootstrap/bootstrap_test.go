@@ -892,6 +892,9 @@ func TestWriteDefaultDevcontainerConfigForLightweightModeOmitsFeatures(t *testin
 	if _, hasFeatures := parsed["features"]; hasFeatures {
 		t.Fatalf("expected lightweight fallback config to omit features, got:\n%s", string(data))
 	}
+	if updateRemoteUserUID, ok := parsed["updateRemoteUserUID"].(bool); !ok || updateRemoteUserUID {
+		t.Fatalf("expected lightweight fallback config to disable updateRemoteUserUID, got:\n%s", string(data))
+	}
 	if img, _ := parsed["image"].(string); img != "mcr.microsoft.com/devcontainers/base:ubuntu" {
 		t.Errorf("expected image %q, got %q", "mcr.microsoft.com/devcontainers/base:ubuntu", img)
 	}
