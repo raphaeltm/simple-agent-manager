@@ -1,6 +1,7 @@
 import type { TaskStatus } from '@simple-agent-manager/shared';
 
 import type { ChatSessionResponse } from '../../lib/api';
+import { buildLineageText, isRetryOrFork } from './lineageUtils';
 import type { TaskInfo } from './useTaskGroups';
 
 /**
@@ -34,60 +35,6 @@ const COMPLETED_STATUSES = new Set<TaskStatus>(['completed']);
 
 interface BuildSessionTreeOptions {
   allSessions?: ChatSessionResponse[];
-}
-
-/**
- * Determine whether a session with a parentTaskId is a retry/fork (user-triggered)
- * vs a genuine agent-dispatched subtask (triggeredBy=mcp).
- *
- * Retries and forks are flattened to root level; genuine subtasks remain children.
- */
-function isRetryOrFork(taskInfo: TaskInfo): boolean {
-  // Agent-dispatched subtasks have triggeredBy=mcp — keep those as children.
-  // Everything else (user, cron, webhook) with a parentTaskId is a retry or fork.
-  return taskInfo.triggeredBy !== 'mcp';
-}
-
-/**
- * Build lineage text for a flattened retry/fork.
- *
- * Counts how many siblings share the same parent to determine attempt number.
- * If only 1 sibling exists, it's a fork. Otherwise, ordered by creation time.
- */
-function buildLineageText(
-  taskInfo: TaskInfo,
-  taskInfoMap: Map<string, TaskInfo>,
-  allSessionsByTaskId: Map<string, ChatSessionResponse>,
-): string {
-  if (!taskInfo.parentTaskId) return '';
-
-  const parentInfo = taskInfoMap.get(taskInfo.parentTaskId);
-  const parentSession = parentInfo ? allSessionsByTaskId.get(taskInfo.parentTaskId) : undefined;
-  const parentLabel = parentSession?.topic
-    ? parentSession.topic.slice(0, 30) + (parentSession.topic.length > 30 ? '…' : '')
-    : parentInfo?.title
-      ? parentInfo.title.slice(0, 30) + (parentInfo.title.length > 30 ? '…' : '')
-      : 'earlier attempt';
-
-  // Count siblings that share the same parent and are also retries/forks
-  const siblings: { taskId: string; startedAt: number }[] = [];
-  for (const [, info] of taskInfoMap) {
-    if (info.parentTaskId === taskInfo.parentTaskId && isRetryOrFork(info)) {
-      const sess = allSessionsByTaskId.get(info.id);
-      siblings.push({ taskId: info.id, startedAt: sess?.startedAt ?? 0 });
-    }
-  }
-
-  if (siblings.length <= 1) {
-    // Single derived session — it's a fork
-    return `⑂ from ${parentLabel}`;
-  }
-
-  // Multiple siblings — they're retries. Sort by startedAt to get attempt number.
-  siblings.sort((a, b) => a.startedAt - b.startedAt);
-  const attemptIndex = siblings.findIndex((s) => s.taskId === taskInfo.id);
-  // Attempt numbering: parent is attempt 1, first retry is attempt 2, etc.
-  return `↩ attempt ${attemptIndex + 2}`;
 }
 
 /**
