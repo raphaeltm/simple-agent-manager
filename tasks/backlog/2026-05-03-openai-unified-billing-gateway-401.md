@@ -1,59 +1,43 @@
 # OpenAI Unified Billing Returns 401 Through SAM AI Gateway
 
-## Status: Gateway Authentication Misconfiguration
+## Status: RESOLVED
 
-The `sam` AI Gateway has `authentication: false`. When authentication is
-disabled, the gateway does NOT inject unified billing credentials into upstream
-requests — it just proxies them through. External providers like OpenAI then see
-no API key and return 401.
-
-The `default` gateway has `authentication: true` and OpenAI models work through
-it with unified billing (confirmed by a separate agent session after adding $10
-AI Gateway credit to the account).
+Fixed by changing `configure-ai-gateway.sh` from PATCH to PUT (the CF AI
+Gateway API doesn't support PATCH — it returned 404 "Route not found"). The
+deploy script now correctly sets `authentication: true` on the `sam` gateway.
 
 ## Root Cause
 
-The `sam` gateway needs `authentication: true` to enable unified billing for
-external providers. With authentication enabled:
-- The `cf-aig-authorization` header authenticates the request to the gateway
-- The gateway uses the account's AI Gateway credits to pay for external
-  provider calls (OpenAI, Anthropic, Google)
-- No external API keys are needed
+Two bugs combined:
+
+1. The `sam` gateway had `authentication: false`, so unified billing credentials
+   weren't injected for external providers (OpenAI saw no API key → 401).
+2. The `configure-ai-gateway.sh` deploy script used HTTP PATCH to update the
+   gateway, but the Cloudflare AI Gateway API only supports PUT for updates.
+   PATCH returned 404 on every deploy, silently failing to set authentication.
+
+The deploy token always had the correct permissions (AI Gateway Write). The
+HTTP method was wrong.
 
 ## Fix
 
-1. Set `authentication: true` on the `sam` AI Gateway (via CF dashboard or API)
-2. The `configure-ai-gateway.sh` script already defaults to
-   `AI_GATEWAY_AUTHENTICATION=true`, but the deploy token lacks permission to
-   modify gateway settings (HTTP 404 during deploy)
+Changed `configure-ai-gateway.sh` from `-X PATCH` to `-X PUT` with all
+required fields per the CF API docs. Deployed to staging — the `sam` gateway
+now has `authentication: true` and OpenAI gpt-4.1-mini works through it
+via unified billing (zero API keys).
 
-## Context
-
-Discovered during the 2026-05-03 harness gateway experiment on branch
-`sam/summarize-work-done-yesterday-01kqpd`.
-
-Working path (Workers AI — works regardless of authentication setting):
-
-- Harness CLI calls `https://api.sammy.party/ai/v1/chat/completions`.
-- SAM AI proxy accepts the experiment MCP token.
-- Workers AI models complete tool loops through the SAM AI Gateway.
-- Verified: Gemma 4, Llama 4 Scout, Qwen 2.5 Coder.
-
-Failing path (OpenAI — requires `authentication: true` on gateway):
-
-- Same harness/proxy path with `model: "gpt-4.1-mini"` reaches the gateway.
-- Gateway logs show status `401` because authentication is disabled.
-- With authentication enabled (as on the `default` gateway), this works.
+Ref: https://developers.cloudflare.com/api/resources/ai_gateway/methods/update/
 
 ## Acceptance Criteria
 
 - [x] Confirm the Cloudflare account has AI Gateway unified-billing credits.
       **CONFIRMED: $10 credit added to account.**
-- [ ] Enable `authentication: true` on the `sam` AI Gateway.
-      **BLOCKED: CF_TOKEN lacks AI Gateway modification permissions. Requires
-      dashboard change or token permission update.**
-- [ ] Verify `gpt-4.1-mini` completes through SAM `/ai/v1`, the SAM AI Gateway
+- [x] Enable `authentication: true` on the `sam` AI Gateway.
+      **FIXED: Deploy script changed from PATCH to PUT. Deployed and verified.**
+- [x] Verify `gpt-4.1-mini` completes through SAM `/ai/v1`, the SAM AI Gateway
       (with authentication enabled), and the harness tool loop.
-- [ ] Fix deploy token permissions so `configure-ai-gateway.sh` can update the
+      **VERIFIED: 2 turns, 6.4s, read_file tool call, zero API keys.**
+- [x] Fix deploy token permissions so `configure-ai-gateway.sh` can update the
       gateway during deploys.
+      **N/A: Token already had permissions. The bug was PATCH vs PUT.**
 - [x] Update `experiments/harness-sam-proxy/README.md` with findings.
