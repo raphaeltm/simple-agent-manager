@@ -1501,6 +1501,66 @@ exit 1
 	}
 }
 
+func TestEnsureContainerUserResolvedSkipsMissingReadConfigurationUser(t *testing.T) {
+	mockBinDir := t.TempDir()
+
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockDevcontainerScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  cat <<'EOF'
+{"outcome":"success","mergedConfiguration":{"remoteUser":"node"}}
+EOF
+  exit 0
+fi
+echo "unexpected devcontainer command: $@" >&2
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockDevcontainerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+
+	mockDocker := filepath.Join(mockBinDir, "docker")
+	mockDockerScript := `#!/bin/sh
+if [ "$1" = "ps" ]; then
+  echo "container-123"
+  exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  echo null
+  exit 0
+fi
+if [ "$1" = "exec" ]; then
+  if [ "$2" = "-u" ] && [ "$3" = "root" ] && [ "$5" = "id" ] && [ "$6" = "-u" ] && [ "$7" = "node" ]; then
+    echo "id: 'node': no such user" >&2
+    exit 1
+  fi
+  if [ "$2" = "container-123" ] && [ "$3" = "id" ] && [ "$4" = "-un" ]; then
+    echo "root"
+    exit 0
+  fi
+fi
+echo "unexpected docker command: $@" >&2
+exit 1
+`
+	if err := os.WriteFile(mockDocker, []byte(mockDockerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock docker command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	cfg := &config.Config{
+		WorkspaceDir:        t.TempDir(),
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: "/workspace/ws-1",
+	}
+	ensureContainerUserResolved(context.Background(), cfg, "")
+
+	if cfg.ContainerUser != "root" {
+		t.Fatalf("ContainerUser=%q, want %q", cfg.ContainerUser, "root")
+	}
+}
+
 func TestEnsureContainerUserResolvedFallsBackToMetadataLabel(t *testing.T) {
 	mockBinDir := t.TempDir()
 
@@ -1525,6 +1585,12 @@ fi
 if [ "$1" = "inspect" ]; then
   echo '"[{\"remoteUser\":\"vscode\"}]"'
   exit 0
+fi
+if [ "$1" = "exec" ]; then
+  if [ "$2" = "-u" ] && [ "$3" = "root" ] && [ "$5" = "id" ] && [ "$6" = "-u" ] && [ "$7" = "vscode" ]; then
+    echo "1000"
+    exit 0
+  fi
 fi
 exit 1
 `
@@ -1573,6 +1639,10 @@ if [ "$1" = "inspect" ]; then
   exit 0
 fi
 if [ "$1" = "exec" ]; then
+  if [ "$2" = "-u" ] && [ "$3" = "root" ] && [ "$5" = "id" ] && [ "$6" = "-u" ] && [ "$7" = "node" ]; then
+    echo "1000"
+    exit 0
+  fi
   if [ "$3" = "id" ] && [ "$4" = "-un" ]; then
     echo "node"
     exit 0
