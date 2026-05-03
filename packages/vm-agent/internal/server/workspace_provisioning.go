@@ -34,6 +34,13 @@ func (s *Server) callbackTokenForWorkspace(workspaceID string) string {
 	return strings.TrimSpace(s.config.CallbackToken)
 }
 
+func (s *Server) workspaceCallbackToken(workspaceID string) string {
+	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		return strings.TrimSpace(runtime.CallbackToken)
+	}
+	return ""
+}
+
 func (s *Server) applyDetectedContainerUser(runtime *WorkspaceRuntime, detected string) {
 	if runtime == nil {
 		return

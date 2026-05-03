@@ -219,6 +219,11 @@ export async function handleAgentSession(
         opencodeProvider: state.config.opencodeProvider,
         opencodeBaseUrl: state.config.opencodeBaseUrl,
       },
+      {
+        projectId: state.projectId,
+        taskId: state.taskId,
+        taskMode: state.config.taskMode,
+      },
     );
 
     state.stepResults.agentStarted = true;

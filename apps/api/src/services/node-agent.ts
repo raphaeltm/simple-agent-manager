@@ -282,6 +282,12 @@ export interface AgentSessionOverrides {
   opencodeBaseUrl?: string | null;
 }
 
+export interface AgentSessionTaskContext {
+  projectId: string;
+  taskId: string;
+  taskMode?: string | null;
+}
+
 export async function startAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,
@@ -292,6 +298,7 @@ export async function startAgentSessionOnNode(
   userId: string,
   mcpServer?: McpServerConfig,
   overrides?: AgentSessionOverrides,
+  taskContext?: AgentSessionTaskContext,
 ): Promise<unknown> {
   const body: Record<string, unknown> = { agentType, initialPrompt };
   if (mcpServer) {
@@ -313,6 +320,13 @@ export async function startAgentSessionOnNode(
   }
   if (overrides?.opencodeBaseUrl != null) {
     body.opencodeBaseUrl = overrides.opencodeBaseUrl;
+  }
+  if (taskContext) {
+    body.projectId = taskContext.projectId;
+    body.taskId = taskContext.taskId;
+    if (taskContext.taskMode != null) {
+      body.taskMode = taskContext.taskMode;
+    }
   }
   return nodeAgentRequest(
     nodeId,

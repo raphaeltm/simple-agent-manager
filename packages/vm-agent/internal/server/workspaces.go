@@ -14,6 +14,7 @@ import (
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/bootstrap"
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
@@ -28,6 +29,7 @@ func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 	}
 	delete(s.sessionMcpServers, hostKey)
 	delete(s.sessionProfileOvr, hostKey)
+	delete(s.sessionTaskCtx, hostKey)
 	s.sessionHostMu.Unlock()
 
 	// Clean up persisted MCP servers (best-effort).
@@ -689,7 +691,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		SessionID     string `json:"sessionId"`
 		Label         string `json:"label"`
 		ChatSessionID string `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
-		ProjectID     string `json:"projectId"`      // Project ID for late-init of message reporter (manual nodes)
+		ProjectID     string `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -778,11 +780,14 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	var body struct {
 		AgentType        string               `json:"agentType"`
 		InitialPrompt    string               `json:"initialPrompt"`
-		McpServers       []acp.McpServerEntry  `json:"mcpServers,omitempty"`
+		McpServers       []acp.McpServerEntry `json:"mcpServers,omitempty"`
 		Model            string               `json:"model,omitempty"`
 		PermissionMode   string               `json:"permissionMode,omitempty"`
 		OpencodeProvider string               `json:"opencodeProvider,omitempty"`
 		OpencodeBaseURL  string               `json:"opencodeBaseUrl,omitempty"`
+		ProjectID        string               `json:"projectId,omitempty"`
+		TaskID           string               `json:"taskId,omitempty"`
+		TaskMode         string               `json:"taskMode,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -853,11 +858,33 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	// Always store profile overrides so getOrCreateSessionHost can apply them.
 	// Even empty overrides are stored to distinguish "no profile" from "not set".
 	s.sessionHostMu.Lock()
+	if s.sessionTaskCtx == nil {
+		s.sessionTaskCtx = make(map[string]taskCallbackContext)
+	}
 	s.sessionProfileOvr[hostKey] = profileOverrides{
 		Model:            body.Model,
 		PermissionMode:   body.PermissionMode,
 		OpencodeProvider: body.OpencodeProvider,
 		OpencodeBaseURL:  body.OpencodeBaseURL,
+	}
+	taskID := strings.TrimSpace(body.TaskID)
+	projectIDForTask := strings.TrimSpace(body.ProjectID)
+	if projectIDForTask == "" {
+		projectIDForTask = strings.TrimSpace(runtime.ProjectID)
+	}
+	if taskID != "" && projectIDForTask != "" {
+		taskMode := strings.TrimSpace(body.TaskMode)
+		if taskMode == "" {
+			taskMode = config.TaskModeTask
+		}
+		s.sessionTaskCtx[hostKey] = taskCallbackContext{
+			ProjectID:   projectIDForTask,
+			TaskID:      taskID,
+			WorkspaceID: workspaceID,
+			TaskMode:    taskMode,
+		}
+	} else {
+		delete(s.sessionTaskCtx, hostKey)
 	}
 	s.sessionHostMu.Unlock()
 	if body.Model != "" || body.PermissionMode != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {

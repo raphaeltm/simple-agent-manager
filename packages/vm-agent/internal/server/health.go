@@ -21,9 +21,9 @@ func (s *Server) getCallbackToken() string {
 	return s.callbackToken
 }
 
-// setCallbackToken updates the callback token and propagates it to all
-// subsystems that use it (error reporter, message reporter, ACP config,
-// workspace runtimes). This mirrors UpdateAfterBootstrap's propagation.
+// setCallbackToken updates the callback token and propagates it to subsystems
+// that can safely use a node-level token. Message reporters keep workspace
+// tokens because they call workspace-scoped endpoints.
 func (s *Server) setCallbackToken(token string) {
 	s.callbackTokenMu.Lock()
 	s.callbackToken = token
@@ -33,7 +33,7 @@ func (s *Server) setCallbackToken(token string) {
 	s.errorReporter.SetToken(token)
 
 	// Propagate to all per-workspace message reporters.
-	s.setTokenAllReporters(token)
+	s.setTokenAllReporters()
 
 	// Update ACP gateway config.
 	s.acpConfig.CallbackToken = token
