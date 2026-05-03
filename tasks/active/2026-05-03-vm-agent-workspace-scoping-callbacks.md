@@ -25,7 +25,7 @@ Production debug evidence from idea `01KQQVNSHJAA8K46Y3ZAZQG109` showed long-liv
 - [x] Ensure conversation-mode or no-workspace tasks do not attempt git push against an empty workspace ID.
 - [x] Add bounded response body logging for task callback and message reporter permanent failures.
 - [x] Update docs or comments that describe the new identity boundary.
-- [ ] Run focused Go/TypeScript tests, then full quality gates.
+- [x] Run focused Go/TypeScript tests, then full quality gates.
 - [ ] Complete staging verification with real VM provisioning, project chat usage, multi-conversation switching, node monitoring/debug package checks, and node cleanup.
 
 ## Acceptance Criteria

@@ -1010,7 +1010,7 @@ func (s *Server) shutdownAllReporters() {
 	}
 }
 
-// setTokenAllReporters propagates an auth token to all active reporters.
+// setTokenAllReporters refreshes each active reporter with its workspace token.
 func (s *Server) setTokenAllReporters() {
 	s.messageReportersMu.RLock()
 	snapshot := make(map[string]*messagereport.Reporter, len(s.messageReporters))

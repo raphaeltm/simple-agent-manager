@@ -37,13 +37,6 @@ func (s *Server) setCallbackToken(token string) {
 
 	// Update ACP gateway config.
 	s.acpConfig.CallbackToken = token
-
-	// Update all workspace runtimes.
-	s.workspaceMu.Lock()
-	for _, ws := range s.workspaces {
-		ws.CallbackToken = token
-	}
-	s.workspaceMu.Unlock()
 }
 
 func (s *Server) startNodeHealthReporter() {
