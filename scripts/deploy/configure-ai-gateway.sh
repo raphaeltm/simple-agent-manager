@@ -21,24 +21,28 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 
 if [ "$HTTP_CODE" -eq 200 ]; then
   echo "AI Gateway '${GATEWAY_ID}' already exists"
-  PATCH_RESPONSE=$(curl -s -w "\n%{http_code}" \
-    -X PATCH "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai-gateway/gateways/${GATEWAY_ID}" \
+  # CF AI Gateway API uses PUT (not PATCH) for updates — PATCH returns 404.
+  # See: https://developers.cloudflare.com/api/resources/ai_gateway/methods/update/
+  UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" \
+    -X PUT "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai-gateway/gateways/${GATEWAY_ID}" \
     -H "Authorization: Bearer ${CF_API_TOKEN}" \
     -H "Content-Type: application/json" \
     -d "{
+      \"id\": \"${GATEWAY_ID}\",
       \"authentication\": ${AUTHENTICATION},
       \"collect_logs\": true,
       \"cache_ttl\": 0,
       \"cache_invalidate_on_update\": true,
       \"rate_limiting_interval\": 0,
-      \"rate_limiting_limit\": 0
+      \"rate_limiting_limit\": 0,
+      \"rate_limiting_technique\": \"fixed\"
     }")
-  PATCH_HTTP_CODE=$(echo "$PATCH_RESPONSE" | tail -1)
-  PATCH_BODY=$(echo "$PATCH_RESPONSE" | sed '$d')
-  if [ "$PATCH_HTTP_CODE" -ge 200 ] && [ "$PATCH_HTTP_CODE" -lt 300 ]; then
+  UPDATE_HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -1)
+  UPDATE_BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
+  if [ "$UPDATE_HTTP_CODE" -ge 200 ] && [ "$UPDATE_HTTP_CODE" -lt 300 ]; then
     echo "AI Gateway '${GATEWAY_ID}' updated (authentication=${AUTHENTICATION})"
   else
-    echo "::warning::Failed to update AI Gateway (HTTP ${PATCH_HTTP_CODE}): ${PATCH_BODY}"
+    echo "::warning::Failed to update AI Gateway (HTTP ${UPDATE_HTTP_CODE}): ${UPDATE_BODY}"
   fi
   exit 0
 fi
