@@ -100,20 +100,31 @@ This harness draws architectural patterns from several open-source projects. No 
 
 All implementations are clean-room. The tool interfaces, agent loop, and transcript system were written from scratch for SAM's specific needs.
 
-## Next Steps (Integration Risks)
+## Proven Capabilities (2026-05-03)
 
-### VM Integration (Phase 2)
-- Wire into `packages/vm-agent/internal/acp/` as a new agent type
-- Share workspace file system and Docker container
-- Connect to ACP session lifecycle (start, stop, stream output)
-- Risk: ACP SDK protocol differences from subprocess-based agents
+The harness has been tested end-to-end inside Cloudflare Containers via the Sandbox SDK:
 
-### Multi-Model Support (Phase 5)
-- Continue experiments through SAM's `/ai/v1` proxy before wiring production paths
-- Compare Gemma and small OpenAI models through the same proxy contract
-- Risk: tool calling format differences between Workers AI and external providers
+- **Multi-model**: Workers AI (Gemma 4, Llama 4 Scout, Qwen 2.5 Coder) and OpenAI (gpt-4.1-mini) all work through the same SAM `/ai/v1` proxy
+- **Unified billing**: OpenAI calls route through the `sam` AI Gateway with `authentication: true` — zero external API keys needed
+- **Container execution**: Static binary (6.1MB) runs inside Cloudflare Containers; admin endpoint orchestrates download from R2, write to container, fixture creation, and harness execution
+- **Tool calls in containers**: `read_file`, `write_file`, and `bash` all execute inside the container filesystem
+- **Performance**: 2-4 turns, 3-8 seconds total (warm container)
 
-### Container Mode (Phase 3)
-- Package as lightweight Docker image for CF Containers
-- Add HTTP server mode (`harness serve`)
-- Risk: Cold start time vs. warm pool management
+See `experiments/harness-sam-proxy/README.md` for full experiment logs and results.
+
+## Next Steps (Track D: SAM Integration Design)
+
+Tracks A (Go harness spike), B (AI Gateway experiment), and C (Cloudflare Sandbox prototype) are complete. The remaining work:
+
+### SAM Integration Design (Track D)
+- Design how TaskRunner DO dispatches the harness as an alternative agent runtime
+- Define transcript-to-chat-message mapping for streaming progress to project chat
+- Decide: harness in Sandbox container vs. on existing VM (or both)
+- Wire harness agent type into the agent profile system
+- Risk: ACP session lifecycle differences from subprocess-based agents
+
+### Evaluation Framework (Track E)
+- Build eval task corpus beyond the 3 scripted mock tests
+- Compare harness vs. Claude Code on standardized coding tasks
+- Measure cost/latency/quality tradeoffs across models
+- Go/no-go decision on shipping harness as a user-facing agent option

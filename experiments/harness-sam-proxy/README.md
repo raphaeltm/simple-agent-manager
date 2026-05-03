@@ -36,9 +36,9 @@ The same proxy path can be used for a small OpenAI model:
 - Workers AI models such as `@cf/google/gemma-4-26b-a4b-it` route through SAM's
   configured `AI_GATEWAY_ID` using the Workers AI gateway path.
 - OpenAI models such as `gpt-4.1-mini` route through the same SAM proxy and use
-  unified billing when the AI Gateway has `authentication: true` and the account
-  has AI Gateway credits. The `sam` gateway currently has `authentication: false`
-  — see `tasks/backlog/2026-05-03-openai-unified-billing-gateway-401.md`.
+  unified billing. The `sam` AI Gateway has `authentication: true` (fixed
+  2026-05-03 — deploy script was using PATCH instead of PUT). No external API
+  keys needed when the account has AI Gateway credits loaded.
 
 ## Experiment Auth Option
 
