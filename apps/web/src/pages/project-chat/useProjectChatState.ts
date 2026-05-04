@@ -37,6 +37,7 @@ import {
   TASK_STATUS_POLL_MS,
 } from './types';
 import { useAttachments } from './useAttachments';
+import { isRetryOrFork } from './lineageUtils';
 import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
 
 export function useProjectChatState() {
@@ -148,7 +149,7 @@ export function useProjectChatState() {
         if (s.status !== 'stopped' || !s.taskId) return false;
         const info = taskInfoMap.get(s.taskId);
         if (!info?.parentTaskId) return false;
-        return info.triggeredBy !== 'mcp'; // user/cron/webhook = retry/fork
+        return isRetryOrFork(info);
       })();
 
       if (isStaleSession(s) || isStoppedRetryOrFork) stale.push(s);
