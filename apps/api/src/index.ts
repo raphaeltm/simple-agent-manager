@@ -38,6 +38,7 @@ import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentia
 import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminSandboxRoutes } from './routes/admin-sandbox';
 import { adminUsageRoutes } from './routes/admin-usage';
+import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { agentRoutes } from './routes/agent';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
@@ -417,6 +418,7 @@ app.route('/api/projects/:projectId/policies', policyRoutes);
 app.route('/api/projects/:projectId/agent', projectAgentRoutes);
 app.route('/api/projects', projectDeploymentRoutes);
 app.route('/api/deployment', gcpDeployCallbackRoute);
+app.route('/api/admin/observability/logs/ingest', observabilityIngestRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/admin/ai-proxy', adminAIProxyRoutes);
 app.route('/api/admin/analytics', adminAnalyticsRoutes);
