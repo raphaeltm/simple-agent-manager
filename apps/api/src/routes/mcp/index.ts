@@ -10,10 +10,12 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import {
   authenticateMcpRequest,
   checkMcpRateLimit,
   getMcpRateLimit,
+  INTERNAL_ERROR,
   jsonRpcError,
   type JsonRpcRequest,
   jsonRpcSuccess,
@@ -207,6 +209,7 @@ mcpRoutes.post('/', async (c) => {
       const toolName = (rpc.params as { name?: string })?.name;
       const toolArgs = ((rpc.params as { arguments?: Record<string, unknown> })?.arguments) ?? {};
 
+      try {
       switch (toolName) {
         case 'get_instructions':
           return c.json(await handleGetInstructions(requestId, tokenData, c.env));
@@ -383,6 +386,12 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleRemovePolicy(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
+      }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Tool execution failed';
+        const name = toolName ?? '<unknown>';
+        log.error('mcp.tool_call_failed', { tool: name, error: String(err) });
+        return c.json(jsonRpcError(requestId, INTERNAL_ERROR, `Tool '${name}' failed: ${message}`));
       }
     }
 

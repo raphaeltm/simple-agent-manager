@@ -41,26 +41,26 @@ The tool appears completely broken to the agent, when in reality it was a transi
 
 ## Implementation Checklist
 
-- [ ] Add try/catch wrapper around the entire `tools/call` switch body in `apps/api/src/routes/mcp/index.ts` that returns `jsonRpcError(requestId, INTERNAL_ERROR, message)` on failure
-- [ ] Add try/catch to `handleSearchKnowledge` in `knowledge-tools.ts`
-- [ ] Add try/catch to `handleAddKnowledge` in `knowledge-tools.ts`
-- [ ] Add try/catch to `handleGetKnowledge` in `knowledge-tools.ts`
-- [ ] Add try/catch to `handleGetProjectKnowledge` in `knowledge-tools.ts`
-- [ ] Add try/catch to `handleGetRelevantKnowledge` in `knowledge-tools.ts`
-- [ ] Add try/catch to `handleConfirmKnowledge` in `knowledge-tools.ts`
-- [ ] Add try/catch to `handleGetRelated` in `knowledge-tools.ts`
-- [ ] Add try/catch to `searchObservationsLike` in `apps/api/src/durable-objects/project-data/knowledge.ts`
-- [ ] Write test: unhandled tool handler exception returns JSON-RPC error (not HTTP 500)
-- [ ] Write test: knowledge search DO failure returns proper error
-- [ ] Verify existing MCP tests still pass
+- [x] Add try/catch wrapper around the entire `tools/call` switch body in `apps/api/src/routes/mcp/index.ts` that returns `jsonRpcError(requestId, INTERNAL_ERROR, message)` on failure
+- [x] Add try/catch to `handleSearchKnowledge` in `knowledge-tools.ts`
+- [x] Add try/catch to `handleAddKnowledge` in `knowledge-tools.ts`
+- [x] Add try/catch to `handleGetKnowledge` in `knowledge-tools.ts`
+- [x] Add try/catch to `handleGetProjectKnowledge` in `knowledge-tools.ts`
+- [x] Add try/catch to `handleGetRelevantKnowledge` in `knowledge-tools.ts`
+- [x] Add try/catch to `handleConfirmKnowledge` in `knowledge-tools.ts`
+- [x] Add try/catch to `handleGetRelated` in `knowledge-tools.ts`
+- [x] Add try/catch to `searchObservationsLike` in `apps/api/src/durable-objects/project-data/knowledge.ts`
+- [x] Write test: unhandled tool handler exception returns JSON-RPC error (not HTTP 500)
+- [x] Write test: knowledge search DO failure returns proper error
+- [x] Verify existing MCP tests still pass
 
 ## Acceptance Criteria
 
-- [ ] When a tool handler throws, the MCP endpoint returns a proper JSON-RPC error response (not HTTP 500)
-- [ ] The error includes the requestId so the client can correlate the response
-- [ ] Knowledge tool errors are caught and return helpful error messages
-- [ ] All existing MCP tests pass
-- [ ] No regressions in tool functionality
+- [x] When a tool handler throws, the MCP endpoint returns a proper JSON-RPC error response (not HTTP 500)
+- [x] The error includes the requestId so the client can correlate the response
+- [x] Knowledge tool errors are caught and return helpful error messages
+- [x] All existing MCP tests pass
+- [x] No regressions in tool functionality
 
 ## References
 
