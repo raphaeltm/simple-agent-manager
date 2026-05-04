@@ -20,12 +20,12 @@ This pollutes the admin error view and makes real VM agent failures harder to tr
 
 ## Implementation Checklist
 
-- [ ] Allow VM agent API ingestion to preserve `info` level entries instead of defaulting them to `error`.
-- [ ] Make VM agent `reportLifecycle()` preserve explicit `error` events.
-- [ ] Document the intentional classification policy near the ingestion and lifecycle mapping code.
-- [ ] Add API route tests for representative VM agent lifecycle success (`info`), warning (`warn`), and failure (`error`) persistence/logging.
-- [ ] Add VM agent test coverage for lifecycle `info`, `warn`, and `error` reporter mapping.
-- [ ] Run relevant local API and VM agent tests/typecheck.
+- [x] Allow VM agent API ingestion to preserve `info` level entries instead of defaulting them to `error`.
+- [x] Make VM agent `reportLifecycle()` preserve explicit `error` events.
+- [x] Document the intentional classification policy near the ingestion and lifecycle mapping code.
+- [x] Add API route tests for representative VM agent lifecycle success (`info`), warning (`warn`), and failure (`error`) persistence/logging.
+- [x] Add VM agent test coverage for lifecycle `info`, `warn`, and `error` reporter mapping.
+- [x] Run relevant local API and VM agent tests/typecheck.
 - [ ] Deploy to staging through `deploy-staging.yml`.
 - [ ] Verify staging observability D1 grouped by source/level/message no longer shows success/lifecycle messages at error level.
 - [ ] Provision a real staging VM, verify heartbeat/workspace access, and clean it up.

@@ -2218,9 +2218,13 @@ func (h *SessionHost) reportLifecycle(level, message string, ctx map[string]inte
 		return
 	}
 	switch level {
+	case "error":
+		h.config.ErrorReporter.ReportError(errors.New(message), "session-host", h.config.WorkspaceID, ctx)
 	case "warn":
 		h.config.ErrorReporter.ReportWarn(message, "session-host", h.config.WorkspaceID, ctx)
 	default:
+		// Lifecycle progress and success reports intentionally stay info-level;
+		// expected degraded operations should pass "warn" and real failures "error".
 		h.config.ErrorReporter.ReportInfo(message, "session-host", h.config.WorkspaceID, ctx)
 	}
 }

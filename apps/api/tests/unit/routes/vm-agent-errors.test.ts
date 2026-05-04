@@ -350,30 +350,38 @@ describe('VM Agent Errors Route', () => {
       spy.mockRestore();
     });
 
-    it('should default level to error when invalid', async () => {
-      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it('should preserve info level for lifecycle success entries', async () => {
+      const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const mockObsDb = {} as D1Database;
 
-      const entries = [validEntry({ level: 'info' })]; // 'info' not valid for VM agent errors
+      const entries = [validEntry({ level: 'info', message: 'ACP NewSession succeeded' })];
 
       await app.request('/api/nodes/node-123/errors', {
         method: 'POST',
         headers: authHeaders,
         body: makeBody(entries),
-      }, createEnv());
+      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
 
       const vmAgentCalls = spy.mock.calls
         .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
         .filter((entry) => entry?.event === 'vm_agent_error');
       const loggedLevel = vmAgentCalls[0].level;
-      expect(loggedLevel).toBe('error'); // 'info' is not in VALID_VM_ERROR_LEVELS
+      expect(loggedLevel).toBe('info');
+
+      const persistedInput = mockPersistErrorBatch.mock.calls[0][1][0];
+      expect(persistedInput).toEqual(expect.objectContaining({
+        level: 'info',
+        message: 'ACP NewSession succeeded',
+        source: 'vm-agent',
+      }));
 
       spy.mockRestore();
     });
 
     it('should pass through valid warn level', async () => {
-      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      const entries = [validEntry({ level: 'warn' })];
+      const entries = [validEntry({ level: 'warn', message: 'ACP SetSessionMode failed' })];
 
       await app.request('/api/nodes/node-123/errors', {
         method: 'POST',
@@ -386,6 +394,27 @@ describe('VM Agent Errors Route', () => {
         .filter((entry) => entry?.event === 'vm_agent_error');
       const loggedLevel = vmAgentCalls[0].level;
       expect(loggedLevel).toBe('warn');
+      expect(vmAgentCalls[0].message).toBe('ACP SetSessionMode failed');
+
+      spy.mockRestore();
+    });
+
+    it('should default level to error when invalid', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const entries = [validEntry({ level: 'critical' })];
+
+      await app.request('/api/nodes/node-123/errors', {
+        method: 'POST',
+        headers: authHeaders,
+        body: makeBody(entries),
+      }, createEnv());
+
+      const vmAgentCalls = spy.mock.calls
+        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .filter((entry) => entry?.event === 'vm_agent_error');
+      const loggedLevel = vmAgentCalls[0].level;
+      expect(loggedLevel).toBe('error');
 
       spy.mockRestore();
     });
@@ -453,6 +482,7 @@ describe('VM Agent Errors Route', () => {
         expect.arrayContaining([
           expect.objectContaining({
             source: 'vm-agent',
+            level: 'error',
             message: 'D1 vm-agent test',
             nodeId: 'node-123',
           }),
