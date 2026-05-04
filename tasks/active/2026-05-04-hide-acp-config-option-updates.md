@@ -24,6 +24,16 @@ This is session metadata, not transcript content. Until SAM has a first-class UI
 
 ## Acceptance Criteria
 
-- `config_option_update` session notifications no longer produce `Rich rendering unavailable` in chat.
-- Unknown session updates still render as `raw_fallback` for debuggability.
-- Regression coverage proves the behavior.
+- [x] `config_option_update` session notifications no longer produce `Rich rendering unavailable` in chat.
+- [x] Unknown session updates still render as `raw_fallback` for debuggability.
+- [x] Regression coverage proves the behavior.
+
+## Validation
+
+- `pnpm --filter @simple-agent-manager/acp-client test -- useAcpMessages` — passed, 31 tests.
+- `pnpm --filter @simple-agent-manager/acp-client typecheck` — passed.
+- `pnpm --filter @simple-agent-manager/acp-client lint` — passed with existing warnings only.
+- `pnpm lint` — passed with existing warnings only.
+- `pnpm typecheck` — passed.
+- `pnpm test` — passed, 19 turbo tasks.
+- `pnpm build` — passed from cache after test/build warmed outputs.
