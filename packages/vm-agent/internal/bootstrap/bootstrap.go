@@ -33,6 +33,15 @@ const (
 
 	workspaceReadyStatusRunning  = "running"
 	workspaceReadyStatusRecovery = "recovery"
+
+	gitConfigMaxAttempts        = 5
+	gitConfigPostCleanupRetries = 3
+	gitConfigSettleDelay        = 100 * time.Millisecond
+
+	// Safety limits for user-supplied git identity values (RFC 5321 email max
+	// is 254; 512 is generous for display names).
+	gitConfigMaxNameLen  = 512
+	gitConfigMaxEmailLen = 254
 )
 
 var projectEnvKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -2118,24 +2127,199 @@ func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error)
 }
 
 func configureGitCredentialHelper(ctx context.Context, containerID, helperPath string) error {
+	return configureSystemGit(ctx, containerID, "credential.helper", helperPath, "git credential helper")
+}
+
+func configureSystemGit(ctx context.Context, containerID, key, value, label string) error {
+	// Reject values that start with "-" so they cannot be misinterpreted as
+	// git flags (e.g. "--no-includes"). exec.CommandContext prevents shell
+	// injection, but git's own argument parser could treat a leading-dash
+	// value as an option.
+	if strings.HasPrefix(value, "-") {
+		return fmt.Errorf("refusing to configure %s: value must not start with a dash", label)
+	}
+
+	runGit := func() ([]byte, error) {
+		return runSystemGitConfig(ctx, containerID, key, value)
+	}
+	checkProcess := func() (bool, error) {
+		return hasActiveGitConfigProcess(ctx, containerID)
+	}
+	removeLock := func() error {
+		rmCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "rm", "-f", "/etc/gitconfig.lock")
+		if output, err := rmCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("rm failed: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
+	return configureSystemGitWith(ctx, label, gitConfigMaxAttempts, runGit, checkProcess, removeLock)
+}
+
+// configureSystemGitWith contains the retry/stale-lock-removal orchestration
+// logic extracted from configureSystemGit so it can be tested without Docker.
+func configureSystemGitWith(
+	ctx context.Context,
+	label string,
+	maxAttempts int,
+	runGit func() ([]byte, error),
+	checkProcess func() (bool, error),
+	removeLock func() error,
+) error {
+	var lastOutput string
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		output, err := runGit()
+		if err == nil {
+			return nil
+		}
+
+		lastOutput = strings.TrimSpace(string(output))
+		lastErr = err
+		if !isGitConfigLockError(lastOutput) {
+			return fmt.Errorf("failed to configure %s in devcontainer: %w: %s", label, err, lastOutput)
+		}
+
+		if attempt < maxAttempts {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):
+			}
+		}
+	}
+
+	// Brief settle delay so any git process that started during the final retry
+	// attempt has time to appear in the process table.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(gitConfigSettleDelay):
+	}
+
+	active, err := checkProcess()
+	if err != nil {
+		return fmt.Errorf(
+			"failed to configure %s in devcontainer: %w: %s (could not verify stale /etc/gitconfig.lock: %v)",
+			label,
+			lastErr,
+			lastOutput,
+			err,
+		)
+	}
+	if active {
+		return fmt.Errorf(
+			"failed to configure %s in devcontainer: %w: %s (another git config process is still active)",
+			label,
+			lastErr,
+			lastOutput,
+		)
+	}
+
+	// NOTE: There is a residual TOCTOU race between the process check above and
+	// the lock removal below — a new git-config writer could acquire the lock in
+	// this window. The risk is low because we only reach this path after all
+	// retries are exhausted with no visible writer, and we retry the write after
+	// removal.
+	if err := removeLock(); err != nil {
+		return fmt.Errorf(
+			"failed to remove stale /etc/gitconfig.lock while configuring %s (last git error: %v): %w",
+			label,
+			lastErr,
+			err,
+		)
+	}
+
+	// Check for context cancellation between lock removal and the final write to
+	// avoid leaving the container with the lock removed but the config unchanged.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Retry the git config write a few times after lock removal — the lock could
+	// reappear if a concurrent process starts between rm and git-config.
+	for postAttempt := 1; postAttempt <= gitConfigPostCleanupRetries; postAttempt++ {
+		output, err := runGit()
+		if err == nil {
+			return nil
+		}
+		if postAttempt == gitConfigPostCleanupRetries || !isGitConfigLockError(strings.TrimSpace(string(output))) {
+			return fmt.Errorf("failed to configure %s in devcontainer after stale lock cleanup: %w: %s", label, err, strings.TrimSpace(string(output)))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil
+}
+
+func runSystemGitConfig(ctx context.Context, containerID, key, value string) ([]byte, error) {
 	// Use -u root because the container's default user (e.g. "node") may not have
 	// write permissions to /etc/gitconfig (system-level git config).
+	// Force LANG=C so git error messages are always in English — isGitConfigLockError
+	// matches on the English-locale error string.
 	cmd := exec.CommandContext(
 		ctx,
 		"docker",
 		"exec",
 		"-u", "root",
+		"-e", "LANG=C",
+		"-e", "LC_ALL=C",
 		containerID,
 		"git",
 		"config",
 		"--system",
-		"credential.helper",
-		helperPath,
+		key,
+		value,
 	)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to configure git credential helper in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
+	return cmd.CombinedOutput()
+}
+
+func isGitConfigLockError(output string) bool {
+	return strings.Contains(output, "could not lock config file /etc/gitconfig: File exists")
+}
+
+func hasActiveGitConfigProcess(ctx context.Context, containerID string) (bool, error) {
+	// Try ps -eo args first (POSIX). Fall back to /proc/*/cmdline for minimal
+	// containers (Alpine/BusyBox) where ps -eo args may not be available.
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "ps", "-eo", "args")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Fallback: read /proc/*/cmdline which is universally available on Linux.
+		fallbackCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID,
+			"sh", "-c", `cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\0' ' '`)
+		fallbackOut, fallbackErr := fallbackCmd.CombinedOutput()
+		if fallbackErr != nil {
+			return false, fmt.Errorf("failed to inspect container processes: %w: %s (fallback also failed: %v)", err, strings.TrimSpace(string(output)), fallbackErr)
+		}
+		return gitConfigProcessActive(string(fallbackOut)), nil
 	}
-	return nil
+
+	return gitConfigProcessActive(string(output)), nil
+}
+
+// gitConfigProcessRe matches process lines where the binary is "git" (or a
+// path ending in /git) followed by the "config" subcommand, or is
+// "git-config" (the plumbing binary). Substring-only matching like
+// strings.Contains("git config") would false-positive on unrelated commands
+// such as "python3 check-git-config-settings.py".
+var gitConfigProcessRe = regexp.MustCompile(`(?:^|/)git(?:-config|\s+config)(?:\s|$)`)
+
+func gitConfigProcessActive(psOutput string) bool {
+	for _, line := range strings.Split(psOutput, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if gitConfigProcessRe.MatchString(trimmed) {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveGitIdentity(state *bootstrapState) (name string, email string, ok bool) {
@@ -2145,6 +2329,15 @@ func resolveGitIdentity(state *bootstrapState) (name string, email string, ok bo
 
 	email = strings.TrimSpace(state.GitUserEmail)
 	name = strings.TrimSpace(state.GitUserName)
+
+	// Enforce length limits on user-supplied identity values to prevent
+	// oversized values from being written to /etc/gitconfig.
+	if len(email) > gitConfigMaxEmailLen {
+		email = email[:gitConfigMaxEmailLen]
+	}
+	if len(name) > gitConfigMaxNameLen {
+		name = name[:gitConfigMaxNameLen]
+	}
 
 	// Noreply email fallback: when the user has no public email, construct a
 	// GitHub noreply address from their GitHub ID and login name. This ensures
@@ -2189,36 +2382,12 @@ func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrap
 		return fmt.Errorf("failed to locate devcontainer for git identity setup: %w", err)
 	}
 
-	setEmailCmd := exec.CommandContext(
-		ctx,
-		"docker",
-		"exec",
-		"-u", "root",
-		containerID,
-		"git",
-		"config",
-		"--system",
-		"user.email",
-		gitUserEmail,
-	)
-	if output, err := setEmailCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to configure git user.email in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
+	if err := configureSystemGit(ctx, containerID, "user.email", gitUserEmail, "git user.email"); err != nil {
+		return err
 	}
 
-	setNameCmd := exec.CommandContext(
-		ctx,
-		"docker",
-		"exec",
-		"-u", "root",
-		containerID,
-		"git",
-		"config",
-		"--system",
-		"user.name",
-		gitUserName,
-	)
-	if output, err := setNameCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to configure git user.name in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
+	if err := configureSystemGit(ctx, containerID, "user.name", gitUserName, "git user.name"); err != nil {
+		return err
 	}
 
 	slog.Info("Configured git identity in devcontainer", "containerID", containerID, "name", gitUserName, "email", gitUserEmail)

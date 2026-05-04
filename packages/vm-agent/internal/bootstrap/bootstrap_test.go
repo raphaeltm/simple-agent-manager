@@ -2526,6 +2526,340 @@ func TestCredentialHelperMountEntry(t *testing.T) {
 	}
 }
 
+func TestIsGitConfigLockError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{
+			name:   "system gitconfig lock error",
+			output: "error: could not lock config file /etc/gitconfig: File exists",
+			want:   true,
+		},
+		{
+			name:   "multi-line output with lock error on second line",
+			output: "warning: unable to access '/root/.config/git/config': Permission denied\nerror: could not lock config file /etc/gitconfig: File exists",
+			want:   true,
+		},
+		{
+			name:   "user gitconfig lock - should not match",
+			output: "error: could not lock config file /home/vscode/.gitconfig: File exists",
+			want:   false,
+		},
+		{
+			name:   "unrelated git error",
+			output: "fatal: not in a git directory",
+			want:   false,
+		},
+		{
+			name:   "empty output",
+			output: "",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := isGitConfigLockError(tt.output)
+			if got != tt.want {
+				t.Fatalf("isGitConfigLockError(%q) = %v, want %v", tt.output, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGitConfigProcessActive(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{
+			name: "git config --system running",
+			output: "COMMAND\n/usr/bin/git config --system credential.helper /usr/local/bin/git-credential-sam\n/bin/sh -c sleep 10\n",
+			want: true,
+		},
+		{
+			name: "git-config plumbing binary",
+			output: "COMMAND\n/usr/libexec/git-core/git-config --system user.name foo\n",
+			want: true,
+		},
+		{
+			name:   "bare git config",
+			output: "COMMAND\ngit config --global user.name foo\n",
+			want:   true,
+		},
+		{
+			name:   "no git config running",
+			output: "COMMAND\n/usr/bin/git status --short\n/bin/sh -c sleep 10\n",
+			want:   false,
+		},
+		{
+			name:   "false positive: script containing git config in name",
+			output: "COMMAND\n/usr/bin/python3 check-git-config-settings.py\n",
+			want:   false,
+		},
+		{
+			name:   "false positive: echo containing git config",
+			output: "COMMAND\n/bin/echo git config is broken\n",
+			want:   false,
+		},
+		{
+			name:   "false positive: editor viewing gitconfig",
+			output: "ARGS\nvim /etc/gitconfig\n",
+			want:   false,
+		},
+		{
+			name:   "header only - ARGS",
+			output: "ARGS\n",
+			want:   false,
+		},
+		{
+			name:   "header only - COMMAND",
+			output: "COMMAND\n",
+			want:   false,
+		},
+		{
+			name:   "empty output",
+			output: "",
+			want:   false,
+		},
+		{
+			name:   "git push is not git config",
+			output: "ARGS\n/usr/bin/git push origin main\n",
+			want:   false,
+		},
+		{
+			name:   "proc cmdline style output (space-separated, no header)",
+			output: "/usr/bin/git config --system credential.helper /tmp/helper\n/bin/sleep 10\n",
+			want:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := gitConfigProcessActive(tc.output)
+			if got != tc.want {
+				t.Fatalf("gitConfigProcessActive() = %v, want %v\nInput:\n%s", got, tc.want, tc.output)
+			}
+		})
+	}
+}
+
+func TestConfigureSystemGitRejectsLeadingDash(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	// configureSystemGit should reject values starting with "-" before
+	// invoking any docker exec call.
+	err := configureSystemGit(ctx, "fake-container", "user.name", "--no-includes", "test")
+	if err == nil {
+		t.Fatal("expected error for value starting with dash")
+	}
+	if !strings.Contains(err.Error(), "must not start with a dash") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestResolveGitIdentityTruncatesLongValues(t *testing.T) {
+	t.Parallel()
+
+	longName := strings.Repeat("a", 1000)
+	longEmail := strings.Repeat("b", 500) + "@example.com"
+
+	state := &bootstrapState{
+		GitUserName:  longName,
+		GitUserEmail: longEmail,
+	}
+
+	name, email, ok := resolveGitIdentity(state)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(name) > gitConfigMaxNameLen {
+		t.Fatalf("name length %d exceeds max %d", len(name), gitConfigMaxNameLen)
+	}
+	if len(email) > gitConfigMaxEmailLen {
+		t.Fatalf("email length %d exceeds max %d", len(email), gitConfigMaxEmailLen)
+	}
+}
+
+func TestConfigureSystemGitWith(t *testing.T) {
+	t.Parallel()
+
+	lockErr := fmt.Errorf("exit status 255")
+	lockOutput := []byte("error: could not lock config file /etc/gitconfig: File exists")
+	otherErr := fmt.Errorf("exit status 1")
+	otherOutput := []byte("error: permission denied")
+
+	tests := []struct {
+		name         string
+		maxAttempts  int
+		runGit       func(call *int) ([]byte, error)
+		checkProcess func() (bool, error)
+		removeLock   func() error
+		wantErr      bool
+		errContains  string
+	}{
+		{
+			name:        "success on first attempt",
+			maxAttempts: 3,
+			runGit: func(call *int) ([]byte, error) {
+				return nil, nil
+			},
+			wantErr: false,
+		},
+		{
+			name:        "non-lock error fails immediately",
+			maxAttempts: 3,
+			runGit: func(call *int) ([]byte, error) {
+				return otherOutput, otherErr
+			},
+			wantErr:     true,
+			errContains: "permission denied",
+		},
+		{
+			name:        "lock clears on retry 2",
+			maxAttempts: 3,
+			runGit: func(call *int) ([]byte, error) {
+				*call++
+				if *call == 1 {
+					return lockOutput, lockErr
+				}
+				return nil, nil
+			},
+			wantErr: false,
+		},
+		{
+			name:        "lock persists then active process found",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			checkProcess: func() (bool, error) { return true, nil },
+			removeLock:   func() error { return nil },
+			wantErr:      true,
+			errContains:  "another git config process is still active",
+		},
+		{
+			name:        "lock persists then ps check fails",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			checkProcess: func() (bool, error) { return false, fmt.Errorf("docker exec failed") },
+			removeLock:   func() error { return nil },
+			wantErr:      true,
+			errContains:  "could not verify stale /etc/gitconfig.lock",
+		},
+		{
+			name:        "stale lock removed then final attempt succeeds",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				*call++
+				// Fail on retries (attempts 1 and 2), succeed on post-cleanup attempt (3rd call).
+				if *call <= 2 {
+					return lockOutput, lockErr
+				}
+				return nil, nil
+			},
+			checkProcess: func() (bool, error) { return false, nil },
+			removeLock:   func() error { return nil },
+			wantErr:      false,
+		},
+		{
+			name:        "stale lock removed but final attempt still fails",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			checkProcess: func() (bool, error) { return false, nil },
+			removeLock:   func() error { return nil },
+			wantErr:      true,
+			errContains:  "after stale lock cleanup",
+		},
+		{
+			name:        "stale lock removal itself fails",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			checkProcess: func() (bool, error) { return false, nil },
+			removeLock:   func() error { return fmt.Errorf("rm failed: permission denied") },
+			wantErr:      true,
+			errContains:  "failed to remove stale /etc/gitconfig.lock",
+		},
+		{
+			name:        "context cancelled during backoff",
+			maxAttempts: 5,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			// checkProcess/removeLock should never be reached
+			wantErr:     true,
+			errContains: "context canceled",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var callCount int
+			runGit := func() ([]byte, error) {
+				return tc.runGit(&callCount)
+			}
+
+			checkProcess := tc.checkProcess
+			if checkProcess == nil {
+				checkProcess = func() (bool, error) {
+					t.Fatal("checkProcess should not be called in this test case")
+					return false, nil
+				}
+			}
+
+			removeLock := tc.removeLock
+			if removeLock == nil {
+				removeLock = func() error {
+					t.Fatal("removeLock should not be called in this test case")
+					return nil
+				}
+			}
+
+			ctx := context.Background()
+			// For the cancellation test, use a pre-cancelled context.
+			if tc.errContains == "context canceled" {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			err := configureSystemGitWith(ctx, "test-key", tc.maxAttempts, runGit, checkProcess, removeLock)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
+					t.Fatalf("expected error to contain %q, got: %v", tc.errContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestWriteCredentialOverrideConfig(t *testing.T) {
 	t.Parallel()
 
