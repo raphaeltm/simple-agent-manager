@@ -63,6 +63,7 @@ vi.mock('../../../src/middleware/rate-limit', () => ({
 
 // We need to import after mocks are set up
 const { adminRoutes } = await import('../../../src/routes/admin');
+const { observabilityIngestRoutes } = await import('../../../src/routes/observability-ingest');
 
 describe('Admin Observability Routes', () => {
   let app: Hono<{ Bindings: Env }>;
@@ -80,6 +81,7 @@ describe('Admin Observability Routes', () => {
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
     });
 
+    app.route('/api/admin/observability/logs/ingest', observabilityIngestRoutes);
     app.route('/api/admin', adminRoutes);
   });
 
@@ -620,7 +622,8 @@ describe('Admin Observability Routes', () => {
         },
       }];
 
-      const res = await app.request('/api/admin/observability/logs/ingest', {
+      // Use synthetic hostname to simulate service binding call
+      const res = await app.request('https://internal/api/admin/observability/logs/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ logs }),

@@ -389,31 +389,6 @@ adminRoutes.get('/observability/logs/stream', async (c) => {
 });
 
 /**
- * POST /api/admin/observability/logs/ingest - Internal endpoint for Tail Worker
- *
- * Receives batched log entries from the Tail Worker and forwards them
- * to the AdminLogs DO for broadcasting to connected WebSocket clients.
- * This endpoint is called via service binding, not external HTTP.
- */
-adminRoutes.post('/observability/logs/ingest', async (c) => {
-  const doId = c.env.ADMIN_LOGS.idFromName('admin-logs');
-  const doStub = c.env.ADMIN_LOGS.get(doId);
-
-  // Read and forward the request body to the DO's /ingest endpoint
-  const doUrl = new URL(c.req.url);
-  doUrl.pathname = '/ingest';
-  const body = await c.req.text();
-
-  const response = await doStub.fetch(new Request(doUrl.toString(), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  }));
-
-  return new Response(response.body, { status: response.status });
-});
-
-/**
  * GET /api/admin/health/details - Detailed health info (superadmin only)
  * Returns binding availability, runtime limits, and missing bindings.
  */
