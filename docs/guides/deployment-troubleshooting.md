@@ -468,4 +468,47 @@ Include:
 
 ---
 
-_Last updated: January 2026_
+## Observability Noise Check {#observability-noise}
+
+After deploying to staging (or during incident review), run the observability noise check to detect log-quality regressions:
+
+```bash
+pnpm quality:observability-noise
+```
+
+### What It Detects
+
+| Finding | Severity | Meaning |
+|---------|----------|---------|
+| `ingest-401` | High | Repeated 401 errors on the internal observability ingest endpoint — indicates a misconfigured tail worker or auth token |
+| `severity-mismatch` | Medium | Normal lifecycle messages (e.g., "started", "connected", "healthy") stored at error level — pollutes the error dashboard |
+| `repeated-error` | Medium | Any single error message occurring an unusual number of times — may indicate a retry loop or persistent failure |
+
+### When to Run
+
+- **After staging deployment** — as part of the post-deploy verification checklist
+- **During incident review** — to quickly identify whether log noise is masking real errors
+- **Periodically** — as a maintenance check to detect slow observability drift
+
+### Configuration
+
+All values are configurable via environment variables (no hardcoded defaults for environment-specific IDs):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CF_TOKEN` | Yes | — | Cloudflare API token |
+| `CF_ACCOUNT_ID` | Yes | — | Cloudflare account ID |
+| `OBSERVABILITY_DB_ID` | No | — | Observability D1 database ID (skips D1 checks if unset) |
+| `LOG_NOISE_LOOKBACK_HOURS` | No | 24 | How far back to query (D1 + telemetry default) |
+| `LOG_NOISE_TELEMETRY_TIMEFRAME_SECONDS` | No | `lookbackHours * 3600` | Telemetry query window in seconds (overrides lookback hours for telemetry) |
+| `LOG_NOISE_THRESHOLD` | No | 10 | Minimum occurrences to flag as noise |
+
+### Remediation
+
+- **ingest-401**: Check the tail worker's auth token configuration. Verify the ingest endpoint's auth middleware accepts the token the tail worker sends.
+- **severity-mismatch**: Find the code path that persists the message and fix the level to `info` or `warn`.
+- **repeated-error**: Investigate whether the error is transient (retry storms) or persistent (misconfiguration).
+
+---
+
+_Last updated: May 2026_
