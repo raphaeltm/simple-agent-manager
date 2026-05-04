@@ -26,7 +26,18 @@ Production debug evidence from idea `01KQQVNSHJAA8K46Y3ZAZQG109` showed long-liv
 - [x] Add bounded response body logging for task callback and message reporter permanent failures.
 - [x] Update docs or comments that describe the new identity boundary.
 - [x] Run focused Go/TypeScript tests, then full quality gates.
-- [ ] Complete staging verification with real VM provisioning, project chat usage, multi-conversation switching, node monitoring/debug package checks, and node cleanup.
+- [x] Complete staging verification with real VM provisioning, project chat usage, multi-conversation switching, node monitoring/debug package checks, and node cleanup.
+
+## Staging Verification
+
+- Deployed branch `sam/read-idea-01kqqvnshjaa8k46y3zazqg109-using-01kqqw` to staging with workflow run `25294363883`.
+- Ran Playwright against `https://app.sammy.party` using the demo smoke-test login.
+- Created project `01KQR4F3CKS2C8A9J3NSEEESAX` for `serverspresentation2025/hono`.
+- Ran project chat task `01KQR4F9HZPBV8ZSAC8BQ5CX5M`; it provisioned workspace `01KQR4M6H0PQ1CABS3NMNHB8JT`, produced assistant output, created project files, and pushed to the output branch.
+- Ran follow-up chat task `01KQR4WQJQ9QP1E4R845M2XEMH`; it provisioned workspace `01KQR4WV1PRT9PE8PBJ9EK221F`, produced coherent follow-up output, and pushed to the output branch.
+- Switched between conversations during the Playwright scenario and verified both sessions remained coherent.
+- Monitored node `01KQR4FDWHC5RP1CD76K35T2N7`, fetched system info/logs, and downloaded debug package `.codex/tmp/debug-01KQR4FDWHC5RP1CD76K35T2N7-20260503235826.tar.gz`.
+- Cleaned up both workspaces, node `01KQR4FDWHC5RP1CD76K35T2N7`, and project `01KQR4F3CKS2C8A9J3NSEEESAX`.
 
 ## Acceptance Criteria
 
