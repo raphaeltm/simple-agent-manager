@@ -432,10 +432,10 @@ export async function handleDispatchTask(
   const conditionalInsertResult = await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, mission_id,
+     task_mode, agent_profile_hint, mission_id, triggered_by,
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
-     ?, ?, ?,
+     ?, ?, ?, 'mcp',
      ?, ?
      WHERE (
        SELECT count(*) FROM tasks

@@ -246,10 +246,10 @@ export async function dispatchTask(
   await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, mission_id,
+     task_mode, agent_profile_hint, mission_id, triggered_by,
      created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', ?, 0, ?, ?,
-     ?, ?, ?,
+     ?, ?, ?, 'mcp',
      ?, ?)`,
   ).bind(
     taskId, input.projectId, ctx.userId,

@@ -28,6 +28,7 @@ import {
 } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
+import { isRetryOrFork } from './lineageUtils';
 import type { ProvisioningState } from './types';
 import {
   CHAT_SESSION_LIST_LIMIT,
@@ -148,7 +149,7 @@ export function useProjectChatState() {
         if (s.status !== 'stopped' || !s.taskId) return false;
         const info = taskInfoMap.get(s.taskId);
         if (!info?.parentTaskId) return false;
-        return info.triggeredBy !== 'mcp'; // user/cron/webhook = retry/fork
+        return isRetryOrFork(info);
       })();
 
       if (isStaleSession(s) || isStoppedRetryOrFork) stale.push(s);

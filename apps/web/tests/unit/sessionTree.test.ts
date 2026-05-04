@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ChatSessionResponse } from '../../src/lib/api';
+import { isRetryOrFork } from '../../src/pages/project-chat/lineageUtils';
 import {
   buildSessionTree,
   type SessionTreeNode,
@@ -35,6 +36,7 @@ function makeTaskInfo(overrides: Partial<TaskInfo> = {}): TaskInfo {
     status: 'in_progress',
     blocked: false,
     triggeredBy: 'mcp', // default to agent-dispatched subtasks for nesting tests
+    dispatchDepth: 0,
     ...overrides,
   };
 }
@@ -484,5 +486,83 @@ describe('buildSessionTree — self-referential cycle safety', () => {
     const ids = collectIds(roots);
     expect(ids).toContain('sA');
     expect(ids).toContain('sB');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isRetryOrFork classification
+// ---------------------------------------------------------------------------
+
+describe('isRetryOrFork — classification logic', () => {
+  it('treats triggeredBy=mcp as subtask (not retry/fork)', () => {
+    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'mcp', dispatchDepth: 1 }))).toBe(false);
+  });
+
+  it('treats triggeredBy=user with dispatchDepth=0 as retry/fork', () => {
+    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'user', dispatchDepth: 0 }))).toBe(true);
+  });
+
+  it('treats triggeredBy=user with dispatchDepth>0 as subtask (fallback for legacy data)', () => {
+    // This is the bug scenario: MCP-dispatched tasks that have triggeredBy='user'
+    // because the backend INSERT was missing the triggered_by column
+    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'user', dispatchDepth: 1 }))).toBe(false);
+  });
+
+  it('treats triggeredBy=cron as retry/fork when dispatchDepth=0', () => {
+    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'cron', dispatchDepth: 0 }))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: subtasks with wrong triggeredBy but correct dispatchDepth
+// ---------------------------------------------------------------------------
+
+describe('buildSessionTree — dispatchDepth fallback for legacy subtasks', () => {
+  it('nests subtasks with triggeredBy=user but dispatchDepth>0 as children (not roots)', () => {
+    // Simulates the bug: MCP dispatch_task was not setting triggered_by='mcp',
+    // so subtasks had triggeredBy='user' but dispatchDepth=1+
+    const tasks = new Map<string, TaskInfo>([
+      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user', dispatchDepth: 0 })],
+      ['tC1', makeTaskInfo({ id: 'tC1', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 1 })],
+      ['tC2', makeTaskInfo({ id: 'tC2', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 1 })],
+      ['tC3', makeTaskInfo({ id: 'tC3', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 1 })],
+    ]);
+    const sessions = [
+      makeSession({ id: 'sP', taskId: 'tP', startedAt: 1000 }),
+      makeSession({ id: 'sC1', taskId: 'tC1', startedAt: 1100 }),
+      makeSession({ id: 'sC2', taskId: 'tC2', startedAt: 1200 }),
+      makeSession({ id: 'sC3', taskId: 'tC3', startedAt: 1300 }),
+    ];
+
+    const roots = buildSessionTree(sessions, tasks);
+    // All subtasks should be nested under the parent, not promoted to root
+    expect(roots).toHaveLength(1);
+    expect(roots[0]!.session.id).toBe('sP');
+    expect(roots[0]!.children).toHaveLength(3);
+    // No lineage text (not retries/forks)
+    expect(roots[0]!.children[0]!.lineageText).toBeUndefined();
+  });
+
+  it('still promotes genuine user retries (dispatchDepth=0) to root level', () => {
+    const tasks = new Map<string, TaskInfo>([
+      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user', dispatchDepth: 0 })],
+      ['tR1', makeTaskInfo({ id: 'tR1', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 0 })],
+      ['tR2', makeTaskInfo({ id: 'tR2', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 0 })],
+    ]);
+    const sessions = [
+      makeSession({ id: 'sP', taskId: 'tP', startedAt: 1000 }),
+      makeSession({ id: 'sR1', taskId: 'tR1', startedAt: 2000 }),
+      makeSession({ id: 'sR2', taskId: 'tR2', startedAt: 3000 }),
+    ];
+
+    const roots = buildSessionTree(sessions, tasks);
+    // Retries should be promoted to root level
+    expect(roots).toHaveLength(3);
+    const r1 = findNode(roots, 'sR1')!;
+    const r2 = findNode(roots, 'sR2')!;
+    expect(r1.depth).toBe(0);
+    expect(r2.depth).toBe(0);
+    expect(r1.lineageText).toContain('attempt');
+    expect(r2.lineageText).toContain('attempt');
   });
 });

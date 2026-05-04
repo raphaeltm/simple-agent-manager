@@ -4,9 +4,16 @@ import type { TaskInfo } from './useTaskGroups';
 /**
  * User-triggered tasks with a parentTaskId are retries/forks. Agent-dispatched
  * tasks stay nested as subtasks.
+ *
+ * Uses both `triggeredBy` and `dispatchDepth` to classify: tasks with
+ * `triggeredBy === 'mcp'` OR `dispatchDepth > 0` are subtasks (not retries).
+ * The `dispatchDepth` fallback handles existing tasks in the DB that were
+ * inserted before the `triggered_by = 'mcp'` fix.
  */
 export function isRetryOrFork(taskInfo: TaskInfo): boolean {
-  return taskInfo.triggeredBy !== 'mcp';
+  if (taskInfo.triggeredBy === 'mcp') return false;
+  if (taskInfo.dispatchDepth > 0) return false;
+  return true;
 }
 
 /**
