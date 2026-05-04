@@ -14,6 +14,7 @@ import {
   authenticateMcpRequest,
   checkMcpRateLimit,
   getMcpRateLimit,
+  INTERNAL_ERROR,
   jsonRpcError,
   type JsonRpcRequest,
   jsonRpcSuccess,
@@ -207,6 +208,7 @@ mcpRoutes.post('/', async (c) => {
       const toolName = (rpc.params as { name?: string })?.name;
       const toolArgs = ((rpc.params as { arguments?: Record<string, unknown> })?.arguments) ?? {};
 
+      try {
       switch (toolName) {
         case 'get_instructions':
           return c.json(await handleGetInstructions(requestId, tokenData, c.env));
@@ -383,6 +385,11 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleRemovePolicy(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
+      }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Tool execution failed';
+        console.error(`MCP tool error [${toolName}]:`, err);
+        return c.json(jsonRpcError(requestId, INTERNAL_ERROR, `Tool '${toolName}' failed: ${message}`));
       }
     }
 

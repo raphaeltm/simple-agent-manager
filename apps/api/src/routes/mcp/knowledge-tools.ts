@@ -7,6 +7,7 @@ import type { Env } from '../../env';
 import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,
+  INTERNAL_ERROR,
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
@@ -59,42 +60,46 @@ export async function handleAddKnowledge(
 
   const sessionId = await resolveSessionId(env, tokenData.workspaceId);
 
-  // Get or create entity
-  const existingEntity = await projectDataService.getKnowledgeEntityByName(env, tokenData.projectId, entityName);
-  let entityId: string;
-  if (!existingEntity) {
-    const created = await projectDataService.createKnowledgeEntity(
-      env, tokenData.projectId, entityName, entityType, null,
-    );
-    entityId = created.id;
-  } else {
-    entityId = existingEntity.id;
-  }
-
-  const obs = await projectDataService.addKnowledgeObservation(
-    env, tokenData.projectId, entityId, observation, confidence, sourceType, sessionId,
-  );
-
-  // Trial bridge — if this project is backing an anonymous trial, fan the
-  // observation out as a `trial.knowledge` SSE event. Non-trial projects
-  // short-circuit after a single KV lookup inside the helper.
   try {
-    const { bridgeKnowledgeAdded } = await import('../../services/trial/bridge');
-    await bridgeKnowledgeAdded(env, tokenData.projectId, entityName, observation);
-  } catch {
-    // Bridge errors are already logged inside the helper; never block MCP.
-  }
+    // Get or create entity
+    const existingEntity = await projectDataService.getKnowledgeEntityByName(env, tokenData.projectId, entityName);
+    let entityId: string;
+    if (!existingEntity) {
+      const created = await projectDataService.createKnowledgeEntity(
+        env, tokenData.projectId, entityName, entityType, null,
+      );
+      entityId = created.id;
+    } else {
+      entityId = existingEntity.id;
+    }
 
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({
-      added: true,
-      entityId,
-      entityName,
-      observationId: obs.id,
-      confidence,
-      sourceType,
-    }, null, 2) }],
-  });
+    const obs = await projectDataService.addKnowledgeObservation(
+      env, tokenData.projectId, entityId, observation, confidence, sourceType, sessionId,
+    );
+
+    // Trial bridge — if this project is backing an anonymous trial, fan the
+    // observation out as a `trial.knowledge` SSE event. Non-trial projects
+    // short-circuit after a single KV lookup inside the helper.
+    try {
+      const { bridgeKnowledgeAdded } = await import('../../services/trial/bridge');
+      await bridgeKnowledgeAdded(env, tokenData.projectId, entityName, observation);
+    } catch {
+      // Bridge errors are already logged inside the helper; never block MCP.
+    }
+
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify({
+        added: true,
+        entityId,
+        entityName,
+        observationId: obs.id,
+        confidence,
+        sourceType,
+      }, null, 2) }],
+    });
+  } catch (err) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to add knowledge: ${(err as Error).message}`);
+  }
 }
 
 // ─── update_knowledge ───────────────────────────────────────────────────────
@@ -170,26 +175,30 @@ export async function handleGetKnowledge(
     return jsonRpcError(requestId, INVALID_PARAMS, 'Either entityName or entityId is required');
   }
 
-  const entity = entityId
-    ? await projectDataService.getKnowledgeEntity(env, tokenData.projectId, entityId)
-    : await projectDataService.getKnowledgeEntityByName(env, tokenData.projectId, entityName);
+  try {
+    const entity = entityId
+      ? await projectDataService.getKnowledgeEntity(env, tokenData.projectId, entityId)
+      : await projectDataService.getKnowledgeEntityByName(env, tokenData.projectId, entityName);
 
-  if (!entity) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Entity not found');
+    if (!entity) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'Entity not found');
+    }
+
+    const observations = await projectDataService.getKnowledgeObservationsForEntity(
+      env, tokenData.projectId, entity.id, false,
+    );
+    const relations = await projectDataService.getKnowledgeRelated(env, tokenData.projectId, entity.id, null);
+
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify({
+        entity,
+        observations,
+        relations,
+      }, null, 2) }],
+    });
+  } catch (err) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get knowledge: ${(err as Error).message}`);
   }
-
-  const observations = await projectDataService.getKnowledgeObservationsForEntity(
-    env, tokenData.projectId, entity.id, false,
-  );
-  const relations = await projectDataService.getKnowledgeRelated(env, tokenData.projectId, entity.id, null);
-
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({
-      entity,
-      observations,
-      relations,
-    }, null, 2) }],
-  });
 }
 
 // ─── search_knowledge ───────────────────────────────────────────────────────
@@ -210,13 +219,17 @@ export async function handleSearchKnowledge(
     ? Math.min(Math.max(1, params.limit), limits.knowledgeSearchLimit)
     : limits.knowledgeSearchLimit;
 
-  const results = await projectDataService.searchKnowledgeObservations(
-    env, tokenData.projectId, query, entityType, minConfidence, limit,
-  );
+  try {
+    const results = await projectDataService.searchKnowledgeObservations(
+      env, tokenData.projectId, query, entityType, minConfidence, limit,
+    );
 
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ results, count: results.length }, null, 2) }],
-  });
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify({ results, count: results.length }, null, 2) }],
+    });
+  } catch (err) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to search knowledge: ${(err as Error).message}`);
+  }
 }
 
 // ─── get_project_knowledge ──────────────────────────────────────────────────
@@ -233,16 +246,20 @@ export async function handleGetProjectKnowledge(
     ? Math.min(Math.max(1, params.limit), limits.knowledgeSearchLimit * 5)
     : limits.knowledgeSearchLimit;
 
-  const result = await projectDataService.listKnowledgeEntities(
-    env, tokenData.projectId, entityType, limit, 0,
-  );
+  try {
+    const result = await projectDataService.listKnowledgeEntities(
+      env, tokenData.projectId, entityType, limit, 0,
+    );
 
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({
-      entities: result.entities,
-      total: result.total,
-    }, null, 2) }],
-  });
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify({
+        entities: result.entities,
+        total: result.total,
+      }, null, 2) }],
+    });
+  } catch (err) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get project knowledge: ${(err as Error).message}`);
+  }
 }
 
 // ─── get_relevant_knowledge ─────────────────────────────────────────────────
@@ -261,13 +278,17 @@ export async function handleGetRelevantKnowledge(
     ? Math.min(Math.max(1, params.limit), limits.knowledgeAutoRetrieveLimit)
     : limits.knowledgeAutoRetrieveLimit;
 
-  const results = await projectDataService.getRelevantKnowledge(
-    env, tokenData.projectId, context, limit,
-  );
+  try {
+    const results = await projectDataService.getRelevantKnowledge(
+      env, tokenData.projectId, context, limit,
+    );
 
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ observations: results, count: results.length }, null, 2) }],
-  });
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify({ observations: results, count: results.length }, null, 2) }],
+    });
+  } catch (err) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get relevant knowledge: ${(err as Error).message}`);
+  }
 }
 
 // ─── relate_knowledge ───────────────────────────────────────────────────────
@@ -328,16 +349,20 @@ export async function handleGetRelated(
 
   const relationType = typeof params.relationType === 'string' ? params.relationType : null;
 
-  const entity = await projectDataService.getKnowledgeEntityByName(env, tokenData.projectId, entityName);
-  if (!entity) return jsonRpcError(requestId, INVALID_PARAMS, `Entity not found: ${entityName}`);
+  try {
+    const entity = await projectDataService.getKnowledgeEntityByName(env, tokenData.projectId, entityName);
+    if (!entity) return jsonRpcError(requestId, INVALID_PARAMS, `Entity not found: ${entityName}`);
 
-  const relations = await projectDataService.getKnowledgeRelated(
-    env, tokenData.projectId, entity.id, relationType,
-  );
+    const relations = await projectDataService.getKnowledgeRelated(
+      env, tokenData.projectId, entity.id, relationType,
+    );
 
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ entityId: entity.id, relations }, null, 2) }],
-  });
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify({ entityId: entity.id, relations }, null, 2) }],
+    });
+  } catch (err) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get related knowledge: ${(err as Error).message}`);
+  }
 }
 
 // ─── confirm_knowledge ──────────────────────────────────────────────────────
@@ -351,10 +376,14 @@ export async function handleConfirmKnowledge(
   const observationId = typeof params.observationId === 'string' ? params.observationId.trim() : '';
   if (!observationId) return jsonRpcError(requestId, INVALID_PARAMS, 'observationId is required');
 
-  await projectDataService.confirmKnowledgeObservation(env, tokenData.projectId, observationId);
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ confirmed: true, observationId }, null, 2) }],
-  });
+  try {
+    await projectDataService.confirmKnowledgeObservation(env, tokenData.projectId, observationId);
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify({ confirmed: true, observationId }, null, 2) }],
+    });
+  } catch (err) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to confirm knowledge: ${(err as Error).message}`);
+  }
 }
 
 // ─── flag_contradiction ─────────────────────────────────────────────────────
