@@ -389,8 +389,9 @@ mcpRoutes.post('/', async (c) => {
       }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Tool execution failed';
-        log.error('mcp.tool_call_failed', { tool: toolName, error: String(err) });
-        return c.json(jsonRpcError(requestId, INTERNAL_ERROR, `Tool '${toolName}' failed: ${message}`));
+        const name = toolName ?? '<unknown>';
+        log.error('mcp.tool_call_failed', { tool: name, error: String(err) });
+        return c.json(jsonRpcError(requestId, INTERNAL_ERROR, `Tool '${name}' failed: ${message}`));
       }
     }
 

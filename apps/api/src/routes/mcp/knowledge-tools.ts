@@ -135,7 +135,7 @@ export async function handleUpdateKnowledge(
       }, null, 2) }],
     });
   } catch (err) {
-    return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to update knowledge: ${(err as Error).message}`);
   }
 }
 
@@ -156,7 +156,7 @@ export async function handleRemoveKnowledge(
       content: [{ type: 'text', text: JSON.stringify({ removed: true, observationId }, null, 2) }],
     });
   } catch (err) {
-    return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to remove knowledge: ${(err as Error).message}`);
   }
 }
 
@@ -332,7 +332,7 @@ export async function handleRelateKnowledge(
       }, null, 2) }],
     });
   } catch (err) {
-    return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to relate knowledge: ${(err as Error).message}`);
   }
 }
 
@@ -417,6 +417,6 @@ export async function handleFlagContradiction(
       }, null, 2) }],
     });
   } catch (err) {
-    return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to flag contradiction: ${(err as Error).message}`);
   }
 }
