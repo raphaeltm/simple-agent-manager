@@ -167,11 +167,11 @@ describe('Observability ingest auth regression', () => {
       expect(mockDoFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('succeeds with alternative synthetic hostname (no dots)', async () => {
+    it('succeeds with any dotless hostname (guard is not hardcoded to "internal")', async () => {
       const env = createEnv();
 
       const res = await app.request(
-        'https://fake-host/api/admin/observability/logs/ingest',
+        'https://worker/api/admin/observability/logs/ingest',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -181,6 +181,7 @@ describe('Observability ingest auth regression', () => {
       );
 
       expect(res.status).toBe(200);
+      expect(mockDoFetch).toHaveBeenCalledTimes(1);
     });
 
     it('rejects external requests with real hostname (401)', async () => {
@@ -266,6 +267,24 @@ describe('Observability ingest auth regression', () => {
       );
 
       expect(res.status).toBe(401);
+    });
+
+    it('GET /api/admin/observability/logs/stream returns 403 without superadmin role', async () => {
+      const env = createEnv();
+
+      const res = await app.request(
+        'https://api.example.com/api/admin/observability/logs/stream',
+        {
+          headers: {
+            Upgrade: 'websocket',
+            'X-Test-Session': 'true',
+            'X-Test-Role': 'user',
+          },
+        },
+        env,
+      );
+
+      expect(res.status).toBe(403);
     });
 
     it('POST /api/admin/observability/logs/query returns 403 without superadmin role', async () => {
