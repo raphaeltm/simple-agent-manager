@@ -35,6 +35,11 @@ const (
 	workspaceReadyStatusRecovery = "recovery"
 
 	gitConfigMaxAttempts = 5
+
+	// Safety limits for user-supplied git identity values (RFC 5321 email max
+	// is 254; 512 is generous for display names).
+	gitConfigMaxNameLen  = 512
+	gitConfigMaxEmailLen = 254
 )
 
 var projectEnvKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -2124,6 +2129,14 @@ func configureGitCredentialHelper(ctx context.Context, containerID, helperPath s
 }
 
 func configureSystemGit(ctx context.Context, containerID, key, value, label string) error {
+	// Reject values that start with "-" so they cannot be misinterpreted as
+	// git flags (e.g. "--no-includes"). exec.CommandContext prevents shell
+	// injection, but git's own argument parser could treat a leading-dash
+	// value as an option.
+	if strings.HasPrefix(value, "-") {
+		return fmt.Errorf("refusing to configure %s: value must not start with a dash", label)
+	}
+
 	var lastOutput string
 	var lastErr error
 
@@ -2216,9 +2229,20 @@ func hasActiveGitConfigProcess(ctx context.Context, containerID string) (bool, e
 	return gitConfigProcessActive(string(output)), nil
 }
 
+// gitConfigProcessRe matches process lines where the binary is "git" (or a
+// path ending in /git) followed by the "config" subcommand, or is
+// "git-config" (the plumbing binary). Substring-only matching like
+// strings.Contains("git config") would false-positive on unrelated commands
+// such as "python3 check-git-config-settings.py".
+var gitConfigProcessRe = regexp.MustCompile(`(?:^|/)git(?:-config|\s+config)(?:\s|$)`)
+
 func gitConfigProcessActive(psOutput string) bool {
 	for _, line := range strings.Split(psOutput, "\n") {
-		if strings.Contains(line, "git config") || strings.Contains(line, "git-config") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if gitConfigProcessRe.MatchString(trimmed) {
 			return true
 		}
 	}
@@ -2232,6 +2256,15 @@ func resolveGitIdentity(state *bootstrapState) (name string, email string, ok bo
 
 	email = strings.TrimSpace(state.GitUserEmail)
 	name = strings.TrimSpace(state.GitUserName)
+
+	// Enforce length limits on user-supplied identity values to prevent
+	// oversized values from being written to /etc/gitconfig.
+	if len(email) > gitConfigMaxEmailLen {
+		email = email[:gitConfigMaxEmailLen]
+	}
+	if len(name) > gitConfigMaxNameLen {
+		name = name[:gitConfigMaxNameLen]
+	}
 
 	// Noreply email fallback: when the user has no public email, construct a
 	// GitHub noreply address from their GitHub ID and login name. This ensures

@@ -2541,20 +2541,88 @@ func TestIsGitConfigLockError(t *testing.T) {
 func TestGitConfigProcessActive(t *testing.T) {
 	t.Parallel()
 
-	activeOutput := `COMMAND
-/usr/bin/git config --system credential.helper /usr/local/bin/git-credential-sam
-/bin/sh -c sleep 10
-`
-	if !gitConfigProcessActive(activeOutput) {
-		t.Fatal("expected active git config process")
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{
+			name: "git config --system running",
+			output: "COMMAND\n/usr/bin/git config --system credential.helper /usr/local/bin/git-credential-sam\n/bin/sh -c sleep 10\n",
+			want: true,
+		},
+		{
+			name: "git-config plumbing binary",
+			output: "COMMAND\n/usr/libexec/git-core/git-config --system user.name foo\n",
+			want: true,
+		},
+		{
+			name:   "bare git config",
+			output: "COMMAND\ngit config --global user.name foo\n",
+			want:   true,
+		},
+		{
+			name:   "no git config running",
+			output: "COMMAND\n/usr/bin/git status --short\n/bin/sh -c sleep 10\n",
+			want:   false,
+		},
+		{
+			name:   "false positive: script containing git config in name",
+			output: "COMMAND\n/usr/bin/python3 check-git-config-settings.py\n",
+			want:   false,
+		},
+		{
+			name:   "false positive: echo containing git config",
+			output: "COMMAND\n/bin/echo git config is broken\n",
+			want:   false,
+		},
 	}
 
-	inactiveOutput := `COMMAND
-/usr/bin/git status --short
-/bin/sh -c sleep 10
-`
-	if gitConfigProcessActive(inactiveOutput) {
-		t.Fatal("did not expect active git config process")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := gitConfigProcessActive(tc.output)
+			if got != tc.want {
+				t.Fatalf("gitConfigProcessActive() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConfigureSystemGitRejectsLeadingDash(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	// configureSystemGit should reject values starting with "-" before
+	// invoking any docker exec call.
+	err := configureSystemGit(ctx, "fake-container", "user.name", "--no-includes", "test")
+	if err == nil {
+		t.Fatal("expected error for value starting with dash")
+	}
+	if !strings.Contains(err.Error(), "must not start with a dash") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestResolveGitIdentityTruncatesLongValues(t *testing.T) {
+	t.Parallel()
+
+	longName := strings.Repeat("a", 1000)
+	longEmail := strings.Repeat("b", 500) + "@example.com"
+
+	state := &bootstrapState{
+		GitUserName:  longName,
+		GitUserEmail: longEmail,
+	}
+
+	name, email, ok := resolveGitIdentity(state)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(name) > gitConfigMaxNameLen {
+		t.Fatalf("name length %d exceeds max %d", len(name), gitConfigMaxNameLen)
+	}
+	if len(email) > gitConfigMaxEmailLen {
+		t.Fatalf("email length %d exceeds max %d", len(email), gitConfigMaxEmailLen)
 	}
 }
 
