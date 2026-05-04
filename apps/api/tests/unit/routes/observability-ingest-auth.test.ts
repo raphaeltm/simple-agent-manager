@@ -167,11 +167,11 @@ describe('Observability ingest auth regression', () => {
       expect(mockDoFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('succeeds with any dotless hostname (guard is not hardcoded to "internal")', async () => {
+    it('rejects other dotless hostnames that are not in the allow-list', async () => {
       const env = createEnv();
 
       const res = await app.request(
-        'https://worker/api/admin/observability/logs/ingest',
+        'https://localhost/api/admin/observability/logs/ingest',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -180,8 +180,7 @@ describe('Observability ingest auth regression', () => {
         env,
       );
 
-      expect(res.status).toBe(200);
-      expect(mockDoFetch).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(401);
     });
 
     it('rejects external requests with real hostname (401)', async () => {
