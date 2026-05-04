@@ -7,7 +7,7 @@
  * 3. API logger (createInstrumentedLogger) persists error-level entries to D1
  * 4. Scheduled purge is registered in the cron handler
  * 5. All three sources use fire-and-forget (waitUntil + catch) patterns
- * 6. Console.error is still called for all sources (CF Workers Observability)
+ * 6. Routes still emit structured logs for CF Workers Observability
  *
  * Uses source-code analysis to verify integration wiring without Miniflare,
  * consistent with existing integration test patterns in this project.
@@ -147,8 +147,9 @@ describe('observability error ingestion pipeline', () => {
       expect(nodesRoute).toContain('c.executionCtx.waitUntil(promise)');
     });
 
-    it('nodes route still logs via structured logger for CF Workers Observability', () => {
-      expect(nodesRoute).toContain("log.error('vm_agent_error'");
+    it('nodes route preserves VM agent severity in structured logs for CF Workers Observability', () => {
+      expect(nodesRoute).toContain("log[level]('vm_agent_error'");
+      expect(nodesRoute).toContain("const VALID_VM_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info'])");
     });
   });
 

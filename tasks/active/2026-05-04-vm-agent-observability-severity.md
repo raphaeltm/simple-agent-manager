@@ -33,10 +33,10 @@ This pollutes the admin error view and makes real VM agent failures harder to tr
 
 ## Acceptance Criteria
 
-- [ ] Successful VM agent lifecycle events persist as `info`, not `error`.
-- [ ] Actual VM agent failures remain `error`.
-- [ ] Non-critical failed operations such as unsupported session mode are classified intentionally as `warn` or `error` with a documented reason.
-- [ ] Tests cover representative lifecycle success, warning, and failure events.
-- [ ] Local tests/typecheck relevant to VM agent/API changes pass.
+- [x] Successful VM agent lifecycle events persist as `info`, not `error`.
+- [x] Actual VM agent failures remain `error`.
+- [x] Non-critical failed operations such as unsupported session mode are classified intentionally as `warn` or `error` with a documented reason.
+- [x] Tests cover representative lifecycle success, warning, and failure events.
+- [x] Local tests/typecheck relevant to VM agent/API changes pass.
 - [ ] Staging deployment and observability verification pass.
 - [ ] PR is opened with verification evidence.
