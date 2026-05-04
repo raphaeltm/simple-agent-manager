@@ -29,7 +29,7 @@ This pollutes the admin error view and makes real VM agent failures harder to tr
 - [x] Deploy to staging through `deploy-staging.yml`.
 - [x] Verify staging observability D1 grouped by source/level/message no longer shows success/lifecycle messages at error level.
 - [x] Provision a real staging VM, verify heartbeat/workspace access, and clean it up.
-- [ ] Open a PR with verification evidence.
+- [x] Open a PR with verification evidence.
 
 ## Acceptance Criteria
 
@@ -39,7 +39,7 @@ This pollutes the admin error view and makes real VM agent failures harder to tr
 - [x] Tests cover representative lifecycle success, warning, and failure events.
 - [x] Local tests/typecheck relevant to VM agent/API changes pass.
 - [x] Staging deployment and observability verification pass.
-- [ ] PR is opened with verification evidence.
+- [x] PR is opened with verification evidence.
 
 ## Verification Evidence
 
@@ -66,4 +66,5 @@ This pollutes the admin error view and makes real VM agent failures harder to tr
   - Created staging workspace `01KQRXZZJ4CTQXWCF0B1TPXCZP` on node `01KQRXZZ48AKXR6SZ63ECDAA4C`; VM agent heartbeat reached healthy at `2026-05-04T07:27:01.664Z`.
   - Created agent session `01KQRYD0Z6MMB0T8DSS795T157`, connected to `wss://ws-01KQRXZZJ4CTQXWCF0B1TPXCZP.sammy.party/agent/ws`, sent an ACP prompt, received agent response and `session_prompt_done`.
   - Staging observability D1 query with cutoff `2026-05-04T07:24:39.311Z` showed the representative lifecycle messages persisted with `level='info'`: `Agent selection started`, `Agent credential fetched`, `Agent binary verified/installed`, `ACP Initialize started/succeeded`, `ACP NewSession started/succeeded`, `Agent ready`, `ACP Prompt started`, and `ACP Prompt completed`.
-  - Cleanup confirmed: `/api/nodes` and `/api/workspaces` returned empty lists for the smoke user; the created node/workspace returned `404`.
+- Cleanup confirmed: `/api/nodes` and `/api/workspaces` returned empty lists for the smoke user; the created node/workspace returned `404`.
+- PR opened with verification evidence: https://github.com/raphaeltm/simple-agent-manager/pull/892
