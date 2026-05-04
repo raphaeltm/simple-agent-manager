@@ -141,9 +141,9 @@ func TestSAMEnvFallbackMerge(t *testing.T) {
 	}
 	fallback := []string{
 		"SAM_WORKSPACE_ID=ws-from-fallback", // Should NOT override file value
-		"SAM_API_URL=https://api.other.com",  // Should NOT override file value
-		"SAM_NODE_ID=node-456",               // Missing from file, should be added
-		"SAM_PROJECT_ID=proj-789",            // Missing from file, should be added
+		"SAM_API_URL=https://api.other.com", // Should NOT override file value
+		"SAM_NODE_ID=node-456",              // Missing from file, should be added
+		"SAM_PROJECT_ID=proj-789",           // Missing from file, should be added
 	}
 
 	// Merge: only add fallback vars not already present.
@@ -241,6 +241,31 @@ func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
 	}
 	if info.envVarName != "" {
 		t.Fatalf("envVarName=%q, want empty for auth-file injection", info.envVarName)
+	}
+}
+
+func TestAgentInstallScriptCleansBrokenGitHubCLIRepoBeforeNpmBootstrap(t *testing.T) {
+	t.Parallel()
+
+	info := agentCommandInfo{
+		command:    "claude-agent-acp",
+		installCmd: "npm install -g @zed-industries/claude-agent-acp",
+		isNpmBased: true,
+	}
+
+	script := agentInstallScript(info)
+	for _, want := range []string{
+		"rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg",
+		"apt-get update -qq",
+		"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm",
+		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"`,
+		"npm install -g n",
+		"n 22",
+		"npm install -g @zed-industries/claude-agent-acp",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("agentInstallScript missing %q in %q", want, script)
+		}
 	}
 }
 
@@ -1026,14 +1051,14 @@ func TestResolveContainerHomeDirFallbackBehavior(t *testing.T) {
 	// This test verifies that resolveContainerHomeDir always returns a valid path
 	// even when all resolution methods fail. We can't easily test the actual
 	// container interaction in unit tests, but we can verify the fallback logic.
-	
+
 	// The function should never return an error in normal operation due to the
 	// final fallback to /root, but we test the error handling path for completeness.
-	
+
 	// Mock context and empty container/user (would fail in real usage, but tests fallback)
 	ctx := context.Background()
 	_, err := resolveContainerHomeDir(ctx, "", "")
-	
+
 	// Even with invalid inputs, the function should either return a path or an error
 	// that can be handled by callers with fallback to /root
 	if err != nil {
@@ -1047,23 +1072,23 @@ func TestAuthFileFunctionsHandleFallbackGracefully(t *testing.T) {
 
 	// Test that auth file functions handle the fallback case gracefully
 	// These tests use invalid container/user to trigger the fallback path
-	
+
 	ctx := context.Background()
-	
+
 	// Test writeAuthFileToContainer with invalid container (should use /root fallback)
 	err := writeAuthFileToContainer(ctx, "invalid-container", "testuser", ".test/auth.json", `{"test": "data"}`)
 	if err != nil {
 		// Expected to fail due to invalid container, but should not panic
 		t.Logf("writeAuthFileToContainer handled invalid container gracefully: %v", err)
 	}
-	
+
 	// Test readAuthFileFromContainer with invalid container (should use /root fallback)
 	_, err = readAuthFileFromContainer(ctx, "invalid-container", "testuser", ".test/auth.json")
 	if err != nil {
 		// Expected to fail due to invalid container, but should not panic
 		t.Logf("readAuthFileFromContainer handled invalid container gracefully: %v", err)
 	}
-	
+
 	// Test readOptionalFileFromContainer with invalid container (should use /root fallback)
 	_, err = readOptionalFileFromContainer(ctx, "invalid-container", "testuser", ".test/config.toml")
 	if err != nil {
@@ -1126,7 +1151,7 @@ func TestAuthFilePathValidation(t *testing.T) {
 			shouldError: true,
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

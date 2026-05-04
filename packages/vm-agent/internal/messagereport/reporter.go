@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"math/rand"
@@ -429,7 +430,7 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 	start := time.Now()
 
 	for {
-		statusCode, err := r.doPost(url, token, body)
+		statusCode, responseBody, err := r.doPost(url, token, body)
 		if err == nil && statusCode >= 200 && statusCode < 300 {
 			return nil // success
 		}
@@ -437,7 +438,11 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 		// Permanent client errors — discard the batch.
 		if statusCode == 400 || statusCode == 401 || statusCode == 403 {
 			slog.Warn("messagereport: permanent error, discarding batch",
-				"statusCode", statusCode, "count", len(batch))
+				"statusCode", statusCode,
+				"count", len(batch),
+				"workspaceId", wsID,
+				"responseBody", responseBody,
+			)
 			// Delete from outbox so we don't retry forever.
 			r.deleteBatch(batch)
 			return nil
@@ -475,20 +480,38 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 	}
 }
 
-func (r *Reporter) doPost(url, token string, body []byte) (int, error) {
+func (r *Reporter) doPost(url, token string, body []byte) (int, string, error) {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode, nil
+	responseBody := readBoundedHTTPBody(resp.Body)
+	return resp.StatusCode, responseBody, nil
+}
+
+const maxLoggedResponseBodyBytes int64 = 2048
+
+func readBoundedHTTPBody(body httpBodyReader) string {
+	if body == nil {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(body, maxLoggedResponseBodyBytes))
+	if err != nil {
+		return fmt.Sprintf("<read error: %v>", err)
+	}
+	return strings.TrimSpace(string(data))
+}
+
+type httpBodyReader interface {
+	Read([]byte) (int, error)
 }
 
 func (r *Reporter) bumpAttempts(batch []outboxRow) {

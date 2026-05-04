@@ -751,15 +751,7 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 
 	// For npm-based agents, ensure npm is available before running the install.
 	// Non-npm agents (e.g., pip-based) handle their own prerequisites in installCmd.
-	var installScript string
-	if info.isNpmBased {
-		installScript = fmt.Sprintf(
-			`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
-			info.installCmd,
-		)
-	} else {
-		installScript = info.installCmd
-	}
+	installScript := agentInstallScript(info)
 
 	installArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", installScript}
 	installCmd := exec.CommandContext(ctx, "docker", installArgs...)
@@ -770,6 +762,16 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 
 	slog.Info("Agent binary installed successfully", "command", info.command)
 	return nil
+}
+
+func agentInstallScript(info agentCommandInfo) string {
+	if !info.isNpmBased {
+		return info.installCmd
+	}
+	return fmt.Sprintf(
+		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; { which npm >/dev/null 2>&1 && [ "$node_major" -ge 20 ]; } || { rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm && npm install -g n && n 22 && hash -r; }; %s`,
+		info.installCmd,
+	)
 }
 
 // agentCommandInfo holds the command, args, env var, and install command for an agent.
@@ -798,11 +800,11 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	case "openai-codex":
 		if credentialKind == "oauth-token" {
 			return agentCommandInfo{
-				command:    "codex-acp",
-				args:       nil,
-				envVarName: "",
-				installCmd: "npm install -g @zed-industries/codex-acp",
-				isNpmBased: true,
+				command:       "codex-acp",
+				args:          nil,
+				envVarName:    "",
+				installCmd:    "npm install -g @zed-industries/codex-acp",
+				isNpmBased:    true,
 				injectionMode: "auth-file",
 				authFilePath:  ".codex/auth.json",
 			}

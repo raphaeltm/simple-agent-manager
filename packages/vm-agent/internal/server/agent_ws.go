@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // serverEventAppender adapts the Server's appendNodeEvent method to the
@@ -225,6 +226,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg := s.acpConfig
 	cfg.WorkspaceID = workspaceID
 	cfg.SessionID = sessionID
+	cfg.OnPromptComplete = nil
 
 	// Override GitTokenFetcher per-session so it targets the correct workspace's
 	// git-token endpoint. The callback token is resolved at call time via
@@ -273,6 +275,35 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	}
 	if callbackToken := s.callbackTokenForWorkspace(workspaceID); callbackToken != "" {
 		cfg.CallbackToken = callbackToken
+	}
+	taskCtx, hasTaskCtx := s.sessionTaskCtx[hostKey]
+	if !hasTaskCtx && s.config != nil && s.config.TaskID != "" && s.config.ProjectID != "" && workspaceID == strings.TrimSpace(s.config.WorkspaceID) {
+		taskMode := strings.TrimSpace(s.config.TaskMode)
+		if taskMode == "" {
+			taskMode = config.TaskModeTask
+		}
+		taskCtx = taskCallbackContext{
+			ProjectID:   strings.TrimSpace(s.config.ProjectID),
+			TaskID:      strings.TrimSpace(s.config.TaskID),
+			WorkspaceID: workspaceID,
+			TaskMode:    taskMode,
+		}
+		hasTaskCtx = true
+	}
+	if hasTaskCtx && s.config != nil && taskCtx.ProjectID != "" && taskCtx.TaskID != "" && taskCtx.WorkspaceID != "" {
+		cfg.OnPromptComplete = s.makeTaskCompletionCallback(
+			s.config.ControlPlaneURL,
+			taskCtx.ProjectID,
+			taskCtx.TaskID,
+			taskCtx.WorkspaceID,
+			taskCtx.TaskMode,
+		)
+		slog.Info("Task completion callback bound to session",
+			"workspace", workspaceID,
+			"sessionId", sessionID,
+			"taskId", taskCtx.TaskID,
+			"taskMode", taskCtx.TaskMode,
+		)
 	}
 	if runtime != nil {
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {

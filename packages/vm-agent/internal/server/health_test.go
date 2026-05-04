@@ -57,7 +57,9 @@ func TestCallbackTokenRefresh(t *testing.T) {
 	s := &Server{
 		config:        cfg,
 		callbackToken: cfg.CallbackToken,
-		workspaces:    make(map[string]*WorkspaceRuntime),
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-token-scoped": {ID: "ws-token-scoped", CallbackToken: "workspace-token"},
+		},
 		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
 	}
@@ -70,6 +72,9 @@ func TestCallbackTokenRefresh(t *testing.T) {
 
 	if got := s.getCallbackToken(); got != refreshedToken {
 		t.Fatalf("expected refreshed token %q, got %q", refreshedToken, got)
+	}
+	if got := s.workspaces["ws-token-scoped"].CallbackToken; got != "workspace-token" {
+		t.Fatalf("expected workspace token to remain scoped, got %q", got)
 	}
 
 	s.sendNodeHeartbeat()

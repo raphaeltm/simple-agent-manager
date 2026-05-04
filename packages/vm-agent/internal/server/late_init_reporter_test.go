@@ -195,8 +195,8 @@ func TestSetTokenAllReporters(t *testing.T) {
 	s.getOrCreateReporter("ws-1", "proj-1", "sess-1")
 	s.getOrCreateReporter("ws-2", "proj-1", "sess-2")
 
-	// Should not panic — verifies token propagation works
-	s.setTokenAllReporters("new-token")
+	// Should not panic — verifies token propagation walks existing reporters.
+	s.setTokenAllReporters()
 
 	s.shutdownAllReporters()
 }

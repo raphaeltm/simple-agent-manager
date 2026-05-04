@@ -93,14 +93,14 @@ type ProjectRuntimeFile struct {
 // ProvisionState carries optional credential and git identity data used when
 // preparing a workspace environment outside the bootstrap-token flow.
 type ProvisionState struct {
-	GitHubToken              string
-	GitUserName              string
-	GitUserEmail             string
-	GitHubID                 string
-	ProjectEnvVars           []ProjectRuntimeEnvVar
-	ProjectFiles             []ProjectRuntimeFile
-	Lightweight              bool   // Skip devcontainer build, use fallback image for faster startup
-	DevcontainerConfigName   string // Named devcontainer config (subdirectory under .devcontainer/)
+	GitHubToken            string
+	GitUserName            string
+	GitUserEmail           string
+	GitHubID               string
+	ProjectEnvVars         []ProjectRuntimeEnvVar
+	ProjectFiles           []ProjectRuntimeFile
+	Lightweight            bool   // Skip devcontainer build, use fallback image for faster startup
+	DevcontainerConfigName string // Named devcontainer config (subdirectory under .devcontainer/)
 }
 
 // Run redeems bootstrap credentials (if configured), prepares the workspace, and signals ready.
@@ -768,7 +768,7 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 	}
 
 	slog.Info("Starting lightweight container (default image)", "workspaceDir", cfg.WorkspaceDir)
-	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath); err != nil {
+	if _, err := runLightweightDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath); err != nil {
 		return false, err
 	}
 
@@ -1077,9 +1077,15 @@ func normalizeLifecycleCommandValue(value interface{}) interface{} {
 	}
 }
 
+const (
+	containerUserSourceReadConfiguration = "read-configuration"
+	containerUserSourceMetadata          = "devcontainer.metadata"
+	containerUserSourceExecFallback      = "docker exec id -un fallback"
+)
+
 func runReadConfiguration(ctx context.Context, workspaceDir, devcontainerConfigName string) (*devcontainerReadConfigurationResult, error) {
 	args := []string{
-		"read-configuration",
+		containerUserSourceReadConfiguration,
 		"--workspace-folder", workspaceDir,
 		"--include-merged-configuration",
 	}
@@ -1211,6 +1217,13 @@ func detectContainerUserFromExec(ctx context.Context, cfg *config.Config) string
 	return strings.TrimSpace(string(output))
 }
 
+type containerUserDetector struct {
+	source          string
+	missingUserLog  string
+	detectedUserLog string
+	detectUser      func() string
+}
+
 func ensureContainerUserResolved(ctx context.Context, cfg *config.Config, devcontainerConfigName string) {
 	override := strings.TrimSpace(cfg.ContainerUser)
 	if override != "" {
@@ -1219,35 +1232,78 @@ func ensureContainerUserResolved(ctx context.Context, cfg *config.Config, devcon
 		return
 	}
 
-	if detected := detectContainerUserFromReadConfiguration(ctx, cfg, devcontainerConfigName); detected != "" {
-		cfg.ContainerUser = detected
-		if detected == "root" {
-			slog.Warn("Detected devcontainer user is root", "source", "read-configuration")
-		} else {
-			slog.Info("Detected devcontainer user via read-configuration", "user", detected)
-		}
-		return
+	detectors := []containerUserDetector{
+		{
+			source:          containerUserSourceReadConfiguration,
+			missingUserLog:  "Ignoring read-configuration devcontainer user because it is absent from the running container",
+			detectedUserLog: "Detected devcontainer user via read-configuration",
+			detectUser: func() string {
+				return detectContainerUserFromReadConfiguration(ctx, cfg, devcontainerConfigName)
+			},
+		},
+		{
+			source:          containerUserSourceMetadata,
+			missingUserLog:  "Ignoring devcontainer.metadata user because it is absent from the running container",
+			detectedUserLog: "Detected devcontainer user via devcontainer.metadata",
+			detectUser: func() string {
+				return detectContainerUserFromMetadata(ctx, cfg)
+			},
+		},
+		{
+			source:          containerUserSourceExecFallback,
+			missingUserLog:  "Detected devcontainer user does not exist in running container",
+			detectedUserLog: "Detected devcontainer user via docker exec fallback",
+			detectUser: func() string {
+				return detectContainerUserFromExec(ctx, cfg)
+			},
+		},
 	}
-	if detected := detectContainerUserFromMetadata(ctx, cfg); detected != "" {
-		cfg.ContainerUser = detected
-		if detected == "root" {
-			slog.Warn("Detected devcontainer user is root", "source", "devcontainer.metadata")
-		} else {
-			slog.Info("Detected devcontainer user via devcontainer.metadata", "user", detected)
+
+	for _, detector := range detectors {
+		if applyDetectedContainerUser(ctx, cfg, detector) {
+			return
 		}
-		return
-	}
-	if detected := detectContainerUserFromExec(ctx, cfg); detected != "" {
-		cfg.ContainerUser = detected
-		if detected == "root" {
-			slog.Warn("Detected devcontainer user is root", "source", "docker exec id -un fallback")
-		} else {
-			slog.Info("Detected devcontainer user via docker exec fallback", "user", detected)
-		}
-		return
 	}
 
 	slog.Warn("Unable to detect devcontainer user; docker exec will use container default user")
+}
+
+func applyDetectedContainerUser(ctx context.Context, cfg *config.Config, detector containerUserDetector) bool {
+	detected := detector.detectUser()
+	if detected == "" {
+		return false
+	}
+	if !detectedContainerUserExists(ctx, cfg, detected, detector.source) {
+		slog.Warn(detector.missingUserLog, "source", detector.source, "user", detected)
+		return false
+	}
+
+	cfg.ContainerUser = detected
+	if detected == "root" {
+		slog.Warn("Detected devcontainer user is root", "source", detector.source)
+	} else {
+		slog.Info(detector.detectedUserLog, "user", detected)
+	}
+	return true
+}
+
+func detectedContainerUserExists(ctx context.Context, cfg *config.Config, user, source string) bool {
+	user = strings.TrimSpace(user)
+	if user == "" || user == "root" {
+		return user != ""
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		slog.Info("Container user detection: running container unavailable for user validation", "source", source, "user", user, "error", err)
+		return true
+	}
+
+	if _, err := resolveContainerUserID(ctx, containerID, user, "-u", "uid"); err != nil {
+		slog.Warn("Container user detection: detected user is absent from running container", "source", source, "user", user, "error", err)
+		return false
+	}
+	return true
 }
 
 func ensureWorkspaceOwnership(ctx context.Context, cfg *config.Config) error {
@@ -1436,6 +1492,26 @@ func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeN
 	return true, nil
 }
 
+// runLightweightDevcontainerWithDefault starts the fallback image without
+// injecting devcontainer Features. Lightweight mode is meant to avoid a Docker
+// build; Features force devcontainer CLI to build an extended image.
+func runLightweightDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) (bool, error) {
+	configPath, err := writeDefaultDevcontainerConfigForMode(cfg, volumeName, credHelperHostPath, false)
+	if err != nil {
+		return false, fmt.Errorf("failed to write lightweight devcontainer config: %w", err)
+	}
+	slog.Info("Using lightweight default devcontainer config", "configPath", configPath, "image", cfg.DefaultDevcontainerImage)
+
+	args := devcontainerUpArgs(cfg, configPath, "")
+	cmd := exec.CommandContext(ctx, "devcontainer", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("devcontainer up failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	return true, nil
+}
+
 // removeStaleContainers finds and removes any containers (running or stopped)
 // matching the workspace label. This is used before the fallback devcontainer
 // build to ensure a clean slate — without it, devcontainer up may reuse a
@@ -1472,6 +1548,10 @@ func removeStaleContainers(ctx context.Context, cfg *config.Config) {
 // set. When omitted, the container runs as the image's default USER (e.g., "vscode" for
 // Microsoft devcontainer images), which is the correct behavior for most images.
 func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName, credHelperHostPath string) (string, error) {
+	return writeDefaultDevcontainerConfigForMode(cfg, volumeName, credHelperHostPath, true)
+}
+
+func writeDefaultDevcontainerConfigForMode(cfg *config.Config, volumeName, credHelperHostPath string, includeDefaultFeatures bool) (string, error) {
 	configPath := cfg.DefaultDevcontainerConfigPath
 	if configPath == "" {
 		configPath = config.DefaultDevcontainerConfigPath
@@ -1512,16 +1592,27 @@ func writeDefaultDevcontainerConfig(cfg *config.Config, volumeName, credHelperHo
 		credLines = fmt.Sprintf(",\n  \"mounts\": [\"%s\"],\n  \"containerEnv\": {\n    \"GIT_CONFIG_COUNT\": \"1\",\n    \"GIT_CONFIG_KEY_0\": \"credential.helper\",\n    \"GIT_CONFIG_VALUE_0\": \"%s\"\n  }", credentialHelperMountEntry(credHelperHostPath), credentialHelperContainerPath)
 	}
 
-	configJSON := fmt.Sprintf(`{
-  "name": "Default Workspace",
-  "image": %q,
-  "privileged": true,
+	featuresLine := ""
+	if includeDefaultFeatures {
+		featuresLine = `,
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {}
-  }%s%s%s
+  }`
+	}
+
+	updateRemoteUserUIDLine := ""
+	if !includeDefaultFeatures {
+		updateRemoteUserUIDLine = `,
+  "updateRemoteUserUID": false`
+	}
+
+	configJSON := fmt.Sprintf(`{
+  "name": "Default Workspace",
+  "image": %q,
+  "privileged": true%s%s%s%s%s
 }
-`, image, remoteUserLine, mountLines, credLines)
+`, image, featuresLine, updateRemoteUserUIDLine, remoteUserLine, mountLines, credLines)
 
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write default config: %w", err)
@@ -1623,12 +1714,16 @@ func ensureGitHubCLI(ctx context.Context, cfg *config.Config) error {
 	// This works on Debian/Ubuntu-based images (the vast majority of devcontainers).
 	// For Alpine or other distros, we fall back to a direct binary download.
 	installScript := `set -e
+cleanup_github_cli_apt() {
+  rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg
+}
+trap 'status=$?; if [ "$status" -ne 0 ]; then cleanup_github_cli_apt; fi; exit "$status"' EXIT
 # Try apt-based install first (Debian/Ubuntu)
 if command -v apt-get >/dev/null 2>&1; then
+  cleanup_github_cli_apt
   (type -p wget >/dev/null || (apt-get update && apt-get install -y wget)) && \
   mkdir -p -m 755 /etc/apt/keyrings && \
-  out=$(wget -nv -O- https://cli.github.com/packages/githubcli-archive-keyring.gpg) && \
-  echo "$out" | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+  wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
   chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
   apt-get update && apt-get install -y gh
