@@ -1,7 +1,7 @@
 import { describe, expect,it } from 'vitest';
 
 import type { ChatMessageResponse } from '../../../src/lib/api';
-import { getLastMessageId,mergeMessages } from '../../../src/lib/merge-messages';
+import { getLastMessageId,mergeMessages, reconcileHasMoreAfterRefresh } from '../../../src/lib/merge-messages';
 
 function msg(overrides: Partial<ChatMessageResponse> & { id: string }): ChatMessageResponse {
   return {
@@ -254,6 +254,68 @@ describe('mergeMessages', () => {
       const incoming = [msg({ id: 'a', createdAt: 1 }), msg({ id: 'b', createdAt: 2 })];
       const result = mergeMessages(prev, incoming, 'prepend');
       expect(result).toHaveLength(2);
+    });
+  });
+
+  describe('refresh strategy', () => {
+    it('preserves older messages already loaded outside the latest REST page', () => {
+      const prev = [
+        msg({ id: 'older-1', createdAt: 1 }),
+        msg({ id: 'older-2', createdAt: 2 }),
+        msg({ id: 'latest-1', createdAt: 3 }),
+        msg({ id: 'latest-2', createdAt: 4 }),
+      ];
+      const incoming = [
+        msg({ id: 'latest-1', content: 'updated', createdAt: 3 }),
+        msg({ id: 'latest-2', createdAt: 4 }),
+        msg({ id: 'latest-3', createdAt: 5 }),
+      ];
+
+      const result = mergeMessages(prev, incoming, 'refresh');
+
+      expect(result.map((m) => m.id)).toEqual(['older-1', 'older-2', 'latest-1', 'latest-2', 'latest-3']);
+      expect(result.find((m) => m.id === 'latest-1')!.content).toBe('updated');
+    });
+
+    it('reconciles optimistic user messages when refreshed server data includes them', () => {
+      const prev = [
+        msg({ id: 'optimistic-1', role: 'user', content: 'please fix this', createdAt: 1 }),
+      ];
+      const incoming = [
+        msg({ id: 'server-1', role: 'user', content: 'please fix this', createdAt: 1 }),
+      ];
+
+      const result = mergeMessages(prev, incoming, 'refresh');
+
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe('server-1');
+    });
+  });
+
+  describe('reconcileHasMoreAfterRefresh', () => {
+    it('keeps current pagination state when older messages are already loaded', () => {
+      const current = [
+        msg({ id: 'older', createdAt: 1 }),
+        msg({ id: 'latest', createdAt: 10 }),
+      ];
+      const incomingLatestPage = [
+        msg({ id: 'latest', createdAt: 10 }),
+      ];
+
+      expect(reconcileHasMoreAfterRefresh(current, incomingLatestPage, false, true)).toBe(false);
+      expect(reconcileHasMoreAfterRefresh(current, incomingLatestPage, true, true)).toBe(true);
+    });
+
+    it('trusts the server when no older messages are loaded before the refreshed page', () => {
+      const current = [
+        msg({ id: 'latest', createdAt: 10 }),
+      ];
+      const incomingLatestPage = [
+        msg({ id: 'latest', createdAt: 10 }),
+      ];
+
+      expect(reconcileHasMoreAfterRefresh(current, incomingLatestPage, false, true)).toBe(true);
+      expect(reconcileHasMoreAfterRefresh(current, incomingLatestPage, true, false)).toBe(false);
     });
   });
 

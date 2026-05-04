@@ -9,7 +9,7 @@
  */
 import type { ChatMessageResponse } from './api';
 
-export type MergeStrategy = 'replace' | 'append' | 'prepend';
+export type MergeStrategy = 'replace' | 'append' | 'prepend' | 'refresh';
 
 /**
  * Compare function for sorting messages by createdAt, then by id for stability.
@@ -80,6 +80,9 @@ function hasConfirmedDuplicate(
  *   Skips messages whose ID already exists.
  * - `prepend`: Add incoming messages to the beginning (load-more pagination).
  *   Skips messages whose ID already exists.
+ * - `refresh`: Incoming messages are the latest authoritative page from REST.
+ *   Updates/appends that page while preserving older messages already loaded
+ *   via pagination.
  *
  * All strategies return a sorted, deduplicated array.
  */
@@ -93,6 +96,9 @@ export function mergeMessages(
   }
   if (strategy === 'append') {
     return mergeAppend(prev, incoming);
+  }
+  if (strategy === 'refresh') {
+    return mergeRefresh(prev, incoming);
   }
   // prepend
   return mergePrepend(prev, incoming);
@@ -177,6 +183,33 @@ function mergeAppend(
 }
 
 /**
+ * Refresh strategy: REST returns only the newest page for long sessions, so it
+ * must not replace older messages the user already loaded. Incoming rows update
+ * existing IDs and add new server rows; optimistic messages are preserved until
+ * the server confirms the same user content.
+ */
+function mergeRefresh(
+  prev: ChatMessageResponse[],
+  incoming: ChatMessageResponse[],
+): ChatMessageResponse[] {
+  const map = new Map<string, ChatMessageResponse>();
+
+  for (const msg of prev) {
+    map.set(msg.id, msg);
+  }
+
+  for (const msg of incoming) {
+    const optimisticId = findMatchingOptimistic(map, msg);
+    if (optimisticId) {
+      map.delete(optimisticId);
+    }
+    map.set(msg.id, msg);
+  }
+
+  return Array.from(map.values()).sort(compareMessages);
+}
+
+/**
  * Prepend strategy: add older messages that don't already exist.
  * Used by load-more pagination.
  */
@@ -207,4 +240,27 @@ function mergePrepend(
  */
 export function getLastMessageId(messages: ChatMessageResponse[]): string | null {
   return messages.length > 0 ? messages[messages.length - 1]!.id : null;
+}
+
+/**
+ * A latest-page REST refresh may report hasMore=true because there are messages
+ * before that latest page. If the client already has older messages loaded, that
+ * signal would regress the pagination UI. Keep the current pagination state in
+ * that case; otherwise trust the server response.
+ */
+export function reconcileHasMoreAfterRefresh(
+  current: ChatMessageResponse[],
+  incoming: ChatMessageResponse[],
+  currentHasMore: boolean,
+  incomingHasMore: boolean,
+): boolean {
+  const incomingFirstCreatedAt = incoming[0]?.createdAt;
+  if (incomingFirstCreatedAt === undefined) {
+    return currentHasMore;
+  }
+
+  const hasLoadedOlderThanIncomingPage = current.some(
+    (msg) => msg.createdAt < incomingFirstCreatedAt,
+  );
+  return hasLoadedOlderThanIncomingPage ? currentHasMore : incomingHasMore;
 }

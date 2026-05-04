@@ -9,7 +9,7 @@ import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api';
 import { getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, resumeAgentSession, uploadSessionFiles } from '../../lib/api';
-import { mergeMessages } from '../../lib/merge-messages';
+import { mergeMessages, reconcileHasMoreAfterRefresh } from '../../lib/merge-messages';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
 import { deriveSessionState,VIRTUAL_START } from './types';
@@ -140,8 +140,10 @@ export function useSessionLifecycle(
     }, []),
     onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, catchUpHasMore: boolean) => {
       setSession(catchUpSession);
-      setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
-      setHasMore(catchUpHasMore);
+      setMessages((prev) => {
+        setHasMore((prevHasMore) => reconcileHasMoreAfterRefresh(prev, catchUpMessages, prevHasMore, catchUpHasMore));
+        return mergeMessages(prev, catchUpMessages, 'refresh');
+      });
     }, []),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
@@ -268,8 +270,10 @@ export function useSessionLifecycle(
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);
-          setHasMore(data.hasMore);
-          setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
+          setMessages((prev) => {
+            setHasMore((prevHasMore) => reconcileHasMoreAfterRefresh(prev, data.messages, prevHasMore, data.hasMore));
+            return mergeMessages(prev, data.messages, 'refresh');
+          });
           if (data.session.task) setTaskEmbed(data.session.task);
         }
       } catch (err) {

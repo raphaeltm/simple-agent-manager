@@ -138,14 +138,14 @@ function makeSession(id: string, status = 'active') {
   };
 }
 
-function makeMessage(id: string, sessionId: string, content: string) {
+function makeMessage(id: string, sessionId: string, content: string, createdAt = Date.now()) {
   return {
     id,
     sessionId,
     role: 'assistant' as const,
     content,
     toolMetadata: null,
-    createdAt: Date.now(),
+    createdAt,
     sequence: null,
   };
 }
@@ -330,6 +330,51 @@ describe('ProjectMessageView — session isolation', () => {
 
     // Session B must remain visible — stale A data must NOT contaminate
     expect(screen.queryByText('Hello from A')).toBeNull();
+  });
+
+  it('does not truncate already-loaded history when active polling returns only the latest page', async () => {
+    const fullHistory = [
+      makeMessage('msg-1', 'session-A', 'Oldest loaded message', 1000),
+      makeMessage('msg-2', 'session-A', 'Middle loaded message', 2000),
+      makeMessage('msg-3', 'session-A', 'Recent loaded message', 3000),
+      makeMessage('msg-4', 'session-A', 'Newest loaded message', 4000),
+    ];
+    const latestPage = [
+      makeMessage('msg-3', 'session-A', 'Recent loaded message', 3000),
+      makeMessage('msg-4', 'session-A', 'Newest loaded message', 4000),
+      makeMessage('msg-5', 'session-A', 'New poll message', 5000),
+    ];
+
+    mocks.getChatSession
+      .mockResolvedValueOnce({
+        session: makeSession('session-A'),
+        messages: fullHistory,
+        hasMore: false,
+      })
+      .mockResolvedValue({
+        session: makeSession('session-A'),
+        messages: latestPage,
+        hasMore: true,
+      });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('Oldest loaded message');
+      expect(document.body.textContent).toContain('Newest loaded message');
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3100);
+    });
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('New poll message');
+    });
+
+    expect(document.body.textContent).toContain('Oldest loaded message');
+    expect(document.body.textContent).toContain('Middle loaded message');
+    expect(screen.queryByText('Load earlier messages')).toBeNull();
   });
 });
 
@@ -1903,10 +1948,7 @@ describe('ProjectMessageView — catch-up race regression', () => {
     expect(screen.getByText('Follow-up question')).toBeTruthy();
   });
 
-  it('onCatchUp with empty messages would wipe the display (documents why guard is needed)', async () => {
-    // This test documents the destructive behavior of onCatchUp with
-    // 'replace' strategy when called with empty data. The wasReconnect
-    // guard prevents this from happening on initial connect.
+  it('onCatchUp with empty messages preserves the existing display', async () => {
     const fullMessages = [
       makeMessage('msg-1', 'session-1', 'Important conversation'),
     ];
@@ -1933,10 +1975,6 @@ describe('ProjectMessageView — catch-up race regression', () => {
       );
     });
 
-    // Messages are gone — replaced by empty set. This is why the
-    // wasReconnect guard must exist: without it, this scenario can
-    // happen on initial connect if the catch-up response arrives
-    // before loadSession completes or with empty/stale data.
-    expect(screen.queryByText('Important conversation')).toBeNull();
+    expect(screen.getByText('Important conversation')).toBeTruthy();
   });
 });
