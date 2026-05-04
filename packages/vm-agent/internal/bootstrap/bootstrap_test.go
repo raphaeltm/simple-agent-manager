@@ -2529,12 +2529,46 @@ func TestCredentialHelperMountEntry(t *testing.T) {
 func TestIsGitConfigLockError(t *testing.T) {
 	t.Parallel()
 
-	output := "error: could not lock config file /etc/gitconfig: File exists"
-	if !isGitConfigLockError(output) {
-		t.Fatal("expected /etc/gitconfig lock error to be detected")
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{
+			name:   "system gitconfig lock error",
+			output: "error: could not lock config file /etc/gitconfig: File exists",
+			want:   true,
+		},
+		{
+			name:   "multi-line output with lock error on second line",
+			output: "warning: unable to access '/root/.config/git/config': Permission denied\nerror: could not lock config file /etc/gitconfig: File exists",
+			want:   true,
+		},
+		{
+			name:   "user gitconfig lock - should not match",
+			output: "error: could not lock config file /home/vscode/.gitconfig: File exists",
+			want:   false,
+		},
+		{
+			name:   "unrelated git error",
+			output: "fatal: not in a git directory",
+			want:   false,
+		},
+		{
+			name:   "empty output",
+			output: "",
+			want:   false,
+		},
 	}
-	if isGitConfigLockError("error: could not lock config file /home/vscode/.gitconfig: File exists") {
-		t.Fatal("expected non-system gitconfig lock error not to match")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := isGitConfigLockError(tt.output)
+			if got != tt.want {
+				t.Fatalf("isGitConfigLockError(%q) = %v, want %v", tt.output, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -2576,13 +2610,44 @@ func TestGitConfigProcessActive(t *testing.T) {
 			output: "COMMAND\n/bin/echo git config is broken\n",
 			want:   false,
 		},
+		{
+			name:   "false positive: editor viewing gitconfig",
+			output: "ARGS\nvim /etc/gitconfig\n",
+			want:   false,
+		},
+		{
+			name:   "header only - ARGS",
+			output: "ARGS\n",
+			want:   false,
+		},
+		{
+			name:   "header only - COMMAND",
+			output: "COMMAND\n",
+			want:   false,
+		},
+		{
+			name:   "empty output",
+			output: "",
+			want:   false,
+		},
+		{
+			name:   "git push is not git config",
+			output: "ARGS\n/usr/bin/git push origin main\n",
+			want:   false,
+		},
+		{
+			name:   "proc cmdline style output (space-separated, no header)",
+			output: "/usr/bin/git config --system credential.helper /tmp/helper\n/bin/sleep 10\n",
+			want:   true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := gitConfigProcessActive(tc.output)
 			if got != tc.want {
-				t.Fatalf("gitConfigProcessActive() = %v, want %v", got, tc.want)
+				t.Fatalf("gitConfigProcessActive() = %v, want %v\nInput:\n%s", got, tc.want, tc.output)
 			}
 		})
 	}

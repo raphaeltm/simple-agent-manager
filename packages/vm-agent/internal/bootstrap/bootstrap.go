@@ -34,7 +34,9 @@ const (
 	workspaceReadyStatusRunning  = "running"
 	workspaceReadyStatusRecovery = "recovery"
 
-	gitConfigMaxAttempts = 5
+	gitConfigMaxAttempts        = 5
+	gitConfigPostCleanupRetries = 3
+	gitConfigSettleDelay        = 100 * time.Millisecond
 
 	// Safety limits for user-supplied git identity values (RFC 5321 email max
 	// is 254; 512 is generous for display names).
@@ -2187,6 +2189,14 @@ func configureSystemGitWith(
 		}
 	}
 
+	// Brief settle delay so any git process that started during the final retry
+	// attempt has time to appear in the process table.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(gitConfigSettleDelay):
+	}
+
 	active, err := checkProcess()
 	if err != nil {
 		return fmt.Errorf(
@@ -2206,17 +2216,43 @@ func configureSystemGitWith(
 		)
 	}
 
+	// NOTE: There is a residual TOCTOU race between the process check above and
+	// the lock removal below — a new git-config writer could acquire the lock in
+	// this window. The risk is low because we only reach this path after all
+	// retries are exhausted with no visible writer, and we retry the write after
+	// removal.
 	if err := removeLock(); err != nil {
 		return fmt.Errorf(
-			"failed to remove stale /etc/gitconfig.lock while configuring %s: %w",
+			"failed to remove stale /etc/gitconfig.lock while configuring %s (last git error: %v): %w",
 			label,
+			lastErr,
 			err,
 		)
 	}
 
-	output, err := runGit()
-	if err != nil {
-		return fmt.Errorf("failed to configure %s in devcontainer after stale lock cleanup: %w: %s", label, err, strings.TrimSpace(string(output)))
+	// Check for context cancellation between lock removal and the final write to
+	// avoid leaving the container with the lock removed but the config unchanged.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Retry the git config write a few times after lock removal — the lock could
+	// reappear if a concurrent process starts between rm and git-config.
+	for postAttempt := 1; postAttempt <= gitConfigPostCleanupRetries; postAttempt++ {
+		output, err := runGit()
+		if err == nil {
+			return nil
+		}
+		if postAttempt == gitConfigPostCleanupRetries || !isGitConfigLockError(strings.TrimSpace(string(output))) {
+			return fmt.Errorf("failed to configure %s in devcontainer after stale lock cleanup: %w: %s", label, err, strings.TrimSpace(string(output)))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 	return nil
 }
@@ -2224,11 +2260,15 @@ func configureSystemGitWith(
 func runSystemGitConfig(ctx context.Context, containerID, key, value string) ([]byte, error) {
 	// Use -u root because the container's default user (e.g. "node") may not have
 	// write permissions to /etc/gitconfig (system-level git config).
+	// Force LANG=C so git error messages are always in English — isGitConfigLockError
+	// matches on the English-locale error string.
 	cmd := exec.CommandContext(
 		ctx,
 		"docker",
 		"exec",
 		"-u", "root",
+		"-e", "LANG=C",
+		"-e", "LC_ALL=C",
 		containerID,
 		"git",
 		"config",
@@ -2244,10 +2284,19 @@ func isGitConfigLockError(output string) bool {
 }
 
 func hasActiveGitConfigProcess(ctx context.Context, containerID string) (bool, error) {
+	// Try ps -eo args first (POSIX). Fall back to /proc/*/cmdline for minimal
+	// containers (Alpine/BusyBox) where ps -eo args may not be available.
 	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "ps", "-eo", "args")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return false, fmt.Errorf("failed to inspect container processes: %w: %s", err, strings.TrimSpace(string(output)))
+		// Fallback: read /proc/*/cmdline which is universally available on Linux.
+		fallbackCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID,
+			"sh", "-c", `cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\0' ' '`)
+		fallbackOut, fallbackErr := fallbackCmd.CombinedOutput()
+		if fallbackErr != nil {
+			return false, fmt.Errorf("failed to inspect container processes: %w: %s (fallback also failed: %v)", err, strings.TrimSpace(string(output)), fallbackErr)
+		}
+		return gitConfigProcessActive(string(fallbackOut)), nil
 	}
 
 	return gitConfigProcessActive(string(output)), nil
