@@ -16,6 +16,8 @@ export interface TaskInfo {
   blocked: boolean;
   /** What created this task (user, cron, webhook, mcp). */
   triggeredBy: string;
+  /** Dispatch generation (0 = user-created, >0 = agent-dispatched). */
+  dispatchDepth: number;
 }
 
 /**
@@ -31,6 +33,7 @@ export function buildTaskInfoMap(tasks: Task[]): Map<string, TaskInfo> {
       status: t.status,
       blocked: t.blocked ?? false,
       triggeredBy: t.triggeredBy ?? 'user',
+      dispatchDepth: t.dispatchDepth ?? 0,
     });
   }
   return map;
