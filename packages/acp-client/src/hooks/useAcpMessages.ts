@@ -411,6 +411,11 @@ export function useAcpMessages(): AcpMessagesHandle {
           break;
         }
 
+        case 'config_option_update': {
+          // Acknowledged ACP notification: session selector state, not transcript content.
+          break;
+        }
+
         default: {
           // Unknown/unsupported update type — render as raw fallback
           setItems((prev) =>
