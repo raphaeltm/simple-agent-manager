@@ -10,6 +10,7 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import {
   authenticateMcpRequest,
   checkMcpRateLimit,
@@ -388,7 +389,7 @@ mcpRoutes.post('/', async (c) => {
       }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Tool execution failed';
-        console.error(`MCP tool error [${toolName}]:`, err);
+        log.error('mcp.tool_call_failed', { tool: toolName, error: String(err) });
         return c.json(jsonRpcError(requestId, INTERNAL_ERROR, `Tool '${toolName}' failed: ${message}`));
       }
     }
