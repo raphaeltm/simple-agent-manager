@@ -30,10 +30,10 @@ This is session metadata, not transcript content. Until SAM has a first-class UI
 
 ## Validation
 
-- `pnpm --filter @simple-agent-manager/acp-client test -- useAcpMessages` — passed, 31 tests.
-- `pnpm --filter @simple-agent-manager/acp-client typecheck` — passed.
-- `pnpm --filter @simple-agent-manager/acp-client lint` — passed with existing warnings only.
-- `pnpm lint` — passed with existing warnings only.
-- `pnpm typecheck` — passed.
-- `pnpm test` — passed, 19 turbo tasks.
-- `pnpm build` — passed from cache after test/build warmed outputs.
+- `pnpm --filter @simple-agent-manager/acp-client test -- useAcpMessages` - passed, 31 tests.
+- `pnpm --filter @simple-agent-manager/acp-client typecheck` - passed.
+- `pnpm --filter @simple-agent-manager/acp-client lint` - passed with existing warnings only.
+- `pnpm lint` - passed with existing warnings only.
+- `pnpm typecheck` - passed.
+- `pnpm test` - passed, 19 turbo tasks.
+- `pnpm build` - passed from cache after test/build warmed outputs.

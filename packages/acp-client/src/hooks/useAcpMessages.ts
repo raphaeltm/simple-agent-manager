@@ -412,7 +412,7 @@ export function useAcpMessages(): AcpMessagesHandle {
         }
 
         case 'config_option_update': {
-          // Acknowledged ACP notification — session selector state (not transcript content)
+          // Acknowledged ACP notification: session selector state, not transcript content.
           break;
         }
 
