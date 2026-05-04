@@ -28,6 +28,7 @@ import {
 } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
+import { isRetryOrFork } from './lineageUtils';
 import type { ProvisioningState } from './types';
 import {
   CHAT_SESSION_LIST_LIMIT,
@@ -37,7 +38,6 @@ import {
   TASK_STATUS_POLL_MS,
 } from './types';
 import { useAttachments } from './useAttachments';
-import { isRetryOrFork } from './lineageUtils';
 import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
 
 export function useProjectChatState() {
