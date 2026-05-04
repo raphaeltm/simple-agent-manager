@@ -32,7 +32,7 @@ The VM agent writes system Git config in the devcontainer for the credential hel
 - [x] Add regression tests for lock-error detection and active process detection.
 - [x] Document the root cause and prevention in a post-mortem.
 - [x] Update VM-agent process rules to prevent future direct `git config --system` writes.
-- [x] Run available local validation.
+- [x] Run available local validation (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`; Go toolchain unavailable locally).
 - [ ] Run specialist review.
 - [ ] Deploy to staging and verify real VM provisioning.
 
