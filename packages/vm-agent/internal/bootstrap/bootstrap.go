@@ -2137,11 +2137,37 @@ func configureSystemGit(ctx context.Context, containerID, key, value, label stri
 		return fmt.Errorf("refusing to configure %s: value must not start with a dash", label)
 	}
 
+	runGit := func() ([]byte, error) {
+		return runSystemGitConfig(ctx, containerID, key, value)
+	}
+	checkProcess := func() (bool, error) {
+		return hasActiveGitConfigProcess(ctx, containerID)
+	}
+	removeLock := func() error {
+		rmCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "rm", "-f", "/etc/gitconfig.lock")
+		if output, err := rmCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("rm failed: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
+	return configureSystemGitWith(ctx, label, gitConfigMaxAttempts, runGit, checkProcess, removeLock)
+}
+
+// configureSystemGitWith contains the retry/stale-lock-removal orchestration
+// logic extracted from configureSystemGit so it can be tested without Docker.
+func configureSystemGitWith(
+	ctx context.Context,
+	label string,
+	maxAttempts int,
+	runGit func() ([]byte, error),
+	checkProcess func() (bool, error),
+	removeLock func() error,
+) error {
 	var lastOutput string
 	var lastErr error
 
-	for attempt := 1; attempt <= gitConfigMaxAttempts; attempt++ {
-		output, err := runSystemGitConfig(ctx, containerID, key, value)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		output, err := runGit()
 		if err == nil {
 			return nil
 		}
@@ -2152,7 +2178,7 @@ func configureSystemGit(ctx context.Context, containerID, key, value, label stri
 			return fmt.Errorf("failed to configure %s in devcontainer: %w: %s", label, err, lastOutput)
 		}
 
-		if attempt < gitConfigMaxAttempts {
+		if attempt < maxAttempts {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -2161,7 +2187,7 @@ func configureSystemGit(ctx context.Context, containerID, key, value, label stri
 		}
 	}
 
-	active, err := hasActiveGitConfigProcess(ctx, containerID)
+	active, err := checkProcess()
 	if err != nil {
 		return fmt.Errorf(
 			"failed to configure %s in devcontainer: %w: %s (could not verify stale /etc/gitconfig.lock: %v)",
@@ -2180,17 +2206,15 @@ func configureSystemGit(ctx context.Context, containerID, key, value, label stri
 		)
 	}
 
-	rmCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "rm", "-f", "/etc/gitconfig.lock")
-	if output, err := rmCmd.CombinedOutput(); err != nil {
+	if err := removeLock(); err != nil {
 		return fmt.Errorf(
-			"failed to remove stale /etc/gitconfig.lock while configuring %s: %w: %s",
+			"failed to remove stale /etc/gitconfig.lock while configuring %s: %w",
 			label,
 			err,
-			strings.TrimSpace(string(output)),
 		)
 	}
 
-	output, err := runSystemGitConfig(ctx, containerID, key, value)
+	output, err := runGit()
 	if err != nil {
 		return fmt.Errorf("failed to configure %s in devcontainer after stale lock cleanup: %w: %s", label, err, strings.TrimSpace(string(output)))
 	}

@@ -2626,6 +2626,175 @@ func TestResolveGitIdentityTruncatesLongValues(t *testing.T) {
 	}
 }
 
+func TestConfigureSystemGitWith(t *testing.T) {
+	t.Parallel()
+
+	lockErr := fmt.Errorf("exit status 255")
+	lockOutput := []byte("error: could not lock config file /etc/gitconfig: File exists")
+	otherErr := fmt.Errorf("exit status 1")
+	otherOutput := []byte("error: permission denied")
+
+	tests := []struct {
+		name         string
+		maxAttempts  int
+		runGit       func(call *int) ([]byte, error)
+		checkProcess func() (bool, error)
+		removeLock   func() error
+		wantErr      bool
+		errContains  string
+	}{
+		{
+			name:        "success on first attempt",
+			maxAttempts: 3,
+			runGit: func(call *int) ([]byte, error) {
+				return nil, nil
+			},
+			wantErr: false,
+		},
+		{
+			name:        "non-lock error fails immediately",
+			maxAttempts: 3,
+			runGit: func(call *int) ([]byte, error) {
+				return otherOutput, otherErr
+			},
+			wantErr:     true,
+			errContains: "permission denied",
+		},
+		{
+			name:        "lock clears on retry 2",
+			maxAttempts: 3,
+			runGit: func(call *int) ([]byte, error) {
+				*call++
+				if *call == 1 {
+					return lockOutput, lockErr
+				}
+				return nil, nil
+			},
+			wantErr: false,
+		},
+		{
+			name:        "lock persists then active process found",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			checkProcess: func() (bool, error) { return true, nil },
+			removeLock:   func() error { return nil },
+			wantErr:      true,
+			errContains:  "another git config process is still active",
+		},
+		{
+			name:        "lock persists then ps check fails",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			checkProcess: func() (bool, error) { return false, fmt.Errorf("docker exec failed") },
+			removeLock:   func() error { return nil },
+			wantErr:      true,
+			errContains:  "could not verify stale /etc/gitconfig.lock",
+		},
+		{
+			name:        "stale lock removed then final attempt succeeds",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				*call++
+				// Fail on retries (attempts 1 and 2), succeed on post-cleanup attempt (3rd call).
+				if *call <= 2 {
+					return lockOutput, lockErr
+				}
+				return nil, nil
+			},
+			checkProcess: func() (bool, error) { return false, nil },
+			removeLock:   func() error { return nil },
+			wantErr:      false,
+		},
+		{
+			name:        "stale lock removed but final attempt still fails",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			checkProcess: func() (bool, error) { return false, nil },
+			removeLock:   func() error { return nil },
+			wantErr:      true,
+			errContains:  "after stale lock cleanup",
+		},
+		{
+			name:        "stale lock removal itself fails",
+			maxAttempts: 2,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			checkProcess: func() (bool, error) { return false, nil },
+			removeLock:   func() error { return fmt.Errorf("rm failed: permission denied") },
+			wantErr:      true,
+			errContains:  "failed to remove stale /etc/gitconfig.lock",
+		},
+		{
+			name:        "context cancelled during backoff",
+			maxAttempts: 5,
+			runGit: func(call *int) ([]byte, error) {
+				return lockOutput, lockErr
+			},
+			// checkProcess/removeLock should never be reached
+			wantErr:     true,
+			errContains: "context canceled",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var callCount int
+			runGit := func() ([]byte, error) {
+				return tc.runGit(&callCount)
+			}
+
+			checkProcess := tc.checkProcess
+			if checkProcess == nil {
+				checkProcess = func() (bool, error) {
+					t.Fatal("checkProcess should not be called in this test case")
+					return false, nil
+				}
+			}
+
+			removeLock := tc.removeLock
+			if removeLock == nil {
+				removeLock = func() error {
+					t.Fatal("removeLock should not be called in this test case")
+					return nil
+				}
+			}
+
+			ctx := context.Background()
+			// For the cancellation test, use a pre-cancelled context.
+			if tc.errContains == "context canceled" {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			err := configureSystemGitWith(ctx, "test-key", tc.maxAttempts, runGit, checkProcess, removeLock)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
+					t.Fatalf("expected error to contain %q, got: %v", tc.errContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestWriteCredentialOverrideConfig(t *testing.T) {
 	t.Parallel()
 
