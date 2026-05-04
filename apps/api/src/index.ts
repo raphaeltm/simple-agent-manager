@@ -38,7 +38,6 @@ import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentia
 import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminSandboxRoutes } from './routes/admin-sandbox';
 import { adminUsageRoutes } from './routes/admin-usage';
-import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { agentRoutes } from './routes/agent';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
@@ -66,6 +65,7 @@ import { missionRoutes } from './routes/missions';
 import { nodeLifecycleRoutes } from './routes/node-lifecycle';
 import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
+import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { orchestratorRoutes } from './routes/orchestrator';
 import { policyRoutes } from './routes/policies';
 import { projectAgentRoutes } from './routes/project-agent';
