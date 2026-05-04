@@ -47,8 +47,12 @@ const mockDoStub = {
   searchKnowledgeObservations: vi.fn(),
   listKnowledgeEntities: vi.fn(),
   getKnowledgeEntityByName: vi.fn(),
+  getKnowledgeEntity: vi.fn(),
   getRelevantKnowledge: vi.fn(),
+  getKnowledgeRelated: vi.fn(),
   confirmKnowledgeObservation: vi.fn(),
+  createKnowledgeEntity: vi.fn(),
+  addKnowledgeObservation: vi.fn(),
 };
 const mockProjectData = {
   idFromName: vi.fn().mockReturnValue('do-id'),
@@ -217,5 +221,56 @@ describe('MCP tools/call error handling', () => {
     expect(body.jsonrpc).toBe('2.0');
     expect(body.error).toBeDefined();
     expect(body.error.code).toBe(-32603);
+  });
+
+  it('returns JSON-RPC error when add_knowledge handler throws', async () => {
+    mockDoStub.getKnowledgeEntityByName.mockRejectedValue(
+      new Error('DO storage full'),
+    );
+
+    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
+      name: 'add_knowledge',
+      arguments: { entityName: 'test-entity', observation: 'some observation' },
+    }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.error).toBeDefined();
+    expect(body.error.code).toBe(-32603);
+    expect(body.error.message).toContain('DO storage full');
+  });
+
+  it('returns JSON-RPC error when get_knowledge handler throws', async () => {
+    mockDoStub.getKnowledgeEntity.mockRejectedValue(
+      new Error('DO unavailable'),
+    );
+
+    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
+      name: 'get_knowledge',
+      arguments: { entityId: 'entity-123' },
+    }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.error).toBeDefined();
+    expect(body.error.code).toBe(-32603);
+    expect(body.error.message).toContain('DO unavailable');
+  });
+
+  it('returns JSON-RPC error when get_related handler throws', async () => {
+    mockDoStub.getKnowledgeEntityByName.mockRejectedValue(
+      new Error('DO connection reset'),
+    );
+
+    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
+      name: 'get_related',
+      arguments: { entityName: 'test-entity' },
+    }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.error).toBeDefined();
+    expect(body.error.code).toBe(-32603);
+    expect(body.error.message).toContain('DO connection reset');
   });
 });

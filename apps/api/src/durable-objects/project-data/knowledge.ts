@@ -320,34 +320,30 @@ function searchObservationsLike(
   minConfidence: number | null,
   limit: number,
 ) {
-  try {
-    const conditions: string[] = ['o.is_active = 1', 'o.content LIKE ?'];
-    const params: (string | number)[] = [`%${query}%`];
+  const conditions: string[] = ['o.is_active = 1', 'o.content LIKE ?'];
+  const params: (string | number)[] = [`%${query}%`];
 
-    if (entityType) {
-      conditions.push('e.entity_type = ?');
-      params.push(entityType);
-    }
-    if (minConfidence != null) {
-      conditions.push('o.confidence >= ?');
-      params.push(minConfidence);
-    }
-
-    const where = conditions.join(' AND ');
-    const rows = sql.exec(
-      `SELECT o.*, e.name as entity_name, e.entity_type
-       FROM knowledge_observations o
-       JOIN knowledge_entities e ON e.id = o.entity_id
-       WHERE ${where}
-       ORDER BY o.last_confirmed_at DESC
-       LIMIT ?`,
-      ...params, limit,
-    ).toArray();
-
-    return rows.map(parseKnowledgeObservationSearchRow);
-  } catch {
-    return [];
+  if (entityType) {
+    conditions.push('e.entity_type = ?');
+    params.push(entityType);
   }
+  if (minConfidence != null) {
+    conditions.push('o.confidence >= ?');
+    params.push(minConfidence);
+  }
+
+  const where = conditions.join(' AND ');
+  const rows = sql.exec(
+    `SELECT o.*, e.name as entity_name, e.entity_type
+     FROM knowledge_observations o
+     JOIN knowledge_entities e ON e.id = o.entity_id
+     WHERE ${where}
+     ORDER BY o.last_confirmed_at DESC
+     LIMIT ?`,
+    ...params, limit,
+  ).toArray();
+
+  return rows.map(parseKnowledgeObservationSearchRow);
 }
 
 export function getRelevantKnowledge(sql: SqlStorage, context: string, limit: number) {
