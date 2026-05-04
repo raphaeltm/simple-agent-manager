@@ -80,7 +80,12 @@ function getConfig() {
     process.exit(2);
   }
 
-  return { cfToken, cfAccountId, observabilityDbId, lookbackHours, threshold };
+  const telemetryTimeframeSec = parseInt(
+    process.env.LOG_NOISE_TELEMETRY_TIMEFRAME_SECONDS ?? String(lookbackHours * 3600),
+    10
+  );
+
+  return { cfToken, cfAccountId, observabilityDbId, lookbackHours, threshold, telemetryTimeframeSec };
 }
 
 // =============================================================================
@@ -113,7 +118,8 @@ async function queryD1(
 async function queryWorkersTelemetry(
   cfToken: string,
   cfAccountId: string,
-  sql: string
+  sql: string,
+  timeframeSec: number
 ): Promise<TelemetryResponse> {
   const url = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/observability/v1/query`;
   const resp = await fetch(url, {
@@ -122,7 +128,7 @@ async function queryWorkersTelemetry(
       Authorization: `Bearer ${cfToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ query: sql, timeframe: 21600 }),
+    body: JSON.stringify({ query: sql, timeframe: timeframeSec }),
   });
 
   if (!resp.ok) {
@@ -291,14 +297,14 @@ async function checkD1Noise(config: ReturnType<typeof getConfig>): Promise<Findi
 }
 
 async function checkTelemetryNoise(config: ReturnType<typeof getConfig>): Promise<Finding[]> {
-  const { cfToken, cfAccountId, threshold } = config;
+  const { cfToken, cfAccountId, threshold, telemetryTimeframeSec } = config;
   const findings: Finding[] = [];
 
   // Check for repeated 401s on internal ingest path
   console.log('  Querying Workers telemetry for ingest 401s...');
   try {
     const telemetrySql = `SELECT COUNT(*) as cnt FROM events WHERE response.status = 401 AND $path LIKE '%/observability/logs/ingest%'`;
-    const resp = await queryWorkersTelemetry(cfToken, cfAccountId, telemetrySql);
+    const resp = await queryWorkersTelemetry(cfToken, cfAccountId, telemetrySql, telemetryTimeframeSec);
 
     if (!resp.success) {
       const errMsg = resp.errors?.[0]?.message ?? 'unknown error';

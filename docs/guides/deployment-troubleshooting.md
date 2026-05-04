@@ -499,7 +499,8 @@ All values are configurable via environment variables (no hardcoded defaults for
 | `CF_TOKEN` | Yes | — | Cloudflare API token |
 | `CF_ACCOUNT_ID` | Yes | — | Cloudflare account ID |
 | `OBSERVABILITY_DB_ID` | No | — | Observability D1 database ID (skips D1 checks if unset) |
-| `LOG_NOISE_LOOKBACK_HOURS` | No | 24 | How far back to query |
+| `LOG_NOISE_LOOKBACK_HOURS` | No | 24 | How far back to query (D1 + telemetry default) |
+| `LOG_NOISE_TELEMETRY_TIMEFRAME_SECONDS` | No | `lookbackHours * 3600` | Telemetry query window in seconds (overrides lookback hours for telemetry) |
 | `LOG_NOISE_THRESHOLD` | No | 10 | Minimum occurrences to flag as noise |
 
 ### Remediation

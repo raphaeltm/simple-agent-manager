@@ -110,6 +110,7 @@ Every PR must verify these existing workflows are not broken:
 - [ ] Settings page loads and displays current configuration
 - [ ] No new console errors in the browser developer tools
 - [ ] API health endpoint responds: `https://api.sammy.party/health`
+- [ ] Observability noise check passes: `pnpm quality:observability-noise` (requires `CF_TOKEN`, `CF_ACCOUNT_ID`; optionally `OBSERVABILITY_DB_ID`)
 
 ### For UI Changes (Additional)
 
