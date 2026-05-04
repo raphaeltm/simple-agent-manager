@@ -183,6 +183,64 @@ describe('useAcpMessages available_commands_update', () => {
   });
 });
 
+describe('useAcpMessages config_option_update', () => {
+  it('acknowledges session config options without rendering them as chat content', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'config_option_update',
+        configOptions: [
+          {
+            id: 'mode',
+            name: 'Mode',
+            category: 'mode',
+            type: 'select',
+            currentValue: 'bypassPermissions',
+            options: [
+              { value: 'default', name: 'Default' },
+              { value: 'bypassPermissions', name: 'Bypass Permissions' },
+            ],
+          },
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'claude-opus-4-6',
+            options: [
+              { value: 'default', name: 'Default' },
+              { value: 'claude-opus-4-6', name: 'Opus 4.6' },
+            ],
+          },
+        ],
+      }));
+    });
+
+    expect(result.current.items).toEqual([]);
+  });
+
+  it('still renders unknown session updates as raw fallback for debugging', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'future_update',
+        payload: 'keep visible',
+      }));
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0]).toMatchObject({
+      kind: 'raw_fallback',
+      data: {
+        sessionUpdate: 'future_update',
+        payload: 'keep visible',
+      },
+    });
+  });
+});
+
 describe('useAcpMessages clear', () => {
   it('clears all messages and resets usage', () => {
     const { result } = renderHook(() => useAcpMessages());

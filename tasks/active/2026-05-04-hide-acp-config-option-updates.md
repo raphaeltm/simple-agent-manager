@@ -16,11 +16,11 @@ This is session metadata, not transcript content. Until SAM has a first-class UI
 
 ## Implementation Checklist
 
-- [ ] Add explicit handling for `config_option_update` in `useAcpMessages()`.
-- [ ] Keep the update out of `items` so it does not render in chat.
-- [ ] Add a regression test proving `config_option_update` does not create a `raw_fallback` item.
-- [ ] Run focused ACP client tests.
-- [ ] Run applicable type/lint checks for the touched package.
+- [x] Add explicit handling for `config_option_update` in `useAcpMessages()`.
+- [x] Keep the update out of `items` so it does not render in chat.
+- [x] Add a regression test proving `config_option_update` does not create a `raw_fallback` item.
+- [x] Run focused ACP client tests.
+- [x] Run applicable type/lint checks for the touched package.
 
 ## Acceptance Criteria
 
