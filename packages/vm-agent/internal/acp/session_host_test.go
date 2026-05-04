@@ -62,6 +62,95 @@ func newTestSessionHost(t *testing.T) *SessionHost {
 	})
 }
 
+type lifecycleReport struct {
+	level       string
+	message     string
+	source      string
+	workspaceID string
+	context     map[string]interface{}
+}
+
+type recordingErrorReporter struct {
+	reports []lifecycleReport
+}
+
+func (r *recordingErrorReporter) ReportError(err error, source, workspaceID string, ctx map[string]interface{}) {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	r.reports = append(r.reports, lifecycleReport{
+		level:       "error",
+		message:     message,
+		source:      source,
+		workspaceID: workspaceID,
+		context:     ctx,
+	})
+}
+
+func (r *recordingErrorReporter) ReportInfo(message, source, workspaceID string, ctx map[string]interface{}) {
+	r.reports = append(r.reports, lifecycleReport{
+		level:       "info",
+		message:     message,
+		source:      source,
+		workspaceID: workspaceID,
+		context:     ctx,
+	})
+}
+
+func (r *recordingErrorReporter) ReportWarn(message, source, workspaceID string, ctx map[string]interface{}) {
+	r.reports = append(r.reports, lifecycleReport{
+		level:       "warn",
+		message:     message,
+		source:      source,
+		workspaceID: workspaceID,
+		context:     ctx,
+	})
+}
+
+func TestSessionHostReportLifecycleSeverityMapping(t *testing.T) {
+	t.Parallel()
+
+	reporter := &recordingErrorReporter{}
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:     "test-session",
+			WorkspaceID:   "test-workspace",
+			ErrorReporter: reporter,
+		},
+	})
+	defer host.Stop()
+
+	host.reportLifecycle("info", "ACP NewSession succeeded", map[string]interface{}{"agentType": "codex"})
+	host.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{"reason": "unsupported"})
+	host.reportLifecycle("error", "ACP prompt force-stopped", map[string]interface{}{"timeout": "5s"})
+
+	if len(reporter.reports) != 3 {
+		t.Fatalf("report count = %d, want 3", len(reporter.reports))
+	}
+
+	want := []lifecycleReport{
+		{level: "info", message: "ACP NewSession succeeded"},
+		{level: "warn", message: "ACP SetSessionMode failed"},
+		{level: "error", message: "ACP prompt force-stopped"},
+	}
+	for i, w := range want {
+		got := reporter.reports[i]
+		if got.level != w.level {
+			t.Fatalf("report %d level = %q, want %q", i, got.level, w.level)
+		}
+		if got.message != w.message {
+			t.Fatalf("report %d message = %q, want %q", i, got.message, w.message)
+		}
+		if got.source != "session-host" {
+			t.Fatalf("report %d source = %q, want session-host", i, got.source)
+		}
+		if got.workspaceID != "test-workspace" {
+			t.Fatalf("report %d workspaceID = %q, want test-workspace", i, got.workspaceID)
+		}
+	}
+}
+
 func TestNewSessionHost_Defaults(t *testing.T) {
 	t.Parallel()
 

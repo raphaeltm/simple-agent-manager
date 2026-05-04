@@ -263,7 +263,19 @@ const MAX_VM_ERROR_MESSAGE_LENGTH = 2048;
 const MAX_VM_ERROR_SOURCE_LENGTH = 256;
 const MAX_VM_ERROR_STACK_LENGTH = 4096;
 
-const VALID_VM_ERROR_LEVELS = new Set(['error', 'warn']);
+type VMAgentReportLevel = 'error' | 'warn' | 'info';
+
+const VALID_VM_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info']);
+
+function isVMAgentReportLevel(value: unknown): value is VMAgentReportLevel {
+  return typeof value === 'string' && VALID_VM_ERROR_LEVELS.has(value);
+}
+
+function normalizeVMAgentReportLevel(value: unknown): VMAgentReportLevel {
+  return isVMAgentReportLevel(value)
+    ? value
+    : 'error';
+}
 
 function truncateString(value: string, maxLength: number): string {
   return value.length > maxLength ? value.slice(0, maxLength) + '...' : value;
@@ -323,11 +335,12 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
 
     if (!message || !source) continue; // Skip malformed entries
 
-    const level = typeof e.level === 'string' && VALID_VM_ERROR_LEVELS.has(e.level)
-      ? e.level
-      : 'error';
+    // VM agent reports include both failures and operational lifecycle entries.
+    // Preserve the agent's intentional severity: info for successful progress,
+    // warn for degraded/non-fatal behavior, error for user-impacting failures.
+    const level = normalizeVMAgentReportLevel(e.level);
 
-    log.error('vm_agent_error', {
+    log[level]('vm_agent_error', {
       level,
       message: truncateString(message, MAX_VM_ERROR_MESSAGE_LENGTH),
       source: truncateString(source, MAX_VM_ERROR_SOURCE_LENGTH),
