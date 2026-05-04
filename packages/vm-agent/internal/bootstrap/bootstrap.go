@@ -1077,9 +1077,15 @@ func normalizeLifecycleCommandValue(value interface{}) interface{} {
 	}
 }
 
+const (
+	containerUserSourceReadConfiguration = "read-configuration"
+	containerUserSourceMetadata          = "devcontainer.metadata"
+	containerUserSourceExecFallback      = "docker exec id -un fallback"
+)
+
 func runReadConfiguration(ctx context.Context, workspaceDir, devcontainerConfigName string) (*devcontainerReadConfigurationResult, error) {
 	args := []string{
-		"read-configuration",
+		containerUserSourceReadConfiguration,
 		"--workspace-folder", workspaceDir,
 		"--include-merged-configuration",
 	}
@@ -1211,6 +1217,13 @@ func detectContainerUserFromExec(ctx context.Context, cfg *config.Config) string
 	return strings.TrimSpace(string(output))
 }
 
+type containerUserDetector struct {
+	source          string
+	missingUserLog  string
+	detectedUserLog string
+	detectUser      func() string
+}
+
 func ensureContainerUserResolved(ctx context.Context, cfg *config.Config, devcontainerConfigName string) {
 	override := strings.TrimSpace(cfg.ContainerUser)
 	if override != "" {
@@ -1219,47 +1232,59 @@ func ensureContainerUserResolved(ctx context.Context, cfg *config.Config, devcon
 		return
 	}
 
-	if detected := detectContainerUserFromReadConfiguration(ctx, cfg, devcontainerConfigName); detected != "" {
-		if !detectedContainerUserExists(ctx, cfg, detected, "read-configuration") {
-			slog.Warn("Ignoring read-configuration devcontainer user because it is absent from the running container", "user", detected)
-		} else {
-			cfg.ContainerUser = detected
-			if detected == "root" {
-				slog.Warn("Detected devcontainer user is root", "source", "read-configuration")
-			} else {
-				slog.Info("Detected devcontainer user via read-configuration", "user", detected)
-			}
-			return
-		}
+	detectors := []containerUserDetector{
+		{
+			source:          containerUserSourceReadConfiguration,
+			missingUserLog:  "Ignoring read-configuration devcontainer user because it is absent from the running container",
+			detectedUserLog: "Detected devcontainer user via read-configuration",
+			detectUser: func() string {
+				return detectContainerUserFromReadConfiguration(ctx, cfg, devcontainerConfigName)
+			},
+		},
+		{
+			source:          containerUserSourceMetadata,
+			missingUserLog:  "Ignoring devcontainer.metadata user because it is absent from the running container",
+			detectedUserLog: "Detected devcontainer user via devcontainer.metadata",
+			detectUser: func() string {
+				return detectContainerUserFromMetadata(ctx, cfg)
+			},
+		},
+		{
+			source:          containerUserSourceExecFallback,
+			missingUserLog:  "Detected devcontainer user does not exist in running container",
+			detectedUserLog: "Detected devcontainer user via docker exec fallback",
+			detectUser: func() string {
+				return detectContainerUserFromExec(ctx, cfg)
+			},
+		},
 	}
-	if detected := detectContainerUserFromMetadata(ctx, cfg); detected != "" {
-		if !detectedContainerUserExists(ctx, cfg, detected, "devcontainer.metadata") {
-			slog.Warn("Ignoring devcontainer.metadata user because it is absent from the running container", "user", detected)
-		} else {
-			cfg.ContainerUser = detected
-			if detected == "root" {
-				slog.Warn("Detected devcontainer user is root", "source", "devcontainer.metadata")
-			} else {
-				slog.Info("Detected devcontainer user via devcontainer.metadata", "user", detected)
-			}
-			return
-		}
-	}
-	if detected := detectContainerUserFromExec(ctx, cfg); detected != "" {
-		if !detectedContainerUserExists(ctx, cfg, detected, "docker exec id -un fallback") {
-			slog.Warn("Detected devcontainer user does not exist in running container", "source", "docker exec id -un fallback", "user", detected)
-		} else {
-			cfg.ContainerUser = detected
-			if detected == "root" {
-				slog.Warn("Detected devcontainer user is root", "source", "docker exec id -un fallback")
-			} else {
-				slog.Info("Detected devcontainer user via docker exec fallback", "user", detected)
-			}
+
+	for _, detector := range detectors {
+		if applyDetectedContainerUser(ctx, cfg, detector) {
 			return
 		}
 	}
 
 	slog.Warn("Unable to detect devcontainer user; docker exec will use container default user")
+}
+
+func applyDetectedContainerUser(ctx context.Context, cfg *config.Config, detector containerUserDetector) bool {
+	detected := detector.detectUser()
+	if detected == "" {
+		return false
+	}
+	if !detectedContainerUserExists(ctx, cfg, detected, detector.source) {
+		slog.Warn(detector.missingUserLog, "source", detector.source, "user", detected)
+		return false
+	}
+
+	cfg.ContainerUser = detected
+	if detected == "root" {
+		slog.Warn("Detected devcontainer user is root", "source", detector.source)
+	} else {
+		slog.Info(detector.detectedUserLog, "user", detected)
+	}
+	return true
 }
 
 func detectedContainerUserExists(ctx context.Context, cfg *config.Config, user, source string) bool {
