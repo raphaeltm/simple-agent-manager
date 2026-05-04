@@ -1,7 +1,7 @@
 ---
 paths:
-  - "packages/vm-agent/**"
-  - "scripts/vm/**"
+  - 'packages/vm-agent/**'
+  - 'scripts/vm/**'
 ---
 
 # VM Agent Technical Patterns
@@ -36,3 +36,9 @@ When a remote system (VM) is responsible for triggering its own cleanup:
 1. Edit `packages/cloud-init/src/template.ts`
 2. Update variable wiring in `packages/cloud-init/src/generate.ts` when needed
 3. Test cloud-init generation through the workspace provisioning flow
+
+## System Git Config in Devcontainers
+
+When VM-agent bootstrap code needs to write system Git config inside a devcontainer, use the shared helper in `packages/vm-agent/internal/bootstrap/bootstrap.go` instead of invoking `git config --system` directly.
+
+Direct `git config --system` calls can fail provisioning when `/etc/gitconfig.lock` is left behind by a concurrent or interrupted config write. See `docs/notes/2026-05-04-devcontainer-gitconfig-lock-postmortem.md`.

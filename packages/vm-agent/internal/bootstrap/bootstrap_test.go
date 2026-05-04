@@ -2526,6 +2526,38 @@ func TestCredentialHelperMountEntry(t *testing.T) {
 	}
 }
 
+func TestIsGitConfigLockError(t *testing.T) {
+	t.Parallel()
+
+	output := "error: could not lock config file /etc/gitconfig: File exists"
+	if !isGitConfigLockError(output) {
+		t.Fatal("expected /etc/gitconfig lock error to be detected")
+	}
+	if isGitConfigLockError("error: could not lock config file /home/vscode/.gitconfig: File exists") {
+		t.Fatal("expected non-system gitconfig lock error not to match")
+	}
+}
+
+func TestGitConfigProcessActive(t *testing.T) {
+	t.Parallel()
+
+	activeOutput := `COMMAND
+/usr/bin/git config --system credential.helper /usr/local/bin/git-credential-sam
+/bin/sh -c sleep 10
+`
+	if !gitConfigProcessActive(activeOutput) {
+		t.Fatal("expected active git config process")
+	}
+
+	inactiveOutput := `COMMAND
+/usr/bin/git status --short
+/bin/sh -c sleep 10
+`
+	if gitConfigProcessActive(inactiveOutput) {
+		t.Fatal("did not expect active git config process")
+	}
+}
+
 func TestWriteCredentialOverrideConfig(t *testing.T) {
 	t.Parallel()
 

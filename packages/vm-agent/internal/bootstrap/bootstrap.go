@@ -33,6 +33,8 @@ const (
 
 	workspaceReadyStatusRunning  = "running"
 	workspaceReadyStatusRecovery = "recovery"
+
+	gitConfigMaxAttempts = 5
 )
 
 var projectEnvKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -2118,6 +2120,71 @@ func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error)
 }
 
 func configureGitCredentialHelper(ctx context.Context, containerID, helperPath string) error {
+	return configureSystemGit(ctx, containerID, "credential.helper", helperPath, "git credential helper")
+}
+
+func configureSystemGit(ctx context.Context, containerID, key, value, label string) error {
+	var lastOutput string
+	var lastErr error
+
+	for attempt := 1; attempt <= gitConfigMaxAttempts; attempt++ {
+		output, err := runSystemGitConfig(ctx, containerID, key, value)
+		if err == nil {
+			return nil
+		}
+
+		lastOutput = strings.TrimSpace(string(output))
+		lastErr = err
+		if !isGitConfigLockError(lastOutput) {
+			return fmt.Errorf("failed to configure %s in devcontainer: %w: %s", label, err, lastOutput)
+		}
+
+		if attempt < gitConfigMaxAttempts {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):
+			}
+		}
+	}
+
+	active, err := hasActiveGitConfigProcess(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to configure %s in devcontainer: %w: %s (could not verify stale /etc/gitconfig.lock: %v)",
+			label,
+			lastErr,
+			lastOutput,
+			err,
+		)
+	}
+	if active {
+		return fmt.Errorf(
+			"failed to configure %s in devcontainer: %w: %s (another git config process is still active)",
+			label,
+			lastErr,
+			lastOutput,
+		)
+	}
+
+	rmCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "rm", "-f", "/etc/gitconfig.lock")
+	if output, err := rmCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf(
+			"failed to remove stale /etc/gitconfig.lock while configuring %s: %w: %s",
+			label,
+			err,
+			strings.TrimSpace(string(output)),
+		)
+	}
+
+	output, err := runSystemGitConfig(ctx, containerID, key, value)
+	if err != nil {
+		return fmt.Errorf("failed to configure %s in devcontainer after stale lock cleanup: %w: %s", label, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func runSystemGitConfig(ctx context.Context, containerID, key, value string) ([]byte, error) {
 	// Use -u root because the container's default user (e.g. "node") may not have
 	// write permissions to /etc/gitconfig (system-level git config).
 	cmd := exec.CommandContext(
@@ -2129,13 +2196,33 @@ func configureGitCredentialHelper(ctx context.Context, containerID, helperPath s
 		"git",
 		"config",
 		"--system",
-		"credential.helper",
-		helperPath,
+		key,
+		value,
 	)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to configure git credential helper in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
+	return cmd.CombinedOutput()
+}
+
+func isGitConfigLockError(output string) bool {
+	return strings.Contains(output, "could not lock config file /etc/gitconfig: File exists")
+}
+
+func hasActiveGitConfigProcess(ctx context.Context, containerID string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "ps", "-eo", "args")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("failed to inspect container processes: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	return nil
+
+	return gitConfigProcessActive(string(output)), nil
+}
+
+func gitConfigProcessActive(psOutput string) bool {
+	for _, line := range strings.Split(psOutput, "\n") {
+		if strings.Contains(line, "git config") || strings.Contains(line, "git-config") {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveGitIdentity(state *bootstrapState) (name string, email string, ok bool) {
@@ -2189,36 +2276,12 @@ func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrap
 		return fmt.Errorf("failed to locate devcontainer for git identity setup: %w", err)
 	}
 
-	setEmailCmd := exec.CommandContext(
-		ctx,
-		"docker",
-		"exec",
-		"-u", "root",
-		containerID,
-		"git",
-		"config",
-		"--system",
-		"user.email",
-		gitUserEmail,
-	)
-	if output, err := setEmailCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to configure git user.email in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
+	if err := configureSystemGit(ctx, containerID, "user.email", gitUserEmail, "git user.email"); err != nil {
+		return err
 	}
 
-	setNameCmd := exec.CommandContext(
-		ctx,
-		"docker",
-		"exec",
-		"-u", "root",
-		containerID,
-		"git",
-		"config",
-		"--system",
-		"user.name",
-		gitUserName,
-	)
-	if output, err := setNameCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to configure git user.name in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
+	if err := configureSystemGit(ctx, containerID, "user.name", gitUserName, "git user.name"); err != nil {
+		return err
 	}
 
 	slog.Info("Configured git identity in devcontainer", "containerID", containerID, "name", gitUserName, "email", gitUserEmail)
