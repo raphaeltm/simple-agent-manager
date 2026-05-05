@@ -99,6 +99,9 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 // safePath resolves path relative to workDir and rejects any path that escapes it.
 // Absolute paths and "../" traversals above workDir are rejected.
 func safePath(workDir, path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return "", fmt.Errorf("path %q escapes working directory", path)
+	}
 	resolved := filepath.Join(workDir, path)
 	absWork, err := filepath.Abs(workDir)
 	if err != nil {
