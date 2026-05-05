@@ -2990,3 +2990,44 @@ func TestWriteDefaultDevcontainerConfigWithVolumeAndCredentialHelper(t *testing.
 		t.Fatal("expected containerEnv for credential helper")
 	}
 }
+
+func TestDevcontainerBuildContext_WithTimeout(t *testing.T) {
+	cfg := &config.Config{
+		DevcontainerBuildTimeout: 5 * time.Second,
+	}
+	parent := context.Background()
+	ctx, cancel := devcontainerBuildContext(parent, cfg)
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("expected context to have a deadline")
+	}
+	// Deadline should be approximately 5s from now
+	remaining := time.Until(deadline)
+	if remaining < 4*time.Second || remaining > 6*time.Second {
+		t.Fatalf("expected ~5s remaining, got %v", remaining)
+	}
+}
+
+func TestDevcontainerBuildContext_ZeroTimeout(t *testing.T) {
+	cfg := &config.Config{
+		DevcontainerBuildTimeout: 0,
+	}
+	parent := context.Background()
+	ctx, cancel := devcontainerBuildContext(parent, cfg)
+	defer cancel()
+
+	_, ok := ctx.Deadline()
+	if ok {
+		t.Fatal("expected context to have no deadline when timeout is 0")
+	}
+}
+
+func TestInjectAptMirrorConfig_EmptyProvider(t *testing.T) {
+	cfg := &config.Config{
+		Provider: "",
+	}
+	// Should not panic or error with empty provider — it's a no-op
+	injectAptMirrorConfig(context.Background(), cfg, "nonexistent-container-id")
+}

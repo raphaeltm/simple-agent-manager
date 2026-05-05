@@ -133,6 +133,13 @@ type Config struct {
 	DefaultDevcontainerConfigPath string // Path to write the generated default config
 	DefaultDevcontainerRemoteUser string // remoteUser for the default config (empty = omit, let image default)
 
+	// Devcontainer build timeout — prevents indefinite hangs when apt/network fails.
+	// Configurable per constitution principle XI.
+	DevcontainerBuildTimeout time.Duration // Max time for a single devcontainer up call (env: DEVCONTAINER_BUILD_TIMEOUT, default: 15m)
+
+	// Cloud provider — used for provider-specific optimizations (apt mirrors, etc.)
+	Provider string // Cloud provider name (env: PROVIDER, e.g. "hetzner", "scaleway", "gcp")
+
 	// Project linkage — set via cloud-init when the workspace belongs to a project.
 	// If ProjectID is empty, the message reporter is disabled (no-op).
 	ProjectID     string // Linked project ID (env: PROJECT_ID)
@@ -323,6 +330,12 @@ func Load() (*Config, error) {
 		DefaultDevcontainerImage:      getEnv("DEFAULT_DEVCONTAINER_IMAGE", DefaultDevcontainerImage),
 		DefaultDevcontainerConfigPath: getEnv("DEFAULT_DEVCONTAINER_CONFIG_PATH", DefaultDevcontainerConfigPath),
 		DefaultDevcontainerRemoteUser: getEnv("DEFAULT_DEVCONTAINER_REMOTE_USER", ""), // Empty = omit, use image default
+
+		// Devcontainer build timeout — prevents indefinite hangs on network failures.
+		DevcontainerBuildTimeout: getEnvDuration("DEVCONTAINER_BUILD_TIMEOUT", 15*time.Minute),
+
+		// Cloud provider (set via cloud-init)
+		Provider: getEnv("PROVIDER", ""),
 
 		// Project linkage (set via cloud-init)
 		ProjectID:     getEnv("PROJECT_ID", ""),

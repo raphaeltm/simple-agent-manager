@@ -866,3 +866,57 @@ func TestCloseIdleControlPlaneConnectionsFlushesPool(t *testing.T) {
 		t.Fatalf("expected 2 total connections after flush (pool was purged), got %d", afterFlush)
 	}
 }
+
+func TestDevcontainerBuildTimeoutDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.DevcontainerBuildTimeout != 15*time.Minute {
+		t.Fatalf("DevcontainerBuildTimeout=%v, want %v", cfg.DevcontainerBuildTimeout, 15*time.Minute)
+	}
+}
+
+func TestDevcontainerBuildTimeoutOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("DEVCONTAINER_BUILD_TIMEOUT", "25m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.DevcontainerBuildTimeout != 25*time.Minute {
+		t.Fatalf("DevcontainerBuildTimeout=%v, want %v", cfg.DevcontainerBuildTimeout, 25*time.Minute)
+	}
+}
+
+func TestProviderDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Provider != "" {
+		t.Fatalf("Provider=%q, want empty string", cfg.Provider)
+	}
+}
+
+func TestProviderOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("PROVIDER", "hetzner")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Provider != "hetzner" {
+		t.Fatalf("Provider=%q, want %q", cfg.Provider, "hetzner")
+	}
+}

@@ -208,6 +208,12 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
 	}
 
+	// Inject provider-specific apt mirror config into the container before any package installs.
+	// Non-fatal: if injection fails, apt will fall back to default archive.ubuntu.com.
+	if containerID, findErr := findDevcontainerID(ctx, cfg); findErr == nil {
+		injectAptMirrorConfig(ctx, cfg, containerID)
+	}
+
 	// Ensure gh CLI is available (install if missing from custom devcontainers).
 	// Non-fatal: workspace still works without gh, just can't create PRs.
 	reporter.Log("gh_cli", "started", "Checking GitHub CLI availability")
@@ -360,6 +366,11 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		} else if markerFound {
 			recoveryMode = true
 		}
+	}
+
+	// Inject provider-specific apt mirror config into the container before any package installs.
+	if containerID, findErr := findDevcontainerID(ctx, cfg); findErr == nil {
+		injectAptMirrorConfig(ctx, cfg, containerID)
 	}
 
 	// Ensure gh CLI is available (install if missing from custom devcontainers).
@@ -857,11 +868,13 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 				slog.Info("Repo has its own devcontainer config, skipping additional-features injection")
 			}
 
-			cmd := exec.CommandContext(ctx, "devcontainer", args...)
+			buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
+			defer buildCancel()
+			cmd := exec.CommandContext(buildCtx, "devcontainer", args...)
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				// Repo config failed — log the error and fall back to default image.
-				slog.Warn("Devcontainer build failed with repo config, falling back to default image", "error", err, "output", strings.TrimSpace(string(output)))
+				slog.Warn("Devcontainer build failed with repo config, falling back to default image", "error", err, "output", strings.TrimSpace(string(output)), "timedOut", buildCtx.Err() == context.DeadlineExceeded)
 				var fallbackErr error
 				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, credHelperHostPath, err, output)
 				if fallbackErr != nil {
@@ -871,7 +884,9 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		}
 	} else {
 		// No config — use default.
-		_, err := runDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath)
+		buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
+		defer buildCancel()
+		_, err := runDevcontainerWithDefault(buildCtx, cfg, volumeName, credHelperHostPath)
 		if err != nil {
 			return false, err
 		}
@@ -885,6 +900,65 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		return false, err
 	}
 	return usedFallback, nil
+}
+
+// devcontainerBuildContext wraps the parent context with a DevcontainerBuildTimeout deadline.
+// This prevents devcontainer up from hanging indefinitely when network/apt operations fail.
+func devcontainerBuildContext(parent context.Context, cfg *config.Config) (context.Context, context.CancelFunc) {
+	if cfg.DevcontainerBuildTimeout > 0 {
+		slog.Info("Applying devcontainer build timeout", "timeout", cfg.DevcontainerBuildTimeout)
+		return context.WithTimeout(parent, cfg.DevcontainerBuildTimeout)
+	}
+	return context.WithCancel(parent)
+}
+
+// injectAptMirrorConfig injects provider-specific apt mirror configuration into a running container.
+// This ensures containers on Hetzner use mirror.hetzner.com instead of archive.ubuntu.com,
+// which is slow/unreachable through Docker bridge NAT on Hetzner networks.
+func injectAptMirrorConfig(ctx context.Context, cfg *config.Config, containerID string) {
+	if cfg.Provider == "" {
+		return
+	}
+
+	// Read the provider-specific mirror config from the host
+	mirrorScript := fmt.Sprintf(`set -e
+# Source provider mirror config written by cloud-init
+if [ -f /etc/sam/apt-mirror-config.sh ]; then
+  . /etc/sam/apt-mirror-config.sh
+fi
+
+if [ -z "$APT_MIRROR" ]; then
+  exit 0
+fi
+
+# Write apt mirror sources list and retry config into the container
+docker exec -u root %s sh -c "
+  # Add retry config
+  mkdir -p /etc/apt/apt.conf.d
+  echo 'Acquire::Retries \"3\";' > /etc/apt/apt.conf.d/80-retries
+  echo 'Acquire::http::Timeout \"30\";' >> /etc/apt/apt.conf.d/80-retries
+  echo 'Acquire::https::Timeout \"30\";' >> /etc/apt/apt.conf.d/80-retries
+
+  # Override sources to use provider mirror
+  if [ -f /etc/apt/sources.list ]; then
+    sed -i \"s|http://archive.ubuntu.com|http://$APT_MIRROR|g\" /etc/apt/sources.list
+    sed -i \"s|http://security.ubuntu.com|http://$APT_MIRROR|g\" /etc/apt/sources.list
+  fi
+  # Handle DEB822 format (Ubuntu 24.04+)
+  if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+    sed -i \"s|http://archive.ubuntu.com|http://$APT_MIRROR|g\" /etc/apt/sources.list.d/ubuntu.sources
+    sed -i \"s|http://security.ubuntu.com|http://$APT_MIRROR|g\" /etc/apt/sources.list.d/ubuntu.sources
+  fi
+"
+`, containerID)
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", mirrorScript)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Warn("Failed to inject apt mirror config into container (non-fatal)", "error", err, "output", strings.TrimSpace(string(output)), "provider", cfg.Provider)
+		return
+	}
+	slog.Info("Injected apt mirror config into container", "provider", cfg.Provider, "containerID", containerID)
 }
 
 func fallbackToDefaultDevcontainer(
