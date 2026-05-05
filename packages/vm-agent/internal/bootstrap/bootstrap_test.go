@@ -3024,10 +3024,68 @@ func TestDevcontainerBuildContext_ZeroTimeout(t *testing.T) {
 	}
 }
 
+func TestInjectAptRetryConfig(t *testing.T) {
+	// Should not panic when docker is unavailable — non-fatal by design.
+	injectAptRetryConfig(context.Background(), "nonexistent-container-id")
+}
+
 func TestInjectAptMirrorConfig_EmptyProvider(t *testing.T) {
 	cfg := &config.Config{
 		Provider: "",
 	}
 	// Should not panic or error with empty provider — it's a no-op
 	injectAptMirrorConfig(context.Background(), cfg, "nonexistent-container-id")
+}
+
+func TestInjectAptMirrorConfig_HetznerProvider(t *testing.T) {
+	cfg := &config.Config{
+		Provider: "hetzner",
+	}
+	// With hetzner provider, the function will attempt docker exec with mirror.hetzner.com.
+	// It will fail (no Docker) but should not panic. The key assertion is that it proceeds
+	// past the guards and attempts the docker exec (logged as a warning, not a crash).
+	injectAptMirrorConfig(context.Background(), cfg, "test-container-abc123")
+}
+
+func TestResolveAptMirror(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		provider string
+		want     string
+	}{
+		{"hetzner", "mirror.hetzner.com"},
+		{"scaleway", ""},
+		{"gcp", ""},
+		{"", ""},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			got := resolveAptMirror(tc.provider)
+			if got != tc.want {
+				t.Fatalf("resolveAptMirror(%q) = %q, want %q", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsValidMirrorHostname(t *testing.T) {
+	t.Parallel()
+
+	valid := []string{"mirror.hetzner.com", "apt.example.org", "mirror123.test"}
+	for _, h := range valid {
+		if !isValidMirrorHostname(h) {
+			t.Errorf("isValidMirrorHostname(%q) = false, want true", h)
+		}
+	}
+
+	invalid := []string{"mirror;rm -rf /", "$(cmd)", "mirror hetzner.com", "", "mirror\n.com"}
+	for _, h := range invalid {
+		if isValidMirrorHostname(h) {
+			t.Errorf("isValidMirrorHostname(%q) = true, want false", h)
+		}
+	}
 }

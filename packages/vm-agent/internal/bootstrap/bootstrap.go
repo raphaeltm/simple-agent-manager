@@ -208,12 +208,13 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
 	}
 
-	// Inject provider-specific apt mirror config into the container before any package installs.
-	// Non-fatal: if injection fails, apt will fall back to default archive.ubuntu.com.
+	// Inject apt retry config (all providers) and mirror config (provider-specific) before package installs.
+	// Non-fatal: if injection fails, apt will use default settings.
 	if containerID, findErr := findDevcontainerID(ctx, cfg); findErr == nil {
+		injectAptRetryConfig(ctx, containerID)
 		injectAptMirrorConfig(ctx, cfg, containerID)
 	} else {
-		slog.Debug("Could not find devcontainer for apt mirror injection (non-fatal)", "error", findErr)
+		slog.Debug("Could not find devcontainer for apt config injection (non-fatal)", "error", findErr)
 	}
 
 	// Ensure gh CLI is available (install if missing from custom devcontainers).
@@ -370,12 +371,13 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		}
 	}
 
-	// Inject provider-specific apt mirror config into the container before any package installs.
-	// Non-fatal: if injection fails, apt will fall back to default archive.ubuntu.com.
+	// Inject apt retry config (all providers) and mirror config (provider-specific) before package installs.
+	// Non-fatal: if injection fails, apt will use default settings.
 	if containerID, findErr := findDevcontainerID(ctx, cfg); findErr == nil {
+		injectAptRetryConfig(ctx, containerID)
 		injectAptMirrorConfig(ctx, cfg, containerID)
 	} else {
-		slog.Debug("Could not find devcontainer for apt mirror injection (non-fatal)", "error", findErr)
+		slog.Debug("Could not find devcontainer for apt config injection (non-fatal)", "error", findErr)
 	}
 
 	// Ensure gh CLI is available (install if missing from custom devcontainers).
@@ -919,6 +921,20 @@ func devcontainerBuildContext(parent context.Context, cfg *config.Config) (conte
 	return context.WithCancel(parent)
 }
 
+// injectAptRetryConfig injects apt retry and timeout configuration into a running container.
+// This makes apt operations resilient to transient network failures regardless of cloud provider.
+// Non-fatal: if injection fails, apt will use default settings (no retries).
+func injectAptRetryConfig(ctx context.Context, containerID string) {
+	retryScript := `mkdir -p /etc/apt/apt.conf.d && printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries`
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", retryScript)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Warn("Failed to inject apt retry config into container (non-fatal)", "error", err, "output", strings.TrimSpace(string(output)))
+		return
+	}
+	slog.Info("Injected apt retry config into container", "containerID", containerID)
+}
+
 // injectAptMirrorConfig injects provider-specific apt mirror configuration into a running container.
 // This ensures containers on Hetzner use mirror.hetzner.com instead of archive.ubuntu.com,
 // which is slow/unreachable through Docker bridge NAT on Hetzner networks.
@@ -928,25 +944,20 @@ func injectAptMirrorConfig(ctx context.Context, cfg *config.Config, containerID 
 		return
 	}
 
-	// Resolve the apt mirror from the host-side config written by cloud-init.
 	mirror := resolveAptMirror(cfg.Provider)
 	if mirror == "" {
 		return
 	}
 
-	// Validate mirror is a safe hostname (alphanumeric, dots, hyphens only).
 	if !isValidMirrorHostname(mirror) {
 		slog.Warn("APT_MIRROR value looks unsafe, skipping injection", "mirror", mirror, "provider", cfg.Provider)
 		return
 	}
 
-	// Build the inner script that runs inside the container.
 	// Uses exec.Command with containerID as a direct argument (not shell-interpolated)
 	// to prevent any injection via containerID.
 	innerScript := fmt.Sprintf(
-		`mkdir -p /etc/apt/apt.conf.d && `+
-			`printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries && `+
-			`{ [ -f /etc/apt/sources.list ] && sed -i 's|http://archive.ubuntu.com|http://%[1]s|g; s|http://security.ubuntu.com|http://%[1]s|g' /etc/apt/sources.list || true; } && `+
+		`{ [ -f /etc/apt/sources.list ] && sed -i 's|http://archive.ubuntu.com|http://%[1]s|g; s|http://security.ubuntu.com|http://%[1]s|g' /etc/apt/sources.list || true; } && `+
 			`{ [ -f /etc/apt/sources.list.d/ubuntu.sources ] && sed -i 's|http://archive.ubuntu.com|http://%[1]s|g; s|http://security.ubuntu.com|http://%[1]s|g' /etc/apt/sources.list.d/ubuntu.sources || true; }`,
 		mirror,
 	)
