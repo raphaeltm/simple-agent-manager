@@ -60,7 +60,8 @@ type Config struct {
 	WorkspaceDir       string
 	BootstrapStatePath string
 	BootstrapMaxWait   time.Duration
-	BootstrapTimeout   time.Duration // Overall bootstrap timeout including devcontainer build
+	BootstrapTimeout         time.Duration // Overall bootstrap timeout including devcontainer build
+	DevcontainerBuildTimeout time.Duration // Timeout for devcontainer up/build operations (env: DEVCONTAINER_BUILD_TIMEOUT, default: 15m)
 
 	// Session settings
 	SessionTTL             time.Duration
@@ -132,6 +133,10 @@ type Config struct {
 	DefaultDevcontainerImage      string // Container image for the default config
 	DefaultDevcontainerConfigPath string // Path to write the generated default config
 	DefaultDevcontainerRemoteUser string // remoteUser for the default config (empty = omit, let image default)
+
+	// Cloud provider (e.g. "hetzner", "scaleway", "gcp") — set via cloud-init.
+	// Used for provider-specific configuration like apt mirrors.
+	Provider string // Cloud provider name (env: PROVIDER)
 
 	// Project linkage — set via cloud-init when the workspace belongs to a project.
 	// If ProjectID is empty, the message reporter is disabled (no-op).
@@ -253,7 +258,8 @@ func Load() (*Config, error) {
 		BootstrapMaxWait:   getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
 		// Must be <= API-side TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS (default 30m).
 		// If larger, the API declares the workspace dead while bootstrap is still running.
-		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
+		BootstrapTimeout:         getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
+		DevcontainerBuildTimeout: getEnvDuration("DEVCONTAINER_BUILD_TIMEOUT", 15*time.Minute),
 
 		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
 		SessionCleanupInterval: getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),
@@ -323,6 +329,9 @@ func Load() (*Config, error) {
 		DefaultDevcontainerImage:      getEnv("DEFAULT_DEVCONTAINER_IMAGE", DefaultDevcontainerImage),
 		DefaultDevcontainerConfigPath: getEnv("DEFAULT_DEVCONTAINER_CONFIG_PATH", DefaultDevcontainerConfigPath),
 		DefaultDevcontainerRemoteUser: getEnv("DEFAULT_DEVCONTAINER_REMOTE_USER", ""), // Empty = omit, use image default
+
+		// Cloud provider (set via cloud-init)
+		Provider: getEnv("PROVIDER", ""),
 
 		// Project linkage (set via cloud-init)
 		ProjectID:     getEnv("PROJECT_ID", ""),

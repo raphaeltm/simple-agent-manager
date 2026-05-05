@@ -247,6 +247,12 @@ func (r *Reporter) send(entries []ErrorEntry) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		slog.Warn("errorreport: control plane returned non-OK status", "statusCode", resp.StatusCode, "count", len(entries))
+		respBody := make([]byte, 1024)
+		n, _ := resp.Body.Read(respBody)
+		slog.Warn("errorreport: control plane returned non-OK status",
+			"statusCode", resp.StatusCode,
+			"count", len(entries),
+			"responseBody", string(respBody[:n]),
+		)
 	}
 }

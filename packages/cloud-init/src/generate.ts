@@ -123,6 +123,11 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       errors.push('originCaKey: must be a valid PEM-encoded key (-----BEGIN ... ----- / -----END ... -----)');
     }
   }
+  if (variables.provider !== undefined && variables.provider !== '') {
+    if (!/^[a-z]+$/.test(variables.provider)) {
+      errors.push(`provider: must be lowercase alpha (got ${JSON.stringify(variables.provider)})`);
+    }
+  }
 
   if (errors.length > 0) {
     throw new Error(`Cloud-init variable validation failed:\n${errors.join('\n')}`);
@@ -162,6 +167,8 @@ export interface CloudInitVariables {
   vmAgentPort?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
+  /** Cloud provider name (e.g. 'hetzner', 'scaleway', 'gcp') for provider-specific configuration */
+  provider?: string;
 }
 
 /**
@@ -204,6 +211,7 @@ export function generateCloudInit(
     '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
+    '{{ provider }}': variables.provider ?? '',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.

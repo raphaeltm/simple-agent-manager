@@ -629,7 +629,13 @@ jobs:
 
       - name: Build VM Agent
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
-        run: make -C packages/vm-agent build-all
+        run: |
+          # Compute VERSION from the clean git checkout before any build artifacts
+          # modify the working tree (pnpm install, Pulumi, etc.), which would add
+          # a "-dirty" suffix via `git describe --dirty`.
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "dev")
+          echo "Building VM Agent version: $VERSION"
+          make -C packages/vm-agent build-all VERSION="$VERSION"
 
       - name: Upload VM Agent Binaries
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}

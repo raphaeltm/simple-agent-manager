@@ -474,8 +474,38 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
     throw errors.notFound('Task');
   }
 
-  if (!task.workspaceId || payload.workspace !== task.workspaceId) {
-    throw errors.forbidden('Token workspace mismatch');
+  if (!task.workspaceId) {
+    throw errors.forbidden('Task has no workspace');
+  }
+
+  // Workspace-scoped tokens must match the task's workspace directly.
+  // Node-scoped tokens (fallback when workspace token isn't available yet) are
+  // accepted if the task's workspace belongs to the node identified by the token.
+  if (payload.workspace !== task.workspaceId) {
+    if (payload.scope === 'node') {
+      const wsRows = await db
+        .select({ nodeId: schema.workspaces.nodeId })
+        .from(schema.workspaces)
+        .where(eq(schema.workspaces.id, task.workspaceId))
+        .limit(1);
+      const ws = wsRows[0];
+      if (!ws || ws.nodeId !== payload.workspace) {
+        log.error('task_callback.node_token_workspace_mismatch', {
+          taskId,
+          workspaceId: task.workspaceId,
+          tokenNodeId: payload.workspace,
+          actualNodeId: ws?.nodeId ?? null,
+        });
+        throw errors.forbidden('Token workspace mismatch');
+      }
+    } else {
+      log.error('task_callback.workspace_token_mismatch', {
+        taskId,
+        workspaceId: task.workspaceId,
+        tokenWorkspace: payload.workspace,
+      });
+      throw errors.forbidden('Token workspace mismatch');
+    }
   }
 
   // --- Execution-step-only update (no status transition) ---

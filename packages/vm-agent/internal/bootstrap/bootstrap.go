@@ -208,6 +208,14 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
 	}
 
+	// Inject provider-specific apt mirror before any apt operations.
+	// Non-fatal: if mirror injection fails, apt falls back to defaults.
+	if cfg.Provider != "" {
+		if err := ensureAptMirrorConfig(ctx, cfg); err != nil {
+			slog.Warn("Apt mirror config failed (non-fatal)", "provider", cfg.Provider, "error", err)
+		}
+	}
+
 	// Ensure gh CLI is available (install if missing from custom devcontainers).
 	// Non-fatal: workspace still works without gh, just can't create PRs.
 	reporter.Log("gh_cli", "started", "Checking GitHub CLI availability")
@@ -359,6 +367,14 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 			slog.Warn("Failed to inspect build error marker", "workspaceID", cfg.WorkspaceID, "error", markerErr)
 		} else if markerFound {
 			recoveryMode = true
+		}
+	}
+
+	// Inject provider-specific apt mirror before any apt operations.
+	// Non-fatal: if mirror injection fails, apt falls back to defaults.
+	if cfg.Provider != "" {
+		if err := ensureAptMirrorConfig(ctx, cfg); err != nil {
+			slog.Warn("Apt mirror config failed (non-fatal)", "provider", cfg.Provider, "error", err)
 		}
 	}
 
@@ -857,7 +873,16 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 				slog.Info("Repo has its own devcontainer config, skipping additional-features injection")
 			}
 
-			cmd := exec.CommandContext(ctx, "devcontainer", args...)
+			// Apply devcontainer build timeout to prevent indefinite hangs
+			// (e.g. when apt mirrors are unreachable inside the Dockerfile).
+			buildCtx := ctx
+			if cfg.DevcontainerBuildTimeout > 0 {
+				var cancel context.CancelFunc
+				buildCtx, cancel = context.WithTimeout(ctx, cfg.DevcontainerBuildTimeout)
+				defer cancel()
+			}
+
+			cmd := exec.CommandContext(buildCtx, "devcontainer", args...)
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				// Repo config failed — log the error and fall back to default image.
@@ -1695,6 +1720,99 @@ func waitForCommand(ctx context.Context, name string) error {
 
 // ensureGitHubCLI checks whether the gh CLI is available inside the devcontainer.
 // If it isn't (common for repos with custom devcontainer configs that don't include
+// providerAptMirror returns the apt mirror URL for the given cloud provider.
+// Only providers with known fast local mirrors get overrides; all others return
+// empty string to use the container's default mirrors.
+func providerAptMirror(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "hetzner":
+		return "mirror.hetzner.com"
+	default:
+		// Scaleway, GCP, and other providers have good default Ubuntu mirror
+		// peering — no override needed.
+		return ""
+	}
+}
+
+// ensureAptMirrorConfig injects a provider-specific apt mirror into the
+// devcontainer. On Hetzner, containers default to archive.ubuntu.com which is
+// slow/unreachable via Docker bridge NAT, causing apt operations to time out.
+// This rewrites /etc/apt/sources.list.d/ to use the Hetzner mirror instead.
+// Non-fatal: if mirror injection fails, apt falls back to its defaults.
+func ensureAptMirrorConfig(ctx context.Context, cfg *config.Config) error {
+	mirror := providerAptMirror(cfg.Provider)
+	if mirror == "" {
+		return nil
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to locate devcontainer for apt mirror config: %w", err)
+	}
+
+	// Write a sources.list override that uses the provider's fast mirror.
+	// This covers both Ubuntu (noble, jammy, etc.) and Debian (bookworm, etc.).
+	// The script detects the distro and codename, then writes a clean sources list.
+	script := fmt.Sprintf(`set -e
+MIRROR="%s"
+if ! command -v apt-get >/dev/null 2>&1; then
+  exit 0
+fi
+# Detect distro info
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+else
+  exit 0
+fi
+case "$ID" in
+  ubuntu)
+    CODENAME="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
+    if [ -z "$CODENAME" ]; then exit 0; fi
+    # Disable any existing sources to prevent slow fallback
+    if [ -d /etc/apt/sources.list.d ]; then
+      find /etc/apt/sources.list.d -name '*.sources' -exec sh -c 'mv "$1" "$1.bak"' _ {} \;
+    fi
+    if [ -f /etc/apt/sources.list ]; then
+      mv /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
+    fi
+    cat > /etc/apt/sources.list.d/provider-mirror.list << SOURCES
+deb http://${MIRROR}/ubuntu/packages ${CODENAME} main restricted universe multiverse
+deb http://${MIRROR}/ubuntu/packages ${CODENAME}-updates main restricted universe multiverse
+deb http://${MIRROR}/ubuntu/packages ${CODENAME}-security main restricted universe multiverse
+SOURCES
+    ;;
+  debian)
+    CODENAME="${VERSION_CODENAME}"
+    if [ -z "$CODENAME" ]; then exit 0; fi
+    if [ -d /etc/apt/sources.list.d ]; then
+      find /etc/apt/sources.list.d -name '*.sources' -exec sh -c 'mv "$1" "$1.bak"' _ {} \;
+    fi
+    if [ -f /etc/apt/sources.list ]; then
+      mv /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
+    fi
+    cat > /etc/apt/sources.list.d/provider-mirror.list << SOURCES
+deb http://${MIRROR}/debian/packages ${CODENAME} main
+deb http://${MIRROR}/debian/packages ${CODENAME}-updates main
+deb http://${MIRROR}/debian/security ${CODENAME}-security main
+SOURCES
+    ;;
+  *)
+    # Non-Debian/Ubuntu distros: no mirror override
+    exit 0
+    ;;
+esac
+`, mirror)
+
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", script)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("apt mirror config failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	slog.Info("Apt mirror configured in devcontainer", "provider", cfg.Provider, "mirror", mirror, "containerID", containerID)
+	return nil
+}
+
 // the github-cli feature), it installs gh via the official install script.
 // This is non-fatal — if installation fails the workspace still works, just without gh.
 func ensureGitHubCLI(ctx context.Context, cfg *config.Config) error {

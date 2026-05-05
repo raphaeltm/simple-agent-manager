@@ -22,7 +22,6 @@ users:
   - name: workspace
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
-    ssh_authorized_keys: []
 
 runcmd:
   # =====================================================================
@@ -75,6 +74,7 @@ write_files:
       Environment=VM_AGENT_PORT={{ vm_agent_port }}
       Environment=TLS_CERT_PATH={{ tls_cert_path }}
       Environment=TLS_KEY_PATH={{ tls_key_path }}
+      Environment=PROVIDER={{ provider }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5
@@ -279,6 +279,14 @@ write_files:
     content: |
       {{ origin_ca_key }}
     permissions: '0600'
+
+  - path: /etc/sam/apt-mirror-config
+    permissions: '0644'
+    content: |
+      # Provider-specific apt mirror configuration.
+      # Sourced by VM agent bootstrap to inject fast mirrors into containers.
+      # Only providers with known fast mirrors get overrides; all others use defaults.
+      PROVIDER={{ provider }}
 
 final_message: "Simple Agent Manager node {{ node_id }} provisioning started!"
 `;

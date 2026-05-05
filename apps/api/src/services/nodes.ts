@@ -164,6 +164,7 @@ export async function provisionNode(
       originCaCert: env.ORIGIN_CA_CERT,
       originCaKey: env.ORIGIN_CA_KEY,
       vmAgentPort: env.VM_AGENT_PORT,
+      provider: targetProvider,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
