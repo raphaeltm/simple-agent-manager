@@ -1903,10 +1903,10 @@ describe('ProjectMessageView — catch-up race regression', () => {
     expect(screen.getByText('Follow-up question')).toBeTruthy();
   });
 
-  it('onCatchUp with empty messages would wipe the display (documents why guard is needed)', async () => {
-    // This test documents the destructive behavior of onCatchUp with
-    // 'replace' strategy when called with empty data. The wasReconnect
-    // guard prevents this from happening on initial connect.
+  it('onCatchUp with empty messages preserves existing display (replace strategy keeps earlier messages)', async () => {
+    // After the fix for the load-more regression, the replace strategy
+    // preserves messages older than the incoming window. When incoming
+    // is empty (oldest = Infinity), all existing messages are preserved.
     const fullMessages = [
       makeMessage('msg-1', 'session-1', 'Important conversation'),
     ];
@@ -1923,7 +1923,7 @@ describe('ProjectMessageView — catch-up race regression', () => {
       expect(screen.getByText('Important conversation')).toBeTruthy();
     });
 
-    // Simulate onCatchUp with EMPTY messages (the destructive case)
+    // Simulate onCatchUp with EMPTY messages
     expect(capturedWsOnCatchUp).not.toBeNull();
     act(() => {
       capturedWsOnCatchUp!(
@@ -1933,10 +1933,7 @@ describe('ProjectMessageView — catch-up race regression', () => {
       );
     });
 
-    // Messages are gone — replaced by empty set. This is why the
-    // wasReconnect guard must exist: without it, this scenario can
-    // happen on initial connect if the catch-up response arrives
-    // before loadSession completes or with empty/stale data.
-    expect(screen.queryByText('Important conversation')).toBeNull();
+    // Messages are preserved — empty incoming does not wipe earlier messages
+    expect(screen.getByText('Important conversation')).toBeTruthy();
   });
 });

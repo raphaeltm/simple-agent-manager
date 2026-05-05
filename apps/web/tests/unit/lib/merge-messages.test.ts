@@ -250,7 +250,6 @@ describe('mergeMessages', () => {
       const result = mergeMessages(prev, incoming, 'replace');
       expect(result).toHaveLength(2);
     });
-  });
 
     it('preserves load-more messages through poll cycles (regression test)', () => {
       // Simulate: user loaded earlier messages (t=1..3), then poll returns latest (t=4..6)
