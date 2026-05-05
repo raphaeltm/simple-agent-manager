@@ -77,10 +77,9 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     onSessionStopped: useCallback(() => {
       setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
     }, []),
-    onCatchUp: useCallback((catchUpMsgs: ChatMessageResponse[], catchUpSession: ChatSessionResponse, catchUpHasMore: boolean) => {
+    onCatchUp: useCallback((catchUpMsgs: ChatMessageResponse[], catchUpSession: ChatSessionResponse) => {
       setSession(catchUpSession);
       setMessages((prev) => mergeMessages(prev, catchUpMsgs, 'replace'));
-      setHasMore(catchUpHasMore);
     }, []),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);

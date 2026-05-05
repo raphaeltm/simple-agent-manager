@@ -42,14 +42,6 @@ export const DEFAULT_SAM_SEARCH_MAX_LIMIT = 50;
 /** Maximum messages loaded on page mount (history). */
 export const DEFAULT_SAM_HISTORY_LOAD_LIMIT = 200;
 
-/**
- * Default message limit for chat session REST endpoints (project chat view).
- * Streaming-token chat messages produce many more DB rows than logical messages,
- * so this limit is much higher than SAM_HISTORY_LOAD_LIMIT.
- * Configurable via CHAT_SESSION_MESSAGE_LIMIT env var.
- */
-export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 3000;
-
 /** Anthropic API version header. */
 export const SAM_ANTHROPIC_VERSION = '2023-06-01';
 

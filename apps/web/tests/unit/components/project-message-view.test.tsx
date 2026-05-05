@@ -44,10 +44,10 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 // Captured WebSocket onMessage callback — tests can call this to inject messages
 let capturedWsOnMessage: ((msg: ReturnType<typeof makeMessage>) => void) | null = null;
 // Captured onCatchUp callback — tests can call this to simulate catch-up after reconnect
-let capturedWsOnCatchUp: ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>, hasMore: boolean) => void) | null = null;
+let capturedWsOnCatchUp: ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void) | null = null;
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void; onCatchUp?: (msgs: unknown[], session: unknown, hasMore: boolean) => void }) => {
+  useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void; onCatchUp?: (msgs: unknown[], session: unknown) => void }) => {
     capturedWsOnMessage = (opts.onMessage ?? null) as typeof capturedWsOnMessage;
     capturedWsOnCatchUp = (opts.onCatchUp ?? null) as typeof capturedWsOnCatchUp;
     return {
@@ -1893,7 +1893,6 @@ describe('ProjectMessageView — catch-up race regression', () => {
       capturedWsOnCatchUp!(
         fullMessages,
         makeSession('session-1'),
-        false,
       );
     });
 
@@ -1929,7 +1928,6 @@ describe('ProjectMessageView — catch-up race regression', () => {
       capturedWsOnCatchUp!(
         [],
         makeSession('session-1'),
-        false,
       );
     });
 
