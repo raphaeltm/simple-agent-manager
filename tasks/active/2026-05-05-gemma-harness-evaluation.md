@@ -37,19 +37,19 @@ The previous AI Gateway experiment (2026-05-02) validated Qwen 2.5 Coder 32B as 
 - [x] Test content:null handling
 - [x] Test harness-style coding tools
 - [x] Compare with Qwen 2.5 Coder and Qwen 3 30B
-- [ ] Write comprehensive findings document at `experiments/ai-gateway-tool-call/FINDINGS-gemma.md`
-- [ ] Add Gemma 4 26B to `PLATFORM_AI_MODELS` registry with correct metadata
-- [ ] Update Gemma 3 12B registry entry to clarify it's utility-only (no tool calls)
-- [ ] Add Gemma 4 to experiment script's `MODELS_TO_TEST` array
-- [ ] Update `agent-harness-integration.md` architecture doc (or create if missing)
+- [x] Write comprehensive findings document at `experiments/ai-gateway-tool-call/FINDINGS-gemma.md`
+- [x] Add Gemma 4 26B to `PLATFORM_AI_MODELS` registry with correct metadata
+- [x] Update Gemma 3 12B registry entry to clarify it's utility-only (no tool calls)
+- [x] Add Gemma 4 to experiment script's `MODELS_TO_TEST` array
+- [x] Update `agent-harness-integration.md` architecture doc (or create if missing)
 
 ## Acceptance Criteria
 
-- [ ] Gemma 4 26B added to model registry with `toolCallSupport: 'good'` or better
-- [ ] Findings document documents request shapes, auth path, reasoning behavior, and comparison
-- [ ] Experiment script updated to test Gemma 4
-- [ ] Model registry accurately reflects all Workers AI models' tool-call capabilities
-- [ ] Clear next-step recommendation for harness model selection
+- [x] Gemma 4 26B added to model registry with `toolCallSupport: 'good'` or better
+- [x] Findings document documents request shapes, auth path, reasoning behavior, and comparison
+- [x] Experiment script updated to test Gemma 4
+- [x] Model registry accurately reflects all Workers AI models' tool-call capabilities
+- [x] Clear next-step recommendation for harness model selection
 
 ## References
 
