@@ -15,6 +15,7 @@ import { log } from '../../lib/logger';
 import * as notificationService from '../../services/notification';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
+import { cleanupTaskRun } from '../../services/task-runner';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
@@ -264,6 +265,19 @@ export async function handleCompleteTask(
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
   await syncTriggerExecutionStatus(env.DATABASE, tokenData.taskId, 'completed');
+
+  // Trigger workspace/node cleanup (best-effort). Without this, auto-provisioned
+  // nodes remain running indefinitely because markIdle() is never called and the
+  // NodeLifecycle DO alarm never fires. This mirrors what the REST API route does
+  // in routes/tasks/crud.ts on toStatus='completed'.
+  try {
+    await cleanupTaskRun(tokenData.taskId, env);
+  } catch (err) {
+    log.warn('mcp.complete_task.cleanup_failed', {
+      taskId: tokenData.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   // Recompute scheduler states for sibling tasks in the same mission (best-effort).
   // When a mission task completes, other tasks that were blocked_dependency may become schedulable.

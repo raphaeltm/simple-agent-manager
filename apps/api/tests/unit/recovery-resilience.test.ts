@@ -274,8 +274,8 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
   });
 
   it('records orphaned nodes in OBSERVABILITY_DATABASE', () => {
-    expect(nodeCleanupSource).toContain("recoveryType: 'orphaned_node'");
-    expect(nodeCleanupSource).toContain('orphaned_node_detected');
+    expect(nodeCleanupSource).toContain("recoveryType: 'orphaned_node_cleanup'");
+    expect(nodeCleanupSource).toContain('orphaned_node_destroying');
   });
 
   it('tracks orphan counts in result', () => {
@@ -408,7 +408,8 @@ describe('recovery type consistency (TDF-7)', () => {
     'max_lifetime_node_cleanup',
     'max_lifetime_node_cleanup_failure',
     'orphaned_workspace',
-    'orphaned_node',
+    'orphaned_node_cleanup',
+    'orphaned_node_cleanup_failure',
     'provisioning_timeout',
   ];
 

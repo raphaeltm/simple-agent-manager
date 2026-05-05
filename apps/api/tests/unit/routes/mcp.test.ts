@@ -3,6 +3,11 @@ import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 
+// Mock task-runner service (cleanupTaskRun is called on complete_task)
+vi.mock('../../../src/services/task-runner', () => ({
+  cleanupTaskRun: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Mock KV namespace
 const mockKV = {
   put: vi.fn(),

@@ -217,6 +217,63 @@ describe('runNodeCleanupSweep', () => {
     });
   });
 
+  describe('Layer 4: orphaned node destruction', () => {
+    it('destroys orphaned nodes with no workspaces past grace period', async () => {
+      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const now = Date.now();
+      const updatedAt = new Date(now - 15 * 60 * 1000).toISOString(); // 15 min ago (> 10 min grace)
+
+      const responses = new Map<string, unknown[]>();
+      responses.set('n.warm_since IS NOT NULL', []);
+      responses.set('auto_provisioned_node_id', []);
+      responses.set("t.status IN ('completed', 'failed', 'cancelled')", []);
+      // Orphaned node: running, no warm_since, no workspaces, old updated_at
+      responses.set('n.warm_since IS NULL', [
+        {
+          id: 'node-orphan',
+          user_id: 'user-1',
+          status: 'running',
+          updated_at: updatedAt,
+          warm_since: null,
+        },
+      ]);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.orphanedNodesFlagged).toBe(1);
+      expect(result.errors).toBe(0);
+      expect(deleteNodeResources).toHaveBeenCalledWith('node-orphan', 'user-1', env);
+    });
+
+    it('increments errors when orphaned node destruction fails', async () => {
+      const { deleteNodeResources } = await import('../../src/services/nodes');
+      (deleteNodeResources as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('API timeout'));
+      const now = Date.now();
+      const updatedAt = new Date(now - 15 * 60 * 1000).toISOString();
+
+      const responses = new Map<string, unknown[]>();
+      responses.set('n.warm_since IS NOT NULL', []);
+      responses.set('auto_provisioned_node_id', []);
+      responses.set("t.status IN ('completed', 'failed', 'cancelled')", []);
+      responses.set('n.warm_since IS NULL', [
+        {
+          id: 'node-orphan',
+          user_id: 'user-1',
+          status: 'running',
+          updated_at: updatedAt,
+          warm_since: null,
+        },
+      ]);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.orphanedNodesFlagged).toBe(0);
+      expect(result.errors).toBe(1);
+    });
+  });
+
   describe('result structure', () => {
     it('returns all expected counters', async () => {
       const env = createMockEnv(new Map());

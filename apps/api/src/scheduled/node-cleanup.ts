@@ -324,9 +324,10 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
   }
 
-  // 4. Orphan detection: running nodes with no workspaces past warm timeout (TDF-7)
+  // 4. Orphan cleanup: running nodes with no workspaces past warm timeout (TDF-7)
   //    A node is orphaned if it's 'running' with no warm_since, no workspaces,
-  //    and its updated_at is older than the grace period.
+  //    and its updated_at is older than the grace period. Previously only flagged —
+  //    now actually destroys them (Layer 2 defense against markIdle never being called).
   const orphanedNodes = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.updated_at, n.warm_since
      FROM nodes n
@@ -347,26 +348,58 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
   }>();
 
   for (const node of orphanedNodes.results) {
-    log.warn('node_cleanup.orphaned_node_detected', {
-      nodeId: node.id,
-      userId: node.user_id,
-      updatedAt: node.updated_at,
-    });
-
-    await persistError(env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'warn',
-      message: `Orphaned node detected: running with no workspaces and not in warm pool`,
-      context: {
-        recoveryType: 'orphaned_node',
+    try {
+      log.warn('node_cleanup.orphaned_node_destroying', {
         nodeId: node.id,
+        userId: node.user_id,
         updatedAt: node.updated_at,
-      },
-      userId: node.user_id,
-      nodeId: node.id,
-    });
+      });
 
-    result.orphanedNodesFlagged++;
+      await deleteNodeResources(node.id, node.user_id, env);
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: `Destroyed orphaned node: was running with no workspaces and not in warm pool`,
+        context: {
+          recoveryType: 'orphaned_node_cleanup',
+          nodeId: node.id,
+          updatedAt: node.updated_at,
+          orphanGracePeriodMs,
+        },
+        userId: node.user_id,
+        nodeId: node.id,
+      });
+
+      await db
+        .update(schema.nodes)
+        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
+        .where(eq(schema.nodes.id, node.id));
+
+      result.orphanedNodesFlagged++;
+    } catch (err) {
+      log.error('node_cleanup.orphaned_node_destroy_failed', {
+        nodeId: node.id,
+        userId: node.user_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'error',
+        message: `Failed to destroy orphaned node: ${err instanceof Error ? err.message : String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        context: {
+          recoveryType: 'orphaned_node_cleanup_failure',
+          nodeId: node.id,
+          updatedAt: node.updated_at,
+        },
+        userId: node.user_id,
+        nodeId: node.id,
+      });
+
+      result.errors++;
+    }
   }
 
   return result;
