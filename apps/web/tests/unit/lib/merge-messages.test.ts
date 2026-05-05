@@ -163,12 +163,32 @@ describe('mergeMessages', () => {
   });
 
   describe('replace strategy', () => {
-    it('replaces messages with incoming set', () => {
+    it('preserves earlier-loaded messages that predate the incoming window', () => {
       const prev = [msg({ id: 'a', createdAt: 1 }), msg({ id: 'b', createdAt: 2 })];
       const incoming = [msg({ id: 'c', createdAt: 3 }), msg({ id: 'd', createdAt: 4 })];
       const result = mergeMessages(prev, incoming, 'replace');
-      expect(result).toHaveLength(2);
-      expect(result.map((m) => m.id)).toEqual(['c', 'd']);
+      // a and b are older than the oldest incoming (t=3), so they are preserved
+      expect(result).toHaveLength(4);
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
+    });
+
+    it('replaces messages within the incoming time range', () => {
+      // prev has messages at t=1,2,3; incoming has updated messages at t=2,3,4
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'b-old', createdAt: 2 }),
+        msg({ id: 'c-old', createdAt: 3 }),
+      ];
+      const incoming = [
+        msg({ id: 'b-new', createdAt: 2 }),
+        msg({ id: 'c-new', createdAt: 3 }),
+        msg({ id: 'd', createdAt: 4 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'replace');
+      // a (t=1) is preserved because it's older than the oldest incoming (t=2)
+      // b-old and c-old are within the incoming range and get replaced
+      expect(result).toHaveLength(4);
+      expect(result.map((m) => m.id)).toEqual(['a', 'b-new', 'c-new', 'd']);
     });
 
     it('preserves unconfirmed optimistic messages', () => {
@@ -229,6 +249,46 @@ describe('mergeMessages', () => {
       ];
       const result = mergeMessages(prev, incoming, 'replace');
       expect(result).toHaveLength(2);
+    });
+  });
+
+    it('preserves load-more messages through poll cycles (regression test)', () => {
+      // Simulate: user loaded earlier messages (t=1..3), then poll returns latest (t=4..6)
+      const afterLoadMore = [
+        msg({ id: 'early-1', createdAt: 1 }),
+        msg({ id: 'early-2', createdAt: 2 }),
+        msg({ id: 'early-3', createdAt: 3 }),
+        msg({ id: 'recent-4', createdAt: 4 }),
+        msg({ id: 'recent-5', createdAt: 5 }),
+      ];
+      const pollResult = [
+        msg({ id: 'recent-4', createdAt: 4 }),
+        msg({ id: 'recent-5', createdAt: 5 }),
+        msg({ id: 'recent-6', createdAt: 6 }),
+      ];
+      const result = mergeMessages(afterLoadMore, pollResult, 'replace');
+      // Earlier messages (t=1..3) are preserved, recent range is updated
+      expect(result).toHaveLength(6);
+      expect(result.map((m) => m.id)).toEqual([
+        'early-1', 'early-2', 'early-3', 'recent-4', 'recent-5', 'recent-6',
+      ]);
+    });
+
+    it('does not duplicate messages at the boundary between earlier and incoming', () => {
+      // Exact boundary: prev has msg at t=3, incoming starts at t=3
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'b', createdAt: 2 }),
+        msg({ id: 'c', createdAt: 3 }),
+      ];
+      const incoming = [
+        msg({ id: 'c', createdAt: 3 }),
+        msg({ id: 'd', createdAt: 4 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'replace');
+      // a and b are preserved (t < 3), c comes from incoming, d is new
+      expect(result).toHaveLength(4);
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
     });
   });
 
@@ -306,9 +366,11 @@ describe('mergeMessages', () => {
       expect(result).toHaveLength(1);
     });
 
-    it('handles empty incoming with replace', () => {
+    it('preserves all prev messages when incoming is empty', () => {
       const result = mergeMessages([msg({ id: 'a', createdAt: 1 })], [], 'replace');
-      expect(result).toHaveLength(0);
+      // Empty incoming means nothing replaces — prev is preserved
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe('a');
     });
 
     it('handles empty incoming with append', () => {

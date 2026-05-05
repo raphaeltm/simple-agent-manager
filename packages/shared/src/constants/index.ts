@@ -328,6 +328,7 @@ export {
 // SAM Agent (Top-Level Agent)
 export type { SamConfig } from './sam';
 export {
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   DEFAULT_SAM_AIG_SOURCE,
   DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW,
   DEFAULT_SAM_FTS_ENABLED,
