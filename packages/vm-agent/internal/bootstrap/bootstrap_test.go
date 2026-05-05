@@ -872,7 +872,7 @@ func TestWriteDefaultDevcontainerConfigForLightweightModeOmitsFeatures(t *testin
 
 	configPath := filepath.Join(t.TempDir(), "default-devcontainer.json")
 	cfg := &config.Config{
-		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
+		DefaultDevcontainerImage:      config.DefaultDevcontainerImage,
 		DefaultDevcontainerConfigPath: configPath,
 	}
 
@@ -895,8 +895,8 @@ func TestWriteDefaultDevcontainerConfigForLightweightModeOmitsFeatures(t *testin
 	if updateRemoteUserUID, ok := parsed["updateRemoteUserUID"].(bool); !ok || updateRemoteUserUID {
 		t.Fatalf("expected lightweight fallback config to disable updateRemoteUserUID, got:\n%s", string(data))
 	}
-	if img, _ := parsed["image"].(string); img != "mcr.microsoft.com/devcontainers/base:ubuntu" {
-		t.Errorf("expected image %q, got %q", "mcr.microsoft.com/devcontainers/base:ubuntu", img)
+	if img, _ := parsed["image"].(string); img != config.DefaultDevcontainerImage {
+		t.Errorf("expected image %q, got %q", config.DefaultDevcontainerImage, img)
 	}
 }
 

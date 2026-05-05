@@ -418,7 +418,7 @@ func installDevcontainerCLI(ctx context.Context) error {
 }
 
 func pullBaseImage(ctx context.Context) error {
-	return runShell(ctx, "docker pull mcr.microsoft.com/devcontainers/base:ubuntu")
+	return runShell(ctx, "docker pull "+config.DefaultDevcontainerImage)
 }
 
 func restartJournald() error {

@@ -27,9 +27,9 @@ const (
 )
 
 // DefaultDevcontainerImage is the default container image used when a repo has no devcontainer config.
-// Uses a lighter base image so fallback workspaces bootstrap quickly on modest nodes.
-// Override via DEFAULT_DEVCONTAINER_IMAGE env var.
-const DefaultDevcontainerImage = "mcr.microsoft.com/devcontainers/base:ubuntu"
+// Uses the Node 22 devcontainer image so lightweight workspaces have a compatible Node.js runtime
+// without a slow apt-get install step. Override via DEFAULT_DEVCONTAINER_IMAGE env var.
+const DefaultDevcontainerImage = "mcr.microsoft.com/devcontainers/typescript-node:22-bookworm"
 
 // DefaultDevcontainerConfigPath is where the VM agent writes the default devcontainer.json
 // when a repo has no devcontainer config. Override via DEFAULT_DEVCONTAINER_CONFIG_PATH env var.
