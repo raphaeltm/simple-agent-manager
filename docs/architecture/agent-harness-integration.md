@@ -37,10 +37,18 @@ Harness Agent Loop
     → cf-aig-metadata: {userId, workspaceId, projectId, source, modelId}
 ```
 
-For non-Workers AI models (Anthropic, OpenAI) with Unified Billing:
+For Anthropic models with Unified Billing:
 ```
-  → resolveUpstreamAuth() → cf-aig-authorization: Bearer {CF_AIG_TOKEN}
-  → Unified API: gateway.ai.cloudflare.com/v1/{account}/sam/compat/chat/completions
+  → forwardToAnthropic() → buildAnthropicGatewayUrl()
+  → gateway.ai.cloudflare.com/v1/{account}/sam/anthropic/v1/messages
+  → cf-aig-authorization: Bearer {CF_AIG_TOKEN}
+```
+
+For OpenAI models with Unified Billing:
+```
+  → forwardToOpenAI() → buildOpenAIUrl()
+  → gateway.ai.cloudflare.com/v1/{account}/sam/openai/v1/chat/completions
+  → cf-aig-authorization: Bearer {CF_AIG_TOKEN}
 ```
 
 ## Cost Attribution

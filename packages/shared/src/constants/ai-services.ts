@@ -238,7 +238,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'free-coding',
-    allowedScopes: ['workspace', 'project'],
+    allowedScopes: ['workspace'],
     unifiedApiModelId: null,
   },
   {
