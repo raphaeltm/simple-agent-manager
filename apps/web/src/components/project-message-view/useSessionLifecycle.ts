@@ -138,10 +138,12 @@ export function useSessionLifecycle(
     onSessionStopped: useCallback(() => {
       setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
     }, []),
-    onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, catchUpHasMore: boolean) => {
+    onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse) => {
       setSession(catchUpSession);
       setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
-      setHasMore(catchUpHasMore);
+      // Do NOT reset hasMore — catch-up returns a limited window of recent
+      // messages; resetting it would discard the pagination state from
+      // earlier "load more" actions.
     }, []),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
@@ -264,11 +266,13 @@ export function useSessionLifecycle(
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
         const taskStatus = data.session.task?.status ?? '';
         const agentSessId = data.session.agentSessionId ?? '';
-        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${data.hasMore}:${taskStatus}:${agentSessId}`;
+        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${taskStatus}:${agentSessId}`;
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);
-          setHasMore(data.hasMore);
+          // Do NOT reset hasMore — polling returns a limited window of recent
+          // messages; resetting it would discard the pagination state from
+          // earlier "load more" actions.
           setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
           if (data.session.task) setTaskEmbed(data.session.task);
         }

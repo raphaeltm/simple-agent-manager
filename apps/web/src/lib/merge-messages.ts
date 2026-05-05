@@ -99,8 +99,11 @@ export function mergeMessages(
 }
 
 /**
- * Replace strategy: incoming is authoritative. Build a new map from incoming,
- * then add any unconfirmed optimistic messages from prev.
+ * Replace strategy: incoming is authoritative for its time range, but
+ * earlier-loaded messages (from "load more" pagination) are preserved.
+ *
+ * This prevents polling and WebSocket catch-up from discarding messages
+ * that the user explicitly loaded via the "Load earlier messages" button.
  *
  * Note: content-based user message dedup (hasConfirmedDuplicate) is intentionally
  * NOT applied here. The REST API snapshot is the ground truth — if the server has
@@ -113,7 +116,27 @@ function mergeReplace(
 ): ChatMessageResponse[] {
   const map = new Map<string, ChatMessageResponse>();
 
-  // Add all incoming messages (authoritative)
+  // Find the oldest incoming message to determine the boundary.
+  // Messages older than this were loaded via pagination and should be kept.
+  let oldestIncoming = Infinity;
+  for (const msg of incoming) {
+    if (msg.createdAt < oldestIncoming) {
+      oldestIncoming = msg.createdAt;
+    }
+  }
+
+  // Preserve earlier-loaded messages from prev that predate the incoming window.
+  // For messages at exactly the boundary timestamp (createdAt === oldestIncoming),
+  // preserve them only if their ID is not in the incoming set — this prevents
+  // silent drops when the server returns only some messages at that timestamp.
+  const incomingIds = new Set(incoming.map((m) => m.id));
+  for (const msg of prev) {
+    if (!isOptimistic(msg) && (msg.createdAt < oldestIncoming || (msg.createdAt === oldestIncoming && !incomingIds.has(msg.id)))) {
+      map.set(msg.id, msg);
+    }
+  }
+
+  // Add all incoming messages (authoritative for the recent range)
   for (const msg of incoming) {
     map.set(msg.id, msg);
   }
@@ -121,13 +144,10 @@ function mergeReplace(
   // Preserve optimistic messages that haven't been confirmed yet
   for (const msg of prev) {
     if (isOptimistic(msg)) {
-      const matchId = findMatchingOptimistic(map, msg);
-      // If no matching confirmed message exists, keep the optimistic one
-      // (Check if any incoming message matches by content)
       const hasMatch = incoming.some(
         (m) => m.role === msg.role && m.content === msg.content,
       );
-      if (!hasMatch && !matchId) {
+      if (!hasMatch) {
         map.set(msg.id, msg);
       }
     }

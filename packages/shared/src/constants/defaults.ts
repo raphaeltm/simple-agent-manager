@@ -49,6 +49,14 @@ export const DEFAULT_TASK_LIST_DEFAULT_PAGE_SIZE = 50;
 /** Default max task list page size. Override via TASK_LIST_MAX_PAGE_SIZE env var. */
 export const DEFAULT_TASK_LIST_MAX_PAGE_SIZE = 200;
 
+/**
+ * Default message limit for chat session REST endpoints (project chat view).
+ * Streaming-token chat messages produce many more DB rows than logical messages,
+ * so this limit is much higher than SAM_HISTORY_LOAD_LIMIT (200).
+ * Override via CHAT_SESSION_MESSAGE_LIMIT env var.
+ */
+export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 3000;
+
 /** Default callback timeout for delegated task updates in milliseconds. */
 export const DEFAULT_TASK_CALLBACK_TIMEOUT_MS = 10000;
 

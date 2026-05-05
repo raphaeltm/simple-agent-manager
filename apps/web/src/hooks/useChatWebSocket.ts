@@ -21,7 +21,7 @@ interface UseChatWebSocketOptions {
   /** Called when the session is stopped server-side. */
   onSessionStopped: () => void;
   /** Called when we catch up with missed messages after reconnect. */
-  onCatchUp: (messages: ChatMessageResponse[], session: ChatSessionResponse, hasMore: boolean) => void;
+  onCatchUp: (messages: ChatMessageResponse[], session: ChatSessionResponse) => void;
   /** Called when the agent completes on the session. */
   onAgentCompleted?: (agentCompletedAt: number) => void;
 }
@@ -214,7 +214,7 @@ export function useChatWebSocket({
   const catchUpMessages = useCallback(async () => {
     try {
       const data = await getChatSession(projectId, sessionId);
-      onCatchUpRef.current(data.messages, data.session, data.hasMore);
+      onCatchUpRef.current(data.messages, data.session);
     } catch {
       // Best-effort catch-up — poll fallback will handle it
     }

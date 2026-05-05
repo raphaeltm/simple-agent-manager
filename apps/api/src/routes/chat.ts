@@ -7,7 +7,7 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
-import { DEFAULT_SAM_HISTORY_LOAD_LIMIT, isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
+import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -29,10 +29,10 @@ const chatRoutes = new Hono<{ Bindings: Env }>();
 chatRoutes.use('/*', requireAuth(), requireApproved());
 
 function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
-  const configuredLimit = parseInt(env.SAM_HISTORY_LOAD_LIMIT || '', 10);
+  const configuredLimit = parseInt(env.CHAT_SESSION_MESSAGE_LIMIT || '', 10);
   const maxLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
     ? configuredLimit
-    : DEFAULT_SAM_HISTORY_LOAD_LIMIT;
+    : DEFAULT_CHAT_SESSION_MESSAGE_LIMIT;
   const parsedLimit = parseInt(requestedLimit || '', 10);
   const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : maxLimit;
   return Math.min(limit, maxLimit);

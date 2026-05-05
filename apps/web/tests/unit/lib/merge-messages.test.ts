@@ -163,12 +163,35 @@ describe('mergeMessages', () => {
   });
 
   describe('replace strategy', () => {
-    it('replaces messages with incoming set', () => {
+    it('preserves earlier-loaded messages that predate the incoming window', () => {
       const prev = [msg({ id: 'a', createdAt: 1 }), msg({ id: 'b', createdAt: 2 })];
       const incoming = [msg({ id: 'c', createdAt: 3 }), msg({ id: 'd', createdAt: 4 })];
       const result = mergeMessages(prev, incoming, 'replace');
-      expect(result).toHaveLength(2);
-      expect(result.map((m) => m.id)).toEqual(['c', 'd']);
+      // a and b are older than the oldest incoming (t=3), so they are preserved
+      expect(result).toHaveLength(4);
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
+    });
+
+    it('replaces messages within the incoming time range (same IDs)', () => {
+      // prev has messages at t=1,2,3; incoming has same messages at t=2,3 plus new at t=4
+      // In real usage, IDs are stable — the server returns the same IDs
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'b', createdAt: 2, content: 'old-b' }),
+        msg({ id: 'c', createdAt: 3, content: 'old-c' }),
+      ];
+      const incoming = [
+        msg({ id: 'b', createdAt: 2, content: 'updated-b' }),
+        msg({ id: 'c', createdAt: 3, content: 'updated-c' }),
+        msg({ id: 'd', createdAt: 4 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'replace');
+      // a (t=1) preserved, b and c overwritten by incoming (same ID), d is new
+      expect(result).toHaveLength(4);
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
+      // Incoming versions are authoritative
+      expect(result[1]!.content).toBe('updated-b');
+      expect(result[2]!.content).toBe('updated-c');
     });
 
     it('preserves unconfirmed optimistic messages', () => {
@@ -229,6 +252,63 @@ describe('mergeMessages', () => {
       ];
       const result = mergeMessages(prev, incoming, 'replace');
       expect(result).toHaveLength(2);
+    });
+
+    it('preserves load-more messages through poll cycles (regression test)', () => {
+      // Simulate: user loaded earlier messages (t=1..3), then poll returns latest (t=4..6)
+      const afterLoadMore = [
+        msg({ id: 'early-1', createdAt: 1 }),
+        msg({ id: 'early-2', createdAt: 2 }),
+        msg({ id: 'early-3', createdAt: 3 }),
+        msg({ id: 'recent-4', createdAt: 4 }),
+        msg({ id: 'recent-5', createdAt: 5 }),
+      ];
+      const pollResult = [
+        msg({ id: 'recent-4', createdAt: 4 }),
+        msg({ id: 'recent-5', createdAt: 5 }),
+        msg({ id: 'recent-6', createdAt: 6 }),
+      ];
+      const result = mergeMessages(afterLoadMore, pollResult, 'replace');
+      // Earlier messages (t=1..3) are preserved, recent range is updated
+      expect(result).toHaveLength(6);
+      expect(result.map((m) => m.id)).toEqual([
+        'early-1', 'early-2', 'early-3', 'recent-4', 'recent-5', 'recent-6',
+      ]);
+    });
+
+    it('does not duplicate messages at the boundary between earlier and incoming', () => {
+      // Exact boundary: prev has msg at t=3, incoming starts at t=3
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'b', createdAt: 2 }),
+        msg({ id: 'c', createdAt: 3 }),
+      ];
+      const incoming = [
+        msg({ id: 'c', createdAt: 3 }),
+        msg({ id: 'd', createdAt: 4 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'replace');
+      // a and b preserved (t < 3), c from incoming (same ID at boundary), d is new
+      expect(result).toHaveLength(4);
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
+    });
+
+    it('preserves same-timestamp messages not returned by poll (silent-drop prevention)', () => {
+      // Two messages at the same timestamp as oldestIncoming, but only one
+      // is in the incoming set. The other must NOT be silently dropped.
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'b', createdAt: 3 }),  // same timestamp as incoming boundary
+        msg({ id: 'c', createdAt: 3 }),  // same timestamp, NOT in incoming
+      ];
+      const incoming = [
+        msg({ id: 'b', createdAt: 3 }),  // server returns b but not c
+        msg({ id: 'd', createdAt: 4 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'replace');
+      // a preserved (t=1 < 3), c preserved (t=3 at boundary but ID not in incoming), b from incoming, d new
+      expect(result).toHaveLength(4);
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
     });
   });
 
@@ -306,9 +386,11 @@ describe('mergeMessages', () => {
       expect(result).toHaveLength(1);
     });
 
-    it('handles empty incoming with replace', () => {
+    it('preserves all prev messages when incoming is empty', () => {
       const result = mergeMessages([msg({ id: 'a', createdAt: 1 })], [], 'replace');
-      expect(result).toHaveLength(0);
+      // Empty incoming means nothing replaces — prev is preserved
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe('a');
     });
 
     it('handles empty incoming with append', () => {
