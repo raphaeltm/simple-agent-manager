@@ -212,6 +212,8 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	// Non-fatal: if injection fails, apt will fall back to default archive.ubuntu.com.
 	if containerID, findErr := findDevcontainerID(ctx, cfg); findErr == nil {
 		injectAptMirrorConfig(ctx, cfg, containerID)
+	} else {
+		slog.Debug("Could not find devcontainer for apt mirror injection (non-fatal)", "error", findErr)
 	}
 
 	// Ensure gh CLI is available (install if missing from custom devcontainers).
@@ -369,8 +371,11 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 
 	// Inject provider-specific apt mirror config into the container before any package installs.
+	// Non-fatal: if injection fails, apt will fall back to default archive.ubuntu.com.
 	if containerID, findErr := findDevcontainerID(ctx, cfg); findErr == nil {
 		injectAptMirrorConfig(ctx, cfg, containerID)
+	} else {
+		slog.Debug("Could not find devcontainer for apt mirror injection (non-fatal)", "error", findErr)
 	}
 
 	// Ensure gh CLI is available (install if missing from custom devcontainers).
@@ -869,9 +874,9 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 			}
 
 			buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
-			defer buildCancel()
 			cmd := exec.CommandContext(buildCtx, "devcontainer", args...)
 			output, err := cmd.CombinedOutput()
+			buildCancel() // Release timer immediately; fallback uses parent ctx.
 			if err != nil {
 				// Repo config failed — log the error and fall back to default image.
 				slog.Warn("Devcontainer build failed with repo config, falling back to default image", "error", err, "output", strings.TrimSpace(string(output)), "timedOut", buildCtx.Err() == context.DeadlineExceeded)
@@ -904,9 +909,11 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 
 // devcontainerBuildContext wraps the parent context with a DevcontainerBuildTimeout deadline.
 // This prevents devcontainer up from hanging indefinitely when network/apt operations fail.
+// If DevcontainerBuildTimeout is zero (e.g. DEVCONTAINER_BUILD_TIMEOUT=0), no deadline is
+// applied and only parent cancellation is forwarded.
 func devcontainerBuildContext(parent context.Context, cfg *config.Config) (context.Context, context.CancelFunc) {
 	if cfg.DevcontainerBuildTimeout > 0 {
-		slog.Info("Applying devcontainer build timeout", "timeout", cfg.DevcontainerBuildTimeout)
+		slog.Debug("Applying devcontainer build timeout", "timeout", cfg.DevcontainerBuildTimeout)
 		return context.WithTimeout(parent, cfg.DevcontainerBuildTimeout)
 	}
 	return context.WithCancel(parent)
@@ -915,50 +922,60 @@ func devcontainerBuildContext(parent context.Context, cfg *config.Config) (conte
 // injectAptMirrorConfig injects provider-specific apt mirror configuration into a running container.
 // This ensures containers on Hetzner use mirror.hetzner.com instead of archive.ubuntu.com,
 // which is slow/unreachable through Docker bridge NAT on Hetzner networks.
+// Non-fatal: if injection fails, apt will fall back to default archive.ubuntu.com.
 func injectAptMirrorConfig(ctx context.Context, cfg *config.Config, containerID string) {
 	if cfg.Provider == "" {
 		return
 	}
 
-	// Read the provider-specific mirror config from the host
-	mirrorScript := fmt.Sprintf(`set -e
-# Source provider mirror config written by cloud-init
-if [ -f /etc/sam/apt-mirror-config.sh ]; then
-  . /etc/sam/apt-mirror-config.sh
-fi
+	// Resolve the apt mirror from the host-side config written by cloud-init.
+	mirror := resolveAptMirror(cfg.Provider)
+	if mirror == "" {
+		return
+	}
 
-if [ -z "$APT_MIRROR" ]; then
-  exit 0
-fi
+	// Validate mirror is a safe hostname (alphanumeric, dots, hyphens only).
+	if !isValidMirrorHostname(mirror) {
+		slog.Warn("APT_MIRROR value looks unsafe, skipping injection", "mirror", mirror, "provider", cfg.Provider)
+		return
+	}
 
-# Write apt mirror sources list and retry config into the container
-docker exec -u root %s sh -c "
-  # Add retry config
-  mkdir -p /etc/apt/apt.conf.d
-  echo 'Acquire::Retries \"3\";' > /etc/apt/apt.conf.d/80-retries
-  echo 'Acquire::http::Timeout \"30\";' >> /etc/apt/apt.conf.d/80-retries
-  echo 'Acquire::https::Timeout \"30\";' >> /etc/apt/apt.conf.d/80-retries
+	// Build the inner script that runs inside the container.
+	// Uses exec.Command with containerID as a direct argument (not shell-interpolated)
+	// to prevent any injection via containerID.
+	innerScript := fmt.Sprintf(
+		`mkdir -p /etc/apt/apt.conf.d && `+
+			`printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries && `+
+			`{ [ -f /etc/apt/sources.list ] && sed -i 's|http://archive.ubuntu.com|http://%[1]s|g; s|http://security.ubuntu.com|http://%[1]s|g' /etc/apt/sources.list || true; } && `+
+			`{ [ -f /etc/apt/sources.list.d/ubuntu.sources ] && sed -i 's|http://archive.ubuntu.com|http://%[1]s|g; s|http://security.ubuntu.com|http://%[1]s|g' /etc/apt/sources.list.d/ubuntu.sources || true; }`,
+		mirror,
+	)
 
-  # Override sources to use provider mirror
-  if [ -f /etc/apt/sources.list ]; then
-    sed -i \"s|http://archive.ubuntu.com|http://$APT_MIRROR|g\" /etc/apt/sources.list
-    sed -i \"s|http://security.ubuntu.com|http://$APT_MIRROR|g\" /etc/apt/sources.list
-  fi
-  # Handle DEB822 format (Ubuntu 24.04+)
-  if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-    sed -i \"s|http://archive.ubuntu.com|http://$APT_MIRROR|g\" /etc/apt/sources.list.d/ubuntu.sources
-    sed -i \"s|http://security.ubuntu.com|http://$APT_MIRROR|g\" /etc/apt/sources.list.d/ubuntu.sources
-  fi
-"
-`, containerID)
-
-	cmd := exec.CommandContext(ctx, "sh", "-c", mirrorScript)
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", innerScript)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Warn("Failed to inject apt mirror config into container (non-fatal)", "error", err, "output", strings.TrimSpace(string(output)), "provider", cfg.Provider)
 		return
 	}
-	slog.Info("Injected apt mirror config into container", "provider", cfg.Provider, "containerID", containerID)
+	slog.Info("Injected apt mirror config into container", "provider", cfg.Provider, "containerID", containerID, "mirror", mirror)
+}
+
+// resolveAptMirror returns the apt mirror hostname for the given cloud provider.
+// Returns empty string if no specific mirror is configured for the provider.
+func resolveAptMirror(provider string) string {
+	switch provider {
+	case "hetzner":
+		return "mirror.hetzner.com"
+	default:
+		return ""
+	}
+}
+
+// isValidMirrorHostname validates that a mirror value contains only safe hostname characters.
+var validMirrorRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.\-]*[a-zA-Z0-9])?$`)
+
+func isValidMirrorHostname(mirror string) bool {
+	return validMirrorRe.MatchString(mirror)
 }
 
 func fallbackToDefaultDevcontainer(
