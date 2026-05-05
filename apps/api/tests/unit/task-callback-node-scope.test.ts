@@ -27,7 +27,7 @@ const mockWorkspaceQuery = vi.fn();
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: (fields?: Record<string, unknown>) => ({
-      from: (table: { name?: string }) => ({
+      from: (_table: { name?: string }) => ({
         where: () => ({
           limit: () => {
             // Route to the right mock based on which fields are selected
