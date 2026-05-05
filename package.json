@@ -62,7 +62,7 @@
     "prettier": "3.8.3",
     "ts-morph": "27.0.2",
     "tsx": "catalog:",
-    "turbo": "2.9.6",
+    "turbo": "2.9.9",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
