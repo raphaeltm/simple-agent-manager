@@ -2990,3 +2990,48 @@ func TestWriteDefaultDevcontainerConfigWithVolumeAndCredentialHelper(t *testing.
 		t.Fatal("expected containerEnv for credential helper")
 	}
 }
+
+func TestProviderAptMirror(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		provider string
+		want     string
+	}{
+		{"hetzner", "mirror.hetzner.com"},
+		{"HETZNER", "mirror.hetzner.com"},
+		{"  hetzner  ", "mirror.hetzner.com"},
+		{"scaleway", ""},
+		{"gcp", ""},
+		{"", ""},
+		{"aws", ""},
+		{"unknown-provider", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("provider=%q", tt.provider), func(t *testing.T) {
+			got := providerAptMirror(tt.provider)
+			if got != tt.want {
+				t.Errorf("providerAptMirror(%q) = %q, want %q", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnsureAptMirrorConfig_SkipsNonHetzner(t *testing.T) {
+	t.Parallel()
+
+	// ensureAptMirrorConfig should return nil immediately for non-Hetzner providers
+	// because providerAptMirror returns "" for them.
+	cfg := &config.Config{Provider: "scaleway"}
+	err := ensureAptMirrorConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("expected nil error for scaleway provider, got: %v", err)
+	}
+
+	cfg2 := &config.Config{Provider: ""}
+	err2 := ensureAptMirrorConfig(context.Background(), cfg2)
+	if err2 != nil {
+		t.Fatalf("expected nil error for empty provider, got: %v", err2)
+	}
+}

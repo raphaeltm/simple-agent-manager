@@ -1354,3 +1354,57 @@ describe('integrated size validation in generateCloudInit', () => {
   });
 });
 
+describe('provider variable', () => {
+  it('injects provider into systemd environment and apt-mirror-config', () => {
+    const config = generateCloudInit(baseVariables({ provider: 'hetzner' }), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    // Check systemd service has PROVIDER env var
+    const vmAgentService = parsed.write_files.find(
+      (f: Record<string, unknown>) => f.path === '/etc/systemd/system/vm-agent.service'
+    );
+    expect(vmAgentService).toBeTruthy();
+    expect(vmAgentService.content).toContain('Environment=PROVIDER=hetzner');
+
+    // Check apt-mirror-config file has the provider
+    const aptMirrorConfig = parsed.write_files.find(
+      (f: Record<string, unknown>) => f.path === '/etc/sam/apt-mirror-config'
+    );
+    expect(aptMirrorConfig).toBeTruthy();
+    expect(aptMirrorConfig.content).toContain('PROVIDER=hetzner');
+  });
+
+  it('leaves provider empty when not specified', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    const vmAgentService = parsed.write_files.find(
+      (f: Record<string, unknown>) => f.path === '/etc/systemd/system/vm-agent.service'
+    );
+    expect(vmAgentService.content).toContain('Environment=PROVIDER=');
+    // Should NOT contain 'PROVIDER=hetzner' or similar
+    expect(vmAgentService.content).not.toContain('PROVIDER=hetzner');
+  });
+
+  it('validates provider as lowercase alpha only', () => {
+    expect(() => generateCloudInit(baseVariables({ provider: 'Hetzner' }))).toThrow('provider');
+    expect(() => generateCloudInit(baseVariables({ provider: 'my-provider' }))).toThrow('provider');
+    expect(() => generateCloudInit(baseVariables({ provider: 'provider123' }))).toThrow('provider');
+  });
+
+  it('accepts valid provider names', () => {
+    expect(() => generateCloudInit(baseVariables({ provider: 'hetzner' }), { validateSize: false })).not.toThrow();
+    expect(() => generateCloudInit(baseVariables({ provider: 'scaleway' }), { validateSize: false })).not.toThrow();
+    expect(() => generateCloudInit(baseVariables({ provider: 'gcp' }), { validateSize: false })).not.toThrow();
+  });
+
+  it('does not include ssh_authorized_keys in users section', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+    const workspaceUser = parsed.users?.find?.((u: Record<string, unknown>) => u.name === 'workspace');
+    expect(workspaceUser).toBeTruthy();
+    // ssh_authorized_keys was removed to pass cloud-init schema validation
+    expect(workspaceUser.ssh_authorized_keys).toBeUndefined();
+  });
+});
+
