@@ -125,9 +125,13 @@ function mergeReplace(
     }
   }
 
-  // Preserve earlier-loaded messages from prev that predate the incoming window
+  // Preserve earlier-loaded messages from prev that predate the incoming window.
+  // For messages at exactly the boundary timestamp (createdAt === oldestIncoming),
+  // preserve them only if their ID is not in the incoming set — this prevents
+  // silent drops when the server returns only some messages at that timestamp.
+  const incomingIds = new Set(incoming.map((m) => m.id));
   for (const msg of prev) {
-    if (!isOptimistic(msg) && msg.createdAt < oldestIncoming) {
+    if (!isOptimistic(msg) && (msg.createdAt < oldestIncoming || (msg.createdAt === oldestIncoming && !incomingIds.has(msg.id)))) {
       map.set(msg.id, msg);
     }
   }

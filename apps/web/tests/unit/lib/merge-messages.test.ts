@@ -172,23 +172,26 @@ describe('mergeMessages', () => {
       expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
     });
 
-    it('replaces messages within the incoming time range', () => {
-      // prev has messages at t=1,2,3; incoming has updated messages at t=2,3,4
+    it('replaces messages within the incoming time range (same IDs)', () => {
+      // prev has messages at t=1,2,3; incoming has same messages at t=2,3 plus new at t=4
+      // In real usage, IDs are stable — the server returns the same IDs
       const prev = [
         msg({ id: 'a', createdAt: 1 }),
-        msg({ id: 'b-old', createdAt: 2 }),
-        msg({ id: 'c-old', createdAt: 3 }),
+        msg({ id: 'b', createdAt: 2, content: 'old-b' }),
+        msg({ id: 'c', createdAt: 3, content: 'old-c' }),
       ];
       const incoming = [
-        msg({ id: 'b-new', createdAt: 2 }),
-        msg({ id: 'c-new', createdAt: 3 }),
+        msg({ id: 'b', createdAt: 2, content: 'updated-b' }),
+        msg({ id: 'c', createdAt: 3, content: 'updated-c' }),
         msg({ id: 'd', createdAt: 4 }),
       ];
       const result = mergeMessages(prev, incoming, 'replace');
-      // a (t=1) is preserved because it's older than the oldest incoming (t=2)
-      // b-old and c-old are within the incoming range and get replaced
+      // a (t=1) preserved, b and c overwritten by incoming (same ID), d is new
       expect(result).toHaveLength(4);
-      expect(result.map((m) => m.id)).toEqual(['a', 'b-new', 'c-new', 'd']);
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
+      // Incoming versions are authoritative
+      expect(result[1]!.content).toBe('updated-b');
+      expect(result[2]!.content).toBe('updated-c');
     });
 
     it('preserves unconfirmed optimistic messages', () => {
@@ -285,7 +288,25 @@ describe('mergeMessages', () => {
         msg({ id: 'd', createdAt: 4 }),
       ];
       const result = mergeMessages(prev, incoming, 'replace');
-      // a and b are preserved (t < 3), c comes from incoming, d is new
+      // a and b preserved (t < 3), c from incoming (same ID at boundary), d is new
+      expect(result).toHaveLength(4);
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
+    });
+
+    it('preserves same-timestamp messages not returned by poll (silent-drop prevention)', () => {
+      // Two messages at the same timestamp as oldestIncoming, but only one
+      // is in the incoming set. The other must NOT be silently dropped.
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'b', createdAt: 3 }),  // same timestamp as incoming boundary
+        msg({ id: 'c', createdAt: 3 }),  // same timestamp, NOT in incoming
+      ];
+      const incoming = [
+        msg({ id: 'b', createdAt: 3 }),  // server returns b but not c
+        msg({ id: 'd', createdAt: 4 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'replace');
+      // a preserved (t=1 < 3), c preserved (t=3 at boundary but ID not in incoming), b from incoming, d new
       expect(result).toHaveLength(4);
       expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
     });
