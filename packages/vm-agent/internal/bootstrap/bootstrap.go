@@ -875,15 +875,17 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 
 			// Apply devcontainer build timeout to prevent indefinite hangs
 			// (e.g. when apt mirrors are unreachable inside the Dockerfile).
-			buildCtx := ctx
-			if cfg.DevcontainerBuildTimeout > 0 {
-				var cancel context.CancelFunc
-				buildCtx, cancel = context.WithTimeout(ctx, cfg.DevcontainerBuildTimeout)
-				defer cancel()
-			}
-
-			cmd := exec.CommandContext(buildCtx, "devcontainer", args...)
-			output, err := cmd.CombinedOutput()
+			// Wrapped in closure so cancel() fires immediately after the build
+			// command finishes, releasing the timer goroutine before fallback.
+			output, err := func() ([]byte, error) {
+				buildCtx := ctx
+				if cfg.DevcontainerBuildTimeout > 0 {
+					var cancel context.CancelFunc
+					buildCtx, cancel = context.WithTimeout(ctx, cfg.DevcontainerBuildTimeout)
+					defer cancel()
+				}
+				return exec.CommandContext(buildCtx, "devcontainer", args...).CombinedOutput()
+			}()
 			if err != nil {
 				// Repo config failed — log the error and fall back to default image.
 				slog.Warn("Devcontainer build failed with repo config, falling back to default image", "error", err, "output", strings.TrimSpace(string(output)))
@@ -1718,8 +1720,6 @@ func waitForCommand(ctx context.Context, name string) error {
 	}
 }
 
-// ensureGitHubCLI checks whether the gh CLI is available inside the devcontainer.
-// If it isn't (common for repos with custom devcontainer configs that don't include
 // providerAptMirror returns the apt mirror URL for the given cloud provider.
 // Only providers with known fast local mirrors get overrides; all others return
 // empty string to use the container's default mirrors.
@@ -1735,8 +1735,11 @@ func providerAptMirror(provider string) string {
 }
 
 // ensureAptMirrorConfig injects a provider-specific apt mirror into the
-// devcontainer. On Hetzner, containers default to archive.ubuntu.com which is
-// slow/unreachable via Docker bridge NAT, causing apt operations to time out.
+// running devcontainer. This affects apt-get calls that run AFTER the container
+// is started (e.g., gh CLI installation, postCreateCommand). It does NOT affect
+// apt calls during the Docker image build (Dockerfile RUN layers).
+// On Hetzner, containers default to archive.ubuntu.com which is slow/unreachable
+// via Docker bridge NAT, causing apt operations to time out.
 // This rewrites /etc/apt/sources.list.d/ to use the Hetzner mirror instead.
 // Non-fatal: if mirror injection fails, apt falls back to its defaults.
 func ensureAptMirrorConfig(ctx context.Context, cfg *config.Config) error {
@@ -1753,8 +1756,9 @@ func ensureAptMirrorConfig(ctx context.Context, cfg *config.Config) error {
 	// Write a sources.list override that uses the provider's fast mirror.
 	// This covers both Ubuntu (noble, jammy, etc.) and Debian (bookworm, etc.).
 	// The script detects the distro and codename, then writes a clean sources list.
-	script := fmt.Sprintf(`set -e
-MIRROR="%s"
+	// Mirror is passed as $1 (positional arg) to avoid shell injection.
+	script := `set -e
+MIRROR="$1"
 if ! command -v apt-get >/dev/null 2>&1; then
   exit 0
 fi
@@ -1801,9 +1805,9 @@ SOURCES
     exit 0
     ;;
 esac
-`, mirror)
+`
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", script)
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", script, "--", mirror)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("apt mirror config failed: %w: %s", err, strings.TrimSpace(string(output)))
@@ -1813,6 +1817,8 @@ esac
 	return nil
 }
 
+// ensureGitHubCLI checks whether the gh CLI is available inside the devcontainer.
+// If it isn't (common for repos with custom devcontainer configs that don't include
 // the github-cli feature), it installs gh via the official install script.
 // This is non-fatal — if installation fails the workspace still works, just without gh.
 func ensureGitHubCLI(ctx context.Context, cfg *config.Config) error {
