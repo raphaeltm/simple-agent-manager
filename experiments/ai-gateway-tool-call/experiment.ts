@@ -491,7 +491,9 @@ async function runWorkersAiToolLoop(
 const MODELS_TO_TEST = [
   { unifiedApiId: 'anthropic/claude-haiku-4-5-20251001', display: 'Claude Haiku 4.5', path: 'unified' },
   { unifiedApiId: 'openai/gpt-4.1-mini', display: 'GPT-4.1 Mini', path: 'unified' },
+  { unifiedApiId: '@cf/google/gemma-4-26b-a4b-it', display: 'Gemma 4 26B', path: 'workers-ai' },
   { unifiedApiId: '@cf/qwen/qwen2.5-coder-32b-instruct', display: 'Qwen 2.5 Coder 32B', path: 'workers-ai' },
+  { unifiedApiId: '@cf/qwen/qwen3-30b-a3b-fp8', display: 'Qwen 3 30B', path: 'workers-ai' },
 ] as const;
 
 async function main(): Promise<void> {
