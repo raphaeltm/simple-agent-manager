@@ -153,7 +153,7 @@ export class ProjectData extends DurableObject<Env> {
     return messages.getMessages(this.sql, sessionId, limit, before, roles, compact);
   }
 
-  getMessageToolContent(sessionId: string, messageId: string): unknown[] | null {
+  async getMessageToolContent(sessionId: string, messageId: string): Promise<unknown[] | null> {
     return messages.getMessageToolContent(this.sql, sessionId, messageId);
   }
 

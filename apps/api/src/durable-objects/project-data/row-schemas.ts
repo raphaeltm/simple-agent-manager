@@ -278,7 +278,7 @@ export function parseChatMessageRowCompact(row: unknown): {
 } {
   const r = parseRow(ChatMessageRowSchema, row, 'chat_message');
   const parsed = safeParseJson(r.tool_metadata);
-  const toolMetadata = parsed ? stripToolMetadataContent(parsed) : null;
+  const toolMetadata = parsed !== null ? stripToolMetadataContent(parsed) : null;
   return {
     id: r.id,
     sessionId: r.session_id,
@@ -295,6 +295,8 @@ export function parseChatMessageRowCompact(row: unknown): {
  * with a `contentSize` field indicating the byte count of the stripped content.
  * Preserves all other metadata fields (toolCallId, title, kind, status, locations).
  */
+const textEncoder = new TextEncoder();
+
 export function stripToolMetadataContent(meta: unknown): unknown {
   if (!meta || typeof meta !== 'object') return meta;
   const obj = meta as Record<string, unknown>;
@@ -302,7 +304,7 @@ export function stripToolMetadataContent(meta: unknown): unknown {
   if (!Array.isArray(contentArray) || contentArray.length === 0) return meta;
 
   const contentJson = JSON.stringify(contentArray);
-  const contentSize = new TextEncoder().encode(contentJson).byteLength;
+  const contentSize = textEncoder.encode(contentJson).byteLength;
 
   const rest = Object.fromEntries(Object.entries(obj).filter(([k]) => k !== 'content'));
   return { ...rest, contentSize };

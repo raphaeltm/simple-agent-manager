@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { getMessageToolContent } from '../../../src/durable-objects/project-data/messages';
 import {
   parseChatMessageRow,
   parseChatMessageRowCompact,
@@ -151,6 +152,51 @@ describe('parseChatMessageRowCompact', () => {
     expect(tm.toolCallId).toBe('tc-1');
     expect(tm.content).toBeUndefined();
     expect(tm.contentSize).toBeUndefined();
+  });
+});
+
+describe('getMessageToolContent', () => {
+  function makeSql(rows: Record<string, unknown>[]) {
+    return {
+      exec: () => ({ toArray: () => rows }),
+    } as unknown as import('@cloudflare/workers-types').SqlStorage;
+  }
+
+  it('returns content array for a valid message with tool_metadata', () => {
+    const content = [{ type: 'content', text: 'hello' }];
+    const sql = makeSql([{ tool_metadata: JSON.stringify({ toolCallId: 'tc-1', content }) }]);
+    const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
+    expect(result).toEqual(content);
+  });
+
+  it('returns null when message is not found', () => {
+    const sql = makeSql([]);
+    const result = getMessageToolContent(sql, 'sess-1', 'msg-missing');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when tool_metadata is not a string', () => {
+    const sql = makeSql([{ tool_metadata: 42 }]);
+    const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when tool_metadata has no content array', () => {
+    const sql = makeSql([{ tool_metadata: JSON.stringify({ toolCallId: 'tc-1', title: 'Read' }) }]);
+    const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when tool_metadata is malformed JSON', () => {
+    const sql = makeSql([{ tool_metadata: '{bad json' }]);
+    const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when tool_metadata is null string', () => {
+    const sql = makeSql([{ tool_metadata: null }]);
+    const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
+    expect(result).toBeNull();
   });
 });
 
