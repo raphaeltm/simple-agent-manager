@@ -811,6 +811,7 @@ describe('MCP Routes', () => {
         expect.any(Number),
         null,
         ['user', 'assistant'],
+        false,
       );
     });
   });
@@ -1932,6 +1933,7 @@ describe('MCP Routes', () => {
         expect.any(Number),
         null,
         ['user', 'assistant'],
+        false,
       );
     });
 
@@ -1949,6 +1951,7 @@ describe('MCP Routes', () => {
         expect.any(Number),
         null,
         ['user', 'assistant'],
+        false,
       );
     });
 
@@ -1967,6 +1970,7 @@ describe('MCP Routes', () => {
         expect.any(Number),
         null,
         ['user', 'assistant'],
+        false,
       );
     });
   });

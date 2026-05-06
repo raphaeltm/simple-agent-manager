@@ -20,6 +20,7 @@ vi.mock('drizzle-orm/d1', () => ({
 
 vi.mock('@simple-agent-manager/shared', () => ({
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 3000,
+  DEFAULT_CHAT_COMPACT_MODE: true,
   DEFAULT_WORKSPACE_PROFILE: 'full',
   isTaskExecutionStep: () => true,
   isTaskMode: (v: unknown) => v === 'task' || v === 'conversation',
@@ -231,6 +232,8 @@ describe('chatRoutes agent session routing', () => {
       'chat-1',
       500,
       null,
+      undefined,
+      true,
     );
   });
 
@@ -253,6 +256,8 @@ describe('chatRoutes agent session routing', () => {
       'chat-1',
       3000,
       null,
+      undefined,
+      true,
     );
   });
 

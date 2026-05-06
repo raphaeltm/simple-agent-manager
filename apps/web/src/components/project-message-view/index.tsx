@@ -5,9 +5,9 @@ import { ChevronDown, ListChecks } from 'lucide-react';
 import { type FC, useCallback, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
+import { getMessageToolContent } from '../../lib/api/sessions';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
-import { getMessageToolContent } from '../../lib/api/sessions';
 import { AcpConversationItemView } from './AcpConversationItemView';
 import { FollowUpInput } from './FollowUpInput';
 import { AgentErrorBanner, ConnectionBanner } from './MessageBanners';
