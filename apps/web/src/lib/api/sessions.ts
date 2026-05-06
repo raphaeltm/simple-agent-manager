@@ -102,6 +102,20 @@ export async function getChatSession(
   return request<ChatSessionDetailResponse>(endpoint, params.signal ? { signal: params.signal } : {});
 }
 
+/**
+ * Lazy-load the tool_metadata.content array for a single message.
+ * Used by compact mode when the user expands a tool call card.
+ */
+export async function getMessageToolContent(
+  projectId: string,
+  sessionId: string,
+  messageId: string
+): Promise<{ content: unknown[] }> {
+  return request<{ content: unknown[] }>(
+    `/api/projects/${projectId}/sessions/${sessionId}/messages/${messageId}/tool-content`
+  );
+}
+
 export async function createChatSession(
   projectId: string,
   data: { workspaceId?: string; topic?: string } = {}

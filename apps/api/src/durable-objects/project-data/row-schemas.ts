@@ -262,6 +262,52 @@ export function parseChatMessageRow(row: unknown): {
   };
 }
 
+/**
+ * Parse a chat message row in compact mode: strips the `content` array from
+ * tool_metadata and replaces it with a `contentSize` byte count.
+ * This dramatically reduces RPC payload size for tool-heavy sessions.
+ */
+export function parseChatMessageRowCompact(row: unknown): {
+  id: string;
+  sessionId: string;
+  role: string;
+  content: string;
+  toolMetadata: unknown;
+  createdAt: number;
+  sequence: number | null;
+} {
+  const r = parseRow(ChatMessageRowSchema, row, 'chat_message');
+  const parsed = safeParseJson(r.tool_metadata);
+  const toolMetadata = parsed ? stripToolMetadataContent(parsed) : null;
+  return {
+    id: r.id,
+    sessionId: r.session_id,
+    role: r.role,
+    content: r.content,
+    toolMetadata,
+    createdAt: r.created_at,
+    sequence: r.sequence,
+  };
+}
+
+/**
+ * Strip the heavy `content` array from parsed tool_metadata, replacing it
+ * with a `contentSize` field indicating the byte count of the stripped content.
+ * Preserves all other metadata fields (toolCallId, title, kind, status, locations).
+ */
+export function stripToolMetadataContent(meta: unknown): unknown {
+  if (!meta || typeof meta !== 'object') return meta;
+  const obj = meta as Record<string, unknown>;
+  const contentArray = obj.content;
+  if (!Array.isArray(contentArray) || contentArray.length === 0) return meta;
+
+  const contentJson = JSON.stringify(contentArray);
+  const contentSize = new TextEncoder().encode(contentJson).byteLength;
+
+  const rest = Object.fromEntries(Object.entries(obj).filter(([k]) => k !== 'content'));
+  return { ...rest, contentSize };
+}
+
 /** Search result row (message + session join) */
 const SearchResultRowSchema = v.object({
   id: v.string(),

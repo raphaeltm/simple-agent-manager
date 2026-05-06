@@ -40,6 +40,12 @@ export interface ToolCallItem {
   content: ToolCallContentItem[];
   locations: Array<{ path: string; line?: number | null }>;
   timestamp: number;
+  /** Byte size of stripped content (present when loaded in compact mode). */
+  contentSize?: number;
+  /** Whether content has been lazy-loaded (false = needs fetch on expand). */
+  contentLoaded?: boolean;
+  /** Message ID for lazy-loading content via the tool-content endpoint. */
+  messageId?: string;
 }
 
 export interface ToolCallContentItem {

@@ -61,6 +61,14 @@ export const DEFAULT_TASK_LIST_MAX_PAGE_SIZE = 200;
  */
 export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 500;
 
+/**
+ * Whether chat session message loads strip tool_metadata.content by default.
+ * When true, tool call content is lazy-loaded on demand when users expand
+ * individual tool calls, dramatically reducing RPC payload size.
+ * Override via CHAT_COMPACT_MODE_DEFAULT env var.
+ */
+export const DEFAULT_CHAT_COMPACT_MODE = true;
+
 /** Default callback timeout for delegated task updates in milliseconds. */
 export const DEFAULT_TASK_CALLBACK_TIMEOUT_MS = 10000;
 

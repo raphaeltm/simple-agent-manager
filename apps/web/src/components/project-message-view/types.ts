@@ -212,12 +212,17 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       // Use structured content from metadata when available; fall back to raw content field.
       // Content items are now stored as raw ACP JSON (same shape as real-time WebSocket),
       // so we pass them through mapToolCallContent — the same function the real-time path uses.
+      // In compact mode, content is stripped and contentSize is provided instead.
       const structuredContent = meta?.content as Array<{ type: string } & Record<string, unknown>> | undefined;
+      const contentSize = typeof meta?.contentSize === 'number' ? meta.contentSize : undefined;
+      const isCompact = !structuredContent && contentSize !== undefined && contentSize > 0;
       let contentItems: Array<{ type: 'content' | 'diff' | 'terminal'; text?: string; data?: unknown }>;
       if (Array.isArray(structuredContent) && structuredContent.length > 0) {
         contentItems = structuredContent.map((c) => mapToolCallContent(c));
-      } else {
+      } else if (!isCompact) {
         contentItems = isPlaceholderContent(msg.content) ? [] : [{ type: 'content' as const, text: msg.content }];
+      } else {
+        contentItems = [];
       }
 
       // Deduplicate tool calls by toolCallId: merge updates into existing tool call
@@ -244,6 +249,7 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
           content: contentItems,
           locations: locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null })),
           timestamp: msg.createdAt,
+          ...(isCompact ? { contentSize, contentLoaded: false, messageId: msg.id } : {}),
         });
         if (toolCallId) {
           toolCallMap.set(toolCallId, idx);

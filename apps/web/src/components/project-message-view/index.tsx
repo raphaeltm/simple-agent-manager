@@ -1,12 +1,13 @@
-import type { PlanItem } from '@simple-agent-manager/acp-client';
-import { PlanModal } from '@simple-agent-manager/acp-client';
+import type { PlanItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ListChecks } from 'lucide-react';
-import { type FC, useRef, useState } from 'react';
+import { type FC, useCallback, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
+import { getMessageToolContent } from '../../lib/api/sessions';
 import { AcpConversationItemView } from './AcpConversationItemView';
 import { FollowUpInput } from './FollowUpInput';
 import { AgentErrorBanner, ConnectionBanner } from './MessageBanners';
@@ -45,6 +46,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [planModalOpen, setPlanModalOpen] = useState(false);
 
   const lc = useSessionLifecycle(projectId, sessionId, isProvisioning, onSessionMutated);
+
+  /** Lazy-load tool content for a compact-mode tool call card. */
+  const handleLoadToolContent = useCallback(async (messageId: string): Promise<ToolCallContentItem[]> => {
+    const { content } = await getMessageToolContent(projectId, sessionId, messageId);
+    return (content as Array<{ type: string } & Record<string, unknown>>).map((c) => mapToolCallContent(c));
+  }, [projectId, sessionId]);
 
   // Initial load — only show full spinner when no data exists yet
   if (lc.loading && lc.messages.length === 0 && !lc.session) {
@@ -181,7 +188,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               overscan={200}
               itemContent={(_index, item) => (
                 <div className="px-4 pb-3">
-                  <AcpConversationItemView item={item} onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined} />
+                  <AcpConversationItemView item={item} onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined} onLoadToolContent={handleLoadToolContent} />
                 </div>
               )}
               components={{

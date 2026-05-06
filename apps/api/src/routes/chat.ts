@@ -7,7 +7,7 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
-import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
+import { DEFAULT_CHAT_COMPACT_MODE, DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
@@ -221,6 +221,9 @@ chatRoutes.get('/:sessionId', async (c) => {
   const beforeParam = c.req.query('before');
   const before = beforeParam ? parseInt(beforeParam, 10) : null;
 
+  const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
+  const compact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;
+
   let messagesResult: Awaited<ReturnType<typeof projectDataService.getMessages>>;
   try {
     messagesResult = await projectDataService.getMessages(
@@ -228,7 +231,9 @@ chatRoutes.get('/:sessionId', async (c) => {
       projectId,
       sessionId,
       limit,
-      before
+      before,
+      undefined,
+      compact
     );
   } catch (err) {
     return recordChatSessionLoadFailure(c, {
@@ -316,6 +321,36 @@ chatRoutes.get('/:sessionId', async (c) => {
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
   });
+});
+
+/**
+ * GET /api/projects/:projectId/sessions/:sessionId/messages/:messageId/tool-content
+ * Lazy-load the tool_metadata.content array for a single message.
+ * Used by compact mode: the session detail route strips tool content to reduce
+ * RPC payload size, and the frontend fetches content on demand when users expand
+ * individual tool call cards.
+ */
+chatRoutes.get('/:sessionId/messages/:messageId/tool-content', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const messageId = requireRouteParam(c, 'messageId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const content = await projectDataService.getMessageToolContent(
+    c.env,
+    projectId,
+    sessionId,
+    messageId
+  );
+
+  if (content === null) {
+    throw errors.notFound('Message tool content');
+  }
+
+  return c.json({ content });
 });
 
 /**
@@ -456,13 +491,15 @@ chatRoutes.post('/:sessionId/summarize', async (c) => {
     throw errors.notFound('Session not found');
   }
 
-  // Fetch all messages for the session (up to 1000)
+  // Fetch all messages for the session (up to 1000) — compact=false to include full content for summarization
   const { messages: allMessages } = await projectDataService.getMessages(
     c.env,
     projectId,
     sessionId,
     1000,
-    null
+    null,
+    undefined,
+    false
   );
 
   if (allMessages.length === 0) {

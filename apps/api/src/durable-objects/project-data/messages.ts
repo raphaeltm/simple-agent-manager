@@ -4,6 +4,7 @@
 import { log } from '../../lib/logger';
 import {
   parseChatMessageRow,
+  parseChatMessageRowCompact,
   parseCount,
   parseMaxSeq,
   parseMessageCount,
@@ -279,7 +280,8 @@ export function getMessages(
   sessionId: string,
   limit: number = 1000,
   before: number | null = null,
-  roles?: string[]
+  roles?: string[],
+  compact: boolean = false
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let query =
     'SELECT id, session_id, role, content, tool_metadata, created_at, sequence FROM chat_messages WHERE session_id = ?';
@@ -329,8 +331,9 @@ export function getMessages(
 
   const trimmedRows = candidateRows.slice(0, safeCount);
 
+  const rowParser = compact ? parseChatMessageRowCompact : parseChatMessageRow;
   return {
-    messages: trimmedRows.reverse().map((row) => parseChatMessageRow(row)),
+    messages: trimmedRows.reverse().map((row) => rowParser(row)),
     hasMore,
   };
 }
@@ -503,6 +506,39 @@ export function extractSnippet(content: string, query: string): string {
   const start = Math.max(0, matchIdx - 80);
   const end = Math.min(content.length, matchIdx + query.length + 120);
   return (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
+}
+
+/**
+ * Fetch the tool_metadata.content array for a single message.
+ * Used by the lazy-load endpoint to fetch content on demand.
+ */
+export function getMessageToolContent(
+  sql: SqlStorage,
+  sessionId: string,
+  messageId: string
+): unknown[] | null {
+  const row = sql
+    .exec(
+      'SELECT tool_metadata FROM chat_messages WHERE id = ? AND session_id = ?',
+      messageId,
+      sessionId
+    )
+    .toArray()[0];
+
+  if (!row) return null;
+
+  const rawMeta = row.tool_metadata;
+  if (typeof rawMeta !== 'string') return null;
+
+  try {
+    const parsed = JSON.parse(rawMeta);
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.content)) {
+      return parsed.content as unknown[];
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function persistSystemMessage(

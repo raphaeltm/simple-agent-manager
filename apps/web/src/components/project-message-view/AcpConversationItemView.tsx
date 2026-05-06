@@ -1,4 +1,4 @@
-import type { ConversationItem } from '@simple-agent-manager/acp-client';
+import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import {
   MessageBubble as AcpMessageBubble,
   PlanView,
@@ -51,7 +51,11 @@ export function SystemMessageBubble({ text }: { text: string }) {
 }
 
 /** Renders a single ACP ConversationItem using the shared acp-client components. */
-export function AcpConversationItemView({ item, onFileClick }: { item: ConversationItem; onFileClick?: (path: string, line?: number | null) => void }) {
+export function AcpConversationItemView({ item, onFileClick, onLoadToolContent }: {
+  item: ConversationItem;
+  onFileClick?: (path: string, line?: number | null) => void;
+  onLoadToolContent?: (messageId: string) => Promise<ToolCallContentItem[]>;
+}) {
   const globalAudio = useGlobalAudio();
 
   const handlePlayAudio = item.kind === 'agent_message'
@@ -78,7 +82,7 @@ export function AcpConversationItemView({ item, onFileClick }: { item: Conversat
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':
-      return <AcpToolCallCard toolCall={item} onFileClick={onFileClick} />;
+      return <AcpToolCallCard toolCall={item} onFileClick={onFileClick} onLoadContent={onLoadToolContent} />;
     case 'plan':
       return <PlanView plan={item} />;
     case 'system_message':

@@ -149,8 +149,12 @@ export class ProjectData extends DurableObject<Env> {
     return result ? this.addBaseDomain(result) : null;
   }
 
-  async getMessages(sessionId: string, limit: number = 1000, before: number | null = null, roles?: string[]) {
-    return messages.getMessages(this.sql, sessionId, limit, before, roles);
+  async getMessages(sessionId: string, limit: number = 1000, before: number | null = null, roles?: string[], compact: boolean = false) {
+    return messages.getMessages(this.sql, sessionId, limit, before, roles, compact);
+  }
+
+  getMessageToolContent(sessionId: string, messageId: string): unknown[] | null {
+    return messages.getMessageToolContent(this.sql, sessionId, messageId);
   }
 
   getMessageCount(sessionId: string, roles?: string[]): number {

@@ -8,6 +8,8 @@ interface ToolCallCardProps {
   toolCall: ToolCallItem;
   /** Called when a file location is clicked. Receives the file path and optional line number. */
   onFileClick?: (path: string, line?: number | null) => void;
+  /** Called to lazy-load tool content when expanding a compact tool call. Returns the content items. */
+  onLoadContent?: (messageId: string) => Promise<ToolCallContentItem[]>;
 }
 
 /** Status icon for tool call state */
@@ -40,9 +42,34 @@ function StatusIcon({ status }: { status: ToolCallItem['status'] }) {
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * don't affect this component's props.
  */
-export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileClick }: ToolCallCardProps) {
+export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileClick, onLoadContent }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const hasContent = toolCall.content.some(hasRenderableContent);
+  const [lazyContent, setLazyContent] = useState<ToolCallContentItem[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const needsLazyLoad = toolCall.contentLoaded === false && !!toolCall.messageId && !!onLoadContent;
+  const hasContent = needsLazyLoad || toolCall.content.some(hasRenderableContent);
+  const displayContent = lazyContent ?? toolCall.content;
+
+  const handleToggle = async () => {
+    if (!hasContent) return;
+
+    if (!expanded && needsLazyLoad && !lazyContent) {
+      setExpanded(true);
+      setLoading(true);
+      try {
+        const content = await onLoadContent!(toolCall.messageId!);
+        setLazyContent(content);
+      } catch {
+        // Show error state — content couldn't be loaded
+        setLazyContent([{ type: 'content', text: 'Failed to load content.' }]);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setExpanded(!expanded);
+    }
+  };
 
   return (
     <div className="my-2 border border-gray-200 rounded-lg overflow-hidden">
@@ -50,8 +77,8 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
       <div
         role="button"
         tabIndex={0}
-        onClick={() => hasContent && setExpanded(!expanded)}
-        onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && hasContent) { e.preventDefault(); setExpanded(!expanded); } }}
+        onClick={handleToggle}
+        onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && hasContent) { e.preventDefault(); void handleToggle(); } }}
         aria-expanded={hasContent ? expanded : undefined}
         className={`w-full flex items-center gap-2 px-3 py-2 bg-gray-50 text-left ${hasContent ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'}`}
       >
@@ -87,6 +114,11 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
             )
           )}
         </div>
+        {needsLazyLoad && !lazyContent && toolCall.contentSize != null && (
+          <span className="text-xs text-gray-400 shrink-0">
+            {formatBytes(toolCall.contentSize)}
+          </span>
+        )}
         {hasContent && (
           <svg
             className={`h-4 w-4 text-gray-400 transition-transform shrink-0 ${expanded ? 'rotate-180' : ''}`}
@@ -102,9 +134,13 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
       {/* Content */}
       {expanded && hasContent && (
         <div className="border-t border-gray-200">
-          {toolCall.content.map((content, idx) => (
-            <ToolCallContentView key={idx} content={content} />
-          ))}
+          {loading ? (
+            <div className="p-3 text-xs text-gray-500 animate-pulse">Loading content…</div>
+          ) : (
+            displayContent.map((content, idx) => (
+              <ToolCallContentView key={idx} content={content} />
+            ))
+          )}
         </div>
       )}
     </div>
@@ -187,4 +223,12 @@ function safeStringify(value: unknown): string {
   } catch {
     return '';
   }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(1)} MB`;
 }
