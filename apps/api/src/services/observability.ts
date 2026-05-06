@@ -7,6 +7,7 @@
  */
 
 import type { PlatformErrorLevel,PlatformErrorSource } from '@simple-agent-manager/shared';
+import type { SQL } from 'drizzle-orm';
 import { and, count, desc, eq, gte, like, lte, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -169,7 +170,7 @@ export async function queryErrors(
   const { platformErrors } = observabilitySchema;
 
   const limit = Math.min(params.limit ?? DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT);
-  const conditions: ReturnType<typeof eq>[] = [];
+  const conditions: SQL[] = [];
 
   if (params.source && VALID_SOURCES.has(params.source)) {
     conditions.push(eq(platformErrors.source, params.source));
@@ -188,7 +189,14 @@ export async function queryErrors(
   }
 
   if (params.search) {
-    conditions.push(like(platformErrors.message, `%${params.search}%`));
+    const searchPattern = `%${params.search}%`;
+    const searchCondition = or(
+      like(platformErrors.message, searchPattern),
+      like(platformErrors.context, searchPattern)
+    );
+    if (searchCondition) {
+      conditions.push(searchCondition);
+    }
   }
 
   // Cursor-based pagination: decode cursor as timestamp

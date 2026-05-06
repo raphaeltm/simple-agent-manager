@@ -298,18 +298,18 @@ describe('parseChatMessageRow', () => {
     expect(result.sequence).toBeNull();
   });
 
-  it('throws on invalid JSON in tool_metadata', () => {
-    expect(() =>
-      parseChatMessageRow({
-        id: 'm1',
-        session_id: 's1',
-        role: 'user',
-        content: 'hi',
-        tool_metadata: 'not-json',
-        created_at: 1000,
-        sequence: null,
-      })
-    ).toThrow();
+  it('returns null for invalid JSON in tool_metadata', () => {
+    const result = parseChatMessageRow({
+      id: 'm1',
+      session_id: 's1',
+      role: 'user',
+      content: 'hi',
+      tool_metadata: 'not-json',
+      created_at: 1000,
+      sequence: null,
+    });
+
+    expect(result.toolMetadata).toBeNull();
   });
 });
 

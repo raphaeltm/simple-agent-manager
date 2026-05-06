@@ -30,14 +30,14 @@ The affected user flow is loading a project chat session:
 
 ## Implementation Checklist
 
-- [ ] Add a safe helper for chat session load diagnostics with a generated request ID, phase, project ID, session ID, error name/message/stack, and sanitized response details.
-- [ ] Persist chat session detail load failures to observability D1 when available, not only sampled Worker logs.
-- [ ] Return a structured 500 response for chat session detail failures that includes a safe `requestId` and phase.
-- [ ] Expose admin-only diagnostic details for chat session load errors while keeping regular-user responses safe.
-- [ ] Make `tool_metadata` parsing resilient so malformed metadata does not prevent a session from loading.
-- [ ] Add regression tests for malformed `tool_metadata` and chat session detail diagnostic responses.
-- [ ] Update documentation for the troubleshooting/debugging path.
-- [ ] Run relevant API tests and quality checks.
+- [x] Add a safe helper for chat session load diagnostics with a generated request ID, phase, project ID, session ID, error name/message/stack, and sanitized response details.
+- [x] Persist chat session detail load failures to observability D1 when available, not only sampled Worker logs.
+- [x] Return a structured 500 response for chat session detail failures that includes a safe `requestId` and phase.
+- [x] Expose admin-only diagnostic details for chat session load errors while keeping regular-user responses safe.
+- [x] Make `tool_metadata` parsing resilient so malformed metadata does not prevent a session from loading.
+- [x] Add regression tests for malformed `tool_metadata` and chat session detail diagnostic responses.
+- [x] Update documentation for the troubleshooting/debugging path.
+- [x] Run relevant API tests and quality checks.
 - [ ] Deploy to staging and verify the changed endpoint behavior with a real authenticated request.
 
 ## Acceptance Criteria

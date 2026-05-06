@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getMessages: vi.fn(),
   listAcpSessions: vi.fn(),
+  persistError: vi.fn(async () => undefined),
+  userRole: 'user',
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -27,6 +29,20 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((c: unknown, next: () => Promise<void>) => next()),
   requireApproved: () => vi.fn((c: unknown, next: () => Promise<void>) => next()),
   getUserId: () => 'user-1',
+  getAuth: () => ({
+    user: {
+      id: 'user-1',
+      email: 'user@example.com',
+      name: null,
+      avatarUrl: null,
+      role: mocks.userRole,
+      status: 'active',
+    },
+    session: {
+      id: 'session-1',
+      expiresAt: new Date('2030-01-01T00:00:00Z'),
+    },
+  }),
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
@@ -46,6 +62,10 @@ vi.mock('../../../src/services/project-data', () => ({
   unlinkSessionIdea: vi.fn(),
 }));
 
+vi.mock('../../../src/services/observability', () => ({
+  persistError: mocks.persistError,
+}));
+
 vi.mock('../../../src/schemas', () => ({
   CreateChatSessionSchema: {},
   LinkTaskToChatSchema: {},
@@ -59,6 +79,7 @@ describe('chatRoutes agent session routing', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.userRole = 'user';
 
     orderBySpy = vi.fn(() => ({
       limit: vi.fn().mockResolvedValue([]),
@@ -233,6 +254,102 @@ describe('chatRoutes agent session routing', () => {
       3000,
       null,
     );
+  });
+
+  it('returns a structured diagnostic response when session lookup fails', async () => {
+    const loadError = new Error('Durable Object session lookup failed');
+    mocks.getSession.mockRejectedValue(loadError);
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1',
+      { method: 'GET', headers: { 'User-Agent': 'vitest' } },
+      {
+        DATABASE: {} as D1Database,
+        OBSERVABILITY_DATABASE: {} as D1Database,
+      } as Env,
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({
+      error: 'CHAT_SESSION_LOAD_FAILED',
+      message: 'Failed to load chat session',
+      requestId: expect.any(String),
+      phase: 'get_session',
+    });
+    expect(body.details).toBeUndefined();
+    expect(mocks.persistError).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        source: 'api',
+        level: 'error',
+        message: 'chat.session_detail_load_failed',
+        stack: expect.stringContaining('Durable Object session lookup failed'),
+        userId: 'user-1',
+        userAgent: 'vitest',
+        context: expect.objectContaining({
+          requestId: body.requestId,
+          route: 'GET /api/projects/:projectId/sessions/:sessionId',
+          phase: 'get_session',
+          projectId: 'proj-1',
+          sessionId: 'chat-1',
+          userId: 'user-1',
+          errorName: 'Error',
+          errorMessage: 'Durable Object session lookup failed',
+        }),
+      }),
+    );
+  });
+
+  it('returns safe diagnostics for regular users when message lookup fails', async () => {
+    mocks.getMessages.mockRejectedValue(new Error('Malformed tool metadata'));
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1',
+      { method: 'GET' },
+      {
+        DATABASE: {} as D1Database,
+        OBSERVABILITY_DATABASE: {} as D1Database,
+      } as Env,
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({
+      error: 'CHAT_SESSION_LOAD_FAILED',
+      message: 'Failed to load chat session',
+      requestId: expect.any(String),
+      phase: 'get_messages',
+    });
+    expect(body.details).toBeUndefined();
+  });
+
+  it('includes sanitized diagnostic details for admins when message lookup fails', async () => {
+    mocks.userRole = 'admin';
+    mocks.getMessages.mockRejectedValue(new Error('Malformed tool metadata'));
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1',
+      { method: 'GET' },
+      {
+        DATABASE: {} as D1Database,
+        OBSERVABILITY_DATABASE: {} as D1Database,
+      } as Env,
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      error: 'CHAT_SESSION_LOAD_FAILED',
+      message: 'Failed to load chat session',
+      requestId: expect.any(String),
+      phase: 'get_messages',
+      details: {
+        errorName: 'Error',
+        errorMessage: 'Malformed tool metadata',
+        stack: expect.stringContaining('Malformed tool metadata'),
+      },
+    });
   });
 
   it('returns null agentType when ACP session has no agentType', async () => {

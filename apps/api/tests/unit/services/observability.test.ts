@@ -1,4 +1,4 @@
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 
@@ -72,6 +72,8 @@ vi.mock('../../../src/db/schema', () => ({
 }));
 
 // Import after mocks
+import { like, or } from 'drizzle-orm';
+
 import {
   persistError,
   persistErrorBatch,
@@ -562,6 +564,28 @@ describe('Observability Service', () => {
       const result = await queryErrors(mockDb, { cursor });
 
       expect(result.total).toBe(5);
+    });
+
+    it('should search serialized context as well as error messages', async () => {
+      mockSelectFrom.mockReturnValueOnce({
+        where: vi.fn().mockResolvedValue([{ count: 0 }]),
+      });
+      mockSelectFrom.mockReturnValueOnce({
+        where: vi.fn().mockReturnValue({
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      await queryErrors(mockDb, { search: 'request-id-123' });
+
+      expect(like).toHaveBeenCalledWith('message', '%request-id-123%');
+      expect(like).toHaveBeenCalledWith('context', '%request-id-123%');
+      expect(or).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'like', val: '%request-id-123%' }),
+        expect.objectContaining({ type: 'like', val: '%request-id-123%' })
+      );
     });
 
     it('should gracefully ignore invalid cursor', async () => {

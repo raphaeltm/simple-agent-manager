@@ -256,7 +256,7 @@ export function parseChatMessageRow(row: unknown): {
     sessionId: r.session_id,
     role: r.role,
     content: r.content,
-    toolMetadata: r.tool_metadata ? JSON.parse(r.tool_metadata) : null,
+    toolMetadata: safeParseJson(r.tool_metadata),
     createdAt: r.created_at,
     sequence: r.sequence,
   };
