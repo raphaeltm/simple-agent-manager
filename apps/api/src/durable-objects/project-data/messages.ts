@@ -258,6 +258,22 @@ export function persistMessageBatch(
   return { persisted, duplicates, persistedMessages, workspaceId, firstUserContent, hadTopic };
 }
 
+/**
+ * Cloudflare DO RPC has a hard 32 MiB serialization ceiling.
+ * We leave a 2 MiB margin for the session envelope, pagination metadata,
+ * and JSON structural overhead.
+ */
+const RPC_SIZE_BUDGET_BYTES = 30 * 1024 * 1024; // 30 MiB
+
+function estimateRowBytes(row: Record<string, unknown>): number {
+  let size = 64; // object overhead + fixed fields (id, role, created_at, sequence)
+  const content = row.content;
+  if (typeof content === 'string') size += content.length * 2; // UTF-16 chars
+  const tm = row.tool_metadata;
+  if (typeof tm === 'string') size += tm.length * 2;
+  return size;
+}
+
 export function getMessages(
   sql: SqlStorage,
   sessionId: string,
@@ -284,11 +300,37 @@ export function getMessages(
   params.push(limit + 1);
 
   const rows = sql.exec(query, ...params).toArray();
-  const hasMore = rows.length > limit;
-  const messageRows = hasMore ? rows.slice(0, limit) : rows;
+  let hasMore = rows.length > limit;
+  const candidateRows = hasMore ? rows.slice(0, limit) : rows;
+
+  // RPC size guard: walk the result set (newest-first) and stop before
+  // exceeding the serialization budget. Because the query returns rows in
+  // DESC order and we reverse() before returning, we trim from the END
+  // of the candidate list (i.e. the oldest messages) so the caller still
+  // sees the most recent messages and can paginate backwards for older ones.
+  let cumulativeBytes = 0;
+  let safeCount = candidateRows.length;
+  for (let i = 0; i < candidateRows.length; i++) {
+    const row = candidateRows[i]!;
+    cumulativeBytes += estimateRowBytes(row);
+    if (cumulativeBytes > RPC_SIZE_BUDGET_BYTES) {
+      safeCount = i; // exclude this row and everything after
+      hasMore = true;
+      log.warn('messages.rpc_size_guard_truncated', {
+        sessionId,
+        requestedLimit: limit,
+        totalRows: candidateRows.length,
+        truncatedTo: safeCount,
+        estimatedBytes: cumulativeBytes,
+      });
+      break;
+    }
+  }
+
+  const trimmedRows = candidateRows.slice(0, safeCount);
 
   return {
-    messages: messageRows.reverse().map((row) => parseChatMessageRow(row)),
+    messages: trimmedRows.reverse().map((row) => parseChatMessageRow(row)),
     hasMore,
   };
 }

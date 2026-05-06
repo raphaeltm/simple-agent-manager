@@ -52,10 +52,14 @@ export const DEFAULT_TASK_LIST_MAX_PAGE_SIZE = 200;
 /**
  * Default message limit for chat session REST endpoints (project chat view).
  * Streaming-token chat messages produce many more DB rows than logical messages,
- * so this limit is much higher than SAM_HISTORY_LOAD_LIMIT (200).
+ * so this limit is higher than SAM_HISTORY_LOAD_LIMIT (200).
+ *
+ * Kept well below the Cloudflare DO RPC serialization ceiling (32 MiB) —
+ * large tool-call output can easily push 3 000 rows past the limit.
+ * The frontend already paginates via the `before` / `hasMore` contract.
  * Override via CHAT_SESSION_MESSAGE_LIMIT env var.
  */
-export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 3000;
+export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 500;
 
 /** Default callback timeout for delegated task updates in milliseconds. */
 export const DEFAULT_TASK_CALLBACK_TIMEOUT_MS = 10000;
