@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: DO proxy service — splitting creates import complexity without meaningful benefit. See .claude/rules/18-file-size-limits.md
 /**
  * Service layer for interacting with the per-project Durable Object.
  *
