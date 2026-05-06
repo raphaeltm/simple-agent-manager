@@ -10,23 +10,110 @@ import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
-import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
-import { CreateChatSessionSchema, LinkTaskToChatSchema,parseOptionalBody, SendChatMessageSchema } from '../schemas';
+import { CreateChatSessionSchema, LinkTaskToChatSchema, parseOptionalBody, SendChatMessageSchema } from '../schemas';
 import * as chatPersistence from '../services/chat-persistence';
+import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
 chatRoutes.use('/*', requireAuth(), requireApproved());
+
+type ChatSessionLoadPhase = 'get_session' | 'get_messages';
+
+function isDiagnosticRole(role: string): boolean {
+  return role === 'admin' || role === 'superadmin';
+}
+
+function serializeDiagnosticError(err: unknown): {
+  name: string;
+  message: string;
+  stack: string | null;
+} {
+  if (err instanceof Error) {
+    return {
+      name: err.name,
+      message: err.message,
+      stack: err.stack ?? null,
+    };
+  }
+
+  return {
+    name: 'NonError',
+    message: String(err),
+    stack: null,
+  };
+}
+
+async function recordChatSessionLoadFailure(
+  c: Context<{ Bindings: Env }>,
+  input: {
+    err: unknown;
+    phase: ChatSessionLoadPhase;
+    projectId: string;
+    sessionId: string;
+    userId: string;
+  }
+): Promise<Response> {
+  const requestId = crypto.randomUUID();
+  const diagnostic = serializeDiagnosticError(input.err);
+  const context = {
+    requestId,
+    route: 'GET /api/projects/:projectId/sessions/:sessionId',
+    phase: input.phase,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    userId: input.userId,
+    errorName: diagnostic.name,
+    errorMessage: diagnostic.message,
+  };
+
+  log.error('chat.session_detail_load_failed', {
+    ...context,
+    stack: diagnostic.stack,
+  });
+
+  if (c.env.OBSERVABILITY_DATABASE) {
+    await persistError(c.env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'error',
+      message: 'chat.session_detail_load_failed',
+      stack: diagnostic.stack,
+      context,
+      userId: input.userId,
+      ipAddress: c.req.header('CF-Connecting-IP') ?? null,
+      userAgent: c.req.header('User-Agent') ?? null,
+    });
+  }
+
+  const body: Record<string, unknown> = {
+    error: 'CHAT_SESSION_LOAD_FAILED',
+    message: 'Failed to load chat session',
+    requestId,
+    phase: input.phase,
+  };
+
+  if (isDiagnosticRole(getAuth(c).user.role)) {
+    body.details = {
+      errorName: diagnostic.name,
+      errorMessage: diagnostic.message,
+      stack: diagnostic.stack,
+    };
+  }
+
+  return c.json(body, 500);
+}
 
 function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
   const configuredLimit = parseInt(env.CHAT_SESSION_MESSAGE_LIMIT || '', 10);
@@ -113,7 +200,19 @@ chatRoutes.get('/:sessionId', async (c) => {
 
   await requireOwnedProject(db, projectId, userId);
 
-  const session = await projectDataService.getSession(c.env, projectId, sessionId);
+  let session: Awaited<ReturnType<typeof projectDataService.getSession>>;
+  try {
+    session = await projectDataService.getSession(c.env, projectId, sessionId);
+  } catch (err) {
+    return recordChatSessionLoadFailure(c, {
+      err,
+      phase: 'get_session',
+      projectId,
+      sessionId,
+      userId,
+    });
+  }
+
   if (!session) {
     throw errors.notFound('Chat session');
   }
@@ -122,13 +221,24 @@ chatRoutes.get('/:sessionId', async (c) => {
   const beforeParam = c.req.query('before');
   const before = beforeParam ? parseInt(beforeParam, 10) : null;
 
-  const messagesResult = await projectDataService.getMessages(
-    c.env,
-    projectId,
-    sessionId,
-    limit,
-    before
-  );
+  let messagesResult: Awaited<ReturnType<typeof projectDataService.getMessages>>;
+  try {
+    messagesResult = await projectDataService.getMessages(
+      c.env,
+      projectId,
+      sessionId,
+      limit,
+      before
+    );
+  } catch (err) {
+    return recordChatSessionLoadFailure(c, {
+      err,
+      phase: 'get_messages',
+      projectId,
+      sessionId,
+      userId,
+    });
+  }
 
   // Embed task summary if session is linked to a task (D1 lookup, best-effort)
   let task: ChatSessionTaskEmbed | null = null;
