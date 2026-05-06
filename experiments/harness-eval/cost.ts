@@ -6,7 +6,8 @@
  * ($0.011 per 1M input neurons, $0.011 per 1M output neurons ≈ $0.011/1K tokens).
  * This is an estimate — actual billing depends on the Cloudflare plan.
  *
- * For Unified API models (Anthropic, OpenAI), costs come from PLATFORM_AI_MODELS registry.
+ * For Unified API models (Anthropic, OpenAI), costs are hardcoded in models.ts
+ * (matching PLATFORM_AI_MODELS registry values at time of writing).
  */
 
 import type { ModelConfig, TokenUsage, ScenarioResult, EvalSummary } from './types.js';

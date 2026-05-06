@@ -7,8 +7,8 @@ Cost-aware model evaluation suite for SAM-native harness model selection. Compar
 | Model | Provider | Gateway Path | Cost Source |
 |-------|----------|-------------|-------------|
 | Gemma 4 26B | Workers AI | `workers-ai` | Cloudflare Workers AI billing (~$0.011/1M tokens) |
-| GPT-4.1 Mini | OpenAI (Unified) | `compat` | OpenAI pricing ($0.40/$1.60 per 1M tokens) |
-| Claude Haiku 4.5 | Anthropic (Unified) | `compat` | Anthropic pricing ($0.80/$4.00 per 1M tokens) |
+| GPT-4.1 Mini | OpenAI (Unified) | `unified` | OpenAI pricing ($0.40/$1.60 per 1M tokens) |
+| Claude Haiku 4.5 | Anthropic (Unified) | `unified` | Anthropic pricing ($0.80/$4.00 per 1M tokens) |
 
 > **Note:** GPT-5 Mini is not yet available in the SAM model registry. The closest available model is `gpt-5.2` ($10/$40 per 1M tokens), which is excluded from default runs due to cost. Add it manually via `EVAL_MODELS` if needed.
 
@@ -40,7 +40,7 @@ All coding scenarios use a **virtual filesystem** — deterministic, network-fre
 | `CF_ACCOUNT_ID` | Yes | Cloudflare account ID |
 | `CF_TOKEN` | Yes | Cloudflare API token (needs AI Gateway access) |
 | `AI_GATEWAY_ID` | No | Gateway ID (default: `sam`) |
-| `WORKERS_AI_COST_PER_1K` | No | Override Workers AI cost per 1K tokens (default: `0.000011`) |
+| `WORKERS_AI_COST_PER_1K_TOKENS` | No | Override Workers AI cost per 1K tokens (default: `0.000011`) |
 | `EVAL_SCENARIOS` | No | Comma-separated scenario IDs to run (default: all) |
 | `EVAL_MODELS` | No | Comma-separated model IDs to run (default: all) |
 
@@ -57,7 +57,7 @@ CF_ACCOUNT_ID=<id> CF_TOKEN=<token> npx tsx experiments/harness-eval/run.ts
 EVAL_SCENARIOS=weather-baseline CF_ACCOUNT_ID=... CF_TOKEN=... npx tsx experiments/harness-eval/run.ts
 
 # Only Gemma
-EVAL_MODELS=@cf/google/gemma-4-27b-it CF_ACCOUNT_ID=... CF_TOKEN=... npx tsx experiments/harness-eval/run.ts
+EVAL_MODELS=@cf/google/gemma-4-26b-a4b-it CF_ACCOUNT_ID=... CF_TOKEN=... npx tsx experiments/harness-eval/run.ts
 ```
 
 ## Credential Blockers
@@ -75,62 +75,63 @@ Each run produces a timestamped JSON file in `experiments/harness-eval/traces/`:
 traces/eval-2026-05-06_14-30-00.json
 ```
 
-### Trace Schema (v1.0.0)
+### Trace Schema (v1.0)
 
 ```typescript
 {
-  version: string;           // Schema version
-  timestamp: string;         // ISO 8601
-  commitHash: string;        // Git short hash
-  schemaVersion: string;     // For forward compat
+  version: "1.0";                // Schema version
+  timestamp: string;             // ISO 8601
+  suite: {
+    commitHash: string;          // Git short hash
+    schemaVersion: string;       // For forward compat
+  };
   results: [{
     scenarioId: string;
     scenarioName: string;
-    model: {                 // Full model config
+    category: string;            // "baseline" | "coding"
+    model: {
+      displayName: string;
       modelId: string;
       provider: string;
-      path: "workers-ai" | "compat";
-      apiModelId: string;
-      costPer1kInput: number;
-      costPer1kOutput: number;
-    };
-    run: {
-      messages: [];          // Full conversation (system, user, assistant, tool)
-      toolCalls: [{          // Every tool invocation
-        turn: number;
-        toolName: string;
-        arguments: {};
-        result: string;
-        isError: boolean;
-      }];
-      totalUsage: { prompt_tokens, completion_tokens, total_tokens };
-      turnUsage: [];         // Per-turn token breakdown
-      turnLatency: [];       // Per-turn latency in ms
-      totalLatencyMs: number;
-      stopReason: "complete" | "max_turns" | "error";
-      turnsUsed: number;
-      error?: string;
+      path: "workers-ai" | "unified";
     };
     rubric: {
       pass: boolean;
       reason: string;
       checks: [{ name, pass, detail }];
     };
-    costUsd: number;         // Derived cost for this run
+    usage: { prompt_tokens, completion_tokens, total_tokens };
+    costUsd: number;             // Derived cost for this run
+    latencyMs: number;           // Wall-clock time
+    turnsUsed: number;
+    stopReason: "complete" | "max_turns" | "error";
+    conversation: [];            // Full messages (system, user, assistant, tool)
+    toolCalls: [{                // Every tool invocation
+      turn: number;
+      toolName: string;
+      arguments: {};
+      result: string;
+      isError: boolean;
+    }];
+    turnUsage: [];               // Per-turn token breakdown
+    turnLatency: [];             // Per-turn latency in ms
+    error?: string;              // Error message if stopReason is "error"
   }];
   summary: {
     totalScenarios: number;
-    totalModels: number;
+    passedScenarios: number;
+    successRate: number;         // 0-1
     totalCostUsd: number;
+    costPerSuccessUsd: number;   // Key metric: total cost / passed
+    avgLatencyMs: number;
     perModel: [{
-      modelId: string;
+      model: string;             // Display name
       provider: string;
-      total: number;
+      totalRuns: number;
       passed: number;
-      failed: number;
-      errors: number;
+      successRate: number;
       totalCostUsd: number;
-      costPerSuccessUsd: number;  // Key metric: total cost / passed
+      costPerSuccessUsd: number;
       avgLatencyMs: number;
       totalTokens: number;
     }];
@@ -152,7 +153,7 @@ A cheap model that fails often can be more expensive per success than a pricier 
 ### Reading the Summary
 
 ```
-Model: @cf/google/gemma-4-27b-it (workers-ai)
+Model: Gemma 4 26B (workers-ai)
   Pass rate:           6/6 (100%)
   Total cost:          $0.000066
   Cost/success:        $0.000011
@@ -174,12 +175,12 @@ Runs with `stopReason: "error"` indicate API-level failures (401, 500, timeout).
 - **429** — Rate limited
 - **500** — Provider error
 
-Check the `run.error` field in the trace JSON for the specific error message.
+Check the `error` field in the trace JSON for the specific error message.
 
 ## Architecture
 
 ```
-run.ts              — Main entry point, orchestrates scenarios × models
+run.ts              — Main entry point, orchestrates scenarios x models
 runner.ts           — Think-act-observe loop against AI Gateway
 models.ts           — Model registry and gateway URL/header builders
 tools.ts            — Virtual filesystem + mock tool implementations
