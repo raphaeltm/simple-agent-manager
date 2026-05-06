@@ -1,4 +1,5 @@
 import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/cloud-init';
+import type { Provider } from '@simple-agent-manager/providers';
 import { ProviderError } from '@simple-agent-manager/providers';
 import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
@@ -60,6 +61,34 @@ export function resolveHetznerBaseImageOverride(
   if (targetProvider !== 'hetzner') return undefined;
   const trimmed = envValue?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+/**
+ * Recover an existing VM that matches the node ID labels.
+ * Used for idempotent provisioning: if a previous createVM succeeded but
+ * the subsequent DB update failed, this finds the orphaned VM so we can
+ * resume instead of creating a duplicate.
+ */
+async function recoverExistingNodeVM(
+  provider: Provider,
+  nodeId: string,
+): Promise<{ id: string; ip: string | null } | null> {
+  try {
+    const vms = await provider.listVMs({
+      node: nodeId.toLowerCase(),
+      managed: 'simple-agent-manager',
+    });
+    const first = vms[0];
+    if (first) {
+      return { id: first.id, ip: first.ip ?? null };
+    }
+  } catch (err) {
+    log.warn('node_provisioning.recovery_search_failed', {
+      nodeId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return null;
 }
 
 export async function createNodeRecord(env: Env, input: CreateNodeInput): Promise<ProvisionedNode> {
@@ -164,6 +193,7 @@ export async function provisionNode(
       originCaCert: env.ORIGIN_CA_CERT,
       originCaKey: env.ORIGIN_CA_KEY,
       vmAgentPort: env.VM_AGENT_PORT,
+      provider: targetProvider,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
@@ -171,6 +201,49 @@ export async function provisionNode(
     }
 
     const provider = providerResult.provider;
+
+    // Idempotent recovery: if a previous attempt already created the VM but
+    // the control-plane state update failed (e.g. crash between createVM and
+    // the DB update), recover the existing VM instead of creating a duplicate.
+    const existingVm = await recoverExistingNodeVM(provider, node.id);
+    if (existingVm) {
+      log.info('node_provisioning.recovered_existing_vm', {
+        nodeId: node.id,
+        providerInstanceId: existingVm.id,
+        ip: existingVm.ip ?? null,
+      });
+
+      if (existingVm.ip) {
+        let backendDnsRecordId: string | null = null;
+        try {
+          backendDnsRecordId = await createNodeBackendDNSRecord(node.id, existingVm.ip, env);
+        } catch (dnsErr) {
+          log.error('node_provisioning.dns_record_failed', { nodeId: node.id, ...serializeError(dnsErr) });
+        }
+        await db
+          .update(schema.nodes)
+          .set({
+            providerInstanceId: existingVm.id,
+            ipAddress: existingVm.ip,
+            backendDnsRecordId,
+            status: 'running',
+            healthStatus: 'stale',
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.nodes.id, node.id));
+      } else {
+        await db
+          .update(schema.nodes)
+          .set({
+            providerInstanceId: existingVm.id,
+            status: 'creating',
+            errorMessage: 'Recovered existing VM — awaiting IP allocation',
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.nodes.id, node.id));
+      }
+      return;
+    }
 
     const baseImageOverride = resolveHetznerBaseImageOverride(
       targetProvider,

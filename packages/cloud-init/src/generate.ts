@@ -108,6 +108,12 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       errors.push(`logJournalMaxRetention: must match ${JOURNALD_TIME_RE} (got ${JSON.stringify(variables.logJournalMaxRetention)})`);
     }
   }
+  if (variables.provider !== undefined && variables.provider !== '') {
+    const validProviders = ['hetzner', 'scaleway', 'gcp'];
+    if (!validProviders.includes(variables.provider)) {
+      errors.push(`provider: must be one of ${validProviders.join(', ')} (got ${JSON.stringify(variables.provider)})`);
+    }
+  }
   if (variables.dockerDnsServers !== undefined && variables.dockerDnsServers !== '') {
     if (!SAFE_DNS_SERVERS_RE.test(variables.dockerDnsServers)) {
       errors.push(`dockerDnsServers: must contain only quoted IPs (got ${JSON.stringify(variables.dockerDnsServers)})`);
@@ -162,6 +168,8 @@ export interface CloudInitVariables {
   vmAgentPort?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
+  /** Cloud provider name (hetzner, scaleway, gcp) — passed to VM agent and used for apt mirror config */
+  provider?: string;
 }
 
 /**
@@ -204,6 +212,7 @@ export function generateCloudInit(
     '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
+    '{{ provider }}': variables.provider ?? '',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.

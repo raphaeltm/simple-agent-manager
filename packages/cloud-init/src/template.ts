@@ -75,6 +75,7 @@ write_files:
       Environment=VM_AGENT_PORT={{ vm_agent_port }}
       Environment=TLS_CERT_PATH={{ tls_cert_path }}
       Environment=TLS_KEY_PATH={{ tls_key_path }}
+      Environment=PROVIDER={{ provider }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5
@@ -279,6 +280,13 @@ write_files:
     content: |
       {{ origin_ca_key }}
     permissions: '0600'
+
+  - path: /etc/apt/apt.conf.d/80-retries
+    content: |
+      Acquire::Retries "3";
+      Acquire::https::Timeout "30";
+      Acquire::http::Timeout "30";
+    permissions: '0644'
 
 final_message: "Simple Agent Manager node {{ node_id }} provisioning started!"
 `;

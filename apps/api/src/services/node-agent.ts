@@ -1,9 +1,25 @@
 import type { Env } from '../env';
-import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
+import type { FetchRetryOptions } from './fetch-timeout';
+import { fetchWithTimeoutAndRetry, getRetryDelayMs, getRetryMaxAttempts, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_NODE_AGENT_REQUEST_RETRY_MAX_ATTEMPTS = 2;
+const DEFAULT_NODE_AGENT_REQUEST_RETRY_BASE_DELAY_MS = 1_000;
+const DEFAULT_NODE_AGENT_REQUEST_RETRY_MAX_DELAY_MS = 10_000;
+
+/**
+ * Build retry options for node agent requests from env.
+ */
+function nodeAgentRetryOptions(env: Env): FetchRetryOptions {
+  return {
+    timeoutMs: getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS),
+    maxAttempts: getRetryMaxAttempts(env.NODE_AGENT_REQUEST_RETRY_MAX_ATTEMPTS, DEFAULT_NODE_AGENT_REQUEST_RETRY_MAX_ATTEMPTS),
+    baseDelayMs: getRetryDelayMs(env.NODE_AGENT_REQUEST_RETRY_BASE_DELAY_MS, DEFAULT_NODE_AGENT_REQUEST_RETRY_BASE_DELAY_MS),
+    maxDelayMs: getRetryDelayMs(env.NODE_AGENT_REQUEST_RETRY_MAX_DELAY_MS, DEFAULT_NODE_AGENT_REQUEST_RETRY_MAX_DELAY_MS),
+  };
+}
 
 const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000; // 15 min — cloud-init takes 8-12 min on Hetzner
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
@@ -136,14 +152,11 @@ async function nodeAgentRequest<T>(
     env
   );
 
-  const requestTimeoutMs = getTimeoutMs(
-    env.NODE_AGENT_REQUEST_TIMEOUT_MS,
-    DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
-  );
-  const response = await fetchWithTimeout(url, {
+  const retryOpts = nodeAgentRetryOptions(env);
+  const response = await fetchWithTimeoutAndRetry(url, {
     ...options,
     headers,
-  }, requestTimeoutMs);
+  }, retryOpts);
 
   recordNodeRoutingMetric(
     {
@@ -519,8 +532,11 @@ export async function nodeAgentRawRequest(
   headers.set('X-SAM-Node-Id', nodeId);
 
   const DEFAULT_EXPORT_TIMEOUT_MS = 60_000;
-  const timeoutMs = getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_EXPORT_TIMEOUT_MS);
-  return fetchWithTimeout(url, { method: 'GET', headers }, timeoutMs);
+  const retryOpts: FetchRetryOptions = {
+    ...nodeAgentRetryOptions(env),
+    timeoutMs: getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_EXPORT_TIMEOUT_MS),
+  };
+  return fetchWithTimeoutAndRetry(url, { method: 'GET', headers }, retryOpts);
 }
 
 export async function rebuildWorkspaceOnNode(

@@ -205,7 +205,7 @@ export class TaskRunner extends DurableObject<Env> {
         durationMs,
       });
 
-      if (isTransientError(err) && state.retryCount < this.getMaxRetries()) {
+      if (isTransientError(err) && state.retryCount < this.getMaxRetries(state.currentStep)) {
         // Transient failure — retry with backoff
         state.retryCount++;
         await this.ctx.storage.put('state', state);
@@ -275,11 +275,31 @@ export class TaskRunner extends DurableObject<Env> {
   // Configuration (all configurable via env vars — Constitution Principle XI)
   // =========================================================================
 
-  private getMaxRetries(): number {
+  private getMaxRetries(step?: TaskExecutionStep): number {
+    // Per-step env override takes precedence over the global setting
+    if (step) {
+      const envKey = this.getPerStepEnvKey(step);
+      if (envKey) {
+        const perStep = parseEnvInt((this.env as unknown as Record<string, string | undefined>)[envKey], 0);
+        if (perStep > 0) return perStep;
+      }
+    }
     return parseEnvInt(
       this.env.TASK_RUNNER_STEP_MAX_RETRIES,
       DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES,
     );
+  }
+
+  private getPerStepEnvKey(step: TaskExecutionStep): string | null {
+    const map: Partial<Record<TaskExecutionStep, string>> = {
+      node_selection: 'TASK_RUNNER_NODE_SELECTION_MAX_RETRIES',
+      node_provisioning: 'TASK_RUNNER_NODE_PROVISIONING_MAX_RETRIES',
+      node_agent_ready: 'TASK_RUNNER_NODE_AGENT_READY_MAX_RETRIES',
+      workspace_creation: 'TASK_RUNNER_WORKSPACE_CREATION_MAX_RETRIES',
+      workspace_ready: 'TASK_RUNNER_WORKSPACE_READY_MAX_RETRIES',
+      agent_session: 'TASK_RUNNER_AGENT_SESSION_MAX_RETRIES',
+    };
+    return map[step] ?? null;
   }
 
   private getRetryBaseDelayMs(): number {

@@ -802,7 +802,7 @@ describe('Node Agent client functions send correct payloads', () => {
     let capturedUrl: string | null = null;
 
     vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockImplementation((url: string, init: RequestInit) => {
+      fetchWithTimeoutAndRetry: vi.fn().mockImplementation((url: string, init: RequestInit) => {
         capturedUrl = url;
         capturedHeaders = new Headers(init.headers);
         capturedBody = init.body as string;
@@ -814,6 +814,8 @@ describe('Node Agent client functions send correct payloads', () => {
         );
       }),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
+      getRetryMaxAttempts: vi.fn().mockReturnValue(2),
+      getRetryDelayMs: vi.fn().mockReturnValue(1000),
     }));
 
     // Dynamic import to pick up mocks
@@ -870,7 +872,7 @@ describe('Node Agent client functions send correct payloads', () => {
     let capturedUrl: string | null = null;
 
     vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockImplementation((url: string, init: RequestInit) => {
+      fetchWithTimeoutAndRetry: vi.fn().mockImplementation((url: string, init: RequestInit) => {
         capturedUrl = url;
         capturedMethod = init.method ?? 'GET';
         return Promise.resolve(
@@ -881,6 +883,8 @@ describe('Node Agent client functions send correct payloads', () => {
         );
       }),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
+      getRetryMaxAttempts: vi.fn().mockReturnValue(2),
+      getRetryDelayMs: vi.fn().mockReturnValue(1000),
     }));
 
     const { deleteWorkspaceOnNode } = await import('../../src/services/node-agent');
@@ -908,7 +912,7 @@ describe('Node Agent client functions send correct payloads', () => {
     let capturedBody: string | null = null;
 
     vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      fetchWithTimeoutAndRetry: vi.fn().mockImplementation((_url: string, init: RequestInit) => {
         capturedBody = init.body as string;
         return Promise.resolve(
           new Response(
@@ -927,6 +931,8 @@ describe('Node Agent client functions send correct payloads', () => {
         );
       }),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
+      getRetryMaxAttempts: vi.fn().mockReturnValue(2),
+      getRetryDelayMs: vi.fn().mockReturnValue(1000),
     }));
 
     const { createAgentSessionOnNode } = await import('../../src/services/node-agent');
@@ -955,13 +961,15 @@ describe('Node Agent client functions send correct payloads', () => {
     }));
 
     vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockResolvedValue(
+      fetchWithTimeoutAndRetry: vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ error: 'workspace not found' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' },
         })
       ),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
+      getRetryMaxAttempts: vi.fn().mockReturnValue(2),
+      getRetryDelayMs: vi.fn().mockReturnValue(1000),
     }));
 
     const { deleteWorkspaceOnNode } = await import('../../src/services/node-agent');
@@ -987,13 +995,15 @@ describe('Node Agent client functions send correct payloads', () => {
 
     // Simulate the API Worker's own 404 response (loop-back via wildcard DNS)
     vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockResolvedValue(
+      fetchWithTimeoutAndRetry: vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ error: 'NOT_FOUND', message: 'Endpoint not found' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' },
         })
       ),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
+      getRetryMaxAttempts: vi.fn().mockReturnValue(2),
+      getRetryDelayMs: vi.fn().mockReturnValue(1000),
     }));
 
     const { deleteWorkspaceOnNode } = await import('../../src/services/node-agent');
@@ -1018,10 +1028,12 @@ describe('Node Agent client functions send correct payloads', () => {
     }));
 
     vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockRejectedValue(
+      fetchWithTimeoutAndRetry: vi.fn().mockRejectedValue(
         new Error('Request timed out after 30000ms: https://node-abc.vm.example.com:8443/workspaces/ws-test')
       ),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
+      getRetryMaxAttempts: vi.fn().mockReturnValue(2),
+      getRetryDelayMs: vi.fn().mockReturnValue(1000),
     }));
 
     const { deleteWorkspaceOnNode } = await import('../../src/services/node-agent');

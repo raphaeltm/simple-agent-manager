@@ -144,7 +144,7 @@ describe('TaskRunner DO retry logic', () => {
   });
 
   it('checks max retries before retrying', () => {
-    expect(doSource).toContain('state.retryCount < this.getMaxRetries()');
+    expect(doSource).toContain('state.retryCount < this.getMaxRetries(state.currentStep)');
   });
 
   it('increments retryCount on transient failure', () => {
@@ -429,14 +429,16 @@ describe('TaskRunner DO configuration', () => {
 
   for (const method of configMethods) {
     it(`has ${method}() configuration method`, () => {
-      expect(doSource).toContain(`private ${method}()`);
+      // getMaxRetries accepts an optional step parameter
+      const pattern = method === 'getMaxRetries' ? `private ${method}(step` : `private ${method}()`;
+      expect(doSource).toContain(pattern);
     });
 
     it(`${method}() reads from env var with DEFAULT fallback`, () => {
-      const section = doSource.slice(
-        doSource.indexOf(`private ${method}()`),
-        doSource.indexOf('}', doSource.indexOf(`private ${method}()`) + 50) + 1
-      );
+      const searchPattern = method === 'getMaxRetries' ? `private ${method}(step` : `private ${method}()`;
+      const startIdx = doSource.indexOf(searchPattern);
+      // Extract a generous section (500 chars) to cover multi-line methods with nested blocks
+      const section = doSource.slice(startIdx, startIdx + 500);
       expect(section).toContain('parseEnvInt');
       expect(section).toContain('this.env.');
       expect(section).toContain('DEFAULT_TASK_RUNNER');

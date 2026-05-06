@@ -34,6 +34,11 @@ export function isTransientError(err: unknown): boolean {
     return false;
   }
 
+  // Honor explicit retryable metadata (e.g. from provider libraries)
+  const retryable = (err as Error & { retryable?: boolean }).retryable;
+  if (retryable === true) return true;
+  if (retryable === false) return false;
+
   const msg = err.message.toLowerCase();
 
   // Network / timeout errors — always transient

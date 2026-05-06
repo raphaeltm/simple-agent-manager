@@ -1354,3 +1354,41 @@ describe('integrated size validation in generateCloudInit', () => {
   });
 });
 
+describe('provider field', () => {
+  it('accepts valid providers', () => {
+    for (const p of ['hetzner', 'scaleway', 'gcp']) {
+      expect(() => generateCloudInit(baseVariables({ provider: p }))).not.toThrow();
+    }
+  });
+
+  it('rejects invalid providers', () => {
+    expect(() => generateCloudInit(baseVariables({ provider: 'aws' }))).toThrow(/provider/i);
+  });
+
+  it('allows empty/missing provider', () => {
+    expect(() => generateCloudInit(baseVariables())).not.toThrow();
+    expect(() => generateCloudInit(baseVariables({ provider: '' }))).not.toThrow();
+  });
+
+  it('includes provider in systemd environment', () => {
+    const config = generateCloudInit(baseVariables({ provider: 'hetzner' }));
+    const parsed = YAML.parse(config);
+    const serviceFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service',
+    );
+    expect(serviceFile).toBeDefined();
+    expect(serviceFile.content).toContain('Environment=PROVIDER=hetzner');
+  });
+
+  it('includes apt retry config', () => {
+    const config = generateCloudInit(baseVariables());
+    const parsed = YAML.parse(config);
+    const aptRetryFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/apt/apt.conf.d/80-retries',
+    );
+    expect(aptRetryFile).toBeDefined();
+    expect(aptRetryFile.content).toContain('Acquire::Retries "3"');
+    expect(aptRetryFile.content).toContain('Acquire::https::Timeout "30"');
+  });
+});
+

@@ -1,6 +1,7 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
+import type { FetchRetryOptions } from './fetch-timeout';
+import { fetchWithTimeoutAndRetry, getRetryDelayMs, getRetryMaxAttempts, getTimeoutMs } from './fetch-timeout';
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 
@@ -9,6 +10,23 @@ const DEFAULT_DNS_TTL = 60;
 
 /** Default timeout for Cloudflare API calls (per Constitution Principle XI) */
 const DEFAULT_CF_API_TIMEOUT_MS = 30_000;
+
+/** Default retry config for CF API */
+const DEFAULT_CF_API_RETRY_MAX_ATTEMPTS = 3;
+const DEFAULT_CF_API_RETRY_BASE_DELAY_MS = 1_000;
+const DEFAULT_CF_API_RETRY_MAX_DELAY_MS = 30_000;
+
+/**
+ * Build retry options from env.
+ */
+function cfRetryOptions(env: Env): FetchRetryOptions {
+  return {
+    timeoutMs: getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS),
+    maxAttempts: getRetryMaxAttempts(env.CF_API_RETRY_MAX_ATTEMPTS, DEFAULT_CF_API_RETRY_MAX_ATTEMPTS),
+    baseDelayMs: getRetryDelayMs(env.CF_API_RETRY_BASE_DELAY_MS, DEFAULT_CF_API_RETRY_BASE_DELAY_MS),
+    maxDelayMs: getRetryDelayMs(env.CF_API_RETRY_MAX_DELAY_MS, DEFAULT_CF_API_RETRY_MAX_DELAY_MS),
+  };
+}
 
 /**
  * Get DNS TTL from env or use default (per constitution principle XI).
@@ -79,16 +97,74 @@ export class DNSService implements DNSServiceInterface {
 }
 
 /**
- * Create a DNS A record for a workspace.
- * Uses Cloudflare proxy for automatic HTTPS.
+ * Search for an existing DNS A record by name.
+ * Returns the record if found, null otherwise.
+ */
+async function findExistingARecord(
+  recordName: string,
+  env: Env,
+): Promise<{ id: string; content: string } | null> {
+  const retryOpts = cfRetryOptions(env);
+  const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}&type=A`;
+
+  const response = await fetchWithTimeoutAndRetry(
+    searchUrl,
+    {
+      headers: {
+        Authorization: `Bearer ${env.CF_API_TOKEN}`,
+      },
+    },
+    retryOpts,
+  );
+
+  if (!response.ok) return null;
+
+  const data = await response.json() as { result: Array<{ id: string; content: string; type: string }> };
+  const records = data.result || [];
+  const aRecord = records.find((r) => r.type === 'A');
+  return aRecord ? { id: aRecord.id, content: aRecord.content } : null;
+}
+
+/**
+ * Create or upsert a DNS A record for a workspace.
+ * Uses idempotent upsert: searches for existing matching record and PATCHes if found.
+ * If CREATE returns duplicate/already-exists, re-searches and PATCHes.
  */
 export async function createDNSRecord(
   workspaceId: string,
   ip: string,
   env: Env
 ): Promise<string> {
-  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-  const response = await fetchWithTimeout(
+  const recordName = `ws-${workspaceId}.${env.BASE_DOMAIN}`;
+  return upsertARecord(recordName, ip, true, env);
+}
+
+/**
+ * Idempotent DNS A record upsert.
+ * 1. Search for existing record matching the name.
+ * 2. If found, PATCH it with the new IP.
+ * 3. If not found, POST to create.
+ * 4. If create returns duplicate, re-search and PATCH.
+ */
+async function upsertARecord(
+  recordName: string,
+  ip: string,
+  proxied: boolean,
+  env: Env,
+): Promise<string> {
+  const retryOpts = cfRetryOptions(env);
+  const ttl = getDnsTTL(env);
+
+  // Step 1: Search for existing record
+  const existing = await findExistingARecord(recordName, env);
+  if (existing) {
+    log.info('dns.upsert_existing_found', { name: recordName, existingIp: existing.content, newIp: ip });
+    await patchDNSRecordContent(existing.id, ip, env);
+    return existing.id;
+  }
+
+  // Step 2: Attempt to create
+  const response = await fetchWithTimeoutAndRetry(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
     {
       method: 'POST',
@@ -98,34 +174,78 @@ export async function createDNSRecord(
       },
       body: JSON.stringify({
         type: 'A',
-        name: `ws-${workspaceId}`,
+        name: recordName,
         content: ip,
-        ttl: getDnsTTL(env), // Configurable TTL (default 1 minute for fast updates)
-        proxied: true, // Enable Cloudflare proxy for HTTPS
+        ttl,
+        proxied,
       }),
     },
-    timeoutMs
+    retryOpts,
+  );
+
+  if (response.ok) {
+    const data = await response.json() as { result: { id: string } };
+    return data.result.id;
+  }
+
+  // Step 3: If duplicate/already-exists, re-search and PATCH
+  const errorBody = await response.json().catch(() => ({})) as { errors?: Array<{ code: number; message: string }> };
+  const isDuplicate = errorBody.errors?.some(
+    (e) => e.code === 81057 || e.message?.toLowerCase().includes('already exists'),
+  );
+
+  if (isDuplicate) {
+    log.info('dns.create_duplicate_fallback', { name: recordName });
+    const retryExisting = await findExistingARecord(recordName, env);
+    if (retryExisting) {
+      await patchDNSRecordContent(retryExisting.id, ip, env);
+      return retryExisting.id;
+    }
+  }
+
+  const message = errorBody.errors?.[0]?.message || `Failed to create DNS record: ${response.status}`;
+  throw new Error(message);
+}
+
+/**
+ * PATCH a DNS record with a new IP address.
+ */
+async function patchDNSRecordContent(
+  recordId: string,
+  ip: string,
+  env: Env,
+): Promise<void> {
+  const retryOpts = cfRetryOptions(env);
+  const response = await fetchWithTimeoutAndRetry(
+    `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${env.CF_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ content: ip }),
+    },
+    retryOpts,
   );
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({})) as { errors?: Array<{ message: string }> };
-    const message = error.errors?.[0]?.message || `Failed to create DNS record: ${response.status}`;
+    const message = error.errors?.[0]?.message || `Failed to update DNS record: ${response.status}`;
     throw new Error(message);
   }
-
-  const data = await response.json() as { result: { id: string } };
-  return data.result.id;
 }
 
 /**
  * Delete a DNS record by ID.
+ * Idempotent: ignores 404 (record already deleted).
  */
 export async function deleteDNSRecord(
   recordId: string,
   env: Env
 ): Promise<void> {
-  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-  const response = await fetchWithTimeout(
+  const retryOpts = cfRetryOptions(env);
+  const response = await fetchWithTimeoutAndRetry(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
     {
       method: 'DELETE',
@@ -133,7 +253,7 @@ export async function deleteDNSRecord(
         Authorization: `Bearer ${env.CF_API_TOKEN}`,
       },
     },
-    timeoutMs
+    retryOpts,
   );
 
   // Ignore 404 errors (record already deleted)
@@ -152,27 +272,7 @@ export async function updateDNSRecord(
   ip: string,
   env: Env
 ): Promise<void> {
-  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-  const response = await fetchWithTimeout(
-    `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
-    {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${env.CF_API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        content: ip,
-      }),
-    },
-    timeoutMs
-  );
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { errors?: Array<{ message: string }> };
-    const message = error.errors?.[0]?.message || `Failed to update DNS record: ${response.status}`;
-    throw new Error(message);
-  }
+  await patchDNSRecordContent(recordId, ip, env);
 }
 
 /**
@@ -189,6 +289,7 @@ export async function cleanupWorkspaceDNSRecords(
 ): Promise<number> {
   const baseDomain = env.BASE_DOMAIN;
   const id = workspaceId.toLowerCase();
+  const retryOpts = cfRetryOptions(env);
 
   // Search for all possible DNS record name formats
   const recordNames = [
@@ -200,12 +301,11 @@ export async function cleanupWorkspaceDNSRecords(
 
   for (const recordName of recordNames) {
     const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}`;
-    const cfTimeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-    const response = await fetchWithTimeout(searchUrl, {
+    const response = await fetchWithTimeoutAndRetry(searchUrl, {
       headers: {
         Authorization: `Bearer ${env.CF_API_TOKEN}`,
       },
-    }, cfTimeoutMs);
+    }, retryOpts);
 
     if (!response.ok) {
       log.error('dns.search_records_failed', { recordName, status: response.status });
@@ -248,47 +348,15 @@ export async function createBackendDNSRecord(
 
 /**
  * Create a proxied (orange-clouded) A record for a node VM backend.
- * Cloudflare's edge handles TLS termination; the VM agent serves HTTPS
- * with an Origin CA certificate that CF trusts.
- *
- * Uses {nodeId}.vm.{BASE_DOMAIN} (two-level subdomain) to bypass Cloudflare
- * same-zone routing. The wildcard Worker route *.{domain}/* only matches
- * single-level subdomains, so {nodeId}.vm.{domain} is NOT intercepted.
- * This allows Worker subrequests (from DO alarms) to reach the VM directly.
+ * Uses idempotent upsert to recover from partial failures.
  */
 export async function createNodeBackendDNSRecord(
   nodeId: string,
   ip: string,
   env: Env
 ): Promise<string> {
-  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-  const response = await fetchWithTimeout(
-    `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${env.CF_API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        type: 'A',
-        name: `${nodeId.toLowerCase()}.vm`,
-        content: ip,
-        ttl: getDnsTTL(env),
-        proxied: true, // Orange-clouded — CF edge terminates TLS, re-encrypts to Origin CA
-      }),
-    },
-    timeoutMs
-  );
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { errors?: Array<{ message: string }> };
-    const message = error.errors?.[0]?.message || `Failed to create backend DNS record: ${response.status}`;
-    throw new Error(message);
-  }
-
-  const data = await response.json() as { result: { id: string } };
-  return data.result.id;
+  const recordName = `${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}`;
+  return upsertARecord(recordName, ip, true, env);
 }
 
 /**

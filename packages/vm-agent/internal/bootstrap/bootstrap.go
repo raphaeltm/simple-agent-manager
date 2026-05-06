@@ -813,7 +813,15 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		return false, fmt.Errorf("devcontainer CLI never became available: %w", err)
 	}
 
-	slog.Info("Starting devcontainer for workspace", "workspaceDir", cfg.WorkspaceDir)
+	// Apply devcontainer build timeout so runaway builds (large Dockerfiles,
+	// network stalls pulling images) do not block workspace provisioning forever.
+	if cfg.DevcontainerBuildTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.DevcontainerBuildTimeout)
+		defer cancel()
+	}
+
+	slog.Info("Starting devcontainer for workspace", "workspaceDir", cfg.WorkspaceDir, "buildTimeout", cfg.DevcontainerBuildTimeout)
 
 	hasConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
 	usedFallback := false

@@ -125,4 +125,22 @@ describe('isTransientError', () => {
     const err = Object.assign(new Error('network error'), { permanent: true });
     expect(isTransientError(err)).toBe(false);
   });
+
+  it('honors explicit retryable=true metadata', () => {
+    // Provider library marks an error as retryable even if the message is unknown
+    const err = Object.assign(new Error('some provider-specific error'), { retryable: true });
+    expect(isTransientError(err)).toBe(true);
+  });
+
+  it('honors explicit retryable=false metadata', () => {
+    // Provider library marks a network error as non-retryable
+    const err = Object.assign(new Error('network error'), { retryable: false });
+    expect(isTransientError(err)).toBe(false);
+  });
+
+  it('permanent flag takes precedence over retryable', () => {
+    // permanent should win over retryable
+    const err = Object.assign(new Error('some error'), { permanent: true, retryable: true });
+    expect(isTransientError(err)).toBe(false);
+  });
 });

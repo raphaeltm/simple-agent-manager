@@ -17,10 +17,12 @@ describe('provisionNode empty IP guard', () => {
     file.indexOf('export async function provisionNode'),
     file.indexOf('export async function stopNodeResources')
   );
+  // Focus on the createVM path (after the recovery block) for the IP guard checks
+  const createVmSection = section.slice(section.indexOf('const vm = await provider.createVM'));
 
   it('checks for empty IP before creating DNS records', () => {
-    const ipCheckIdx = section.indexOf('if (!vm.ip)');
-    const dnsCreateIdx = section.indexOf('createNodeBackendDNSRecord');
+    const ipCheckIdx = createVmSection.indexOf('if (!vm.ip)');
+    const dnsCreateIdx = createVmSection.indexOf('createNodeBackendDNSRecord');
     expect(ipCheckIdx).toBeGreaterThan(-1);
     expect(dnsCreateIdx).toBeGreaterThan(-1);
     // IP check must come before DNS record creation
@@ -28,34 +30,34 @@ describe('provisionNode empty IP guard', () => {
   });
 
   it('keeps node in creating status when IP is empty (awaiting heartbeat backfill)', () => {
-    const ipGuardBlock = section.slice(
-      section.indexOf('if (!vm.ip)'),
-      section.indexOf('let backendDnsRecordId')
+    const ipGuardBlock = createVmSection.slice(
+      createVmSection.indexOf('if (!vm.ip)'),
+      createVmSection.indexOf('let backendDnsRecordId')
     );
     expect(ipGuardBlock).toContain("status: 'creating'");
     expect(ipGuardBlock).toContain('Awaiting IP allocation');
   });
 
   it('returns early after setting creating status for empty IP', () => {
-    const ipGuardBlock = section.slice(
-      section.indexOf('if (!vm.ip)'),
-      section.indexOf('let backendDnsRecordId')
+    const ipGuardBlock = createVmSection.slice(
+      createVmSection.indexOf('if (!vm.ip)'),
+      createVmSection.indexOf('let backendDnsRecordId')
     );
     expect(ipGuardBlock).toContain('return;');
   });
 
   it('stores providerInstanceId even when IP is empty (for cleanup)', () => {
-    const ipGuardBlock = section.slice(
-      section.indexOf('if (!vm.ip)'),
-      section.indexOf('let backendDnsRecordId')
+    const ipGuardBlock = createVmSection.slice(
+      createVmSection.indexOf('if (!vm.ip)'),
+      createVmSection.indexOf('let backendDnsRecordId')
     );
     expect(ipGuardBlock).toContain('providerInstanceId: vm.id');
   });
 
   it('logs structured info with nodeId and providerInstanceId', () => {
-    const ipGuardBlock = section.slice(
-      section.indexOf('if (!vm.ip)'),
-      section.indexOf('let backendDnsRecordId')
+    const ipGuardBlock = createVmSection.slice(
+      createVmSection.indexOf('if (!vm.ip)'),
+      createVmSection.indexOf('let backendDnsRecordId')
     );
     expect(ipGuardBlock).toContain('nodeId: node.id');
     expect(ipGuardBlock).toContain('providerInstanceId: vm.id');

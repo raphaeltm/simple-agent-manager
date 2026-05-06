@@ -866,3 +866,37 @@ func TestCloseIdleControlPlaneConnectionsFlushesPool(t *testing.T) {
 		t.Fatalf("expected 2 total connections after flush (pool was purged), got %d", afterFlush)
 	}
 }
+
+func TestProviderAndDevcontainerBuildTimeoutConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+		t.Setenv("NODE_ID", "test-node")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.Provider != "" {
+			t.Errorf("expected empty Provider, got %q", cfg.Provider)
+		}
+		if cfg.DevcontainerBuildTimeout != 15*time.Minute {
+			t.Errorf("expected DevcontainerBuildTimeout 15m, got %v", cfg.DevcontainerBuildTimeout)
+		}
+	})
+
+	t.Run("env overrides", func(t *testing.T) {
+		t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+		t.Setenv("NODE_ID", "test-node")
+		t.Setenv("PROVIDER", "hetzner")
+		t.Setenv("DEVCONTAINER_BUILD_TIMEOUT", "5m")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.Provider != "hetzner" {
+			t.Errorf("expected Provider hetzner, got %q", cfg.Provider)
+		}
+		if cfg.DevcontainerBuildTimeout != 5*time.Minute {
+			t.Errorf("expected DevcontainerBuildTimeout 5m, got %v", cfg.DevcontainerBuildTimeout)
+		}
+	})
+}
