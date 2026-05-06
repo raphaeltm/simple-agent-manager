@@ -46,6 +46,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
   const [expanded, setExpanded] = useState(false);
   const [lazyContent, setLazyContent] = useState<ToolCallContentItem[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const needsLazyLoad = toolCall.contentLoaded === false && !!toolCall.messageId && !!onLoadContent;
   const hasContent = needsLazyLoad || toolCall.content.some(hasRenderableContent);
@@ -54,15 +55,15 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
   const handleToggle = async () => {
     if (!hasContent) return;
 
-    if (!expanded && needsLazyLoad && !lazyContent) {
+    if (!expanded && needsLazyLoad && !lazyContent && !loadFailed) {
       setExpanded(true);
       setLoading(true);
+      setLoadFailed(false);
       try {
         const content = await onLoadContent!(toolCall.messageId!);
         setLazyContent(content);
       } catch {
-        // Show error state — content couldn't be loaded
-        setLazyContent([{ type: 'content', text: 'Failed to load content.' }]);
+        setLoadFailed(true);
       } finally {
         setLoading(false);
       }
@@ -135,7 +136,14 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
       {expanded && hasContent && (
         <div className="border-t border-gray-200">
           {loading ? (
-            <div className="p-3 text-xs text-gray-500 animate-pulse">Loading content…</div>
+            <div role="status" aria-live="polite" aria-label="Loading tool content" className="p-3 text-xs text-gray-500 animate-pulse">Loading content…</div>
+          ) : loadFailed ? (
+            <div role="alert" aria-live="assertive" className="p-3 text-xs text-red-600 flex items-center gap-1.5">
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+              Failed to load content.
+            </div>
           ) : (
             displayContent.map((content, idx) => (
               <ToolCallContentView key={idx} content={content} />
