@@ -214,6 +214,14 @@ describe('NodeLifecycle workspace auto-deletion source contract', () => {
         'scheduleWorkspaceDeletion(state.stepResults.workspaceId, state.userId)',
       );
     });
+
+    it('idle cleanup processExpiredCleanups schedules deletion after stop', () => {
+      const projectDataIndexFile = readFileSync(
+        resolve(process.cwd(), 'src/durable-objects/project-data/index.ts'),
+        'utf8',
+      );
+      expect(projectDataIndexFile).toContain('scheduleWorkspaceDeletion(workspaceId, wsRow.user_id)');
+    });
   });
 
   describe('cron safety-net for stale stopped workspaces', () => {

@@ -350,7 +350,24 @@ export class ProjectData extends DurableObject<Env> {
       (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());
     await idleCleanup.processExpiredCleanups(this.sql, this.env,
       (taskId) => idleCleanup.completeTaskInD1(this.env.DATABASE, taskId),
-      (workspaceId) => idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId),
+      async (workspaceId) => {
+        await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId);
+        // Schedule automatic deletion after TTL (best-effort)
+        try {
+          const workerEnv = this.env as unknown as import('../../env').Env;
+          const wsRow = await workerEnv.DATABASE.prepare(
+            'SELECT node_id, user_id FROM workspaces WHERE id = ?'
+          ).bind(workspaceId).first<{ node_id: string | null; user_id: string }>();
+          if (wsRow?.node_id) {
+            const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
+            const stub = workerEnv.NODE_LIFECYCLE.get(doId);
+            await (stub as unknown as import('../node-lifecycle').NodeLifecycle)
+              .scheduleWorkspaceDeletion(workspaceId, wsRow.user_id);
+          }
+        } catch {
+          // Best-effort — cron safety-net will catch it
+        }
+      },
       (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());
 
     // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
