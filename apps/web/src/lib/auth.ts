@@ -8,10 +8,11 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
  * BetterAuth React client instance.
  * Provides hooks and methods for authentication.
  */
-export const authClient = createAuthClient({
-  baseURL: API_URL,
-  basePath: '/api/auth',
-});
+export const authClient: ReturnType<typeof createAuthClient> =
+  createAuthClient({
+    baseURL: API_URL,
+    basePath: '/api/auth',
+  });
 
 /**
  * Sign in with GitHub OAuth.
@@ -42,5 +43,6 @@ export async function signOut() {
 /**
  * React hook to get current session.
  */
-export const useSession = authClient.useSession;
+export const useSession: typeof authClient.useSession =
+  authClient.useSession;
 
