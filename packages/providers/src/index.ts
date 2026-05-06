@@ -20,7 +20,15 @@ export type {
 export { ProviderError } from './types';
 
 // Re-export utilities
-export { getTimeoutMs,providerFetch } from './provider-fetch';
+export {
+  computeRetryDelayMs,
+  getRetryDelayMs,
+  getRetryMaxAttempts,
+  getTimeoutMs,
+  providerFetch,
+  providerFetchWithRetry,
+  shouldRetryProviderError,
+} from './provider-fetch';
 
 // Re-export providers
 export type { GcpTokenProvider } from './gcp';
@@ -40,6 +48,12 @@ export function createProvider(config: ProviderConfig): Provider {
         config.datacenter,
         config.placementRetryDelayMs,
         config.placementFallbackEnabled,
+        config.timeoutMs,
+        config.apiRetryMaxAttempts,
+        config.apiRetryBaseDelayMs,
+        config.apiRetryMaxDelayMs,
+        config.placementRetryAttempts,
+        config.placementFallbackLocations,
       );
     case 'scaleway':
       return new ScalewayProvider(

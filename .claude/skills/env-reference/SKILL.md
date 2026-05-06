@@ -78,6 +78,13 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `NODE_AGENT_READY_TIMEOUT_MS` — Max wait for freshly provisioned node-agent health
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` — Polling interval for fresh-node readiness checks
 - `HETZNER_API_TIMEOUT_MS` — Timeout for Hetzner Cloud API calls (default: 30000)
+- `HETZNER_API_RETRY_MAX_ATTEMPTS` — Retry budget for transient Hetzner API calls (default: 3)
+- `HETZNER_API_RETRY_BASE_DELAY_MS` — Base delay for transient Hetzner API retry backoff (default: 1000)
+- `HETZNER_API_RETRY_MAX_DELAY_MS` — Max delay for transient Hetzner API retry backoff (default: 10000)
+- `HETZNER_PLACEMENT_RETRY_DELAY_MS` — Delay before retrying Hetzner primary-location placement failures (default: 3000)
+- `HETZNER_PLACEMENT_RETRY_ATTEMPTS` — Number of primary-location placement attempts before fallback locations (default: 2)
+- `HETZNER_PLACEMENT_FALLBACK_ENABLED` — Whether Hetzner provisioning tries alternate locations after primary placement failures (default: true)
+- `HETZNER_PLACEMENT_FALLBACK_LOCATIONS` — Ordered comma-separated Hetzner fallback locations
 - `CF_API_TIMEOUT_MS` — Timeout for Cloudflare DNS API calls (default: 30000)
 - `NODE_AGENT_REQUEST_TIMEOUT_MS` — Timeout for Node Agent HTTP requests (default: 30000)
 

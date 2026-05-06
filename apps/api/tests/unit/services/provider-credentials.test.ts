@@ -35,6 +35,31 @@ describe('buildProviderConfig', () => {
     });
   });
 
+  it('should build HetznerProviderConfig with retry and placement overrides from env', () => {
+    const config = buildProviderConfig('hetzner', 'my-hetzner-token', {
+      HETZNER_API_TIMEOUT_MS: '45000',
+      HETZNER_API_RETRY_MAX_ATTEMPTS: '4',
+      HETZNER_API_RETRY_BASE_DELAY_MS: '1500',
+      HETZNER_API_RETRY_MAX_DELAY_MS: '12000',
+      HETZNER_PLACEMENT_RETRY_DELAY_MS: '2500',
+      HETZNER_PLACEMENT_RETRY_ATTEMPTS: '3',
+      HETZNER_PLACEMENT_FALLBACK_ENABLED: 'false',
+      HETZNER_PLACEMENT_FALLBACK_LOCATIONS: 'hel1,nbg1',
+    });
+    expect(config).toEqual({
+      provider: 'hetzner',
+      apiToken: 'my-hetzner-token',
+      timeoutMs: 45000,
+      apiRetryMaxAttempts: 4,
+      apiRetryBaseDelayMs: 1500,
+      apiRetryMaxDelayMs: 12000,
+      placementRetryDelayMs: 2500,
+      placementRetryAttempts: 3,
+      placementFallbackEnabled: false,
+      placementFallbackLocations: ['hel1', 'nbg1'],
+    });
+  });
+
   it('should build ScalewayProviderConfig from JSON string', () => {
     const token = JSON.stringify({
       secretKey: 'scw-secret',

@@ -1,6 +1,12 @@
 import { afterEach,describe, expect, it, vi } from 'vitest';
 
-import { getTimeoutMs,providerFetch } from '../../src/provider-fetch';
+import { providerFetch, providerFetchWithRetry } from '../../src/provider-fetch';
+import {
+  computeRetryDelayMs,
+  getRetryDelayMs,
+  getRetryMaxAttempts,
+  getTimeoutMs,
+} from '../../src/provider-fetch';
 import { ProviderError } from '../../src/types';
 
 describe('getTimeoutMs', () => {
@@ -172,6 +178,101 @@ describe('providerFetch', () => {
     } catch (err) {
       const pe = err as ProviderError;
       expect(pe.message).toContain('Rate limited');
+      expect(pe.retryable).toBe(true);
+      expect(pe.reason).toBe('rate_limit');
     }
+  });
+});
+
+describe('retry helpers', () => {
+  it('parses retry attempts with fallback', () => {
+    expect(getRetryMaxAttempts('4')).toBe(4);
+    expect(getRetryMaxAttempts('0', 2)).toBe(2);
+    expect(getRetryMaxAttempts('abc', 2)).toBe(2);
+  });
+
+  it('parses retry delays with fallback', () => {
+    expect(getRetryDelayMs('2500', 1000)).toBe(2500);
+    expect(getRetryDelayMs('-1', 1000)).toBe(1000);
+    expect(getRetryDelayMs('abc', 1000)).toBe(1000);
+  });
+
+  it('computes capped exponential retry delays without jitter', () => {
+    expect(computeRetryDelayMs(1, 1000, 10000, 0)).toBe(1000);
+    expect(computeRetryDelayMs(2, 1000, 10000, 0)).toBe(2000);
+    expect(computeRetryDelayMs(5, 1000, 10000, 0)).toBe(10000);
+  });
+});
+
+describe('providerFetchWithRetry', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.useRealTimers();
+    globalThis.fetch = originalFetch;
+  });
+
+  it('retries transient 5xx responses and returns the eventual success', async () => {
+    vi.useFakeTimers();
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(new Response('temporarily unavailable', { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    globalThis.fetch = mockFetch;
+
+    const promise = providerFetchWithRetry(
+      'hetzner',
+      'https://api.example.com/test',
+      undefined,
+      30_000,
+      { maxAttempts: 2, baseDelayMs: 100, maxDelayMs: 100, jitterRatio: 0 },
+    );
+
+    await vi.runAllTimersAsync();
+    const response = await promise;
+
+    expect(response.ok).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('honors Retry-After for 429 responses', async () => {
+    vi.useFakeTimers();
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(new Response('rate limited', {
+        status: 429,
+        headers: { 'Retry-After': '2' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    globalThis.fetch = mockFetch;
+
+    const promise = providerFetchWithRetry(
+      'hetzner',
+      'https://api.example.com/test',
+      undefined,
+      30_000,
+      { maxAttempts: 2, baseDelayMs: 100, maxDelayMs: 100, jitterRatio: 0 },
+    );
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await promise;
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry auth failures', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 }),
+    );
+    globalThis.fetch = mockFetch;
+
+    await expect(providerFetchWithRetry(
+      'hetzner',
+      'https://api.example.com/test',
+      undefined,
+      30_000,
+      { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 },
+    )).rejects.toThrow(ProviderError);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

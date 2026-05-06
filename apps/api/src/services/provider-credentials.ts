@@ -1,4 +1,4 @@
-import type { Provider, ProviderConfig } from '@simple-agent-manager/providers';
+import type { HetznerProviderConfig, Provider, ProviderConfig } from '@simple-agent-manager/providers';
 import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
 import type { CredentialProvider, CredentialSource, GcpOidcCredential } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
@@ -61,10 +61,20 @@ export function extractScalewaySecretKey(decryptedToken: string): string | null 
 export function buildProviderConfig(
   provider: CredentialProvider,
   decryptedToken: string,
+  env?: {
+    HETZNER_API_TIMEOUT_MS?: string;
+    HETZNER_API_RETRY_MAX_ATTEMPTS?: string;
+    HETZNER_API_RETRY_BASE_DELAY_MS?: string;
+    HETZNER_API_RETRY_MAX_DELAY_MS?: string;
+    HETZNER_PLACEMENT_RETRY_DELAY_MS?: string;
+    HETZNER_PLACEMENT_RETRY_ATTEMPTS?: string;
+    HETZNER_PLACEMENT_FALLBACK_ENABLED?: string;
+    HETZNER_PLACEMENT_FALLBACK_LOCATIONS?: string;
+  },
 ): ProviderConfig {
   switch (provider) {
     case 'hetzner':
-      return { provider: 'hetzner', apiToken: decryptedToken };
+      return buildHetznerProviderConfig(decryptedToken, env);
     case 'scaleway': {
       let parsed: unknown;
       try {
@@ -88,6 +98,44 @@ export function buildProviderConfig(
     default:
       throw new Error(`Unsupported provider: ${provider}`);
   }
+}
+
+function buildHetznerProviderConfig(
+  apiToken: string,
+  env?: {
+    HETZNER_API_TIMEOUT_MS?: string;
+    HETZNER_API_RETRY_MAX_ATTEMPTS?: string;
+    HETZNER_API_RETRY_BASE_DELAY_MS?: string;
+    HETZNER_API_RETRY_MAX_DELAY_MS?: string;
+    HETZNER_PLACEMENT_RETRY_DELAY_MS?: string;
+    HETZNER_PLACEMENT_RETRY_ATTEMPTS?: string;
+    HETZNER_PLACEMENT_FALLBACK_ENABLED?: string;
+    HETZNER_PLACEMENT_FALLBACK_LOCATIONS?: string;
+  },
+): HetznerProviderConfig {
+  const config: HetznerProviderConfig = {
+    provider: 'hetzner',
+    apiToken,
+  };
+
+  const timeoutMs = parseOptionalPositiveInt(env?.HETZNER_API_TIMEOUT_MS);
+  if (timeoutMs !== undefined) config.timeoutMs = timeoutMs;
+  const apiRetryMaxAttempts = parseOptionalPositiveInt(env?.HETZNER_API_RETRY_MAX_ATTEMPTS);
+  if (apiRetryMaxAttempts !== undefined) config.apiRetryMaxAttempts = apiRetryMaxAttempts;
+  const apiRetryBaseDelayMs = parseOptionalPositiveInt(env?.HETZNER_API_RETRY_BASE_DELAY_MS);
+  if (apiRetryBaseDelayMs !== undefined) config.apiRetryBaseDelayMs = apiRetryBaseDelayMs;
+  const apiRetryMaxDelayMs = parseOptionalPositiveInt(env?.HETZNER_API_RETRY_MAX_DELAY_MS);
+  if (apiRetryMaxDelayMs !== undefined) config.apiRetryMaxDelayMs = apiRetryMaxDelayMs;
+  const placementRetryDelayMs = parseOptionalPositiveInt(env?.HETZNER_PLACEMENT_RETRY_DELAY_MS);
+  if (placementRetryDelayMs !== undefined) config.placementRetryDelayMs = placementRetryDelayMs;
+  const placementRetryAttempts = parseOptionalPositiveInt(env?.HETZNER_PLACEMENT_RETRY_ATTEMPTS);
+  if (placementRetryAttempts !== undefined) config.placementRetryAttempts = placementRetryAttempts;
+  const placementFallbackEnabled = parseOptionalBoolean(env?.HETZNER_PLACEMENT_FALLBACK_ENABLED);
+  if (placementFallbackEnabled !== undefined) config.placementFallbackEnabled = placementFallbackEnabled;
+  const placementFallbackLocations = parseOptionalList(env?.HETZNER_PLACEMENT_FALLBACK_LOCATIONS);
+  if (placementFallbackLocations !== undefined) config.placementFallbackLocations = placementFallbackLocations;
+
+  return config;
 }
 
 /**
@@ -179,7 +227,24 @@ export async function createProviderForUser(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: { KV: KVNamespace; BASE_DOMAIN: string; JWT_PRIVATE_KEY: string; JWT_PUBLIC_KEY: string; GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string; GCP_TOKEN_CACHE_TTL_SECONDS?: string; GCP_API_TIMEOUT_MS?: string; GCP_OPERATION_POLL_TIMEOUT_MS?: string },
+  env: {
+    KV: KVNamespace;
+    BASE_DOMAIN: string;
+    JWT_PRIVATE_KEY: string;
+    JWT_PUBLIC_KEY: string;
+    GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string;
+    GCP_TOKEN_CACHE_TTL_SECONDS?: string;
+    GCP_API_TIMEOUT_MS?: string;
+    GCP_OPERATION_POLL_TIMEOUT_MS?: string;
+    HETZNER_API_TIMEOUT_MS?: string;
+    HETZNER_API_RETRY_MAX_ATTEMPTS?: string;
+    HETZNER_API_RETRY_BASE_DELAY_MS?: string;
+    HETZNER_API_RETRY_MAX_DELAY_MS?: string;
+    HETZNER_PLACEMENT_RETRY_DELAY_MS?: string;
+    HETZNER_PLACEMENT_RETRY_ATTEMPTS?: string;
+    HETZNER_PLACEMENT_FALLBACK_ENABLED?: string;
+    HETZNER_PLACEMENT_FALLBACK_LOCATIONS?: string;
+  },
   targetProvider?: CredentialProvider,
 ): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
   // 1. Try user's own credential first
@@ -215,7 +280,7 @@ export async function createProviderForUser(
       return { provider, providerName, credentialSource: 'user' };
     }
 
-    const config = buildProviderConfig(providerName, decryptedToken);
+    const config = buildProviderConfig(providerName, decryptedToken, env);
     return { provider: createProvider(config), providerName, credentialSource: 'user' };
   }
 
@@ -241,8 +306,27 @@ export async function createProviderForUser(
     return { provider, providerName: platformProvider, credentialSource: 'platform' };
   }
 
-  const config = buildProviderConfig(platformProvider, decryptedToken);
+  const config = buildProviderConfig(platformProvider, decryptedToken, env);
   return { provider: createProvider(config), providerName: platformProvider, credentialSource: 'platform' };
+}
+
+function parseOptionalPositiveInt(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function parseOptionalBoolean(value: string | undefined): boolean | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
+
+function parseOptionalList(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const items = value.split(',').map((item) => item.trim()).filter(Boolean);
+  return items.length > 0 ? items : undefined;
 }
 
 /**

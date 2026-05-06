@@ -196,6 +196,13 @@ export interface Env {
   HETZNER_BASE_IMAGE?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
+  HETZNER_API_RETRY_MAX_ATTEMPTS?: string;
+  HETZNER_API_RETRY_BASE_DELAY_MS?: string;
+  HETZNER_API_RETRY_MAX_DELAY_MS?: string;
+  HETZNER_PLACEMENT_RETRY_DELAY_MS?: string;
+  HETZNER_PLACEMENT_RETRY_ATTEMPTS?: string;
+  HETZNER_PLACEMENT_FALLBACK_ENABLED?: string;
+  HETZNER_PLACEMENT_FALLBACK_LOCATIONS?: string;
   CF_API_TIMEOUT_MS?: string;
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
   // Project data DO limits

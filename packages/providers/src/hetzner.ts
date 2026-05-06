@@ -1,7 +1,13 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent-manager/shared';
 
-import { providerFetch } from './provider-fetch';
+import {
+  getRetryDelayMs,
+  getRetryMaxAttempts,
+  getTimeoutMs,
+  providerFetch,
+  providerFetchWithRetry,
+} from './provider-fetch';
 import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
 
@@ -18,6 +24,7 @@ const HETZNER_LOCATION_META: Record<string, LocationMeta> = {
 };
 
 export const DEFAULT_PLACEMENT_RETRY_DELAY_MS = 3_000;
+export const DEFAULT_PLACEMENT_RETRY_ATTEMPTS = 2;
 
 const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   small: {
@@ -74,20 +81,38 @@ export class HetznerProvider implements Provider {
 
   private readonly apiToken: string;
   private readonly datacenter: string;
+  private readonly timeoutMs: number;
+  private readonly apiRetryMaxAttempts: number;
+  private readonly apiRetryBaseDelayMs: number;
+  private readonly apiRetryMaxDelayMs: number;
   private readonly placementRetryDelayMs: number;
+  private readonly placementRetryAttempts: number;
   private readonly placementFallbackEnabled: boolean;
+  private readonly placementFallbackLocations: string[] | undefined;
 
   constructor(
     apiToken: string,
     datacenter?: string,
     placementRetryDelayMs?: number,
     placementFallbackEnabled?: boolean,
+    timeoutMs?: number,
+    apiRetryMaxAttempts?: number,
+    apiRetryBaseDelayMs?: number,
+    apiRetryMaxDelayMs?: number,
+    placementRetryAttempts?: number,
+    placementFallbackLocations?: string[],
   ) {
     this.apiToken = apiToken;
     this.datacenter = datacenter || DEFAULT_HETZNER_DATACENTER;
     this.defaultLocation = this.datacenter;
-    this.placementRetryDelayMs = placementRetryDelayMs ?? DEFAULT_PLACEMENT_RETRY_DELAY_MS;
+    this.timeoutMs = getTimeoutMs(timeoutMs === undefined ? undefined : String(timeoutMs));
+    this.apiRetryMaxAttempts = getRetryMaxAttempts(apiRetryMaxAttempts);
+    this.apiRetryBaseDelayMs = getRetryDelayMs(apiRetryBaseDelayMs, 1_000);
+    this.apiRetryMaxDelayMs = getRetryDelayMs(apiRetryMaxDelayMs, 10_000);
+    this.placementRetryDelayMs = getRetryDelayMs(placementRetryDelayMs, DEFAULT_PLACEMENT_RETRY_DELAY_MS);
+    this.placementRetryAttempts = getRetryMaxAttempts(placementRetryAttempts, DEFAULT_PLACEMENT_RETRY_ATTEMPTS);
     this.placementFallbackEnabled = placementFallbackEnabled ?? true;
+    this.placementFallbackLocations = placementFallbackLocations?.filter((loc) => HETZNER_LOCATIONS.includes(loc as typeof HETZNER_LOCATIONS[number]));
   }
 
   async createVM(config: VMConfig): Promise<VMInstance> {
@@ -97,15 +122,20 @@ export class HetznerProvider implements Provider {
     }
     const primaryLocation = config.location || this.datacenter;
 
-    // Build attempt order: primary twice (with a delay between), then remaining locations shuffled
+    // Build attempt order: primary N times (with a delay between), then remaining locations.
+    // Fallback order can be explicitly configured for deterministic capacity handling.
     const fallbackLocations = this.placementFallbackEnabled
-      ? HETZNER_LOCATIONS
+      ? (this.placementFallbackLocations?.length
+          ? this.placementFallbackLocations
+          : HETZNER_LOCATIONS.filter((loc) => loc !== primaryLocation).sort(() => Math.random() - 0.5))
           .filter((loc) => loc !== primaryLocation)
-          .sort(() => Math.random() - 0.5)
       : [];
+    const primaryAttempts = Array.from({ length: this.placementRetryAttempts }, (_, index) => ({
+      location: primaryLocation,
+      delayMs: index === 0 ? 0 : this.placementRetryDelayMs,
+    }));
     const attemptsToTry: Array<{ location: string; delayMs: number }> = [
-      { location: primaryLocation, delayMs: 0 },
-      { location: primaryLocation, delayMs: this.placementRetryDelayMs },
+      ...primaryAttempts,
       ...fallbackLocations.map((loc) => ({ location: loc, delayMs: 0 })),
     ];
 
@@ -134,7 +164,7 @@ export class HetznerProvider implements Provider {
             labels: config.labels || {},
             start_after_create: true,
           }),
-        });
+        }, this.timeoutMs);
 
         const data = (await response.json()) as HetznerServerResponse;
         if (attempt.location !== primaryLocation) {
@@ -145,10 +175,21 @@ export class HetznerProvider implements Provider {
         return this.mapServerToVMInstance(data.server);
       } catch (err) {
         if (err instanceof ProviderError && err.statusCode === 412) {
+          const placementError = new ProviderError(
+            this.name,
+            err.statusCode,
+            err.message,
+            {
+              cause: err,
+              retryable: true,
+              reason: 'capacity',
+              idempotencyRisk: 'duplicate_resource',
+            },
+          );
           console.warn(
             `hetzner: placement failed in ${attempt.location} (412)`,
           );
-          lastError = err;
+          lastError = placementError;
           continue;
         }
         throw err; // Non-placement errors are not retryable
@@ -161,7 +202,7 @@ export class HetznerProvider implements Provider {
 
   async deleteVM(id: string): Promise<void> {
     try {
-      await providerFetch(this.name, `${HETZNER_API_URL}/servers/${id}`, {
+      await this.fetch(`${HETZNER_API_URL}/servers/${id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${this.apiToken}`,
@@ -177,7 +218,7 @@ export class HetznerProvider implements Provider {
 
   async getVM(id: string): Promise<VMInstance | null> {
     try {
-      const response = await providerFetch(this.name, `${HETZNER_API_URL}/servers/${id}`, {
+      const response = await this.fetch(`${HETZNER_API_URL}/servers/${id}`, {
         headers: {
           Authorization: `Bearer ${this.apiToken}`,
         },
@@ -205,7 +246,7 @@ export class HetznerProvider implements Provider {
       ? `${HETZNER_API_URL}/servers?label_selector=${encodeURIComponent(labelParts.join(','))}`
       : `${HETZNER_API_URL}/servers`;
 
-    const response = await providerFetch(this.name, url, {
+    const response = await this.fetch(url, {
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
       },
@@ -216,7 +257,7 @@ export class HetznerProvider implements Provider {
   }
 
   async powerOff(id: string): Promise<void> {
-    await providerFetch(this.name, `${HETZNER_API_URL}/servers/${id}/actions/poweroff`, {
+    await this.fetch(`${HETZNER_API_URL}/servers/${id}/actions/poweroff`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -225,7 +266,7 @@ export class HetznerProvider implements Provider {
   }
 
   async powerOn(id: string): Promise<void> {
-    await providerFetch(this.name, `${HETZNER_API_URL}/servers/${id}/actions/poweron`, {
+    await this.fetch(`${HETZNER_API_URL}/servers/${id}/actions/poweron`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -234,12 +275,20 @@ export class HetznerProvider implements Provider {
   }
 
   async validateToken(): Promise<boolean> {
-    await providerFetch(this.name, `${HETZNER_API_URL}/datacenters`, {
+    await this.fetch(`${HETZNER_API_URL}/datacenters`, {
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
       },
     });
     return true;
+  }
+
+  private fetch(url: string | URL, init?: RequestInit): Promise<Response> {
+    return providerFetchWithRetry(this.name, url, init, this.timeoutMs, {
+      maxAttempts: this.apiRetryMaxAttempts,
+      baseDelayMs: this.apiRetryBaseDelayMs,
+      maxDelayMs: this.apiRetryMaxDelayMs,
+    });
   }
 
   private mapServerToVMInstance(server: HetznerServerResponse['server']): VMInstance {

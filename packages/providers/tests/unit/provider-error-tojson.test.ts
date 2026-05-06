@@ -12,6 +12,10 @@ describe('ProviderError.toJSON', () => {
       message: 'Server not found',
       provider: 'hetzner',
       statusCode: 404,
+      retryable: false,
+      reason: 'not_found',
+      retryAfterMs: undefined,
+      idempotencyRisk: 'none',
       cause: undefined,
     });
   });
@@ -69,4 +73,3 @@ describe('ProviderError.toJSON', () => {
     expect('stack' in json).toBe(false);
   });
 });
-

@@ -438,6 +438,83 @@ describe('HetznerProvider', () => {
       // primary (1) + primary retry (2), no fallback locations
       expect(fetch).toHaveBeenCalledTimes(2);
     });
+
+    it('should honor configurable primary placement retry attempts', async () => {
+      vi.useFakeTimers();
+      const retryProvider = new HetznerProvider(
+        'test-token',
+        'fsn1',
+        3000,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        3,
+      );
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: 'error during placement' } }),
+          { status: 412 },
+        ),
+      );
+
+      const promise = retryProvider.createVM(vmConfig).catch((err) => err);
+      await vi.runAllTimersAsync();
+      const result = await promise;
+      expect(result).toBeInstanceOf(ProviderError);
+      expect(fetch).toHaveBeenCalledTimes(3);
+
+      const locations = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => JSON.parse((call[1] as RequestInit).body as string).location,
+      );
+      expect(locations).toEqual(['fsn1', 'fsn1', 'fsn1']);
+    });
+
+    it('should honor configured fallback location order', async () => {
+      vi.useFakeTimers();
+      const orderedFallbackProvider = new HetznerProvider(
+        'test-token',
+        'fsn1',
+        3000,
+        true,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        1,
+        ['hel1', 'nbg1'],
+      );
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ error: { message: 'error during placement' } }),
+            { status: 412 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ error: { message: 'error during placement' } }),
+            { status: 412 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
+            { status: 200 },
+          ),
+        );
+      globalThis.fetch = mockFetch;
+
+      const promise = orderedFallbackProvider.createVM(vmConfig);
+      await vi.runAllTimersAsync();
+      await promise;
+
+      const locations = mockFetch.mock.calls.map(
+        (call) => JSON.parse((call[1] as RequestInit).body as string).location,
+      );
+      expect(locations).toEqual(['fsn1', 'hel1', 'nbg1']);
+    });
   });
 
   describe('deleteVM', () => {

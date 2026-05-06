@@ -135,10 +135,22 @@ export interface HetznerProviderConfig {
   provider: 'hetzner';
   apiToken: string;
   datacenter?: string;
+  /** Per-request API timeout in ms (default: 30000) */
+  timeoutMs?: number;
+  /** Max HTTP retry attempts for transient provider API calls (default: 3) */
+  apiRetryMaxAttempts?: number;
+  /** Base delay in ms for transient provider API retries (default: 1000) */
+  apiRetryBaseDelayMs?: number;
+  /** Max delay in ms for transient provider API retries (default: 10000) */
+  apiRetryMaxDelayMs?: number;
   /** Delay in ms before retrying same location on 412 (default: 3000) */
   placementRetryDelayMs?: number;
+  /** Number of primary-location placement attempts before fallback locations (default: 2) */
+  placementRetryAttempts?: number;
   /** Whether to try other locations after primary fails (default: true) */
   placementFallbackEnabled?: boolean;
+  /** Ordered fallback locations to try after primary placement attempts fail */
+  placementFallbackLocations?: string[];
 }
 
 export interface ScalewayProviderConfig {
@@ -175,10 +187,25 @@ export class ProviderError extends Error {
     public readonly statusCode: number | undefined,
     message: string,
     /** Original error */
-    options?: { cause?: Error },
+    options?: {
+      cause?: Error;
+      retryable?: boolean;
+      reason?: ProviderErrorReason;
+      retryAfterMs?: number;
+      idempotencyRisk?: ProviderIdempotencyRisk;
+    },
   ) {
     super(message, options);
+    this.retryable = options?.retryable ?? false;
+    this.reason = options?.reason ?? classifyProviderErrorReason(statusCode);
+    this.retryAfterMs = options?.retryAfterMs;
+    this.idempotencyRisk = options?.idempotencyRisk ?? 'none';
   }
+
+  readonly retryable: boolean;
+  readonly reason: ProviderErrorReason;
+  readonly retryAfterMs: number | undefined;
+  readonly idempotencyRisk: ProviderIdempotencyRisk;
 
   /** Make Error properties visible to JSON.stringify */
   toJSON(): Record<string, unknown> {
@@ -187,7 +214,38 @@ export class ProviderError extends Error {
       message: this.message,
       provider: this.providerName,
       statusCode: this.statusCode,
+      retryable: this.retryable,
+      reason: this.reason,
+      retryAfterMs: this.retryAfterMs,
+      idempotencyRisk: this.idempotencyRisk,
       cause: this.cause instanceof Error ? this.cause.message : this.cause,
     };
   }
+}
+
+export type ProviderErrorReason =
+  | 'network'
+  | 'timeout'
+  | 'rate_limit'
+  | 'provider_5xx'
+  | 'capacity'
+  | 'placement'
+  | 'quota'
+  | 'auth'
+  | 'validation'
+  | 'not_found'
+  | 'conflict'
+  | 'unknown';
+
+export type ProviderIdempotencyRisk = 'none' | 'duplicate_resource' | 'destructive';
+
+function classifyProviderErrorReason(statusCode: number | undefined): ProviderErrorReason {
+  if (statusCode === undefined) return 'unknown';
+  if (statusCode === 401 || statusCode === 403) return 'auth';
+  if (statusCode === 404) return 'not_found';
+  if (statusCode === 409) return 'conflict';
+  if (statusCode === 429) return 'rate_limit';
+  if (statusCode >= 400 && statusCode < 500) return 'validation';
+  if (statusCode >= 500) return 'provider_5xx';
+  return 'unknown';
 }
