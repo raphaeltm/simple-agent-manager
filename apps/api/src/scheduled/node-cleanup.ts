@@ -25,7 +25,7 @@ import {
   DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
   DEFAULT_WORKSPACE_STOPPED_TTL_MS,
 } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -398,11 +398,11 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
         });
       }
 
-      // Mark as deleted in D1
+      // Mark as deleted in D1 (status guard prevents TOCTOU race if workspace was restarted)
       await db
         .update(schema.workspaces)
         .set({ status: 'deleted', updatedAt: new Date().toISOString() })
-        .where(eq(schema.workspaces.id, ws.id));
+        .where(and(eq(schema.workspaces.id, ws.id), eq(schema.workspaces.status, 'stopped')));
 
       result.stoppedWorkspacesDeleted++;
     } catch (e) {

@@ -93,7 +93,7 @@ describe('NodeLifecycle workspace auto-deletion source contract', () => {
     });
 
     it('calls deleteWorkspace for expired entries', () => {
-      expect(doFile).toContain('await this.deleteWorkspace(entry.workspaceId, entry.userId)');
+      expect(doFile).toContain('await this.deleteWorkspace(state.nodeId, entry.workspaceId, entry.userId)');
     });
 
     it('removes processed entries from storage', () => {
@@ -107,13 +107,8 @@ describe('NodeLifecycle workspace auto-deletion source contract', () => {
   });
 
   describe('deleteWorkspace implementation', () => {
-    it('looks up node IP from D1', () => {
-      expect(doFile).toContain('SELECT ip_address FROM nodes WHERE id = ?');
-    });
-
-    it('calls VM agent DELETE endpoint', () => {
-      expect(doFile).toContain('/workspaces/${workspaceId}');
-      expect(doFile).toContain("method: 'DELETE'");
+    it('calls deleteWorkspaceOnNode via shared helper (proper JWT auth)', () => {
+      expect(doFile).toContain('deleteWorkspaceOnNode(nodeId, workspaceId, this.env as unknown as Env, userId)');
     });
 
     it('updates D1 workspace status to deleted', () => {

@@ -34,7 +34,9 @@ import {
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
+import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { deleteWorkspaceOnNode } from '../services/node-agent';
 
 type NodeLifecycleEnv = {
   DATABASE: D1Database;
@@ -263,8 +265,8 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         nodeId: state.nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
-      // Schedule retry
-      await this.ctx.storage.setAlarm(Date.now() + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
+      // Schedule retry (use recalculateAlarm to not delay pending workspace deletions)
+      await this.recalculateAlarm(Date.now() + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
     }
   }
 
@@ -332,11 +334,15 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     const pending = await this.getPendingDeletions();
     const now = Date.now();
 
+    // Load state once to get nodeId — avoids N storage reads in the loop
+    const state = await this.getStoredState();
+    if (!state) return;
+
     for (const [key, entry] of pending) {
       if (entry.deleteAt > now) continue;
 
       try {
-        await this.deleteWorkspace(entry.workspaceId, entry.userId);
+        await this.deleteWorkspace(state.nodeId, entry.workspaceId, entry.userId);
         await this.ctx.storage.delete(key);
 
         log.info('node_lifecycle.workspace_auto_deleted', {
@@ -361,39 +367,18 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * Delete a workspace: call VM agent to remove Docker container + volume,
    * then update D1 status to 'deleted'.
    */
-  private async deleteWorkspace(workspaceId: string, userId: string): Promise<void> {
-    const state = await this.getStoredState();
-    if (!state) return;
-
-    // Look up node IP from D1 to call the VM agent
-    const nodeRow = await this.env.DATABASE.prepare(
-      `SELECT ip_address FROM nodes WHERE id = ?`
-    ).bind(state.nodeId).first<{ ip_address: string | null }>();
-
-    if (nodeRow?.ip_address) {
-      // Call VM agent DELETE endpoint to remove container + volume
-      try {
-        const protocol = 'https';
-        const port = '8443';
-        const url = `${protocol}://${nodeRow.ip_address}:${port}/workspaces/${workspaceId}`;
-        const resp = await fetch(url, {
-          method: 'DELETE',
-          headers: { 'X-User-ID': userId },
-          signal: AbortSignal.timeout(30_000),
-        });
-
-        if (!resp.ok && resp.status !== 404) {
-          throw new Error(`VM agent DELETE returned ${resp.status}`);
-        }
-      } catch (err) {
-        // If the node is unreachable (already destroyed), log but don't fail
-        // The D1 status update below still marks the workspace as deleted
-        log.warn('node_lifecycle.workspace_delete_vm_agent_failed', {
-          workspaceId,
-          nodeId: state.nodeId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+  private async deleteWorkspace(nodeId: string, workspaceId: string, userId: string): Promise<void> {
+    // Call VM agent DELETE endpoint via shared helper (handles JWT auth, proper URL routing)
+    try {
+      await deleteWorkspaceOnNode(nodeId, workspaceId, this.env as unknown as Env, userId);
+    } catch (err) {
+      // If the node is unreachable (already destroyed), log but don't fail
+      // The D1 status update below still marks the workspace as deleted
+      log.warn('node_lifecycle.workspace_delete_vm_agent_failed', {
+        workspaceId,
+        nodeId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     // Update D1 workspace status to 'deleted'
