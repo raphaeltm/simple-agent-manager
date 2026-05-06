@@ -47,8 +47,8 @@ describe('NodeLifecycle DO source contract', () => {
       expect(doFile).toContain('warmSince: now');
     });
 
-    it('schedules alarm at now + timeout', () => {
-      expect(doFile).toContain('setAlarm(now + warmTimeout)');
+    it('recalculates alarm considering warm timeout and pending deletions', () => {
+      expect(doFile).toContain('recalculateAlarm(now + warmTimeout)');
     });
 
     it('updates D1 warm_since column', () => {
@@ -69,8 +69,9 @@ describe('NodeLifecycle DO source contract', () => {
       expect(doFile).toContain('state.claimedByTask = null');
     });
 
-    it('cancels alarm via deleteAlarm', () => {
-      expect(doFile).toContain('this.ctx.storage.deleteAlarm()');
+    it('recalculates alarm (preserves workspace deletion alarms)', () => {
+      const markActiveSection = doFile.slice(doFile.indexOf('async markActive()'));
+      expect(markActiveSection).toContain('recalculateAlarm(null)');
     });
 
     it('clears D1 warm_since', () => {
@@ -96,10 +97,9 @@ describe('NodeLifecycle DO source contract', () => {
       expect(doFile).toContain('state.claimedByTask = taskId');
     });
 
-    it('cancels alarm on successful claim', () => {
-      // deleteAlarm is called inside tryClaim after claiming
+    it('recalculates alarm on successful claim (preserves workspace deletion alarms)', () => {
       const tryClaimSection = doFile.slice(doFile.indexOf('async tryClaim'));
-      expect(tryClaimSection).toContain('deleteAlarm()');
+      expect(tryClaimSection).toContain('recalculateAlarm(null)');
     });
   });
 

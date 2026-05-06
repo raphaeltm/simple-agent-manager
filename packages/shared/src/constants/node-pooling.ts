@@ -18,6 +18,13 @@ export const DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 
 export const DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS = 60 * 1000; // 1 minute
 
 // =============================================================================
+// Workspace Stopped Auto-Delete
+// =============================================================================
+
+/** Default TTL (ms) before a stopped workspace is automatically deleted. Override via WORKSPACE_STOPPED_TTL_MS env var. */
+export const DEFAULT_WORKSPACE_STOPPED_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// =============================================================================
 // Workspace Idle Timeout (Compute Lifecycle Management)
 // =============================================================================
 

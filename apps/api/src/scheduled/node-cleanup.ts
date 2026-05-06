@@ -23,6 +23,7 @@ import {
   DEFAULT_MAX_AUTO_NODE_LIFETIME_MS,
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
   DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
+  DEFAULT_WORKSPACE_STOPPED_TTL_MS,
 } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -30,7 +31,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { stopWorkspaceOnNode } from '../services/node-agent';
+import { deleteWorkspaceOnNode, stopWorkspaceOnNode } from '../services/node-agent';
 import { deleteNodeResources } from '../services/nodes';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
@@ -48,6 +49,7 @@ export interface NodeCleanupResult {
   lifetimeSkipped: number;
   orphanedWorkspacesFlagged: number;
   orphanedNodesFlagged: number;
+  stoppedWorkspacesDeleted: number;
   errors: number;
 }
 
@@ -63,6 +65,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     lifetimeSkipped: 0,
     orphanedWorkspacesFlagged: 0,
     orphanedNodesFlagged: 0,
+    stoppedWorkspacesDeleted: 0,
     errors: 0,
   };
 
@@ -367,6 +370,45 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     });
 
     result.orphanedNodesFlagged++;
+  }
+
+  // 5. Safety-net: delete stopped workspaces past TTL that the DO alarm missed.
+  //    This catches cases where the DO alarm failed to fire or wasn't scheduled.
+  const stoppedTtlMs = parseMs(env.WORKSPACE_STOPPED_TTL_MS, DEFAULT_WORKSPACE_STOPPED_TTL_MS);
+  // Add a 2x grace buffer so the DO alarm has time to fire first
+  const stoppedGraceThreshold = new Date(now.getTime() - stoppedTtlMs * 2).toISOString();
+  const staleStoppedWorkspaces = await env.DATABASE.prepare(
+    `SELECT w.id, w.node_id, w.user_id
+     FROM workspaces w
+     WHERE w.status = 'stopped'
+       AND w.updated_at < ?
+     LIMIT 50`
+  ).bind(stoppedGraceThreshold).all<{
+    id: string;
+    node_id: string | null;
+    user_id: string;
+  }>();
+
+  for (const ws of staleStoppedWorkspaces.results) {
+    try {
+      // Delete on VM agent (best-effort — node may be gone)
+      if (ws.node_id) {
+        await deleteWorkspaceOnNode(ws.node_id, ws.id, env, ws.user_id).catch((e) => {
+          log.warn('node_cleanup.stale_stopped_delete_on_node_failed', { workspaceId: ws.id, error: String(e) });
+        });
+      }
+
+      // Mark as deleted in D1
+      await db
+        .update(schema.workspaces)
+        .set({ status: 'deleted', updatedAt: new Date().toISOString() })
+        .where(eq(schema.workspaces.id, ws.id));
+
+      result.stoppedWorkspacesDeleted++;
+    } catch (e) {
+      log.error('node_cleanup.stale_stopped_workspace_delete_failed', { workspaceId: ws.id, error: String(e) });
+      result.errors++;
+    }
   }
 
   return result;

@@ -104,6 +104,22 @@ export async function cleanupTaskRun(
     });
   }
 
+  // Schedule automatic deletion after TTL (best-effort)
+  if (workspace.nodeId && (workspace.status === 'running' || workspace.status === 'recovery' || workspace.status === 'stopped')) {
+    try {
+      const doId = env.NODE_LIFECYCLE.idFromName(workspace.nodeId);
+      const stub = env.NODE_LIFECYCLE.get(doId);
+      await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
+        .scheduleWorkspaceDeletion(workspace.id, task.userId);
+    } catch (e) {
+      log.warn('task_run.cleanup.schedule_deletion_failed', {
+        taskId,
+        workspaceId: workspace.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
   // If node was auto-provisioned for this task, check if it can be cleaned up
   if (task.autoProvisionedNodeId) {
     await cleanupAutoProvisionedNode(

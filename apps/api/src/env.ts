@@ -139,6 +139,8 @@ export interface Env {
   ORPHANED_WORKSPACE_GRACE_PERIOD_MS?: string;
   // Workspace idle timeout (global default, overridable per-project)
   WORKSPACE_IDLE_TIMEOUT_MS?: string;
+  // Auto-delete stopped workspaces after this TTL (default: 300000 = 5 minutes)
+  WORKSPACE_STOPPED_TTL_MS?: string;
   // Task agent configuration
   DEFAULT_TASK_AGENT_TYPE?: string;
   // Built-in profile model overrides (defaults: claude-sonnet-4-5-20250929, claude-opus-4-6)

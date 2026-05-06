@@ -14,6 +14,11 @@
  *   alarm()       → on `warm`: sets `destroying`, updates D1, cron handles teardown
  *                 → on `active`: no-op (was claimed between schedule and fire)
  *
+ * Workspace auto-deletion:
+ *   scheduleWorkspaceDeletion(workspaceId, userId) → stores pending deletion, recalculates alarm
+ *   cancelWorkspaceDeletion(workspaceId) → removes pending deletion, recalculates alarm
+ *   alarm() → also processes expired workspace deletions (calls VM agent, updates D1)
+ *
  * Actual infrastructure destruction (Hetzner API, DNS) is handled by the
  * cron sweep, NOT by this DO — because user credentials are encrypted in D1
  * and must be decrypted with CREDENTIAL_ENCRYPTION_KEY (or ENCRYPTION_KEY
@@ -21,10 +26,11 @@
  *
  * See: specs/021-task-chat-architecture/tasks.md (Phase 5)
  */
-import type { NodeLifecycleState,NodeLifecycleStatus } from '@simple-agent-manager/shared';
+import type { NodeLifecycleState, NodeLifecycleStatus } from '@simple-agent-manager/shared';
 import {
   DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS,
   DEFAULT_NODE_WARM_TIMEOUT_MS,
+  DEFAULT_WORKSPACE_STOPPED_TTL_MS,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
@@ -33,6 +39,7 @@ import { log } from '../lib/logger';
 type NodeLifecycleEnv = {
   DATABASE: D1Database;
   NODE_WARM_TIMEOUT_MS?: string;
+  WORKSPACE_STOPPED_TTL_MS?: string;
 };
 
 interface StoredState {
@@ -43,6 +50,12 @@ interface StoredState {
   claimedByTask: string | null;
   /** Per-project warm timeout override (ms). Null = use platform default. */
   warmTimeoutOverrideMs?: number | null;
+}
+
+interface PendingWorkspaceDeletion {
+  workspaceId: string;
+  userId: string;
+  deleteAt: number;
 }
 
 export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
@@ -73,8 +86,8 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     };
     await this.ctx.storage.put('state', newState);
 
-    // Schedule (or reschedule) alarm
-    await this.ctx.storage.setAlarm(now + warmTimeout);
+    // Recalculate alarm considering both warm timeout and pending workspace deletions
+    await this.recalculateAlarm(now + warmTimeout);
 
     // Update D1 warm_since column
     await this.updateD1WarmSince(nodeId, new Date(now).toISOString());
@@ -84,7 +97,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
 
   /**
    * Mark a node as active. Called when a workspace starts on the node.
-   * Cancels any pending warm timeout alarm.
+   * Cancels any pending warm timeout alarm but preserves workspace deletion alarms.
    */
   async markActive(): Promise<NodeLifecycleState> {
     const state = await this.getStoredState();
@@ -97,8 +110,8 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     state.warmSince = null;
     await this.ctx.storage.put('state', state);
 
-    // Cancel any pending alarm
-    await this.ctx.storage.deleteAlarm();
+    // Recalculate alarm — pending workspace deletions still need to fire
+    await this.recalculateAlarm(null);
 
     // Clear D1 warm_since
     await this.updateD1WarmSince(state.nodeId, null);
@@ -128,8 +141,8 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     state.warmSince = null;
     await this.ctx.storage.put('state', state);
 
-    // Cancel alarm
-    await this.ctx.storage.deleteAlarm();
+    // Recalculate alarm — pending workspace deletions still need to fire
+    await this.recalculateAlarm(null);
 
     // Clear D1 warm_since
     await this.updateD1WarmSince(state.nodeId, null);
@@ -148,19 +161,65 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     return this.toPublicState(state);
   }
 
+  // =========================================================================
+  // Workspace auto-deletion scheduling
+  // =========================================================================
+
   /**
-   * Alarm handler. Fires when the warm timeout expires.
+   * Schedule a stopped workspace for automatic deletion after the configured TTL.
+   * Called when a workspace transitions to 'stopped' status.
+   */
+  async scheduleWorkspaceDeletion(workspaceId: string, userId: string): Promise<void> {
+    const ttl = this.getWorkspaceStoppedTtlMs();
+    const deleteAt = Date.now() + ttl;
+
+    const entry: PendingWorkspaceDeletion = { workspaceId, userId, deleteAt };
+    await this.ctx.storage.put(`ws-delete:${workspaceId}`, entry);
+
+    log.info('node_lifecycle.workspace_deletion_scheduled', {
+      workspaceId,
+      userId,
+      deleteAt: new Date(deleteAt).toISOString(),
+      ttlMs: ttl,
+    });
+
+    await this.recalculateAlarm(await this.getWarmAlarmTime());
+  }
+
+  /**
+   * Cancel a pending workspace deletion. Called when a workspace is restarted
+   * before the TTL expires.
+   */
+  async cancelWorkspaceDeletion(workspaceId: string): Promise<void> {
+    await this.ctx.storage.delete(`ws-delete:${workspaceId}`);
+
+    log.info('node_lifecycle.workspace_deletion_cancelled', { workspaceId });
+
+    await this.recalculateAlarm(await this.getWarmAlarmTime());
+  }
+
+  // =========================================================================
+  // Alarm handler
+  // =========================================================================
+
+  /**
+   * Alarm handler. Fires when either:
+   * 1. The warm timeout expires (node should be destroyed)
+   * 2. A workspace deletion is due
    *
-   * If the node is still warm, transitions to `destroying` and marks D1
-   * for the cron sweep to handle actual infrastructure teardown.
-   * If the node was claimed between schedule and fire, this is a no-op.
+   * Processes expired workspace deletions first, then handles warm timeout.
    */
   async alarm(): Promise<void> {
+    // Process any expired workspace deletions
+    await this.processExpiredDeletions();
+
     const state = await this.getStoredState();
     if (!state) return;
 
     // No-op if node was claimed (active) or already destroying
     if (state.status === 'active') {
+      // Still recalculate alarm for any remaining pending workspace deletions
+      await this.recalculateAlarm(null);
       return;
     }
 
@@ -171,7 +230,18 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       return;
     }
 
-    // status === 'warm' → transition to destroying
+    // status === 'warm' → check if warm timeout has actually expired
+    if (state.warmSince) {
+      const warmTimeout = state.warmTimeoutOverrideMs ?? this.getWarmTimeoutMs();
+      const warmExpiry = state.warmSince + warmTimeout;
+      if (Date.now() < warmExpiry) {
+        // Warm timeout hasn't expired yet — alarm fired for workspace deletion only
+        await this.recalculateAlarm(warmExpiry);
+        return;
+      }
+    }
+
+    // Warm timeout expired → transition to destroying
     state.status = 'destroying';
     await this.ctx.storage.put('state', state);
 
@@ -215,6 +285,15 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     return DEFAULT_NODE_WARM_TIMEOUT_MS;
   }
 
+  private getWorkspaceStoppedTtlMs(): number {
+    const envValue = this.env.WORKSPACE_STOPPED_TTL_MS;
+    if (envValue) {
+      const parsed = parseInt(envValue, 10);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return DEFAULT_WORKSPACE_STOPPED_TTL_MS;
+  }
+
   private toPublicState(state: StoredState): NodeLifecycleState {
     return {
       nodeId: state.nodeId,
@@ -236,6 +315,133 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  /**
+   * Get all pending workspace deletions from DO storage.
+   */
+  private async getPendingDeletions(): Promise<Map<string, PendingWorkspaceDeletion>> {
+    return await this.ctx.storage.list<PendingWorkspaceDeletion>({ prefix: 'ws-delete:' });
+  }
+
+  /**
+   * Process all workspace deletions whose deleteAt time has passed.
+   */
+  private async processExpiredDeletions(): Promise<void> {
+    const pending = await this.getPendingDeletions();
+    const now = Date.now();
+
+    for (const [key, entry] of pending) {
+      if (entry.deleteAt > now) continue;
+
+      try {
+        await this.deleteWorkspace(entry.workspaceId, entry.userId);
+        await this.ctx.storage.delete(key);
+
+        log.info('node_lifecycle.workspace_auto_deleted', {
+          workspaceId: entry.workspaceId,
+          userId: entry.userId,
+        });
+      } catch (err) {
+        log.error('node_lifecycle.workspace_deletion_failed', {
+          workspaceId: entry.workspaceId,
+          userId: entry.userId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Leave the entry for retry on next alarm. Push deleteAt forward slightly
+        // to avoid tight retry loops.
+        entry.deleteAt = now + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS;
+        await this.ctx.storage.put(key, entry);
+      }
+    }
+  }
+
+  /**
+   * Delete a workspace: call VM agent to remove Docker container + volume,
+   * then update D1 status to 'deleted'.
+   */
+  private async deleteWorkspace(workspaceId: string, userId: string): Promise<void> {
+    const state = await this.getStoredState();
+    if (!state) return;
+
+    // Look up node IP from D1 to call the VM agent
+    const nodeRow = await this.env.DATABASE.prepare(
+      `SELECT ip_address FROM nodes WHERE id = ?`
+    ).bind(state.nodeId).first<{ ip_address: string | null }>();
+
+    if (nodeRow?.ip_address) {
+      // Call VM agent DELETE endpoint to remove container + volume
+      try {
+        const protocol = 'https';
+        const port = '8443';
+        const url = `${protocol}://${nodeRow.ip_address}:${port}/workspaces/${workspaceId}`;
+        const resp = await fetch(url, {
+          method: 'DELETE',
+          headers: { 'X-User-ID': userId },
+          signal: AbortSignal.timeout(30_000),
+        });
+
+        if (!resp.ok && resp.status !== 404) {
+          throw new Error(`VM agent DELETE returned ${resp.status}`);
+        }
+      } catch (err) {
+        // If the node is unreachable (already destroyed), log but don't fail
+        // The D1 status update below still marks the workspace as deleted
+        log.warn('node_lifecycle.workspace_delete_vm_agent_failed', {
+          workspaceId,
+          nodeId: state.nodeId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Update D1 workspace status to 'deleted'
+    const now = new Date().toISOString();
+    await this.env.DATABASE.prepare(
+      `UPDATE workspaces SET status = 'deleted', updated_at = ? WHERE id = ? AND status = 'stopped'`
+    ).bind(now, workspaceId).run();
+
+    // Clean up any agent_sessions referencing this workspace (best-effort)
+    try {
+      await this.env.DATABASE.prepare(
+        `UPDATE agent_sessions SET status = 'completed', updated_at = ? WHERE workspace_id = ? AND status NOT IN ('completed', 'failed')`
+      ).bind(now, workspaceId).run();
+    } catch {
+      // best-effort
+    }
+  }
+
+  /**
+   * Get the warm alarm time if the node is in warm state.
+   */
+  private async getWarmAlarmTime(): Promise<number | null> {
+    const state = await this.getStoredState();
+    if (!state || state.status !== 'warm' || !state.warmSince) return null;
+    const warmTimeout = state.warmTimeoutOverrideMs ?? this.getWarmTimeoutMs();
+    return state.warmSince + warmTimeout;
+  }
+
+  /**
+   * Recalculate and set the alarm to the earliest time needed:
+   * either the warm timeout expiry or the earliest pending workspace deletion.
+   *
+   * @param warmAlarmTime - The warm timeout expiry time, or null if not applicable
+   */
+  private async recalculateAlarm(warmAlarmTime: number | null): Promise<void> {
+    let earliest = warmAlarmTime;
+
+    const pending = await this.getPendingDeletions();
+    for (const [, entry] of pending) {
+      if (earliest === null || entry.deleteAt < earliest) {
+        earliest = entry.deleteAt;
+      }
+    }
+
+    if (earliest !== null) {
+      await this.ctx.storage.setAlarm(earliest);
+    } else {
+      await this.ctx.storage.deleteAlarm();
     }
   }
 }

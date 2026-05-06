@@ -350,6 +350,20 @@ export async function cleanupOnFailure(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    // Schedule automatic deletion after TTL (best-effort)
+    try {
+      const doId = rc.env.NODE_LIFECYCLE.idFromName(state.stepResults.nodeId);
+      const stub = rc.env.NODE_LIFECYCLE.get(doId);
+      await (stub as unknown as import('../node-lifecycle').NodeLifecycle)
+        .scheduleWorkspaceDeletion(state.stepResults.workspaceId, state.userId);
+    } catch (err) {
+      log.warn('task_runner_do.cleanup.schedule_deletion_failed', {
+        taskId: state.taskId,
+        workspaceId: state.stepResults.workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // Clean up auto-provisioned node. If a workspace exists, cleanupTaskRun

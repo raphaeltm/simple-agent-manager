@@ -68,6 +68,16 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
         await stopComputeTracking(innerDb, workspace.id).catch((e) => {
           log.warn('workspace.compute_tracking_stop_failed', { workspaceId: workspace.id, error: String(e) });
         });
+
+        // Schedule automatic deletion after TTL
+        try {
+          const doId = c.env.NODE_LIFECYCLE.idFromName(workspace.nodeId!);
+          const stub = c.env.NODE_LIFECYCLE.get(doId);
+          await (stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle)
+            .scheduleWorkspaceDeletion(workspace.id, userId);
+        } catch (e) {
+          log.warn('workspace.schedule_deletion_failed', { workspaceId: workspace.id, error: String(e) });
+        }
       } catch (err) {
         await innerDb
           .update(schema.workspaces)
@@ -121,6 +131,16 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
 
   const node = await getOwnedNode(db, workspace.nodeId, userId);
   assertNodeOperational(node, 'restart workspace');
+
+  // Cancel any pending auto-deletion before restarting
+  try {
+    const doId = c.env.NODE_LIFECYCLE.idFromName(workspace.nodeId!);
+    const stub = c.env.NODE_LIFECYCLE.get(doId);
+    await (stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle)
+      .cancelWorkspaceDeletion(workspace.id);
+  } catch (e) {
+    log.warn('workspace.cancel_deletion_failed', { workspaceId: workspace.id, error: String(e) });
+  }
 
   // Clear previous error state and boot logs before starting new provisioning
   await db
