@@ -328,6 +328,31 @@ curl -I https://app.example.com
 
 ---
 
+#### "Project chat session returns Internal server error"
+
+**Symptoms:**
+
+- The project chat list loads, but opening one session fails
+- Browser/network response includes `CHAT_SESSION_LOAD_FAILED`
+- The response includes `requestId` and `phase`
+
+**How diagnostics work:**
+
+`GET /api/projects/:projectId/sessions/:sessionId` in `apps/api/src/routes/chat.ts` wraps the session detail load phases separately. A `phase` of `get_session` points at the session lookup; `get_messages` points at the message page load from ProjectData. The same handler persists `chat.session_detail_load_failed` to `OBSERVABILITY_DATABASE` with the `requestId`, `projectId`, `sessionId`, `phase`, and sanitized error fields so `/admin/errors` can be searched even if Worker tail logs are sampled.
+
+Admin and superadmin callers also receive a `details` object with sanitized error name/message/stack in the API response. Regular users only receive the generic message, `requestId`, and `phase`.
+
+Malformed `tool_metadata` on a single chat message is handled in `apps/api/src/durable-objects/project-data/row-schemas.ts` by `parseChatMessageRow()`, which returns `toolMetadata: null` for invalid JSON instead of making the whole session unloadable.
+
+**Solutions:**
+
+1. Copy the response `requestId` and `phase`.
+2. Search `/admin/errors` for the `requestId`, or filter source `api` and message `chat.session_detail_load_failed`.
+3. If `phase` is `get_messages`, inspect the ProjectData DO message rows for malformed or unexpected message data.
+4. If `phase` is `get_session`, inspect the ProjectData DO session row and project ownership mapping.
+
+---
+
 ### Resume & Recovery
 
 #### Resuming a Failed Deployment
