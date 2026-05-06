@@ -30,13 +30,13 @@ const BILLING_MODE_OPTIONS: Array<{ value: BillingMode; label: string; descripti
 ];
 
 const TIER_LABELS: Record<string, string> = {
-  free: 'Free Tier',
+  'low-cost': 'Low Cost',
   standard: 'Standard',
   premium: 'Premium',
 };
 
 const TIER_ORDER: Record<string, number> = {
-  free: 0,
+  'low-cost': 0,
   standard: 1,
   premium: 2,
 };
@@ -48,15 +48,15 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 function formatCost(cost: number): string {
-  if (cost === 0) return 'Free';
+  if (cost === 0) return '$0.0000';
   if (cost < 0.001) return `$${cost.toFixed(4)}`;
   return `$${cost.toFixed(3)}`;
 }
 
 function tierBadgeClasses(tier: string): string {
   switch (tier) {
-    case 'free':
-      return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+    case 'low-cost':
+      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
     case 'standard':
       return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
     case 'premium':
@@ -166,8 +166,8 @@ export function AdminAIProxy() {
     <div className="space-y-6">
       <Body>
         Configure the default AI model and billing mode for the platform inference proxy. Models are routed
-        through Cloudflare AI Gateway. Workers AI models are free; Anthropic and OpenAI models
-        require credentials or Unified Billing.
+        through Cloudflare AI Gateway. Workers AI models are Cloudflare-billed; Anthropic and OpenAI
+        models require credentials or Unified Billing.
       </Body>
 
       {error && (
@@ -265,7 +265,7 @@ export function AdminAIProxy() {
               ))}
             </select>
             <p className="mt-1.5 text-xs text-[var(--sam-text-secondary)]">
-              Workers AI models are free. Anthropic and OpenAI models require credentials on the{' '}
+              Workers AI models bill through Cloudflare. Anthropic and OpenAI models require credentials on the{' '}
               <a href="/admin/credentials" className="text-[var(--sam-accent)] underline">
                 Credentials
               </a>{' '}
@@ -337,7 +337,7 @@ export function AdminAIProxy() {
                           {formatCost(model.costPer1kOutputTokens)}/1K out
                         </span>
                       ) : (
-                        <span className="text-xs text-green-600 dark:text-green-400">Free</span>
+                        <span className="text-xs text-[var(--sam-text-secondary)]">No metered cost</span>
                       )}
                       {!model.available && (
                         <span className="text-xs text-yellow-600 dark:text-yellow-400">

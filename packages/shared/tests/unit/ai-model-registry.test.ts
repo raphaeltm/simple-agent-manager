@@ -48,20 +48,22 @@ describe('AI Model Registry', () => {
       }
     });
 
-    it('free-tier models have zero cost', () => {
-      const freeModels = PLATFORM_AI_MODELS.filter((m) => m.tier === 'free');
-      for (const model of freeModels) {
-        expect(model.costPer1kInputTokens, `Free model ${model.id} should have zero input cost`).toBe(0);
-        expect(model.costPer1kOutputTokens, `Free model ${model.id} should have zero output cost`).toBe(0);
+    it('low-cost models are Workers AI models with Cloudflare billing metadata', () => {
+      const lowCostModels = PLATFORM_AI_MODELS.filter((m) => m.tier === 'low-cost');
+      expect(lowCostModels.length).toBeGreaterThan(0);
+
+      for (const model of lowCostModels) {
+        expect(model.provider, `Low-cost model ${model.id} should route through Workers AI`).toBe('workers-ai');
+        expect(model.costPer1kInputTokens, `Low-cost model ${model.id} should have input cost metadata`).toBeGreaterThan(0);
+        expect(model.costPer1kOutputTokens, `Low-cost model ${model.id} should have output cost metadata`).toBeGreaterThan(0);
       }
     });
 
-    it('paid-tier models have non-zero cost', () => {
-      const paidModels = PLATFORM_AI_MODELS.filter((m) => m.tier !== 'free');
-      for (const model of paidModels) {
+    it('all catalog models have non-zero cost metadata', () => {
+      for (const model of PLATFORM_AI_MODELS) {
         expect(
           model.costPer1kInputTokens > 0 || model.costPer1kOutputTokens > 0,
-          `Paid model ${model.id} should have non-zero cost`,
+          `Model ${model.id} should have non-zero cost metadata`,
         ).toBe(true);
       }
     });
@@ -255,9 +257,9 @@ describe('AI Model Registry', () => {
         id: 'model-good',
         label: 'Good Model',
         provider: 'workers-ai',
-        tier: 'free',
-        costPer1kInputTokens: 0,
-        costPer1kOutputTokens: 0,
+        tier: 'low-cost',
+        costPer1kInputTokens: 0.0001,
+        costPer1kOutputTokens: 0.0003,
         contextWindow: 32768,
         toolCallSupport: 'good',
         intendedRole: 'workspace-agent',
@@ -269,9 +271,9 @@ describe('AI Model Registry', () => {
         id: 'model-limited',
         label: 'Limited Model',
         provider: 'workers-ai',
-        tier: 'free',
-        costPer1kInputTokens: 0,
-        costPer1kOutputTokens: 0,
+        tier: 'low-cost',
+        costPer1kInputTokens: 0.0001,
+        costPer1kOutputTokens: 0.0003,
         contextWindow: 131072,
         toolCallSupport: 'limited',
         intendedRole: 'utility',
@@ -283,9 +285,9 @@ describe('AI Model Registry', () => {
         id: 'model-none',
         label: 'No Tool Model',
         provider: 'workers-ai',
-        tier: 'free',
-        costPer1kInputTokens: 0,
-        costPer1kOutputTokens: 0,
+        tier: 'low-cost',
+        costPer1kInputTokens: 0.0001,
+        costPer1kOutputTokens: 0.0003,
         contextWindow: 8192,
         toolCallSupport: 'none',
         intendedRole: 'utility',

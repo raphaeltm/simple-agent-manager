@@ -33,14 +33,14 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
     hasOpenAICredential: false,
     hasUnifiedBilling: false,
     models: [
-      { id: '@cf/meta/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B', provider: 'workers-ai', tier: 'free', costPer1kInputTokens: 0, costPer1kOutputTokens: 0, isDefault: true, available: true },
-      { id: '@cf/qwen/qwen3-30b-a3b-fp8', label: 'Qwen3 30B', provider: 'workers-ai', tier: 'free', costPer1kInputTokens: 0, costPer1kOutputTokens: 0, available: true },
-      { id: '@cf/google/gemma-3-12b-it', label: 'Gemma 3 12B', provider: 'workers-ai', tier: 'free', costPer1kInputTokens: 0, costPer1kOutputTokens: 0, available: true },
-      { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic', tier: 'standard', costPer1kInputTokens: 0.0008, costPer1kOutputTokens: 0.004, available: false },
+      { id: '@cf/meta/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B', provider: 'workers-ai', tier: 'low-cost', costPer1kInputTokens: 0.00027, costPer1kOutputTokens: 0.00085, isDefault: true, available: true },
+      { id: '@cf/qwen/qwen3-30b-a3b-fp8', label: 'Qwen3 30B', provider: 'workers-ai', tier: 'low-cost', costPer1kInputTokens: 0.000051, costPer1kOutputTokens: 0.000335, available: true },
+      { id: '@cf/google/gemma-3-12b-it', label: 'Gemma 3 12B', provider: 'workers-ai', tier: 'low-cost', costPer1kInputTokens: 0.00035, costPer1kOutputTokens: 0.00056, available: true },
+      { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic', tier: 'standard', costPer1kInputTokens: 0.001, costPer1kOutputTokens: 0.005, available: false },
       { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic', tier: 'standard', costPer1kInputTokens: 0.003, costPer1kOutputTokens: 0.015, available: false },
       { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', provider: 'openai', tier: 'standard', costPer1kInputTokens: 0.0004, costPer1kOutputTokens: 0.0016, available: false },
       { id: 'gpt-4.1', label: 'GPT-4.1', provider: 'openai', tier: 'standard', costPer1kInputTokens: 0.002, costPer1kOutputTokens: 0.008, available: false },
-      { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'anthropic', tier: 'premium', costPer1kInputTokens: 0.015, costPer1kOutputTokens: 0.075, available: false },
+      { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'anthropic', tier: 'premium', costPer1kInputTokens: 0.005, costPer1kOutputTokens: 0.025, available: false },
       { id: 'gpt-5.2', label: 'GPT-5.2', provider: 'openai', tier: 'premium', costPer1kInputTokens: 0.01, costPer1kOutputTokens: 0.04, available: false },
     ],
     ...overrides,
@@ -83,7 +83,7 @@ async function screenshot(page: Page, name: string) {
 test.describe('AdminAIProxy — Mobile', () => {
   test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
-  test('normal data — free tier default', async ({ page }) => {
+  test('normal data — low-cost Workers AI default', async ({ page }) => {
     await setupApiMocks(page);
     await page.goto('/admin/ai-proxy');
     await screenshot(page, 'admin-ai-proxy-normal-mobile');
@@ -148,7 +148,7 @@ test.describe('AdminAIProxy — Mobile', () => {
 test.describe('AdminAIProxy — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-  test('normal data — free tier default', async ({ page }) => {
+  test('normal data — low-cost Workers AI default', async ({ page }) => {
     await setupApiMocks(page);
     await page.goto('/admin/ai-proxy');
     await screenshot(page, 'admin-ai-proxy-normal-desktop');

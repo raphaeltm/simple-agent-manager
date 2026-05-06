@@ -184,7 +184,7 @@ Gemma 4 26B is the current recommended Workers AI model for harness/orchestrator
 - Produces structured `tool_calls` with `tool_choice: "auto"` (no forcing required)
 - Handles OpenAI-format `content: null` without workarounds
 - Returns built-in `reasoning` field for observability
-- Runs on the Workers AI free tier
+- Runs through Cloudflare-billed Workers AI at low per-token rates
 - Has official `function_calling=true` in Cloudflare model metadata
 
 ### Fallback: Qwen 2.5 Coder 32B (`@cf/qwen/qwen2.5-coder-32b-instruct`)

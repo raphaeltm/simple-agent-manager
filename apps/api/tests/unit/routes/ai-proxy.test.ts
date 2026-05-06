@@ -295,15 +295,15 @@ describe('PLATFORM_AI_MODELS catalog', () => {
   it('has correct tier assignments', async () => {
     const { PLATFORM_AI_MODELS } = await import('@simple-agent-manager/shared');
 
-    const freeModels = PLATFORM_AI_MODELS.filter((m) => m.tier === 'free');
+    const lowCostModels = PLATFORM_AI_MODELS.filter((m) => m.tier === 'low-cost');
     const standardModels = PLATFORM_AI_MODELS.filter((m) => m.tier === 'standard');
     const premiumModels = PLATFORM_AI_MODELS.filter((m) => m.tier === 'premium');
 
-    // All Workers AI models are free tier
-    for (const m of freeModels) {
+    // Low-cost models route through Cloudflare-billed Workers AI.
+    for (const m of lowCostModels) {
       expect(m.provider).toBe('workers-ai');
-      expect(m.costPer1kInputTokens).toBe(0);
-      expect(m.costPer1kOutputTokens).toBe(0);
+      expect(m.costPer1kInputTokens).toBeGreaterThan(0);
+      expect(m.costPer1kOutputTokens).toBeGreaterThan(0);
     }
 
     // Standard tier has at least Haiku and GPT-4.1
@@ -328,13 +328,11 @@ describe('PLATFORM_AI_MODELS catalog', () => {
     expect(providers.has('openai')).toBe(true);
   });
 
-  it('has positive cost for non-free models', async () => {
+  it('has positive cost metadata for all catalog models', async () => {
     const { PLATFORM_AI_MODELS } = await import('@simple-agent-manager/shared');
     for (const m of PLATFORM_AI_MODELS) {
-      if (m.tier !== 'free') {
-        expect(m.costPer1kInputTokens).toBeGreaterThan(0);
-        expect(m.costPer1kOutputTokens).toBeGreaterThan(0);
-      }
+      expect(m.costPer1kInputTokens).toBeGreaterThan(0);
+      expect(m.costPer1kOutputTokens).toBeGreaterThan(0);
     }
   });
 
@@ -345,4 +343,3 @@ describe('PLATFORM_AI_MODELS catalog', () => {
     }
   });
 });
-

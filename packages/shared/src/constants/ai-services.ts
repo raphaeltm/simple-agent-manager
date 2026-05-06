@@ -115,7 +115,7 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
 // =============================================================================
 
 /** Default model for AI proxy inference when no admin override is set.
- * Out-of-box default is a free Workers AI model — no API key required.
+ * Out-of-box default is a Cloudflare-billed Workers AI model — no separate provider API key required.
  * Admins can override via the AI Proxy admin page (stored in KV) or
  * the AI_PROXY_DEFAULT_MODEL env var. */
 export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
@@ -129,7 +129,7 @@ export const DEFAULT_AI_PROXY_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 export const DEFAULT_AI_PROXY_OPENAI_MODEL = 'gpt-4.1';
 
 /** Budget tier for platform AI models. */
-export type PlatformAIModelTier = 'free' | 'standard' | 'premium';
+export type PlatformAIModelTier = 'low-cost' | 'standard' | 'premium';
 
 /** Tool-call reliability tier for agent loop suitability. */
 export type ToolCallSupport = 'excellent' | 'good' | 'limited' | 'none';
@@ -150,7 +150,7 @@ export interface PlatformAIModel {
   isDefault?: boolean;
   /** Provider for the model (determines routing in AI proxy) */
   provider: 'workers-ai' | 'anthropic' | 'openai';
-  /** Budget tier: free (Workers AI free tier), standard, or premium */
+  /** Budget tier: Cloudflare-billed low-cost, standard, or premium */
   tier: PlatformAIModelTier;
   /** Approximate cost per 1K input tokens (USD) for budget estimation. Actual costs from AI Gateway logs. */
   costPer1kInputTokens: number;
@@ -180,22 +180,22 @@ export interface PlatformAIModel {
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
  * string and the UI dropdown both derive from this list.
- * Includes Workers AI (free, Cloudflare-hosted), Anthropic, and OpenAI
+ * Includes Workers AI (Cloudflare-billed), Anthropic, and OpenAI
  * models routed through Cloudflare AI Gateway with Unified Billing. */
 export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
-  // --- Workers AI (free tier) ---
+  // --- Workers AI (Cloudflare-billed low-cost tier) ---
   {
     id: '@cf/meta/llama-4-scout-17b-16e-instruct',
     label: 'Llama 4 Scout 17B',
     isDefault: true,
     provider: 'workers-ai',
-    tier: 'free',
-    costPer1kInputTokens: 0,
-    costPer1kOutputTokens: 0,
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.00027,
+    costPer1kOutputTokens: 0.00085,
     contextWindow: 131072,
     toolCallSupport: 'limited',
     intendedRole: 'utility',
-    fallbackGroup: 'free-general',
+    fallbackGroup: 'workers-general',
     allowedScopes: ['workspace'],
     unifiedApiModelId: null,
   },
@@ -203,13 +203,13 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     id: '@cf/qwen/qwen3-30b-a3b-fp8',
     label: 'Qwen 3 30B',
     provider: 'workers-ai',
-    tier: 'free',
-    costPer1kInputTokens: 0,
-    costPer1kOutputTokens: 0,
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.000051,
+    costPer1kOutputTokens: 0.000335,
     contextWindow: 32768,
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
-    fallbackGroup: 'free-coding',
+    fallbackGroup: 'workers-coding',
     allowedScopes: ['workspace'],
     unifiedApiModelId: null,
   },
@@ -217,13 +217,13 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     id: '@cf/qwen/qwen2.5-coder-32b-instruct',
     label: 'Qwen 2.5 Coder 32B',
     provider: 'workers-ai',
-    tier: 'free',
-    costPer1kInputTokens: 0,
-    costPer1kOutputTokens: 0,
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.00066,
+    costPer1kOutputTokens: 0.001,
     contextWindow: 32768,
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
-    fallbackGroup: 'free-coding',
+    fallbackGroup: 'workers-coding',
     allowedScopes: ['workspace'],
     unifiedApiModelId: null,
   },
@@ -231,13 +231,13 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     id: '@cf/google/gemma-4-26b-a4b-it',
     label: 'Gemma 4 26B',
     provider: 'workers-ai',
-    tier: 'free',
-    costPer1kInputTokens: 0,
-    costPer1kOutputTokens: 0,
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.0001,
+    costPer1kOutputTokens: 0.0003,
     contextWindow: 32768,
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
-    fallbackGroup: 'free-coding',
+    fallbackGroup: 'workers-coding',
     allowedScopes: ['workspace'],
     unifiedApiModelId: null,
   },
@@ -245,13 +245,13 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     id: '@cf/google/gemma-3-12b-it',
     label: 'Gemma 3 12B',
     provider: 'workers-ai',
-    tier: 'free',
-    costPer1kInputTokens: 0,
-    costPer1kOutputTokens: 0,
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.00035,
+    costPer1kOutputTokens: 0.00056,
     contextWindow: 32768,
     toolCallSupport: 'none',
     intendedRole: 'utility',
-    fallbackGroup: 'free-utility',
+    fallbackGroup: 'workers-utility',
     allowedScopes: ['workspace'],
     unifiedApiModelId: null,
   },
@@ -261,8 +261,8 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     label: 'Claude Haiku 4.5',
     provider: 'anthropic',
     tier: 'standard',
-    costPer1kInputTokens: 0.0008,
-    costPer1kOutputTokens: 0.004,
+    costPer1kInputTokens: 0.001,
+    costPer1kOutputTokens: 0.005,
     contextWindow: 200000,
     toolCallSupport: 'excellent',
     intendedRole: 'utility',
@@ -289,8 +289,8 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     label: 'Claude Opus 4.6',
     provider: 'anthropic',
     tier: 'premium',
-    costPer1kInputTokens: 0.015,
-    costPer1kOutputTokens: 0.075,
+    costPer1kInputTokens: 0.005,
+    costPer1kOutputTokens: 0.025,
     contextWindow: 200000,
     toolCallSupport: 'excellent',
     intendedRole: 'sam-agent',

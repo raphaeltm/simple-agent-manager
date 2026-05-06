@@ -7,7 +7,7 @@
 
 This experiment validates multi-model tool calling through Cloudflare AI Gateway for SAM's native harness. Three provider paths were tested: Anthropic (via Unified API), OpenAI (via Unified API), and Workers AI (via dedicated path).
 
-**Key result**: Workers AI (Qwen 2.5 Coder 32B) successfully completed a two-tool loop (`get_weather` -> `calculate`) with structured `tool_calls` responses through AI Gateway, proving the concept is viable for SAM's cost-free tier.
+**Key result**: Workers AI (Qwen 2.5 Coder 32B) successfully completed a two-tool loop (`get_weather` -> `calculate`) with structured `tool_calls` responses through AI Gateway, proving the concept is viable for SAM's low-cost Cloudflare-billed tier.
 
 ## Models Tested
 
@@ -82,11 +82,11 @@ The existing metadata schema works unchanged for multi-model tool calling. Each 
 
 | Path | Billing | Cost |
 |------|---------|------|
-| Workers AI | Free (included in Workers plan) | $0 |
+| Workers AI | Cloudflare Workers AI billing | Model-specific per-token rates |
 | Unified API (Anthropic) | Via `cf-aig-authorization` (Unified Billing) or direct API key | Standard Anthropic pricing |
 | Unified API (OpenAI) | Via `cf-aig-authorization` (Unified Billing) or direct API key | Standard OpenAI pricing |
 
-Workers AI models are the only zero-cost path. For SAM's free tier, routing all tool-call work through Workers AI models avoids per-token costs entirely.
+Workers AI models are Cloudflare-billed, not free. For SAM's lowest-cost tier, routing tool-call work through Workers AI keeps billing inside the Cloudflare account and avoids separate provider credentials.
 
 ## Model Registry Additions
 
@@ -103,11 +103,11 @@ The `PLATFORM_AI_MODELS` registry in `packages/shared/src/constants/ai-services.
 
 ### New Model Added
 
-`@cf/qwen/qwen2.5-coder-32b-instruct` — Workers AI model with 32K context, good tool-call support, and zero cost. Recommended as the primary free-tier model for tool-calling workloads.
+`@cf/qwen/qwen2.5-coder-32b-instruct` — Workers AI model with 32K context and good tool-call support. Recommended as the primary low-cost Workers AI model for tool-calling workloads in this baseline, superseded by Gemma 4 in the 2026-05-05 follow-up.
 
 ## Recommendations for SAM Harness
 
-1. **Use Workers AI path for free-tier tool calling**. The Unified API (`/compat/chat/completions`) does not support Workers AI models — they must use the dedicated `/workers-ai/v1/chat/completions` path.
+1. **Use Workers AI path for low-cost Cloudflare-billed tool calling**. The Unified API (`/compat/chat/completions`) does not support Workers AI models — they must use the dedicated `/workers-ai/v1/chat/completions` path.
 
 2. **Apply Workers AI workarounds in the proxy layer**, not in calling agents:
    - Normalize `content: null` → `""` in assistant messages before forwarding to Workers AI

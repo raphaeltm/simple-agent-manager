@@ -347,7 +347,7 @@ export interface AIProxyConfigResponse {
     id: string;
     label: string;
     provider: 'workers-ai' | 'anthropic' | 'openai';
-    tier: 'free' | 'standard' | 'premium';
+    tier: 'low-cost' | 'standard' | 'premium';
     costPer1kInputTokens: number;
     costPer1kOutputTokens: number;
     isDefault?: boolean;

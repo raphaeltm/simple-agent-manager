@@ -13,7 +13,7 @@ Gemma 4 26B (`@cf/google/gemma-4-26b-a4b-it`) is **strictly superior** to all te
 
 - **Gateway endpoint**: `https://gateway.ai.cloudflare.com/v1/{account_id}/sam/workers-ai/v1/chat/completions`
 - **Auth**: `Authorization: Bearer {CF_TOKEN}` (standard Cloudflare API token — no Unified Billing needed for Workers AI path)
-- **Cost**: $0 (Workers AI free tier)
+- **Cost**: Cloudflare Workers AI billing ($0.10 per 1M input tokens, $0.30 per 1M output tokens as of 2026-05-06)
 - **Metadata**: `cf-aig-metadata` header with userId, workspaceId, projectId, source, modelId — same schema as existing SAM proxy
 
 ## Detailed Findings
@@ -60,7 +60,7 @@ Step 3: Call `calculate(expression='(F_value - 32) * 5 / 9')` where `F_value` is
 Step 4: Respond to the user with the weather condition and the temperature in Celsius.
 ```
 
-This provides free observability for harness traces without needing an explicit "think step by step" prompt.
+This provides built-in observability for harness traces without needing an explicit "think step by step" prompt.
 
 ### 4. Harness-Style Coding Tools: PASS
 
@@ -82,7 +82,7 @@ Tested with `grep`, `read_file`, `edit_file`, `bash` tools (the planned harness 
 | **Workarounds needed** | **None** | 2 | None |
 | **CF function_calling flag** | `true` | N/A | N/A |
 | **Context window** | 32K | 32K | 32K |
-| **Cost** | $0 (Workers AI) | $0 (Workers AI) | $0 (Workers AI) |
+| **Cost** | Workers AI: $0.10/M input, $0.30/M output | Workers AI: $0.660/M input, $1.000/M output | Workers AI: $0.051/M input, $0.335/M output |
 
 ### 6. Workers AI Model Availability
 
@@ -190,7 +190,7 @@ These workarounds should remain in the generic proxy for backward compatibility 
 
 1. **Use Gemma 4 26B as the default harness model.** It requires zero workarounds, produces reasoning traces, and has official function_calling support from Cloudflare. Qwen 2.5 Coder remains as a fallback but should not be the default.
 
-2. **Persist the `reasoning` field in harness traces.** It provides free observability — the model's decision-making process is visible without needing "chain of thought" prompting or separate logging.
+2. **Persist the `reasoning` field in harness traces.** It provides built-in observability — the model's decision-making process is visible without needing "chain of thought" prompting or separate logging.
 
 3. **Next experiment: OpenAI model through Unified Billing.** Per the knowledge graph, the priority after Gemma is a small OpenAI model (gpt-4.1-mini) through the Unified API path. This requires `CF_AIG_TOKEN` with Unified Billing scope, which was blocked in the previous experiment.
 
