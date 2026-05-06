@@ -15,6 +15,18 @@ vi.mock('../../src/services/nodes', () => ({
   deleteNodeResources: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock node-agent service
+vi.mock('../../src/services/node-agent', () => ({
+  deleteWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
+  stopWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock project-data service
+vi.mock('../../src/services/project-data', () => ({
+  stopSession: vi.fn().mockResolvedValue(undefined),
+  cleanupWorkspaceActivity: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Mock persistError
 vi.mock('../../src/services/observability', () => ({
   persistError: vi.fn().mockResolvedValue(undefined),
@@ -228,6 +240,7 @@ describe('runNodeCleanupSweep', () => {
         lifetimeSkipped: 0,
         orphanedWorkspacesFlagged: 0,
         orphanedNodesFlagged: 0,
+        stoppedWorkspacesDeleted: 0,
         errors: 0,
       });
     });

@@ -39,7 +39,7 @@ describe('warm node pooling lifecycle integration', () => {
 
     it('DO.markIdle sets warm status and schedules alarm', () => {
       expect(doFile).toContain("status: 'warm'");
-      expect(doFile).toContain('setAlarm(now + warmTimeout)');
+      expect(doFile).toContain('recalculateAlarm(now + warmTimeout)');
     });
 
     it('DO.markIdle updates D1 warm_since', () => {
@@ -64,7 +64,7 @@ describe('warm node pooling lifecycle integration', () => {
       const tryClaimSection = doFile.slice(doFile.indexOf('async tryClaim'));
       expect(tryClaimSection).toContain("state.status = 'active'");
       expect(tryClaimSection).toContain('state.claimedByTask = taskId');
-      expect(tryClaimSection).toContain('deleteAlarm()');
+      expect(tryClaimSection).toContain('recalculateAlarm(null)');
     });
   });
 
