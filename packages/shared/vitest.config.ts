@@ -9,6 +9,12 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.d.ts'],
+      thresholds: {
+        statements: 83,
+        branches: 30,
+        functions: 60,
+        lines: 83,
+      },
     },
   },
 });
