@@ -65,7 +65,7 @@ func (rb *RingBuffer) ReadAll() []byte {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
-	length := rb.Len()
+	length := rb.lenLocked()
 	if length == 0 {
 		return nil
 	}
@@ -86,7 +86,15 @@ func (rb *RingBuffer) ReadAll() []byte {
 }
 
 // Len returns the number of bytes currently stored in the buffer.
+// It is safe to call concurrently with Write.
 func (rb *RingBuffer) Len() int {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	return rb.lenLocked()
+}
+
+// lenLocked returns the buffered byte count. Caller must hold rb.mu.
+func (rb *RingBuffer) lenLocked() int {
 	if rb.written <= int64(rb.capacity) {
 		return int(rb.written)
 	}
