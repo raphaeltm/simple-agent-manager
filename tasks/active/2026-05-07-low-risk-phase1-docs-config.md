@@ -1,6 +1,6 @@
 # Low-Risk Phase 1: Documentation/Config Recommendations
 
-**Status**: Backlog
+**Status**: Active
 **Source**: 2026-05-07 evaluation, findings F-005, F-025, F-028, F-024
 **Priority**: P1
 **Branch**: sam/implement-low-risk-phase-01kr0f (PR #925)
@@ -33,16 +33,37 @@ The 2026-05-07 codebase evaluation identified four low-risk documentation/config
 
 ## Implementation Checklist
 
-- [ ] Verify F-005 implementation (instruction budget reduction)
-- [ ] Verify F-025 implementation (nested AGENTS.md files)
-- [ ] F-028: Create `.claude/settings.json` with minimal safe permissions
-- [ ] F-024: Amend constitution Principle IV file-size limits to match enforced 500/800
+- [x] Verify F-005 implementation (instruction budget reduction)
+- [x] Verify F-025 implementation (nested AGENTS.md files)
+- [x] F-028: Create `.claude/settings.json` with minimal safe permissions
+- [x] F-024: Amend constitution Principle IV file-size limits to match enforced 500/800
 - [ ] Update task file and PR description
 
 ## Acceptance Criteria
 
-- [ ] F-005 and F-025 verified as complete
-- [ ] `.claude/settings.json` exists with documented, non-overbroad permissions
-- [ ] Constitution Principle IV file-size limit matches enforced thresholds
-- [ ] No runtime code changes
+- [x] F-005 and F-025 verified as complete
+- [x] `.claude/settings.json` exists with documented, non-overbroad permissions
+- [x] Constitution Principle IV file-size limit matches enforced thresholds
+- [x] No runtime code changes
 - [ ] All changes pushed to PR #925 branch (NOT merged)
+
+## Implementation Notes
+
+### F-028: `.claude/settings.json` Permissions Rationale
+Allowed commands are restricted to safe, non-destructive operations:
+- **Build tools**: `pnpm`, `npm`, `npx`, `tsx`, `go` — standard build/test/run
+- **GitHub CLI**: `gh pr`, `gh run`, `gh workflow`, `gh api` — PR and CI management
+- **Git (safe subset)**: status, log, diff, branch, fetch, add, commit, push, worktree, rebase, stash, remote, show, rev-parse, merge-base — everyday workflow operations
+- **Wrangler**: Cloudflare Workers CLI for deploys and dev
+- **Utilities**: `curl`, `ls`, `wc`, `find`, `mkdir`, `mv`, `cp` — basic file operations
+
+Excluded (require manual approval):
+- `rm` — file deletion needs human judgment
+- `git reset`, `git checkout --`, `git clean` — destructive git operations
+- `git push --force` — blocked by deny list convention, not in allow list
+- `docker` — container operations have side effects
+
+### F-024: Constitution Amendment
+- Constitution Principle IV line 85: changed "files under 400 lines" to "files under 500 lines, mandatory split above 800 lines"
+- Version bumped 1.8.0 → 1.8.1 (PATCH — clarification, no new principles)
+- This aligns the constitution with `.claude/rules/18-file-size-limits.md` and `scripts/quality/check-file-sizes.ts`
