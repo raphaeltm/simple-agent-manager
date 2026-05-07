@@ -8,7 +8,7 @@ Public marketing website, blog, and documentation at `simple-agent-manager.org`.
 
 | File | Purpose |
 |------|---------|
-| `astro.config.mjs` | Astro/Starlight configuration, sidebar, integrations |
+| `astro.config.ts` | Astro/Starlight configuration, sidebar, integrations |
 | `src/content/docs/` | Starlight documentation pages (MDX/MD) |
 | `src/content/blog/` | Blog posts (MDX with frontmatter) |
 | `src/pages/index.astro` | Landing page |
@@ -40,4 +40,4 @@ pnpm --filter @simple-agent-manager/www preview   # Preview production build
 - `pnpm build:assets` runs before both `dev` and `build` — if you add new scripts, wire them there
 - The analytics tracker (`scripts/build-tracker.ts`) is bundled at build time, not at runtime
 - Do NOT confuse this with `apps/web/` — different stack (Astro vs React+Vite), different domain
-- Starlight sidebar config lives in `astro.config.mjs`, not in the content files
+- Starlight sidebar config lives in `astro.config.ts`, not in the content files
