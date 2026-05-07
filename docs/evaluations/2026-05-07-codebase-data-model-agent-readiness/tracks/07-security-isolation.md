@@ -13,9 +13,9 @@ SAM's security posture is **strong for a pre-production platform**. The BYOC cre
 
 **Finding Distribution:**
 - CRITICAL: 0
-- HIGH: 1
-- MEDIUM: 3
-- LOW: 2
+- HIGH: 2
+- MEDIUM: 6
+- LOW: 4
 - INFO: 3
 
 ---
@@ -158,11 +158,44 @@ All admin routes (`/api/admin/*`) are protected with `requireSuperadmin()` middl
 
 ### 7.3.1 SQL Injection
 
-**Assessment: STRONG (no findings)**
+**Assessment: STRONG (one FTS5 sanitization inconsistency)**
 
 - **Drizzle ORM** (D1): All queries use the builder pattern with parameterized values. No raw SQL string concatenation found.
 - **DO SQLite**: Uses `.exec(query, ...params)` with `?` placeholders. Dynamic WHERE clause construction in `apps/api/src/durable-objects/project-data/sessions.ts` builds conditions array and params array separately — safe pattern.
-- **FTS5 queries**: Search terms are passed as parameters to `MATCH ?`, not interpolated into the query string.
+- **FTS5 queries**: Search terms are passed as parameters to `MATCH ?`, not interpolated into the query string. However, the FTS5 query sanitization is inconsistent (see HIGH-2).
+
+<a id="finding-high-2"></a>
+#### [HIGH-2] Inconsistent FTS5 query sanitization — `messages.ts` weaker than `knowledge.ts`
+
+**File:** `apps/api/src/durable-objects/project-data/messages.ts:494-498`
+**Severity:** HIGH
+**Also affects:** `apps/api/src/durable-objects/sam-session/index.ts:101-105`
+
+**Description:**
+
+The `buildFtsQuery` function in `messages.ts` wraps each whitespace-split word in double-quotes and escapes internal quotes (`""`) but does NOT strip FTS5 special characters (`*`, `^`, `NEAR/N`) or filter reserved keywords (`AND`, `OR`, `NOT`, `NEAR`). The stronger implementation in `knowledge.ts:513-522` strips all non-word characters first (`replace(/[^\w\s]/g, ' ')`) and filters reserved keywords.
+
+```typescript
+// messages.ts (WEAKER) — preserves FTS5 operators inside quoted tokens
+export function buildFtsQuery(query: string): string | null {
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+  return words.map((w) => `"${w.replace(/"/g, '""')}"`).join(' ');
+}
+
+// knowledge.ts (STRONGER) — strips special chars, filters reserved words
+function buildFtsQuery(query: string): string | null {
+  const cleaned = query.replace(/[^\w\s]/g, ' ').trim();
+  if (!cleaned) return null;
+  const words = cleaned.split(/\s+/)
+    .filter((w) => w && !FTS5_RESERVED.has(w.toUpperCase()));
+  return words.join(' ');
+}
+```
+
+An input like `hello* OR /etc/passwd` could trigger FTS5 prefix queries or operator injection depending on the SQLite build. The same weaker function is duplicated in `sam-session/index.ts`.
+
+**Recommendation:** Replace the `buildFtsQuery` in `messages.ts` and `sam-session/index.ts` with the hardened version from `knowledge.ts`.
 
 ### 7.3.2 Path Traversal
 
@@ -229,11 +262,50 @@ The `POST /api/auth/token-login` rate limit uses `useIp: true` only (20 attempts
 
 **Mitigating factors:** Token entropy (256 bits) makes brute-force impossible. The rate limit exists primarily to prevent credential stuffing with leaked tokens.
 
-### 7.3.7 Zod/Schema Validation
+### 7.3.7 Schema Validation
 
-**Assessment: ACCEPTABLE**
+**Assessment: ACCEPTABLE (with gaps)**
 
-Route handlers use `jsonValidator()` with Zod schemas for request body validation (e.g., `SmokeTestCreateSchema`, `SmokeTestRedeemSchema`). This provides type-safe input validation at the API boundary.
+Route handlers use `jsonValidator()` with Valibot schemas for request body validation (89 usages). However, ~30 route handlers bypass this by calling `c.req.json()` directly and casting with `as SomeType`.
+
+<a id="finding-medium-4"></a>
+#### [MEDIUM-4] ~30 routes use raw `c.req.json()` without schema validation
+
+**Files:** Representative samples:
+- `apps/api/src/routes/knowledge.ts:119,145`
+- `apps/api/src/routes/policies.ts:80,123`
+- `apps/api/src/routes/admin-sandbox.ts:94,128,170,218`
+- `apps/api/src/routes/project-agent.ts:36`
+- `apps/api/src/routes/sam.ts:28`
+**Severity:** MEDIUM
+
+TypeScript type casts are erased at runtime — there is no runtime enforcement that parsed JSON conforms to the declared type. Risk is highest on admin routes (`admin-sandbox.ts` accepts `{ command: string }` with no structural validation) and agent routes (`project-agent.ts`, `sam.ts` forward messages to DOs without sanitization).
+
+**Recommendation:** Migrate to `jsonValidator(Schema)` — the infrastructure already exists. Priority: admin routes, agent routes, then knowledge/policies.
+
+### 7.3.8 VM Agent WebSocket Origin Check
+
+<a id="finding-medium-5"></a>
+#### [MEDIUM-5] VM agent `isOriginAllowed` accepts wildcard `*`
+
+**File:** `packages/vm-agent/internal/server/websocket.go:30-39`
+**Severity:** MEDIUM
+
+If `AllowedOrigins` config contains the literal `"*"`, all WebSocket origins are accepted unconditionally. If any deployment path sets this (cloud-init, default config), any website could establish WebSocket connections to the VM agent terminal.
+
+**Recommendation:** Audit all code paths that populate `AllowedOrigins` in `ServerConfig`. Remove the `allowed == "*"` branch or require explicit opt-in with documented security implications.
+
+### 7.3.9 Mermaid SVG Rendering
+
+<a id="finding-medium-6"></a>
+#### [MEDIUM-6] Mermaid SVG rendered via DOMPurify — config needs verification
+
+**File:** `apps/web/src/components/MarkdownRenderer.tsx:141`
+**Severity:** MEDIUM
+
+The Mermaid renderer uses `containerRef.current.innerHTML = DOMPurify.sanitize(svg, SVG_SANITIZE_CONFIG)`. DOMPurify is the correct approach, but the `SVG_SANITIZE_CONFIG` must explicitly forbid `<foreignObject>`, `<use>`, and external-reference attributes (`href`, `xlink:href`) to prevent bypass. No page-level CSP header provides a backstop.
+
+**Recommendation:** Verify config forbids dangerous SVG elements. Pin DOMPurify version. Consider adding page-level CSP `script-src 'self'`.
 
 ---
 
@@ -302,6 +374,26 @@ BetterAuth sessions persist independently of user role changes. If an admin demo
 
 ProjectData DO SQLite stores chat messages, knowledge entities, and session metadata in plaintext. This data is not user credentials (those are in D1 with AES-GCM), but for highly sensitive conversations, at-rest encryption would provide additional protection. Cloudflare encrypts DO storage at the infrastructure level, making this a defence-in-depth consideration rather than a vulnerability.
 
+<a id="finding-low-3"></a>
+#### [LOW-3] `requireWorkspaceOwnership` lacks SQL-level userId filter
+
+**File:** `apps/api/src/middleware/workspace-auth.ts`
+**Severity:** LOW
+
+The `requireWorkspaceOwnership` middleware queries the workspace by ID only, then performs a post-query ownership check. Compare with the stronger pattern in `node-auth.ts` which includes `eq(nodes.userId, userId)` in the WHERE clause. The post-check prevents data disclosure, but the weaker pattern returns the full row for any workspaceId to the application layer.
+
+**Recommendation:** Add `eq(workspaces.userId, userId)` to the WHERE clause, matching `requireWorkspaceOwnershipOnNode` and `node-auth.ts`.
+
+<a id="finding-low-4"></a>
+#### [LOW-4] VM agent `files.go` error responses embed raw error messages
+
+**File:** `packages/vm-agent/internal/server/files.go:54,63,67`
+**Severity:** LOW
+
+Several error responses use `fmt.Sprintf(`{"error":"%s"}`, err.Error())` which can expose internal paths, container IDs, or Go runtime details. Also produces malformed JSON if `err.Error()` contains double-quotes. Other handlers in the same package use the safer `writeError()` helper.
+
+**Recommendation:** Replace `fmt.Sprintf` JSON error patterns with calls to the existing `writeError()` helper.
+
 ---
 
 ## Summary of Findings
@@ -309,11 +401,17 @@ ProjectData DO SQLite stores chat messages, knowledge entities, and session meta
 | ID | Severity | Category | Title | File |
 |----|----------|----------|-------|------|
 | HIGH-1 | HIGH | Multi-tenant | Workspace subdomain proxy bypasses user ownership | `apps/api/src/index.ts:188-256` |
+| HIGH-2 | HIGH | SQL/FTS5 | Inconsistent FTS5 query sanitization in messages.ts | `apps/api/src/durable-objects/project-data/messages.ts:494-498` |
 | MEDIUM-1 | MEDIUM | CORS | Wildcard origin for port-forwarded workspace requests | `apps/api/src/index.ts:320-325` |
 | MEDIUM-2 | MEDIUM | Rate limiting | Token-login rate limit is IP-only | `apps/api/src/routes/smoke-test-tokens.ts:225-229` |
 | MEDIUM-3 | MEDIUM | Cookie security | Terminal token cookie missing SameSite=Strict | `apps/api/src/index.ts:238-256` |
+| MEDIUM-4 | MEDIUM | Input validation | ~30 routes use raw `c.req.json()` without schema validation | Multiple routes |
+| MEDIUM-5 | MEDIUM | WebSocket | VM agent origin check accepts wildcard `*` | `packages/vm-agent/internal/server/websocket.go:30-39` |
+| MEDIUM-6 | MEDIUM | XSS | Mermaid SVG DOMPurify config needs verification | `apps/web/src/components/MarkdownRenderer.tsx:141` |
 | LOW-1 | LOW | Key management | No built-in key rotation mechanism | `apps/api/src/services/encryption.ts` |
 | LOW-2 | LOW | Session mgmt | Session not invalidated on role change | BetterAuth session layer |
+| LOW-3 | LOW | Multi-tenant | `requireWorkspaceOwnership` lacks SQL-level userId filter | `apps/api/src/middleware/workspace-auth.ts` |
+| LOW-4 | LOW | Info disclosure | VM agent error responses embed raw error messages | `packages/vm-agent/internal/server/files.go:54,63,67` |
 | INFO-1 | INFO | Key management | Single ENCRYPTION_KEY fallback | `apps/api/src/lib/secrets.ts:3-15` |
 | INFO-2 | INFO | Token exposure | Token-in-URL for Codex refresh | Documented accepted risk |
 | INFO-3 | INFO | Data at rest | DO SQLite has no row-level encryption | ProjectData DO |
@@ -349,6 +447,31 @@ ProjectData DO SQLite stores chat messages, knowledge entities, and session meta
 **Files to modify:**
 - `apps/api/src/index.ts` (workspace subdomain handler)
 - `apps/api/tests/integration/` (new test file)
+
+---
+
+### P0: Harden FTS5 Query Sanitization (HIGH-2)
+
+**Priority:** P0 — Fix before production launch
+**Estimated effort:** 30 minutes
+**Blocking:** Production readiness
+
+**Problem:** The `buildFtsQuery` function in `messages.ts` and `sam-session/index.ts` does not strip FTS5 special characters or filter reserved keywords, unlike the hardened version in `knowledge.ts`. This could allow FTS5 operator injection via user search input.
+
+**Implementation:**
+1. Replace `buildFtsQuery` in `apps/api/src/durable-objects/project-data/messages.ts:494-498` with the version from `knowledge.ts:513-522` (strip `[^\w\s]`, filter FTS5 reserved words)
+2. Replace the duplicate in `apps/api/src/durable-objects/sam-session/index.ts:101-105`
+3. Consider extracting to a shared utility to prevent future drift
+
+**Tests required:**
+- Unit test: FTS5 operators (`*`, `NEAR`, `OR`, `NOT`) are stripped from search queries
+- Unit test: normal search terms still produce valid FTS5 queries
+- Regression test: existing search functionality still works
+
+**Files to modify:**
+- `apps/api/src/durable-objects/project-data/messages.ts`
+- `apps/api/src/durable-objects/sam-session/index.ts`
+- Optionally: shared utility extraction
 
 ---
 
