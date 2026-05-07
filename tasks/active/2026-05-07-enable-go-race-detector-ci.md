@@ -22,21 +22,21 @@ All other packages pass with `-race` (16 packages clean).
 
 ## Implementation Checklist
 
-- [ ] Fix `RingBuffer.Len()` to acquire mutex (production code fix)
-- [ ] Fix `TestHeartbeatRetriesPendingReadyCallback` to use atomic/mutex for `readyCalled` and `heartbeatCount`
-- [ ] Fix `TestHeartbeatRetryUsesNodeTokenWhenWorkspaceHasNone` to use atomic/mutex for `receivedAuth`
-- [ ] Add `-race` to CI `vm-agent-test` job
-- [ ] Add `-race` to CI `vm-agent-integration` job
-- [ ] Add `-race` to CI `vm-agent-e2e` job
-- [ ] Add `-race` to Makefile `test` target
-- [ ] Verify `go test -race ./...` passes locally with all fixes
+- [x] Fix `RingBuffer.Len()` to acquire mutex (production code fix)
+- [x] Fix `TestHeartbeatRetriesPendingReadyCallback` to use atomic/mutex for `readyCalled` and `heartbeatCount`
+- [x] Fix `TestHeartbeatRetryUsesNodeTokenWhenWorkspaceHasNone` to use atomic/mutex for `receivedAuth`
+- [x] Add `-race` to CI `vm-agent-test` job
+- [x] Add `-race` to CI `vm-agent-integration` job
+- [x] Add `-race` to CI `vm-agent-e2e` job
+- [x] Add `-race` to Makefile `test` target
+- [x] Verify `go test -race ./...` passes locally with all fixes
 
 ## Acceptance Criteria
 
-- [ ] `go test -race ./...` passes with zero race warnings in `packages/vm-agent/`
-- [ ] CI workflow uses `-race` for all three Go test jobs
-- [ ] Makefile `test` target uses `-race`
-- [ ] No unrelated refactors
+- [x] `go test -race ./...` passes with zero race warnings in `packages/vm-agent/`
+- [x] CI workflow uses `-race` for all three Go test jobs
+- [x] Makefile `test` target uses `-race`
+- [x] No unrelated refactors
 
 ## References
 
