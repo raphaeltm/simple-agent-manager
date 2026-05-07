@@ -13,8 +13,8 @@ SAM's security posture is **strong for a pre-production platform**. The BYOC cre
 
 **Finding Distribution:**
 - CRITICAL: 0
-- HIGH: 2
-- MEDIUM: 6
+- HIGH: 3
+- MEDIUM: 7
 - LOW: 4
 - INFO: 3
 
@@ -74,9 +74,33 @@ The credential resolution order (project-scoped > user-scoped > platform) is imp
 
 ### 7.1.4 OAuth Token Sync-Back
 
-**Assessment: ACCEPTABLE**
+**Assessment: ACCEPTABLE (one scope validation concern)**
 
 The Codex OAuth credential sync (`apps/api/src/routes/workspaces/agent-credential-sync.ts`) re-encrypts with a fresh AES-GCM IV on every update. The `CodexRefreshLock` DO serializes concurrent refresh attempts per-user to prevent rotating-token race conditions.
+
+<a id="finding-medium-7"></a>
+#### [MEDIUM-7] Codex scope validation defaults to warn-only (violates Rule 28)
+
+**File:** `apps/api/src/durable-objects/codex-refresh-lock.ts:354-371`
+**Severity:** MEDIUM
+
+`CODEX_SCOPE_VALIDATION_MODE` defaults to `'warn'` — unexpected scopes from an upstream OAuth refresh are logged but the rotated token is still accepted and stored. Rule 28 explicitly requires: "rotation validation defaults to a conservative allowlist (not disabled)" and "Rejected rotations MUST NOT persist the new credential."
+
+**Recommendation:** Change default to `'block'`. Make `'warn'` an explicit opt-out via env var.
+
+### 7.1.5 Bootstrap Token Credential Exposure
+
+<a id="finding-high-3"></a>
+#### [HIGH-3] Callback JWT stored plaintext in KV bootstrap token data
+
+**File:** `apps/api/src/services/bootstrap.ts:1-80`, `apps/api/src/routes/bootstrap.ts:103-114`
+**Severity:** HIGH
+
+The `BootstrapTokenData` stored in KV contains the `callbackToken` (a 24-hour RS256 JWT granting workspace API access) as a plaintext string, while the Hetzner and GitHub tokens in the same blob are correctly AES-GCM encrypted. Anyone who can read KV (Cloudflare support, misconfigured permissions, side-channel) can extract a long-lived callback token.
+
+**Mitigating factors:** Bootstrap tokens are single-use (delete-on-read) with 15-minute TTL, limiting the exposure window. However, the callback token itself has a 24-hour lifetime that extends far beyond the bootstrap window.
+
+**Recommendation:** Either encrypt the `callbackToken` using the same AES-GCM pattern as the other credentials in the bootstrap blob, or reduce callback token TTL to match the bootstrap window and issue a longer-lived token only after the VM proves it received the bootstrap payload (at the `/ready` callback).
 
 ---
 
@@ -402,12 +426,14 @@ Several error responses use `fmt.Sprintf(`{"error":"%s"}`, err.Error())` which c
 |----|----------|----------|-------|------|
 | HIGH-1 | HIGH | Multi-tenant | Workspace subdomain proxy bypasses user ownership | `apps/api/src/index.ts:188-256` |
 | HIGH-2 | HIGH | SQL/FTS5 | Inconsistent FTS5 query sanitization in messages.ts | `apps/api/src/durable-objects/project-data/messages.ts:494-498` |
+| HIGH-3 | HIGH | Credential exposure | Callback JWT stored plaintext in KV bootstrap data | `apps/api/src/services/bootstrap.ts:1-80` |
 | MEDIUM-1 | MEDIUM | CORS | Wildcard origin for port-forwarded workspace requests | `apps/api/src/index.ts:320-325` |
 | MEDIUM-2 | MEDIUM | Rate limiting | Token-login rate limit is IP-only | `apps/api/src/routes/smoke-test-tokens.ts:225-229` |
 | MEDIUM-3 | MEDIUM | Cookie security | Terminal token cookie missing SameSite=Strict | `apps/api/src/index.ts:238-256` |
 | MEDIUM-4 | MEDIUM | Input validation | ~30 routes use raw `c.req.json()` without schema validation | Multiple routes |
 | MEDIUM-5 | MEDIUM | WebSocket | VM agent origin check accepts wildcard `*` | `packages/vm-agent/internal/server/websocket.go:30-39` |
 | MEDIUM-6 | MEDIUM | XSS | Mermaid SVG DOMPurify config needs verification | `apps/web/src/components/MarkdownRenderer.tsx:141` |
+| MEDIUM-7 | MEDIUM | Credential rotation | Codex scope validation defaults to warn-only | `apps/api/src/durable-objects/codex-refresh-lock.ts:354-371` |
 | LOW-1 | LOW | Key management | No built-in key rotation mechanism | `apps/api/src/services/encryption.ts` |
 | LOW-2 | LOW | Session mgmt | Session not invalidated on role change | BetterAuth session layer |
 | LOW-3 | LOW | Multi-tenant | `requireWorkspaceOwnership` lacks SQL-level userId filter | `apps/api/src/middleware/workspace-auth.ts` |
@@ -472,6 +498,30 @@ Several error responses use `fmt.Sprintf(`{"error":"%s"}`, err.Error())` which c
 - `apps/api/src/durable-objects/project-data/messages.ts`
 - `apps/api/src/durable-objects/sam-session/index.ts`
 - Optionally: shared utility extraction
+
+---
+
+### P0: Encrypt Callback JWT in Bootstrap KV Data (HIGH-3)
+
+**Priority:** P0 — Fix before production launch
+**Estimated effort:** 1-2 hours
+**Blocking:** Production readiness
+
+**Problem:** The `BootstrapTokenData` stored in KV contains the callback JWT (24-hour lifetime, workspace API access) as plaintext, while Hetzner/GitHub tokens in the same blob are AES-GCM encrypted.
+
+**Implementation:**
+1. In `apps/api/src/services/bootstrap.ts`, encrypt the `callbackToken` with AES-GCM before storing in KV (same pattern as `encryptedHetznerToken`)
+2. In `apps/api/src/routes/bootstrap.ts`, decrypt the callback token during bootstrap redemption
+3. Alternatively, reduce callback token TTL to 15 minutes (matching bootstrap TTL) and issue a longer-lived token at the `/ready` callback after VM proves bootstrap receipt
+
+**Tests required:**
+- Unit test: bootstrap token creation encrypts callback token
+- Unit test: bootstrap token redemption decrypts callback token correctly
+- Integration test: full bootstrap flow still works end-to-end
+
+**Files to modify:**
+- `apps/api/src/services/bootstrap.ts` (encrypt callback token)
+- `apps/api/src/routes/bootstrap.ts` (decrypt on redemption)
 
 ---
 
