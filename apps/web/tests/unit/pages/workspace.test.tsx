@@ -632,9 +632,13 @@ describe('Workspace page', () => {
 
     renderWorkspace('/workspaces/ws-123');
     await screen.findByText('Workspace A');
+    await waitFor(() => {
+      expect(mocks.listAgents).toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Create terminal or chat session' })).not.toBeDisabled();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Claude Code' }));
 
     await waitFor(() => {
       expect(mocks.createAgentSession).toHaveBeenCalledWith('ws-123', {
@@ -679,6 +683,10 @@ describe('Workspace page', () => {
 
     renderWorkspace('/workspaces/ws-123');
     await screen.findByText('Workspace A');
+    await waitFor(() => {
+      expect(mocks.listAgents).toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Create terminal or chat session' })).not.toBeDisabled();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
 
