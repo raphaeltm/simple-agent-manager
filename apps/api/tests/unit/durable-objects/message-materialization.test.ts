@@ -12,9 +12,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { buildSafeFtsQuery } from '../../../src/lib/fts5';
-
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
+import { buildSafeFtsQuery } from '../../../src/lib/fts5';
 
 // ── Grouping logic (mirrors ProjectData.materializeSession and mcp.ts groupTokensIntoMessages) ──
 
