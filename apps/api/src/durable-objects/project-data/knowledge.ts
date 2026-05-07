@@ -4,6 +4,7 @@
 import type { KnowledgeEntityType, KnowledgeRelationType, KnowledgeSourceType } from '@simple-agent-manager/shared';
 import { KNOWLEDGE_DEFAULTS } from '@simple-agent-manager/shared';
 
+import { buildSafeFtsQuery } from '../../lib/fts5';
 import {
   parseCountCnt,
   parseKnowledgeEntityRow,
@@ -507,16 +508,6 @@ function removeObservationFromFts(sql: SqlStorage, observationId: string) {
   }
 }
 
-// FTS5 reserved keywords that must be stripped to prevent query injection
-const FTS5_RESERVED = new Set(['AND', 'OR', 'NOT', 'NEAR']);
-
 function buildFtsQuery(query: string): string | null {
-  const cleaned = query.replace(/[^\w\s]/g, ' ').trim();
-  if (!cleaned) return null;
-  // Split into words, strip FTS5 operators, and join for implicit AND matching
-  const words = cleaned
-    .split(/\s+/)
-    .filter((w) => w && !FTS5_RESERVED.has(w.toUpperCase()));
-  if (words.length === 0) return null;
-  return words.join(' ');
+  return buildSafeFtsQuery(query);
 }

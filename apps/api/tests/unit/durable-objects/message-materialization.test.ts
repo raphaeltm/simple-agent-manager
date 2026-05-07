@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
+import { buildSafeFtsQuery } from '../../../src/lib/fts5';
 
 // ── Grouping logic (mirrors ProjectData.materializeSession and mcp.ts groupTokensIntoMessages) ──
 
@@ -184,32 +185,26 @@ describe('Message Materialization', () => {
   });
 
   describe('FTS5 query builder', () => {
-    // Test the buildFtsQuery logic (private method, test via behavior)
-    function buildFtsQuery(query: string): string | null {
-      const words = query.trim().split(/\s+/).filter(Boolean);
-      if (words.length === 0) return null;
-      return words.map((w) => `"${w.replace(/"/g, '""')}"`).join(' ');
-    }
-
-    it('should quote single word', () => {
-      expect(buildFtsQuery('authentication')).toBe('"authentication"');
+    it('should preserve a safe single word', () => {
+      expect(buildSafeFtsQuery('authentication')).toBe('authentication');
     });
 
-    it('should quote and AND multiple words', () => {
-      expect(buildFtsQuery('auth refactor')).toBe('"auth" "refactor"');
+    it('should join multiple safe words', () => {
+      expect(buildSafeFtsQuery('auth refactor')).toBe('auth refactor');
     });
 
-    it('should escape double quotes in words', () => {
-      expect(buildFtsQuery('say "hello"')).toBe('"say" """hello"""');
+    it('should strip FTS5 punctuation and reserved operators', () => {
+      expect(buildSafeFtsQuery('say "hello*" OR NEAR /etc/passwd')).toBe('say hello etc passwd');
     });
 
     it('should return null for empty query', () => {
-      expect(buildFtsQuery('')).toBeNull();
-      expect(buildFtsQuery('   ')).toBeNull();
+      expect(buildSafeFtsQuery('')).toBeNull();
+      expect(buildSafeFtsQuery('   ')).toBeNull();
+      expect(buildSafeFtsQuery('AND OR NOT NEAR')).toBeNull();
     });
 
     it('should handle multiple spaces between words', () => {
-      expect(buildFtsQuery('auth   refactor')).toBe('"auth" "refactor"');
+      expect(buildSafeFtsQuery('auth   refactor')).toBe('auth refactor');
     });
   });
 

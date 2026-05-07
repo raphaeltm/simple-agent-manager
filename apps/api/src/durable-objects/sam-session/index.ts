@@ -14,6 +14,7 @@ import {
 import { DurableObject } from 'cloudflare:workers';
 
 import type { Env as AppEnv } from '../../env';
+import { buildSafeFtsQuery } from '../../lib/fts5';
 import { createModuleLogger } from '../../lib/logger';
 import { runAgentLoop, SAM_SYSTEM_PROMPT } from './agent-loop';
 import { executeTool, SAM_TOOLS } from './tools';
@@ -97,11 +98,9 @@ function migrate(sql: SqlStorage): void {
   }
 }
 
-/** Build an FTS5 query from user input — wraps each word in double quotes. */
+/** Build an FTS5 query from user input after stripping operators/reserved words. */
 export function buildFtsQuery(query: string): string | null {
-  const words = query.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return null;
-  return words.map((w) => `"${w.replace(/"/g, '""')}"`).join(' ');
+  return buildSafeFtsQuery(query);
 }
 
 /** Extract a context-windowed snippet around the first match. */

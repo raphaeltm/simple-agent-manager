@@ -39,6 +39,35 @@ function createMockKV(): KVNamespace & { _store: Map<string, string> } {
   } as unknown as KVNamespace & { _store: Map<string, string> };
 }
 
+function createAtomicBudgetEnv() {
+  const store = new Map<string, { inputTokens: number; outputTokens: number }>();
+  let queue = Promise.resolve();
+  const stub = {
+    async get(dateKey: string) {
+      return store.get(dateKey) ?? { inputTokens: 0, outputTokens: 0 };
+    },
+    async increment(dateKey: string, inputTokens: number, outputTokens: number) {
+      queue = queue.then(async () => {
+        const current = store.get(dateKey) ?? { inputTokens: 0, outputTokens: 0 };
+        await Promise.resolve();
+        store.set(dateKey, {
+          inputTokens: current.inputTokens + inputTokens,
+          outputTokens: current.outputTokens + outputTokens,
+        });
+      });
+      await queue;
+      return store.get(dateKey)!;
+    },
+  };
+
+  return {
+    AI_TOKEN_BUDGET_COUNTER: {
+      idFromName: vi.fn((name: string) => name),
+      get: vi.fn(() => stub),
+    },
+  } as unknown as Env;
+}
+
 describe('buildBudgetKey', () => {
   it('creates key with userId and date', () => {
     const date = new Date('2026-04-13T10:00:00Z');
@@ -105,6 +134,19 @@ describe('incrementTokenUsage', () => {
       expect.any(String),
       { expirationTtl: 7200 },
     );
+  });
+
+  it('uses the Durable Object counter for concurrent increments when available', async () => {
+    const kv = createMockKV();
+    const env = createAtomicBudgetEnv();
+
+    await Promise.all(
+      Array.from({ length: 25 }, () => incrementTokenUsage(kv, 'user-atomic', 10, 2, env)),
+    );
+
+    const usage = await getTokenUsage(kv, 'user-atomic', env);
+    expect(usage).toEqual({ inputTokens: 250, outputTokens: 50 });
+    expect(kv.put).not.toHaveBeenCalled();
   });
 });
 

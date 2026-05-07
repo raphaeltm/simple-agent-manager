@@ -1,6 +1,6 @@
-import type { BootstrapResponse,BootstrapTokenData } from '@simple-agent-manager/shared';
+import type { BootstrapResponse, BootstrapTokenData } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock rate-limit middleware to be a passthrough (tested separately)
 vi.mock('../../../src/middleware/rate-limit', () => ({
@@ -65,12 +65,17 @@ describe('Bootstrap Routes', () => {
         'github-token-456',
         mockEnv.ENCRYPTION_KEY
       );
+      const { ciphertext: encCallback, iv: ivCallback } = await encrypt(
+        'jwt-callback-token',
+        mockEnv.ENCRYPTION_KEY
+      );
 
       const tokenData: BootstrapTokenData = {
         workspaceId: 'ws-123',
         encryptedHetznerToken: encHetzner,
         hetznerTokenIv: ivHetzner,
-        callbackToken: 'jwt-callback-token',
+        encryptedCallbackToken: encCallback,
+        callbackTokenIv: ivCallback,
         encryptedGithubToken: encGithub,
         githubTokenIv: ivGithub,
         gitUserName: 'Octo Cat',
