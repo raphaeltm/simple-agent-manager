@@ -1,6 +1,6 @@
 # Deep Codebase & Data Model Review Prompt
 
-> **Purpose**: This prompt is designed to be executed by one or more AI coding agents (or human reviewers) to produce a thorough, actionable evaluation of the SAM codebase. It can be run as a single deep session or decomposed into the 8 review tracks below, each dispatched to a specialist agent.
+> **Purpose**: This prompt is designed to be executed by one or more AI coding agents (or human reviewers) to produce a thorough, actionable evaluation of the SAM codebase. It can be run as a single deep session or decomposed into the 9 review tracks below, each dispatched to a specialist agent.
 >
 > **Output**: Each track produces a structured findings report with severity ratings (CRITICAL / HIGH / MEDIUM / LOW / INFO), specific file:line references, and concrete recommendations. The final deliverable is a unified report with a prioritized action plan.
 
@@ -28,6 +28,19 @@ Before starting any review track, read these for architectural context:
 4. `docs/architecture/credential-security.md` — BYOC model, encryption
 5. `docs/architecture/durable-objects.md` — DO architecture overview
 6. `.claude/rules/` — All 33 agent rules (these encode hard-won lessons from production incidents)
+
+### Current Agent-Ready Codebase Research Basis
+
+Use these external references to calibrate the review against current agent-oriented development practice:
+
+- [AGENTS.md](https://agents.md/) frames `AGENTS.md` as a dedicated, predictable "README for agents" and recommends root-level instructions plus nested `AGENTS.md` files for large monorepos where subprojects need tailored guidance.
+- [Claude Code best practices](https://code.claude.com/docs/en/best-practices) emphasize that context-window pressure is the core operating constraint for coding agents, and recommend concise persistent instructions, verification commands, scoped prompts, skills for domain workflows, and subagents for isolated investigation.
+- [MCP client best practices](https://modelcontextprotocol.io/docs/develop/clients/client-best-practices) recommend progressive tool discovery: expose a small catalog/search layer first, inspect a chosen tool only when needed, then execute. This reduces context load and improves tool selection when many tools are available.
+- [Microsoft's Learn MCP Server writeup](https://devblogs.microsoft.com/engineering-at-microsoft/how-we-built-the-microsoft-learn-mcp-server/) shows the practical pattern of exposing agent-friendly search/fetch/code-sample tools backed by trusted, up-to-date source material instead of asking agents to scrape or memorize docs.
+- [12 Factor Agents](https://contextqmd.com/libraries/12-factor-agents) highlights agent-specific operational principles that apply to codebase organization: own prompts, own the context window, use structured tool outputs, unify execution state, support launch/pause/resume, compact errors, and prefer small focused agents.
+- [The Twelve-Factor App](https://12factor.net/) remains relevant baseline guidance for deployable systems: one codebase, explicit dependencies, environment-based config, strict build/release/run separation, dev/prod parity, logs as event streams, and one-off admin processes.
+
+Treat these as review lenses, not as generic citations. Every recommendation must still be grounded in SAM files, SAM data flows, and SAM operating constraints.
 
 ---
 
@@ -122,12 +135,16 @@ A data flow diagram (Mermaid) for each primary flow, annotated with auth mechani
 - **Directory structure predictability**: Given a feature name, can you predict where its code lives? Test with 5 features: notification system, trial orchestrator, AI proxy, file library, mission orchestration. How many hops does it take to find each?
 - **Barrel file quality**: Are index.ts re-exports clear and maintained? Or are there barrel files that re-export everything, making it hard to trace imports?
 - **Dead code**: Search for exports that have zero consumers. Search for route handlers that are registered but unreachable. Search for components that are imported nowhere.
+- **Agent search affordances**: For each major feature, identify the 3-5 search terms an agent would naturally try. Do those terms find the canonical route, service, component, data type, tests, and docs? Note mismatches between product vocabulary, code names, database names, and docs.
+- **Change locality**: For common feature edits, how many packages must an agent touch? A well-organized feature should have clear ownership boundaries and predictable cross-package contracts. Identify workflows where small changes require broad, fragile edits.
 
 ### 3.3 Documentation Quality (Code-Level)
 
 - **Inline comments**: Are "why" comments present for non-obvious logic? Are there stale comments that describe behavior that no longer exists?
 - **Type expressiveness**: Are types used to encode business rules (e.g., branded types for IDs, discriminated unions for status)? Or are they loosely typed (string, any, unknown)?
 - **CLAUDE.md accuracy**: Is the "Recent Changes" section in CLAUDE.md up-to-date with the last 5 merged PRs? Are the architecture descriptions still accurate?
+- **Instruction entropy**: Compare `AGENTS.md`, `CLAUDE.md`, `.claude/rules/`, `.agents/skills/`, and `.codex/prompts/`. Are rules duplicated, contradictory, stale, or too broad? Are high-risk instructions close to the code they govern?
+- **Context budget discipline**: Identify instructions that agents load every session but can infer from code or docs on demand. Recommend what should move from always-loaded instructions into focused skills, guides, or task-specific prompts.
 
 ### 3.4 Go Codebase (VM Agent)
 
@@ -236,12 +253,17 @@ A cost model estimate (monthly) for a typical workload (10 users, 50 tasks/day, 
 - **Test isolation**: Can an agent run tests for a single package without building the entire monorepo?
 - **Visual testing**: Is the Playwright visual audit setup (`.claude/rules/17-ui-visual-testing.md`) functional and producing useful results?
 - **Staging feedback loop**: How long from code push to staging deploy to verified result? Can this be shortened?
+- **Self-verifying tasks**: For each major work type (API route, UI component, DO migration, VM agent change, docs-only change), is there a documented minimal verification command and a stronger pre-PR verification path? Agents should not have to infer the right checks from CI.
+- **Fixture and mock discoverability**: Can agents find realistic fixtures quickly? Are mock data builders named by domain concepts, or hidden in test files with ad hoc shapes?
+- **Failure reproduction path**: For production bugs and post-mortems, is there a clear command or test that reproduces the issue locally before the fix?
 
 ### 6.3 Configuration for Experimentation
 
 - **Feature flags**: Are feature flags used for experimental features? Can an agent enable/disable features via KV without redeploying?
 - **Configurable constants**: The constitution requires all limits/timeouts/thresholds to be configurable via environment variables. Audit compliance: are there hardcoded values that should be configurable?
 - **A/B testing capability**: Can the system run A/B experiments (e.g., different agent prompts, different VM sizes) and measure outcomes?
+- **Agent profile experimentability**: Are prompts, skills, model/tool profiles, VM sizes, and workspace setup parameters versioned and attributable to task outcomes? Can an agent compare two profile versions without mixing state?
+- **Trace durability**: Are prompts, tool calls, command outputs, errors, test results, and resource usage persisted in a way that future agents can search and learn from?
 
 ### 6.4 Deliverable
 
@@ -311,6 +333,62 @@ A strategic debt map: a prioritized list of architectural changes needed, sized 
 
 ---
 
+## Track 9: Agent-Ready Repository Architecture
+
+**Goal**: Evaluate whether the repository is organized as an effective working environment for coding agents, not just as a conventional human-maintained monorepo. This track focuses on how agents load context, discover capabilities, verify work, coordinate subtasks, and preserve useful knowledge across sessions.
+
+### 9.1 Instruction Architecture
+
+- **Root instruction audit**: Review `AGENTS.md`, `CLAUDE.md`, and any equivalent agent entry points. Do they contain only durable, broadly applicable rules? Identify content that should move to a focused guide or skill because it is long, specialized, or rarely needed.
+- **Nested instruction opportunity**: For each major surface (`apps/api`, `apps/web`, `apps/www`, `packages/vm-agent`, `packages/ui`, `packages/providers`), decide whether a nested `AGENTS.md` would reduce context load or prevent mistakes. Recommend exact sections for each nested file: commands, local gotchas, relevant tests, ownership boundaries, and examples.
+- **Instruction precedence**: Document how instructions should resolve when root, nested, skill, task, and user instructions conflict. Verify the repo's current files do not create ambiguous precedence.
+- **Rule deduplication**: Identify repeated rules across `.claude/rules/`, `AGENTS.md`, `CLAUDE.md`, skills, and prompts. Recommend a single source of truth and link strategy.
+- **Human vs agent docs split**: Confirm README and public docs stay human-oriented while `AGENTS.md` and skills carry agent-specific operational detail.
+
+### 9.2 Context Map & Code Discovery
+
+- **Feature index**: Determine whether the repo has a machine-readable or easily searchable map from product concepts to routes, services, storage tables, components, tests, and docs. If not, propose one.
+- **Boundary index**: For every cross-boundary contract (Browser/API, API/DO, API/VM Agent, MCP/API, worker/provider), identify the canonical type/schema/test file an agent should start from.
+- **Search vocabulary alignment**: Compare user-facing names, route names, database table names, task names, and doc headings. Flag concepts where agents are likely to search the wrong term.
+- **Ownership markers**: Check whether directories expose clear ownership and risk markers: security-sensitive, infra-sensitive, migration-sensitive, UI visual-test required, staging-verification required.
+- **Generated vs authored code**: Verify generated files, build artifacts, migrations, and hand-authored files are clearly distinguished so agents edit the right source.
+
+### 9.3 Tool & MCP Surface Design
+
+- **Tool catalog size**: Count available SAM MCP tools and deferred tools. Are agents forced to load too many tool schemas up front, or is there progressive discovery through search/inspect/execute style tools?
+- **Tool naming and descriptions**: Are tool names action-oriented and domain-specific? Do descriptions mention side effects, auth scope, required IDs, and output shape?
+- **Structured outputs**: Do tool outputs return compact structured data that can be composed by agents, or verbose prose that wastes context and is hard to validate?
+- **Error compactness**: Are tool and API errors concise but actionable, with stable error codes, admin-only detail where appropriate, and copy-paste-ready debugging context?
+- **Tool-to-code traceability**: For every MCP tool, can an agent quickly find the API route/service/DO method it wraps? Add references where missing.
+
+### 9.4 Verification Affordances
+
+- **Check matrix**: Build a matrix from change type to minimal local verification, stronger local verification, and staging verification. Example rows: D1 migration, ProjectData DO change, Hono route, React UI, VM agent WebSocket, cloud-init template, docs-only.
+- **Fast-path commands**: Are package-specific commands documented so agents can avoid expensive whole-repo checks during iteration while still running full gates before PR?
+- **Deterministic fixtures**: Are there stable fixtures for common project/workspace/task/session states, including failure states and high-volume data?
+- **Visual baselines**: For UI surfaces, can agents run mock-data screenshots without auth or live API dependency?
+- **Contract tests**: Are inter-service HTTP and WebSocket contracts testable without provisioning real VMs unless the behavior genuinely requires staging?
+
+### 9.5 Agent Coordination & Knowledge Persistence
+
+- **Task decomposition readiness**: Can review or implementation work be split into independent tasks with clear write ownership? Identify packages where coupling prevents parallel work.
+- **Handoff packet quality**: Are agent handoffs structured enough for another agent to continue without replaying the whole session? Evaluate task files, PR descriptions, and SAM session summaries.
+- **Persistent knowledge hygiene**: Are durable learnings captured in the right place (knowledge graph, policy, rule, doc, backlog task) instead of being trapped in chat history?
+- **Decision records**: Are architecture decisions, experiment results, model/tool profile changes, and staging failures preserved with enough evidence for later agents to trust or revise them?
+- **Review specialization**: Are specialist skills/subagents aligned with actual code ownership and risk surfaces? Identify missing specialists or overly broad ones.
+
+### 9.6 Deliverable
+
+An agent-readiness report containing:
+
+1. A repository context map showing which files an agent should read first for each major work type
+2. A proposed nested `AGENTS.md` layout for the monorepo, with exact content recommendations
+3. A tool/MCP surface scorecard covering discoverability, schema quality, side-effect clarity, and output compactness
+4. A verification matrix by change type
+5. A prioritized list of repository changes that would most improve agent speed, correctness, and reviewability
+
+---
+
 ## Execution Guide
 
 ### Running as a Single Deep Review
@@ -320,8 +398,9 @@ If executing this prompt as a single agent session:
 1. Start with Track 1 (Data Model) and Track 3 (Code Organization) — these inform all other tracks
 2. Then Track 2 (Data Flow) and Track 4 (Coding Standards)
 3. Then Track 5 (Performance), Track 6 (Testing), Track 7 (Security)
-4. Finish with Track 8 (Architecture Alignment) — this synthesizes findings from all other tracks
-5. Produce the unified report with the prioritized action plan
+4. Run Track 9 (Agent-Ready Repository Architecture) after Track 3 and Track 6 have produced initial findings
+5. Finish with Track 8 (Architecture Alignment) — this synthesizes findings from all other tracks, including Track 9
+6. Produce the unified report with the prioritized action plan
 
 ### Running as Parallel Agent Tasks
 
@@ -330,6 +409,7 @@ If decomposing into subtasks via SAM's `dispatch_task`:
 - Tracks 1, 3, 5, 6, and 7 can run independently in parallel
 - Track 2 benefits from Track 1 results but can start concurrently
 - Track 4 benefits from Track 3 results but can start concurrently
+- Track 9 benefits from Track 3 and Track 6 results but can start concurrently if focused on instruction/tool/documentation architecture
 - Track 8 MUST run last — it synthesizes findings from all other tracks
 
 Each agent should use the `/do` skill and produce findings in the report format below.
@@ -343,7 +423,7 @@ Each finding should follow this structure:
 
 **Track**: N — Track Name
 **Location**: `file/path.ts:line_number` (or range)
-**Category**: data-model | data-flow | navigability | standards | performance | testing | security | architecture
+**Category**: data-model | data-flow | navigability | standards | performance | testing | security | architecture | agent-readiness
 
 **Finding**: What was observed.
 
@@ -374,5 +454,6 @@ The review is complete when:
 2. All CRITICAL and HIGH findings have been identified and categorized
 3. The data model has been fully mapped (every table, every relationship, every storage location)
 4. At least 5 primary data flows have been traced end-to-end with boundary documentation
-5. A prioritized action plan exists with effort estimates
-6. The findings are actionable — an agent could pick up any finding and implement the fix without ambiguity
+5. Agent-readiness has been evaluated for instruction architecture, context maps, MCP/tool surfaces, verification affordances, and knowledge persistence
+6. A prioritized action plan exists with effort estimates
+7. The findings are actionable — an agent could pick up any finding and implement the fix without ambiguity
