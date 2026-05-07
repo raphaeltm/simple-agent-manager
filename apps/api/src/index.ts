@@ -1,5 +1,6 @@
 // Re-export Durable Object classes for Cloudflare Workers runtime
 export { AdminLogs } from './durable-objects/admin-logs';
+export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter';
 // Sandbox SDK DO class — re-exported from @cloudflare/sandbox (experimental prototype)
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
@@ -15,12 +16,13 @@ export { TrialOrchestrator } from './durable-objects/trial-orchestrator';
 export type { Env } from './env';
 export { Sandbox as SandboxDO } from '@cloudflare/sandbox';
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
+import { createAuth } from './auth';
 import * as schema from './db/schema';
 import type { Env } from './env';
 import { log, serializeError } from './lib/logger';
@@ -183,6 +185,13 @@ app.use('*', async (c, next) => {
   }
   const { workspaceId, targetPort } = parsed;
 
+  const auth = createAuth(c.env);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session?.user) {
+    return c.json({ error: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+  const userId = session.user.id;
+
   // Look up workspace routing metadata from D1.
   const db = drizzle(c.env.DATABASE, { schema });
   const workspace = await db
@@ -191,7 +200,7 @@ app.use('*', async (c, next) => {
       status: schema.workspaces.status,
     })
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
+    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
     .get();
 
   if (!workspace) {

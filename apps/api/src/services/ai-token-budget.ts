@@ -1,13 +1,10 @@
 /**
- * Per-user daily token budget tracking via KV.
+ * Per-user daily token budget tracking.
  *
- * Stores input/output token counts keyed by userId + date.
- * Auto-expires via KV TTL (86400s) so no cleanup is needed.
- *
- * NOTE: The read-increment-write pattern is not atomic. Under concurrent requests
- * from the same user, the true count may slightly exceed the limit. For strict
- * enforcement, use a Durable Object counter. KV is sufficient here because
- * small overages on a daily budget are acceptable.
+ * Runtime accounting uses the `AI_TOKEN_BUDGET_COUNTER` Durable Object when
+ * available. KV remains as a compatibility fallback for un-migrated local/test
+ * environments, but it is no longer the primary counter because KV read-modify-
+ * write updates are not atomic under concurrent requests.
  */
 
 import type { UpdateAiBudgetRequest, UserAiBudgetSettings } from '@simple-agent-manager/shared';
@@ -31,21 +28,45 @@ export interface TokenBudget {
   outputTokens: number;
 }
 
+interface AiTokenBudgetCounterStub extends DurableObjectStub {
+  get(dateKey: string): Promise<TokenBudget>;
+  increment(dateKey: string, inputTokens: number, outputTokens: number): Promise<TokenBudget>;
+}
+
+function buildBudgetDateKey(date?: Date): string {
+  const d = date ?? new Date();
+  return d.toISOString().slice(0, 10);
+}
+
 /**
  * Build the KV key for a user's daily budget.
  * Format: `ai-budget:{userId}:{YYYY-MM-DD}`
  */
 export function buildBudgetKey(userId: string, date?: Date): string {
-  const d = date ?? new Date();
-  const dateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD
-  return `ai-budget:${userId}:${dateStr}`;
+  return `ai-budget:${userId}:${buildBudgetDateKey(date)}`;
+}
+
+function getBudgetCounter(env: Env | undefined, userId: string) {
+  if (!env?.AI_TOKEN_BUDGET_COUNTER) return null;
+  return env.AI_TOKEN_BUDGET_COUNTER.get(
+    env.AI_TOKEN_BUDGET_COUNTER.idFromName(userId),
+  ) as AiTokenBudgetCounterStub;
 }
 
 /**
  * Get the current daily token usage for a user.
  * Returns zero counts if no entry exists (new day or first request).
  */
-export async function getTokenUsage(kv: KVNamespace, userId: string): Promise<TokenBudget> {
+export async function getTokenUsage(
+  kv: KVNamespace,
+  userId: string,
+  env?: Env,
+): Promise<TokenBudget> {
+  const counter = getBudgetCounter(env, userId);
+  if (counter) {
+    return counter.get(buildBudgetDateKey());
+  }
+
   const key = buildBudgetKey(userId);
   const existing = await kv.get<TokenBudget>(key, 'json');
   return existing ?? { inputTokens: 0, outputTokens: 0 };
@@ -178,7 +199,7 @@ export async function checkTokenBudget(
   const { dailyInputTokenLimit: inputLimit, dailyOutputTokenLimit: outputLimit } =
     resolveEffectiveLimits(userSettings, env);
 
-  const usage = await getTokenUsage(kv, userId);
+  const usage = await getTokenUsage(kv, userId, env);
   const allowed = usage.inputTokens <= inputLimit && usage.outputTokens <= outputLimit;
 
   return { allowed, usage, inputLimit, outputLimit };
@@ -194,6 +215,26 @@ export async function incrementTokenUsage(
   outputTokens: number,
   env?: Env,
 ): Promise<TokenBudget> {
+  const counter = getBudgetCounter(env, userId);
+  if (counter) {
+    const updated = await counter.increment(
+      buildBudgetDateKey(),
+      inputTokens,
+      outputTokens,
+    );
+
+    log.info('ai_proxy.token_usage_updated', {
+      userId,
+      inputTokensAdded: inputTokens,
+      outputTokensAdded: outputTokens,
+      totalInput: updated.inputTokens,
+      totalOutput: updated.outputTokens,
+      counter: 'durable_object',
+    });
+
+    return updated;
+  }
+
   const key = buildBudgetKey(userId);
   const existing = await getTokenUsage(kv, userId);
 
@@ -215,6 +256,7 @@ export async function incrementTokenUsage(
     outputTokensAdded: outputTokens,
     totalInput: updated.inputTokens,
     totalOutput: updated.outputTokens,
+    counter: 'kv_compatibility_fallback',
   });
 
   return updated;

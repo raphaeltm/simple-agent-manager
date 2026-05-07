@@ -65,7 +65,7 @@ export async function getTrialStatus(
   }
 
   // Fetch current daily usage
-  const usage = await getTokenUsage(env.KV, userId);
+  const usage = await getTokenUsage(env.KV, userId, env);
 
   const inputLimit = parseInt(env.AI_PROXY_DAILY_INPUT_TOKEN_LIMIT ?? '', 10) || DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT;
   const outputLimit = parseInt(env.AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT ?? '', 10) || DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT;

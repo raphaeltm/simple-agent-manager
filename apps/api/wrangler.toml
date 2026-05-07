@@ -153,6 +153,11 @@ class_name = "SamSession"
 name = "PROJECT_AGENT"
 class_name = "ProjectAgent"
 
+# Durable Object for atomic per-user AI token budget accounting
+[[durable_objects.bindings]]
+name = "AI_TOKEN_BUDGET_COUNTER"
+class_name = "AiTokenBudgetCounter"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -219,6 +224,10 @@ class_name = "SandboxDO"
 [[migrations]]
 tag = "v13"
 new_sqlite_classes = ["SandboxDO"]  # Sandbox SDK container DO; SQLite-backed per CF requirement
+
+[[migrations]]
+tag = "v14"
+new_sqlite_classes = ["AiTokenBudgetCounter"]
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

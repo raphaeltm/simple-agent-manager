@@ -183,7 +183,7 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
 
   const [userSettings, dailyUsage] = await Promise.all([
     getUserBudgetSettings(c.env.KV, userId),
-    getTokenUsage(c.env.KV, userId),
+    getTokenUsage(c.env.KV, userId, c.env),
   ]);
 
   const effectiveLimits = resolveEffectiveLimits(userSettings, c.env);

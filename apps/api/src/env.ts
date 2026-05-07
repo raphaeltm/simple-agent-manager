@@ -49,6 +49,7 @@ export interface Env {
   PROJECT_ORCHESTRATOR: DurableObjectNamespace;
   SAM_SESSION: DurableObjectNamespace;
   PROJECT_AGENT: DurableObjectNamespace;
+  AI_TOKEN_BUDGET_COUNTER?: DurableObjectNamespace;
   // Sandbox SDK (experimental — admin-only prototype for CF Containers agent runtime)
   SANDBOX?: DurableObjectNamespace<Sandbox>;
   // Environment variables
