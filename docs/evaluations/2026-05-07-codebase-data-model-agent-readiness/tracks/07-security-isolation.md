@@ -13,8 +13,8 @@ SAM's security posture is **strong for a pre-production platform**. The BYOC cre
 
 **Finding Distribution:**
 - CRITICAL: 0
-- HIGH: 3
-- MEDIUM: 7
+- HIGH: 6
+- MEDIUM: 8
 - LOW: 4
 - INFO: 3
 
@@ -375,7 +375,51 @@ The workspace proxy generates a terminal JWT and sets it as a cookie for port-fo
 
 ---
 
-## 7.4 Additional Findings
+## 7.4 Token Lifecycle Findings
+
+<a id="finding-high-4"></a>
+#### [HIGH-4] Callback JWT tokens have no revocation mechanism
+
+**File:** `apps/api/src/services/jwt.ts` (signCallbackToken, verifyCallbackToken)
+**Severity:** HIGH
+
+Workspace callback tokens are stateless RS256 JWTs with 24-hour lifetime. There is no revocation list, KV-based blocklist, or any way to invalidate a token before expiry. When a workspace is deleted/stopped or a user is suspended, outstanding tokens remain valid for up to 24 hours. A malicious agent can continue posting messages, triggering Codex token refreshes, and making AI proxy requests.
+
+**Recommendation:** Add a KV-based revocation check. Set a `jti` claim in `signCallbackToken()`, check `KV.get('revoked-jwt:' + jti)` in `verifyCallbackToken()`. Revoke on workspace deletion/user suspension. Alternatively, reduce default lifetime from 24 hours to 4-8 hours.
+
+<a id="finding-high-5"></a>
+#### [HIGH-5] Port-proxy tokens use synthetic `userId: 'port-proxy'` breaking audit trails
+
+**File:** `apps/api/src/index.ts:247`
+**Severity:** HIGH
+
+Port-forwarded workspace requests auto-generate a terminal JWT with `userId: 'port-proxy'` — a hardcoded non-user identifier. This breaks audit trails (VM agent logs cannot be correlated to the real user) and the token appears in URL query parameters (`?token=`), making extraction from logs feasible.
+
+**Recommendation:** Pass the real `userId` from the authenticated Worker request context. Consider moving the token from `?token=` to an `Authorization` header in the Worker-to-VM-agent leg.
+
+<a id="finding-high-6"></a>
+#### [HIGH-6] MCP rate limiter uses non-atomic KV read-modify-write
+
+**File:** `apps/api/src/routes/mcp/_helpers.ts`
+**Severity:** HIGH
+
+The MCP endpoint rate limiter uses KV read-modify-write without compare-and-swap. Under concurrent requests (common for parallel agent tool calls), multiple Workers can read the same counter, increment independently, and write back — allowing burst significantly beyond the 120 req/min limit. Rule 28 requires atomic primitives (DO storage, DB locks) for rate limits guarding sensitive operations.
+
+**Recommendation:** Move MCP rate limiting to a lightweight DO (following the `CodexRefreshLock` pattern already in the codebase) for atomic increment-and-check semantics.
+
+<a id="finding-medium-8"></a>
+#### [MEDIUM-8] Smoke test tokens have no expiry
+
+**File:** `apps/api/src/routes/smoke-test-tokens.ts`
+**Severity:** MEDIUM
+
+Smoke test tokens remain valid indefinitely until explicitly revoked. A stolen `sam_test_*` token can create new 7-day sessions repeatedly forever. The feature gate (`SMOKE_TEST_AUTH_ENABLED`) must be disabled in production, but no automated enforcement prevents cross-environment token reuse.
+
+**Recommendation:** Add `expiresAt` column to `smokeTestTokens` table. Default maximum lifetime: 30 days. Enforce at `token-login` time.
+
+---
+
+## 7.5 Additional Findings
 
 <a id="finding-low-1"></a>
 #### [LOW-1] Encryption key rotation has no built-in mechanism
@@ -427,6 +471,9 @@ Several error responses use `fmt.Sprintf(`{"error":"%s"}`, err.Error())` which c
 | HIGH-1 | HIGH | Multi-tenant | Workspace subdomain proxy bypasses user ownership | `apps/api/src/index.ts:188-256` |
 | HIGH-2 | HIGH | SQL/FTS5 | Inconsistent FTS5 query sanitization in messages.ts | `apps/api/src/durable-objects/project-data/messages.ts:494-498` |
 | HIGH-3 | HIGH | Credential exposure | Callback JWT stored plaintext in KV bootstrap data | `apps/api/src/services/bootstrap.ts:1-80` |
+| HIGH-4 | HIGH | Token lifecycle | Callback JWT tokens have no revocation mechanism | `apps/api/src/services/jwt.ts` |
+| HIGH-5 | HIGH | Audit trail | Port-proxy tokens use synthetic userId | `apps/api/src/index.ts:247` |
+| HIGH-6 | HIGH | Rate limiting | MCP rate limiter uses non-atomic KV | `apps/api/src/routes/mcp/_helpers.ts` |
 | MEDIUM-1 | MEDIUM | CORS | Wildcard origin for port-forwarded workspace requests | `apps/api/src/index.ts:320-325` |
 | MEDIUM-2 | MEDIUM | Rate limiting | Token-login rate limit is IP-only | `apps/api/src/routes/smoke-test-tokens.ts:225-229` |
 | MEDIUM-3 | MEDIUM | Cookie security | Terminal token cookie missing SameSite=Strict | `apps/api/src/index.ts:238-256` |
@@ -434,6 +481,7 @@ Several error responses use `fmt.Sprintf(`{"error":"%s"}`, err.Error())` which c
 | MEDIUM-5 | MEDIUM | WebSocket | VM agent origin check accepts wildcard `*` | `packages/vm-agent/internal/server/websocket.go:30-39` |
 | MEDIUM-6 | MEDIUM | XSS | Mermaid SVG DOMPurify config needs verification | `apps/web/src/components/MarkdownRenderer.tsx:141` |
 | MEDIUM-7 | MEDIUM | Credential rotation | Codex scope validation defaults to warn-only | `apps/api/src/durable-objects/codex-refresh-lock.ts:354-371` |
+| MEDIUM-8 | MEDIUM | Token lifecycle | Smoke test tokens have no expiry | `apps/api/src/routes/smoke-test-tokens.ts` |
 | LOW-1 | LOW | Key management | No built-in key rotation mechanism | `apps/api/src/services/encryption.ts` |
 | LOW-2 | LOW | Session mgmt | Session not invalidated on role change | BetterAuth session layer |
 | LOW-3 | LOW | Multi-tenant | `requireWorkspaceOwnership` lacks SQL-level userId filter | `apps/api/src/middleware/workspace-auth.ts` |
