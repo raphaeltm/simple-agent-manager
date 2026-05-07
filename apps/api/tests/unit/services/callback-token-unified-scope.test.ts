@@ -94,6 +94,23 @@ describe('verifyCallbackToken — unified scope enforcement (F-010)', () => {
     expect(result.scope).toBe('node');
   });
 
+  it('rejects tokens with invalid scope values (empty string, unexpected string)', async () => {
+    const { verifyCallbackToken } = await import('../../../src/services/jwt');
+    const env = makeTestEnv();
+
+    // Empty string scope — invalid
+    const emptyScope = await signTestToken({ type: 'callback', workspace: 'ws-123', scope: '' });
+    await expect(
+      verifyCallbackToken(emptyScope, env)
+    ).rejects.toThrow(/Invalid token scope/);
+
+    // Unexpected scope value — invalid
+    const adminScope = await signTestToken({ type: 'callback', workspace: 'ws-123', scope: 'admin' });
+    await expect(
+      verifyCallbackToken(adminScope, env)
+    ).rejects.toThrow(/Invalid token scope/);
+  });
+
   it('contract: AI proxy path and direct verifyCallbackToken reject same tokens', async () => {
     const { verifyCallbackToken } = await import('../../../src/services/jwt');
     const env = makeTestEnv();
