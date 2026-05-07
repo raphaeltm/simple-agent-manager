@@ -12,15 +12,15 @@ This directory contains the durable output of the deep SAM codebase evaluation. 
 
 | Track | Report | Status |
 | --- | --- | --- |
-| 1. Data Model Integrity & Schema Design | `tracks/01-data-model.md` | Pending |
-| 2. Data Flow & Cross-Boundary Communication | `tracks/02-data-flow.md` | Pending |
-| 3. Code Organization & Agent Navigability | `tracks/03-code-organization.md` | Pending |
-| 4. Coding Standards & Consistency | `tracks/04-coding-standards.md` | Pending |
-| 5. Performance & Cost Efficiency | `tracks/05-performance-cost.md` | Pending |
-| 6. Testing & Experiment Infrastructure | `tracks/06-testing-experiments.md` | Pending |
-| 7. Security & Multi-Tenant Isolation | `tracks/07-security-isolation.md` | Pending |
-| 8. Architecture Alignment & Technical Debt | `tracks/08-architecture-debt.md` | Pending |
-| 9. Agent-Ready Repository Architecture | `tracks/09-agent-readiness.md` | Pending |
+| 1. Data Model Integrity & Schema Design | `tracks/01-data-model.md` | Complete |
+| 2. Data Flow & Cross-Boundary Communication | `tracks/02-data-flow.md` | Complete |
+| 3. Code Organization & Agent Navigability | `tracks/03-code-organization.md` | Complete |
+| 4. Coding Standards & Consistency | `tracks/04-coding-standards.md` | Complete |
+| 5. Performance & Cost Efficiency | `tracks/05-performance-cost.md` | Complete |
+| 6. Testing & Experiment Infrastructure | `tracks/06-testing-experiments.md` | Complete |
+| 7. Security & Multi-Tenant Isolation | `tracks/07-security-isolation.md` | Complete |
+| 8. Architecture Alignment & Technical Debt | `tracks/08-architecture-debt.md` | Complete |
+| 9. Agent-Ready Repository Architecture | `tracks/09-agent-readiness.md` | Complete |
 
 ## Synthesis Artifacts
 
@@ -60,3 +60,12 @@ Agents working on this evaluation must:
 4. Use specific code references with file paths and line numbers.
 5. Commit and push work frequently to the assigned branch.
 6. Avoid implementation changes unless explicitly requested; this phase is evaluation and task decomposition.
+
+## Orchestration Notes
+
+The evaluation was completed with nine SAM child tasks, respecting a five-active-subtask cap and staggered dispatch cadence. Child task reports were integrated from:
+
+- `sam/execute-task-using-skill-01kr08`
+- `sam/execute-task-using-skill-01kr09`
+
+Track 8 synthesized the completed track reports into an architecture debt map and implementation wave plan.
