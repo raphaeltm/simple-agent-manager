@@ -41,7 +41,7 @@ build-linux-arm64:
 
 # Run tests
 test:
-	$(GO) test -v ./...
+	$(GO) test -race -v ./...
 
 # Run integration tests (requires Docker and optionally devcontainer CLI)
 test-integration:

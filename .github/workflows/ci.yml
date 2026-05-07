@@ -297,7 +297,7 @@ jobs:
 
       - name: Run VM Agent tests
         working-directory: packages/vm-agent
-        run: go test ./...
+        run: go test -race ./...
 
   vm-agent-integration:
     name: VM Agent Integration
@@ -328,7 +328,7 @@ jobs:
 
       - name: Run VM Agent integration tests
         working-directory: packages/vm-agent
-        run: go test -v -tags integration -timeout 15m ./internal/bootstrap/ ./internal/acp/
+        run: go test -race -v -tags integration -timeout 15m ./internal/bootstrap/ ./internal/acp/
 
   vm-agent-e2e:
     name: VM Agent E2E
@@ -355,7 +355,7 @@ jobs:
 
       - name: Run VM Agent E2E tests
         working-directory: packages/vm-agent
-        run: go test -v -tags e2e -timeout 15m ./internal/e2e/
+        run: go test -race -v -tags e2e -timeout 15m ./internal/e2e/
 
   devcontainer:
     name: Devcontainer Validation
