@@ -24,6 +24,26 @@ docs/             # Documentation
 strategy/         # Strategic planning (competitive, business, marketing, engineering, content)
 ```
 
+## Nested AGENTS.md Files
+
+Each app and package has its own `AGENTS.md` with package-specific guidance (key files, commands, conventions, gotchas). **When working in a specific package, read its local `AGENTS.md` first** — it gives you the fastest path to understanding that package without reading the entire codebase.
+
+| Package | Has Local AGENTS.md |
+|---------|:---:|
+| `apps/api/` | Yes |
+| `apps/web/` | Yes |
+| `apps/www/` | Yes |
+| `apps/tail-worker/` | Yes |
+| `packages/vm-agent/` | Yes |
+| `packages/shared/` | Yes |
+| `packages/providers/` | Yes |
+| `packages/cloud-init/` | Yes |
+| `packages/terminal/` | Yes |
+| `packages/ui/` | Yes |
+| `packages/acp-client/` | Yes |
+
+**Precedence**: Nested `AGENTS.md` files provide package-specific details. This root file provides monorepo-wide rules, architecture, and cross-cutting concerns. If there is a conflict, the root file and `.claude/rules/` take precedence.
+
 ## Common Commands
 
 ```bash
