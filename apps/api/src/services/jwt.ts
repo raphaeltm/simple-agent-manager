@@ -189,7 +189,8 @@ export interface CallbackTokenPayload {
  */
 export async function verifyCallbackToken(
   token: string,
-  env: Env
+  env: Env,
+  options?: { expectedScope?: CallbackTokenScope }
 ): Promise<CallbackTokenPayload> {
   const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
   const issuer = getIssuer(env);
@@ -214,6 +215,11 @@ export async function verifyCallbackToken(
     throw new Error('Invalid token scope claim');
   }
   const scope = rawScope as CallbackTokenScope | undefined;
+
+  // Enforce expected scope when specified (unified scope check — F-010)
+  if (options?.expectedScope && scope !== options.expectedScope) {
+    throw new Error(`Token scope '${scope ?? 'undefined'}' does not match expected '${options.expectedScope}'`);
+  }
 
   return {
     workspace: payload.workspace,

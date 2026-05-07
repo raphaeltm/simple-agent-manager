@@ -233,7 +233,11 @@ Workspace callback tokens use a 24-hour lifetime because:
 
 1. **Workspaces run for extended periods** — agents may execute tasks lasting hours
 2. **Auto-refresh during heartbeats** — the VM agent sends periodic heartbeats; when a token passes the 50% threshold, the control plane issues a fresh token in the heartbeat response
-3. **Scope discrimination** — workspace-scoped tokens (`scope: "workspace"`) can access workspace-specific endpoints; node-scoped tokens (`scope: "node"`) are restricted to node-level operations. This prevents cross-workspace credential access on multi-tenant nodes.
+3. **Scope discrimination** — workspace-scoped tokens (`scope: "workspace"`) can access workspace-specific endpoints; node-scoped tokens (`scope: "node"`) are restricted to node-level operations. Scope enforcement is unified in `verifyCallbackToken()` via the `expectedScope` parameter (see `docs/architecture/callback-auth-contract.md`).
+
+### Bootstrap KV Encryption
+
+When callback tokens are stored in KV as part of bootstrap credential data (`BootstrapTokenData`), they are AES-GCM encrypted at rest — matching the encryption pattern used for Hetzner and GitHub tokens in the same blob. Fields: `encryptedCallbackToken` + `callbackTokenIv`. The deprecated `callbackToken` plaintext field is retained for backward compatibility with in-flight tokens. See `packages/shared/src/types/workspace.ts`.
 
 ## Accepted Risks
 

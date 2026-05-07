@@ -52,12 +52,8 @@ export async function verifyAIProxyAuth(
   env: Env,
   db: ReturnType<typeof drizzle>,
 ): Promise<AIProxyAuthResult> {
-  const tokenPayload = await verifyCallbackToken(token, env);
-
-  // Only workspace-scoped tokens are allowed (allowlist, not blocklist)
-  if (tokenPayload.scope !== 'workspace') {
-    throw new AIProxyAuthError('Insufficient token scope', 403);
-  }
+  // Unified scope check — rejects non-workspace tokens via verifyCallbackToken (F-010)
+  const tokenPayload = await verifyCallbackToken(token, env, { expectedScope: 'workspace' });
 
   const workspaceId = tokenPayload.workspace;
 
