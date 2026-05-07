@@ -254,8 +254,8 @@ describe('SAM Tool Definitions', () => {
 });
 
 describe('buildFtsQuery', () => {
-  it('wraps each word in double quotes', () => {
-    expect(buildFtsQuery('hello world')).toBe('"hello" "world"');
+  it('preserves safe search words', () => {
+    expect(buildFtsQuery('hello world')).toBe('hello world');
   });
 
   it('returns null for empty input', () => {
@@ -263,16 +263,17 @@ describe('buildFtsQuery', () => {
     expect(buildFtsQuery('   ')).toBeNull();
   });
 
-  it('escapes double quotes within words', () => {
-    expect(buildFtsQuery('say "hello"')).toBe('"say" """hello"""');
+  it('strips FTS5 punctuation and reserved operators', () => {
+    expect(buildFtsQuery('say "hello*" OR NEAR /etc/passwd')).toBe('say hello etc passwd');
+    expect(buildFtsQuery('AND OR NOT NEAR')).toBeNull();
   });
 
   it('handles single word', () => {
-    expect(buildFtsQuery('testing')).toBe('"testing"');
+    expect(buildFtsQuery('testing')).toBe('testing');
   });
 
   it('strips extra whitespace', () => {
-    expect(buildFtsQuery('  a   b  ')).toBe('"a" "b"');
+    expect(buildFtsQuery('  a   b  ')).toBe('a b');
   });
 });
 

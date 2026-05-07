@@ -1,6 +1,7 @@
 /**
  * Message storage, retrieval, batch persistence, search, and sequencing.
  */
+import { buildSafeFtsQuery } from '../../lib/fts5';
 import { log } from '../../lib/logger';
 import {
   parseChatMessageRow,
@@ -492,9 +493,7 @@ function searchMessagesLike(
 }
 
 export function buildFtsQuery(query: string): string | null {
-  const words = query.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return null;
-  return words.map((w) => `"${w.replace(/"/g, '""')}"`).join(' ');
+  return buildSafeFtsQuery(query);
 }
 
 export function extractSnippet(content: string, query: string): string {
