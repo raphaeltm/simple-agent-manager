@@ -26,6 +26,7 @@ jobs:
       vm-agent: ${{ steps.filter.outputs.vm-agent }}
       devcontainer: ${{ steps.filter.outputs.devcontainer }}
       devcontainer-volume-mount: ${{ steps.filter.outputs.devcontainer-volume-mount }}
+      web-ui: ${{ steps.filter.outputs.web-ui }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
@@ -43,6 +44,12 @@ jobs:
               - 'scripts/ci/**'
               - 'packages/vm-agent/**'
               - 'packages/cloud-init/**'
+              - '.github/workflows/ci.yml'
+            web-ui:
+              - 'apps/web/**'
+              - 'packages/ui/**'
+              - 'packages/terminal/**'
+              - 'packages/acp-client/**'
               - '.github/workflows/ci.yml'
 
   preflight-evidence:
@@ -192,6 +199,46 @@ jobs:
 
       - name: Build all packages
         run: pnpm build
+
+  playwright-visual:
+    name: Playwright Visual Tests
+    needs: [changes]
+    if: needs.changes.outputs.web-ui == 'true'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@8912a9102ac27614460f54aedde9e1e7f9aec20d # v6.0.5
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright visual audit tests
+        working-directory: apps/web
+        run: npx playwright test --reporter=list
+        env:
+          CI: true
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-screenshots
+          path: .codex/tmp/playwright-screenshots/
+          retention-days: 7
 
   deploy-scripts:
     name: Validate Deploy Scripts

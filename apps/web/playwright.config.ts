@@ -48,7 +48,7 @@ export default defineConfig({
     command: 'VITE_API_URL=http://localhost:4173 npx vite build && npx vite preview --port 4173',
     port: 4173,
     reuseExistingServer: true,
-    timeout: 60000,
+    timeout: process.env.CI ? 180000 : 60000,
     cwd: '.',
   },
 });
