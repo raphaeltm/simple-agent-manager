@@ -7,14 +7,23 @@
 
 import type { BootstrapTokenData } from '@simple-agent-manager/shared';
 
+import { getCredentialEncryptionKey } from '../lib/secrets';
+import { decrypt, encrypt } from './encryption';
+
 /** KV key prefix for bootstrap tokens */
 const BOOTSTRAP_PREFIX = 'bootstrap:';
 
 /** Default bootstrap token TTL in seconds (15 minutes) */
 const DEFAULT_BOOTSTRAP_TTL = 900;
 
+interface BootstrapEnv {
+  BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
+  ENCRYPTION_KEY: string;
+  CREDENTIAL_ENCRYPTION_KEY?: string;
+}
+
 /** Get bootstrap TTL from env or use default (per constitution principle XI) */
-export function getBootstrapTTL(env?: { BOOTSTRAP_TOKEN_TTL_SECONDS?: string }): number {
+export function getBootstrapTTL(env?: Pick<BootstrapEnv, 'BOOTSTRAP_TOKEN_TTL_SECONDS'>): number {
   if (env?.BOOTSTRAP_TOKEN_TTL_SECONDS) {
     const ttl = parseInt(env.BOOTSTRAP_TOKEN_TTL_SECONDS, 10);
     if (!isNaN(ttl) && ttl > 0) {
@@ -44,10 +53,25 @@ export async function storeBootstrapToken(
   kv: KVNamespace,
   token: string,
   data: BootstrapTokenData,
-  env?: { BOOTSTRAP_TOKEN_TTL_SECONDS?: string }
+  env: BootstrapEnv
 ): Promise<void> {
   const ttl = getBootstrapTTL(env);
-  await kv.put(`${BOOTSTRAP_PREFIX}${token}`, JSON.stringify(data), {
+  const { callbackToken, ...dataWithoutPlaintextCallbackToken } = data;
+  if (!callbackToken) {
+    throw new Error('Bootstrap callback token is required');
+  }
+
+  const encryptedCallbackToken = await encrypt(
+    callbackToken,
+    getCredentialEncryptionKey(env)
+  );
+  const storedData: BootstrapTokenData = {
+    ...dataWithoutPlaintextCallbackToken,
+    encryptedCallbackToken: encryptedCallbackToken.ciphertext,
+    callbackTokenIv: encryptedCallbackToken.iv,
+  };
+
+  await kv.put(`${BOOTSTRAP_PREFIX}${token}`, JSON.stringify(storedData), {
     expirationTtl: ttl,
   });
 }
@@ -63,7 +87,8 @@ export async function storeBootstrapToken(
  */
 export async function redeemBootstrapToken(
   kv: KVNamespace,
-  token: string
+  token: string,
+  env: BootstrapEnv
 ): Promise<BootstrapTokenData | null> {
   const key = `${BOOTSTRAP_PREFIX}${token}`;
 
@@ -76,5 +101,23 @@ export async function redeemBootstrapToken(
   // Delete immediately to enforce single-use
   await kv.delete(key);
 
-  return data;
+  if (data.encryptedCallbackToken && data.callbackTokenIv) {
+    const callbackToken = await decrypt(
+      data.encryptedCallbackToken,
+      data.callbackTokenIv,
+      getCredentialEncryptionKey(env)
+    );
+
+    return {
+      ...data,
+      callbackToken,
+    };
+  }
+
+  // Backward compatibility for bootstrap entries written before callback token encryption.
+  if (data.callbackToken) {
+    return data;
+  }
+
+  throw new Error('Bootstrap token data is missing callback token material');
 }

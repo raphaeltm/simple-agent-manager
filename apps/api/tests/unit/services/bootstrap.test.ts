@@ -1,11 +1,15 @@
 import type { BootstrapTokenData } from '@simple-agent-manager/shared';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock KV namespace
 const mockKV = {
   put: vi.fn(),
   get: vi.fn(),
   delete: vi.fn(),
+};
+
+const mockEnv = {
+  ENCRYPTION_KEY: 'iZEI8rg5FHtTo2yvt6Qw3m4z6aTfqj5MdLEGqOvdqw0=',
 };
 
 describe('Bootstrap Service', () => {
@@ -57,13 +61,21 @@ describe('Bootstrap Service', () => {
         createdAt: new Date().toISOString(),
       };
 
-      await storeBootstrapToken(mockKV as unknown as KVNamespace, token, data);
-
-      expect(mockKV.put).toHaveBeenCalledWith(
-        `bootstrap:${token}`,
-        JSON.stringify(data),
-        { expirationTtl: 900 } // 15 minutes
+      await storeBootstrapToken(
+        mockKV as unknown as KVNamespace,
+        token,
+        data,
+        mockEnv
       );
+
+      const storedJson = mockKV.put.mock.calls[0][1] as string;
+      const storedData = JSON.parse(storedJson) as BootstrapTokenData;
+      expect(storedData.callbackToken).toBeUndefined();
+      expect(storedData.encryptedCallbackToken).toEqual(expect.any(String));
+      expect(storedData.callbackTokenIv).toEqual(expect.any(String));
+      expect(mockKV.put).toHaveBeenCalledWith(`bootstrap:${token}`, storedJson, {
+        expirationTtl: 900,
+      });
     });
   });
 
@@ -77,7 +89,8 @@ describe('Bootstrap Service', () => {
 
       const result = await redeemBootstrapToken(
         mockKV as unknown as KVNamespace,
-        'non-existent-token'
+        'non-existent-token',
+        mockEnv
       );
 
       expect(result).toBeNull();
@@ -91,11 +104,18 @@ describe('Bootstrap Service', () => {
         '../../../src/services/bootstrap'
       );
 
+      const { encrypt } = await import('../../../src/services/encryption');
+
+      const encryptedCallbackToken = await encrypt(
+        'jwt-callback-token',
+        mockEnv.ENCRYPTION_KEY
+      );
       const data: BootstrapTokenData = {
         workspaceId: 'ws-123',
         encryptedHetznerToken: 'encrypted-hetzner',
         hetznerTokenIv: 'hetzner-iv',
-        callbackToken: 'jwt-callback-token',
+        encryptedCallbackToken: encryptedCallbackToken.ciphertext,
+        callbackTokenIv: encryptedCallbackToken.iv,
         encryptedGithubToken: null,
         githubTokenIv: null,
         createdAt: new Date().toISOString(),
@@ -105,10 +125,14 @@ describe('Bootstrap Service', () => {
 
       const result = await redeemBootstrapToken(
         mockKV as unknown as KVNamespace,
-        'valid-token'
+        'valid-token',
+        mockEnv
       );
 
-      expect(result).toEqual(data);
+      expect(result).toEqual({
+        ...data,
+        callbackToken: 'jwt-callback-token',
+      });
       expect(mockKV.get).toHaveBeenCalledWith('bootstrap:valid-token', {
         type: 'json',
       });
@@ -136,7 +160,12 @@ describe('Bootstrap Service', () => {
         createdAt: new Date().toISOString(),
       };
 
-      await storeBootstrapToken(mockKV as unknown as KVNamespace, token, data);
+      await storeBootstrapToken(
+        mockKV as unknown as KVNamespace,
+        token,
+        data,
+        mockEnv
+      );
 
       // Verify TTL is set to 900 seconds (15 minutes)
       expect(mockKV.put).toHaveBeenCalledWith(

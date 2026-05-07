@@ -246,7 +246,11 @@ export interface BootstrapTokenData {
   workspaceId: string;
   encryptedHetznerToken: string;
   hetznerTokenIv: string;
-  callbackToken: string;
+  /** Plaintext callback token accepted during creation and returned after redemption. */
+  callbackToken?: string;
+  /** AES-GCM encrypted callback token stored in KV. */
+  encryptedCallbackToken?: string | null;
+  callbackTokenIv?: string | null;
   encryptedGithubToken: string | null;
   githubTokenIv: string | null;
   gitUserName?: string | null;

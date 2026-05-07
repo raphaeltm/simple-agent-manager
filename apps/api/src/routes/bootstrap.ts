@@ -65,7 +65,7 @@ bootstrapRoutes.post('/:token', bootstrapRateLimit, async (c) => {
   const requestTime = Date.now();
 
   // Attempt to redeem token (get + delete)
-  const tokenData = await redeemBootstrapToken(c.env.KV, token);
+  const tokenData = await redeemBootstrapToken(c.env.KV, token, c.env);
 
   if (!tokenData) {
     logBootstrapAttempt(false, ip);
@@ -82,6 +82,19 @@ bootstrapRoutes.post('/:token', bootstrapRateLimit, async (c) => {
   const tokenCreatedAt = tokenData.createdAt ? new Date(tokenData.createdAt).getTime() : undefined;
   const tokenAge = tokenCreatedAt ? requestTime - tokenCreatedAt : undefined;
   logBootstrapAttempt(true, ip, tokenData.workspaceId, tokenAge);
+
+  if (!tokenData.callbackToken) {
+    log.warn('bootstrap.token_data_missing_callback_token', {
+      workspaceId: tokenData.workspaceId,
+    });
+    return c.json(
+      {
+        error: 'INVALID_TOKEN_DATA',
+        message: 'Bootstrap token data is invalid',
+      },
+      500
+    );
+  }
 
   // Decrypt the Hetzner token
   const hetznerToken = await decrypt(
