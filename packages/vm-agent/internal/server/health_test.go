@@ -179,12 +179,15 @@ func TestHeartbeatNoRefreshOnServerError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHeartbeatRetriesPendingReadyCallback(t *testing.T) {
+	var mu sync.Mutex
 	readyCalled := false
 	heartbeatCount := 0
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/heartbeat") {
+			mu.Lock()
 			heartbeatCount++
+			mu.Unlock()
 			resp := heartbeatResponse{
 				Status:          "running",
 				LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
@@ -195,7 +198,9 @@ func TestHeartbeatRetriesPendingReadyCallback(t *testing.T) {
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/ready") {
+			mu.Lock()
 			readyCalled = true
+			mu.Unlock()
 			if got := r.Header.Get("Authorization"); got != "Bearer ws-token-123" {
 				t.Errorf("unexpected auth header on ready retry: %s", got)
 			}
@@ -240,14 +245,20 @@ func TestHeartbeatRetriesPendingReadyCallback(t *testing.T) {
 	// Heartbeat should trigger the pending callback retry (runs in background goroutine)
 	s.sendNodeHeartbeat()
 
-	if heartbeatCount != 1 {
-		t.Fatalf("expected 1 heartbeat, got %d", heartbeatCount)
+	mu.Lock()
+	hbCount := heartbeatCount
+	mu.Unlock()
+	if hbCount != 1 {
+		t.Fatalf("expected 1 heartbeat, got %d", hbCount)
 	}
 
 	// Wait for background retry goroutine to complete
 	time.Sleep(100 * time.Millisecond)
 
-	if !readyCalled {
+	mu.Lock()
+	called := readyCalled
+	mu.Unlock()
+	if !called {
 		t.Fatal("expected workspace-ready callback to be retried after heartbeat")
 	}
 
@@ -421,6 +432,7 @@ func TestHeartbeatRetryTransientErrorKeepsPending(t *testing.T) {
 }
 
 func TestHeartbeatRetryUsesNodeTokenWhenWorkspaceHasNone(t *testing.T) {
+	var mu sync.Mutex
 	var receivedAuth string
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -435,7 +447,9 @@ func TestHeartbeatRetryUsesNodeTokenWhenWorkspaceHasNone(t *testing.T) {
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/ready") {
+			mu.Lock()
 			receivedAuth = r.Header.Get("Authorization")
+			mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -472,8 +486,11 @@ func TestHeartbeatRetryUsesNodeTokenWhenWorkspaceHasNone(t *testing.T) {
 	// Wait for background retry goroutine to complete
 	time.Sleep(100 * time.Millisecond)
 
-	if receivedAuth != "Bearer node-level-token" {
-		t.Fatalf("expected retry to use node-level token, got %q", receivedAuth)
+	mu.Lock()
+	auth := receivedAuth
+	mu.Unlock()
+	if auth != "Bearer node-level-token" {
+		t.Fatalf("expected retry to use node-level token, got %q", auth)
 	}
 }
 
