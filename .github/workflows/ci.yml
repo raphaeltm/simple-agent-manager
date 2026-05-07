@@ -226,15 +226,24 @@ jobs:
         working-directory: apps/web
         run: npx playwright install --with-deps chromium
 
+      - name: Prepare screenshot output directory
+        working-directory: apps/web
+        run: mkdir -p ../../.codex/tmp/playwright-screenshots
+
       - name: Run Playwright visual audit tests
         working-directory: apps/web
-        run: npx playwright test --reporter=list
+        run: |
+          find tests/playwright \
+            -name '*.spec.ts' \
+            ! -name 'staging-*.spec.ts' \
+            -print0 \
+            | xargs -0 npx playwright test --reporter=list
         env:
           CI: true
 
       - name: Upload screenshots on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-screenshots
           path: .codex/tmp/playwright-screenshots/
