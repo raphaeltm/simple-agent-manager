@@ -218,7 +218,7 @@ export async function verifyCallbackToken(
 
   // Enforce expected scope when specified (unified scope check — F-010)
   if (options?.expectedScope && scope !== options.expectedScope) {
-    throw new Error(`Token scope '${scope ?? 'undefined'}' does not match expected '${options.expectedScope}'`);
+    throw new Error(`Token scope '${scope ?? 'none'}' does not match expected '${options.expectedScope}'`);
   }
 
   return {

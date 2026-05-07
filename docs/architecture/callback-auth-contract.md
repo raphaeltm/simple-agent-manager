@@ -47,15 +47,20 @@ Callers that require a specific scope pass `expectedScope`:
 |--------|------|---------------|
 | `verifyAIProxyAuth()` | `apps/api/src/services/ai-proxy-shared.ts` | `workspace` |
 
-Callers that accept any scope omit `expectedScope`:
+Callers that enforce scope manually (omit `expectedScope`, check `payload.scope` inline):
 
 | Caller | File | Notes |
 |--------|------|-------|
-| `verifyWorkspaceCallbackAuth()` | `apps/api/src/routes/workspaces/_helpers.ts` | Verifies workspace ownership separately |
+| `verifyWorkspaceCallbackAuth()` | `apps/api/src/routes/workspaces/_helpers.ts` | Rejects `node` scope; accepts `workspace` and legacy (undefined) with warning log |
+| Codex refresh proxy | `apps/api/src/routes/codex-refresh.ts` | Rejects `node` scope; accepts `workspace` and legacy |
+| ACP heartbeat | `apps/api/src/routes/projects/node-acp-heartbeat.ts` | Rejects legacy (scopeless) tokens; accepts `workspace` and `node` |
+
+Callers that accept any valid scope (omit `expectedScope`, no manual check):
+
+| Caller | File | Notes |
+|--------|------|-------|
 | Node lifecycle heartbeat | `apps/api/src/routes/node-lifecycle.ts` | Accepts both node and workspace tokens |
-| Codex refresh proxy | `apps/api/src/routes/codex-refresh.ts` | Workspace token passed via query param |
 | Task completion | `apps/api/src/routes/tasks/crud.ts` | Workspace callback for task status |
-| ACP heartbeat | `apps/api/src/routes/projects/node-acp-heartbeat.ts` | Session heartbeat |
 
 ### Legacy Token Handling
 
