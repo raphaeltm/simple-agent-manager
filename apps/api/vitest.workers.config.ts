@@ -20,7 +20,7 @@ export default defineConfig({
         // 2024-04-03+ required for DO RPC (calling methods directly on stubs)
         compatibilityDate: '2024-04-03',
         compatibilityFlags: ['nodejs_compat'],
-        d1Databases: ['DATABASE'],
+        d1Databases: ['DATABASE', 'OBSERVABILITY_DATABASE'],
         kvNamespaces: ['KV'],
         r2Buckets: ['R2'],
         durableObjects: {
@@ -50,6 +50,12 @@ export default defineConfig({
             className: 'ProjectAgent',
             useSQLite: true,
           },
+          TASK_RUNNER: {
+            className: 'TaskRunner',
+          },
+          NODE_LIFECYCLE: {
+            className: 'NodeLifecycle',
+          },
         },
         bindings: {
           BASE_DOMAIN: 'test.example.com',
@@ -70,6 +76,8 @@ export default defineConfig({
           TRIAL_SSE_HEARTBEAT_MS: '60000',
           TRIAL_SSE_POLL_TIMEOUT_MS: '500',
           TRIAL_SSE_MAX_DURATION_MS: '5000',
+          NODE_WARM_TIMEOUT_MS: '5000',
+          WORKSPACE_STOPPED_TTL_MS: '3000',
         },
       },
     }),
