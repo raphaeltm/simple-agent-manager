@@ -456,8 +456,8 @@ function searchMessagesLike(
   limit: number,
   onlyNonMaterialized: boolean = false
 ): SearchResult[] {
-  const conditions: string[] = ['m.content LIKE ?'];
   const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
+  const conditions: string[] = ["m.content LIKE ? ESCAPE '\\'"];
   const params: (string | number)[] = [`%${escapedQuery}%`];
 
   if (sessionId) {
