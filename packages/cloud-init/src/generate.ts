@@ -93,6 +93,11 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       errors.push(`taskMode: must be 'task' or 'conversation' (got ${JSON.stringify(variables.taskMode)})`);
     }
   }
+  if (variables.provider !== undefined && variables.provider !== '') {
+    if (!VALID_CLOUD_PROVIDERS.includes(variables.provider as CloudProvider)) {
+      errors.push(`provider: must be one of ${VALID_CLOUD_PROVIDERS.join(', ')} (got ${JSON.stringify(variables.provider)})`);
+    }
+  }
   if (variables.logJournalMaxUse !== undefined && variables.logJournalMaxUse !== '') {
     if (!JOURNALD_SIZE_RE.test(variables.logJournalMaxUse)) {
       errors.push(`logJournalMaxUse: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalMaxUse)})`);
@@ -129,6 +134,10 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
   }
 }
 
+/** Valid cloud provider values for cloud-init. */
+export const VALID_CLOUD_PROVIDERS = ['hetzner', 'scaleway', 'gcp'] as const;
+export type CloudProvider = (typeof VALID_CLOUD_PROVIDERS)[number];
+
 /**
  * Variables for cloud-init generation.
  */
@@ -138,6 +147,8 @@ export interface CloudInitVariables {
   controlPlaneUrl: string;
   jwksUrl: string;
   callbackToken: string;
+  /** Cloud provider (hetzner, scaleway, gcp). Used for provider-specific apt mirrors. */
+  provider?: string;
   /** journald SystemMaxUse (default: 500M) */
   logJournalMaxUse?: string;
   /** journald SystemKeepFree (default: 1G) */
@@ -204,6 +215,7 @@ export function generateCloudInit(
     '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
+    '{{ provider }}': variables.provider ?? '',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.

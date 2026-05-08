@@ -1299,6 +1299,93 @@ describe('regex injection prevention ($-pattern in replacement values)', () => {
   });
 });
 
+describe('provider field and apt mirror configuration', () => {
+  it('substitutes PROVIDER env var in systemd service when provider is set', () => {
+    const config = generateCloudInit(baseVariables({ provider: 'hetzner' }));
+    expect(config).toContain('Environment=PROVIDER=hetzner');
+  });
+
+  it('produces empty PROVIDER env var when provider is undefined', () => {
+    const config = generateCloudInit(baseVariables());
+    expect(config).toContain('Environment=PROVIDER=');
+    expect(config).not.toContain('PROVIDER=undefined');
+  });
+
+  it('includes apt retry configuration in write_files', () => {
+    const config = generateCloudInit(baseVariables());
+    const parsed = YAML.parse(config);
+
+    const aptRetry = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/apt/apt.conf.d/80-retries'
+    );
+    expect(aptRetry).toBeDefined();
+    expect(aptRetry.content).toContain('Acquire::Retries "3"');
+    expect(aptRetry.content).toContain('Acquire::http::Timeout "30"');
+    expect(aptRetry.content).toContain('Acquire::https::Timeout "30"');
+  });
+
+  it('includes provider-specific apt mirror script in write_files', () => {
+    const config = generateCloudInit(baseVariables({ provider: 'hetzner' }));
+    const parsed = YAML.parse(config);
+
+    const mirrorScript = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sam/apt-mirror-config.sh'
+    );
+    expect(mirrorScript).toBeDefined();
+    expect(mirrorScript.permissions).toBe('0755');
+    expect(mirrorScript.content).toContain('PROVIDER="hetzner"');
+    expect(mirrorScript.content).toContain('APT_MIRROR="mirror.hetzner.com"');
+  });
+
+  it('apt mirror script sets empty APT_MIRROR for non-hetzner providers', () => {
+    const config = generateCloudInit(baseVariables({ provider: 'scaleway' }));
+    const parsed = YAML.parse(config);
+
+    const mirrorScript = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sam/apt-mirror-config.sh'
+    );
+    expect(mirrorScript).toBeDefined();
+    expect(mirrorScript.content).toContain('PROVIDER="scaleway"');
+    // The default case sets APT_MIRROR=""
+    expect(mirrorScript.content).toContain('APT_MIRROR=""');
+  });
+
+  it('apt mirror script sets empty PROVIDER when provider is omitted', () => {
+    const config = generateCloudInit(baseVariables());
+    const parsed = YAML.parse(config);
+
+    const mirrorScript = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sam/apt-mirror-config.sh'
+    );
+    expect(mirrorScript).toBeDefined();
+    expect(mirrorScript.content).toContain('PROVIDER=""');
+  });
+});
+
+describe('validateCloudInitVariables — provider field', () => {
+  it('accepts valid provider values', () => {
+    for (const provider of ['hetzner', 'scaleway', 'gcp']) {
+      expect(() => validateCloudInitVariables(baseVariables({ provider }))).not.toThrow();
+    }
+  });
+
+  it('accepts empty string for provider', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ provider: '' }))).not.toThrow();
+  });
+
+  it('accepts undefined provider', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ provider: undefined }))).not.toThrow();
+  });
+
+  it('rejects invalid provider', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ provider: 'aws' }))).toThrow('provider');
+  });
+
+  it('rejects provider with shell metacharacters', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ provider: 'hetzner; rm -rf /' }))).toThrow('provider');
+  });
+});
+
 describe('integrated size validation in generateCloudInit', () => {
   it('throws when output exceeds 32KB (default behavior)', () => {
     // Create variables that will produce a config exceeding 32KB

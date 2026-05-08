@@ -75,6 +75,7 @@ write_files:
       Environment=VM_AGENT_PORT={{ vm_agent_port }}
       Environment=TLS_CERT_PATH={{ tls_cert_path }}
       Environment=TLS_KEY_PATH={{ tls_key_path }}
+      Environment=PROVIDER={{ provider }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5
@@ -279,6 +280,31 @@ write_files:
     content: |
       {{ origin_ca_key }}
     permissions: '0600'
+
+  - path: /etc/apt/apt.conf.d/80-retries
+    content: |
+      Acquire::Retries "3";
+      Acquire::http::Timeout "30";
+      Acquire::https::Timeout "30";
+    permissions: '0644'
+
+  - path: /etc/sam/apt-mirror-config.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Provider-specific apt mirror configuration for Docker containers.
+      # Sourced by the VM agent bootstrap to inject fast mirrors into containers.
+      # Only overrides for providers with known fast local mirrors.
+      PROVIDER="{{ provider }}"
+      case "$PROVIDER" in
+        hetzner)
+          APT_MIRROR="mirror.hetzner.com"
+          ;;
+        *)
+          APT_MIRROR=""
+          ;;
+      esac
+      export APT_MIRROR
 
 final_message: "Simple Agent Manager node {{ node_id }} provisioning started!"
 `;
