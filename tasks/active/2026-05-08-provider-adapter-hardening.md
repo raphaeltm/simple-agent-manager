@@ -49,7 +49,7 @@ This does not meet the quality bar for infrastructure software. Malformed provid
 - [x] Run and record provider package `lint`, `typecheck`, and `test`.
 - [x] Run and record broader `/do` quality checks. Root `pnpm lint` passed with pre-existing warnings outside `packages/providers`; root `pnpm typecheck` passed; root `pnpm build` passed; root `pnpm test` passed after a targeted quality-gate repair for `apps/api/tests/unit/durable-objects/project-agent.test.ts`; standalone `pnpm --filter @simple-agent-manager/api test` passed. After review fixes, provider `lint`/`typecheck`/`test`, root `lint`, root `typecheck`, root `build`, and root `test` passed again.
 - [x] Complete specialist review for infrastructure/security/config/test/docs changes before staging. Review summaries were received from security/BYOC, Constitution/config, documentation sync, and provider test reviewers; security blocking findings C-1 and H-3 were addressed before staging.
-- [ ] Deploy the branch to staging via GitHub Actions and verify the changed provider path as far as staging credentials allow. If exact GCP/Scaleway verification is blocked by missing credentials/provider availability, comment on the PR, label it `needs-human-review`, notify the human, and do not merge.
+- [ ] Deploy the branch to staging via GitHub Actions and verify the changed provider path as far as staging credentials allow. Blocked: staging workflow run `25535524173` failed at `Deploy API Worker` with Cloudflare Wrangler error `10074` (`ProjectData` `new_sqlite_class` migration already depended on by existing Durable Objects). Filed `tasks/backlog/2026-05-08-staging-projectdata-sqlite-migration-blocker.md`; PR must be labeled/commented `needs-human-review` and must not merge.
 
 ## Acceptance Criteria
 
