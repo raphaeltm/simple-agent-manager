@@ -226,6 +226,7 @@ app.use('*', async (c, next) => {
                 Location: redirectUrl.toString(),
                 'Set-Cookie': `sam_port_access=${portToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${cookieMaxAge}`,
                 'Cache-Control': 'no-store',
+                'Referrer-Policy': 'no-referrer',
               },
             });
             userId = payload.subject;
@@ -248,7 +249,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 <p>Your access to this port has expired or is invalid.</p>
 <p>Ask the agent to run <code>expose_port</code> again for a fresh link.</p>
 </body></html>`,
-        { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } },
+        { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } },
       );
     }
 
@@ -312,11 +313,6 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   // This ensures the cookie is only set after the D1 ownership check passes.
   if (portAccessRedirect) {
     return portAccessRedirect;
-  }
-
-  // 5d: Strip port_token from URL before logging to prevent token leakage into logs.
-  if (url.searchParams.has('port_token')) {
-    url.searchParams.delete('port_token');
   }
 
   // Proxy to the VM agent via its proxied (orange-clouded) backend hostname.
@@ -396,9 +392,13 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   // 5e: Strip Set-Cookie headers from container responses on port-proxy path.
   // Prevents a malicious container app from overwriting the sam_port_access cookie.
   if (targetPort !== null) {
-    const sanitized = new Response(response.body, response);
-    sanitized.headers.delete('set-cookie');
-    return sanitized;
+    const headers = new Headers(response.headers);
+    headers.delete('set-cookie');
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
   }
 
   return response;

@@ -125,6 +125,27 @@ describe('workspace proxy port-access auth', () => {
     expect(await response.text()).toBe('proxied');
   });
 
+  it('rejects cookie for wrong port (port 3000 cookie on port 8080 subdomain)', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000, // Cookie JWT is for port 3000
+      subject: 'user-1',
+    });
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--8080.workspaces.example.com/`, {
+        headers: { cookie: 'sam_port_access=wrong-port-cookie-jwt' },
+      }),
+      env,
+    );
+
+    // Cookie port (3000) !== subdomain port (8080) → HTML 401
+    expect(response.status).toBe(401);
+    const body = await response.text();
+    expect(body).toContain('Session expired');
+    expect(response.headers.get('content-type')).toContain('text/html');
+  });
+
   it('rejects token for wrong port (port 3000 token on port 8080 subdomain)', async () => {
     mockVerifyPortAccessToken.mockResolvedValue({
       workspace: WORKSPACE_ID,

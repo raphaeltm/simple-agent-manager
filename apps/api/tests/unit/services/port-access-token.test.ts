@@ -43,7 +43,7 @@ describe('port access token — sign/verify', () => {
     expect(payload.subject).toBe('user-1');
   });
 
-  it('rejects token with wrong workspace', async () => {
+  it('payload reflects signed workspace claim (mismatch enforced by proxy)', async () => {
     const { signPortAccessToken, verifyPortAccessToken } = await import(
       '../../../src/services/jwt'
     );
@@ -51,12 +51,11 @@ describe('port access token — sign/verify', () => {
     const token = await signPortAccessToken('user-1', 'ws-abc', 3000, env);
     const payload = await verifyPortAccessToken(token, env);
 
-    // Token is valid but workspace mismatch must be caught by the caller
+    // verifyPortAccessToken returns claims; caller (proxy) enforces workspace match
     expect(payload.workspace).toBe('ws-abc');
-    expect(payload.workspace).not.toBe('ws-other');
   });
 
-  it('rejects token with wrong port', async () => {
+  it('payload reflects signed port claim (mismatch enforced by proxy)', async () => {
     const { signPortAccessToken, verifyPortAccessToken } = await import(
       '../../../src/services/jwt'
     );
@@ -64,9 +63,8 @@ describe('port access token — sign/verify', () => {
     const token = await signPortAccessToken('user-1', 'ws-abc', 3000, env);
     const payload = await verifyPortAccessToken(token, env);
 
-    // Token is valid but port mismatch must be caught by the caller
+    // verifyPortAccessToken returns claims; caller (proxy) enforces port match
     expect(payload.port).toBe(3000);
-    expect(payload.port).not.toBe(8080);
   });
 
   it('rejects expired token', async () => {
