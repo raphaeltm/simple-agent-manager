@@ -588,6 +588,38 @@ describe('JWT Token Contract', () => {
     });
   });
 
+  describe('verifyTerminalToken', () => {
+    it('verifies terminal token workspace and subject claims', async () => {
+      const { signTerminalToken, verifyTerminalToken } = await import('../../src/services/jwt');
+
+      const env = {
+        JWT_PRIVATE_KEY: testPrivateKey,
+        JWT_PUBLIC_KEY: testPublicKey,
+        BASE_DOMAIN: 'example.com',
+      } as any;
+
+      const { token } = await signTerminalToken('user-terminal', 'ws-terminal', env);
+      const payload = await verifyTerminalToken(token, env);
+
+      expect(payload.workspace).toBe('ws-terminal');
+      expect(payload.subject).toBe('user-terminal');
+    });
+
+    it('rejects callback tokens as terminal tokens', async () => {
+      const { signCallbackToken, verifyTerminalToken } = await import('../../src/services/jwt');
+
+      const env = {
+        JWT_PRIVATE_KEY: testPrivateKey,
+        JWT_PUBLIC_KEY: testPublicKey,
+        BASE_DOMAIN: 'example.com',
+      } as any;
+
+      const token = await signCallbackToken('ws-terminal', env);
+
+      await expect(verifyTerminalToken(token, env)).rejects.toThrow();
+    });
+  });
+
   describe('signNodeManagementToken', () => {
     it('produces a token with correct claims for workspace-scoped request', async () => {
       const { signNodeManagementToken } = await import('../../src/services/jwt');

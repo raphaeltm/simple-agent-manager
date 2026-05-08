@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockGetSession = vi.fn();
+const mockVerifyTerminalToken = vi.fn();
+const mockSignTerminalToken = vi.fn();
 let workspaceResult: { nodeId: string; status: string } | null = null;
 
 vi.mock('../../src/auth', () => ({
@@ -9,6 +11,11 @@ vi.mock('../../src/auth', () => ({
       getSession: mockGetSession,
     },
   })),
+}));
+
+vi.mock('../../src/services/jwt', () => ({
+  verifyTerminalToken: mockVerifyTerminalToken,
+  signTerminalToken: mockSignTerminalToken,
 }));
 
 vi.mock('cloudflare:workers', () => ({
@@ -51,6 +58,14 @@ describe('workspace subdomain proxy ownership', () => {
       user: { id: 'user-owner' },
       session: { id: 'session-owner', expiresAt: new Date() },
     });
+    mockVerifyTerminalToken.mockResolvedValue({
+      workspace: OWNER_WORKSPACE_ID,
+      subject: 'user-owner',
+    });
+    mockSignTerminalToken.mockResolvedValue({
+      token: 'backend-port-token',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('proxied', { status: 200 })),
@@ -66,6 +81,57 @@ describe('workspace subdomain proxy ownership', () => {
     );
 
     expect(response.status).toBe(401);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('proxies workspace subdomain requests authorized by terminal token when no app session cookie is present', async () => {
+    mockGetSession.mockResolvedValue(null);
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/agent/ws?token=valid-terminal-token`),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockVerifyTerminalToken).toHaveBeenCalledWith('valid-terminal-token', env);
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    const firstFetchCall = vi.mocked(globalThis.fetch).mock.calls.at(0);
+    expect(firstFetchCall).toBeDefined();
+    const proxiedUrl = new URL(String(firstFetchCall?.[0]));
+    expect(proxiedUrl.hostname).toBe('node-owner.vm.workspaces.example.com');
+    expect(proxiedUrl.searchParams.get('token')).toBe('valid-terminal-token');
+  });
+
+  it('rejects terminal tokens for a different workspace', async () => {
+    mockGetSession.mockResolvedValue(null);
+    mockVerifyTerminalToken.mockResolvedValue({
+      workspace: OTHER_WORKSPACE_ID,
+      subject: 'user-owner',
+    });
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/agent/ws?token=wrong-workspace-token`),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects terminal tokens when the token subject does not own the workspace', async () => {
+    mockGetSession.mockResolvedValue(null);
+    mockVerifyTerminalToken.mockResolvedValue({
+      workspace: OTHER_WORKSPACE_ID,
+      subject: 'user-other',
+    });
+    workspaceResult = null;
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${OTHER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/agent/ws?token=other-user-token`),
+      env,
+    );
+
+    expect(response.status).toBe(404);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
