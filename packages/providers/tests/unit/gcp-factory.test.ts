@@ -1,6 +1,7 @@
 import { describe, expect,it } from 'vitest';
 
 import { createProvider, DEFAULT_GCP_AGENT_PORTS, DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GcpProvider } from '../../src/index';
+import { testCidr } from './test-helpers';
 
 describe('createProvider with GCP', () => {
   it('should return GcpProvider for gcp config', () => {
@@ -29,7 +30,7 @@ describe('createProvider with GCP', () => {
       provider: 'gcp',
       projectId: 'test-project',
       tokenProvider: async () => 'test-token',
-      firewallSourceRanges: ['10.0.0.0/8'],
+      firewallSourceRanges: [testCidr(10, 0, 0, 0, 8)],
       agentPorts: ['9443'],
     });
 
@@ -37,8 +38,8 @@ describe('createProvider with GCP', () => {
   });
 
   it('should export documented GCP firewall defaults', () => {
-    expect(DEFAULT_GCP_FIREWALL_SOURCE_RANGES).toContain('173.245.48.0/20');
-    expect(DEFAULT_GCP_FIREWALL_SOURCE_RANGES).not.toContain('0.0.0.0/0');
+    expect(DEFAULT_GCP_FIREWALL_SOURCE_RANGES).toContain(testCidr(173, 245, 48, 0, 20));
+    expect(DEFAULT_GCP_FIREWALL_SOURCE_RANGES).not.toContain(testCidr(0, 0, 0, 0, 0));
     expect(DEFAULT_GCP_AGENT_PORTS).toEqual(['8080', '8443']);
   });
 });

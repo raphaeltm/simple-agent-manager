@@ -3,7 +3,7 @@ import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 import { HetznerProvider } from '../../src/hetzner';
 import { ProviderError } from '../../src/types';
 import { createMockServer } from '../fixtures/hetzner-mocks';
-import { expectDefined, fetchCall } from './test-helpers';
+import { expectDefined, fetchCall, testIpv4 } from './test-helpers';
 
 describe('HetznerProvider lifecycle', () => {
   let provider: HetznerProvider;
@@ -85,8 +85,8 @@ describe('HetznerProvider lifecycle', () => {
   describe('listVMs', () => {
     const mockServers = {
       servers: [
-        createMockServer({ id: 1, name: 's1', public_net: { ipv4: { ip: '1.1.1.1' } }, server_type: { name: 'cx23' }, created: '2024-01-01T00:00:00Z', labels: { managed: 'sam' } }),
-        createMockServer({ id: 2, name: 's2', status: 'off', public_net: { ipv4: { ip: '2.2.2.2' } }, server_type: { name: 'cx33' }, created: '2024-01-02T00:00:00Z', labels: { managed: 'sam' } }),
+        createMockServer({ id: 1, name: 's1', public_net: { ipv4: { ip: testIpv4(1, 1, 1, 1) } }, server_type: { name: 'cx23' }, created: '2024-01-01T00:00:00Z', labels: { managed: 'sam' } }),
+        createMockServer({ id: 2, name: 's2', status: 'off', public_net: { ipv4: { ip: testIpv4(2, 2, 2, 2) } }, server_type: { name: 'cx33' }, created: '2024-01-02T00:00:00Z', labels: { managed: 'sam' } }),
       ],
     };
 

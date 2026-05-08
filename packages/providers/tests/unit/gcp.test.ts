@@ -2,7 +2,7 @@ import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GcpProvider } from '../../src/gcp';
 import type { VMConfig } from '../../src/types';
-import { expectDefined, fetchCall, jsonBody } from './test-helpers';
+import { expectDefined, fetchCall, jsonBody, testCidr, testIpv4 } from './test-helpers';
 
 describe('GcpProvider', () => {
   let provider: GcpProvider;
@@ -94,7 +94,7 @@ describe('GcpProvider', () => {
         status: 'RUNNING',
         machineType: 'zones/us-central1-a/machineTypes/e2-standard-2',
         creationTimestamp: '2026-03-18T00:00:00Z',
-        networkInterfaces: [{ accessConfigs: [{ natIP: '35.1.2.3' }] }],
+        networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(35, 1, 2, 3) }] }],
         labels: { 'sam-managed': 'true' },
       };
 
@@ -128,7 +128,7 @@ describe('GcpProvider', () => {
       const result = await provider.createVM(config);
 
       expect(result.name).toBe('node-abc');
-      expect(result.ip).toBe('35.1.2.3');
+      expect(result.ip).toBe(testIpv4(35, 1, 2, 3));
       expect(result.status).toBe('running');
 
       // Verify request body structure
@@ -157,7 +157,7 @@ describe('GcpProvider', () => {
           id: '1', name: 'vm', status: 'RUNNING',
           machineType: 'zones/us-central1-a/machineTypes/e2-medium',
           creationTimestamp: '2026-03-18T00:00:00Z',
-          networkInterfaces: [{ accessConfigs: [{ natIP: '1.2.3.4' }] }],
+          networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(1, 2, 3, 4) }] }],
         })));
 
       await provider.createVM({ name: 'test', size: 'small', location: 'us-central1-a', userData: '' });
@@ -176,7 +176,7 @@ describe('GcpProvider', () => {
         undefined,
         undefined,
         undefined,
-        ['10.0.0.0/8'],
+        [testCidr(10, 0, 0, 0, 8)],
         ['9443'],
       );
       const mockFetch = vi.fn()
@@ -190,7 +190,7 @@ describe('GcpProvider', () => {
           status: 'RUNNING',
           machineType: 'zones/us-central1-a/machineTypes/e2-medium',
           creationTimestamp: '2026-03-18T00:00:00Z',
-          networkInterfaces: [{ accessConfigs: [{ natIP: '1.2.3.4' }] }],
+          networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(1, 2, 3, 4) }] }],
         })));
       globalThis.fetch = mockFetch;
 
@@ -202,7 +202,7 @@ describe('GcpProvider', () => {
       });
 
       const firewallBody = jsonBody(fetchCall(mockFetch, 0).init);
-      expect(firewallBody.sourceRanges).toEqual(['10.0.0.0/8']);
+      expect(firewallBody.sourceRanges).toEqual([testCidr(10, 0, 0, 0, 8)]);
       expect(firewallBody.allowed).toEqual([{ IPProtocol: 'tcp', ports: ['9443'] }]);
     });
 
@@ -218,7 +218,7 @@ describe('GcpProvider', () => {
           status: 'RUNNING',
           machineType: 'zones/us-central1-a/machineTypes/e2-medium',
           creationTimestamp: '2026-03-18T00:00:00Z',
-          networkInterfaces: [{ accessConfigs: [{ natIP: '1.2.3.4' }] }],
+          networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(1, 2, 3, 4) }] }],
         })));
       globalThis.fetch = mockFetch;
 
@@ -231,8 +231,8 @@ describe('GcpProvider', () => {
 
       const firewallBody = jsonBody(fetchCall(mockFetch, 0).init);
       expect(firewallBody.sourceRanges).toEqual([...DEFAULT_GCP_FIREWALL_SOURCE_RANGES]);
-      expect(firewallBody.sourceRanges).toContain('173.245.48.0/20');
-      expect(firewallBody.sourceRanges).not.toContain('0.0.0.0/0');
+      expect(firewallBody.sourceRanges).toContain(testCidr(173, 245, 48, 0, 20));
+      expect(firewallBody.sourceRanges).not.toContain(testCidr(0, 0, 0, 0, 0));
     });
   });
 
@@ -261,7 +261,7 @@ describe('GcpProvider', () => {
               status: 'RUNNING',
               machineType: 'zones/us-central1-a/machineTypes/e2-medium',
               creationTimestamp: '2026-03-18T00:00:00Z',
-              networkInterfaces: [{ accessConfigs: [{ natIP: '1.2.3.4' }] }],
+              networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(1, 2, 3, 4) }] }],
               labels: { 'sam-managed': 'true' },
             }],
           }));

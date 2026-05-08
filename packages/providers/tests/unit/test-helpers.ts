@@ -26,3 +26,11 @@ export function expectDefined<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) throw new Error('Expected value to be defined');
   return value;
 }
+
+export function testIpv4(a: number, b: number, c: number, d: number): string {
+  return `${a}.${b}.${c}.${d}`;
+}
+
+export function testCidr(a: number, b: number, c: number, d: number, prefix: number): string {
+  return `${testIpv4(a, b, c, d)}/${prefix}`;
+}

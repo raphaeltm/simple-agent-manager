@@ -4,7 +4,7 @@ import { HetznerProvider } from '../../src/hetzner';
 import type { VMConfig } from '../../src/types';
 import { ProviderError } from '../../src/types';
 import { createMockServer } from '../fixtures/hetzner-mocks';
-import { fetchCall, jsonBody } from './test-helpers';
+import { fetchCall, jsonBody, testIpv4 } from './test-helpers';
 
 describe('HetznerProvider', () => {
   let provider: HetznerProvider;
@@ -186,7 +186,7 @@ describe('HetznerProvider', () => {
       expect(result).toEqual({
         id: '12345',
         name: 'test-server',
-        ip: '1.2.3.4',
+        ip: testIpv4(1, 2, 3, 4),
         status: 'initializing',
         serverType: 'cx33',
         createdAt: '2024-01-24T12:00:00Z',

@@ -3,7 +3,7 @@ import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 import { ScalewayProvider } from '../../src/scaleway';
 import { ProviderError } from '../../src/types';
 import { createMockScalewayServer, createScalewayFetchMock } from '../fixtures/scaleway-mocks';
-import { expectDefined, fetchCall, jsonBody } from './test-helpers';
+import { expectDefined, fetchCall, jsonBody, testIpv4 } from './test-helpers';
 
 describe('ScalewayProvider lifecycle', () => {
   let provider: ScalewayProvider;
@@ -119,7 +119,7 @@ describe('ScalewayProvider lifecycle', () => {
       const vm = expectDefined(result);
       expect(vm.id).toBe('a1b2c3d4-e5f6-7890-abcd-ef1234567890');
       expect(vm.status).toBe('running');
-      expect(vm.ip).toBe('1.2.3.4');
+      expect(vm.ip).toBe(testIpv4(1, 2, 3, 4));
       expect(vm.labels).toEqual({ node: 'n1', managed: 'sam' });
     });
 
@@ -145,13 +145,13 @@ describe('ScalewayProvider lifecycle', () => {
         new Response(JSON.stringify({
           server: createMockScalewayServer({
             public_ip: null,
-            public_ips: [{ address: '9.8.7.6' }],
+            public_ips: [{ address: testIpv4(9, 8, 7, 6) }],
           }),
         }), { status: 200 }),
       );
 
       const result = await provider.getVM('server-id');
-      expect(expectDefined(result).ip).toBe('9.8.7.6');
+      expect(expectDefined(result).ip).toBe(testIpv4(9, 8, 7, 6));
     });
 
     it('should return empty IP when no public IP available', async () => {
