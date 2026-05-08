@@ -1,19 +1,19 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.7.0 → 1.8.0
-Bump Rationale: MINOR - Added Principle XIII (Fail-Fast Error Detection)
+Version Change: 1.8.0 → 1.8.1
+Bump Rationale: PATCH - Align Principle IV file-size limits with enforced thresholds
 
-Modified Principles: None
+Modified Principles:
+  - Principle IV: "files under 400 lines" → "files under 500 lines, mandatory split above 800 lines"
+
 Modified Sections: None
-
-Added Sections:
-  - Principle XIII: Fail-Fast Error Detection (NON-NEGOTIABLE)
+Added Sections: None
 
 Templates Status:
-  - plan-template.md: ✅ Compatible (Constitution Check section references this file)
+  - plan-template.md: ✅ Compatible (no dependency on file-size limits)
   - spec-template.md: ✅ Compatible (no direct dependency)
-  - tasks-template.md: ✅ Compatible (test-first aligns with Principle II)
+  - tasks-template.md: ✅ Compatible (no direct dependency)
   - checklist-template.md: ✅ Compatible (no direct dependency)
 
 Follow-up TODOs: None
@@ -82,7 +82,7 @@ Code should read like well-written prose.
 - Default configuration works out-of-the-box for common use cases
 - Error messages are actionable: explain what went wrong AND how to fix it
 - Code follows single responsibility principle: one function/class does one thing
-- Functions under 50 lines; files under 400 lines (excluding tests)
+- Functions under 50 lines; files under 500 lines (excluding tests), mandatory split above 800 lines
 - Variable/function names are self-documenting; avoid abbreviations
 - Complex logic MUST have inline comments explaining "why", not "what"
 - UI interactions provide immediate feedback (loading states, confirmations)
@@ -925,4 +925,4 @@ and other project documentation, this Constitution takes precedence.
 - Violations should be addressed constructively with reference to specific principles
 - Repeated violations may result in contribution restrictions per Code of Conduct
 
-**Version**: 1.8.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-03-08
+**Version**: 1.8.1 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-05-07
