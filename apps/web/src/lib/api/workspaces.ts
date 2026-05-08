@@ -10,7 +10,7 @@ import type {
   WorkspaceTab,
 } from '@simple-agent-manager/shared';
 
-import { request } from './client';
+import { API_URL, request } from './client';
 
 export async function listWorkspaces(
   status?: string,
@@ -122,6 +122,11 @@ export async function listWorkspacePorts(
   }
   const data = (await res.json()) as { ports: DetectedPort[] };
   return data.ports ?? [];
+}
+
+/** Build the authenticated port-access redirect URL (API mints token and 302-redirects). */
+export function getPortAccessUrl(workspaceId: string, port: number): string {
+  return `${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/port-access?port=${port}`;
 }
 
 // =============================================================================

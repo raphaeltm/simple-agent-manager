@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import type { ChatSessionResponse } from '../../lib/api';
-import { deleteWorkspace, getProjectTask, updateProjectTaskStatus } from '../../lib/api';
+import { deleteWorkspace, getPortAccessUrl, getProjectTask, updateProjectTaskStatus } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
 import type { SessionState } from './types';
@@ -238,7 +238,7 @@ export function SessionHeader({
               .map((p) => (
                 <a
                   key={p.port}
-                  href={sanitizeUrl(p.url)}
+                  href={workspace ? getPortAccessUrl(workspace.id, p.port) : sanitizeUrl(p.url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded no-underline shrink-0"
@@ -625,7 +625,7 @@ export function SessionHeader({
                       .map((p) => (
                         <a
                           key={p.port}
-                          href={sanitizeUrl(p.url)}
+                          href={workspace ? getPortAccessUrl(workspace.id, p.port) : sanitizeUrl(p.url)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 font-mono text-[11px] no-underline hover:underline"
@@ -653,7 +653,7 @@ export function SessionHeader({
                     .map((p) => (
                       <a
                         key={p.port}
-                        href={sanitizeUrl(p.url)}
+                        href={workspace ? getPortAccessUrl(workspace.id, p.port) : sanitizeUrl(p.url)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 font-mono text-[11px] no-underline hover:underline"

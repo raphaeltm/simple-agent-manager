@@ -263,6 +263,7 @@ export {
   createAgentSession,
   createWorkspace,
   deleteWorkspace,
+  getPortAccessUrl,
   getTerminalToken,
   getWorkspace,
   getWorkspaceTabs,

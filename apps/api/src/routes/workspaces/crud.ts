@@ -13,6 +13,7 @@ import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspaceSchema } from '../../schemas';
 import { startComputeTracking, stopComputeTracking } from '../../services/compute-usage';
+import { signPortAccessToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   deleteWorkspaceOnNode,
@@ -75,6 +76,28 @@ crudRoutes.get('/:id', requireAuth(), requireApproved(), async (c) => {
   }
 
   return c.json(response);
+});
+
+crudRoutes.get('/:id/port-access', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const portParam = c.req.query('port');
+  if (!portParam || !/^\d+$/.test(portParam)) {
+    throw errors.badRequest('port query parameter is required and must be a number');
+  }
+  const port = parseInt(portParam, 10);
+  if (port < 1 || port > 65535) {
+    throw errors.badRequest('port must be between 1 and 65535');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+  // Verify ownership
+  await getOwnedWorkspace(db, workspaceId, userId);
+
+  const token = await signPortAccessToken(userId, workspaceId, port, c.env);
+  const portUrl = `https://ws-${workspaceId.toLowerCase()}--${port}.${c.env.BASE_DOMAIN}/?port_token=${encodeURIComponent(token)}`;
+
+  return c.redirect(portUrl, 302);
 });
 
 crudRoutes.patch('/:id', requireAuth(), requireApproved(), jsonValidator(UpdateWorkspaceSchema), async (c) => {
