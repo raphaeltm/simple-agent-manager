@@ -113,7 +113,7 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
     expect(body.callbackToken).toBe('plaintext-legacy-jwt');
   });
 
-  it('returns empty callbackToken when both encrypted and plaintext fields are absent', async () => {
+  it('rejects bootstrap data when both encrypted and plaintext callback fields are absent', async () => {
     const { bootstrapRoutes } = await import('../../../src/routes/bootstrap');
     const { encrypt } = await import('../../../src/services/encryption');
 
@@ -144,10 +144,6 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
       mockEnv
     );
 
-    expect(res.status).toBe(200);
-    const body: BootstrapResponse = await res.json();
-    // Falls through to empty string — the VM agent will fail with 401 on first use
-    // This is the expected backward-compat behavior for partially-written KV data
-    expect(body.callbackToken).toBe('');
+    expect(res.status).toBe(500);
   });
 });
