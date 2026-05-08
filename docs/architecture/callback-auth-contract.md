@@ -75,6 +75,47 @@ Authorization: Bearer <token>
 
 This is verified in Go contract tests at `packages/vm-agent/internal/bootstrap/contract_test.go`.
 
+## Port Access Tokens
+
+Port access tokens are RS256 JWTs used to authenticate browser access to exposed workspace ports (`ws-{id}--{port}.{BASE_DOMAIN}`). They solve the cross-subdomain cookie problem: BetterAuth session cookies are scoped to `api.{BASE_DOMAIN}` and are NOT sent to port subdomains.
+
+### Token Design
+
+| Property | Value |
+|----------|-------|
+| Audience | `port-access` |
+| Subject | userId |
+| Claims | `{ workspace, port }` |
+| Default expiry | 15 minutes (`PORT_ACCESS_TOKEN_EXPIRY_MS`) |
+| Signing | Same RS256 key pair as other SAM JWTs |
+
+**Functions:** `signPortAccessToken()` / `verifyPortAccessToken()` in `apps/api/src/services/jwt.ts`
+
+### Cookie Handshake Flow
+
+1. Agent calls `expose_port` MCP tool → handler signs a port-access JWT and appends `?port_token={jwt}` to the URL
+2. User opens URL → workspace proxy validates `?port_token`, sets `sam_port_access` HttpOnly cookie, 302-redirects to strip token from URL
+3. Subsequent requests (CSS, JS, images, WebSocket) use the cookie automatically (same-site)
+
+### Cookie Attributes
+
+| Attribute | Value |
+|-----------|-------|
+| Name | `sam_port_access` |
+| HttpOnly | yes |
+| Secure | yes |
+| SameSite | Strict |
+| Max-Age | `PORT_ACCESS_COOKIE_MAX_AGE_SECONDS` (default 14400 = 4hr) |
+
+### Security Properties
+
+- **Per-port scoping**: Token for port 3000 rejected on port 8080
+- **Per-workspace scoping**: Token for workspace A rejected on workspace B
+- **D1 ownership verified**: Every request (cookie + token path) goes through the DB lookup (`workspace.userId === token.subject`)
+- **Container Set-Cookie stripped**: Prevents malicious containers from overwriting the `sam_port_access` cookie
+- **Log sanitization**: `port_token` stripped from URLs before logging
+- **Audience isolation**: Port-access tokens rejected by `verifyTerminalToken` and vice versa
+
 ## Bootstrap Token Encryption (F-004)
 
 When bootstrap data is stored in KV for VM credential delivery, the callback token is AES-GCM encrypted at rest — matching the pattern used for Hetzner and GitHub tokens:
