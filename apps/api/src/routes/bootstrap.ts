@@ -113,10 +113,23 @@ bootstrapRoutes.post('/:token', bootstrapRateLimit, async (c) => {
     );
   }
 
+  // Decrypt callback token if encrypted; fall back to plaintext for in-flight legacy tokens
+  let callbackToken: string;
+  if (tokenData.encryptedCallbackToken && tokenData.callbackTokenIv) {
+    callbackToken = await decrypt(
+      tokenData.encryptedCallbackToken,
+      tokenData.callbackTokenIv,
+      getCredentialEncryptionKey(c.env)
+    );
+  } else {
+    // Backward compat: legacy tokens stored callbackToken as plaintext
+    callbackToken = tokenData.callbackToken ?? '';
+  }
+
   const response: BootstrapResponse = {
     workspaceId: tokenData.workspaceId,
     hetznerToken,
-    callbackToken: tokenData.callbackToken,
+    callbackToken,
     githubToken,
     gitUserName: tokenData.gitUserName ?? null,
     gitUserEmail: tokenData.gitUserEmail ?? null,

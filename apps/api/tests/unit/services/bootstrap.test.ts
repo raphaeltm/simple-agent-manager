@@ -154,7 +154,7 @@ describe('Bootstrap Service', () => {
         workspaceId: 'ws-123',
         encryptedHetznerToken: 'encrypted',
         hetznerTokenIv: 'iv',
-        callbackToken: 'jwt',
+        callbackToken: 'jwt-callback-token',
         encryptedGithubToken: null,
         githubTokenIv: null,
         createdAt: new Date().toISOString(),

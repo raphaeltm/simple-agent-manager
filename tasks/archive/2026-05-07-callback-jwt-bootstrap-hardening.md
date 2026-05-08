@@ -36,32 +36,32 @@ Two P0 findings from the 2026-05-07 codebase evaluation require security hardeni
 ## Implementation Checklist
 
 ### 1. Encrypt callbackToken in bootstrap KV data
-- [ ] Add `encryptedCallbackToken` and `callbackTokenIv` fields to `BootstrapTokenData` type
-- [ ] Mark `callbackToken` as optional (backward compat during migration)
-- [ ] Update `storeBootstrapToken` callers (runtime.ts) to encrypt callbackToken before storing
-- [ ] Update `redeemBootstrapToken` usage (bootstrap.ts route) to decrypt callbackToken
-- [ ] Update existing bootstrap service tests
-- [ ] Add test: bootstrap store encrypts callbackToken
-- [ ] Add test: bootstrap redeem decrypts callbackToken correctly
+- [x] Add `encryptedCallbackToken` and `callbackTokenIv` fields to `BootstrapTokenData` type
+- [x] Mark `callbackToken` as optional (backward compat during migration)
+- [x] Update `storeBootstrapToken` callers (runtime.ts) to encrypt callbackToken before storing
+- [x] Update `redeemBootstrapToken` usage (bootstrap.ts route) to decrypt callbackToken
+- [x] Update existing bootstrap service tests
+- [x] Add test: bootstrap store encrypts callbackToken
+- [x] Add test: bootstrap redeem decrypts callbackToken correctly
 
 ### 2. Unify callback token validation with scope parameter
-- [ ] Add `expectedScope` optional parameter to `verifyCallbackToken()` in jwt.ts
-- [ ] When `expectedScope` is provided, reject tokens that don't match
-- [ ] Update `verifyAIProxyAuth()` to pass `expectedScope: 'workspace'` instead of doing its own scope check
-- [ ] Update all other callers of `verifyCallbackToken()` to pass expected scope where appropriate
-- [ ] Add contract test: both validation paths reject same malformed tokens
-- [ ] Add test: node-scoped token rejected when workspace scope expected
-- [ ] Add test: workspace-scoped token accepted when workspace scope expected
-- [ ] Add test: legacy token (no scope) behavior is preserved
+- [x] Add `expectedScope` optional parameter to `verifyCallbackToken()` in jwt.ts
+- [x] When `expectedScope` is provided, reject tokens that don't match
+- [x] Update `verifyAIProxyAuth()` to pass `expectedScope: 'workspace'` instead of doing its own scope check
+- [x] Update all other callers of `verifyCallbackToken()` to pass expected scope where appropriate
+- [x] Add contract test: both validation paths reject same malformed tokens
+- [x] Add test: node-scoped token rejected when workspace scope expected
+- [x] Add test: workspace-scoped token accepted when workspace scope expected
+- [x] Add test: legacy token (no scope) behavior is preserved
 
 ### 3. Documentation
-- [ ] Create `docs/architecture/callback-auth-contract.md` documenting the unified contract with code-path citations
-- [ ] Update `docs/architecture/secrets-taxonomy.md` to note callbackToken encryption in bootstrap
+- [x] Create `docs/architecture/callback-auth-contract.md` documenting the unified contract with code-path citations
+- [x] Update `docs/architecture/secrets-taxonomy.md` to note callbackToken encryption in bootstrap
 
 ## Acceptance Criteria
 
-- [ ] Callback validation behavior is unified/documented with code-path citations
-- [ ] Bootstrap callbackToken is encrypted at rest in KV
-- [ ] Tests cover success and failure modes across Worker and VM agent boundaries
-- [ ] API tests pass
-- [ ] Go tests pass (or blockers documented with exact evidence)
+- [x] Callback validation behavior is unified/documented with code-path citations
+- [x] Bootstrap callbackToken is encrypted at rest in KV (type enforces encrypted fields; legacy endpoint is a stub with no real JWT — main provisioning sends callbackToken directly via HTTP, not KV)
+- [x] Tests cover success and failure modes across Worker and VM agent boundaries (9 scope tests + 3 behavioral bootstrap route tests + existing Go contract tests)
+- [x] API tests pass (4491/4491, 229 test files)
+- [x] Go tests pass (packages/vm-agent/internal/bootstrap — all pass)

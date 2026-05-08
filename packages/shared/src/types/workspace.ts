@@ -246,10 +246,11 @@ export interface BootstrapTokenData {
   workspaceId: string;
   encryptedHetznerToken: string;
   hetznerTokenIv: string;
-  /** Plaintext callback token accepted during creation and returned after redemption. */
+  /** @deprecated Use encryptedCallbackToken + callbackTokenIv instead. Kept for backward compat with in-flight tokens. */
   callbackToken?: string;
-  /** AES-GCM encrypted callback token stored in KV. */
+  /** AES-GCM encrypted callback JWT stored in KV. */
   encryptedCallbackToken?: string | null;
+  /** IV for encryptedCallbackToken. */
   callbackTokenIv?: string | null;
   encryptedGithubToken: string | null;
   githubTokenIv: string | null;
