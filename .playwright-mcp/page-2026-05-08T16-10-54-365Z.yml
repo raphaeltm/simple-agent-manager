@@ -1,0 +1,167 @@
+- generic [ref=e5]:
+  - complementary [ref=e6]:
+    - generic [ref=e7]:
+      - img "SAM" [ref=e8]
+      - generic [ref=e9]:
+        - button "Recent chats" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+        - button "Notifications (38 unread)" [ref=e15] [cursor=pointer]:
+          - img [ref=e16]
+          - generic [ref=e19]: "38"
+    - button "Open command palette" [ref=e20] [cursor=pointer]:
+      - img [ref=e21]
+      - generic [ref=e24]: Search...
+      - generic [ref=e25]: Ctrl+K
+    - generic [ref=e27]:
+      - navigation "Project navigation" [ref=e28]:
+        - button "Show global navigation" [ref=e29] [cursor=pointer]:
+          - img [ref=e30]
+          - generic [ref=e32]: Back to Projects
+        - generic "CrewAI" [ref=e33]
+        - link "Chat" [ref=e34] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/chat
+          - img [ref=e35]
+          - text: Chat
+        - link "Agent" [ref=e37] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/agent
+          - img [ref=e38]
+          - text: Agent
+        - link "Library" [ref=e41] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/library
+          - img [ref=e42]
+          - text: Library
+        - link "Ideas" [ref=e44] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/ideas
+          - img [ref=e45]
+          - text: Ideas
+        - link "Knowledge" [ref=e47] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/knowledge
+          - img [ref=e48]
+          - text: Knowledge
+        - link "Notifications" [ref=e58] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/notifications
+          - img [ref=e59]
+          - text: Notifications
+        - link "Triggers" [ref=e62] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/triggers
+          - img [ref=e63]
+          - text: Triggers
+        - link "Profiles" [ref=e66] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/profiles
+          - img [ref=e67]
+          - text: Profiles
+        - link "Activity" [ref=e79] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/activity
+          - img [ref=e80]
+          - text: Activity
+        - link "Settings" [ref=e82] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/settings
+          - img [ref=e83]
+          - text: Settings
+      - navigation [ref=e86]:
+        - button [ref=e87] [cursor=pointer]:
+          - img [ref=e88]
+          - generic [ref=e90]: Back to CrewAI
+        - link [ref=e91] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e92]
+          - text: Home
+        - link [ref=e95] [cursor=pointer]:
+          - /url: /sam
+          - img [ref=e96]
+          - text: SAM
+        - link [ref=e99] [cursor=pointer]:
+          - /url: /chats
+          - img [ref=e100]
+          - text: Chats
+        - link [ref=e102] [cursor=pointer]:
+          - /url: /projects
+          - img [ref=e103]
+          - text: Projects
+        - link [ref=e105] [cursor=pointer]:
+          - /url: /account-map
+          - img [ref=e106]
+          - text: Map
+        - link [ref=e108] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e109]
+          - text: Settings
+        - link [ref=e112] [cursor=pointer]:
+          - /url: /admin
+          - img [ref=e113]
+          - text: Admin
+        - button [ref=e116] [cursor=pointer]:
+          - img [ref=e117]
+          - text: Infrastructure
+        - generic [ref=e119]:
+          - button [expanded] [ref=e120] [cursor=pointer]:
+            - img [ref=e121]
+            - text: Recent Projects
+          - region [ref=e123]:
+            - generic [ref=e125]:
+              - img
+              - textbox [ref=e126]:
+                - /placeholder: Filter projects...
+            - generic [ref=e127]:
+              - button [ref=e128] [cursor=pointer]:
+                - generic [ref=e129]: C
+                - generic [ref=e130]: CrewAI
+                - generic [ref=e131]: 1m
+                - img [ref=e132]
+              - button [ref=e133] [cursor=pointer]:
+                - generic [ref=e134]: E
+                - generic [ref=e135]: elysia
+                - generic [ref=e136]: 4d
+                - img [ref=e137]
+              - button [ref=e138] [cursor=pointer]:
+                - generic [ref=e139]: C
+                - generic [ref=e140]: CrewAI Org
+                - generic [ref=e141]: 4w
+                - img [ref=e142]
+    - generic [ref=e143]:
+      - img "serverspresentation2025" [ref=e144]
+      - generic [ref=e146]: serverspresentation2025
+      - button "Sign out" [ref=e147] [cursor=pointer]:
+        - img [ref=e148]
+  - main [ref=e150]:
+    - generic [ref=e152]:
+      - generic [ref=e153]:
+        - generic [ref=e154]:
+          - generic [ref=e155]: CrewAI
+          - button "Project status" [ref=e156] [cursor=pointer]:
+            - img [ref=e157]
+          - button "Automation triggers" [ref=e163] [cursor=pointer]:
+            - img [ref=e164]
+          - button "Project settings" [ref=e167] [cursor=pointer]:
+            - img [ref=e168]
+        - button "+ New Chat" [ref=e172] [cursor=pointer]
+        - status "Refreshing sessions" [ref=e224]
+        - generic [ref=e174]:
+          - img
+          - textbox "Search chats..." [ref=e175]
+        - navigation "Chat sessions" [ref=e176]:
+          - button "Hello! List the top-level files and directories in this repository. Just now" [ref=e228] [cursor=pointer]:
+            - generic [ref=e231]: Hello! List the top-level files and directories in this repository.
+            - generic [ref=e233]: Just now
+          - button "List root repository files and directories 1m ago" [ref=e180] [cursor=pointer]:
+            - generic [ref=e183]: List root repository files and directories
+            - generic [ref=e185]: 1m ago
+          - button "Older (52)" [ref=e186] [cursor=pointer]:
+            - img [ref=e187]
+            - generic [ref=e189]: Older (52)
+      - generic [ref=e191]:
+        - generic [ref=e234]:
+          - generic [ref=e235]:
+            - status "Loading" [ref=e236]
+            - generic [ref=e237]: Starting...
+            - generic [ref=e238]: sam/hello-list-top-level-01kr45
+            - generic [ref=e239]: 0s
+          - generic [ref=e240]:
+            - generic "Finding a server..." [ref=e241]
+            - generic "Setting up a new server..." [ref=e242]
+            - generic "Waiting for server to start..." [ref=e243]
+            - generic "Creating workspace..." [ref=e244]
+            - generic "Setting up development environment..." [ref=e245]
+            - generic "Uploading attachments to workspace..." [ref=e246]
+            - generic "Starting AI agent..." [ref=e247]
+        - status "Loading" [ref=e249]

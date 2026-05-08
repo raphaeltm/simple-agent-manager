@@ -1,0 +1,237 @@
+- generic [ref=e5]:
+  - complementary [ref=e6]:
+    - generic [ref=e7]:
+      - img "SAM" [ref=e8]
+      - generic [ref=e9]:
+        - button "Recent chats" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+        - button "Notifications (38 unread)" [ref=e15] [cursor=pointer]:
+          - img [ref=e16]
+          - generic [ref=e19]: "38"
+    - button "Open command palette" [ref=e20] [cursor=pointer]:
+      - img [ref=e21]
+      - generic [ref=e24]: Search...
+      - generic [ref=e25]: Ctrl+K
+    - generic [ref=e27]:
+      - navigation "Project navigation" [ref=e28]:
+        - button "Show global navigation" [ref=e29] [cursor=pointer]:
+          - img [ref=e30]
+          - generic [ref=e32]: Back to Projects
+        - generic "CrewAI" [ref=e33]
+        - link "Chat" [ref=e34] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/chat
+          - img [ref=e35]
+          - text: Chat
+        - link "Agent" [ref=e37] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/agent
+          - img [ref=e38]
+          - text: Agent
+        - link "Library" [ref=e41] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/library
+          - img [ref=e42]
+          - text: Library
+        - link "Ideas" [ref=e44] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/ideas
+          - img [ref=e45]
+          - text: Ideas
+        - link "Knowledge" [ref=e47] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/knowledge
+          - img [ref=e48]
+          - text: Knowledge
+        - link "Notifications" [ref=e58] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/notifications
+          - img [ref=e59]
+          - text: Notifications
+        - link "Triggers" [ref=e62] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/triggers
+          - img [ref=e63]
+          - text: Triggers
+        - link "Profiles" [ref=e66] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/profiles
+          - img [ref=e67]
+          - text: Profiles
+        - link "Activity" [ref=e79] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/activity
+          - img [ref=e80]
+          - text: Activity
+        - link "Settings" [ref=e82] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/settings
+          - img [ref=e83]
+          - text: Settings
+      - navigation [ref=e86]:
+        - button [ref=e87] [cursor=pointer]:
+          - img [ref=e88]
+          - generic [ref=e90]: Back to CrewAI
+        - link [ref=e91] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e92]
+          - text: Home
+        - link [ref=e95] [cursor=pointer]:
+          - /url: /sam
+          - img [ref=e96]
+          - text: SAM
+        - link [ref=e99] [cursor=pointer]:
+          - /url: /chats
+          - img [ref=e100]
+          - text: Chats
+        - link [ref=e102] [cursor=pointer]:
+          - /url: /projects
+          - img [ref=e103]
+          - text: Projects
+        - link [ref=e105] [cursor=pointer]:
+          - /url: /account-map
+          - img [ref=e106]
+          - text: Map
+        - link [ref=e108] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e109]
+          - text: Settings
+        - link [ref=e112] [cursor=pointer]:
+          - /url: /admin
+          - img [ref=e113]
+          - text: Admin
+        - button [ref=e116] [cursor=pointer]:
+          - img [ref=e117]
+          - text: Infrastructure
+        - generic [ref=e119]:
+          - button [expanded] [ref=e120] [cursor=pointer]:
+            - img [ref=e121]
+            - text: Recent Projects
+          - region [ref=e123]:
+            - generic [ref=e125]:
+              - img
+              - textbox [ref=e126]:
+                - /placeholder: Filter projects...
+            - generic [ref=e127]:
+              - button [ref=e128] [cursor=pointer]:
+                - generic [ref=e129]: C
+                - generic [ref=e130]: CrewAI
+                - generic [ref=e131]: 1m
+                - img [ref=e132]
+              - button [ref=e133] [cursor=pointer]:
+                - generic [ref=e134]: E
+                - generic [ref=e135]: elysia
+                - generic [ref=e136]: 4d
+                - img [ref=e137]
+              - button [ref=e138] [cursor=pointer]:
+                - generic [ref=e139]: C
+                - generic [ref=e140]: CrewAI Org
+                - generic [ref=e141]: 4w
+                - img [ref=e142]
+    - generic [ref=e143]:
+      - img "serverspresentation2025" [ref=e144]
+      - generic [ref=e146]: serverspresentation2025
+      - button "Sign out" [ref=e147] [cursor=pointer]:
+        - img [ref=e148]
+  - main [ref=e150]:
+    - generic [ref=e152]:
+      - generic [ref=e153]:
+        - generic [ref=e154]:
+          - generic [ref=e155]: CrewAI
+          - button "Project status" [ref=e156] [cursor=pointer]:
+            - img [ref=e157]
+          - button "Automation triggers" [ref=e163] [cursor=pointer]:
+            - img [ref=e164]
+          - button "Project settings" [ref=e167] [cursor=pointer]:
+            - img [ref=e168]
+        - button "+ New Chat" [ref=e172] [cursor=pointer]
+        - generic [ref=e174]:
+          - img
+          - textbox "Search chats..." [ref=e175]
+        - navigation "Chat sessions" [ref=e176]:
+          - button "Hello! List the top-level files and directories in this repository. Just now" [ref=e228] [cursor=pointer]:
+            - generic [ref=e231]: Hello! List the top-level files and directories in this repository.
+            - generic [ref=e233]: Just now
+          - button "List root repository files and directories 2m ago" [ref=e250] [cursor=pointer]:
+            - generic [ref=e183]: List root repository files and directories
+            - generic [ref=e185]: 2m ago
+          - button "Older (52)" [ref=e186] [cursor=pointer]:
+            - img [ref=e187]
+            - generic [ref=e189]: Older (52)
+      - generic [ref=e248]:
+        - generic [ref=e252]:
+          - generic [ref=e253]: Hello! List the top-level files and directories in this repository.
+          - 'generic "Workspace profile: Lightweight" [ref=e254]': Lightweight
+          - generic [ref=e255]:
+            - button "Retry task" [ref=e256] [cursor=pointer]:
+              - img [ref=e257]
+            - button "Fork session" [ref=e260] [cursor=pointer]:
+              - img [ref=e261]
+          - generic [ref=e266]: Active
+          - button "Show session details" [ref=e268] [cursor=pointer]:
+            - img [ref=e269]
+        - log "Conversation" [ref=e271]:
+          - generic [ref=e274]:
+            - button "mcp__sam-mcp__get_instructions other" [ref=e278]:
+              - generic [ref=e279]:
+                - img [ref=e281]
+                - generic [ref=e283]: mcp__sam-mcp__get_instructions
+                - generic [ref=e284]: other
+            - button "Find search" [ref=e288]:
+              - generic [ref=e289]:
+                - img [ref=e291]
+                - generic [ref=e293]: Find
+                - generic [ref=e294]: search
+            - generic [ref=e298]:
+              - generic [ref=e299]:
+                - paragraph [ref=e300]: "Here are the top-level files and directories in this repository:"
+                - paragraph [ref=e301]:
+                  - strong [ref=e302]: "Directories:"
+                - list [ref=e303]:
+                  - listitem [ref=e304]:
+                    - code [ref=e305]: app/
+                    - text: — Django application (contains
+                    - code [ref=e306]: manage.py
+                    - text: ","
+                    - code [ref=e307]: config/
+                    - text: ","
+                    - code [ref=e308]: core/
+                    - text: ","
+                    - code [ref=e309]: requirements.txt
+                    - text: ", Docker files)"
+                  - listitem [ref=e310]:
+                    - code [ref=e311]: .github/
+                    - text: — GitHub Actions workflows (
+                    - code [ref=e312]: deploy.yaml
+                    - text: )
+                  - listitem [ref=e313]:
+                    - code [ref=e314]: .devcontainer/
+                    - text: — Dev container configuration
+                  - listitem [ref=e315]:
+                    - code [ref=e316]: .git/
+                    - text: — Git internals
+                - paragraph [ref=e317]:
+                  - strong [ref=e318]: "Files:"
+                - list [ref=e319]:
+                  - listitem [ref=e320]:
+                    - code [ref=e321]: compose.yaml
+                    - text: — Docker Compose (production)
+                  - listitem [ref=e322]:
+                    - code [ref=e323]: compose.local.yaml
+                    - text: — Docker Compose (local development)
+                  - listitem [ref=e324]:
+                    - code [ref=e325]: README.md
+                    - text: — Project documentation
+                  - listitem [ref=e326]:
+                    - code [ref=e327]: .gitignore
+                    - text: — Git ignore rules
+              - generic [ref=e329]:
+                - button "Message info" [ref=e330] [cursor=pointer]:
+                  - img [ref=e331]
+                - button "Read aloud" [ref=e333] [cursor=pointer]:
+                  - img [ref=e334]
+                - button "Copy message" [ref=e338] [cursor=pointer]:
+                  - img [ref=e339]
+          - button "Scroll to bottom" [ref=e342] [cursor=pointer]:
+            - img [ref=e343]
+        - generic [ref=e356]:
+          - status "Loading" [ref=e357]
+          - generic [ref=e358]: Agent is working...
+          - button "Cancel" [ref=e359] [cursor=pointer]
+        - generic [ref=e346]:
+          - button "Attach files" [ref=e347] [cursor=pointer]:
+            - img [ref=e348]
+          - textbox "Send a message..." [ref=e350]
+          - button "Start voice input" [ref=e351] [cursor=pointer]:
+            - img [ref=e352]
+          - button "Send" [disabled] [ref=e355]
