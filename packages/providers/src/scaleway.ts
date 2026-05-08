@@ -7,6 +7,13 @@ import {
 import { providerFetch } from './provider-fetch';
 import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
+import {
+  parseProviderJson,
+  type ScalewayServerPayload,
+  validateScalewayImageResponse,
+  validateScalewayServerResponse,
+  validateScalewayServersResponse,
+} from './validation';
 
 const SCALEWAY_INSTANCE_API_URL = 'https://api.scaleway.com/instance/v1/zones';
 
@@ -50,28 +57,6 @@ const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
     storageGb: 600,
   },
 };
-
-/** Response shape from Scaleway POST/GET /servers */
-interface ScalewayServerResponse {
-  server: {
-    id: string;
-    name: string;
-    state: string;
-    public_ip: { address: string } | null;
-    public_ips: Array<{ address: string }>;
-    commercial_type: string;
-    creation_date: string;
-    tags: string[];
-  };
-}
-
-interface ScalewayServersResponse {
-  servers: ScalewayServerResponse['server'][];
-}
-
-interface ScalewayImageResponse {
-  images: Array<{ id: string; name: string }>;
-}
 
 export class ScalewayProvider implements Provider {
   readonly name = 'scaleway';
@@ -142,7 +127,10 @@ export class ScalewayProvider implements Provider {
       },
     );
 
-    const createData = (await createResponse.json()) as ScalewayServerResponse;
+    const createData = validateScalewayServerResponse(
+      await parseProviderJson(createResponse, this.name, 'createVM.createServer'),
+      'createVM.createServer',
+    );
     const serverId = createData.server.id;
 
     // Step 2: Set cloud-init user data
@@ -211,7 +199,10 @@ export class ScalewayProvider implements Provider {
         },
       );
 
-      const data = (await response.json()) as ScalewayServerResponse;
+      const data = validateScalewayServerResponse(
+        await parseProviderJson(response, this.name, 'getVM'),
+        'getVM',
+      );
       return this.mapServerToVMInstance(data.server);
     } catch (err) {
       if (err instanceof ProviderError && err.statusCode === 404) {
@@ -240,7 +231,10 @@ export class ScalewayProvider implements Provider {
       headers: { 'X-Auth-Token': this.secretKey },
     });
 
-    const data = (await response.json()) as ScalewayServersResponse;
+    const data = validateScalewayServersResponse(
+      await parseProviderJson(response, this.name, 'listVMs'),
+      'listVMs',
+    );
     return data.servers.map((server) => this.mapServerToVMInstance(server));
   }
 
@@ -286,7 +280,10 @@ export class ScalewayProvider implements Provider {
       },
     );
 
-    const data = (await response.json()) as ScalewayImageResponse;
+    const data = validateScalewayImageResponse(
+      await parseProviderJson(response, this.name, 'resolveImageId'),
+      'resolveImageId',
+    );
     if (data.images.length === 0) {
       throw new ProviderError(
         this.name,
@@ -295,7 +292,15 @@ export class ScalewayProvider implements Provider {
       );
     }
 
-    return data.images[0]!.id;
+    const [firstImage] = data.images;
+    if (!firstImage) {
+      throw new ProviderError(
+        this.name,
+        undefined,
+        `No image found matching name "${imageName}" in zone ${zone}`,
+      );
+    }
+    return firstImage.id;
   }
 
   private async performAction(zone: string, serverId: string, action: string): Promise<void> {
@@ -313,10 +318,10 @@ export class ScalewayProvider implements Provider {
     );
   }
 
-  private mapServerToVMInstance(server: ScalewayServerResponse['server']): VMInstance {
+  private mapServerToVMInstance(server: ScalewayServerPayload): VMInstance {
     // Extract IP: prefer public_ip, then first public_ips entry
-    const ip = server.public_ip?.address
-      || (server.public_ips?.length > 0 ? server.public_ips[0]!.address : '');
+    const [firstPublicIp] = server.public_ips;
+    const ip = server.public_ip?.address || firstPublicIp?.address || '';
 
     return {
       id: server.id,

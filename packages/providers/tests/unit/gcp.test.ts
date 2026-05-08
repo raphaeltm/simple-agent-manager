@@ -2,7 +2,7 @@ import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GcpProvider } from '../../src/gcp';
 import type { VMConfig } from '../../src/types';
-import { ProviderError } from '../../src/types';
+import { expectDefined, fetchCall, jsonBody } from './test-helpers';
 
 describe('GcpProvider', () => {
   let provider: GcpProvider;
@@ -132,7 +132,7 @@ describe('GcpProvider', () => {
       expect(result.status).toBe('running');
 
       // Verify request body structure
-      const body = JSON.parse(capturedBody!);
+      const body = JSON.parse(expectDefined(capturedBody));
       expect(body.name).toBe('node-abc');
       expect(body.machineType).toContain('e2-standard-2');
       expect(body.labels).toHaveProperty('sam-managed', 'true');
@@ -165,16 +165,117 @@ describe('GcpProvider', () => {
       expect(capturedHeaders).toBeDefined();
       expect((capturedHeaders as Record<string, string>)['Authorization']).toBe('Bearer test-gcp-token');
     });
+
+    it('should use configured firewall source ranges and agent ports', async () => {
+      const configuredProvider = new GcpProvider(
+        'test-project',
+        mockTokenProvider,
+        'us-central1-a',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ['10.0.0.0/8'],
+        ['9443'],
+      );
+      const mockFetch = vi.fn()
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'firewall-op', status: 'PENDING' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'create-op', status: 'PENDING' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({
+          id: '1',
+          name: 'vm',
+          status: 'RUNNING',
+          machineType: 'zones/us-central1-a/machineTypes/e2-medium',
+          creationTimestamp: '2026-03-18T00:00:00Z',
+          networkInterfaces: [{ accessConfigs: [{ natIP: '1.2.3.4' }] }],
+        })));
+      globalThis.fetch = mockFetch;
+
+      await configuredProvider.createVM({
+        name: 'vm',
+        size: 'small',
+        location: 'us-central1-a',
+        userData: '',
+      });
+
+      const firewallBody = jsonBody(fetchCall(mockFetch, 0).init);
+      expect(firewallBody.sourceRanges).toEqual(['10.0.0.0/8']);
+      expect(firewallBody.allowed).toEqual([{ IPProtocol: 'tcp', ports: ['9443'] }]);
+    });
   });
 
   describe('deleteVM', () => {
     it('should be idempotent when VM is not found', async () => {
-      globalThis.fetch = vi.fn().mockImplementation(async () => {
-        throw new ProviderError('gcp', 404, 'Not found');
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/aggregated/instances')) {
+          return new Response(JSON.stringify({ items: {} }));
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
       });
 
       // Should not throw — idempotent delete
       await expect(provider.deleteVM('nonexistent')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('listVMs', () => {
+    it('should tolerate explicit unavailable or missing zones', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/zones/us-central1-a/')) {
+          return new Response(JSON.stringify({
+            items: [{
+              id: '1',
+              name: 'vm-1',
+              status: 'RUNNING',
+              machineType: 'zones/us-central1-a/machineTypes/e2-medium',
+              creationTimestamp: '2026-03-18T00:00:00Z',
+              networkInterfaces: [{ accessConfigs: [{ natIP: '1.2.3.4' }] }],
+              labels: { 'sam-managed': 'true' },
+            }],
+          }));
+        }
+        if (url.includes('/zones/us-east1-b/')) {
+          return new Response(JSON.stringify({ error: { message: 'Zone unavailable' } }), { status: 503 });
+        }
+        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), { status: 404 });
+      });
+
+      const result = await provider.listVMs();
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.id).toBe('1');
+    });
+
+    it('should fail fast on permission failures', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'Permission denied' } }), { status: 403 }),
+      );
+
+      await expect(provider.listVMs()).rejects.toThrow(/zone us-central1-a list failed/);
+    });
+
+    it('should fail fast on malformed list payloads', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ items: [{ id: 'missing-required-fields' }] })),
+      );
+
+      await expect(provider.listVMs()).rejects.toThrow(/response validation failed/);
+    });
+  });
+
+  describe('findInstanceByIdOrName', () => {
+    it('should surface aggregated-list failures after zonal name misses', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/aggregated/instances')) {
+          return new Response(JSON.stringify({ error: { message: 'Permission denied' } }), { status: 403 });
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+      });
+
+      await expect(provider.getVM('numeric-id')).rejects.toThrow(/aggregated instance lookup failed/);
     });
   });
 

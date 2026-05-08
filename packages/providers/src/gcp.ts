@@ -3,14 +3,29 @@ import type { VMSize } from '@simple-agent-manager/shared';
 import { providerFetch } from './provider-fetch';
 import type { LocationMeta,Provider, SizeConfig, VMConfig, VMInstance } from './types';
 import { ProviderError } from './types';
+import {
+  type GcpInstancePayload,
+  type GcpNetworkInterfacePayload,
+  parseProviderJson,
+  validateGcpAggregatedInstances,
+  validateGcpInstance,
+  validateGcpInstancesList,
+  validateGcpOperation,
+} from './validation';
 
 const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
 
 /** Firewall rule name and config for SAM VM agent inbound access */
 const SAM_FIREWALL_RULE_NAME = 'sam-allow-agent';
 const SAM_NETWORK_TAG = 'sam-agent';
-/** Ports the VM agent may listen on (8443 with TLS, 8080 without) */
-const SAM_AGENT_PORTS = ['8080', '8443'];
+/** Default ports the VM agent may listen on (8443 with TLS, 8080 without). */
+export const DEFAULT_GCP_AGENT_PORTS = ['8080', '8443'] as const;
+/**
+ * Default GCP project firewall source ranges. The VM cloud-init firewall still
+ * restricts agent access to Cloudflare IP ranges; this provider-level rule only
+ * prevents GCP's VPC firewall from blocking those edge-to-VM connections.
+ */
+export const DEFAULT_GCP_FIREWALL_SOURCE_RANGES = ['0.0.0.0/0'] as const;
 
 /** GCP machine type mappings for SAM VM sizes */
 const SIZE_MAP: Record<VMSize, SizeConfig> = {
@@ -63,32 +78,11 @@ function mapGcpStatus(status: string): VMInstance['status'] {
 }
 
 /** Extract IP from GCP network interfaces */
-function extractIp(networkInterfaces?: GcpNetworkInterface[]): string {
+function extractIp(networkInterfaces?: GcpNetworkInterfacePayload[]): string {
   if (!networkInterfaces?.length) return '';
   const accessConfigs = networkInterfaces[0]?.accessConfigs;
   if (!accessConfigs?.length) return '';
   return accessConfigs[0]?.natIP || '';
-}
-
-/** Interface for GCP operation polling */
-interface GcpOperation {
-  name: string;
-  status: string;
-  error?: { errors?: Array<{ code: string; message: string }> };
-}
-
-interface GcpNetworkInterface {
-  accessConfigs?: Array<{ natIP?: string }>;
-}
-
-interface GcpInstance {
-  id: string;
-  name: string;
-  status: string;
-  machineType: string;
-  creationTimestamp: string;
-  labels?: Record<string, string>;
-  networkInterfaces?: GcpNetworkInterface[];
 }
 
 /**
@@ -121,6 +115,8 @@ export class GcpProvider implements Provider {
     private readonly diskSizeGb: number = 50,
     private readonly timeoutMs: number = 30_000,
     private readonly operationPollTimeoutMs: number = 5 * 60 * 1000,
+    private readonly firewallSourceRanges: readonly string[] = DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
+    private readonly agentPorts: readonly string[] = DEFAULT_GCP_AGENT_PORTS,
   ) {
     this.defaultLocation = defaultZone || 'us-central1-a';
   }
@@ -149,7 +145,10 @@ export class GcpProvider implements Provider {
       const headers = await this.authHeaders();
       const url = `${this.projectUrl()}/zones/${zone}/operations/${operationName}`;
       const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
-      const op = (await res.json()) as GcpOperation;
+      const op = validateGcpOperation(
+        await parseProviderJson(res, 'gcp', 'pollOperation'),
+        'pollOperation',
+      );
 
       if (op.status === 'DONE') {
         if (op.error?.errors?.length) {
@@ -183,11 +182,11 @@ export class GcpProvider implements Provider {
       allowed: [
         {
           IPProtocol: 'tcp',
-          ports: SAM_AGENT_PORTS,
+          ports: [...this.agentPorts],
         },
       ],
-      sourceRanges: ['0.0.0.0/0'],
-      description: 'Allow inbound access to SAM VM agent (managed by Simple Agent Manager)',
+      sourceRanges: [...this.firewallSourceRanges],
+      description: 'Allow configured inbound access to SAM VM agent (managed by Simple Agent Manager)',
     };
 
     try {
@@ -196,7 +195,11 @@ export class GcpProvider implements Provider {
         headers,
         body: JSON.stringify(body),
       }, this.timeoutMs);
-      const op = (await res.json()) as GcpOperation;
+      const op = validateGcpOperation(
+        await parseProviderJson(res, 'gcp', 'ensureFirewallRule'),
+        'ensureFirewallRule',
+        { requireName: true },
+      );
       // Firewall operations are global, poll via global operations endpoint
       await this.pollGlobalOperation(op.name);
     } catch (err) {
@@ -218,7 +221,10 @@ export class GcpProvider implements Provider {
       const headers = await this.authHeaders();
       const url = `${this.projectUrl()}/global/operations/${operationName}`;
       const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
-      const op = (await res.json()) as GcpOperation;
+      const op = validateGcpOperation(
+        await parseProviderJson(res, 'gcp', 'pollGlobalOperation'),
+        'pollGlobalOperation',
+      );
 
       if (op.status === 'DONE') {
         if (op.error?.errors?.length) {
@@ -295,7 +301,11 @@ export class GcpProvider implements Provider {
       body: JSON.stringify(body),
     }, this.timeoutMs);
 
-    const op = (await res.json()) as GcpOperation;
+    const op = validateGcpOperation(
+      await parseProviderJson(res, 'gcp', 'createVM'),
+      'createVM',
+      { requireName: true },
+    );
     await this.pollOperation(zone, op.name);
 
     // Fetch the created instance to get its details
@@ -317,7 +327,11 @@ export class GcpProvider implements Provider {
 
     try {
       const res = await providerFetch('gcp', url, { method: 'DELETE', headers }, this.timeoutMs);
-      const op = (await res.json()) as GcpOperation;
+      const op = validateGcpOperation(
+        await parseProviderJson(res, 'gcp', 'deleteVM'),
+        'deleteVM',
+        { requireName: true },
+      );
       await this.pollOperation(zone, op.name);
     } catch (err) {
       if (err instanceof ProviderError && err.statusCode === 404) return;
@@ -345,22 +359,23 @@ export class GcpProvider implements Provider {
     const filterStr = filters.join(' ');
 
     // Query all configured zones
-    const zonePromises = this.locations.map(async (zone) => {
+    for (const zone of this.locations) {
       try {
         const url = `${this.projectUrl()}/zones/${zone}/instances?filter=${encodeURIComponent(filterStr)}`;
         const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
-        const data = (await res.json()) as { items?: GcpInstance[] };
-        return (data.items || []).map((i) => this.toVMInstance(i));
-      } catch {
-        // Zone may not be available — skip
-        return [];
-      }
-    });
-
-    const zoneResults = await Promise.allSettled(zonePromises);
-    for (const result of zoneResults) {
-      if (result.status === 'fulfilled') {
-        results.push(...result.value);
+        const data = validateGcpInstancesList(
+          await parseProviderJson(res, 'gcp', `listVMs.${zone}`),
+          `listVMs.${zone}`,
+        );
+        results.push(...(data.items || []).map((i) => this.toVMInstance(i)));
+      } catch (err) {
+        if (this.isToleratedZoneListError(err)) continue;
+        throw new ProviderError(
+          'gcp',
+          err instanceof ProviderError ? err.statusCode : undefined,
+          `GCP zone ${zone} list failed: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err instanceof Error ? err : undefined },
+        );
       }
     }
 
@@ -375,7 +390,11 @@ export class GcpProvider implements Provider {
     const headers = await this.authHeaders();
     const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/stop`;
     const res = await providerFetch('gcp', url, { method: 'POST', headers }, this.timeoutMs);
-    const op = (await res.json()) as GcpOperation;
+    const op = validateGcpOperation(
+      await parseProviderJson(res, 'gcp', 'powerOff'),
+      'powerOff',
+      { requireName: true },
+    );
     await this.pollOperation(zone, op.name);
   }
 
@@ -387,7 +406,11 @@ export class GcpProvider implements Provider {
     const headers = await this.authHeaders();
     const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/start`;
     const res = await providerFetch('gcp', url, { method: 'POST', headers }, this.timeoutMs);
-    const op = (await res.json()) as GcpOperation;
+    const op = validateGcpOperation(
+      await parseProviderJson(res, 'gcp', 'powerOn'),
+      'powerOn',
+      { requireName: true },
+    );
     await this.pollOperation(zone, op.name);
   }
 
@@ -402,7 +425,7 @@ export class GcpProvider implements Provider {
   /**
    * Find a GCP instance by numeric ID or name across all configured zones.
    */
-  private async findInstanceByIdOrName(idOrName: string): Promise<GcpInstance | null> {
+  private async findInstanceByIdOrName(idOrName: string): Promise<GcpInstancePayload | null> {
     const headers = await this.authHeaders();
 
     // First try as a name in each zone
@@ -410,7 +433,10 @@ export class GcpProvider implements Provider {
       try {
         const url = `${this.projectUrl()}/zones/${zone}/instances/${idOrName}`;
         const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
-        return (await res.json()) as GcpInstance;
+        return validateGcpInstance(
+          await parseProviderJson(res, 'gcp', `findInstanceByIdOrName.${zone}`),
+          `findInstanceByIdOrName.${zone}`,
+        );
       } catch (err) {
         if (err instanceof ProviderError && err.statusCode === 404) continue;
         throw err;
@@ -422,7 +448,10 @@ export class GcpProvider implements Provider {
       const filterStr = `labels.sam-managed=true`;
       const url = `${COMPUTE_API_BASE}/projects/${this.projectId}/aggregated/instances?filter=${encodeURIComponent(filterStr)}`;
       const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
-      const data = (await res.json()) as { items?: Record<string, { instances?: GcpInstance[] }> };
+      const data = validateGcpAggregatedInstances(
+        await parseProviderJson(res, 'gcp', 'findInstanceByIdOrName.aggregated'),
+        'findInstanceByIdOrName.aggregated',
+      );
       if (data.items) {
         for (const scopeData of Object.values(data.items)) {
           for (const instance of scopeData.instances || []) {
@@ -432,14 +461,19 @@ export class GcpProvider implements Provider {
           }
         }
       }
-    } catch {
-      // Aggregated list may fail — fall through to null
+    } catch (err) {
+      throw new ProviderError(
+        'gcp',
+        err instanceof ProviderError ? err.statusCode : undefined,
+        `GCP aggregated instance lookup failed for ${idOrName}: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err instanceof Error ? err : undefined },
+      );
     }
 
     return null;
   }
 
-  private toVMInstance(instance: GcpInstance): VMInstance {
+  private toVMInstance(instance: GcpInstancePayload): VMInstance {
     return {
       id: instance.id || instance.name,
       name: instance.name,
@@ -449,6 +483,11 @@ export class GcpProvider implements Provider {
       createdAt: instance.creationTimestamp,
       labels: instance.labels || {},
     };
+  }
+
+  private isToleratedZoneListError(err: unknown): boolean {
+    return err instanceof ProviderError
+      && (err.statusCode === 404 || err.statusCode === 503);
   }
 
   /** Extract zone from a machineType URL like zones/us-central1-a/machineTypes/e2-standard-2 */

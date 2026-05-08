@@ -4,6 +4,12 @@ import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent
 import { providerFetch } from './provider-fetch';
 import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
+import {
+  type HetznerServerPayload,
+  parseProviderJson,
+  validateHetznerServerResponse,
+  validateHetznerServersResponse,
+} from './validation';
 
 const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
 
@@ -43,28 +49,6 @@ const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   },
 };
 
-interface HetznerServerResponse {
-  server: {
-    id: number;
-    name: string;
-    status: string;
-    public_net: {
-      ipv4: {
-        ip: string;
-      };
-    };
-    server_type: {
-      name: string;
-    };
-    created: string;
-    labels: Record<string, string>;
-  };
-}
-
-interface HetznerServersResponse {
-  servers: HetznerServerResponse['server'][];
-}
-
 export class HetznerProvider implements Provider {
   readonly name = 'hetzner';
   readonly locations: readonly string[] = HETZNER_LOCATIONS;
@@ -97,11 +81,10 @@ export class HetznerProvider implements Provider {
     }
     const primaryLocation = config.location || this.datacenter;
 
-    // Build attempt order: primary twice (with a delay between), then remaining locations shuffled
+    // Build attempt order: primary twice (with a delay between), then remaining locations in provider order.
     const fallbackLocations = this.placementFallbackEnabled
       ? HETZNER_LOCATIONS
           .filter((loc) => loc !== primaryLocation)
-          .sort(() => Math.random() - 0.5)
       : [];
     const attemptsToTry: Array<{ location: string; delayMs: number }> = [
       { location: primaryLocation, delayMs: 0 },
@@ -136,7 +119,10 @@ export class HetznerProvider implements Provider {
           }),
         });
 
-        const data = (await response.json()) as HetznerServerResponse;
+        const data = validateHetznerServerResponse(
+          await parseProviderJson(response, this.name, 'createVM'),
+          'createVM',
+        );
         if (attempt.location !== primaryLocation) {
           console.log(
             `hetzner: placement failed in ${primaryLocation}, succeeded in ${attempt.location}`,
@@ -156,7 +142,8 @@ export class HetznerProvider implements Provider {
     }
 
     // All locations exhausted
-    throw lastError!;
+    if (lastError) throw lastError;
+    throw new ProviderError(this.name, undefined, 'No Hetzner placement attempts were available');
   }
 
   async deleteVM(id: string): Promise<void> {
@@ -183,7 +170,10 @@ export class HetznerProvider implements Provider {
         },
       });
 
-      const data = (await response.json()) as HetznerServerResponse;
+      const data = validateHetznerServerResponse(
+        await parseProviderJson(response, this.name, 'getVM'),
+        'getVM',
+      );
       return this.mapServerToVMInstance(data.server);
     } catch (err) {
       if (err instanceof ProviderError && err.statusCode === 404) {
@@ -211,7 +201,10 @@ export class HetznerProvider implements Provider {
       },
     });
 
-    const data = (await response.json()) as HetznerServersResponse;
+    const data = validateHetznerServersResponse(
+      await parseProviderJson(response, this.name, 'listVMs'),
+      'listVMs',
+    );
     return data.servers.map((server) => this.mapServerToVMInstance(server));
   }
 
@@ -242,7 +235,7 @@ export class HetznerProvider implements Provider {
     return true;
   }
 
-  private mapServerToVMInstance(server: HetznerServerResponse['server']): VMInstance {
+  private mapServerToVMInstance(server: HetznerServerPayload): VMInstance {
     return {
       id: String(server.id),
       name: server.name,

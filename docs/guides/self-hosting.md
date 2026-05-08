@@ -123,6 +123,7 @@ These are runtime Worker variables, not GitHub Environment variables in the curr
 | `GCP_SA_IMPERSONATION_SCOPES` | `https://www.googleapis.com/auth/compute`        | Comma-separated scopes for SA impersonation |
 
 For the full list of GCP configuration variables, see the [GCP Setup Guide](./gcp-setup.md#configuration-reference).
+The GCP Compute Engine provider also creates an idempotent VPC firewall rule in `GcpProvider.ensureFirewallRule()` (`packages/providers/src/gcp.ts`) with explicit provider-config defaults for source ranges and agent ports; see [GCP VM Firewall Defaults](./gcp-setup.md#gcp-vm-firewall-defaults).
 
 **Optional GCP deployment configuration** (for project-level Defang deployment — sensible defaults provided):
 

@@ -24,7 +24,7 @@ export { getTimeoutMs,providerFetch } from './provider-fetch';
 
 // Re-export providers
 export type { GcpTokenProvider } from './gcp';
-export { GCP_LOCATIONS,GcpProvider } from './gcp';
+export { DEFAULT_GCP_AGENT_PORTS, DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GCP_LOCATIONS,GcpProvider } from './gcp';
 export { DEFAULT_PLACEMENT_RETRY_DELAY_MS,HetznerProvider } from './hetzner';
 export { SCALEWAY_LOCATIONS,ScalewayProvider } from './scaleway';
 
@@ -57,6 +57,8 @@ export function createProvider(config: ProviderConfig): Provider {
         config.diskSizeGb,
         config.timeoutMs,
         config.operationPollTimeoutMs,
+        config.firewallSourceRanges,
+        config.agentPorts,
       );
     default: {
       const _exhaustive: never = config;

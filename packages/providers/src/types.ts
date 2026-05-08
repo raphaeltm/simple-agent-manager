@@ -159,6 +159,10 @@ export interface GcpProviderConfig {
   diskSizeGb?: number;
   timeoutMs?: number;
   operationPollTimeoutMs?: number;
+  /** Source CIDR ranges allowed by the GCP VPC firewall rule for VM agent ingress. */
+  firewallSourceRanges?: readonly string[];
+  /** TCP ports allowed by the GCP VPC firewall rule for VM agent ingress. */
+  agentPorts?: readonly string[];
 }
 
 /**
