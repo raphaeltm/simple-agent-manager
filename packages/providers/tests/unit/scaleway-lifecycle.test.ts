@@ -20,16 +20,16 @@ describe('ScalewayProvider lifecycle', () => {
 
   describe('deleteVM', () => {
     it('should call terminate action', async () => {
-      const mockFetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ task: {} }), { status: 202 }),
-      );
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ server: createMockScalewayServer() }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ task: {} }), { status: 202 }));
       globalThis.fetch = mockFetch;
 
       await provider.deleteVM('server-id');
 
-      const url = fetchCall(mockFetch, 0).url;
+      const url = fetchCall(mockFetch, 1).url;
       expect(url).toContain('/servers/server-id/action');
-      const body = jsonBody(fetchCall(mockFetch, 0).init);
+      const body = jsonBody(fetchCall(mockFetch, 1).init);
       expect(body.action).toBe('terminate');
     });
 
@@ -43,6 +43,7 @@ describe('ScalewayProvider lifecycle', () => {
 
     it('should fall back to DELETE when terminate returns 400', async () => {
       const mockFetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ server: createMockScalewayServer() }), { status: 200 }))
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ message: 'Invalid state' }), { status: 400 }),
         )
@@ -53,14 +54,15 @@ describe('ScalewayProvider lifecycle', () => {
 
       await provider.deleteVM('server-id');
 
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-      const deleteUrl = fetchCall(mockFetch, 1).url;
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      const deleteUrl = fetchCall(mockFetch, 2).url;
       expect(deleteUrl).toContain('/servers/server-id');
-      expect(fetchCall(mockFetch, 1).init.method).toBe('DELETE');
+      expect(fetchCall(mockFetch, 2).init.method).toBe('DELETE');
     });
 
     it('should handle 404 on fallback DELETE (idempotent)', async () => {
       const mockFetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ server: createMockScalewayServer() }), { status: 200 }))
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ message: 'Invalid state' }), { status: 400 }),
         )
@@ -73,11 +75,33 @@ describe('ScalewayProvider lifecycle', () => {
     });
 
     it('should throw ProviderError on non-400/404 errors', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response('Server Error', { status: 500 }),
-      );
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ server: createMockScalewayServer() }), { status: 200 }))
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }));
 
       await expect(provider.deleteVM('server-id')).rejects.toThrow(ProviderError);
+    });
+
+    it('should terminate a server in the zone where it is found', async () => {
+      const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        const method = (init?.method || 'GET').toUpperCase();
+        if (method === 'GET' && url.includes('/zones/fr-par-1/servers/server-id')) {
+          return Promise.resolve(new Response(JSON.stringify({ message: 'Not found' }), { status: 404 }));
+        }
+        if (method === 'GET' && url.includes('/zones/fr-par-2/servers/server-id')) {
+          return Promise.resolve(new Response(JSON.stringify({ server: createMockScalewayServer() }), { status: 200 }));
+        }
+        if (method === 'POST' && url.includes('/zones/fr-par-2/servers/server-id/action')) {
+          return Promise.resolve(new Response(JSON.stringify({ task: {} }), { status: 202 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ message: 'Unexpected URL' }), { status: 500 }));
+      });
+      globalThis.fetch = mockFetch;
+
+      await provider.deleteVM('server-id');
+
+      const actionUrl = fetchCall(mockFetch, 2).url;
+      expect(actionUrl).toContain('/zones/fr-par-2/servers/server-id/action');
     });
   });
 
@@ -151,9 +175,9 @@ describe('ScalewayProvider lifecycle', () => {
         createMockScalewayServer({ id: 'id-1', name: 's1', tags: ['managed=sam'] }),
         createMockScalewayServer({ id: 'id-2', name: 's2', state: 'stopped', tags: ['managed=sam'] }),
       ];
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ servers }), { status: 200 }),
-      );
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => Promise.resolve(
+        new Response(JSON.stringify({ servers: url.includes('/zones/fr-par-1/') ? servers : [] }), { status: 200 }),
+      ));
 
       const result = await provider.listVMs();
       expect(result).toHaveLength(2);
@@ -163,9 +187,9 @@ describe('ScalewayProvider lifecycle', () => {
     });
 
     it('should pass label filters as tags query params', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
+      globalThis.fetch = vi.fn().mockImplementation(() => Promise.resolve(
         new Response(JSON.stringify({ servers: [] }), { status: 200 }),
-      );
+      ));
 
       await provider.listVMs({ 'managed-by': 'simple-agent-manager', node: 'n1' });
 
@@ -176,18 +200,18 @@ describe('ScalewayProvider lifecycle', () => {
     });
 
     it('should return empty array when no VMs match', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
+      globalThis.fetch = vi.fn().mockImplementation(() => Promise.resolve(
         new Response(JSON.stringify({ servers: [] }), { status: 200 }),
-      );
+      ));
 
       const result = await provider.listVMs({ nonexistent: 'label' });
       expect(result).toEqual([]);
     });
 
     it('should not include query params when no labels provided', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
+      globalThis.fetch = vi.fn().mockImplementation(() => Promise.resolve(
         new Response(JSON.stringify({ servers: [] }), { status: 200 }),
-      );
+      ));
 
       await provider.listVMs();
 
@@ -198,22 +222,22 @@ describe('ScalewayProvider lifecycle', () => {
 
   describe('powerOff', () => {
     it('should call poweroff action endpoint', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ task: {} }), { status: 202 }),
-      );
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ server: createMockScalewayServer() }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ task: {} }), { status: 202 }));
 
       await provider.powerOff('server-id');
 
-      const url = fetchCall(fetch as ReturnType<typeof vi.fn>, 0).url;
+      const url = fetchCall(fetch as ReturnType<typeof vi.fn>, 1).url;
       expect(url).toContain('/servers/server-id/action');
-      const body = jsonBody(fetchCall(fetch as ReturnType<typeof vi.fn>, 0).init);
+      const body = jsonBody(fetchCall(fetch as ReturnType<typeof vi.fn>, 1).init);
       expect(body.action).toBe('poweroff');
     });
 
     it('should throw ProviderError on failure', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response('Error', { status: 500 }),
-      );
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ server: createMockScalewayServer() }), { status: 200 }))
+        .mockResolvedValueOnce(new Response('Error', { status: 500 }));
 
       await expect(provider.powerOff('server-id')).rejects.toThrow(ProviderError);
     });
@@ -221,15 +245,15 @@ describe('ScalewayProvider lifecycle', () => {
 
   describe('powerOn', () => {
     it('should call poweron action endpoint', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ task: {} }), { status: 202 }),
-      );
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ server: createMockScalewayServer() }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ task: {} }), { status: 202 }));
 
       await provider.powerOn('server-id');
 
-      const url = fetchCall(fetch as ReturnType<typeof vi.fn>, 0).url;
+      const url = fetchCall(fetch as ReturnType<typeof vi.fn>, 1).url;
       expect(url).toContain('/servers/server-id/action');
-      const body = jsonBody(fetchCall(fetch as ReturnType<typeof vi.fn>, 0).init);
+      const body = jsonBody(fetchCall(fetch as ReturnType<typeof vi.fn>, 1).init);
       expect(body.action).toBe('poweron');
     });
   });

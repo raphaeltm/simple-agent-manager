@@ -166,10 +166,10 @@ The provider exposes explicit constructor and `GcpProviderConfig` options for th
 
 | Provider config field | Default constant | Description |
 |-----------------------|------------------|-------------|
-| `firewallSourceRanges` | `DEFAULT_GCP_FIREWALL_SOURCE_RANGES` = `['0.0.0.0/0']` | CIDR ranges allowed through the GCP VPC firewall to the VM agent ports |
+| `firewallSourceRanges` | `DEFAULT_GCP_FIREWALL_SOURCE_RANGES` = Cloudflare IPv4 ranges | CIDR ranges allowed through the GCP VPC firewall to the VM agent ports |
 | `agentPorts` | `DEFAULT_GCP_AGENT_PORTS` = `['8080', '8443']` | TCP ports allowed through the GCP VPC firewall for VM agent ingress |
 
-The default source range is intentionally broad at the GCP VPC layer so self-hosters do not need to precompute Cloudflare edge ranges in their Google Cloud project. The tighter ingress control is the OS-level cloud-init firewall documented in `docs/architecture/walkthrough.md`, which restricts VM agent access to Cloudflare IP ranges on the VM itself. Self-hosters with fixed ingress ranges can pass narrower `firewallSourceRanges` through provider configuration.
+The default source range is Cloudflare's IPv4 edge range list from `packages/providers/src/cloudflare-ranges.ts`, reused by `DEFAULT_GCP_FIREWALL_SOURCE_RANGES` in `packages/providers/src/gcp.ts`. The VM also keeps the OS-level cloud-init firewall documented in `docs/architecture/walkthrough.md`, so the VPC rule and VM firewall both restrict VM agent access to Cloudflare-routed traffic by default. Self-hosters with fixed ingress ranges can pass narrower `firewallSourceRanges` through provider configuration.
 
 ### GCP Deployment Variables (for Defang project deployment)
 

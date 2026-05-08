@@ -1,6 +1,6 @@
 import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GcpProvider } from '../../src/gcp';
+import { DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GcpProvider } from '../../src/gcp';
 import type { VMConfig } from '../../src/types';
 import { expectDefined, fetchCall, jsonBody } from './test-helpers';
 
@@ -204,6 +204,35 @@ describe('GcpProvider', () => {
       const firewallBody = jsonBody(fetchCall(mockFetch, 0).init);
       expect(firewallBody.sourceRanges).toEqual(['10.0.0.0/8']);
       expect(firewallBody.allowed).toEqual([{ IPProtocol: 'tcp', ports: ['9443'] }]);
+    });
+
+    it('should default firewall source ranges to Cloudflare IPv4 ranges', async () => {
+      const mockFetch = vi.fn()
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'firewall-op', status: 'PENDING' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'create-op', status: 'PENDING' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({
+          id: '1',
+          name: 'vm',
+          status: 'RUNNING',
+          machineType: 'zones/us-central1-a/machineTypes/e2-medium',
+          creationTimestamp: '2026-03-18T00:00:00Z',
+          networkInterfaces: [{ accessConfigs: [{ natIP: '1.2.3.4' }] }],
+        })));
+      globalThis.fetch = mockFetch;
+
+      await provider.createVM({
+        name: 'vm',
+        size: 'small',
+        location: 'us-central1-a',
+        userData: '',
+      });
+
+      const firewallBody = jsonBody(fetchCall(mockFetch, 0).init);
+      expect(firewallBody.sourceRanges).toEqual([...DEFAULT_GCP_FIREWALL_SOURCE_RANGES]);
+      expect(firewallBody.sourceRanges).toContain('173.245.48.0/20');
+      expect(firewallBody.sourceRanges).not.toContain('0.0.0.0/0');
     });
   });
 

@@ -1,5 +1,6 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 
+import { CLOUDFLARE_IPV4_RANGES } from './cloudflare-ranges';
 import { providerFetch } from './provider-fetch';
 import type { LocationMeta,Provider, SizeConfig, VMConfig, VMInstance } from './types';
 import { ProviderError } from './types';
@@ -21,11 +22,11 @@ const SAM_NETWORK_TAG = 'sam-agent';
 /** Default ports the VM agent may listen on (8443 with TLS, 8080 without). */
 export const DEFAULT_GCP_AGENT_PORTS = ['8080', '8443'] as const;
 /**
- * Default GCP project firewall source ranges. The VM cloud-init firewall still
- * restricts agent access to Cloudflare IP ranges; this provider-level rule only
- * prevents GCP's VPC firewall from blocking those edge-to-VM connections.
+ * Default GCP project firewall source ranges. These mirror Cloudflare's IPv4
+ * edge ranges so the VPC firewall and VM cloud-init firewall both restrict
+ * agent ingress to Cloudflare-routed traffic by default.
  */
-export const DEFAULT_GCP_FIREWALL_SOURCE_RANGES = ['0.0.0.0/0'] as const;
+export const DEFAULT_GCP_FIREWALL_SOURCE_RANGES = CLOUDFLARE_IPV4_RANGES;
 
 /** GCP machine type mappings for SAM VM sizes */
 const SIZE_MAP: Record<VMSize, SizeConfig> = {

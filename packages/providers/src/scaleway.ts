@@ -158,10 +158,13 @@ export class ScalewayProvider implements Provider {
   }
 
   async deleteVM(id: string): Promise<void> {
+    const server = await this.findServerInAnyZone(id);
+    if (!server) return;
+
     try {
       // Scaleway cannot delete running servers — try terminate action first
       // which handles poweroff + delete in one step
-      await this.performAction(this.zone, id, 'terminate');
+      await this.performAction(server.zone, id, 'terminate');
     } catch (err) {
       if (err instanceof ProviderError && err.statusCode === 404) {
         return; // Idempotent: already deleted
@@ -171,7 +174,7 @@ export class ScalewayProvider implements Provider {
         try {
           await providerFetch(
             this.name,
-            `${SCALEWAY_INSTANCE_API_URL}/${this.zone}/servers/${id}`,
+            `${SCALEWAY_INSTANCE_API_URL}/${server.zone}/servers/${id}`,
             {
               method: 'DELETE',
               headers: { 'X-Auth-Token': this.secretKey },
@@ -190,26 +193,8 @@ export class ScalewayProvider implements Provider {
   }
 
   async getVM(id: string): Promise<VMInstance | null> {
-    try {
-      const response = await providerFetch(
-        this.name,
-        `${SCALEWAY_INSTANCE_API_URL}/${this.zone}/servers/${id}`,
-        {
-          headers: { 'X-Auth-Token': this.secretKey },
-        },
-      );
-
-      const data = validateScalewayServerResponse(
-        await parseProviderJson(response, this.name, 'getVM'),
-        'getVM',
-      );
-      return this.mapServerToVMInstance(data.server);
-    } catch (err) {
-      if (err instanceof ProviderError && err.statusCode === 404) {
-        return null;
-      }
-      throw err;
-    }
+    const server = await this.findServerInAnyZone(id);
+    return server ? this.mapServerToVMInstance(server.payload) : null;
   }
 
   async listVMs(labels?: Record<string, string>): Promise<VMInstance[]> {
@@ -222,28 +207,45 @@ export class ScalewayProvider implements Provider {
       }
     }
 
-    const queryString = params.toString();
-    const url = queryString
-      ? `${SCALEWAY_INSTANCE_API_URL}/${this.zone}/servers?${queryString}`
-      : `${SCALEWAY_INSTANCE_API_URL}/${this.zone}/servers`;
+    const vms: VMInstance[] = [];
+    for (const zone of this.scalewayZones()) {
+      const queryString = params.toString();
+      const url = queryString
+        ? `${SCALEWAY_INSTANCE_API_URL}/${zone}/servers?${queryString}`
+        : `${SCALEWAY_INSTANCE_API_URL}/${zone}/servers`;
 
-    const response = await providerFetch(this.name, url, {
-      headers: { 'X-Auth-Token': this.secretKey },
-    });
+      try {
+        const response = await providerFetch(this.name, url, {
+          headers: { 'X-Auth-Token': this.secretKey },
+        });
 
-    const data = validateScalewayServersResponse(
-      await parseProviderJson(response, this.name, 'listVMs'),
-      'listVMs',
-    );
-    return data.servers.map((server) => this.mapServerToVMInstance(server));
+        const data = validateScalewayServersResponse(
+          await parseProviderJson(response, this.name, `listVMs.${zone}`),
+          `listVMs.${zone}`,
+        );
+        vms.push(...data.servers.map((server) => this.mapServerToVMInstance(server)));
+      } catch (err) {
+        if (err instanceof ProviderError && err.statusCode === 404) continue;
+        throw err;
+      }
+    }
+    return vms;
   }
 
   async powerOff(id: string): Promise<void> {
-    await this.performAction(this.zone, id, 'poweroff');
+    const server = await this.findServerInAnyZone(id);
+    if (!server) {
+      throw new ProviderError(this.name, 404, `Scaleway server ${id} not found`);
+    }
+    await this.performAction(server.zone, id, 'poweroff');
   }
 
   async powerOn(id: string): Promise<void> {
-    await this.performAction(this.zone, id, 'poweron');
+    const server = await this.findServerInAnyZone(id);
+    if (!server) {
+      throw new ProviderError(this.name, 404, `Scaleway server ${id} not found`);
+    }
+    await this.performAction(server.zone, id, 'poweron');
   }
 
   async validateToken(): Promise<boolean> {
@@ -316,6 +318,37 @@ export class ScalewayProvider implements Provider {
         body: JSON.stringify({ action }),
       },
     );
+  }
+
+  private async findServerInAnyZone(id: string): Promise<{ zone: string; payload: ScalewayServerPayload } | null> {
+    for (const zone of this.scalewayZones()) {
+      try {
+        const response = await providerFetch(
+          this.name,
+          `${SCALEWAY_INSTANCE_API_URL}/${zone}/servers/${id}`,
+          {
+            headers: { 'X-Auth-Token': this.secretKey },
+          },
+        );
+
+        const data = validateScalewayServerResponse(
+          await parseProviderJson(response, this.name, `findServerInAnyZone.${zone}`),
+          `findServerInAnyZone.${zone}`,
+        );
+        return { zone, payload: data.server };
+      } catch (err) {
+        if (err instanceof ProviderError && err.statusCode === 404) continue;
+        throw err;
+      }
+    }
+    return null;
+  }
+
+  private scalewayZones(): readonly string[] {
+    return [
+      this.zone,
+      ...SCALEWAY_LOCATIONS.filter((zone) => zone !== this.zone),
+    ];
   }
 
   private mapServerToVMInstance(server: ScalewayServerPayload): VMInstance {

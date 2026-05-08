@@ -37,7 +37,8 @@ describe('createProvider with GCP', () => {
   });
 
   it('should export documented GCP firewall defaults', () => {
-    expect(DEFAULT_GCP_FIREWALL_SOURCE_RANGES).toEqual(['0.0.0.0/0']);
+    expect(DEFAULT_GCP_FIREWALL_SOURCE_RANGES).toContain('173.245.48.0/20');
+    expect(DEFAULT_GCP_FIREWALL_SOURCE_RANGES).not.toContain('0.0.0.0/0');
     expect(DEFAULT_GCP_AGENT_PORTS).toEqual(['8080', '8443']);
   });
 });
