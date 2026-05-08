@@ -242,6 +242,56 @@ export async function getInstallationRepositories(
   return allRepos;
 }
 
+/**
+ * Get GitHub App installations accessible to an authenticated GitHub user.
+ * This is the user-context check GitHub recommends before trusting a setup
+ * callback's installation_id parameter.
+ */
+export async function getUserAccessibleInstallations(
+  accessToken: string
+): Promise<Array<{ id: number; account: { login: string; type: string } }>> {
+  const allInstallations: Array<{ id: number; account: { login: string; type: string } }> = [];
+  let page = 1;
+  const perPage = 100;
+  let hasMore = true;
+
+  while (hasMore) {
+    const response = await fetch(
+      `https://api.github.com/user/installations?per_page=${perPage}&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'Simple-Agent-Manager',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({})) as { message?: string };
+      throw new Error(error.message || `Failed to get user installations: ${response.status}`);
+    }
+
+    const data = await response.json() as {
+      installations: Array<{
+        id: number;
+        account: { login: string; type: string };
+      }>;
+    };
+
+    allInstallations.push(...data.installations.map((installation) => ({
+      id: installation.id,
+      account: installation.account,
+    })));
+
+    hasMore = data.installations.length === perPage;
+    page++;
+  }
+
+  return allInstallations;
+}
+
 const DEFAULT_MAX_BRANCHES_PER_REPO = 5000;
 
 /**
@@ -306,39 +356,6 @@ export async function getRepositoryBranches(
   }
 
   return allBranches;
-}
-
-/**
- * Get all installations for the app.
- */
-export async function getAppInstallations(
-  env: Env
-): Promise<Array<{ id: number; account: { login: string; type: string } }>> {
-  const jwt = await generateAppJWT(env);
-
-  const response = await fetch(
-    'https://api.github.com/app/installations',
-    {
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'Simple-Agent-Manager',
-      },
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { message?: string };
-    throw new Error(error.message || `Failed to get installations: ${response.status}`);
-  }
-
-  const data = await response.json() as Array<{
-    id: number;
-    account: { login: string; type: string };
-  }>;
-
-  return data;
 }
 
 /**
