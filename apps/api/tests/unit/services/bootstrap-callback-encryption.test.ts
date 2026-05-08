@@ -8,47 +8,70 @@ import type { BootstrapResponse, BootstrapTokenData } from '@simple-agent-manage
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock rate-limit middleware to be a passthrough
-vi.mock('../../../src/middleware/rate-limit', () => ({
-  rateLimit: () => vi.fn(async (_c: any, next: any) => { await next(); }),
-  getRateLimit: vi.fn(),
-}));
+vi.mock('../../../src/middleware/rate-limit', () => {
+  const continueRequest = async (_c: unknown, next: () => Promise<void>) => next();
+  return {
+    rateLimit: () => vi.fn(continueRequest),
+    getRateLimit: vi.fn(),
+  };
+});
 
-const mockKV = {
-  put: vi.fn(),
-  get: vi.fn(),
-  delete: vi.fn(),
+type KvMock = {
+  put: ReturnType<typeof vi.fn>;
+  get: ReturnType<typeof vi.fn>;
+  delete: ReturnType<typeof vi.fn>;
 };
 
-const mockEnv = {
-  KV: mockKV,
-  DATABASE: {},
-  ENCRYPTION_KEY: 'iZEI8rg5FHtTo2yvt6Qw3m4z6aTfqj5MdLEGqOvdqw0=',
-  BASE_DOMAIN: 'workspaces.example.com',
+const TEST_ENCRYPTION_KEY = 'iZEI8rg5FHtTo2yvt6Qw3m4z6aTfqj5MdLEGqOvdqw0=';
+
+let kv: KvMock;
+let env: {
+  KV: KvMock;
+  DATABASE: Record<string, never>;
+  ENCRYPTION_KEY: string;
+  BASE_DOMAIN: string;
 };
+
+function resetBootstrapHarness() {
+  kv = {
+    put: vi.fn(),
+    get: vi.fn(),
+    delete: vi.fn(),
+  };
+  env = {
+    KV: kv,
+    DATABASE: {},
+    ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+    BASE_DOMAIN: 'workspaces.example.com',
+  };
+}
+
+async function requestBootstrapToken(token: string) {
+  const { bootstrapRoutes } = await import('../../../src/routes/bootstrap');
+  const app = new Hono();
+  app.route('/api/bootstrap', bootstrapRoutes);
+  return app.request(`/api/bootstrap/${token}`, { method: 'POST' }, env);
+}
 
 describe('Bootstrap Callback Token Encryption (F-004)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBootstrapHarness();
   });
 
   it('decrypts encryptedCallbackToken via the bootstrap route', async () => {
-    const { bootstrapRoutes } = await import('../../../src/routes/bootstrap');
     const { encrypt } = await import('../../../src/services/encryption');
-
-    const app = new Hono();
-    app.route('/api/bootstrap', bootstrapRoutes);
 
     const originalCallbackJwt = 'eyJhbGciOiJSUzI1NiJ9.test-callback-jwt-payload';
 
     // Encrypt callback token using the same key the route will use to decrypt
     const { ciphertext: encCallback, iv: ivCallback } = await encrypt(
       originalCallbackJwt,
-      mockEnv.ENCRYPTION_KEY
+      env.ENCRYPTION_KEY
     );
     const { ciphertext: encHetzner, iv: ivHetzner } = await encrypt(
       'hetzner-token',
-      mockEnv.ENCRYPTION_KEY
+      env.ENCRYPTION_KEY
     );
 
     const tokenData: BootstrapTokenData = {
@@ -63,13 +86,9 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
       createdAt: new Date().toISOString(),
     };
 
-    mockKV.get.mockResolvedValue(tokenData);
+    kv.get.mockResolvedValue(tokenData);
 
-    const res = await app.request(
-      '/api/bootstrap/encrypted-callback-token',
-      { method: 'POST' },
-      mockEnv
-    );
+    const res = await requestBootstrapToken('encrypted-callback-token');
 
     expect(res.status).toBe(200);
     const body: BootstrapResponse = await res.json();
@@ -78,15 +97,11 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
   });
 
   it('falls back to plaintext callbackToken for legacy in-flight tokens', async () => {
-    const { bootstrapRoutes } = await import('../../../src/routes/bootstrap');
     const { encrypt } = await import('../../../src/services/encryption');
-
-    const app = new Hono();
-    app.route('/api/bootstrap', bootstrapRoutes);
 
     const { ciphertext: encHetzner, iv: ivHetzner } = await encrypt(
       'hetzner-token',
-      mockEnv.ENCRYPTION_KEY
+      env.ENCRYPTION_KEY
     );
 
     const tokenData: BootstrapTokenData = {
@@ -100,13 +115,9 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
       createdAt: new Date().toISOString(),
     };
 
-    mockKV.get.mockResolvedValue(tokenData);
+    kv.get.mockResolvedValue(tokenData);
 
-    const res = await app.request(
-      '/api/bootstrap/legacy-callback-token',
-      { method: 'POST' },
-      mockEnv
-    );
+    const res = await requestBootstrapToken('legacy-callback-token');
 
     expect(res.status).toBe(200);
     const body: BootstrapResponse = await res.json();
@@ -114,15 +125,11 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
   });
 
   it('rejects bootstrap data when both encrypted and plaintext callback fields are absent', async () => {
-    const { bootstrapRoutes } = await import('../../../src/routes/bootstrap');
     const { encrypt } = await import('../../../src/services/encryption');
-
-    const app = new Hono();
-    app.route('/api/bootstrap', bootstrapRoutes);
 
     const { ciphertext: encHetzner, iv: ivHetzner } = await encrypt(
       'hetzner-token',
-      mockEnv.ENCRYPTION_KEY
+      env.ENCRYPTION_KEY
     );
 
     // Edge case: neither encrypted nor plaintext callbackToken present
@@ -136,13 +143,9 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
       createdAt: new Date().toISOString(),
     };
 
-    mockKV.get.mockResolvedValue(tokenData);
+    kv.get.mockResolvedValue(tokenData);
 
-    const res = await app.request(
-      '/api/bootstrap/no-callback-token',
-      { method: 'POST' },
-      mockEnv
-    );
+    const res = await requestBootstrapToken('no-callback-token');
 
     expect(res.status).toBe(500);
   });
