@@ -72,16 +72,16 @@ describe('GitHub App installation sharing', () => {
     mocks.getAccessToken.mockResolvedValue({ accessToken: 'github-user-token' });
 
     const makeSelectBuilder = () => {
-      const builder = {
-        from: vi.fn().mockReturnThis(),
-        where: vi.fn().mockReturnThis(),
-        limit: vi.fn(() => Promise.resolve(limitResponses.shift() ?? [])),
+      const fromBuilder = {
+        where: vi.fn(() =>
+          Object.assign(Promise.resolve(whereResponses.shift() ?? []), {
+            limit: vi.fn(() => Promise.resolve(limitResponses.shift() ?? [])),
+          })
+        ),
       };
-      Object.defineProperty(builder, 'then', {
-        value: (resolve: (value: unknown[]) => void, reject: (reason: unknown) => void) =>
-          Promise.resolve(whereResponses.shift() ?? []).then(resolve, reject),
-      });
-      return builder;
+      return {
+        from: vi.fn(() => fromBuilder),
+      };
     };
 
     const makeInsertBuilder = () => ({
