@@ -318,7 +318,7 @@ describe('WorkspaceSidebar', () => {
     ];
     render(<WorkspaceSidebar {...defaultProps} detectedPorts={ports} />);
     const link = screen.getByText('3000').closest('a');
-    expect(link).toHaveAttribute('href', 'https://ws-ws1--3000.example.com');
+    expect(link).toHaveAttribute('href', 'http://localhost:8787/api/workspaces/ws-1/port-access?port=3000');
     expect(link).toHaveAttribute('target', '_blank');
   });
 
