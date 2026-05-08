@@ -87,6 +87,8 @@ export interface Env {
   // Optional configurable values (per constitution principle XI)
   TERMINAL_TOKEN_EXPIRY_MS?: string;
   CALLBACK_TOKEN_EXPIRY_MS?: string;
+  PORT_ACCESS_TOKEN_EXPIRY_MS?: string;          // Port access JWT expiry in ms (default: 900000 = 15 min)
+  PORT_ACCESS_COOKIE_MAX_AGE_SECONDS?: string;   // Port access cookie Max-Age in seconds (default: 14400 = 4 hr)
   BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
   PROVISIONING_TIMEOUT_MS?: string;
   DNS_TTL_SECONDS?: string;

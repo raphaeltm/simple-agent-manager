@@ -14,7 +14,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { signTerminalToken } from '../../services/jwt';
+import { signPortAccessToken, signTerminalToken } from '../../services/jwt';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -205,7 +205,18 @@ export async function handleExposePort(
     const result = await proxyToVmAgent(
       env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'expose-port', 'POST',
       { port, label },
-    );
+    ) as { port?: number; externalUrl?: string; listening?: boolean };
+
+    // Append port-access token to the external URL for browser auth
+    if (result.externalUrl && typeof result.externalUrl === 'string') {
+      const portToken = await signPortAccessToken(
+        tokenData.userId, tokenData.workspaceId, port, env,
+      );
+      const url = new URL(result.externalUrl);
+      url.searchParams.set('port_token', portToken);
+      result.externalUrl = url.toString();
+    }
+
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
   } catch (e) {
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to expose port: ${e instanceof Error ? e.message : String(e)}`);

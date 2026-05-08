@@ -37,7 +37,7 @@ export const WORKSPACE_TOOLS = [
   {
     name: 'expose_port',
     description:
-      'Register a port and get its external URL. Use after starting a dev server to get the public URL for testing.',
+      'Register a port and get a time-limited external URL. Use after starting a dev server. Present the URL to the user using markdown link syntax for readability: `[Open port {port}](url)`. The URL is valid for a limited time; call again for a fresh link if it expires.',
     inputSchema: {
       type: 'object' as const,
       properties: {

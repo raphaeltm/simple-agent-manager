@@ -98,7 +98,7 @@ import { runTrialRolloverAudit } from './scheduled/trial-rollover';
 import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
-import { signTerminalToken, verifyTerminalToken } from './services/jwt';
+import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
@@ -185,9 +185,83 @@ app.use('*', async (c, next) => {
   }
   const { workspaceId, targetPort } = parsed;
 
-  const auth = createAuth(c.env);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  let userId = session?.user.id ?? null;
+  // --- Port-access authentication (cookie + token handshake) ---
+  // For port-specific subdomains (ws-{id}--{port}), check the port-access cookie
+  // and ?port_token= query param BEFORE the normal session/terminal-token paths.
+  // This is necessary because BetterAuth cookies are scoped to api.{BASE_DOMAIN}
+  // and are NOT sent to ws-{id}--{port}.{BASE_DOMAIN} subdomains.
+  let userId: string | null = null;
+  let portAccessRedirect: Response | null = null;
+
+  if (targetPort !== null) {
+    // 5a: Check sam_port_access cookie (subsequent requests)
+    const cookieHeader = c.req.raw.headers.get('cookie') || '';
+    const cookieMatch = cookieHeader.match(/(?:^|;\s*)sam_port_access=([^\s;]+)/);
+    if (cookieMatch?.[1]) {
+      try {
+        const payload = await verifyPortAccessToken(cookieMatch[1], c.env);
+        if (payload.workspace === workspaceId && payload.port === targetPort) {
+          userId = payload.subject;
+        }
+      } catch {
+        // Cookie expired or invalid — fall through to token check
+      }
+    }
+
+    // 5b: Check ?port_token= query param (initial request from expose_port URL)
+    if (!userId) {
+      const portToken = url.searchParams.get('port_token');
+      if (portToken) {
+        try {
+          const payload = await verifyPortAccessToken(portToken, c.env);
+          if (payload.workspace === workspaceId && payload.port === targetPort) {
+            // Set cookie and 302 redirect to strip token from URL
+            const cookieMaxAge = c.env.PORT_ACCESS_COOKIE_MAX_AGE_SECONDS
+              ? parseInt(c.env.PORT_ACCESS_COOKIE_MAX_AGE_SECONDS, 10) : 14400;
+            const redirectUrl = new URL(url.toString());
+            redirectUrl.searchParams.delete('port_token');
+            portAccessRedirect = new Response(null, {
+              status: 302,
+              headers: {
+                Location: redirectUrl.toString(),
+                'Set-Cookie': `sam_port_access=${portToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${cookieMaxAge}`,
+                'Cache-Control': 'no-store',
+              },
+            });
+            userId = payload.subject;
+          }
+        } catch (err) {
+          log.warn('ws_proxy_port_token_rejected', { workspaceId, targetPort, ...serializeError(err) });
+        }
+      }
+    }
+
+    // 5f: HTML error page for expired/invalid port access
+    if (!userId) {
+      return new Response(
+        `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Session expired</title>
+<style>body{font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;padding:0 20px;color:#333}
+h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;font-size:0.9em}</style>
+</head><body>
+<h1>Session expired</h1>
+<p>Your access to this port has expired or is invalid.</p>
+<p>Ask the agent to run <code>expose_port</code> again for a fresh link.</p>
+</body></html>`,
+        { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    // Return the 302 redirect after we confirm the DB lookup passes below
+    // (moved after DB check to ensure ownership is validated first)
+  }
+
+  // --- Standard session/terminal-token authentication (non-port or fallback) ---
+  if (!userId) {
+    const auth = createAuth(c.env);
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    userId = session?.user.id ?? null;
+  }
 
   if (!userId) {
     const token = url.searchParams.get('token');
@@ -234,6 +308,17 @@ app.use('*', async (c, next) => {
     }
   }
 
+  // 5b continued: Return the 302 redirect now that ownership is verified.
+  // This ensures the cookie is only set after the D1 ownership check passes.
+  if (portAccessRedirect) {
+    return portAccessRedirect;
+  }
+
+  // 5d: Strip port_token from URL before logging to prevent token leakage into logs.
+  if (url.searchParams.has('port_token')) {
+    url.searchParams.delete('port_token');
+  }
+
   // Proxy to the VM agent via its proxied (orange-clouded) backend hostname.
   // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
   // so we use the {id}.vm.{domain} hostname. The two-level subdomain bypasses
@@ -266,6 +351,9 @@ app.use('*', async (c, next) => {
     const subPath = url.pathname === '/' ? '' : url.pathname;
     vmUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${subPath}`;
 
+    // Strip port_token from the proxied URL (it was already validated above).
+    vmUrl.searchParams.delete('port_token');
+
     // Inject a workspace-scoped JWT so the VM agent can authenticate this request.
     // Port-forwarded URLs are accessed directly by browsers which have no pre-existing
     // workspace session cookie or token. The Worker is a trusted intermediary that has
@@ -297,13 +385,23 @@ app.use('*', async (c, next) => {
   headers.set('X-Forwarded-Host', hostname);
   headers.set('X-Forwarded-Proto', 'https');
 
-  return fetch(vmUrl.toString(), {
+  const response = await fetch(vmUrl.toString(), {
     method: c.req.raw.method,
     headers,
     body: c.req.raw.body,
     // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
     duplex: c.req.raw.body ? 'half' : undefined,
   });
+
+  // 5e: Strip Set-Cookie headers from container responses on port-proxy path.
+  // Prevents a malicious container app from overwriting the sam_port_access cookie.
+  if (targetPort !== null) {
+    const sanitized = new Response(response.body, response);
+    sanitized.headers.delete('set-cookie');
+    return sanitized;
+  }
+
+  return response;
 });
 
 // Structured request/response logging middleware.
