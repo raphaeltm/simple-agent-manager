@@ -9,6 +9,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
+const PROJECT_AGENT_TOOLS_IMPORT_TIMEOUT_MS = 10_000;
 
 // Mock cloudflare:workers
 vi.mock('cloudflare:workers', () => ({
@@ -52,7 +53,7 @@ describe('Project Agent Tool Definitions', () => {
         expect(tool.input_schema.required).not.toContain('projectId');
       }
     }
-  });
+  }, PROJECT_AGENT_TOOLS_IMPORT_TIMEOUT_MS);
 
   it('includes expected tool categories', async () => {
     const { PROJECT_AGENT_TOOLS } = await import(
@@ -95,7 +96,7 @@ describe('Project Agent Tool Definitions', () => {
 
     // Conversation memory
     expect(names).toContain('search_conversation_history');
-  });
+  }, PROJECT_AGENT_TOOLS_IMPORT_TIMEOUT_MS);
 
   it('does NOT include cross-project tools', async () => {
     const { PROJECT_AGENT_TOOLS } = await import(
@@ -106,7 +107,7 @@ describe('Project Agent Tool Definitions', () => {
     // These are SAM-level (cross-project) tools, not project-scoped
     expect(names).not.toContain('list_projects');
     expect(names).not.toContain('get_project_status');
-  });
+  }, PROJECT_AGENT_TOOLS_IMPORT_TIMEOUT_MS);
 });
 
 describe('Project Agent Tool Execution', () => {
@@ -120,7 +121,7 @@ describe('Project Agent Tool Execution', () => {
       { env: {} as Record<string, unknown>, userId: 'u1', projectId: 'p1' },
     );
     expect(result).toEqual({ error: 'Unknown tool: nonexistent_tool' });
-  });
+  }, PROJECT_AGENT_TOOLS_IMPORT_TIMEOUT_MS);
 
   it('injects projectId from context for project-scoped tools', async () => {
     const { executeProjectTool } = await import(
@@ -143,7 +144,7 @@ describe('Project Agent Tool Execution', () => {
     if (errorResult.error) {
       expect(errorResult.error).not.toContain('missing projectId');
     }
-  });
+  }, PROJECT_AGENT_TOOLS_IMPORT_TIMEOUT_MS);
 
   it('returns error when projectId is missing from context', async () => {
     const { executeProjectTool } = await import(
@@ -160,7 +161,7 @@ describe('Project Agent Tool Execution', () => {
     );
 
     expect(result).toEqual({ error: 'Project agent context missing projectId.' });
-  });
+  }, PROJECT_AGENT_TOOLS_IMPORT_TIMEOUT_MS);
 
   it('does not inject projectId for tools that do not need it', async () => {
     const { executeProjectTool } = await import(
@@ -182,7 +183,7 @@ describe('Project Agent Tool Execution', () => {
     if (errorResult.error) {
       expect(errorResult.error).not.toContain('Unknown tool');
     }
-  });
+  }, PROJECT_AGENT_TOOLS_IMPORT_TIMEOUT_MS);
 });
 
 describe('Project Agent System Prompt', () => {

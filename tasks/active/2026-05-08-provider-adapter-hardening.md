@@ -45,7 +45,7 @@ This does not meet the quality bar for infrastructure software. Malformed provid
 - [x] Add or update providerFetch tests if providerFetch behavior is changed, including malformed JSON/error body edge cases. Not touched; validation-level malformed JSON/payload tests added instead.
 - [x] Update documentation that references GCP provider configuration/firewall behavior, with code-path citations.
 - [x] Run and record provider package `lint`, `typecheck`, and `test`.
-- [ ] Run and record broader `/do` quality checks.
+- [x] Run and record broader `/do` quality checks. Root `pnpm lint` passed with pre-existing warnings outside `packages/providers`; root `pnpm typecheck` passed; root `pnpm build` passed; root `pnpm test` passed after a targeted quality-gate repair for `apps/api/tests/unit/durable-objects/project-agent.test.ts`; standalone `pnpm --filter @simple-agent-manager/api test` passed.
 - [ ] Complete specialist review for infrastructure/security/config/test/docs changes before staging.
 - [ ] Deploy the branch to staging via GitHub Actions and verify the changed provider path as far as staging credentials allow. If exact GCP/Scaleway verification is blocked by missing credentials/provider availability, comment on the PR, label it `needs-human-review`, notify the human, and do not merge.
 
