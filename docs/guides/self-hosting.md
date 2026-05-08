@@ -418,6 +418,8 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 
 > **Note**: The Setup URL points to the API, not the web UI. The API records the installation in the database and then redirects the user to `https://app.example.com/settings`.
 
+> **Team use**: Multiple SAM users can connect the same organization installation. Each user must sign in with GitHub and visit the GitHub settings page; `apps/api/src/routes/github.ts` verifies the requested installation against that user's GitHub-accessible installations via `getUserAccessibleInstallations()` in `apps/api/src/services/github-app.ts` before recording a per-user connection. This enables shared GitHub App access for organization repositories, but SAM projects and workspaces remain user-owned until full organization tenancy is implemented.
+
 **Webhook:**
 | Field | Value |
 |-------|-------|

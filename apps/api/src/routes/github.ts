@@ -1,8 +1,9 @@
 import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
 import { and,eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context,Hono } from 'hono';
 
+import { createAuth } from '../auth';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -11,11 +12,9 @@ import { ulid } from '../lib/ulid';
 import { getUserId, optionalAuth,requireApproved, requireAuth } from '../middleware/auth';
 import { AppError, errors } from '../middleware/error';
 import {
-  generateAppJWT,
-  getAppInstallations,
   getInstallationRepositories,
-  getInstallationToken,
   getRepositoryBranches,
+  getUserAccessibleInstallations,
   verifyWebhookSignature,
 } from '../services/github-app';
 
@@ -24,18 +23,18 @@ const githubRoutes = new Hono<{ Bindings: Env }>();
 /**
  * GET /api/github/installations - List user's GitHub App installations
  *
- * Syncs installations from GitHub on each request so that org members
- * who didn't originally install the app still see org installations.
- * Uses the GitHub App JWT to list all app installations, then checks
- * each against the user's existing DB records. New accessible installations
- * are auto-created for the user.
+ * Syncs installations from GitHub on each request so that users see every
+ * installation their authenticated GitHub account can access.
  */
 githubRoutes.get('/installations', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
   // Sync: discover installations the user can access but doesn't have a DB record for
-  await syncUserInstallations(db, userId, c.env);
+  const accessToken = await getGitHubUserAccessToken(c, userId);
+  if (accessToken) {
+    await syncUserInstallations(db, userId, accessToken);
+  }
 
   const installations = await db
     .select()
@@ -329,37 +328,27 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     return c.redirect(`${settingsUrl}?github_app=installed`);
   }
 
-  // Fetch installation details from GitHub API and save to DB
+  // Verify the setup callback's installation_id against the authenticated
+  // GitHub user's accessible installations before saving it.
   try {
-    const jwt = await generateAppJWT(c.env);
-    const response = await fetch(
-      `https://api.github.com/app/installations/${installationId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${jwt}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          'User-Agent': 'Simple-Agent-Manager',
-        },
-      }
-    );
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      log.error('github.api_error_for_installation', { status: response.status, installationId, body: errorBody });
-      return c.redirect(`${settingsUrl}?github_app=error&reason=github_api_${response.status}`);
+    const accessToken = await getGitHubUserAccessToken(c, auth.user.id);
+    if (!accessToken) {
+      return c.redirect(`${settingsUrl}?github_app=error&reason=github_user_token_unavailable`);
     }
 
-    const installation = await response.json() as {
-      account: { login: string; type: string };
-    };
+    const accessibleInstallations = await getUserAccessibleInstallations(accessToken);
+    const accessibleInstallation = accessibleInstallations.find((inst) => String(inst.id) === installationId);
+    if (!accessibleInstallation) {
+      log.warn('github.installation_not_accessible_to_user', { installationId, userId: auth.user.id });
+      return c.redirect(`${settingsUrl}?github_app=error&reason=installation_not_accessible`);
+    }
 
     await db.insert(schema.githubInstallations).values({
       id: ulid(),
       userId: auth.user.id,
       installationId: installationId,
-      accountType: installation.account.type === 'Organization' ? 'organization' : 'personal',
-      accountName: installation.account.login,
+      accountType: accessibleInstallation.account.type === 'Organization' ? 'organization' : 'personal',
+      accountName: accessibleInstallation.account.login,
       createdAt: now,
       updatedAt: now,
     });
@@ -400,33 +389,19 @@ githubRoutes.delete('/installations/:id', requireAuth(), requireApproved(), asyn
 /**
  * Sync GitHub App installations for a user.
  *
- * Fetches all installations of the GitHub App, then for org-type installations
- * that the user doesn't already have a DB record for, checks whether the user
- * is a member of the org. If so, creates a record so the user can see and use
- * the installation.
- *
- * For personal installations, only the account owner should see them (handled
- * by the webhook creating the initial record).
+ * Fetches installations in user context, then creates any missing per-user
+ * records for installations the authenticated GitHub account can access.
  */
 async function syncUserInstallations(
   db: ReturnType<typeof drizzle<typeof schema>>,
   userId: string,
-  env: Env
+  accessToken: string
 ): Promise<void> {
   try {
-    // Get the user's GitHub username for membership checks
-    const userRows = await db
-      .select({ githubId: schema.users.githubId, name: schema.users.name })
-      .from(schema.users)
-      .where(eq(schema.users.id, userId))
-      .limit(1);
-
-    const user = userRows[0];
-    if (!user?.githubId) return;
-
-    // Get all app installations from GitHub
-    const appInstallations = await getAppInstallations(env);
-    if (appInstallations.length === 0) return;
+    // User-context GitHub verification: only sync installations the
+    // authenticated GitHub user can access.
+    const accessibleInstallations = await getUserAccessibleInstallations(accessToken);
+    if (accessibleInstallations.length === 0) return;
 
     // Get user's existing installation records
     const existingRecords = await db
@@ -436,8 +411,7 @@ async function syncUserInstallations(
 
     const existingInstallationIds = new Set(existingRecords.map((r) => r.installationId));
 
-    // Find installations the user doesn't have a record for
-    const missingInstallations = appInstallations.filter(
+    const missingInstallations = accessibleInstallations.filter(
       (inst) => !existingInstallationIds.has(String(inst.id))
     );
 
@@ -446,22 +420,6 @@ async function syncUserInstallations(
     const now = new Date().toISOString();
 
     for (const inst of missingInstallations) {
-      // For org installations, check if the user is a member
-      if (inst.account.type === 'Organization') {
-        const isMember = await checkOrgMembership(
-          String(inst.id),
-          inst.account.login,
-          user.githubId,
-          env
-        );
-        if (!isMember) continue;
-      } else {
-        // Personal installations: only the account owner should see them.
-        // The webhook handler creates these records; skip if not already present.
-        continue;
-      }
-
-      // Create the record for this user
       try {
         await db
           .insert(schema.githubInstallations)
@@ -486,52 +444,27 @@ async function syncUserInstallations(
 }
 
 /**
- * Check if a GitHub user is a member of an organization.
- * Uses the installation access token to query the org members API.
+ * Get the current user's GitHub access token from BetterAuth.
+ * BetterAuth owns OAuth token encryption/refresh; callers should not read the
+ * encrypted accounts table directly.
  */
-async function checkOrgMembership(
-  installationId: string,
-  orgLogin: string,
-  githubUserId: string,
-  env: Env
-): Promise<boolean> {
+async function getGitHubUserAccessToken(
+  c: Context<{ Bindings: Env }>,
+  userId: string
+): Promise<string | null> {
   try {
-    const { token } = await getInstallationToken(installationId, env);
-
-    // List org members and check if the user's GitHub ID is among them
-    // Use per_page=100 and paginate if needed
-    const perPage = 100;
-    const maxPages = 100;
-
-    for (let page = 1; page <= maxPages; page++) {
-      const response = await fetch(
-        `https://api.github.com/orgs/${encodeURIComponent(orgLogin)}/members?per_page=${perPage}&page=${page}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2022-11-28',
-            'User-Agent': 'Simple-Agent-Manager',
-          },
-        }
-      );
-
-      if (!response.ok) {
-        // If we can't check membership (e.g., insufficient permissions), skip
-        return false;
-      }
-
-      const members = (await response.json()) as Array<{ id: number }>;
-      if (members.some((m) => String(m.id) === githubUserId)) {
-        return true;
-      }
-
-      if (members.length < perPage) break;
-    }
-
-    return false;
-  } catch {
-    return false;
+    const auth = createAuth(c.env);
+    const token = await auth.api.getAccessToken({
+      headers: c.req.raw.headers,
+      body: { providerId: 'github', userId },
+    });
+    return token.accessToken || null;
+  } catch (err) {
+    log.warn('github.user_access_token_unavailable', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
   }
 }
 
