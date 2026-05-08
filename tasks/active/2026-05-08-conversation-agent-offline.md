@@ -19,7 +19,19 @@ Conversation mode tasks start and the VM agent continues working, but project ch
 - [x] Keep app-session auth working for normal authenticated workspace and port proxy access.
 - [x] Add regression tests for token-only workspace proxy access and cross-user rejection.
 - [x] Run focused tests and typecheck/lint for touched packages.
-- [ ] Verify staging with a live conversation-mode task and production with non-mutating probes/log checks.
+- [x] Verify staging with a live conversation-mode task and production with non-mutating probes/log checks.
+
+## Verification
+
+- Local focused tests: `pnpm --filter @simple-agent-manager/api test -- workspace-proxy-ownership.test.ts node-agent-contract.test.ts` (65 passed).
+- API typecheck: `pnpm --filter @simple-agent-manager/api typecheck`.
+- API lint: `pnpm --filter @simple-agent-manager/api lint` (exited 0 with pre-existing warning-only output).
+- Staging deploy: GitHub Actions `deploy-staging.yml` run `25546500678` succeeded, including smoke tests.
+- Staging live task: submitted conversation task `01KR3D1BKGTBSDKZ9FKRDN0W82`, session `eb4c858f-b52d-4655-b499-f89cbd44b6ff`, workspace `01KR3D5775CW48ZBWPZVNW58H6`.
+- Staging WebSocket: token-only project-chat ACP URL returned `HTTP/1.1 101 Switching Protocols` and `session_state` with `status: ready`.
+- Staging follow-up: sent a follow-up `session/prompt` over the same WebSocket and received `session_prompting`.
+- Cleanup: closed the staging conversation task and deleted workspace `01KR3D5775CW48ZBWPZVNW58H6` and node `01KR3D1FY3G4FEY627T1H2N2JZ`.
+- Production non-mutating check: production workspace-subdomain request currently returns proxy-level `401 UNAUTHORIZED` without app cookie, matching the deployed regression before this fix reaches production.
 
 ## Acceptance Criteria
 
