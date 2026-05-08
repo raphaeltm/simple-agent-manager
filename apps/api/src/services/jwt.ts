@@ -181,6 +181,11 @@ export interface CallbackTokenPayload {
   scope?: CallbackTokenScope;
 }
 
+export interface TerminalTokenPayload {
+  workspace: string;
+  subject: string;
+}
+
 /**
  * Verify a callback token from VM Agent.
  * Returns the payload including the optional scope claim.
@@ -225,6 +230,41 @@ export async function verifyCallbackToken(
     workspace: payload.workspace,
     type: 'callback',
     scope,
+  };
+}
+
+/**
+ * Verify a browser-to-workspace terminal token.
+ *
+ * These tokens are minted after normal app authentication by
+ * POST /api/terminal/token, then sent directly to workspace subdomains as a
+ * query parameter because WebSocket upgrades cannot reliably attach custom
+ * headers. The API workspace proxy verifies the token before forwarding the
+ * request to the VM agent so token-only project chat connections do not depend
+ * on cross-subdomain app cookies.
+ */
+export async function verifyTerminalToken(
+  token: string,
+  env: Env
+): Promise<TerminalTokenPayload> {
+  const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
+  const issuer = getIssuer(env);
+
+  const { payload } = await jwtVerify(token, publicKey, {
+    issuer,
+    audience: TERMINAL_AUDIENCE,
+  });
+
+  if (typeof payload.workspace !== 'string') {
+    throw new Error('Missing workspace claim');
+  }
+  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
+    throw new Error('Missing subject claim');
+  }
+
+  return {
+    workspace: payload.workspace,
+    subject: payload.sub,
   };
 }
 

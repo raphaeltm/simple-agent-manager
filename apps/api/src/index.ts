@@ -98,7 +98,7 @@ import { runTrialRolloverAudit } from './scheduled/trial-rollover';
 import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
-import { signTerminalToken } from './services/jwt';
+import { signTerminalToken, verifyTerminalToken } from './services/jwt';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
@@ -187,10 +187,28 @@ app.use('*', async (c, next) => {
 
   const auth = createAuth(c.env);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) {
-    return c.json({ error: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  let userId = session?.user.id ?? null;
+
+  if (!userId) {
+    const token = url.searchParams.get('token');
+    if (!token) {
+      return c.json({ error: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+    }
+
+    try {
+      const payload = await verifyTerminalToken(token, c.env);
+      if (payload.workspace !== workspaceId || payload.subject === 'port-proxy') {
+        return c.json({ error: 'UNAUTHORIZED', message: 'Invalid workspace token' }, 401);
+      }
+      userId = payload.subject;
+    } catch (err) {
+      log.warn('ws_proxy_terminal_token_rejected', {
+        workspaceId,
+        ...serializeError(err),
+      });
+      return c.json({ error: 'UNAUTHORIZED', message: 'Invalid workspace token' }, 401);
+    }
   }
-  const userId = session.user.id;
 
   // Look up workspace routing metadata from D1.
   const db = drizzle(c.env.DATABASE, { schema });
