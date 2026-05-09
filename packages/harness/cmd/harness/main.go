@@ -12,6 +12,7 @@ import (
 
 	"github.com/workspace/harness/agent"
 	"github.com/workspace/harness/llm"
+	"github.com/workspace/harness/mcp"
 	"github.com/workspace/harness/repomap"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
@@ -30,6 +31,9 @@ func main() {
 		apiKey           = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
 		model            = flag.String("model", llm.DefaultModel, "Model ID for LLM completions")
 		repoMapFlag      = flag.Bool("repo-map", true, "Generate and prepend a repo map to the system prompt")
+		mcpURL           = flag.String("mcp-url", envOr("SAM_MCP_URL", ""), "MCP server URL (or SAM_MCP_URL env var)")
+		mcpToken         = flag.String("mcp-token", envOr("SAM_MCP_TOKEN", ""), "MCP server Bearer token (or SAM_MCP_TOKEN env var)")
+		toolProfile      = flag.String("tool-profile", "workspace", "Tool profile: workspace, orchestrate, or full")
 	)
 	flag.Parse()
 
@@ -74,9 +78,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Build tool registry.
+	// Build tool registry with local tools.
 	registry := tools.NewRegistry()
-	for _, t := range []tools.Tool{
+	localTools := []tools.Tool{
 		&tools.ReadFile{WorkDir: workDir},
 		&tools.WriteFile{WorkDir: workDir},
 		&tools.EditFile{WorkDir: workDir},
@@ -88,12 +92,41 @@ func main() {
 		&tools.GitLog{WorkDir: workDir},
 		&tools.GitCommit{WorkDir: workDir},
 		&tools.GitBranch{WorkDir: workDir},
-	} {
+	}
+
+	// Discover and merge MCP tools if configured.
+	allTools := localTools
+	if *mcpURL != "" {
+		if *mcpToken == "" {
+			fmt.Fprintln(os.Stderr, "error: --mcp-token (or SAM_MCP_TOKEN) is required when --mcp-url is set")
+			os.Exit(1)
+		}
+
+		client := mcp.NewClient(*mcpURL, *mcpToken)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mcpDefs, err := client.ListTools(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error discovering MCP tools: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Discovered %d MCP tools\n", len(mcpDefs))
+
+		mcpTools := mcp.AdaptTools(client, mcpDefs)
+		allTools = append(allTools, mcpTools...)
+	}
+
+	// Apply tool profile filtering.
+	allTools = mcp.FilterTools(*toolProfile, allTools)
+
+	for _, t := range allTools {
 		if err := registry.Register(t); err != nil {
 			fmt.Fprintf(os.Stderr, "error registering tool %s: %v\n", t.Name(), err)
 			os.Exit(1)
 		}
 	}
+	fmt.Fprintf(os.Stderr, "Registered %d tools (profile: %s)\n", len(allTools), *toolProfile)
 
 	// Create transcript log.
 	log := transcript.NewLog()
@@ -168,4 +201,12 @@ func isGitRepo(dir string) bool {
 		}
 		dir = parent
 	}
+}
+
+// envOr returns the value of the named environment variable, or fallback if unset.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
