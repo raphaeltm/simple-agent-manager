@@ -2911,6 +2911,165 @@ func TestWriteCredentialOverrideConfigEmpty(t *testing.T) {
 	}
 }
 
+func TestWriteMountOverrideConfigWithCacheFrom(t *testing.T) {
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  cat <<'EOF'
+{
+  "outcome": "success",
+  "mergedConfiguration": {
+    "name": "Repo Config",
+    "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm"
+  }
+}
+EOF
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer: %v", err)
+	}
+	t.Setenv("PATH", mockBinDir+":"+os.Getenv("PATH"))
+
+	cfg := &config.Config{
+		WorkspaceDir: "/workspace/my-repo",
+		Repository:   "owner/my-repo",
+	}
+
+	cacheRef := "ghcr.io/octocat/hello-world:devcontainer-cache"
+	path, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123", "", "", cacheRef)
+	if err != nil {
+		t.Fatalf("writeMountOverrideConfig returned error: %v", err)
+	}
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	cacheFromArr, ok := parsed["cacheFrom"].([]interface{})
+	if !ok || len(cacheFromArr) != 1 {
+		t.Fatalf("expected cacheFrom array with 1 entry, got %v", parsed["cacheFrom"])
+	}
+	if cacheFromArr[0] != cacheRef {
+		t.Fatalf("expected cacheFrom[0] = %q, got %q", cacheRef, cacheFromArr[0])
+	}
+}
+
+func TestWriteCredentialOverrideConfigWithCacheFrom(t *testing.T) {
+	t.Parallel()
+
+	cacheRef := "ghcr.io/octocat/hello-world:devcontainer-cache"
+	path, err := writeCredentialOverrideConfig("", cacheRef)
+	if err != nil {
+		t.Fatalf("writeCredentialOverrideConfig failed: %v", err)
+	}
+	defer os.Remove(path)
+
+	if path == "" {
+		t.Fatal("expected non-empty path when cacheFrom is set")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	cacheFromArr, ok := parsed["cacheFrom"].([]interface{})
+	if !ok || len(cacheFromArr) != 1 {
+		t.Fatalf("expected cacheFrom array with 1 entry, got %v", parsed["cacheFrom"])
+	}
+	if cacheFromArr[0] != cacheRef {
+		t.Fatalf("expected cacheFrom[0] = %q, got %q", cacheRef, cacheFromArr[0])
+	}
+
+	// Should not have mounts or containerEnv when only cacheFrom is set.
+	if _, ok := parsed["mounts"]; ok {
+		t.Fatal("expected no mounts when credHelperHostPath is empty")
+	}
+}
+
+func TestWriteCredentialOverrideConfigWithBothCredAndCache(t *testing.T) {
+	t.Parallel()
+
+	cacheRef := "ghcr.io/octocat/hello-world:devcontainer-cache"
+	path, err := writeCredentialOverrideConfig("/tmp/git-credential-sam-test", cacheRef)
+	if err != nil {
+		t.Fatalf("writeCredentialOverrideConfig failed: %v", err)
+	}
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Should have both cacheFrom and mounts.
+	cacheFromArr, ok := parsed["cacheFrom"].([]interface{})
+	if !ok || len(cacheFromArr) != 1 || cacheFromArr[0] != cacheRef {
+		t.Fatalf("expected cacheFrom = [%q], got %v", cacheRef, parsed["cacheFrom"])
+	}
+	if _, ok := parsed["mounts"]; !ok {
+		t.Fatal("expected mounts when credHelperHostPath is set")
+	}
+	if _, ok := parsed["containerEnv"]; !ok {
+		t.Fatal("expected containerEnv when credHelperHostPath is set")
+	}
+}
+
+func TestWriteCacheOnlyOverrideConfig(t *testing.T) {
+	t.Parallel()
+
+	cacheRef := "ghcr.io/octocat/hello-world:devcontainer-cache"
+	path, err := writeCacheOnlyOverrideConfig(cacheRef)
+	if err != nil {
+		t.Fatalf("writeCacheOnlyOverrideConfig failed: %v", err)
+	}
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	cacheFromArr, ok := parsed["cacheFrom"].([]interface{})
+	if !ok || len(cacheFromArr) != 1 {
+		t.Fatalf("expected cacheFrom array with 1 entry, got %v", parsed["cacheFrom"])
+	}
+	if cacheFromArr[0] != cacheRef {
+		t.Fatalf("expected cacheFrom[0] = %q, got %q", cacheRef, cacheFromArr[0])
+	}
+
+	// Should only have cacheFrom, nothing else.
+	if len(parsed) != 1 {
+		t.Fatalf("expected only cacheFrom key, got keys: %v", parsed)
+	}
+}
+
 func TestWriteDefaultDevcontainerConfigWithCredentialHelper(t *testing.T) {
 	t.Parallel()
 
