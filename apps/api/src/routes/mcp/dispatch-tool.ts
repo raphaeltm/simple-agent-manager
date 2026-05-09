@@ -382,10 +382,12 @@ export async function handleDispatchTask(
     );
   }
 
-  // Task mode: explicit → profile → inferred from workspace profile → default 'task'
+  // Task mode: explicit → profile → task.
+  // MCP dispatch is agent-to-agent delegated work; workspace profile controls
+  // provisioning shape, not whether the task reports completion.
   const resolvedTaskMode: TaskMode = explicitTaskMode
     ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? (resolvedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
+    ?? 'task';
 
   // Agent type: explicit → profile → project default → platform default
   const resolvedAgentType: string | null = explicitAgentType

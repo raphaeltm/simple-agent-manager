@@ -1601,7 +1601,7 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain("not valid for provider 'scaleway'");
     });
 
-    it('should infer taskMode=conversation when workspaceProfile=lightweight and no explicit taskMode', async () => {
+    it('should default to task mode when workspaceProfile=lightweight and no explicit taskMode', async () => {
       setupHappyPathMocks();
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
@@ -1617,7 +1617,7 @@ describe('MCP Routes', () => {
       expect(body.error).toBeUndefined();
 
       const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
-      expect(startInput.config.taskMode).toBe('conversation');
+      expect(startInput.config.taskMode).toBe('task');
       expect(startInput.config.workspaceProfile).toBe('lightweight');
     });
 
