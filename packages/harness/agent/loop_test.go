@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,6 +217,98 @@ func TestRun_ScriptedEditWorkflow(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(dir, "app.py"))
 	if !strings.Contains(string(data), "goodbye") {
 		t.Error("file was not edited")
+	}
+}
+
+func TestRun_CompactionTriggered(t *testing.T) {
+	// Create a provider that always returns tool calls with large content,
+	// eventually stopping. We set a very low context limit to force compaction.
+	numTurns := 8
+	responses := make([]*llm.Response, numTurns)
+	for i := 0; i < numTurns-1; i++ {
+		responses[i] = &llm.Response{
+			Content: strings.Repeat("thinking deeply about this problem ", 20),
+			ToolCalls: []llm.ToolCall{{
+				ID:     fmt.Sprintf("call-%d", i),
+				Name:   "echo",
+				Params: map[string]any{"text": strings.Repeat("verbose output ", 30)},
+			}},
+		}
+	}
+	// Last turn: no tool calls, agent finishes.
+	responses[numTurns-1] = &llm.Response{Content: "Done."}
+
+	provider := llm.NewMockProvider(responses...)
+	registry := tools.NewRegistry()
+	registry.Register(&echoTool{})
+	tlog := transcript.NewLog()
+
+	result, err := Run(context.Background(), provider, registry, tlog, Config{
+		SystemPrompt:     "You are a test assistant.",
+		MaxTurns:         numTurns,
+		MaxContextTokens: 500, // Very low to trigger compaction.
+	}, "Do something verbose.")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StopReason != "complete" {
+		t.Errorf("stop_reason = %s, want complete", result.StopReason)
+	}
+
+	// Check that compaction events were logged.
+	var compactionCount int
+	for _, e := range tlog.Events() {
+		if e.Type == transcript.EventInfo {
+			if data, ok := e.Data.(map[string]any); ok {
+				if data["event"] == "compaction" {
+					compactionCount++
+					if _, ok := data["messages_removed"]; !ok {
+						t.Error("compaction event missing messages_removed")
+					}
+					if _, ok := data["tokens_before"]; !ok {
+						t.Error("compaction event missing tokens_before")
+					}
+					if _, ok := data["tokens_after"]; !ok {
+						t.Error("compaction event missing tokens_after")
+					}
+				}
+			}
+		}
+	}
+	if compactionCount == 0 {
+		t.Error("expected at least one compaction event in transcript")
+	}
+}
+
+func TestRun_NoCompactionWhenUnderLimit(t *testing.T) {
+	provider := llm.NewMockProvider(
+		&llm.Response{Content: "Short answer."},
+	)
+	registry := tools.NewRegistry()
+	tlog := transcript.NewLog()
+
+	result, err := Run(context.Background(), provider, registry, tlog, Config{
+		MaxTurns:         5,
+		MaxContextTokens: 100000, // Very high, no compaction needed.
+	}, "Hi")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StopReason != "complete" {
+		t.Errorf("stop_reason = %s, want complete", result.StopReason)
+	}
+
+	// No compaction events should appear.
+	for _, e := range tlog.Events() {
+		if e.Type == transcript.EventInfo {
+			if data, ok := e.Data.(map[string]any); ok {
+				if data["event"] == "compaction" {
+					t.Error("unexpected compaction event when under limit")
+				}
+			}
+		}
 	}
 }
 

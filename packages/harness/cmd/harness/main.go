@@ -19,15 +19,16 @@ import (
 
 func main() {
 	var (
-		dir          = flag.String("dir", ".", "Working directory for tools")
-		prompt       = flag.String("prompt", "", "Initial task prompt")
-		maxTurns     = flag.Int("max-turns", 10, "Maximum agent loop iterations")
-		transcriptF  = flag.String("transcript", "", "Path to write transcript JSON")
-		systemPrompt = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
-		apiURL       = flag.String("api-url", "", "OpenAI-compatible API base URL (enables real LLM provider)")
-		apiKey       = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
-		model        = flag.String("model", llm.DefaultModel, "Model ID for LLM completions")
-		repoMapFlag  = flag.Bool("repo-map", true, "Generate and prepend a repo map to the system prompt")
+		dir              = flag.String("dir", ".", "Working directory for tools")
+		prompt           = flag.String("prompt", "", "Initial task prompt")
+		maxTurns         = flag.Int("max-turns", 10, "Maximum agent loop iterations")
+		maxContextTokens = flag.Int("max-context-tokens", 30000, "Maximum context window tokens before compaction")
+		transcriptF      = flag.String("transcript", "", "Path to write transcript JSON")
+		systemPrompt     = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
+		apiURL           = flag.String("api-url", "", "OpenAI-compatible API base URL (enables real LLM provider)")
+		apiKey           = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
+		model            = flag.String("model", llm.DefaultModel, "Model ID for LLM completions")
+		repoMapFlag      = flag.Bool("repo-map", true, "Generate and prepend a repo map to the system prompt")
 	)
 	flag.Parse()
 
@@ -110,8 +111,9 @@ func main() {
 	defer cancel()
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
-		SystemPrompt: sysPrompt,
-		MaxTurns:     *maxTurns,
+		SystemPrompt:     sysPrompt,
+		MaxTurns:         *maxTurns,
+		MaxContextTokens: *maxContextTokens,
 	}, *prompt)
 
 	if err != nil {
