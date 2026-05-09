@@ -1,6 +1,14 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const mockStopAgentSessionOnNode = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockSendPromptToAgentOnNode = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+
+vi.mock('../../../src/services/node-agent', () => ({
+  stopAgentSessionOnNode: mockStopAgentSessionOnNode,
+  sendPromptToAgentOnNode: mockSendPromptToAgentOnNode,
+}));
+
 // Mock KV namespace
 const mockKV = {
   put: vi.fn(),
@@ -245,6 +253,8 @@ describe('MCP Orchestration Tools', () => {
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
     mockKV.get.mockResolvedValue(validTokenData);
+    mockStopAgentSessionOnNode.mockResolvedValue(undefined);
+    mockSendPromptToAgentOnNode.mockResolvedValue(undefined);
     mockDoStub.createSession = vi.fn().mockResolvedValue('session-new');
     mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-1');
     const { mcpRoutes } = await import('../../../src/routes/mcp');
@@ -289,11 +299,18 @@ describe('MCP Orchestration Tools', () => {
         result: [['User', 'user@test.com', '12345']],
       });
 
-      // 5. Workspace query for session stop (when workspaceId is set)
+      // 5. Workspace query for active agent stop (when workspaceId is set)
       mockD1._handlers.push({
         match: 'from "workspaces"',
         method: 'raw',
-        result: [['session-to-stop']],
+        result: [['ws-child', 'node-child', 'running', 'session-to-stop']],
+      });
+
+      // 6. Running agent session query for active agent stop
+      mockD1._handlers.push({
+        match: 'from "agent_sessions"',
+        method: 'raw',
+        result: [['agent-session-child']],
       });
 
       // DO mocks
@@ -450,6 +467,35 @@ describe('MCP Orchestration Tools', () => {
       const content = JSON.parse(body.result.content[0].text);
       expect(content.stoppedTaskId).toBe('child-active');
       expect(content.newTaskId).toBeDefined();
+      expect(mockStopAgentSessionOnNode).toHaveBeenCalledWith(
+        'node-child',
+        'ws-child',
+        'agent-session-child',
+        mockEnv,
+        'user-789',
+      );
+      expect(mockDoStub.stopSession).toHaveBeenCalledWith('session-to-stop');
+      expect(mockTaskRunnerStub.start).toHaveBeenCalled();
+    });
+
+    it('should not dispatch replacement when active child agent cannot be stopped', async () => {
+      setupRetryHappyPath({
+        id: 'child-active',
+        status: 'in_progress',
+        workspaceId: 'ws-child',
+      });
+      mockStopAgentSessionOnNode.mockRejectedValueOnce(new Error('node unavailable'));
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-active', newDescription: 'Try again with fix' },
+      }));
+
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Failed to stop active child agent before retry');
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+      expect(mockDoStub.createSession).not.toHaveBeenCalled();
     });
   });
 
