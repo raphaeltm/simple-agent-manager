@@ -21,6 +21,10 @@ func main() {
 		maxTurns     = flag.Int("max-turns", 10, "Maximum agent loop iterations")
 		transcriptF  = flag.String("transcript", "", "Path to write transcript JSON")
 		systemPrompt = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
+		providerName = flag.String("provider", "mock", "LLM provider: mock or openai")
+		apiURL       = flag.String("api-url", "", "OpenAI-compatible API base URL")
+		apiKey       = flag.String("api-key", "", "API key for the LLM provider")
+		model        = flag.String("model", "@cf/google/gemma-3-27b-it", "Model name for the LLM provider")
 	)
 	flag.Parse()
 
@@ -37,10 +41,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create mock provider (spike only supports mock mode).
-	provider := llm.NewMockProvider(
-		&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
-	)
+	// Create LLM provider.
+	var provider llm.Provider
+	switch *providerName {
+	case "mock":
+		provider = llm.NewMockProvider(
+			&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
+		)
+	case "openai":
+		if *apiURL == "" {
+			fmt.Fprintln(os.Stderr, "error: --api-url is required when using openai provider")
+			os.Exit(1)
+		}
+		provider = llm.NewOpenAIClient(*apiURL, *apiKey, *model)
+	default:
+		fmt.Fprintf(os.Stderr, "error: unknown provider %q (use mock or openai)\n", *providerName)
+		os.Exit(1)
+	}
 
 	// Build tool registry.
 	registry := tools.NewRegistry()
@@ -49,6 +66,8 @@ func main() {
 		&tools.WriteFile{WorkDir: workDir},
 		&tools.EditFile{WorkDir: workDir},
 		&tools.Bash{WorkDir: workDir},
+		&tools.Grep{WorkDir: workDir},
+		&tools.Glob{WorkDir: workDir},
 	} {
 		if err := registry.Register(t); err != nil {
 			fmt.Fprintf(os.Stderr, "error registering tool %s: %v\n", t.Name(), err)
