@@ -38,11 +38,23 @@ async function stopActiveChildAgentForRetry(
   db: DrizzleD1Database<typeof schema>,
 ): Promise<{ chatSessionId: string | null } | JsonRpcResponse> {
   if (!childTask.workspaceId) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'Cannot retry active child task because it has no workspace assigned',
-    );
+    return { chatSessionId: null };
+  }
+
+  const [agentSession] = await db
+    .select({ id: schema.agentSessions.id })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, childTask.workspaceId),
+        eq(schema.agentSessions.status, 'running'),
+      ),
+    )
+    .orderBy(desc(schema.agentSessions.createdAt))
+    .limit(1);
+
+  if (!agentSession) {
+    return { chatSessionId: null };
   }
 
   const [workspace] = await db
@@ -73,26 +85,6 @@ async function stopActiveChildAgentForRetry(
     );
   }
 
-  const [agentSession] = await db
-    .select({ id: schema.agentSessions.id })
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.status, 'running'),
-      ),
-    )
-    .orderBy(desc(schema.agentSessions.createdAt))
-    .limit(1);
-
-  if (!agentSession) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'Cannot retry active child task because no running agent session was found',
-    );
-  }
-
   try {
     await stopAgentSessionOnNode(
       workspace.nodeId,
@@ -116,6 +108,17 @@ async function stopActiveChildAgentForRetry(
       `Failed to stop active child agent before retry: ${errorMsg}`,
     );
   }
+
+  const now = new Date().toISOString();
+  await db
+    .update(schema.agentSessions)
+    .set({
+      status: 'stopped',
+      stoppedAt: now,
+      errorMessage: null,
+      updatedAt: now,
+    })
+    .where(eq(schema.agentSessions.id, agentSession.id));
 
   return { chatSessionId: workspace.chatSessionId ?? null };
 }

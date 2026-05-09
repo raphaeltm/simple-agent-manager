@@ -266,9 +266,13 @@ describe('MCP Orchestration Tools', () => {
 
   describe('retry_subtask', () => {
     /** Set up all D1 mocks needed for a successful retry */
-    function setupRetryHappyPath(childOverrides: Partial<Record<string, unknown>> = {}) {
+    function setupRetryHappyPath(
+      childOverrides: Partial<Record<string, unknown>> = {},
+      options: { runningAgentSession?: boolean } = {},
+    ) {
       const childTask = makeTask(childOverrides);
       const project = makeProjectObj();
+      const runningAgentSession = options.runningAgentSession ?? true;
 
       // 1. Child task full select (Drizzle uses .raw() for D1)
       mockD1._handlers.push({
@@ -310,7 +314,7 @@ describe('MCP Orchestration Tools', () => {
       mockD1._handlers.push({
         match: 'from "agent_sessions"',
         method: 'raw',
-        result: [['agent-session-child']],
+        result: runningAgentSession ? [['agent-session-child']] : [],
       });
 
       // DO mocks
@@ -475,6 +479,55 @@ describe('MCP Orchestration Tools', () => {
         'user-789',
       );
       expect(mockDoStub.stopSession).toHaveBeenCalledWith('session-to-stop');
+      expect(mockTaskRunnerStub.start).toHaveBeenCalled();
+      expect(
+        mockD1.prepare.mock.calls.some(([sql]) =>
+          String(sql).includes('update "agent_sessions"')
+          && String(sql).includes('"status"')
+          && String(sql).includes('"stopped_at"')
+        ),
+      ).toBe(true);
+    });
+
+    it('should retry queued child task without requiring an agent session', async () => {
+      setupRetryHappyPath({
+        id: 'child-queued',
+        status: 'queued',
+        workspaceId: null,
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-queued', newDescription: 'Try again once ready' },
+      }));
+
+      const body = await res.json();
+      expect(body.result).toBeDefined();
+      const content = JSON.parse(body.result.content[0].text);
+      expect(content.stoppedTaskId).toBe('child-queued');
+      expect(content.newTaskId).toBeDefined();
+      expect(mockStopAgentSessionOnNode).not.toHaveBeenCalled();
+      expect(mockTaskRunnerStub.start).toHaveBeenCalled();
+    });
+
+    it('should retry delegated child task when no running agent session exists', async () => {
+      setupRetryHappyPath({
+        id: 'child-delegated',
+        status: 'delegated',
+        workspaceId: 'ws-child',
+      }, { runningAgentSession: false });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-delegated', newDescription: 'Try delegated work again' },
+      }));
+
+      const body = await res.json();
+      expect(body.result).toBeDefined();
+      const content = JSON.parse(body.result.content[0].text);
+      expect(content.stoppedTaskId).toBe('child-delegated');
+      expect(content.newTaskId).toBeDefined();
+      expect(mockStopAgentSessionOnNode).not.toHaveBeenCalled();
       expect(mockTaskRunnerStub.start).toHaveBeenCalled();
     });
 
