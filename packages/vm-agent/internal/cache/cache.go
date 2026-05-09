@@ -56,12 +56,28 @@ func splitOwnerRepo(path string) (owner, repo string, ok bool) {
 // CacheRef constructs a container image reference for caching.
 // For unnamed configs: ghcr.io/<owner>/<repo>:devcontainer-cache
 // For named configs:   ghcr.io/<owner>/<repo>:devcontainer-cache-<configName>
+// The configName is sanitized to the OCI tag character set.
 func CacheRef(registry, owner, repo, configName string) string {
 	tag := "devcontainer-cache"
 	if configName != "" {
-		tag = "devcontainer-cache-" + configName
+		tag = "devcontainer-cache-" + sanitizeTagComponent(configName)
 	}
 	return fmt.Sprintf("%s/%s/%s:%s", registry, strings.ToLower(owner), strings.ToLower(repo), tag)
+}
+
+// sanitizeTagComponent replaces characters invalid in OCI image tags with hyphens.
+// OCI tags may contain: [a-zA-Z0-9_.-]
+func sanitizeTagComponent(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // DockerLogin authenticates to a container registry using docker login.
@@ -114,6 +130,12 @@ func PushCacheImage(ctx context.Context, containerLabelKey, containerLabelValue,
 	containers := strings.Fields(string(psOutput))
 	if len(containers) == 0 {
 		return fmt.Errorf("no running devcontainer found for label %s=%s", containerLabelKey, containerLabelValue)
+	}
+	if len(containers) > 1 {
+		slog.Warn("Multiple containers found for label; using first match",
+			"label", fmt.Sprintf("%s=%s", containerLabelKey, containerLabelValue),
+			"count", len(containers),
+			"selected", containers[0])
 	}
 	containerID := containers[0]
 

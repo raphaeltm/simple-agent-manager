@@ -959,10 +959,12 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 	// Best-effort async cache push: tag and push the built image in the background.
 	// Only push when the build succeeded with the repo's own config (not fallback).
 	if cacheRef != "" && !usedFallback && hasConfig {
+		labelKey := cfg.ContainerLabelKey
+		labelValue := cfg.ContainerLabelValue
 		go func() {
 			pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer pushCancel()
-			if pushErr := cache.PushCacheImage(pushCtx, cfg.ContainerLabelKey, cfg.ContainerLabelValue, cacheRef); pushErr != nil {
+			if pushErr := cache.PushCacheImage(pushCtx, labelKey, labelValue, cacheRef); pushErr != nil {
 				slog.Warn("Cache image push failed (non-fatal)", "ref", cacheRef, "error", pushErr)
 			}
 		}()
