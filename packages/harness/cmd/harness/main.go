@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"time"
 
 	"github.com/workspace/harness/agent"
 	"github.com/workspace/harness/llm"
+	"github.com/workspace/harness/repomap"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
 )
@@ -21,6 +24,7 @@ func main() {
 		maxTurns     = flag.Int("max-turns", 10, "Maximum agent loop iterations")
 		transcriptF  = flag.String("transcript", "", "Path to write transcript JSON")
 		systemPrompt = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
+		repoMapFlag  = flag.Bool("repo-map", true, "Generate and prepend a repo map to the system prompt")
 	)
 	flag.Parse()
 
@@ -59,12 +63,31 @@ func main() {
 	// Create transcript log.
 	log := transcript.NewLog()
 
+	// Generate repo map if enabled and directory is a git repo.
+	sysPrompt := *systemPrompt
+	if *repoMapFlag && isGitRepo(workDir) {
+		start := time.Now()
+		rm, err := repomap.Generate(workDir, nil)
+		elapsed := time.Since(start)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: repo map generation failed: %v\n", err)
+		} else if rm != "" {
+			sysPrompt = "# Repository Map\n\n" + rm + "\n\n" + sysPrompt
+			log.Append(transcript.EventInfo, 0, map[string]any{
+				"action":   "repo_map",
+				"chars":    len(rm),
+				"duration": elapsed.String(),
+			})
+			fmt.Fprintf(os.Stderr, "Repo map generated in %v (%d chars)\n", elapsed.Round(time.Millisecond), len(rm))
+		}
+	}
+
 	// Run agent loop with signal handling.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
-		SystemPrompt: *systemPrompt,
+		SystemPrompt: sysPrompt,
 		MaxTurns:     *maxTurns,
 	}, *prompt)
 
@@ -94,5 +117,19 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Transcript written to %s (%d events)\n", *transcriptF, log.Len())
+	}
+}
+
+// isGitRepo checks whether dir (or an ancestor) is a git repository.
+func isGitRepo(dir string) bool {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
 	}
 }
