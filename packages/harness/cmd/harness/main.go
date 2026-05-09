@@ -10,6 +10,7 @@ import (
 
 	"github.com/workspace/harness/agent"
 	"github.com/workspace/harness/llm"
+	"github.com/workspace/harness/mcp"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
 )
@@ -21,6 +22,9 @@ func main() {
 		maxTurns     = flag.Int("max-turns", 10, "Maximum agent loop iterations")
 		transcriptF  = flag.String("transcript", "", "Path to write transcript JSON")
 		systemPrompt = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
+		mcpURL       = flag.String("mcp-url", envOr("SAM_MCP_URL", ""), "MCP server URL (or SAM_MCP_URL env var)")
+		mcpToken     = flag.String("mcp-token", envOr("SAM_MCP_TOKEN", ""), "MCP server Bearer token (or SAM_MCP_TOKEN env var)")
+		toolProfile  = flag.String("tool-profile", "workspace", "Tool profile: workspace, orchestrate, or full")
 	)
 	flag.Parse()
 
@@ -42,19 +46,48 @@ func main() {
 		&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
 	)
 
-	// Build tool registry.
+	// Build tool registry with local tools.
 	registry := tools.NewRegistry()
-	for _, t := range []tools.Tool{
+	localTools := []tools.Tool{
 		&tools.ReadFile{WorkDir: workDir},
 		&tools.WriteFile{WorkDir: workDir},
 		&tools.EditFile{WorkDir: workDir},
 		&tools.Bash{WorkDir: workDir},
-	} {
+	}
+
+	// Discover and merge MCP tools if configured.
+	allTools := localTools
+	if *mcpURL != "" {
+		if *mcpToken == "" {
+			fmt.Fprintln(os.Stderr, "error: --mcp-token (or SAM_MCP_TOKEN) is required when --mcp-url is set")
+			os.Exit(1)
+		}
+
+		client := mcp.NewClient(*mcpURL, *mcpToken)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mcpDefs, err := client.ListTools(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error discovering MCP tools: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Discovered %d MCP tools\n", len(mcpDefs))
+
+		mcpTools := mcp.AdaptTools(client, mcpDefs)
+		allTools = append(allTools, mcpTools...)
+	}
+
+	// Apply tool profile filtering.
+	allTools = mcp.FilterTools(*toolProfile, allTools)
+
+	for _, t := range allTools {
 		if err := registry.Register(t); err != nil {
 			fmt.Fprintf(os.Stderr, "error registering tool %s: %v\n", t.Name(), err)
 			os.Exit(1)
 		}
 	}
+	fmt.Fprintf(os.Stderr, "Registered %d tools (profile: %s)\n", len(allTools), *toolProfile)
 
 	// Create transcript log.
 	log := transcript.NewLog()
@@ -95,4 +128,12 @@ func main() {
 		}
 		fmt.Printf("Transcript written to %s (%d events)\n", *transcriptF, log.Len())
 	}
+}
+
+// envOr returns the value of the named environment variable, or fallback if unset.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
