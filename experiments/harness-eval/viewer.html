@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harness Eval Trace Viewer</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --purple: #bc8cff;
+    --orange: #f0883e;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button, select {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .file-input { display: none; }
+  .file-label {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .file-label:hover { border-color: var(--accent); }
+
+  .container { display: flex; height: calc(100vh - 57px); }
+  .sidebar {
+    width: 280px;
+    min-width: 280px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 12px 0;
+  }
+  .scenario-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    font-size: 13px;
+  }
+  .scenario-item:hover { background: var(--surface); }
+  .scenario-item.active { background: var(--surface); border-left-color: var(--accent); }
+  .scenario-item .name { font-weight: 500; }
+  .scenario-item .meta { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge.pass { background: rgba(63,185,80,0.2); color: var(--green); }
+  .badge.fail { background: rgba(248,81,73,0.2); color: var(--red); }
+
+  .main { flex: 1; overflow-y: auto; padding: 20px 24px; }
+  .main.split { display: flex; gap: 0; padding: 0; }
+  .split-pane {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    border-right: 1px solid var(--border);
+  }
+  .split-pane:last-child { border-right: none; }
+  .split-pane .pane-header {
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 0;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+  }
+  .stat-card .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+
+  .timeline { margin-top: 16px; }
+  .turn {
+    border-left: 2px solid var(--border);
+    margin-left: 12px;
+    padding-left: 20px;
+    padding-bottom: 16px;
+    position: relative;
+  }
+  .turn::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 6px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+  }
+  .turn.llm::before { background: var(--accent); }
+  .turn.tool::before { background: var(--purple); }
+  .turn.error::before { background: var(--red); }
+  .turn.user::before { background: var(--green); }
+  .turn.system::before { background: var(--yellow); }
+
+  .turn-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+  .turn-type {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .turn-type.llm { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .turn-type.tool { background: rgba(188,140,255,0.15); color: var(--purple); }
+  .turn-type.error { background: rgba(248,81,73,0.15); color: var(--red); }
+  .turn-type.user { background: rgba(63,185,80,0.15); color: var(--green); }
+  .turn-type.system { background: rgba(210,153,34,0.15); color: var(--yellow); }
+
+  .turn-stats { font-size: 11px; color: var(--text-muted); }
+  .turn-content {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 13px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .turn-content.collapsed { max-height: 80px; overflow: hidden; cursor: pointer; }
+  .turn-content.collapsed::after {
+    content: '... click to expand';
+    display: block;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 4px;
+  }
+
+  .tool-call-block {
+    margin-top: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .tool-call-header {
+    background: rgba(188,140,255,0.08);
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+  }
+  .tool-call-body {
+    padding: 8px 12px;
+    font-size: 12px;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 15px;
+  }
+
+  .mode-tabs { display: flex; gap: 4px; }
+  .mode-tabs button { font-size: 12px; padding: 4px 10px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Trace Viewer</h1>
+  <div class="controls">
+    <div class="mode-tabs">
+      <button id="btn-single" class="active" onclick="setMode('single')">Single</button>
+      <button id="btn-compare" onclick="setMode('compare')">Compare</button>
+    </div>
+    <label class="file-label">
+      Load Trace A
+      <input type="file" class="file-input" accept=".json" onchange="loadFile(event, 'a')">
+    </label>
+    <label class="file-label" id="load-b-label" style="display:none;">
+      Load Trace B
+      <input type="file" class="file-input" accept=".json" onchange="loadFile(event, 'b')">
+    </label>
+    <button onclick="loadMockData()">Load Mock Data</button>
+  </div>
+</div>
+
+<div class="container">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main" id="main">
+    <div class="empty-state">Load a trace file or click "Load Mock Data" to begin.</div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Mock data
+// ---------------------------------------------------------------------------
+const MOCK_TRACE_A = {
+  version: "1.0",
+  timestamp: "2026-05-09T10:00:00.000Z",
+  suite: { commitHash: "abc1234", schemaVersion: "1.0" },
+  results: [
+    {
+      scenarioId: "weather-baseline",
+      scenarioName: "Weather Baseline",
+      category: "baseline",
+      model: { displayName: "Gemma 4 26B", modelId: "@cf/google/gemma-4-26b-a4b-it", provider: "workers-ai", path: "workers-ai" },
+      rubric: { pass: true, reason: "Correctly converted 72F to 22.2C", checks: [{ name: "tool_called", pass: true, detail: "get_weather called" }, { name: "conversion", pass: true, detail: "22.2C correct" }] },
+      usage: { prompt_tokens: 450, completion_tokens: 120, total_tokens: 570 },
+      costUsd: 0.00000627,
+      latencyMs: 1100,
+      turnsUsed: 2,
+      stopReason: "complete",
+      conversation: [
+        { role: "system", content: "You are a helpful assistant with access to weather and calculation tools." },
+        { role: "user", content: "What is the weather in San Francisco? Convert the temperature to Celsius." },
+        { role: "assistant", content: null, tool_calls: [{ id: "tc1", type: "function", function: { name: "get_weather", arguments: '{"city":"San Francisco"}' } }] },
+        { role: "tool", content: '{"temperature_f": 72, "condition": "sunny"}', tool_call_id: "tc1" },
+        { role: "assistant", content: null, tool_calls: [{ id: "tc2", type: "function", function: { name: "calculate", arguments: '{"expression":"(72-32)*5/9"}' } }] },
+        { role: "tool", content: '{"result": 22.222222222222221}', tool_call_id: "tc2" },
+        { role: "assistant", content: "The weather in San Francisco is sunny at 72\u00b0F, which is approximately 22.2\u00b0C." }
+      ],
+      toolCalls: [
+        { turn: 1, toolName: "get_weather", arguments: { city: "San Francisco" }, result: '{"temperature_f":72,"condition":"sunny"}', isError: false },
+        { turn: 2, toolName: "calculate", arguments: { expression: "(72-32)*5/9" }, result: '{"result":22.222}', isError: false }
+      ],
+      turnUsage: [
+        { turn: 1, usage: { prompt_tokens: 200, completion_tokens: 50, total_tokens: 250 } },
+        { turn: 2, usage: { prompt_tokens: 250, completion_tokens: 70, total_tokens: 320 } }
+      ],
+      turnLatency: [{ turn: 1, latencyMs: 600 }, { turn: 2, latencyMs: 500 }]
+    },
+    {
+      scenarioId: "read-and-summarize",
+      scenarioName: "Read and Summarize",
+      category: "coding",
+      model: { displayName: "Gemma 4 26B", modelId: "@cf/google/gemma-4-26b-a4b-it", provider: "workers-ai", path: "workers-ai" },
+      rubric: { pass: true, reason: "Correctly read file and identified main function", checks: [{ name: "file_read", pass: true }, { name: "summary_quality", pass: true }] },
+      usage: { prompt_tokens: 800, completion_tokens: 250, total_tokens: 1050 },
+      costUsd: 0.00001155,
+      latencyMs: 1800,
+      turnsUsed: 2,
+      stopReason: "complete",
+      conversation: [
+        { role: "system", content: "You are a code assistant." },
+        { role: "user", content: "Read src/utils.ts and summarize what it does." },
+        { role: "assistant", content: null, tool_calls: [{ id: "tc3", type: "function", function: { name: "read_file", arguments: '{"path":"src/utils.ts"}' } }] },
+        { role: "tool", content: "export function formatDate(d: Date): string {\n  return d.toISOString().slice(0,10);\n}\n\nexport function slugify(s: string): string {\n  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-');\n}", tool_call_id: "tc3" },
+        { role: "assistant", content: "The file `src/utils.ts` exports two utility functions:\n1. `formatDate` - converts a Date to ISO date string (YYYY-MM-DD)\n2. `slugify` - converts a string to a URL-friendly slug" }
+      ],
+      toolCalls: [
+        { turn: 1, toolName: "read_file", arguments: { path: "src/utils.ts" }, result: "export function formatDate...", isError: false }
+      ],
+      turnUsage: [
+        { turn: 1, usage: { prompt_tokens: 350, completion_tokens: 80, total_tokens: 430 } },
+        { turn: 2, usage: { prompt_tokens: 450, completion_tokens: 170, total_tokens: 620 } }
+      ],
+      turnLatency: [{ turn: 1, latencyMs: 900 }, { turn: 2, latencyMs: 900 }]
+    },
+    {
+      scenarioId: "missing-file-recovery",
+      scenarioName: "Missing File Recovery",
+      category: "error-handling",
+      model: { displayName: "Gemma 4 26B", modelId: "@cf/google/gemma-4-26b-a4b-it", provider: "workers-ai", path: "workers-ai" },
+      rubric: { pass: false, reason: "Failed to recover after file not found", checks: [{ name: "error_handled", pass: false, detail: "Model gave up instead of searching" }] },
+      usage: { prompt_tokens: 600, completion_tokens: 80, total_tokens: 680 },
+      costUsd: 0.00000748,
+      latencyMs: 950,
+      turnsUsed: 1,
+      stopReason: "complete",
+      conversation: [
+        { role: "system", content: "You are a code assistant." },
+        { role: "user", content: "Read the config file at config/settings.json and tell me the database port." },
+        { role: "assistant", content: null, tool_calls: [{ id: "tc4", type: "function", function: { name: "read_file", arguments: '{"path":"config/settings.json"}' } }] },
+        { role: "tool", content: "Error: File not found: config/settings.json", tool_call_id: "tc4" },
+        { role: "assistant", content: "I'm sorry, the file config/settings.json does not exist. I cannot find the database port." }
+      ],
+      toolCalls: [
+        { turn: 1, toolName: "read_file", arguments: { path: "config/settings.json" }, result: "Error: File not found", isError: true }
+      ],
+      turnUsage: [{ turn: 1, usage: { prompt_tokens: 600, completion_tokens: 80, total_tokens: 680 } }],
+      turnLatency: [{ turn: 1, latencyMs: 950 }]
+    }
+  ],
+  summary: {
+    totalScenarios: 3, passedScenarios: 2, successRate: 0.667,
+    totalCostUsd: 0.0000253, costPerSuccessUsd: 0.00001265, avgLatencyMs: 1283,
+    perModel: [{ model: "Gemma 4 26B", provider: "workers-ai", totalRuns: 3, passed: 2, successRate: 0.667, totalCostUsd: 0.0000253, costPerSuccessUsd: 0.00001265, avgLatencyMs: 1283, totalTokens: 2300 }]
+  }
+};
+
+const MOCK_TRACE_B = {
+  version: "1.0",
+  timestamp: "2026-05-09T12:00:00.000Z",
+  suite: { commitHash: "def5678", schemaVersion: "1.0" },
+  results: [
+    {
+      ...MOCK_TRACE_A.results[0],
+      usage: { prompt_tokens: 400, completion_tokens: 100, total_tokens: 500 },
+      costUsd: 0.0000055,
+      latencyMs: 950,
+      turnUsage: [
+        { turn: 1, usage: { prompt_tokens: 180, completion_tokens: 40, total_tokens: 220 } },
+        { turn: 2, usage: { prompt_tokens: 220, completion_tokens: 60, total_tokens: 280 } }
+      ],
+      turnLatency: [{ turn: 1, latencyMs: 500 }, { turn: 2, latencyMs: 450 }]
+    },
+    { ...MOCK_TRACE_A.results[1] },
+    {
+      ...MOCK_TRACE_A.results[2],
+      rubric: { pass: true, reason: "Recovered by searching for the file", checks: [{ name: "error_handled", pass: true, detail: "Used grep to find the config" }] },
+      usage: { prompt_tokens: 900, completion_tokens: 200, total_tokens: 1100 },
+      costUsd: 0.0000121,
+      latencyMs: 1400,
+      turnsUsed: 3,
+      stopReason: "complete",
+      conversation: [
+        { role: "system", content: "You are a code assistant. When a file is not found, search for it using grep or glob." },
+        { role: "user", content: "Read the config file at config/settings.json and tell me the database port." },
+        { role: "assistant", content: null, tool_calls: [{ id: "tc4", type: "function", function: { name: "read_file", arguments: '{"path":"config/settings.json"}' } }] },
+        { role: "tool", content: "Error: File not found: config/settings.json", tool_call_id: "tc4" },
+        { role: "assistant", content: null, tool_calls: [{ id: "tc5", type: "function", function: { name: "grep", arguments: '{"pattern":"settings","glob":"**/*.json"}' } }] },
+        { role: "tool", content: "src/config/settings.json:1: {", tool_call_id: "tc5" },
+        { role: "assistant", content: null, tool_calls: [{ id: "tc6", type: "function", function: { name: "read_file", arguments: '{"path":"src/config/settings.json"}' } }] },
+        { role: "tool", content: '{"database":{"host":"localhost","port":5432}}', tool_call_id: "tc6" },
+        { role: "assistant", content: "The database port is 5432 (found in src/config/settings.json)." }
+      ],
+      toolCalls: [
+        { turn: 1, toolName: "read_file", arguments: { path: "config/settings.json" }, result: "Error: File not found", isError: true },
+        { turn: 2, toolName: "grep", arguments: { pattern: "settings", glob: "**/*.json" }, result: "src/config/settings.json:1: {", isError: false },
+        { turn: 3, toolName: "read_file", arguments: { path: "src/config/settings.json" }, result: '{"database":...}', isError: false }
+      ],
+      turnUsage: [
+        { turn: 1, usage: { prompt_tokens: 300, completion_tokens: 50, total_tokens: 350 } },
+        { turn: 2, usage: { prompt_tokens: 350, completion_tokens: 60, total_tokens: 410 } },
+        { turn: 3, usage: { prompt_tokens: 250, completion_tokens: 90, total_tokens: 340 } }
+      ],
+      turnLatency: [{ turn: 1, latencyMs: 500 }, { turn: 2, latencyMs: 450 }, { turn: 3, latencyMs: 450 }]
+    }
+  ],
+  summary: {
+    totalScenarios: 3, passedScenarios: 3, successRate: 1.0,
+    totalCostUsd: 0.0000301, costPerSuccessUsd: 0.00001003, avgLatencyMs: 1383,
+    perModel: [{ model: "Gemma 4 26B", provider: "workers-ai", totalRuns: 3, passed: 3, successRate: 1.0, totalCostUsd: 0.0000301, costPerSuccessUsd: 0.00001003, avgLatencyMs: 1383, totalTokens: 2650 }]
+  }
+};
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let traceA = null;
+let traceB = null;
+let mode = 'single'; // 'single' | 'compare'
+let selectedScenario = null;
+
+// ---------------------------------------------------------------------------
+// File loading
+// ---------------------------------------------------------------------------
+function loadFile(event, slot) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (slot === 'a') traceA = data;
+      else traceB = data;
+      selectedScenario = null;
+      render();
+    } catch (err) {
+      alert('Invalid JSON file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function loadMockData() {
+  traceA = MOCK_TRACE_A;
+  traceB = MOCK_TRACE_B;
+  selectedScenario = null;
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// Mode switching
+// ---------------------------------------------------------------------------
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-single').classList.toggle('active', m === 'single');
+  document.getElementById('btn-compare').classList.toggle('active', m === 'compare');
+  document.getElementById('load-b-label').style.display = m === 'compare' ? '' : 'none';
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+function render() {
+  renderSidebar();
+  renderMain();
+}
+
+function renderSidebar() {
+  const el = document.getElementById('sidebar');
+  if (!traceA) { el.innerHTML = '<div style="padding:16px;color:var(--text-muted)">No trace loaded</div>'; return; }
+
+  const scenarioIds = [...new Set(traceA.results.map(r => r.scenarioId))];
+  el.innerHTML = scenarioIds.map(id => {
+    const r = traceA.results.find(x => x.scenarioId === id);
+    const rB = traceB ? traceB.results.find(x => x.scenarioId === id) : null;
+    const active = selectedScenario === id ? ' active' : '';
+    let badge = `<span class="badge ${r.rubric.pass ? 'pass' : 'fail'}">${r.rubric.pass ? 'PASS' : 'FAIL'}</span>`;
+    if (mode === 'compare' && rB) {
+      badge += ` <span class="badge ${rB.rubric.pass ? 'pass' : 'fail'}">${rB.rubric.pass ? 'PASS' : 'FAIL'}</span>`;
+    }
+    return `<div class="scenario-item${active}" onclick="selectScenario('${id}')">
+      <div class="name">${r.scenarioName} ${badge}</div>
+      <div class="meta">${r.model.displayName} &middot; $${r.costUsd.toFixed(6)} &middot; ${r.turnsUsed} turns</div>
+    </div>`;
+  }).join('');
+}
+
+function selectScenario(id) {
+  selectedScenario = id;
+  render();
+}
+
+function renderMain() {
+  const el = document.getElementById('main');
+  if (!traceA) { el.className = 'main'; el.innerHTML = '<div class="empty-state">Load a trace file or click "Load Mock Data" to begin.</div>'; return; }
+
+  if (!selectedScenario) {
+    el.className = 'main';
+    el.innerHTML = renderSummary(traceA, traceB);
+    return;
+  }
+
+  const rA = traceA.results.find(x => x.scenarioId === selectedScenario);
+
+  if (mode === 'compare' && traceB) {
+    const rB = traceB.results.find(x => x.scenarioId === selectedScenario);
+    el.className = 'main split';
+    el.innerHTML = `
+      <div class="split-pane"><div class="pane-header">Candidate A &mdash; ${traceA.suite.commitHash}</div>${rA ? renderScenarioDetail(rA, traceA) : '<div class="empty-state">Not in Trace A</div>'}</div>
+      <div class="split-pane"><div class="pane-header">Candidate B &mdash; ${traceB.suite.commitHash}</div>${rB ? renderScenarioDetail(rB, traceB) : '<div class="empty-state">Not in Trace B</div>'}</div>
+    `;
+  } else {
+    el.className = 'main';
+    el.innerHTML = rA ? renderScenarioDetail(rA, traceA) : '<div class="empty-state">Scenario not found</div>';
+  }
+}
+
+function renderSummary(a, b) {
+  let html = '<div class="summary-grid">';
+  html += statCard('Scenarios', `${a.summary.passedScenarios}/${a.summary.totalScenarios} passed`);
+  html += statCard('Success Rate', `${(a.summary.successRate * 100).toFixed(1)}%`);
+  html += statCard('Total Cost', `$${a.summary.totalCostUsd.toFixed(6)}`);
+  html += statCard('Cost/Success', a.summary.passedScenarios > 0 ? `$${a.summary.costPerSuccessUsd.toFixed(6)}` : 'N/A');
+  html += statCard('Avg Latency', `${a.summary.avgLatencyMs.toFixed(0)}ms`);
+  html += statCard('Commit', a.suite.commitHash);
+  html += '</div>';
+
+  if (mode === 'compare' && b) {
+    html += '<h3 style="margin:16px 0 8px">Comparison (A vs B)</h3>';
+    html += '<div class="summary-grid">';
+    const sr = b.summary.successRate - a.summary.successRate;
+    const cd = b.summary.totalCostUsd - a.summary.totalCostUsd;
+    const ld = b.summary.avgLatencyMs - a.summary.avgLatencyMs;
+    html += statCard('Success Rate \u0394', `${sr >= 0 ? '+' : ''}${(sr * 100).toFixed(1)}%`);
+    html += statCard('Cost \u0394', `${cd >= 0 ? '+' : ''}$${cd.toFixed(6)}`);
+    html += statCard('Latency \u0394', `${ld >= 0 ? '+' : ''}${ld.toFixed(0)}ms`);
+    html += statCard('B Commit', b.suite.commitHash);
+    html += '</div>';
+  }
+
+  // Per-model table
+  html += '<h3 style="margin:16px 0 8px">Per-Model Breakdown</h3>';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+  html += '<tr style="border-bottom:1px solid var(--border);text-align:left"><th style="padding:6px">Model</th><th>Pass Rate</th><th>Cost</th><th>Cost/Success</th><th>Avg Latency</th><th>Tokens</th></tr>';
+  for (const m of a.summary.perModel) {
+    html += `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px">${m.model} (${m.provider})</td>
+      <td>${m.passed}/${m.totalRuns} (${(m.successRate*100).toFixed(0)}%)</td>
+      <td>$${m.totalCostUsd.toFixed(6)}</td>
+      <td>${m.passed > 0 ? '$'+m.costPerSuccessUsd.toFixed(6) : 'N/A'}</td>
+      <td>${m.avgLatencyMs.toFixed(0)}ms</td>
+      <td>${m.totalTokens}</td>
+    </tr>`;
+  }
+  html += '</table>';
+
+  html += '<p style="margin-top:16px;color:var(--text-muted);font-size:13px">Select a scenario from the sidebar to view its trace timeline.</p>';
+  return html;
+}
+
+function statCard(label, value) {
+  return `<div class="stat-card"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+}
+
+function renderScenarioDetail(r, trace) {
+  let html = '';
+
+  // Stats bar
+  html += '<div class="summary-grid">';
+  html += statCard('Result', r.rubric.pass ? 'PASS' : 'FAIL');
+  html += statCard('Cost', `$${r.costUsd.toFixed(6)}`);
+  html += statCard('Latency', `${r.latencyMs}ms`);
+  html += statCard('Turns', `${r.turnsUsed}`);
+  html += statCard('Tokens', `${r.usage.total_tokens}`);
+  html += statCard('Stop', r.stopReason);
+  html += '</div>';
+
+  // Rubric
+  html += `<div style="margin-bottom:16px;font-size:13px;color:var(--text-muted)"><strong>Rubric:</strong> ${esc(r.rubric.reason)}</div>`;
+  if (r.rubric.checks) {
+    html += '<div style="margin-bottom:16px">';
+    for (const c of r.rubric.checks) {
+      const icon = c.pass ? '\u2705' : '\u274c';
+      html += `<div style="font-size:13px">${icon} ${esc(c.name)}${c.detail ? ' \u2014 ' + esc(c.detail) : ''}</div>`;
+    }
+    html += '</div>';
+  }
+
+  // Timeline
+  html += '<div class="timeline">';
+  let turnIdx = 0;
+  for (const msg of r.conversation) {
+    if (msg.role === 'system') {
+      html += renderTurnBlock('system', 'System Prompt', msg.content, null);
+    } else if (msg.role === 'user') {
+      html += renderTurnBlock('user', 'User', msg.content, null);
+    } else if (msg.role === 'assistant') {
+      turnIdx++;
+      const turnU = r.turnUsage.find(t => t.turn === turnIdx);
+      const turnL = r.turnLatency.find(t => t.turn === turnIdx);
+      const stats = [];
+      if (turnU && turnU.usage) stats.push(`${turnU.usage.total_tokens} tok`);
+      if (turnL) stats.push(`${turnL.latencyMs}ms`);
+
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        let content = '';
+        for (const tc of msg.tool_calls) {
+          const tcRecord = r.toolCalls.find(x => x.turn === turnIdx && x.toolName === tc.function.name);
+          content += `<div class="tool-call-block">
+            <div class="tool-call-header"><span>${esc(tc.function.name)}()</span>${tcRecord && tcRecord.isError ? '<span style="color:var(--red)">ERROR</span>' : ''}</div>
+            <div class="tool-call-body"><strong>Args:</strong> ${esc(tc.function.arguments)}\n<strong>Result:</strong> ${tcRecord ? esc(tcRecord.result) : '(pending)'}</div>
+          </div>`;
+        }
+        html += renderTurnBlock('tool', `Turn ${turnIdx} \u2014 Tool Calls`, content, stats.join(' \u00b7 '), true);
+      } else {
+        html += renderTurnBlock('llm', `Turn ${turnIdx} \u2014 Response`, msg.content || '(empty)', stats.join(' \u00b7 '));
+      }
+    } else if (msg.role === 'tool') {
+      // Tool results are shown inline with tool calls above
+    }
+  }
+  html += '</div>';
+
+  return html;
+}
+
+function renderTurnBlock(type, title, content, stats, isHtml) {
+  const collapsed = !isHtml && content && content.length > 300 ? ' collapsed' : '';
+  return `<div class="turn ${type}">
+    <div class="turn-header">
+      <span class="turn-type ${type}">${type}</span>
+      <span>${esc(title)}</span>
+      ${stats ? `<span class="turn-stats">${stats}</span>` : ''}
+    </div>
+    <div class="turn-content${collapsed}" onclick="this.classList.remove('collapsed')">${isHtml ? content : esc(content || '')}</div>
+  </div>`;
+}
+
+function esc(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Initial render
+render();
+</script>
+</body>
+</html>
