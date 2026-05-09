@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	ctxmgr "github.com/workspace/harness/context"
 	"github.com/workspace/harness/llm"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
@@ -16,6 +17,10 @@ type Config struct {
 	SystemPrompt string
 	// MaxTurns is the maximum number of think-act-observe cycles. 0 means 10.
 	MaxTurns int
+	// MaxContextTokens is the context window budget. 0 means 30000.
+	MaxContextTokens int
+	// CompactOptions controls compaction behavior. Zero value uses defaults.
+	CompactOptions ctxmgr.CompactOptions
 }
 
 // Result is the outcome of an agent run.
@@ -36,6 +41,16 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 		maxTurns = 10
 	}
 
+	maxContextTokens := cfg.MaxContextTokens
+	if maxContextTokens <= 0 {
+		maxContextTokens = 30000
+	}
+
+	compactOpts := cfg.CompactOptions
+	if compactOpts.Threshold <= 0 {
+		compactOpts = ctxmgr.DefaultCompactOptions()
+	}
+
 	toolDefs := registry.Definitions()
 
 	// Build initial conversation.
@@ -49,6 +64,20 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 		// Check cancellation.
 		if err := ctx.Err(); err != nil {
 			return &Result{TurnsUsed: turn - 1, StopReason: "cancelled"}, err
+		}
+
+		// Compact conversation if approaching context limit.
+		if ctxmgr.NeedsCompaction(messages, maxContextTokens, compactOpts) {
+			compacted, cr := ctxmgr.Compact(messages, maxContextTokens, compactOpts)
+			if cr.Compacted {
+				log.Append(transcript.EventInfo, turn, map[string]any{
+					"event":            "compaction",
+					"messages_removed": cr.MessagesRemoved,
+					"tokens_before":    cr.TokensBefore,
+					"tokens_after":     cr.TokensAfter,
+				})
+				messages = compacted
+			}
 		}
 
 		// Think: send to LLM.

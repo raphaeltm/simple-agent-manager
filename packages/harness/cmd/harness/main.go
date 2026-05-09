@@ -16,11 +16,12 @@ import (
 
 func main() {
 	var (
-		dir          = flag.String("dir", ".", "Working directory for tools")
-		prompt       = flag.String("prompt", "", "Initial task prompt")
-		maxTurns     = flag.Int("max-turns", 10, "Maximum agent loop iterations")
-		transcriptF  = flag.String("transcript", "", "Path to write transcript JSON")
-		systemPrompt = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
+		dir              = flag.String("dir", ".", "Working directory for tools")
+		prompt           = flag.String("prompt", "", "Initial task prompt")
+		maxTurns         = flag.Int("max-turns", 10, "Maximum agent loop iterations")
+		maxContextTokens = flag.Int("max-context-tokens", 30000, "Maximum context window tokens before compaction")
+		transcriptF      = flag.String("transcript", "", "Path to write transcript JSON")
+		systemPrompt     = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
 	)
 	flag.Parse()
 
@@ -64,8 +65,9 @@ func main() {
 	defer cancel()
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
-		SystemPrompt: *systemPrompt,
-		MaxTurns:     *maxTurns,
+		SystemPrompt:     *systemPrompt,
+		MaxTurns:         *maxTurns,
+		MaxContextTokens: *maxContextTokens,
 	}, *prompt)
 
 	if err != nil {
