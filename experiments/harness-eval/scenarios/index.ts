@@ -8,6 +8,9 @@ import grepLocateCode from './grep-locate-code.js';
 import missingFileRecovery from './missing-file-recovery.js';
 import proposePatch from './propose-patch.js';
 import interpretTestFailure from './interpret-test-failure.js';
+import multiFileRefactor from './multi-file-refactor.js';
+import testDrivenFix from './test-driven-fix.js';
+import dependencyAnalysis from './dependency-analysis.js';
 
 export const ALL_SCENARIOS = [
   weatherBaseline,
@@ -16,4 +19,7 @@ export const ALL_SCENARIOS = [
   missingFileRecovery,
   proposePatch,
   interpretTestFailure,
+  multiFileRefactor,
+  testDrivenFix,
+  dependencyAnalysis,
 ];
