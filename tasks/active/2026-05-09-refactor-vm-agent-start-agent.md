@@ -32,3 +32,12 @@ This is valid technical debt. The function sits on a high-risk runtime boundary 
 - No credential values are logged or persisted in new places.
 - Staging deployment succeeds through the normal GitHub Actions pipeline.
 - Staging verification exercises live agent/tool/repo-push behavior, not just page loading.
+
+## Validation Notes
+
+- `go test ./internal/acp` passes.
+- `go test ./...` passes in `packages/vm-agent`.
+- `pnpm lint` passes with existing warnings only.
+- `pnpm typecheck` passes.
+- `pnpm test` passes.
+- `pnpm build` passes.
