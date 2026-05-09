@@ -633,4 +633,7 @@ export interface Env {
   SANDBOX_EXEC_TIMEOUT_MS?: string;                 // Default exec timeout in ms (default: 30000)
   SANDBOX_GIT_TIMEOUT_MS?: string;                  // Git checkout timeout in ms (default: 120000)
   SANDBOX_SLEEP_AFTER?: string;                     // Container sleep-after duration (default: 10m)
+  SANDBOX_DEFAULT_MODEL?: string;                   // Default LLM for sandbox agent loops
+  SANDBOX_AGENT_MAX_TURNS?: string;                 // Max think-act-observe cycles (default: 20)
+  HARNESS_AGENT_ENABLED?: string;                   // Enables sam-harness AgentType (default: false)
 }
