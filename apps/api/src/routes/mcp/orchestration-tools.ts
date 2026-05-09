@@ -4,7 +4,8 @@
  */
 import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -12,6 +13,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { generateBranchName } from '../../services/branch-name';
+import { stopAgentSessionOnNode } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
@@ -27,6 +29,96 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+
+async function stopActiveChildAgentForRetry(
+  requestId: string | number | null,
+  childTask: typeof schema.tasks.$inferSelect,
+  tokenData: McpTokenData,
+  env: Env,
+  db: DrizzleD1Database<typeof schema>,
+): Promise<{ chatSessionId: string | null } | JsonRpcResponse> {
+  if (!childTask.workspaceId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Cannot retry active child task because it has no workspace assigned',
+    );
+  }
+
+  const [workspace] = await db
+    .select({
+      id: schema.workspaces.id,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+      chatSessionId: schema.workspaces.chatSessionId,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
+    .where(eq(schema.workspaces.id, childTask.workspaceId))
+    .limit(1);
+
+  if (!workspace?.nodeId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Cannot retry active child task because its workspace or node was not found',
+    );
+  }
+
+  if (workspace.nodeStatus !== 'running') {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Cannot retry active child task because its node is not running (status: ${workspace.nodeStatus ?? 'unknown'})`,
+    );
+  }
+
+  const [agentSession] = await db
+    .select({ id: schema.agentSessions.id })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.status, 'running'),
+      ),
+    )
+    .orderBy(desc(schema.agentSessions.createdAt))
+    .limit(1);
+
+  if (!agentSession) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Cannot retry active child task because no running agent session was found',
+    );
+  }
+
+  try {
+    await stopAgentSessionOnNode(
+      workspace.nodeId,
+      workspace.id,
+      agentSession.id,
+      env,
+      tokenData.userId,
+    );
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log.error('orchestration.retry_stop_agent_failed', {
+      childTaskId: childTask.id,
+      workspaceId: workspace.id,
+      nodeId: workspace.nodeId,
+      agentSessionId: agentSession.id,
+      error: errorMsg,
+    });
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to stop active child agent before retry: ${errorMsg}`,
+    );
+  }
+
+  return { chatSessionId: workspace.chatSessionId ?? null };
+}
 
 // ─── retry_subtask ──────────────────────────────────────────────────────────
 
@@ -109,7 +201,14 @@ export async function handleRetrySubtask(
 
   // If child is still running, stop it
   let stoppedStatus = childTask.status;
+  let stoppedChatSessionId: string | null = null;
   if (ACTIVE_STATUSES.includes(childTask.status)) {
+    const stopResult = await stopActiveChildAgentForRetry(requestId, childTask, tokenData, env, db);
+    if ('jsonrpc' in stopResult) {
+      return stopResult;
+    }
+    stoppedChatSessionId = stopResult.chatSessionId;
+
     const now = new Date().toISOString();
     await db.update(schema.tasks)
       .set({
@@ -133,18 +232,11 @@ export async function handleRetrySubtask(
 
     stoppedStatus = 'failed';
 
-    // Stop the session if one exists — find workspace via the task's workspaceId
-    if (childTask.workspaceId) {
+    // Stop the durable chat session after the node agent is confirmed stopped.
+    if (stoppedChatSessionId) {
       try {
-        const [workspace] = await db
-          .select({ chatSessionId: schema.workspaces.chatSessionId })
-          .from(schema.workspaces)
-          .where(eq(schema.workspaces.id, childTask.workspaceId))
-          .limit(1);
-        if (workspace?.chatSessionId) {
-          await projectDataService.stopSession(env, tokenData.projectId, workspace.chatSessionId)
-            .catch((e) => log.warn('orchestration.retry_stop_session_failed', { error: String(e) }));
-        }
+        await projectDataService.stopSession(env, tokenData.projectId, stoppedChatSessionId)
+          .catch((e) => log.warn('orchestration.retry_stop_session_failed', { error: String(e) }));
       } catch {
         // Best-effort session stop
       }

@@ -88,6 +88,7 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 - **If mocks hid the bug**, the right response is often an integration or E2E test that uses real (or more realistic) dependencies. Shallow unit tests with overly permissive mocks can give false confidence.
 - **If the bug was a missing propagation** (value set in A but never forwarded to B), write a test that constructs the real lifecycle (A then B) and asserts the value arrives.
 - **If the bug involves streamed UI data that is later reconstructed from durable storage**, write a parity regression test for the persisted representation, not only the live stream. The test MUST include a partial/status-only update event and assert omitted fields do not clear previously visible metadata. See `docs/notes/2026-05-02-persisted-tool-call-title-loss-postmortem.md`.
+- **If the bug involves lifecycle control across a runtime boundary** (agent/session/workspace/node stop, cancel, retry, replacement, suspend, or resume), the regression test MUST assert the runtime command is invoked before accepting the terminal state or dispatching replacement work. Database state changes and successful JSON responses are insufficient; the test must prove the external agent/node/workspace control side effect.
 
 ### Destructive Cleanup State Gates
 
