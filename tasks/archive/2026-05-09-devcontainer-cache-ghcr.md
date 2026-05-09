@@ -42,46 +42,46 @@ Track A (GHCR) approved by user. Uses the GitHub token SAM already has (`bootstr
 ## Implementation Checklist
 
 ### 1. Add config fields
-- [ ] Add `DevcontainerCacheEnabled` (env: `DEVCONTAINER_CACHE_ENABLED`, default: `false`)
-- [ ] Add `DevcontainerCacheRegistry` (env: `DEVCONTAINER_CACHE_REGISTRY`, default: `ghcr.io`)
+- [x] Add `DevcontainerCacheEnabled` (env: `DEVCONTAINER_CACHE_ENABLED`, default: `false`)
+- [x] Add `DevcontainerCacheRegistry` (env: `DEVCONTAINER_CACHE_REGISTRY`, default: `ghcr.io`)
 
 ### 2. Create `internal/cache/` package
-- [ ] `ParseGitHubRepo(repoURL string) (owner, repo string, ok bool)` — extract owner/repo from git URL
-- [ ] `CacheRef(registry, owner, repo, configName string) string` — construct cache image reference
-- [ ] `DockerLogin(ctx, registry, username, token string) error` — `docker login` to registry
-- [ ] `PullCacheImage(ctx, ref string) error` — `docker pull <ref>`, returns error
-- [ ] `PushCacheImage(ctx, containerLabelKey, containerLabelValue, cacheRef string) error` — find image from container, tag, push
+- [x] `ParseGitHubRepo(repoURL string) (owner, repo string, ok bool)` — extract owner/repo from git URL
+- [x] `CacheRef(registry, owner, repo, configName string) string` — construct cache image reference
+- [x] `DockerLogin(ctx, registry, username, token string) error` — `docker login` to registry
+- [x] `PullCacheImage(ctx, ref string) error` — `docker pull <ref>`, returns error
+- [x] `PushCacheImage(ctx, containerLabelKey, containerLabelValue, cacheRef string) error` — find image from container, tag, push
 
 ### 3. Write tests for cache package
-- [ ] Test ParseGitHubRepo with various URL formats (https, ssh, owner/repo)
-- [ ] Test CacheRef construction including named configs
-- [ ] Test edge cases (non-GitHub repos, empty inputs)
+- [x] Test ParseGitHubRepo with various URL formats (https, ssh, owner/repo)
+- [x] Test CacheRef construction including named configs
+- [x] Test edge cases (non-GitHub repos, empty inputs)
 
 ### 4. Integrate into bootstrap flow
-- [ ] Modify `ensureDevcontainerReady()`: before build, call login+pull (best-effort)
-- [ ] Inject `cacheFrom` into override configs (`writeMountOverrideConfig`, `writeCredentialOverrideConfig`)
-- [ ] After successful build (non-fallback): launch async push in background goroutine
-- [ ] Pass GitHub token through from `PrepareWorkspace` to `ensureDevcontainerReady`
-- [ ] Add boot log entries for cache status ("Cache hit", "No cache found", "Cache push started")
-- [ ] Skip caching in lightweight mode and fallback mode
+- [x] Modify `ensureDevcontainerReady()`: before build, call login+pull (best-effort)
+- [x] Inject `cacheFrom` into override configs (`writeMountOverrideConfig`, `writeCredentialOverrideConfig`)
+- [x] After successful build (non-fallback): launch async push in background goroutine
+- [x] Pass GitHub token through from `PrepareWorkspace` to `ensureDevcontainerReady`
+- [x] Add boot log entries for cache status ("Cache hit", "No cache found", "Cache push started")
+- [x] Skip caching in lightweight mode and fallback mode
 
 ### 5. Documentation
-- [ ] Document `packages:write` permission requirement for GitHub App
-- [ ] Add env vars to relevant docs
+- [x] Document `packages:write` permission requirement for GitHub App (see PR description)
+- [x] Add env vars to relevant docs (see PR description)
 
 ## Acceptance Criteria
 
-- [ ] `DEVCONTAINER_CACHE_ENABLED=true` activates caching
-- [ ] Before build: docker login + pull attempt (best-effort, logged)
-- [ ] `cacheFrom` injected into devcontainer override config
-- [ ] After successful build: async push in background goroutine
-- [ ] Lightweight mode skips caching
-- [ ] Fallback to default image skips caching
-- [ ] Non-GitHub repos skip caching (no GHCR token)
-- [ ] Named configs use separate cache tags
-- [ ] All failures are non-fatal (logged as warnings, never block workspace creation)
-- [ ] Boot logs surface cache status
-- [ ] Unit tests cover ParseGitHubRepo, CacheRef, and edge cases
+- [x] `DEVCONTAINER_CACHE_ENABLED=true` activates caching
+- [x] Before build: docker login + pull attempt (best-effort, logged)
+- [x] `cacheFrom` injected into devcontainer override config
+- [x] After successful build: async push in background goroutine
+- [x] Lightweight mode skips caching
+- [x] Fallback to default image skips caching
+- [x] Non-GitHub repos skip caching (no GHCR token)
+- [x] Named configs use separate cache tags
+- [x] All failures are non-fatal (logged as warnings, never block workspace creation)
+- [x] Boot logs surface cache status
+- [x] Unit tests cover ParseGitHubRepo, CacheRef, and edge cases
 
 ## References
 
