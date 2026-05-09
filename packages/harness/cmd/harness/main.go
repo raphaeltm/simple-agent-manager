@@ -25,6 +25,7 @@ func main() {
 		maxContextTokens = flag.Int("max-context-tokens", 30000, "Maximum context window tokens before compaction")
 		transcriptF      = flag.String("transcript", "", "Path to write transcript JSON")
 		systemPrompt     = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
+		providerName     = flag.String("provider", "mock", "LLM provider: mock or openai")
 		apiURL           = flag.String("api-url", "", "OpenAI-compatible API base URL (enables real LLM provider)")
 		apiKey           = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
 		model            = flag.String("model", llm.DefaultModel, "Model ID for LLM completions")
@@ -47,22 +48,30 @@ func main() {
 
 	// Create LLM provider.
 	var provider llm.Provider
-	if *apiURL != "" {
+	switch *providerName {
+	case "mock":
+		provider = llm.NewMockProvider(
+			&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
+		)
+		fmt.Fprintln(os.Stderr, "Using mock provider (pass --provider openai to use a real LLM)")
+	case "openai":
+		if *apiURL == "" {
+			fmt.Fprintln(os.Stderr, "error: --api-url is required when using openai provider")
+			os.Exit(1)
+		}
 		key := *apiKey
 		if key == "" {
 			key = os.Getenv("SAM_API_KEY")
 		}
 		if key == "" {
-			fmt.Fprintln(os.Stderr, "error: --api-key or SAM_API_KEY env var is required when using --api-url")
+			fmt.Fprintln(os.Stderr, "error: --api-key or SAM_API_KEY env var is required when using openai provider")
 			os.Exit(1)
 		}
 		provider = llm.NewOpenAIClient(*apiURL, key, llm.WithModel(*model))
 		fmt.Fprintf(os.Stderr, "Using OpenAI-compatible provider: %s (model: %s)\n", *apiURL, *model)
-	} else {
-		provider = llm.NewMockProvider(
-			&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
-		)
-		fmt.Fprintln(os.Stderr, "Using mock provider (pass --api-url to use a real LLM)")
+	default:
+		fmt.Fprintf(os.Stderr, "error: unknown provider %q (use mock or openai)\n", *providerName)
+		os.Exit(1)
 	}
 
 	// Build tool registry.
@@ -72,6 +81,8 @@ func main() {
 		&tools.WriteFile{WorkDir: workDir},
 		&tools.EditFile{WorkDir: workDir},
 		&tools.Bash{WorkDir: workDir},
+		&tools.Grep{WorkDir: workDir},
+		&tools.Glob{WorkDir: workDir},
 		&tools.GitStatus{WorkDir: workDir},
 		&tools.GitDiff{WorkDir: workDir},
 		&tools.GitLog{WorkDir: workDir},
