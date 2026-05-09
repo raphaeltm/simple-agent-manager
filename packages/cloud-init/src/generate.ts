@@ -173,6 +173,8 @@ export interface CloudInitVariables {
   vmAgentPort?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
+  /** Enable opportunistic devcontainer image caching via GHCR (default: false) */
+  devcontainerCacheEnabled?: string;
 }
 
 /**
@@ -216,6 +218,7 @@ export function generateCloudInit(
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
     '{{ provider }}': variables.provider ?? '',
+    '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.

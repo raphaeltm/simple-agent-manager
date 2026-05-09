@@ -151,6 +151,30 @@ func TestCacheRef(t *testing.T) {
 			repo:     "myapp",
 			want:     "registry.example.com/myorg/myapp:devcontainer-cache",
 		},
+		{
+			name:       "config name with spaces sanitized",
+			registry:   "ghcr.io",
+			owner:      "octocat",
+			repo:       "hello-world",
+			configName: "my config",
+			want:       "ghcr.io/octocat/hello-world:devcontainer-cache-my-config",
+		},
+		{
+			name:       "config name with colon sanitized",
+			registry:   "ghcr.io",
+			owner:      "octocat",
+			repo:       "hello-world",
+			configName: "node:20",
+			want:       "ghcr.io/octocat/hello-world:devcontainer-cache-node-20",
+		},
+		{
+			name:       "config name with special chars sanitized",
+			registry:   "ghcr.io",
+			owner:      "octocat",
+			repo:       "hello-world",
+			configName: "@my/config+v2",
+			want:       "ghcr.io/octocat/hello-world:devcontainer-cache-my-config-v2",
+		},
 	}
 
 	for _, tt := range tests {

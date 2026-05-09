@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/bootlog"
+	"github.com/workspace/vm-agent/internal/cache"
 	"github.com/workspace/vm-agent/internal/callbackretry"
 	"github.com/workspace/vm-agent/internal/config"
 )
@@ -197,7 +198,9 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	// bootstrapState (from redeemBootstrapToken) does not carry it. Named
 	// devcontainer configs are only supported via the control-plane POST /workspaces
 	// flow (PrepareWorkspace), which threads state.DevcontainerConfigName directly.
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath, "")
+	// The bootstrap-token path does not support caching (no DevcontainerConfigName,
+	// limited token context). Pass empty cacheRef to disable.
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath, "", "")
 	if err != nil {
 		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
 		return err
@@ -335,6 +338,24 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		}()
 	}
 
+	// Resolve devcontainer cache ref (best-effort, only for non-lightweight GitHub repos).
+	cacheRef := ""
+	if cfg.DevcontainerCacheEnabled && !state.Lightweight && bootstrap.GitHubToken != "" {
+		owner, repo, ok := cache.ParseGitHubRepo(cfg.Repository)
+		if ok {
+			cacheRef = cache.CacheRef(cfg.DevcontainerCacheRegistry, owner, repo, state.DevcontainerConfigName)
+			// Best-effort login to the cache registry.
+			if loginErr := cache.DockerLogin(ctx, cfg.DevcontainerCacheRegistry, "x-access-token", bootstrap.GitHubToken); loginErr != nil {
+				slog.Warn("Cache registry login failed (caching disabled for this build)", "registry", cfg.DevcontainerCacheRegistry, "error", loginErr)
+				cacheRef = "" // Disable caching if login fails.
+			} else {
+				reporter.Log("devcontainer_cache", "started", "Checking devcontainer cache")
+			}
+		} else {
+			slog.Info("Devcontainer caching disabled: not a GitHub repository", "repository", cfg.Repository)
+		}
+	}
+
 	var usedFallback bool
 	var recoveryMode bool
 	if state.Lightweight {
@@ -352,7 +373,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	} else {
 		reporter.Log("devcontainer_up", "started", "Building devcontainer")
 		var devErr error
-		usedFallback, devErr = ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath, state.DevcontainerConfigName)
+		usedFallback, devErr = ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath, state.DevcontainerConfigName, cacheRef)
 		if devErr != nil {
 			reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", devErr.Error())
 			return false, devErr
@@ -814,7 +835,11 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 // volume mounted at /workspaces instead of the default bind mount. This eliminates
 // host/container permission mismatches because the container user owns everything
 // inside the volume.
-func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName string) (bool, error) {
+//
+// cacheRef is an optional container image reference for cache-from. When non-empty,
+// it is injected into override configs as a cacheFrom source and the built image
+// is pushed to this ref asynchronously after a successful build.
+func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName, cacheRef string) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		slog.Info("Devcontainer already running", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
 		ensureContainerUserResolved(ctx, cfg, devcontainerConfigName)
@@ -833,6 +858,23 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 
 	slog.Info("Starting devcontainer for workspace", "workspaceDir", cfg.WorkspaceDir)
 
+	// Best-effort cache pull: try to pull the cached image so Docker can use
+	// its layers during the build. Failures are non-fatal.
+	cacheImagePulled := false
+	if cacheRef != "" {
+		if pullErr := cache.PullCacheImage(ctx, cacheRef); pullErr != nil {
+			slog.Info("No cache image available (building from scratch)", "ref", cacheRef, "reason", pullErr)
+		} else {
+			slog.Info("Cache hit: pulled devcontainer cache image", "ref", cacheRef)
+			cacheImagePulled = true
+		}
+	}
+	// Only inject cacheFrom if we actually pulled the image.
+	effectiveCacheRef := ""
+	if cacheImagePulled {
+		effectiveCacheRef = cacheRef
+	}
+
 	hasConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
 	usedFallback := false
 
@@ -845,7 +887,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		var overridePath string
 		if volumeName != "" {
 			var mountErr error
-			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName, credHelperHostPath, devcontainerConfigName)
+			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName, credHelperHostPath, devcontainerConfigName, effectiveCacheRef)
 			if mountErr != nil {
 				slog.Warn("Failed to prepare repo mount override config, falling back to default image", "error", mountErr)
 				fallbackOutput := []byte(fmt.Sprintf("failed to prepare repo devcontainer mount override: %v\n", mountErr))
@@ -859,10 +901,21 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		} else if credHelperHostPath != "" {
 			// Repo has config but no volume — use a credential-only override.
 			var credErr error
-			overridePath, credErr = writeCredentialOverrideConfig(credHelperHostPath)
+			overridePath, credErr = writeCredentialOverrideConfig(credHelperHostPath, effectiveCacheRef)
 			if credErr != nil {
 				slog.Warn("Failed to write credential override config", "error", credErr)
 				// Non-fatal: continue without pre-mounted credential helper.
+			}
+			if overridePath != "" {
+				defer os.Remove(overridePath)
+			}
+		} else if effectiveCacheRef != "" {
+			// No volume, no credential helper, but we have a cache ref —
+			// write a cache-only override config.
+			var cacheErr error
+			overridePath, cacheErr = writeCacheOnlyOverrideConfig(effectiveCacheRef)
+			if cacheErr != nil {
+				slog.Warn("Failed to write cache override config", "error", cacheErr)
 			}
 			if overridePath != "" {
 				defer os.Remove(overridePath)
@@ -902,6 +955,21 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 	if !usedFallback {
 		clearBuildErrorArtifacts(ctx, cfg, volumeName)
 	}
+
+	// Best-effort async cache push: tag and push the built image in the background.
+	// Only push when the build succeeded with the repo's own config (not fallback).
+	if cacheRef != "" && !usedFallback && hasConfig {
+		labelKey := cfg.ContainerLabelKey
+		labelValue := cfg.ContainerLabelValue
+		go func() {
+			pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer pushCancel()
+			if pushErr := cache.PushCacheImage(pushCtx, labelKey, labelValue, cacheRef); pushErr != nil {
+				slog.Warn("Cache image push failed (non-fatal)", "ref", cacheRef, "error", pushErr)
+			}
+		}()
+	}
+
 	ensureContainerUserResolved(ctx, cfg, devcontainerConfigName)
 	if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
 		return false, err
@@ -1506,7 +1574,8 @@ func statContainerPathOwnership(ctx context.Context, containerID, path string) (
 // writeMountOverrideConfig resolves the repo devcontainer configuration via
 // `devcontainer read-configuration` and writes a full override config that
 // includes workspaceMount/workspaceFolder for named-volume workspaces.
-func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName string) (string, error) {
+// When cacheFrom is non-empty, it is injected as a cacheFrom source for the build.
+func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName, cacheFrom string) (string, error) {
 	repoDirName := config.DeriveRepoDirName(cfg.Repository)
 	if repoDirName == "" {
 		repoDirName = filepath.Base(cfg.WorkspaceDir)
@@ -1554,6 +1623,11 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 		}
 	}
 
+	// Inject cache-from source if available.
+	if cacheFrom != "" {
+		readResult.MergedConfiguration["cacheFrom"] = []string{cacheFrom}
+	}
+
 	configJSON, err := json.MarshalIndent(readResult.MergedConfiguration, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal merged mount override config: %w", err)
@@ -1575,7 +1649,7 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 		return "", fmt.Errorf("failed to finalize mount override config: %w", err)
 	}
 
-	slog.Info("Wrote mount override config", "path", tmpFile.Name(), "volume", volumeName, "workspaceFolder", "/workspaces/"+repoDirName)
+	slog.Info("Wrote mount override config", "path", tmpFile.Name(), "volume", volumeName, "workspaceFolder", "/workspaces/"+repoDirName, "cacheFrom", cacheFrom)
 	return tmpFile.Name(), nil
 }
 
@@ -2177,14 +2251,21 @@ func credentialHelperContainerEnv() map[string]string {
 // writeCredentialOverrideConfig writes a minimal devcontainer override config that
 // only adds the credential helper bind mount and containerEnv. This is used when
 // the repo has its own devcontainer config but no volume mount override is needed.
-func writeCredentialOverrideConfig(credHelperHostPath string) (string, error) {
-	if credHelperHostPath == "" {
+// When cacheFrom is non-empty, it is included as a cacheFrom source.
+func writeCredentialOverrideConfig(credHelperHostPath, cacheFrom string) (string, error) {
+	if credHelperHostPath == "" && cacheFrom == "" {
 		return "", nil
 	}
 
-	overrideCfg := map[string]interface{}{
-		"mounts":       []string{credentialHelperMountEntry(credHelperHostPath)},
-		"containerEnv": credentialHelperContainerEnv(),
+	overrideCfg := map[string]interface{}{}
+
+	if credHelperHostPath != "" {
+		overrideCfg["mounts"] = []string{credentialHelperMountEntry(credHelperHostPath)}
+		overrideCfg["containerEnv"] = credentialHelperContainerEnv()
+	}
+
+	if cacheFrom != "" {
+		overrideCfg["cacheFrom"] = []string{cacheFrom}
 	}
 
 	configJSON, err := json.MarshalIndent(overrideCfg, "", "  ")
@@ -2208,7 +2289,39 @@ func writeCredentialOverrideConfig(credHelperHostPath string) (string, error) {
 		return "", fmt.Errorf("failed to finalize credential override config: %w", err)
 	}
 
-	slog.Info("Wrote credential override config", "path", tmpFile.Name())
+	slog.Info("Wrote credential override config", "path", tmpFile.Name(), "cacheFrom", cacheFrom)
+	return tmpFile.Name(), nil
+}
+
+// writeCacheOnlyOverrideConfig writes a minimal devcontainer override config that
+// only includes a cacheFrom source. Used when no volume or credential override is needed.
+func writeCacheOnlyOverrideConfig(cacheFrom string) (string, error) {
+	overrideCfg := map[string]interface{}{
+		"cacheFrom": []string{cacheFrom},
+	}
+
+	configJSON, err := json.MarshalIndent(overrideCfg, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal cache override config: %w", err)
+	}
+	configJSON = append(configJSON, '\n')
+
+	tmpFile, err := os.CreateTemp("", "devcontainer-cache-override-*.json")
+	if err != nil {
+		return "", fmt.Errorf("failed to create cache override config: %w", err)
+	}
+
+	if _, err := tmpFile.Write(configJSON); err != nil {
+		_ = tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to write cache override config: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to finalize cache override config: %w", err)
+	}
+
+	slog.Info("Wrote cache-only override config", "path", tmpFile.Name(), "cacheFrom", cacheFrom)
 	return tmpFile.Name(), nil
 }
 
