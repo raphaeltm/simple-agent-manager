@@ -76,6 +76,7 @@ write_files:
       Environment=TLS_CERT_PATH={{ tls_cert_path }}
       Environment=TLS_KEY_PATH={{ tls_key_path }}
       Environment=PROVIDER={{ provider }}
+      Environment=DEVCONTAINER_CACHE_ENABLED={{ devcontainer_cache_enabled }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5
