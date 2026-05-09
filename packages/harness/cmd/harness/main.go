@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"time"
 
 	"github.com/workspace/harness/agent"
 	"github.com/workspace/harness/llm"
+	"github.com/workspace/harness/repomap"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
 )
@@ -24,6 +27,7 @@ func main() {
 		apiURL       = flag.String("api-url", "", "OpenAI-compatible API base URL (enables real LLM provider)")
 		apiKey       = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
 		model        = flag.String("model", llm.DefaultModel, "Model ID for LLM completions")
+		repoMapFlag  = flag.Bool("repo-map", true, "Generate and prepend a repo map to the system prompt")
 	)
 	flag.Parse()
 
@@ -82,12 +86,31 @@ func main() {
 	// Create transcript log.
 	log := transcript.NewLog()
 
+	// Generate repo map if enabled and directory is a git repo.
+	sysPrompt := *systemPrompt
+	if *repoMapFlag && isGitRepo(workDir) {
+		start := time.Now()
+		rm, err := repomap.Generate(workDir, nil)
+		elapsed := time.Since(start)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: repo map generation failed: %v\n", err)
+		} else if rm != "" {
+			sysPrompt = "# Repository Map\n\n" + rm + "\n\n" + sysPrompt
+			log.Append(transcript.EventInfo, 0, map[string]any{
+				"action":   "repo_map",
+				"chars":    len(rm),
+				"duration": elapsed.String(),
+			})
+			fmt.Fprintf(os.Stderr, "Repo map generated in %v (%d chars)\n", elapsed.Round(time.Millisecond), len(rm))
+		}
+	}
+
 	// Run agent loop with signal handling.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
-		SystemPrompt: *systemPrompt,
+		SystemPrompt: sysPrompt,
 		MaxTurns:     *maxTurns,
 	}, *prompt)
 
@@ -117,5 +140,19 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Transcript written to %s (%d events)\n", *transcriptF, log.Len())
+	}
+}
+
+// isGitRepo checks whether dir (or an ancestor) is a git repository.
+func isGitRepo(dir string) bool {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
 	}
 }
