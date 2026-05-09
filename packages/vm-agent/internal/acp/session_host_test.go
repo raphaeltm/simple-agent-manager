@@ -1844,6 +1844,157 @@ func TestCredentialMetadataTracking(t *testing.T) {
 	host.Stop()
 }
 
+func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			WorkspaceID:   "test-workspace",
+			CallbackToken: "workspace-token",
+		},
+	})
+	defer host.Stop()
+
+	cred := &agentCredential{
+		credential: "sk-user",
+		inferenceConfig: &inferenceConfig{
+			Provider:     "anthropic-passthrough",
+			BaseURL:      "https://api.example.com/ai/{wstoken}/v1",
+			Model:        "claude-sonnet",
+			APIKeySource: "user-credential",
+		},
+	}
+	envVars, settings, err := host.injectAgentCredential(
+		context.Background(),
+		"container-id",
+		"claude-code",
+		cred,
+		nil,
+		getAgentCommandInfo("claude-code", "api-key"),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("injectAgentCredential returned error: %v", err)
+	}
+	if settings != nil {
+		t.Fatalf("settings = %#v, want nil", settings)
+	}
+	assertEnvEntry(t, envVars, "ANTHROPIC_BASE_URL=https://api.example.com/ai/workspace-token/v1")
+	assertEnvEntry(t, envVars, "ANTHROPIC_API_KEY=sk-user")
+	assertEnvEntry(t, envVars, "ANTHROPIC_MODEL=claude-sonnet")
+}
+
+func TestInjectAgentCredential_PlatformOpenCodeConfiguresSettings(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			WorkspaceID:   "test-workspace",
+			CallbackToken: "workspace-token",
+		},
+	})
+	defer host.Stop()
+
+	cred := &agentCredential{
+		inferenceConfig: &inferenceConfig{
+			Provider:     "openai-proxy",
+			BaseURL:      "https://api.example.com/ai/v1",
+			Model:        "@cf/meta/llama-4-scout",
+			APIKeySource: "callback-token",
+		},
+	}
+	envVars, settings, err := host.injectAgentCredential(
+		context.Background(),
+		"container-id",
+		"opencode",
+		cred,
+		nil,
+		getAgentCommandInfo("opencode", "api-key"),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("injectAgentCredential returned error: %v", err)
+	}
+	assertEnvEntry(t, envVars, "OPENCODE_PLATFORM_BASE_URL=https://api.example.com/ai/v1")
+	assertEnvEntry(t, envVars, "OPENCODE_PLATFORM_API_KEY=workspace-token")
+	if settings == nil {
+		t.Fatal("settings is nil, want OpenCode platform settings")
+	}
+	if settings.OpencodeProvider != "platform" {
+		t.Fatalf("OpencodeProvider = %q, want platform", settings.OpencodeProvider)
+	}
+	if settings.Model != "meta/llama-4-scout" {
+		t.Fatalf("Model = %q, want stripped Workers AI model", settings.Model)
+	}
+}
+
+func TestInjectAgentCredential_ProxyRequiresCallbackToken(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{WorkspaceID: "test-workspace"},
+	})
+	defer host.Stop()
+
+	cred := &agentCredential{
+		credential: "sk-user",
+		inferenceConfig: &inferenceConfig{
+			Provider:     "openai-passthrough",
+			BaseURL:      "https://api.example.com/ai/{wstoken}/v1",
+			APIKeySource: "user-credential",
+		},
+	}
+	_, _, err := host.injectAgentCredential(
+		context.Background(),
+		"container-id",
+		"openai-codex",
+		cred,
+		nil,
+		getAgentCommandInfo("openai-codex", "api-key"),
+		nil,
+	)
+	if err == nil {
+		t.Fatal("injectAgentCredential returned nil error, want missing CallbackToken error")
+	}
+	if !strings.Contains(err.Error(), "CallbackToken is empty") {
+		t.Fatalf("error = %q, want CallbackToken message", err.Error())
+	}
+}
+
+func TestCodexRefreshProxyEnv(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			WorkspaceID:     "test-workspace",
+			SessionID:       "test-session",
+			ControlPlaneURL: "https://api.example.com/",
+			CallbackToken:   "token with spaces",
+		},
+		MessageBufferSize: 100,
+	})
+	defer host.Stop()
+
+	envVar, ok := host.codexRefreshProxyEnv("openai-codex", &agentCredential{credentialKind: "oauth-token"})
+	if !ok {
+		t.Fatal("codexRefreshProxyEnv ok = false, want true")
+	}
+	want := "CODEX_REFRESH_TOKEN_URL_OVERRIDE=https://api.example.com/api/auth/codex-refresh?token=token+with+spaces"
+	if envVar != want {
+		t.Fatalf("envVar = %q, want %q", envVar, want)
+	}
+}
+
+func assertEnvEntry(t *testing.T, envVars []string, want string) {
+	t.Helper()
+	for _, got := range envVars {
+		if got == want {
+			return
+		}
+	}
+	t.Fatalf("env vars missing %q: %#v", want, envVars)
+}
+
 func TestSessionHost_SelectAgent_SkipsRestartWhenSameAgentRunning(t *testing.T) {
 	t.Parallel()
 

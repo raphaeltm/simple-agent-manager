@@ -1,0 +1,219 @@
+package acp
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+)
+
+// SelectAgent handles agent selection requests from a browser.
+// It fetches credentials, installs the binary, starts the process,
+// and initializes the ACP session.
+func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
+	previous, started := h.beginAgentSelection(agentType)
+	if !started {
+		return
+	}
+
+	h.broadcastAgentStatus(StatusStarting, agentType, "")
+	h.reportLifecycle("info", "Agent selection started", map[string]interface{}{
+		"agentType":            agentType,
+		"previousAcpSessionID": previous.acpSessionID,
+		"previousAgentType":    previous.agentType,
+		"sessionId":            h.config.SessionID,
+	})
+
+	cred, err := h.fetchAgentKey(ctx, agentType)
+	if err != nil {
+		h.failAgentSelection(agentType, "agent_key_fetch", fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType), err)
+		return
+	}
+	h.reportCredentialFetched(agentType, cred)
+
+	info := getAgentCommandInfo(agentType, cred.credentialKind)
+	if err := h.ensureAgentInstalled(ctx, info); err != nil {
+		h.failAgentSelection(agentType, "agent_install", fmt.Sprintf("Failed to install %s: %v", info.command, err), err)
+		return
+	}
+	h.reportLifecycle("info", "Agent binary verified/installed", map[string]interface{}{
+		"agentType": agentType,
+		"command":   info.command,
+	})
+
+	settings := h.loadAgentSettings(ctx, agentType)
+	loadSessionID := h.resolveLoadSessionID(agentType, previous)
+	if !h.startSelectedAgent(ctx, agentType, cred, settings, loadSessionID) {
+		return
+	}
+
+	h.reportLifecycle("info", "Agent ready", map[string]interface{}{
+		"agentType": agentType,
+		"sessionId": h.config.SessionID,
+	})
+	h.reportEvent("info", "agent.ready", fmt.Sprintf("Agent %s is ready", agentType), map[string]interface{}{
+		"agentType": agentType,
+	})
+	h.broadcastAgentStatus(StatusReady, agentType, "")
+}
+
+type previousAgentSelection struct {
+	acpSessionID string
+	agentType    string
+}
+
+func (h *SessionHost) beginAgentSelection(agentType string) (previousAgentSelection, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	slog.Info("SessionHost: agent selection requested", "sessionID", h.config.SessionID, "agentType", agentType)
+	if h.agentType == agentType && h.process != nil && (h.status == HostReady || h.status == HostStarting) {
+		slog.Info("SessionHost: agent already running/starting with requested type, skipping restart",
+			"sessionID", h.config.SessionID, "agentType", agentType, "status", h.status)
+		return previousAgentSelection{}, false
+	}
+
+	previous := h.capturePreviousAgentSelection()
+	if h.process != nil {
+		h.stopCurrentAgentLocked()
+	}
+	h.agentType = agentType
+	h.restartCount = 0
+	h.status = HostStarting
+	h.statusErr = ""
+	h.resetStderrBuffer()
+	return previous, true
+}
+
+func (h *SessionHost) capturePreviousAgentSelection() previousAgentSelection {
+	previous := previousAgentSelection{agentType: h.agentType}
+	if h.sessionID != "" {
+		previous.acpSessionID = string(h.sessionID)
+	}
+	if previous.acpSessionID == "" && h.config.PreviousAcpSessionID != "" {
+		previous.acpSessionID = h.config.PreviousAcpSessionID
+		h.config.PreviousAcpSessionID = ""
+	}
+	if previous.agentType == "" && h.config.PreviousAgentType != "" {
+		previous.agentType = h.config.PreviousAgentType
+		h.config.PreviousAgentType = ""
+	}
+	return previous
+}
+
+func (h *SessionHost) resetStderrBuffer() {
+	h.stderrMu.Lock()
+	h.stderrBuf.Reset()
+	h.stderrMu.Unlock()
+}
+
+func (h *SessionHost) failAgentSelection(agentType, source, message string, err error) {
+	slog.Error("Agent selection failed", "source", source, "error", err)
+	h.setStatus(HostError, message)
+	h.broadcastAgentStatus(StatusError, agentType, message)
+	detail := ""
+	if err != nil {
+		detail = err.Error()
+	}
+	h.reportAgentError(agentType, source, message, detail)
+}
+
+func (h *SessionHost) reportCredentialFetched(agentType string, cred *agentCredential) {
+	hasInferenceConfig := cred.inferenceConfig != nil
+	inferenceModel, inferenceBaseURL, inferenceAPIKeySource := "", "", ""
+	if hasInferenceConfig {
+		inferenceModel = cred.inferenceConfig.Model
+		inferenceBaseURL = cred.inferenceConfig.BaseURL
+		inferenceAPIKeySource = cred.inferenceConfig.APIKeySource
+	}
+	context := map[string]interface{}{
+		"agentType":             agentType,
+		"credentialKind":        cred.credentialKind,
+		"hasInferenceConfig":    hasInferenceConfig,
+		"inferenceModel":        inferenceModel,
+		"inferenceBaseURL":      inferenceBaseURL,
+		"inferenceAPIKeySource": inferenceAPIKeySource,
+	}
+	h.reportLifecycle("info", "Agent credential fetched", context)
+	slog.Debug("Agent credential details",
+		"agentType", agentType, "credentialKind", cred.credentialKind,
+		"hasInferenceConfig", hasInferenceConfig, "inferenceModel", inferenceModel,
+		"inferenceBaseURL", inferenceBaseURL, "inferenceAPIKeySource", inferenceAPIKeySource,
+		"credentialLen", len(cred.credential), "workspaceId", h.config.WorkspaceID)
+}
+
+func (h *SessionHost) loadAgentSettings(ctx context.Context, agentType string) *agentSettingsPayload {
+	settings := h.fetchAgentSettings(ctx, agentType)
+	if settings == nil {
+		slog.Info("No agent settings found, using defaults", "agentType", agentType, "workspaceId", h.config.WorkspaceID)
+		return h.applyProfileOverrides(nil)
+	}
+	slog.Info("Agent settings loaded",
+		"model", settings.Model, "permissionMode", settings.PermissionMode,
+		"opencodeProvider", settings.OpencodeProvider, "opencodeBaseURL", settings.OpencodeBaseURL,
+		"agentType", agentType, "workspaceId", h.config.WorkspaceID)
+	return h.applyProfileOverrides(settings)
+}
+
+func (h *SessionHost) applyProfileOverrides(settings *agentSettingsPayload) *agentSettingsPayload {
+	if h.config.ModelOverride == "" && h.config.PermissionModeOverride == "" &&
+		h.config.OpencodeProviderOverride == "" && h.config.OpencodeBaseURLOverride == "" {
+		return settings
+	}
+	if settings == nil {
+		settings = &agentSettingsPayload{}
+	}
+	if h.config.ModelOverride != "" {
+		settings.Model = h.config.ModelOverride
+		slog.Info("Agent model overridden by profile", "model", h.config.ModelOverride)
+	}
+	if h.config.PermissionModeOverride != "" {
+		settings.PermissionMode = h.config.PermissionModeOverride
+		slog.Info("Agent permission mode overridden by profile", "permissionMode", h.config.PermissionModeOverride)
+	}
+	if h.config.OpencodeProviderOverride != "" {
+		settings.OpencodeProvider = h.config.OpencodeProviderOverride
+		slog.Info("OpenCode provider overridden by profile", "provider", h.config.OpencodeProviderOverride)
+	}
+	if h.config.OpencodeBaseURLOverride != "" {
+		settings.OpencodeBaseURL = h.config.OpencodeBaseURLOverride
+		slog.Info("OpenCode base URL overridden by profile", "baseUrl", h.config.OpencodeBaseURLOverride)
+	}
+	return settings
+}
+
+func (h *SessionHost) resolveLoadSessionID(agentType string, previous previousAgentSelection) string {
+	if previous.acpSessionID == "" {
+		return ""
+	}
+	if previous.agentType == agentType {
+		slog.Info("ACP: will attempt LoadSession", "sessionID", previous.acpSessionID)
+		h.reportLifecycle("info", "LoadSession will be attempted", map[string]interface{}{
+			"agentType":            agentType,
+			"previousAcpSessionID": previous.acpSessionID,
+		})
+		return previous.acpSessionID
+	}
+	slog.Info("ACP: skipping LoadSession, agent type mismatch", "previousAgentType", previous.agentType, "requestedAgentType", agentType)
+	h.reportLifecycle("info", "LoadSession skipped: agent type mismatch", map[string]interface{}{
+		"previousAgentType": previous.agentType,
+		"requestedAgent":    agentType,
+	})
+	return ""
+}
+
+func (h *SessionHost) startSelectedAgent(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, loadSessionID string) bool {
+	h.mu.Lock()
+	if err := h.startAgent(ctx, agentType, cred, settings, loadSessionID); err != nil {
+		h.status = HostError
+		h.statusErr = err.Error()
+		h.mu.Unlock()
+		slog.Error("Agent start failed", "error", err)
+		h.broadcastAgentStatus(StatusError, agentType, err.Error())
+		h.reportAgentError(agentType, "agent_start", err.Error(), "")
+		return false
+	}
+	h.status = HostReady
+	h.statusErr = ""
+	h.mu.Unlock()
+	return true
+}
