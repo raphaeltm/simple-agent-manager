@@ -1334,7 +1334,7 @@ exit 1
 		Repository:   "owner/my-repo",
 	}
 
-	path, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123", "", "")
+	path, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123", "", "", "")
 	if err != nil {
 		t.Fatalf("writeMountOverrideConfig returned error: %v", err)
 	}
@@ -1388,7 +1388,7 @@ exit 1
 		Repository:   "owner/my-repo",
 	}
 
-	_, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123", "", "")
+	_, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123", "", "", "")
 	if err == nil {
 		t.Fatal("expected writeMountOverrideConfig to fail when runtime source is missing")
 	}
@@ -2109,7 +2109,7 @@ exit 1
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", "", "")
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", "", "", "")
 	if err != nil {
 		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
 	}
@@ -2203,7 +2203,7 @@ exit 0
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "sam-ws-logfail", "", "")
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "sam-ws-logfail", "", "", "")
 	if err == nil {
 		t.Fatal("expected ensureDevcontainerReady to fail when build logs cannot be persisted")
 	}
@@ -2315,7 +2315,7 @@ func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", "", "")
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", "", "", "")
 	if err != nil {
 		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
 	}
@@ -2863,7 +2863,7 @@ func TestConfigureSystemGitWith(t *testing.T) {
 func TestWriteCredentialOverrideConfig(t *testing.T) {
 	t.Parallel()
 
-	path, err := writeCredentialOverrideConfig("/tmp/git-credential-sam-test")
+	path, err := writeCredentialOverrideConfig("/tmp/git-credential-sam-test", "")
 	if err != nil {
 		t.Fatalf("writeCredentialOverrideConfig failed: %v", err)
 	}
@@ -2902,7 +2902,7 @@ func TestWriteCredentialOverrideConfig(t *testing.T) {
 func TestWriteCredentialOverrideConfigEmpty(t *testing.T) {
 	t.Parallel()
 
-	path, err := writeCredentialOverrideConfig("")
+	path, err := writeCredentialOverrideConfig("", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
