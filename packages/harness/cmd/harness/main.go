@@ -21,6 +21,9 @@ func main() {
 		maxTurns     = flag.Int("max-turns", 10, "Maximum agent loop iterations")
 		transcriptF  = flag.String("transcript", "", "Path to write transcript JSON")
 		systemPrompt = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
+		apiURL       = flag.String("api-url", "", "OpenAI-compatible API base URL (enables real LLM provider)")
+		apiKey       = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
+		model        = flag.String("model", llm.DefaultModel, "Model ID for LLM completions")
 	)
 	flag.Parse()
 
@@ -37,10 +40,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create mock provider (spike only supports mock mode).
-	provider := llm.NewMockProvider(
-		&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
-	)
+	// Create LLM provider.
+	var provider llm.Provider
+	if *apiURL != "" {
+		key := *apiKey
+		if key == "" {
+			key = os.Getenv("SAM_API_KEY")
+		}
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "error: --api-key or SAM_API_KEY env var is required when using --api-url")
+			os.Exit(1)
+		}
+		provider = llm.NewOpenAIClient(*apiURL, key, llm.WithModel(*model))
+		fmt.Fprintf(os.Stderr, "Using OpenAI-compatible provider: %s (model: %s)\n", *apiURL, *model)
+	} else {
+		provider = llm.NewMockProvider(
+			&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
+		)
+		fmt.Fprintln(os.Stderr, "Using mock provider (pass --api-url to use a real LLM)")
+	}
 
 	// Build tool registry.
 	registry := tools.NewRegistry()
