@@ -19,6 +19,13 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env as AppEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
+import {
+  type SandboxAgentSseEvent,
+  isSandboxEnabled,
+  resolveSandboxAgentConfig,
+  runSandboxAgent,
+} from '../../services/sandbox-agent';
+import type { SandboxHandle } from '../../services/sandbox-tools';
 import { buildFtsQuery, extractSnippet } from '../sam-session';
 import { runAgentLoop } from '../sam-session/agent-loop';
 import type { ConversationRow, MessageRow, SamSseEvent } from '../sam-session/types';
@@ -108,6 +115,10 @@ export class ProjectAgent extends DurableObject<AppEnv> {
     try {
       if (method === 'POST' && path === '/chat') {
         return await this.handleChat(request);
+      }
+
+      if (method === 'POST' && path === '/sandbox-prompt') {
+        return await this.handleSandboxPrompt(request);
       }
 
       if (method === 'GET' && path === '/conversations') {
@@ -247,6 +258,102 @@ export class ProjectAgent extends DurableObject<AppEnv> {
               message: 'An unexpected error occurred. Please try again.',
             }));
             await writer.write(encodeSseEvent({ type: 'done' }));
+          } catch { /* writer may be closed */ }
+        } finally {
+          try { await writer.close(); } catch { /* already closed */ }
+        }
+      })()
+    );
+
+    return new Response(readable, {
+      headers: {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+      },
+    });
+  }
+
+  /** Handle POST /sandbox-prompt — run a sandbox agent loop and stream SSE. */
+  private async handleSandboxPrompt(request: Request): Promise<Response> {
+    if (!isSandboxEnabled(this.env)) {
+      return new Response(
+        JSON.stringify({ error: 'Sandbox is not enabled. Set SANDBOX_ENABLED=true.' }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      );
+    }
+
+    if (this.env.HARNESS_AGENT_ENABLED !== 'true') {
+      return new Response(
+        JSON.stringify({ error: 'Harness agent is not enabled. Set HARNESS_AGENT_ENABLED=true.' }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      );
+    }
+
+    const body = (await request.json()) as {
+      prompt: string;
+      projectId: string;
+      systemPrompt?: string;
+      modelId?: string;
+      maxTurns?: number;
+    };
+
+    if (!body.prompt?.trim()) {
+      return new Response(
+        JSON.stringify({ error: 'prompt is required' }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      );
+    }
+
+    if (!body.projectId) {
+      return new Response(
+        JSON.stringify({ error: 'projectId is required' }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      );
+    }
+
+    const config = resolveSandboxAgentConfig(this.env, {
+      sandboxId: `project-${body.projectId}`,
+      modelId: body.modelId,
+      maxTurns: body.maxTurns,
+    });
+
+    // Get sandbox instance
+    let sandbox: SandboxHandle;
+    try {
+      const { getSandbox } = await import('@cloudflare/sandbox');
+      sandbox = getSandbox(this.env.SANDBOX!, config.sandboxId) as unknown as SandboxHandle;
+    } catch (err) {
+      return new Response(
+        JSON.stringify({
+          error: `Failed to initialize sandbox: ${err instanceof Error ? err.message : String(err)}`,
+        }),
+        { status: 500, headers: { 'content-type': 'application/json' } },
+      );
+    }
+
+    // Create SSE stream
+    const { readable, writable } = new TransformStream<Uint8Array>();
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
+
+    const writeEvent = async (event: SandboxAgentSseEvent) => {
+      try {
+        await writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      } catch { /* writer may be closed */ }
+    };
+
+    // Run agent loop in background
+    this.ctx.waitUntil(
+      (async () => {
+        try {
+          await runSandboxAgent(this.env, sandbox, config, body.prompt, body.systemPrompt, writeEvent);
+        } catch (err) {
+          log.error('project_agent.sandbox_error', {
+            projectId: body.projectId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          try {
+            await writeEvent({ type: 'agent_error', message: 'Sandbox agent loop failed unexpectedly.' });
           } catch { /* writer may be closed */ }
         } finally {
           try { await writer.close(); } catch { /* already closed */ }

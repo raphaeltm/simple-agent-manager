@@ -15,6 +15,13 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import {
+  type SandboxAgentSseEvent,
+  isSandboxEnabled,
+  resolveSandboxAgentConfig,
+  runSandboxAgent,
+} from '../services/sandbox-agent';
+import type { SandboxHandle } from '../services/sandbox-tools';
 
 const adminSandboxRoutes = new Hono<{ Bindings: Env }>();
 
@@ -276,6 +283,77 @@ adminSandboxRoutes.get('/exec-stream', async (c) => {
   });
 
   return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
+});
+
+/**
+ * POST /api/admin/sandbox/agent — Run a full sandbox agent loop with a prompt.
+ *
+ * Body: { prompt: string, sandboxId?: string, systemPrompt?: string, modelId?: string, maxTurns?: number }
+ * Returns: SSE stream of agent think-act-observe events.
+ */
+adminSandboxRoutes.post('/agent', async (c) => {
+  requireSandbox(c.env);
+
+  if (!isSandboxEnabled(c.env)) {
+    throw errors.badRequest('Sandbox is not enabled.');
+  }
+
+  const body = await c.req.json<{
+    prompt: string;
+    sandboxId?: string;
+    systemPrompt?: string;
+    modelId?: string;
+    maxTurns?: number;
+  }>();
+
+  if (!body.prompt || typeof body.prompt !== 'string') {
+    throw errors.badRequest('prompt is required and must be a string');
+  }
+
+  const sandboxId = body.sandboxId || 'sam-agent-prototype';
+  const sandbox = await getSandboxInstance(c.env, sandboxId) as unknown as SandboxHandle;
+
+  const config = resolveSandboxAgentConfig(c.env, {
+    sandboxId,
+    modelId: body.modelId,
+    maxTurns: body.maxTurns,
+  });
+
+  const { readable, writable } = new TransformStream<Uint8Array>();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+
+  const writeEvent = async (event: SandboxAgentSseEvent) => {
+    try {
+      await writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+    } catch { /* writer may be closed */ }
+  };
+
+  // Run in background so the response starts streaming immediately
+  c.executionCtx.waitUntil(
+    (async () => {
+      try {
+        await runSandboxAgent(c.env, sandbox, config, body.prompt, body.systemPrompt, writeEvent);
+      } catch (err) {
+        try {
+          await writeEvent({
+            type: 'agent_error',
+            message: err instanceof Error ? err.message : String(err),
+          });
+        } catch { /* writer may be closed */ }
+      } finally {
+        try { await writer.close(); } catch { /* already closed */ }
+      }
+    })()
+  );
+
+  return new Response(readable, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
