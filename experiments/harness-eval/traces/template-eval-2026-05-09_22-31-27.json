@@ -1,0 +1,168 @@
+{
+  "version": "1.1",
+  "timestamp": "2026-05-09T22:31:27.505Z",
+  "suite": {
+    "commitHash": "73ea875f",
+    "schemaVersion": "1.1"
+  },
+  "templates": [
+    "concise"
+  ],
+  "results": [
+    {
+      "scenarioId": "read-and-summarize",
+      "scenarioName": "Read File and Summarize Code",
+      "category": "coding",
+      "templateId": "concise",
+      "model": {
+        "displayName": "Gemma 4 26B",
+        "modelId": "@cf/google/gemma-4-26b-a4b-it",
+        "provider": "workers-ai",
+        "path": "workers-ai"
+      },
+      "rubric": {
+        "pass": true,
+        "reason": "Successfully read and summarized the auth module",
+        "checks": [
+          {
+            "name": "read_auth_file",
+            "pass": true,
+            "detail": "Model should read src/auth.ts"
+          },
+          {
+            "name": "completed",
+            "pass": true,
+            "detail": "Model should complete with a summary"
+          },
+          {
+            "name": "mentions_auth_middleware",
+            "pass": true,
+            "detail": "Summary should mention authMiddleware"
+          },
+          {
+            "name": "mentions_jwt",
+            "pass": true,
+            "detail": "Summary should mention JWT/token verification"
+          },
+          {
+            "name": "mentions_admin",
+            "pass": true,
+            "detail": "Summary should mention admin role checking"
+          }
+        ]
+      },
+      "usage": {
+        "prompt_tokens": 834,
+        "completion_tokens": 85,
+        "total_tokens": 919
+      },
+      "costUsd": 0.000010109,
+      "latencyMs": 1092,
+      "turnsUsed": 2,
+      "stopReason": "complete",
+      "conversation": [
+        {
+          "role": "system",
+          "content": "You are a coding assistant. Use tools to complete tasks. Be brief.\n\nRules:\n- Read files before acting\n- Fix issues directly with edit_file\n- Answer in 1-3 sentences"
+        },
+        {
+          "role": "user",
+          "content": "Read src/auth.ts and give me a brief summary of what it does, including the key functions and their purposes."
+        },
+        {
+          "annotations": null,
+          "audio": null,
+          "content": null,
+          "function_call": null,
+          "reasoning": "",
+          "refusal": null,
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"path\": \"src/auth.ts\"}",
+                "name": "read_file"
+              },
+              "id": "chatcmpl-tool-a368bbd864b70fd7",
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "   1  import { verify } from 'jsonwebtoken';\n   2  import type { Request, Response, NextFunction } from 'express';\n   3  \n   4  interface JWTPayload {\n   5    userId: string;\n   6    role: 'admin' | 'user';\n   7    exp: number;\n   8  }\n   9  \n  10  const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';\n  11  \n  12  export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {\n  13    const header = req.headers.authorization;\n  14    if (!header?.startsWith('Bearer ')) {\n  15      throw new Error('Missing or invalid Authorization header');\n  16    }\n  17    const token = header.slice(7);\n  18    const payload = verify(token, JWT_SECRET) as JWTPayload;\n  19    req.user = { id: payload.userId, role: payload.role };\n  20    next();\n  21  }\n  22  \n  23  export function requireAdmin(req: Request, _res: Response, next: NextFunction): void {\n  24    if (req.user?.role !== 'admin') {\n  25      throw new Error('Admin access required');\n  26    }\n  27    next();\n  28  }\n  29  ",
+          "tool_call_id": "chatcmpl-tool-a368bbd864b70fd7"
+        },
+        {
+          "annotations": null,
+          "audio": null,
+          "content": "`src/auth.ts` provides authentication and authorization middleware using JSON Web Tokens (JWT). Key functions include `authMiddleware`, which validates the Bearer token and populates `req.user`, and `requireAdmin`, which restricts access to users with the 'admin' role.",
+          "function_call": null,
+          "reasoning": "",
+          "refusal": null,
+          "role": "assistant",
+          "tool_calls": []
+        }
+      ],
+      "toolCalls": [
+        {
+          "turn": 1,
+          "toolName": "read_file",
+          "arguments": {
+            "path": "src/auth.ts"
+          },
+          "result": "   1  import { verify } from 'jsonwebtoken';\n   2  import type { Request, Response, NextFunction } from 'express';\n   3  \n   4  interface JWTPayload {\n   5    userId: string;\n   6    role: 'admin' | 'user';\n   7    exp: number;\n   8  }\n   9  \n  10  const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';\n  11  \n  12  export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {\n  13    const header = req.headers.authorization;\n  14    if (!header?.startsWith('Bearer ')) {\n  15      throw new Error('Missing or invalid Authorization header');\n  16    }\n  17    const token = header.slice(7);\n  18    const payload = verify(token, JWT_SECRET) as JWTPayload;\n  19    req.user = { id: payload.userId, role: payload.role };\n  20    next();\n  21  }\n  22  \n  23  export function requireAdmin(req: Request, _res: Response, next: NextFunction): void {\n  24    if (req.user?.role !== 'admin') {\n  25      throw new Error('Admin access required');\n  26    }\n  27    next();\n  28  }\n  29  ",
+          "isError": false
+        }
+      ],
+      "turnUsage": [
+        {
+          "turn": 1,
+          "usage": {
+            "prompt_tokens": 234,
+            "completion_tokens": 23,
+            "total_tokens": 257,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        },
+        {
+          "turn": 2,
+          "usage": {
+            "prompt_tokens": 600,
+            "completion_tokens": 62,
+            "total_tokens": 662,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        }
+      ],
+      "turnLatency": [
+        {
+          "turn": 1,
+          "latencyMs": 395
+        },
+        {
+          "turn": 2,
+          "latencyMs": 692
+        }
+      ]
+    }
+  ],
+  "matrix": [
+    {
+      "templateId": "concise",
+      "model": "Gemma 4 26B",
+      "provider": "workers-ai",
+      "totalRuns": 1,
+      "passed": 1,
+      "successRate": 1,
+      "totalCostUsd": 0.000010109,
+      "costPerSuccessUsd": 0.000010109,
+      "avgLatencyMs": 1092,
+      "totalTokens": 919
+    }
+  ]
+}

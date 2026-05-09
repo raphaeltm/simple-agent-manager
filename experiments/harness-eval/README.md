@@ -22,6 +22,9 @@ Cost-aware model evaluation suite for SAM-native harness model selection. Compar
 | `missing-file-recovery` | coding | Handle a read_file error and recover via search | read_file, grep, glob |
 | `propose-patch` | coding | Read code, identify a bug, propose an edit_file fix | read_file, edit_file, grep, glob |
 | `interpret-test-failure` | coding | Read test output, trace to root cause, explain fix | read_file, grep, glob |
+| `multi-file-refactor` | coding | Rename a function across 4 files (grep + multiple edits) | read_file, edit_file, grep, glob |
+| `test-driven-fix` | coding | Given a failing test, fix the implementation | read_file, edit_file, grep, glob |
+| `dependency-analysis` | coding | Read imports across 8 files and produce a dependency graph | read_file, grep, glob |
 
 All coding scenarios use a **virtual filesystem** — deterministic, network-free, no side effects.
 
@@ -43,11 +46,26 @@ All coding scenarios use a **virtual filesystem** — deterministic, network-fre
 | `WORKERS_AI_COST_PER_1K_TOKENS` | No | Override Workers AI cost per 1K tokens (default: `0.000011`) |
 | `EVAL_SCENARIOS` | No | Comma-separated scenario IDs to run (default: all) |
 | `EVAL_MODELS` | No | Comma-separated model IDs to run (default: all) |
+| `EVAL_TEMPLATES` | No | Comma-separated template IDs (default: all, template runner only) |
+| `DRY_RUN` | No | Set to `true` to validate config without API calls (template runner only) |
 
-### Run All
+### Run All (Standard)
 
 ```bash
 CF_ACCOUNT_ID=<id> CF_TOKEN=<token> npx tsx experiments/harness-eval/run.ts
+```
+
+### Run Template Variants
+
+```bash
+# All scenarios x models x templates
+CF_ACCOUNT_ID=<id> CF_TOKEN=<token> npx tsx experiments/harness-eval/run-templates.ts
+
+# Dry run — validate config without calling APIs
+DRY_RUN=true npx tsx experiments/harness-eval/run-templates.ts
+
+# Specific templates only
+EVAL_TEMPLATES=concise,structured CF_ACCOUNT_ID=... CF_TOKEN=... npx tsx experiments/harness-eval/run-templates.ts
 ```
 
 ### Run Specific Scenarios or Models
@@ -58,6 +76,16 @@ EVAL_SCENARIOS=weather-baseline CF_ACCOUNT_ID=... CF_TOKEN=... npx tsx experimen
 
 # Only Gemma
 EVAL_MODELS=@cf/google/gemma-4-26b-a4b-it CF_ACCOUNT_ID=... CF_TOKEN=... npx tsx experiments/harness-eval/run.ts
+```
+
+### Analyze Results
+
+```bash
+# Analyze the most recent trace
+npx tsx experiments/harness-eval/analyze.ts
+
+# Analyze a specific trace file
+npx tsx experiments/harness-eval/analyze.ts traces/template-eval-2026-05-09_12-00-00.json
 ```
 
 ## Credential Blockers
@@ -177,16 +205,36 @@ Runs with `stopReason: "error"` indicate API-level failures (401, 500, timeout).
 
 Check the `error` field in the trace JSON for the specific error message.
 
+## Prompt Templates
+
+Templates override the per-scenario system prompt to test how different prompting strategies affect model performance. Located in `prompts/`:
+
+| Template | Strategy | Optimized For |
+|----------|----------|---------------|
+| `default` | Balanced general-purpose instructions | All models |
+| `concise` | Minimal instructions, brief output | Smaller models (less prompt overhead) |
+| `structured` | Explicit think-act-observe loop | Models that benefit from structured reasoning |
+| `coding-focused` | Detailed tool-use examples and workflow | Models that need explicit tool guidance |
+
+### Adding a Template
+
+Create a markdown file in `prompts/` — the filename (without `.md`) becomes the template ID. The file content replaces the scenario's system prompt during template runs.
+
 ## Architecture
 
 ```
-run.ts              — Main entry point, orchestrates scenarios x models
+run.ts              — Standard entry point (scenarios x models)
+run-templates.ts    — Template entry point (scenarios x models x templates)
 runner.ts           — Think-act-observe loop against AI Gateway
+template-runner.ts  — Template-aware runner with matrix output
+templates.ts        — Prompt template loader
+analyze.ts          — Results analysis and markdown report generator
 models.ts           — Model registry and gateway URL/header builders
 tools.ts            — Virtual filesystem + mock tool implementations
 cost.ts             — Cost computation and summary aggregation
 trace.ts            — JSON trace persistence and summary printing
 types.ts            — TypeScript type definitions
+prompts/            — Prompt template markdown files
 scenarios/
   index.ts          — Scenario barrel export
   weather-baseline.ts
@@ -195,6 +243,9 @@ scenarios/
   missing-file-recovery.ts
   propose-patch.ts
   interpret-test-failure.ts
+  multi-file-refactor.ts
+  test-driven-fix.ts
+  dependency-analysis.ts
 traces/             — Output directory for JSON trace files (gitignored content)
 ```
 
