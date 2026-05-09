@@ -49,6 +49,11 @@ func main() {
 		&tools.WriteFile{WorkDir: workDir},
 		&tools.EditFile{WorkDir: workDir},
 		&tools.Bash{WorkDir: workDir},
+		&tools.GitStatus{WorkDir: workDir},
+		&tools.GitDiff{WorkDir: workDir},
+		&tools.GitLog{WorkDir: workDir},
+		&tools.GitCommit{WorkDir: workDir},
+		&tools.GitBranch{WorkDir: workDir},
 	} {
 		if err := registry.Register(t); err != nil {
 			fmt.Fprintf(os.Stderr, "error registering tool %s: %v\n", t.Name(), err)

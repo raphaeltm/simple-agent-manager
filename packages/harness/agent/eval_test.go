@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -239,4 +240,121 @@ func TestEval_FailingCommandRecovery(t *testing.T) {
 	if !foundToolResult {
 		t.Log("Note: could not verify error in transcript data (this is OK for mock-based eval)")
 	}
+}
+
+// Evaluation Task 4: Edit a file and commit it using git tools.
+// The agent creates a file, checks status, commits, and verifies the log.
+func TestEval_GitEditAndCommit(t *testing.T) {
+	// Create a temp dir with a git repo
+	dir := t.TempDir()
+	cmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "commit", "--allow-empty", "-m", "initial"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup (%v): %v\n%s", args, err, out)
+		}
+	}
+
+	provider := llm.NewMockProvider(
+		// Turn 1: create a file
+		&llm.Response{
+			ToolCalls: []llm.ToolCall{{
+				ID:   "c1",
+				Name: "write_file",
+				Params: map[string]any{
+					"path":    "hello.go",
+					"content": "package main\n\nfunc main() {}\n",
+				},
+			}},
+		},
+		// Turn 2: check git status
+		&llm.Response{
+			ToolCalls: []llm.ToolCall{{
+				ID:     "c2",
+				Name:   "git_status",
+				Params: map[string]any{},
+			}},
+		},
+		// Turn 3: commit the file
+		&llm.Response{
+			ToolCalls: []llm.ToolCall{{
+				ID:   "c3",
+				Name: "git_commit",
+				Params: map[string]any{
+					"message": "feat: add hello.go",
+					"paths":   []any{"hello.go"},
+				},
+			}},
+		},
+		// Turn 4: check the log
+		&llm.Response{
+			ToolCalls: []llm.ToolCall{{
+				ID:     "c4",
+				Name:   "git_log",
+				Params: map[string]any{"count": float64(2)},
+			}},
+		},
+		// Turn 5: done
+		&llm.Response{Content: "Created hello.go and committed it successfully."},
+	)
+
+	registry := tools.NewRegistry()
+	registry.Register(&tools.WriteFile{WorkDir: dir})
+	registry.Register(&tools.GitStatus{WorkDir: dir})
+	registry.Register(&tools.GitCommit{WorkDir: dir})
+	registry.Register(&tools.GitLog{WorkDir: dir})
+
+	log := transcript.NewLog()
+
+	result, err := Run(context.Background(), provider, registry, log, Config{MaxTurns: 10}, "Create hello.go and commit it")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.StopReason != "complete" {
+		t.Errorf("stop_reason = %s, want complete", result.StopReason)
+	}
+
+	// Verify the file exists
+	data, err := os.ReadFile(filepath.Join(dir, "hello.go"))
+	if err != nil {
+		t.Fatalf("hello.go not created: %v", err)
+	}
+	if !strings.Contains(string(data), "package main") {
+		t.Error("hello.go has wrong content")
+	}
+
+	// Verify the commit is in git log
+	gitLog := exec.Command("git", "log", "--oneline")
+	gitLog.Dir = dir
+	out, _ := gitLog.Output()
+	if !strings.Contains(string(out), "feat: add hello.go") {
+		t.Errorf("commit not found in log: %s", out)
+	}
+
+	// Verify git status is now clean
+	gitStatus := exec.Command("git", "status", "--porcelain")
+	gitStatus.Dir = dir
+	statusOut, _ := gitStatus.Output()
+	if strings.TrimSpace(string(statusOut)) != "" {
+		t.Errorf("expected clean status after commit, got: %s", statusOut)
+	}
+
+	// Verify transcript captured all tool calls
+	events := log.Events()
+	var toolCallCount int
+	for _, e := range events {
+		if e.Type == transcript.EventToolCall {
+			toolCallCount++
+		}
+	}
+	if toolCallCount != 4 {
+		t.Errorf("expected 4 tool calls in transcript, got %d", toolCallCount)
+	}
+
 }
