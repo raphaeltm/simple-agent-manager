@@ -4,6 +4,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	ctxmgr "github.com/workspace/harness/context"
 	"github.com/workspace/harness/llm"
@@ -48,6 +49,10 @@ type Config struct {
 	Handler EventHandler
 	// Stream enables streaming when the provider supports it. Default: false.
 	Stream bool
+	// ParallelTools enables parallel execution of multiple tool calls. Default: false.
+	ParallelTools bool
+	// MaxParallelTools is the maximum number of concurrent tool executions. Default: 5.
+	MaxParallelTools int
 }
 
 // ProviderConfig stores provider connection details for child session spawning.
@@ -173,36 +178,23 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			ToolCalls: resp.ToolCalls,
 		})
 
-		// Act + Observe: execute each tool call, checking cancellation between calls.
-		for _, call := range resp.ToolCalls {
-			if err := ctx.Err(); err != nil {
-				return &Result{TurnsUsed: turn, StopReason: "cancelled"}, err
-			}
-			log.Append(transcript.EventToolCall, turn, map[string]any{
-				"id":     call.ID,
-				"name":   call.Name,
-				"params": call.Params,
-			})
+		// Act + Observe: execute tool calls (parallel or sequential).
+		var toolResults []llm.ToolResult
+		if cfg.ParallelTools && len(resp.ToolCalls) > 1 {
+			toolResults = executeToolsParallel(ctx, registry, resp.ToolCalls, log, cfg, turn)
+		} else {
+			toolResults = executeToolsSequential(ctx, registry, resp.ToolCalls, log, cfg, turn)
+		}
 
-			if cfg.Handler != nil {
-				cfg.Handler.OnToolStart(call.Name, call.Params)
-			}
+		// Check if context was cancelled during tool execution.
+		if err := ctx.Err(); err != nil {
+			return &Result{TurnsUsed: turn, StopReason: "cancelled"}, err
+		}
 
-			result := registry.Dispatch(ctx, call)
-
-			log.Append(transcript.EventToolResult, turn, map[string]any{
-				"call_id":  result.CallID,
-				"is_error": result.IsError,
-				"content":  truncate(result.Content, 500),
-			})
-
-			if cfg.Handler != nil {
-				cfg.Handler.OnToolEnd(call.Name, truncate(result.Content, 200), result.IsError)
-			}
-
+		for i := range toolResults {
 			messages = append(messages, llm.Message{
 				Role:       llm.RoleTool,
-				ToolResult: &result,
+				ToolResult: &toolResults[i],
 			})
 		}
 
@@ -215,6 +207,108 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 		TurnsUsed:  maxTurns,
 		StopReason: "max_turns",
 	}, nil
+}
+
+// executeToolsSequential runs tool calls one at a time, checking context between each.
+func executeToolsSequential(ctx context.Context, registry *tools.Registry, calls []llm.ToolCall, log *transcript.Log, cfg Config, turn int) []llm.ToolResult {
+	results := make([]llm.ToolResult, 0, len(calls))
+	for _, call := range calls {
+		if err := ctx.Err(); err != nil {
+			break
+		}
+		log.Append(transcript.EventToolCall, turn, map[string]any{
+			"id":     call.ID,
+			"name":   call.Name,
+			"params": call.Params,
+		})
+		if cfg.Handler != nil {
+			cfg.Handler.OnToolStart(call.Name, call.Params)
+		}
+
+		result := registry.Dispatch(ctx, call)
+
+		log.Append(transcript.EventToolResult, turn, map[string]any{
+			"call_id":  result.CallID,
+			"is_error": result.IsError,
+			"content":  truncate(result.Content, 500),
+		})
+		if cfg.Handler != nil {
+			cfg.Handler.OnToolEnd(call.Name, truncate(result.Content, 200), result.IsError)
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+// executeToolsParallel runs tool calls concurrently with semaphore-based limiting.
+func executeToolsParallel(ctx context.Context, registry *tools.Registry, calls []llm.ToolCall, log *transcript.Log, cfg Config, turn int) []llm.ToolResult {
+	maxPar := cfg.MaxParallelTools
+	if maxPar <= 0 {
+		maxPar = 5
+	}
+
+	results := make([]llm.ToolResult, len(calls))
+	sem := make(chan struct{}, maxPar)
+	var wg sync.WaitGroup
+
+	for i, call := range calls {
+		if err := ctx.Err(); err != nil {
+			break
+		}
+
+		log.Append(transcript.EventToolCall, turn, map[string]any{
+			"id":     call.ID,
+			"name":   call.Name,
+			"params": call.Params,
+		})
+		if cfg.Handler != nil {
+			cfg.Handler.OnToolStart(call.Name, call.Params)
+		}
+
+		wg.Add(1)
+		go func(idx int, tc llm.ToolCall) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					results[idx] = llm.ToolResult{
+						CallID:  tc.ID,
+						Content: fmt.Sprintf("panic: %v", r),
+						IsError: true,
+					}
+				}
+			}()
+
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			if ctx.Err() != nil {
+				results[idx] = llm.ToolResult{
+					CallID:  tc.ID,
+					Content: "context cancelled",
+					IsError: true,
+				}
+				return
+			}
+
+			results[idx] = registry.Dispatch(ctx, tc)
+		}(i, call)
+	}
+
+	wg.Wait()
+
+	// Fire OnToolEnd events in original order after all complete.
+	for i, result := range results {
+		log.Append(transcript.EventToolResult, turn, map[string]any{
+			"call_id":  result.CallID,
+			"is_error": result.IsError,
+			"content":  truncate(result.Content, 500),
+		})
+		if cfg.Handler != nil {
+			cfg.Handler.OnToolEnd(calls[i].Name, truncate(result.Content, 200), result.IsError)
+		}
+	}
+
+	return results
 }
 
 func truncate(s string, maxLen int) string {

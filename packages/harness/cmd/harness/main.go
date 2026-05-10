@@ -42,6 +42,8 @@ func main() {
 		mockOrchScenario = flag.String("mock-orchestration", "", "Register mock orchestration tools with scenario: success, failure, or mixed (for eval without MCP)")
 		realOrch         = flag.Bool("real-orchestration", false, "Enable real subtask execution — dispatch_task spawns child harness sessions")
 		stream           = flag.Bool("stream", false, "Enable streaming output from LLM providers that support it")
+		parallelTools    = flag.Bool("parallel-tools", false, "Execute multiple tool calls in parallel")
+		maxParallelTools = flag.Int("max-parallel-tools", 5, "Maximum concurrent tool executions when --parallel-tools is enabled")
 	)
 	flag.Parse()
 
@@ -230,6 +232,8 @@ func main() {
 		WorkerModel:      resolvedWorkerModel,
 		WorkDir:          workDir,
 		Stream:           *stream,
+		ParallelTools:    *parallelTools,
+		MaxParallelTools: *maxParallelTools,
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,
