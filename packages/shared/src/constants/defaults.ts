@@ -62,6 +62,14 @@ export const DEFAULT_TASK_LIST_MAX_PAGE_SIZE = 200;
 export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 500;
 
 /**
+ * Default timeout (ms) before stopping stale active chat sessions.
+ * Chat sessions whose workspace is in a terminal state or that have been
+ * active with no workspace beyond this threshold are stopped.
+ * Override via CHAT_SESSION_STALE_TIMEOUT_MS env var.
+ */
+export const DEFAULT_CHAT_SESSION_STALE_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+/**
  * Whether chat session message loads strip tool_metadata.content by default.
  * When true, tool call content is lazy-loaded on demand when users expand
  * individual tool calls, dramatically reducing RPC payload size.

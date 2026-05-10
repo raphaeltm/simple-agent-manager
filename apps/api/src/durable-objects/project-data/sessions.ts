@@ -1,9 +1,13 @@
 /**
  * Chat session CRUD, state machine, listing, and search.
  */
+import { DEFAULT_CHAT_SESSION_STALE_TIMEOUT_MS } from '@simple-agent-manager/shared';
+
+import { log } from '../../lib/logger';
 import {
   parseChatSessionListRow,
   parseCountCnt,
+  parseMinEarliest,
   parseSessionStatus,
   parseSessionStop,
 } from './row-schemas';
@@ -237,4 +241,131 @@ export function mapSessionRow(
   _baseDomain?: string
 ): Record<string, unknown> {
   return parseChatSessionListRow(row);
+}
+
+/**
+ * Stop stale active chat sessions:
+ * 1. Sessions whose workspace is in a terminal state (stopped/deleted/error)
+ * 2. Sessions with no workspace that have been active past the stale timeout
+ *
+ * The workspace status check queries D1 (DATABASE binding) since workspace
+ * status lives in D1, not the ProjectData DO's SQLite.
+ */
+export async function checkStaleChatSessions(
+  sql: SqlStorage,
+  env: Env,
+): Promise<number> {
+  const staleTimeoutMs = parseInt(
+    env.CHAT_SESSION_STALE_TIMEOUT_MS || String(DEFAULT_CHAT_SESSION_STALE_TIMEOUT_MS),
+    10
+  );
+  const cutoff = Date.now() - staleTimeoutMs;
+  let stopped = 0;
+
+  // 1. Stop sessions whose workspace is in a terminal state
+  if (env.DATABASE) {
+    const activeWithWorkspace = sql
+      .exec(
+        `SELECT id, workspace_id FROM chat_sessions
+         WHERE status = 'active' AND workspace_id IS NOT NULL`
+      )
+      .toArray();
+
+    for (const row of activeWithWorkspace) {
+      const sessionId = row.id as string;
+      const workspaceId = row.workspace_id as string;
+      try {
+        const wsRow = await env.DATABASE.prepare(
+          `SELECT status FROM workspaces WHERE id = ?`
+        ).bind(workspaceId).first<{ status: string }>();
+
+        if (!wsRow || ['stopped', 'deleted', 'error'].includes(wsRow.status)) {
+          stopSessionInternal(sql, sessionId);
+          log.info('session.stale_workspace_stopped', {
+            sessionId,
+            workspaceId,
+            workspaceStatus: wsRow?.status ?? 'not_found',
+          });
+          stopped++;
+        }
+      } catch (err) {
+        log.error('session.stale_check_workspace_failed', {
+          sessionId,
+          workspaceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  // 2. Stop sessions with no workspace that have been active past the stale timeout
+  const noWorkspaceSessions = sql
+    .exec(
+      `SELECT id FROM chat_sessions
+       WHERE status = 'active'
+       AND workspace_id IS NULL
+       AND created_at < ?`,
+      cutoff
+    )
+    .toArray();
+
+  for (const row of noWorkspaceSessions) {
+    const sessionId = row.id as string;
+    stopSessionInternal(sql, sessionId);
+    log.info('session.stale_no_workspace_stopped', { sessionId });
+    stopped++;
+  }
+
+  return stopped;
+}
+
+/**
+ * Compute alarm time for stale chat session checks.
+ * Returns the earliest time we should wake up to check for stale sessions.
+ */
+export function computeStaleChatSessionAlarmTime(sql: SqlStorage, env: Env): number | null {
+  const staleTimeoutMs = parseInt(
+    env.CHAT_SESSION_STALE_TIMEOUT_MS || String(DEFAULT_CHAT_SESSION_STALE_TIMEOUT_MS),
+    10
+  );
+
+  // Check if there are any active sessions that might need checking
+  const activeCount = sql
+    .exec("SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'")
+    .toArray()[0];
+
+  if (!activeCount || parseCountCnt(activeCount, 'sessions.active_count') === 0) return null;
+
+  // For sessions with workspaces: check periodically (every 5 minutes)
+  const withWorkspaceRow = sql
+    .exec(
+      "SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active' AND workspace_id IS NOT NULL"
+    )
+    .toArray()[0];
+
+  const hasWorkspaceSessions = withWorkspaceRow && parseCountCnt(withWorkspaceRow, 'sessions.with_workspace') > 0;
+
+  // For sessions without workspaces: alarm at earliest_created_at + stale_timeout
+  const noWsRow = sql
+    .exec(
+      `SELECT MIN(created_at) as earliest FROM chat_sessions
+       WHERE status = 'active' AND workspace_id IS NULL`
+    )
+    .toArray()[0];
+
+  const candidates: number[] = [];
+
+  if (hasWorkspaceSessions) {
+    // Check workspace-linked sessions every 5 minutes
+    candidates.push(Date.now() + 5 * 60 * 1000);
+  }
+
+  if (noWsRow) {
+    const earliest = parseMinEarliest(noWsRow, 'sessions.earliest_no_workspace');
+    if (earliest !== null) {
+      candidates.push(earliest + staleTimeoutMs);
+    }
+  }
+
+  return candidates.length > 0 ? Math.min(...candidates) : null;
 }

@@ -380,6 +380,9 @@ export class ProjectData extends DurableObject<Env> {
       },
       (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());
 
+    // Chat session staleness sweep: stop active sessions whose workspace is terminal
+    await sessions.checkStaleChatSessions(this.sql, this.env);
+
     // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
     const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
     const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
@@ -692,9 +695,10 @@ export class ProjectData extends DurableObject<Env> {
   private async recalculateAlarm(): Promise<void> {
     const { idleCleanupTime, workspaceIdleCheckTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
     const heartbeatTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
+    const staleChatTime = sessions.computeStaleChatSessionAlarmTime(this.sql, this.env);
     const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
     const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
-    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime].filter((t): t is number => t !== null);
+    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime, staleChatTime].filter((t): t is number => t !== null);
     if (candidates.length > 0) await this.ctx.storage.setAlarm(Math.min(...candidates));
     else await this.ctx.storage.deleteAlarm();
   }
