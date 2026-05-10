@@ -224,8 +224,13 @@ func (c *AnthropicClient) parseResponse(body []byte) (*Response, error) {
 		StopReason: anthResp.StopReason,
 	}
 	if anthResp.Usage != nil {
-		resp.CacheCreationInputTokens = anthResp.Usage.CacheCreationInputTokens
-		resp.CacheReadInputTokens = anthResp.Usage.CacheReadInputTokens
+		resp.Usage = &Usage{
+			PromptTokens:             anthResp.Usage.InputTokens,
+			CompletionTokens:         anthResp.Usage.OutputTokens,
+			TotalTokens:              anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
+			CacheCreationInputTokens: anthResp.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     anthResp.Usage.CacheReadInputTokens,
+		}
 	}
 
 	for _, block := range anthResp.Content {

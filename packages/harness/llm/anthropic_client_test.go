@@ -133,11 +133,14 @@ func TestParseResponse_CacheUsageFields(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if resp.CacheCreationInputTokens != 1500 {
-		t.Errorf("expected CacheCreationInputTokens=1500, got %d", resp.CacheCreationInputTokens)
+	if resp.Usage == nil {
+		t.Fatal("expected Usage to be populated")
 	}
-	if resp.CacheReadInputTokens != 3000 {
-		t.Errorf("expected CacheReadInputTokens=3000, got %d", resp.CacheReadInputTokens)
+	if resp.Usage.CacheCreationInputTokens != 1500 {
+		t.Errorf("expected CacheCreationInputTokens=1500, got %d", resp.Usage.CacheCreationInputTokens)
+	}
+	if resp.Usage.CacheReadInputTokens != 3000 {
+		t.Errorf("expected CacheReadInputTokens=3000, got %d", resp.Usage.CacheReadInputTokens)
 	}
 }
 

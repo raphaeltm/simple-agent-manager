@@ -41,6 +41,7 @@ func main() {
 		toolProfile      = flag.String("tool-profile", "workspace", "Tool profile: workspace, orchestrate, or full")
 		mockOrchScenario = flag.String("mock-orchestration", "", "Register mock orchestration tools with scenario: success, failure, or mixed (for eval without MCP)")
 		realOrch         = flag.Bool("real-orchestration", false, "Enable real subtask execution — dispatch_task spawns child harness sessions")
+		stream           = flag.Bool("stream", false, "Enable streaming output from LLM providers that support it")
 	)
 	flag.Parse()
 
@@ -228,6 +229,7 @@ func main() {
 		MaxContextTokens: *maxContextTokens,
 		WorkerModel:      resolvedWorkerModel,
 		WorkDir:          workDir,
+		Stream:           *stream,
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,

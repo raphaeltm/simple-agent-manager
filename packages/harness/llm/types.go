@@ -1,7 +1,10 @@
 // Package llm provides the LLM provider abstraction for the SAM agent harness.
 package llm
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Role represents a message role in the conversation.
 type Role string
@@ -48,10 +51,8 @@ type Response struct {
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	// StopReason indicates why the model stopped generating.
 	StopReason string `json:"stop_reason,omitempty"`
-	// CacheCreationInputTokens is the number of tokens written to cache (Anthropic only).
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	// CacheReadInputTokens is the number of tokens read from cache (Anthropic only).
-	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
+	// Usage tracks token consumption (populated when available).
+	Usage *Usage `json:"usage,omitempty"`
 }
 
 // Provider is the interface that LLM backends must implement.
@@ -59,3 +60,7 @@ type Provider interface {
 	// SendMessage sends a conversation to the LLM and returns its response.
 	SendMessage(ctx context.Context, messages []Message, tools []ToolDefinition) (*Response, error)
 }
+
+// jsonUnmarshal is a package-level alias for encoding/json.Unmarshal,
+// used by stream.go to avoid importing encoding/json directly.
+var jsonUnmarshal = json.Unmarshal

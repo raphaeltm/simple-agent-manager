@@ -11,6 +11,22 @@ import (
 	"github.com/workspace/harness/transcript"
 )
 
+// EventHandler receives streaming events from the agent loop.
+// Implementations can display tokens in real-time, show progress, etc.
+// If nil, the agent loop operates in batch mode (no streaming display).
+type EventHandler interface {
+	// OnToken is called for each content token as it streams from the LLM.
+	OnToken(token string)
+	// OnToolStart is called when a tool begins execution.
+	OnToolStart(name string, params map[string]any)
+	// OnToolEnd is called when a tool finishes execution.
+	OnToolEnd(name string, result string, isError bool)
+	// OnTurnStart is called at the beginning of each agent turn.
+	OnTurnStart(turn, maxTurns int)
+	// OnTurnEnd is called at the end of each agent turn.
+	OnTurnEnd(turn int, toolCallCount int)
+}
+
 // Config configures the agent loop.
 type Config struct {
 	// SystemPrompt is prepended to every LLM call.
@@ -28,6 +44,10 @@ type Config struct {
 	WorkDir string
 	// ProviderConfig holds connection details for spawning child sessions.
 	ProviderConfig *ProviderConfig
+	// Handler receives streaming events. If nil, batch mode is used.
+	Handler EventHandler
+	// Stream enables streaming when the provider supports it. Default: false.
+	Stream bool
 }
 
 // ProviderConfig stores provider connection details for child session spawning.
@@ -76,10 +96,18 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 	}
 	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: userPrompt})
 
+	// Check if the provider supports streaming.
+	streamProvider, canStream := provider.(llm.StreamProvider)
+	useStreaming := cfg.Stream && canStream
+
 	for turn := 1; turn <= maxTurns; turn++ {
 		// Check cancellation.
 		if err := ctx.Err(); err != nil {
 			return &Result{TurnsUsed: turn - 1, StopReason: "cancelled"}, err
+		}
+
+		if cfg.Handler != nil {
+			cfg.Handler.OnTurnStart(turn, maxTurns)
 		}
 
 		// Compact conversation if approaching context limit.
@@ -102,27 +130,35 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			"tool_count":    len(toolDefs),
 		})
 
-		resp, err := provider.SendMessage(ctx, messages, toolDefs)
+		var (
+			resp *llm.Response
+			err  error
+		)
+		if useStreaming {
+			resp, err = sendStreaming(ctx, streamProvider, messages, toolDefs, cfg.Handler)
+		} else {
+			resp, err = provider.SendMessage(ctx, messages, toolDefs)
+		}
 		if err != nil {
 			log.Append(transcript.EventError, turn, map[string]any{"error": err.Error()})
 			return &Result{TurnsUsed: turn, StopReason: "error"}, fmt.Errorf("turn %d: LLM error: %w", turn, err)
 		}
 
-		responseData := map[string]any{
+		logData := map[string]any{
 			"content":         resp.Content,
 			"tool_call_count": len(resp.ToolCalls),
 			"stop_reason":     resp.StopReason,
 		}
-		if resp.CacheCreationInputTokens > 0 {
-			responseData["cache_creation_input_tokens"] = resp.CacheCreationInputTokens
+		if resp.Usage != nil {
+			logData["usage"] = resp.Usage
 		}
-		if resp.CacheReadInputTokens > 0 {
-			responseData["cache_read_input_tokens"] = resp.CacheReadInputTokens
-		}
-		log.Append(transcript.EventLLMResponse, turn, responseData)
+		log.Append(transcript.EventLLMResponse, turn, logData)
 
 		// If no tool calls, the model is done.
 		if len(resp.ToolCalls) == 0 {
+			if cfg.Handler != nil {
+				cfg.Handler.OnTurnEnd(turn, 0)
+			}
 			return &Result{
 				FinalMessage: resp.Content,
 				TurnsUsed:    turn,
@@ -148,6 +184,10 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 				"params": call.Params,
 			})
 
+			if cfg.Handler != nil {
+				cfg.Handler.OnToolStart(call.Name, call.Params)
+			}
+
 			result := registry.Dispatch(ctx, call)
 
 			log.Append(transcript.EventToolResult, turn, map[string]any{
@@ -156,10 +196,18 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 				"content":  truncate(result.Content, 500),
 			})
 
+			if cfg.Handler != nil {
+				cfg.Handler.OnToolEnd(call.Name, truncate(result.Content, 200), result.IsError)
+			}
+
 			messages = append(messages, llm.Message{
 				Role:       llm.RoleTool,
 				ToolResult: &result,
 			})
+		}
+
+		if cfg.Handler != nil {
+			cfg.Handler.OnTurnEnd(turn, len(resp.ToolCalls))
 		}
 	}
 
@@ -174,4 +222,30 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "...(truncated)"
+}
+
+// sendStreaming calls a StreamProvider, forwards token events to the handler,
+// and assembles the result into a complete Response.
+func sendStreaming(ctx context.Context, sp llm.StreamProvider, messages []llm.Message, tools []llm.ToolDefinition, handler EventHandler) (*llm.Response, error) {
+	events, err := sp.SendMessageStream(ctx, messages, tools)
+	if err != nil {
+		return nil, err
+	}
+
+	// If we have a handler, forward token events before collecting.
+	if handler != nil {
+		forwarded := make(chan llm.StreamEvent, 16)
+		go func() {
+			defer close(forwarded)
+			for ev := range events {
+				if ev.Type == llm.EventContentDelta {
+					handler.OnToken(ev.Delta)
+				}
+				forwarded <- ev
+			}
+		}()
+		return llm.CollectStream(forwarded)
+	}
+
+	return llm.CollectStream(events)
 }
