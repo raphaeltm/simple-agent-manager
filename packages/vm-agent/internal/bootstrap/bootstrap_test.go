@@ -155,8 +155,10 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Port:          8080,
-		CallbackToken: "callback-token-123",
+		Port:            8080,
+		CallbackToken:   "callback-token-123",
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-test-456",
 	}
 
 	script, err := renderGitCredentialHelperScript(cfg)
@@ -166,33 +168,34 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 
 	required := []string{
 		`Authorization: Bearer callback-token-123`,
-		`http://${target}:8080/git-credential`,
-		"host.docker.internal",
-		"172.17.0.1",
+		`https://api.example.com/api/workspaces/ws-test-456/git-token`,
+		`x-access-token`,
+		`"token"`,
 	}
 
 	for _, fragment := range required {
 		if !strings.Contains(script, fragment) {
-			t.Fatalf("expected script to contain %q", fragment)
+			t.Fatalf("expected script to contain %q\nscript:\n%s", fragment, script)
 		}
 	}
 
-	// Plain HTTP mode must NOT use -k or https
-	if strings.Contains(script, "https://") {
-		t.Fatal("plain HTTP mode should not contain https://")
+	// Must NOT call the VM agent directly
+	if strings.Contains(script, "/git-credential") {
+		t.Fatal("script should not call VM agent /git-credential endpoint")
 	}
-	if strings.Contains(script, " -k") {
-		t.Fatal("plain HTTP mode should not contain -k flag")
+	if strings.Contains(script, "host.docker.internal") {
+		t.Fatal("script should not reference Docker gateway (calls control plane directly)")
 	}
 }
 
-func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
+func TestRenderGitCredentialHelperScriptTrailingSlash(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Port:          8443,
-		CallbackToken: "callback-token-tls",
-		TLSEnabled:    true,
+		Port:            8443,
+		CallbackToken:   "callback-token-tls",
+		ControlPlaneURL: "https://api.example.com/",
+		WorkspaceID:     "ws-abc",
 	}
 
 	script, err := renderGitCredentialHelperScript(cfg)
@@ -200,23 +203,12 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 		t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
 	}
 
-	required := []string{
-		`Authorization: Bearer callback-token-tls`,
-		`https://${target}:8443/git-credential`,
-		" -k",
-		"host.docker.internal",
-		"172.17.0.1",
+	// Trailing slash on ControlPlaneURL must not produce double-slash
+	if strings.Contains(script, "com//api") {
+		t.Fatalf("double slash in URL: %s", script)
 	}
-
-	for _, fragment := range required {
-		if !strings.Contains(script, fragment) {
-			t.Fatalf("expected TLS script to contain %q", fragment)
-		}
-	}
-
-	// TLS mode must NOT use http:// (without the s)
-	if strings.Contains(script, "http://") {
-		t.Fatal("TLS mode should not contain plain http:// URL")
+	if !strings.Contains(script, "https://api.example.com/api/workspaces/ws-abc/git-token") {
+		t.Fatalf("expected clean URL in script:\n%s", script)
 	}
 }
 
@@ -227,12 +219,22 @@ func TestRenderGitCredentialHelperScriptValidation(t *testing.T) {
 		t.Fatal("expected error for nil config")
 	}
 
-	if _, err := renderGitCredentialHelperScript(&config.Config{Port: 8080}); err == nil {
+	if _, err := renderGitCredentialHelperScript(&config.Config{
+		Port: 8080, ControlPlaneURL: "https://api.example.com", WorkspaceID: "ws-1",
+	}); err == nil {
 		t.Fatal("expected error for missing callback token")
 	}
 
-	if _, err := renderGitCredentialHelperScript(&config.Config{CallbackToken: "token", Port: 0}); err == nil {
-		t.Fatal("expected error for invalid port")
+	if _, err := renderGitCredentialHelperScript(&config.Config{
+		CallbackToken: "token", Port: 8080, WorkspaceID: "ws-1",
+	}); err == nil {
+		t.Fatal("expected error for missing control plane URL")
+	}
+
+	if _, err := renderGitCredentialHelperScript(&config.Config{
+		CallbackToken: "token", Port: 8080, ControlPlaneURL: "https://api.example.com",
+	}); err == nil {
+		t.Fatal("expected error for missing workspace ID")
 	}
 }
 
@@ -2412,10 +2414,11 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		WorkspaceID:   "test-ws-123",
-		Repository:    "https://github.com/test/repo",
-		CallbackToken: "test-token",
-		Port:          8080,
+		WorkspaceID:     "test-ws-123",
+		Repository:      "https://github.com/test/repo",
+		CallbackToken:   "test-token",
+		ControlPlaneURL: "https://api.example.com",
+		Port:            8080,
 	}
 
 	hostPath, err := writeCredentialHelperToHost(cfg)
@@ -2447,16 +2450,20 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 	if !strings.Contains(string(content), "test-token") {
 		t.Fatal("expected script to contain callback token")
 	}
+	if !strings.Contains(string(content), "api.example.com/api/workspaces/test-ws-123/git-token") {
+		t.Fatal("expected script to call control plane git-token endpoint")
+	}
 }
 
 func TestWriteCredentialHelperToHostSkipsNonGitHub(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		WorkspaceID:   "test-ws",
-		Repository:    "https://gitlab.com/test/repo",
-		CallbackToken: "test-token",
-		Port:          8080,
+		WorkspaceID:     "test-ws",
+		Repository:      "https://gitlab.com/test/repo",
+		CallbackToken:   "test-token",
+		ControlPlaneURL: "https://api.example.com",
+		Port:            8080,
 	}
 
 	hostPath, err := writeCredentialHelperToHost(cfg)
@@ -2473,9 +2480,10 @@ func TestWriteCredentialHelperToHostMissingToken(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		WorkspaceID: "test-ws",
-		Repository:  "https://github.com/test/repo",
-		Port:        8080,
+		WorkspaceID:     "test-ws",
+		Repository:      "https://github.com/test/repo",
+		ControlPlaneURL: "https://api.example.com",
+		Port:            8080,
 	}
 
 	_, err := writeCredentialHelperToHost(cfg)
@@ -2484,19 +2492,19 @@ func TestWriteCredentialHelperToHostMissingToken(t *testing.T) {
 	}
 }
 
-func TestWriteCredentialHelperToHostInvalidPort(t *testing.T) {
+func TestWriteCredentialHelperToHostMissingControlPlaneURL(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
 		WorkspaceID:   "test-ws",
 		Repository:    "https://github.com/test/repo",
 		CallbackToken: "test-token",
-		Port:          0,
+		Port:          8080,
 	}
 
 	_, err := writeCredentialHelperToHost(cfg)
 	if err == nil {
-		t.Fatal("expected error for invalid port")
+		t.Fatal("expected error for missing control plane URL")
 	}
 }
 

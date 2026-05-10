@@ -2095,27 +2095,21 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	if cfg.CallbackToken == "" {
 		return "", errors.New("callback token is empty")
 	}
-	if cfg.Port <= 0 {
-		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
+	if cfg.ControlPlaneURL == "" {
+		return "", errors.New("control plane URL is empty")
+	}
+	if cfg.WorkspaceID == "" {
+		return "", errors.New("workspace ID is empty")
 	}
 
-	query := ""
-	if workspaceID := strings.TrimSpace(cfg.WorkspaceID); workspaceID != "" {
-		query = "?workspaceId=" + url.QueryEscape(workspaceID)
-	}
-
-	// When TLS is enabled on the VM agent, the credential helper must use https://
-	// with -k (skip cert verification) because the TLS cert is issued for the
-	// external domain (e.g. ws-*.example.com), not for internal Docker addresses
-	// like host.docker.internal or 172.17.0.1. This is acceptable because the
-	// credential endpoint is only bound to the VM host, and each request is
-	// authenticated via the callback token.
-	scheme := "http"
-	curlTLSFlag := ""
-	if cfg.TLSEnabled {
-		scheme = "https"
-		curlTLSFlag = " -k"
-	}
+	// Call the control plane directly for git tokens. The control plane's
+	// /api/workspaces/:id/git-token endpoint performs proper JWT verification
+	// (signature + expiry), unlike the VM agent's byte-comparison auth which
+	// fails when tokens rotate. This makes credential refresh reliable for
+	// long-running sessions that outlive the initial GH_TOKEN (~1 hour TTL).
+	gitTokenURL := fmt.Sprintf("%s/api/workspaces/%s/git-token",
+		strings.TrimRight(cfg.ControlPlaneURL, "/"),
+		url.PathEscape(cfg.WorkspaceID))
 
 	return fmt.Sprintf(`#!/bin/sh
 set -eu
@@ -2137,27 +2131,22 @@ if [ -n "$requested_host" ] && [ "$requested_host" != "github.com" ] && [ "$requ
   exit 0
 fi
 
-resolve_gateway() {
-  ip route 2>/dev/null | awk '/default/ {print $3; exit}'
-}
+# Fetch a fresh git token from the control plane. The callback JWT
+# (valid for the workspace lifetime) authenticates the request.
+response=$(curl -fsS --max-time 10 -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer %s" \
+  -d '{}' \
+  "%s" 2>/dev/null) || exit 0
 
-request_credentials() {
-  target="$1"
-  curl -fsS --max-time 5%s \
-    -H "Authorization: Bearer %s" \
-    "%s://${target}:%d/git-credential%s"
-}
+# Extract the token from the JSON response {"token":"..."}
+token=$(printf '%%s' "$response" | sed -n 's/.*"token" *: *"\([^"]*\)".*/\1/p')
+if [ -z "$token" ]; then
+  exit 0
+fi
 
-gateway="$(resolve_gateway || true)"
-for target in host.docker.internal "$gateway" 172.17.0.1; do
-  [ -n "$target" ] || continue
-  if request_credentials "$target" 2>/dev/null; then
-    exit 0
-  fi
-done
-
-exit 0
-`, curlTLSFlag, cfg.CallbackToken, scheme, cfg.Port, query), nil
+printf 'protocol=https\nhost=github.com\nusername=x-access-token\npassword=%%s\n\n' "$token"
+`, cfg.CallbackToken, gitTokenURL), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
@@ -2196,9 +2185,6 @@ func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
 	}
 	if cfg.CallbackToken == "" {
 		return "", errors.New("callback token is required for credential helper")
-	}
-	if cfg.Port <= 0 {
-		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
 	}
 
 	script, err := renderGitCredentialHelperScript(cfg)
