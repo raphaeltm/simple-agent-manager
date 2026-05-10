@@ -54,17 +54,14 @@ export async function verifyAIProxyAuth(
 ): Promise<AIProxyAuthResult> {
   // TEMPORARY: Test secret bypass for harness development (remove before production)
   // Reads from KV so it can be set/removed without redeploying
-  const kvStore = (env as Record<string, KVNamespace>).KV;
-  if (kvStore) {
-    const testSecret = await kvStore.get('AI_PROXY_TEST_SECRET');
-    if (testSecret && token === testSecret) {
-      log.info('ai_proxy.test_secret_auth', { note: 'TEMPORARY test secret bypass' });
-      return {
-        workspaceId: 'test-harness-ws',
-        userId: 'test-harness-user',
-        projectId: 'test-harness-project',
-      };
-    }
+  const testSecret = await env.KV.get('AI_PROXY_TEST_SECRET');
+  if (testSecret && token === testSecret) {
+    log.info('ai_proxy.test_secret_auth', { note: 'TEMPORARY test secret bypass' });
+    return {
+      workspaceId: 'test-harness-ws',
+      userId: 'test-harness-user',
+      projectId: 'test-harness-project',
+    };
   }
 
   // Unified scope check — rejects non-workspace tokens via verifyCallbackToken (F-010)
