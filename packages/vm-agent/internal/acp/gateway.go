@@ -824,6 +824,14 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			injectionMode: "",
 			authFilePath:  "",
 		}
+	case "sam-harness":
+		return agentCommandInfo{
+			command:    "sam-harness",
+			args:       []string{"--acp"},
+			envVarName: "SAM_API_KEY",
+			installCmd: "cd /opt/harness && CGO_ENABLED=0 go build -o /usr/local/bin/sam-harness ./cmd/harness/",
+			isNpmBased: false,
+		}
 	default:
 		return agentCommandInfo{agentType, nil, "API_KEY", "", false, "", ""}
 	}
@@ -848,6 +856,8 @@ func getModelEnvVar(agentType string) string {
 	case "opencode":
 		// Model is set via OPENCODE_CONFIG_CONTENT env var, not a standalone model env var.
 		return ""
+	case "sam-harness":
+		return "SAM_AI_MODEL"
 	default:
 		return ""
 	}

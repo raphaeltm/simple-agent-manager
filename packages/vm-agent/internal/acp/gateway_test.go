@@ -359,7 +359,7 @@ func TestGetAgentExtraEnvVars_MistralVibe(t *testing.T) {
 func TestGetAgentExtraEnvVars_OtherAgents(t *testing.T) {
 	t.Parallel()
 
-	for _, agent := range []string{"claude-code", "openai-codex", "google-gemini", "unknown"} {
+	for _, agent := range []string{"claude-code", "openai-codex", "google-gemini", "sam-harness", "unknown"} {
 		if envVars := getAgentExtraEnvVars(agent); len(envVars) != 0 {
 			t.Errorf("getAgentExtraEnvVars(%q) returned %v, want nil", agent, envVars)
 		}
@@ -470,6 +470,71 @@ func TestSanitizeVibeModelAlias(t *testing.T) {
 				t.Errorf("sanitizeVibeModelAlias(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetAgentCommandInfoSamHarness(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("sam-harness", "api-key")
+	if info.command != "sam-harness" {
+		t.Fatalf("command=%q, want %q", info.command, "sam-harness")
+	}
+	if info.envVarName != "SAM_API_KEY" {
+		t.Fatalf("envVarName=%q, want %q", info.envVarName, "SAM_API_KEY")
+	}
+	if len(info.args) != 1 || info.args[0] != "--acp" {
+		t.Fatalf("args=%v, want [--acp]", info.args)
+	}
+	wantInstall := "cd /opt/harness && CGO_ENABLED=0 go build -o /usr/local/bin/sam-harness ./cmd/harness/"
+	if info.installCmd != wantInstall {
+		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
+	}
+	if info.isNpmBased {
+		t.Fatalf("isNpmBased=true, want false (sam-harness uses Go, not npm)")
+	}
+	if info.injectionMode != "" {
+		t.Fatalf("injectionMode=%q, want empty (env var injection)", info.injectionMode)
+	}
+	if info.authFilePath != "" {
+		t.Fatalf("authFilePath=%q, want empty (no file-based auth)", info.authFilePath)
+	}
+}
+
+func TestGetModelEnvVarSamHarness(t *testing.T) {
+	t.Parallel()
+
+	got := getModelEnvVar("sam-harness")
+	if got != "SAM_AI_MODEL" {
+		t.Fatalf("getModelEnvVar(\"sam-harness\") = %q, want %q", got, "SAM_AI_MODEL")
+	}
+}
+
+func TestGetAgentExtraEnvVars_SamHarness(t *testing.T) {
+	t.Parallel()
+
+	envVars := getAgentExtraEnvVars("sam-harness")
+	if len(envVars) != 0 {
+		t.Fatalf("expected no extra env vars for sam-harness, got %v", envVars)
+	}
+}
+
+func TestAgentInstallScriptSamHarnessNotNpmBased(t *testing.T) {
+	t.Parallel()
+
+	info := agentCommandInfo{
+		command:    "sam-harness",
+		installCmd: "cd /opt/harness && CGO_ENABLED=0 go build -o /usr/local/bin/sam-harness ./cmd/harness/",
+		isNpmBased: false,
+	}
+
+	script := agentInstallScript(info)
+	// Non-npm agents should use the install command directly without npm bootstrap
+	if script != info.installCmd {
+		t.Fatalf("agentInstallScript for non-npm agent should return installCmd directly, got %q", script)
+	}
+	if strings.Contains(script, "apt-get") {
+		t.Fatalf("non-npm agent install script should not contain apt-get bootstrap")
 	}
 }
 
