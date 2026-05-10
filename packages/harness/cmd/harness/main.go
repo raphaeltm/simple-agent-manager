@@ -43,6 +43,8 @@ func main() {
 		realOrch         = flag.Bool("real-orchestration", false, "Enable real subtask execution — dispatch_task spawns child harness sessions")
 		stream           = flag.Bool("stream", false, "Enable streaming output from LLM providers that support it")
 		permissionMode   = flag.String("permission-mode", "allow-all", "Permission mode: allow-all, deny-dangerous, or ask-always")
+		parallelTools    = flag.Bool("parallel-tools", false, "Execute multiple tool calls in parallel")
+		maxParallelTools = flag.Int("max-parallel-tools", 5, "Maximum concurrent tool executions when --parallel-tools is enabled")
 	)
 	flag.Parse()
 
@@ -240,6 +242,8 @@ func main() {
 		Stream:            *stream,
 		PermissionMode:    permMode,
 		PermissionChecker: tools.AutoApproveChecker{},
+		ParallelTools:     *parallelTools,
+		MaxParallelTools:  *maxParallelTools,
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,
