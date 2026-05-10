@@ -66,16 +66,11 @@ import {
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
-crudRoutes.use('/*', async (c, next) => {
-  if (c.req.path.endsWith('/status/callback')) {
-    return next();
-  }
-  return requireAuth()(c, async () => {
-    await requireApproved()(c, next);
-  });
-});
+// Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
+// The status/callback route uses its own bearer-token auth (verifyCallbackToken).
+// See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
 
-crudRoutes.post('/', jsonValidator(CreateTaskSchema), async (c) => {
+crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateTaskSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -142,7 +137,7 @@ crudRoutes.post('/', jsonValidator(CreateTaskSchema), async (c) => {
   return c.json(toTaskResponse(task, false), 201);
 });
 
-crudRoutes.get('/', async (c) => {
+crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -212,7 +207,7 @@ crudRoutes.get('/', async (c) => {
   return c.json(response);
 });
 
-crudRoutes.get('/:taskId', async (c) => {
+crudRoutes.get('/:taskId', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -283,7 +278,7 @@ crudRoutes.get('/:taskId', async (c) => {
   return c.json(response);
 });
 
-crudRoutes.patch('/:taskId', jsonValidator(UpdateTaskSchema), async (c) => {
+crudRoutes.patch('/:taskId', requireAuth(), requireApproved(), jsonValidator(UpdateTaskSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -364,7 +359,7 @@ crudRoutes.patch('/:taskId', jsonValidator(UpdateTaskSchema), async (c) => {
   return c.json(toTaskResponse(updatedTask, blocked));
 });
 
-crudRoutes.delete('/:taskId', async (c) => {
+crudRoutes.delete('/:taskId', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -387,7 +382,7 @@ crudRoutes.delete('/:taskId', async (c) => {
   return c.json({ success: true });
 });
 
-crudRoutes.post('/:taskId/status', jsonValidator(UpdateTaskStatusSchema), async (c) => {
+crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidator(UpdateTaskStatusSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -709,7 +704,7 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
   return c.json(toTaskResponse(updatedTask, blocked));
 });
 
-crudRoutes.post('/:taskId/dependencies', jsonValidator(CreateTaskDependencySchema), async (c) => {
+crudRoutes.post('/:taskId/dependencies', requireAuth(), requireApproved(), jsonValidator(CreateTaskDependencySchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -786,7 +781,7 @@ crudRoutes.post('/:taskId/dependencies', jsonValidator(CreateTaskDependencySchem
   }, 201);
 });
 
-crudRoutes.delete('/:taskId/dependencies', async (c) => {
+crudRoutes.delete('/:taskId/dependencies', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -817,7 +812,7 @@ crudRoutes.delete('/:taskId/dependencies', async (c) => {
   return c.json({ success: true });
 });
 
-crudRoutes.post('/:taskId/delegate', jsonValidator(DelegateTaskSchema), async (c) => {
+crudRoutes.post('/:taskId/delegate', requireAuth(), requireApproved(), jsonValidator(DelegateTaskSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -873,7 +868,7 @@ crudRoutes.post('/:taskId/delegate', jsonValidator(DelegateTaskSchema), async (c
   return c.json(toTaskResponse(updatedTask, false));
 });
 
-crudRoutes.get('/:taskId/events', async (c) => {
+crudRoutes.get('/:taskId/events', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -912,7 +907,7 @@ crudRoutes.get('/:taskId/events', async (c) => {
 // ─── Close conversation endpoint ──────────────────────────────────────────────
 // Human-initiated completion for conversation-mode tasks.
 // POST /api/projects/:projectId/tasks/:taskId/close
-crudRoutes.post('/:taskId/close', async (c) => {
+crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -979,7 +974,7 @@ crudRoutes.post('/:taskId/close', async (c) => {
  * GET /api/projects/:projectId/tasks/:taskId/sessions
  * List all chat sessions linked to a task (idea). Useful for the Ideas page timeline.
  */
-crudRoutes.get('/:taskId/sessions', async (c) => {
+crudRoutes.get('/:taskId/sessions', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');

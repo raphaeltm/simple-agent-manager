@@ -31,7 +31,8 @@ import { startTaskRunnerDO } from '../../services/task-runner-do';
 
 const runRoutes = new Hono<{ Bindings: Env }>();
 
-runRoutes.use('/*', requireAuth(), requireApproved());
+// Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
+// See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
 
 /**
  * POST /projects/:projectId/tasks/:taskId/run
@@ -48,7 +49,7 @@ runRoutes.use('/*', requireAuth(), requireApproved());
  * Response 202:
  *   taskId, status, workspaceId, nodeId, autoProvisionedNode
  */
-runRoutes.post('/:taskId/run', async (c) => {
+runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = c.req.param('projectId');
@@ -315,7 +316,7 @@ runRoutes.post('/:taskId/run', async (c) => {
  * Stops the workspace and optionally the auto-provisioned node.
  * This can be called manually or is triggered automatically by the callback mechanism.
  */
-runRoutes.post('/:taskId/run/cleanup', async (c) => {
+runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = c.req.param('projectId');

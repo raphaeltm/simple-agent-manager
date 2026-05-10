@@ -26,7 +26,8 @@ import { generatePresignedUploadUrl } from '../../services/attachment-upload';
 
 const uploadRoutes = new Hono<{ Bindings: Env }>();
 
-uploadRoutes.use('/*', requireAuth(), requireApproved());
+// Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
+// See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
 
 /**
  * POST /request-upload
@@ -36,7 +37,7 @@ uploadRoutes.use('/*', requireAuth(), requireApproved());
  *   POST /api/projects/:projectId/tasks/request-upload
  * Returns 200 with { uploadId, uploadUrl, r2Key, expiresIn }.
  */
-uploadRoutes.post('/request-upload', jsonValidator(RequestAttachmentUploadSchema), async (c) => {
+uploadRoutes.post('/request-upload', requireAuth(), requireApproved(), jsonValidator(RequestAttachmentUploadSchema), async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   // projectId comes from the parent route mount: /api/projects/:projectId/tasks

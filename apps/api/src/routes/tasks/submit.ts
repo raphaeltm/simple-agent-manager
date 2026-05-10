@@ -43,7 +43,8 @@ import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title
 const DEFAULT_MAX_MESSAGE_LENGTH = 16_000;
 const submitRoutes = new Hono<{ Bindings: Env }>();
 
-submitRoutes.use('/*', requireAuth(), requireApproved());
+// Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
+// See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
 
 /**
  * POST /projects/:projectId/tasks/submit
@@ -51,7 +52,7 @@ submitRoutes.use('/*', requireAuth(), requireApproved());
  * Single-action task submission. Creates task, session, and kicks off execution.
  * Returns 202 immediately — frontend tracks progress via WebSocket/polling.
  */
-submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
+submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(SubmitTaskSchema), async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = c.req.param('projectId');
