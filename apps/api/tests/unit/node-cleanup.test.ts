@@ -229,6 +229,63 @@ describe('runNodeCleanupSweep', () => {
     });
   });
 
+  describe('Step 4: orphaned node destruction', () => {
+    it('destroys orphaned nodes instead of just flagging them', async () => {
+      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const now = Date.now();
+      const updatedAt = new Date(now - 2 * 60 * 60 * 1000).toISOString(); // 2 hours ago
+
+      const responses = new Map<string, unknown[]>();
+      responses.set('n.warm_since IS NOT NULL', []);
+      responses.set('auto_provisioned_node_id', []);
+      responses.set("t.status IN ('completed', 'failed', 'cancelled')", []);
+      // Step 4: one orphaned node
+      responses.set('n.warm_since IS NULL', [
+        {
+          id: 'orphan-node-1',
+          user_id: 'user-1',
+          status: 'running',
+          updated_at: updatedAt,
+          warm_since: null,
+        },
+      ]);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.orphanedNodesDestroyed).toBe(1);
+      expect(deleteNodeResources).toHaveBeenCalledWith('orphan-node-1', 'user-1', env);
+    });
+  });
+
+  describe('Step 6: heartbeat stale node destruction', () => {
+    it('destroys running nodes with stale heartbeats and no active workspaces', async () => {
+      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const now = Date.now();
+      const lastHeartbeat = new Date(now - 2 * 60 * 60 * 1000).toISOString(); // 2 hours ago
+
+      const responses = new Map<string, unknown[]>();
+      responses.set('n.warm_since IS NOT NULL', []);
+      responses.set('auto_provisioned_node_id', []);
+      responses.set("t.status IN ('completed', 'failed', 'cancelled')", []);
+      responses.set('n.warm_since IS NULL', []);
+      // Step 6: one heartbeat-stale node
+      responses.set('n.last_heartbeat_at IS NOT NULL', [
+        {
+          id: 'stale-hb-node',
+          user_id: 'user-1',
+          last_heartbeat_at: lastHeartbeat,
+        },
+      ]);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.heartbeatStaleDestroyed).toBe(1);
+      expect(deleteNodeResources).toHaveBeenCalledWith('stale-hb-node', 'user-1', env);
+    });
+  });
+
   describe('result structure', () => {
     it('returns all expected counters', async () => {
       const env = createMockEnv(new Map());
@@ -239,7 +296,8 @@ describe('runNodeCleanupSweep', () => {
         lifetimeDestroyed: 0,
         lifetimeSkipped: 0,
         orphanedWorkspacesFlagged: 0,
-        orphanedNodesFlagged: 0,
+        orphanedNodesDestroyed: 0,
+        heartbeatStaleDestroyed: 0,
         stoppedWorkspacesDeleted: 0,
         errors: 0,
       });

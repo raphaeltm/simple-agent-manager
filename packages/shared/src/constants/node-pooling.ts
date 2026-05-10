@@ -14,6 +14,12 @@ export const DEFAULT_NODE_WARM_GRACE_PERIOD_MS = 35 * 60 * 1000; // 35 minutes (
 /** Default grace period (ms) before stopping orphaned task workspaces. Override via ORPHANED_WORKSPACE_GRACE_PERIOD_MS env var. */
 export const DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 minutes
 
+/** Default grace period (ms) before destroying orphaned nodes (running, no workspaces, no warm_since). Override via ORPHANED_NODE_DESTROY_GRACE_PERIOD_MS env var. */
+export const DEFAULT_ORPHANED_NODE_DESTROY_GRACE_PERIOD_MS = 60 * 60 * 1000; // 1 hour
+
+/** Default threshold (ms) for destroying running nodes with stale heartbeats and no active workspaces. Override via NODE_HEARTBEAT_STALE_DESTROY_MS env var. */
+export const DEFAULT_NODE_HEARTBEAT_STALE_DESTROY_MS = 60 * 60 * 1000; // 1 hour
+
 /** Default alarm retry delay (ms) when node destruction fails. */
 export const DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS = 60 * 1000; // 1 minute
 

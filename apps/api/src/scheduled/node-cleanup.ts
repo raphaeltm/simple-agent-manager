@@ -21,7 +21,9 @@
  */
 import {
   DEFAULT_MAX_AUTO_NODE_LIFETIME_MS,
+  DEFAULT_NODE_HEARTBEAT_STALE_DESTROY_MS,
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
+  DEFAULT_ORPHANED_NODE_DESTROY_GRACE_PERIOD_MS,
   DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
   DEFAULT_WORKSPACE_STOPPED_TTL_MS,
 } from '@simple-agent-manager/shared';
@@ -48,7 +50,8 @@ export interface NodeCleanupResult {
   lifetimeDestroyed: number;
   lifetimeSkipped: number;
   orphanedWorkspacesFlagged: number;
-  orphanedNodesFlagged: number;
+  orphanedNodesDestroyed: number;
+  heartbeatStaleDestroyed: number;
   stoppedWorkspacesDeleted: number;
   errors: number;
 }
@@ -64,7 +67,8 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     lifetimeDestroyed: 0,
     lifetimeSkipped: 0,
     orphanedWorkspacesFlagged: 0,
-    orphanedNodesFlagged: 0,
+    orphanedNodesDestroyed: 0,
+    heartbeatStaleDestroyed: 0,
     stoppedWorkspacesDeleted: 0,
     errors: 0,
   };
@@ -327,9 +331,10 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
   }
 
-  // 4. Orphan detection: running nodes with no workspaces past warm timeout (TDF-7)
+  // 4. Orphan cleanup: running nodes with no workspaces past grace period (TDF-7)
   //    A node is orphaned if it's 'running' with no warm_since, no workspaces,
-  //    and its updated_at is older than the grace period.
+  //    and its updated_at is older than the grace period. Destroy instead of just flagging.
+  const orphanNodeGracePeriodMs = parseMs(env.ORPHANED_NODE_DESTROY_GRACE_PERIOD_MS, DEFAULT_ORPHANED_NODE_DESTROY_GRACE_PERIOD_MS);
   const orphanedNodes = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.updated_at, n.warm_since
      FROM nodes n
@@ -341,7 +346,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
          WHERE w.node_id = n.id
            AND w.status IN ('running', 'creating', 'recovery')
        )`
-  ).bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString()).all<{
+  ).bind(new Date(now.getTime() - orphanNodeGracePeriodMs).toISOString()).all<{
     id: string;
     user_id: string;
     status: string;
@@ -350,26 +355,58 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
   }>();
 
   for (const node of orphanedNodes.results) {
-    log.warn('node_cleanup.orphaned_node_detected', {
-      nodeId: node.id,
-      userId: node.user_id,
-      updatedAt: node.updated_at,
-    });
-
-    await persistError(env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'warn',
-      message: `Orphaned node detected: running with no workspaces and not in warm pool`,
-      context: {
-        recoveryType: 'orphaned_node',
+    try {
+      log.warn('node_cleanup.orphaned_node_destroying', {
         nodeId: node.id,
+        userId: node.user_id,
         updatedAt: node.updated_at,
-      },
-      userId: node.user_id,
-      nodeId: node.id,
-    });
+      });
 
-    result.orphanedNodesFlagged++;
+      await deleteNodeResources(node.id, node.user_id, env);
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: `Destroyed orphaned node: running with no workspaces and not in warm pool`,
+        context: {
+          recoveryType: 'orphaned_node_cleanup',
+          nodeId: node.id,
+          updatedAt: node.updated_at,
+          gracePeriodMs: orphanNodeGracePeriodMs,
+        },
+        userId: node.user_id,
+        nodeId: node.id,
+      });
+
+      await db
+        .update(schema.nodes)
+        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
+        .where(eq(schema.nodes.id, node.id));
+
+      result.orphanedNodesDestroyed++;
+    } catch (err) {
+      log.error('node_cleanup.orphaned_node_destroy_failed', {
+        nodeId: node.id,
+        userId: node.user_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'error',
+        message: `Failed to destroy orphaned node: ${err instanceof Error ? err.message : String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        context: {
+          recoveryType: 'orphaned_node_cleanup_failure',
+          nodeId: node.id,
+          updatedAt: node.updated_at,
+        },
+        userId: node.user_id,
+        nodeId: node.id,
+      });
+
+      result.errors++;
+    }
   }
 
   // 5. Safety-net: delete stopped workspaces past TTL that the DO alarm missed.
@@ -407,6 +444,83 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       result.stoppedWorkspacesDeleted++;
     } catch (e) {
       log.error('node_cleanup.stale_stopped_workspace_delete_failed', { workspaceId: ws.id, error: String(e) });
+      result.errors++;
+    }
+  }
+
+  // 6. Heartbeat staleness: destroy running nodes with stale heartbeats and no active workspaces.
+  //    Distinct from orphan check (step 4) which uses updated_at — this uses last_heartbeat_at
+  //    specifically for nodes that were once healthy but stopped sending heartbeats.
+  const heartbeatStaleMs = parseMs(env.NODE_HEARTBEAT_STALE_DESTROY_MS, DEFAULT_NODE_HEARTBEAT_STALE_DESTROY_MS);
+  const heartbeatStaleThreshold = new Date(now.getTime() - heartbeatStaleMs).toISOString();
+  const heartbeatStaleNodes = await env.DATABASE.prepare(
+    `SELECT n.id, n.user_id, n.last_heartbeat_at
+     FROM nodes n
+     WHERE n.status = 'running'
+       AND n.last_heartbeat_at IS NOT NULL
+       AND n.last_heartbeat_at < ?
+       AND NOT EXISTS (
+         SELECT 1 FROM workspaces w
+         WHERE w.node_id = n.id
+           AND w.status IN ('running', 'creating', 'recovery')
+       )`
+  ).bind(heartbeatStaleThreshold).all<{
+    id: string;
+    user_id: string;
+    last_heartbeat_at: string;
+  }>();
+
+  for (const node of heartbeatStaleNodes.results) {
+    try {
+      log.warn('node_cleanup.heartbeat_stale_destroying', {
+        nodeId: node.id,
+        userId: node.user_id,
+        lastHeartbeatAt: node.last_heartbeat_at,
+      });
+
+      await deleteNodeResources(node.id, node.user_id, env);
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: `Destroyed node with stale heartbeat and no active workspaces`,
+        context: {
+          recoveryType: 'heartbeat_stale_node_cleanup',
+          nodeId: node.id,
+          lastHeartbeatAt: node.last_heartbeat_at,
+          heartbeatStaleMs,
+        },
+        userId: node.user_id,
+        nodeId: node.id,
+      });
+
+      await db
+        .update(schema.nodes)
+        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
+        .where(eq(schema.nodes.id, node.id));
+
+      result.heartbeatStaleDestroyed++;
+    } catch (err) {
+      log.error('node_cleanup.heartbeat_stale_destroy_failed', {
+        nodeId: node.id,
+        userId: node.user_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'error',
+        message: `Failed to destroy heartbeat-stale node: ${err instanceof Error ? err.message : String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        context: {
+          recoveryType: 'heartbeat_stale_node_cleanup_failure',
+          nodeId: node.id,
+          lastHeartbeatAt: node.last_heartbeat_at,
+        },
+        userId: node.user_id,
+        nodeId: node.id,
+      });
+
       result.errors++;
     }
   }

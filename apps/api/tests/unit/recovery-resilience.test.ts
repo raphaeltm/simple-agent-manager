@@ -274,20 +274,20 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
   });
 
   it('records orphaned nodes in OBSERVABILITY_DATABASE', () => {
-    expect(nodeCleanupSource).toContain("recoveryType: 'orphaned_node'");
-    expect(nodeCleanupSource).toContain('orphaned_node_detected');
+    expect(nodeCleanupSource).toContain("recoveryType: 'orphaned_node_cleanup'");
+    expect(nodeCleanupSource).toContain('orphaned_node_destroying');
   });
 
   it('tracks orphan counts in result', () => {
     expect(nodeCleanupSource).toContain('orphanedWorkspacesFlagged: number');
-    expect(nodeCleanupSource).toContain('orphanedNodesFlagged: number');
+    expect(nodeCleanupSource).toContain('orphanedNodesDestroyed: number');
     expect(nodeCleanupSource).toContain('result.orphanedWorkspacesFlagged++');
-    expect(nodeCleanupSource).toContain('result.orphanedNodesFlagged++');
+    expect(nodeCleanupSource).toContain('result.orphanedNodesDestroyed++');
   });
 
   it('cron handler logs orphan counts', () => {
     expect(indexSource).toContain('orphanedWorkspacesFlagged');
-    expect(indexSource).toContain('orphanedNodesFlagged');
+    expect(indexSource).toContain('orphanedNodesDestroyed');
   });
 
   it('uses grace period to avoid flagging recently created resources', () => {
