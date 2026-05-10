@@ -40,6 +40,7 @@ func main() {
 		mcpToken         = flag.String("mcp-token", envOr("SAM_MCP_TOKEN", ""), "MCP server Bearer token (or SAM_MCP_TOKEN env var)")
 		toolProfile      = flag.String("tool-profile", "workspace", "Tool profile: workspace, orchestrate, or full")
 		mockOrchScenario = flag.String("mock-orchestration", "", "Register mock orchestration tools with scenario: success, failure, or mixed (for eval without MCP)")
+		realOrch         = flag.Bool("real-orchestration", false, "Enable real subtask execution — dispatch_task spawns child harness sessions")
 	)
 	flag.Parse()
 
@@ -88,6 +89,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Resolve worker model — defaults to orchestrator model.
+	resolvedWorkerModel := *workerModel
+	if resolvedWorkerModel == "" {
+		resolvedWorkerModel = *model
+	}
+
 	// Build tool registry with local tools.
 	registry := tools.NewRegistry()
 	localTools := []tools.Tool{
@@ -127,11 +134,29 @@ func main() {
 		allTools = append(allTools, mcpTools...)
 	}
 
-	// Register mock orchestration tools if requested (for eval without MCP).
+	// Register orchestration tools: mock (for eval) or real (for actual subtask execution).
+	if *mockOrchScenario != "" && *realOrch {
+		fmt.Fprintln(os.Stderr, "error: --mock-orchestration and --real-orchestration are mutually exclusive")
+		os.Exit(1)
+	}
+
 	if *mockOrchScenario != "" {
 		orchTools := tools.MockOrchestrationTools(*mockOrchScenario)
 		allTools = append(allTools, orchTools...)
 		fmt.Fprintf(os.Stderr, "Mock orchestration tools registered (scenario: %s)\n", *mockOrchScenario)
+	}
+
+	if *realOrch {
+		realState := tools.NewRealOrchestrationState()
+		realState.WorkDir = workDir
+		realState.Model = resolvedWorkerModel
+		realState.APIURL = *apiURL
+		realState.APIKey = *apiKey
+		realState.AuthHeader = *authHeader
+
+		orchTools := tools.RealOrchestrationTools(realState)
+		allTools = append(allTools, orchTools...)
+		fmt.Fprintf(os.Stderr, "Real orchestration tools registered (worker model: %s)\n", resolvedWorkerModel)
 	}
 
 	// Apply tool profile filtering.
@@ -176,12 +201,6 @@ func main() {
 	// Run agent loop with signal handling.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-
-	// Resolve worker model — defaults to orchestrator model.
-	resolvedWorkerModel := *workerModel
-	if resolvedWorkerModel == "" {
-		resolvedWorkerModel = *model
-	}
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
 		SystemPrompt:     sysPrompt,
