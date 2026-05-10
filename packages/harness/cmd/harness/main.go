@@ -42,6 +42,7 @@ func main() {
 		mockOrchScenario = flag.String("mock-orchestration", "", "Register mock orchestration tools with scenario: success, failure, or mixed (for eval without MCP)")
 		realOrch         = flag.Bool("real-orchestration", false, "Enable real subtask execution — dispatch_task spawns child harness sessions")
 		stream           = flag.Bool("stream", false, "Enable streaming output from LLM providers that support it")
+		permissionMode   = flag.String("permission-mode", "allow-all", "Permission mode: allow-all, deny-dangerous, or ask-always")
 	)
 	flag.Parse()
 
@@ -219,17 +220,26 @@ func main() {
 		}
 	}
 
+	// Parse permission mode.
+	permMode, err := tools.ParsePermissionMode(*permissionMode)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Run agent loop with signal handling.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
-		SystemPrompt:     sysPrompt,
-		MaxTurns:         *maxTurns,
-		MaxContextTokens: *maxContextTokens,
-		WorkerModel:      resolvedWorkerModel,
-		WorkDir:          workDir,
-		Stream:           *stream,
+		SystemPrompt:      sysPrompt,
+		MaxTurns:          *maxTurns,
+		MaxContextTokens:  *maxContextTokens,
+		WorkerModel:       resolvedWorkerModel,
+		WorkDir:           workDir,
+		Stream:            *stream,
+		PermissionMode:    permMode,
+		PermissionChecker: tools.AutoApproveChecker{},
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,
