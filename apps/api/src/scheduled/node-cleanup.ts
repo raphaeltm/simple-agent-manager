@@ -45,6 +45,42 @@ function parseMs(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
+/**
+ * Destroy a node: delete cloud resources, record observability event, mark as deleted in D1.
+ * Shared by orphan cleanup (step 4) and heartbeat-stale cleanup (step 6).
+ */
+async function destroyNodeWithRecovery(
+  node: { id: string; user_id: string },
+  env: Env,
+  db: ReturnType<typeof drizzle>,
+  now: Date,
+  opts: {
+    recoveryType: string;
+    message: string;
+    context: Record<string, unknown>;
+    logEvent: string;
+    logExtra: Record<string, unknown>;
+  },
+): Promise<void> {
+  log.warn(opts.logEvent, { nodeId: node.id, userId: node.user_id, ...opts.logExtra });
+
+  await deleteNodeResources(node.id, node.user_id, env);
+
+  await persistError(env.OBSERVABILITY_DATABASE, {
+    source: 'api',
+    level: 'warn',
+    message: opts.message,
+    context: { recoveryType: opts.recoveryType, nodeId: node.id, ...opts.context },
+    userId: node.user_id,
+    nodeId: node.id,
+  });
+
+  await db
+    .update(schema.nodes)
+    .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
+    .where(eq(schema.nodes.id, node.id));
+}
+
 export interface NodeCleanupResult {
   staleDestroyed: number;
   lifetimeDestroyed: number;
@@ -356,33 +392,13 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
 
   for (const node of orphanedNodes.results) {
     try {
-      log.warn('node_cleanup.orphaned_node_destroying', {
-        nodeId: node.id,
-        userId: node.user_id,
-        updatedAt: node.updated_at,
+      await destroyNodeWithRecovery(node, env, db, now, {
+        recoveryType: 'orphaned_node_cleanup',
+        message: 'Destroyed orphaned node: running with no workspaces and not in warm pool',
+        context: { updatedAt: node.updated_at, gracePeriodMs: orphanNodeGracePeriodMs },
+        logEvent: 'node_cleanup.orphaned_node_destroying',
+        logExtra: { updatedAt: node.updated_at },
       });
-
-      await deleteNodeResources(node.id, node.user_id, env);
-
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: `Destroyed orphaned node: running with no workspaces and not in warm pool`,
-        context: {
-          recoveryType: 'orphaned_node_cleanup',
-          nodeId: node.id,
-          updatedAt: node.updated_at,
-          gracePeriodMs: orphanNodeGracePeriodMs,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      });
-
-      await db
-        .update(schema.nodes)
-        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
-        .where(eq(schema.nodes.id, node.id));
-
       result.orphanedNodesDestroyed++;
     } catch (err) {
       log.error('node_cleanup.orphaned_node_destroy_failed', {
@@ -390,21 +406,6 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
         userId: node.user_id,
         error: err instanceof Error ? err.message : String(err),
       });
-
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Failed to destroy orphaned node: ${err instanceof Error ? err.message : String(err)}`,
-        stack: err instanceof Error ? err.stack : undefined,
-        context: {
-          recoveryType: 'orphaned_node_cleanup_failure',
-          nodeId: node.id,
-          updatedAt: node.updated_at,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      });
-
       result.errors++;
     }
   }
@@ -477,33 +478,13 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
 
   for (const node of heartbeatStaleNodes.results) {
     try {
-      log.warn('node_cleanup.heartbeat_stale_destroying', {
-        nodeId: node.id,
-        userId: node.user_id,
-        lastHeartbeatAt: node.last_heartbeat_at,
+      await destroyNodeWithRecovery(node, env, db, now, {
+        recoveryType: 'heartbeat_stale_node_cleanup',
+        message: 'Destroyed node with stale heartbeat and no active workspaces',
+        context: { lastHeartbeatAt: node.last_heartbeat_at, heartbeatStaleMs },
+        logEvent: 'node_cleanup.heartbeat_stale_destroying',
+        logExtra: { lastHeartbeatAt: node.last_heartbeat_at },
       });
-
-      await deleteNodeResources(node.id, node.user_id, env);
-
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: `Destroyed node with stale heartbeat and no active workspaces`,
-        context: {
-          recoveryType: 'heartbeat_stale_node_cleanup',
-          nodeId: node.id,
-          lastHeartbeatAt: node.last_heartbeat_at,
-          heartbeatStaleMs,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      });
-
-      await db
-        .update(schema.nodes)
-        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
-        .where(eq(schema.nodes.id, node.id));
-
       result.heartbeatStaleDestroyed++;
     } catch (err) {
       log.error('node_cleanup.heartbeat_stale_destroy_failed', {
@@ -511,21 +492,6 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
         userId: node.user_id,
         error: err instanceof Error ? err.message : String(err),
       });
-
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Failed to destroy heartbeat-stale node: ${err instanceof Error ? err.message : String(err)}`,
-        stack: err instanceof Error ? err.stack : undefined,
-        context: {
-          recoveryType: 'heartbeat_stale_node_cleanup_failure',
-          nodeId: node.id,
-          lastHeartbeatAt: node.last_heartbeat_at,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      });
-
       result.errors++;
     }
   }

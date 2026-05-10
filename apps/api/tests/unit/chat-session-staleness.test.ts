@@ -25,16 +25,18 @@ function createMockSql(queryMap: Record<string, Record<string, unknown>[]>) {
   } as unknown as SqlStorage;
 }
 
+function createMockD1(batchResults: Array<{ results: Array<Record<string, unknown>> }> = []): D1Database {
+  return {
+    prepare: vi.fn().mockReturnValue({
+      bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }),
+    }),
+    batch: vi.fn().mockResolvedValue(batchResults),
+  } as unknown as D1Database;
+}
+
 function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
-    DATABASE: {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          first: vi.fn().mockResolvedValue(null),
-        }),
-      }),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database,
+    DATABASE: createMockD1(),
     CHAT_SESSION_STALE_TIMEOUT_MS: String(DEFAULT_CHAT_SESSION_STALE_TIMEOUT_MS),
     ...overrides,
   } as unknown as Env;
@@ -51,17 +53,10 @@ describe('checkStaleChatSessions', () => {
     });
 
     const env = createMockEnv({
-      DATABASE: {
-        prepare: vi.fn().mockReturnValue({
-          bind: vi.fn().mockReturnValue({
-            first: vi.fn(),
-          }),
-        }),
-        batch: vi.fn().mockResolvedValue([
-          { results: [{ id: 'ws-1', status: 'stopped' }] },
-          { results: [{ id: 'ws-2', status: 'running' }] },
-        ]),
-      } as unknown as D1Database,
+      DATABASE: createMockD1([
+        { results: [{ id: 'ws-1', status: 'stopped' }] },
+        { results: [{ id: 'ws-2', status: 'running' }] },
+      ]),
     });
 
     const stopped = await checkStaleChatSessions(sql, env);
@@ -84,14 +79,9 @@ describe('checkStaleChatSessions', () => {
     });
 
     const env = createMockEnv({
-      DATABASE: {
-        prepare: vi.fn().mockReturnValue({
-          bind: vi.fn().mockReturnValue({ first: vi.fn() }),
-        }),
-        batch: vi.fn().mockResolvedValue([
-          { results: [] }, // workspace not found
-        ]),
-      } as unknown as D1Database,
+      DATABASE: createMockD1([
+        { results: [] }, // workspace not found
+      ]),
     });
 
     const stopped = await checkStaleChatSessions(sql, env);
@@ -128,14 +118,9 @@ describe('checkStaleChatSessions', () => {
     });
 
     const env = createMockEnv({
-      DATABASE: {
-        prepare: vi.fn().mockReturnValue({
-          bind: vi.fn().mockReturnValue({ first: vi.fn() }),
-        }),
-        batch: vi.fn().mockResolvedValue([
-          { results: [{ id: 'ws-1', status: 'running' }] },
-        ]),
-      } as unknown as D1Database,
+      DATABASE: createMockD1([
+        { results: [{ id: 'ws-1', status: 'running' }] },
+      ]),
     });
 
     const stopped = await checkStaleChatSessions(sql, env);
@@ -151,14 +136,9 @@ describe('checkStaleChatSessions', () => {
       "workspace_id IS NULL": [],
     });
 
-    const env = createMockEnv({
-      DATABASE: {
-        prepare: vi.fn().mockReturnValue({
-          bind: vi.fn().mockReturnValue({ first: vi.fn() }),
-        }),
-        batch: vi.fn().mockRejectedValue(new Error('D1 unavailable')),
-      } as unknown as D1Database,
-    });
+    const d1 = createMockD1();
+    (d1.batch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('D1 unavailable'));
+    const env = createMockEnv({ DATABASE: d1 });
 
     const stopped = await checkStaleChatSessions(sql, env);
 
