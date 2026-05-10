@@ -48,6 +48,11 @@ type Config struct {
 	Handler EventHandler
 	// Stream enables streaming when the provider supports it. Default: false.
 	Stream bool
+	// PermissionMode controls tool execution gating. Default: allow-all.
+	PermissionMode tools.PermissionMode
+	// PermissionChecker is called when a tool requires permission approval.
+	// If nil and mode requires checks, tools are denied by default.
+	PermissionChecker tools.PermissionChecker
 }
 
 // ProviderConfig stores provider connection details for child session spawning.
@@ -188,7 +193,13 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 				cfg.Handler.OnToolStart(call.Name, call.Params)
 			}
 
-			result := registry.Dispatch(ctx, call)
+			// Permission check: gate execution based on mode and danger level.
+			var result llm.ToolResult
+			if denied, denyResult := checkToolPermission(registry, call, cfg); denied {
+				result = denyResult
+			} else {
+				result = registry.Dispatch(ctx, call)
+			}
 
 			log.Append(transcript.EventToolResult, turn, map[string]any{
 				"call_id":  result.CallID,
@@ -222,6 +233,54 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "...(truncated)"
+}
+
+// checkToolPermission evaluates whether a tool call is allowed under the current
+// permission mode. Returns (true, result) if denied, (false, zero) if allowed.
+func checkToolPermission(registry *tools.Registry, call llm.ToolCall, cfg Config) (bool, llm.ToolResult) {
+	mode := cfg.PermissionMode
+	if mode == "" || mode == tools.PermissionAllowAll {
+		return false, llm.ToolResult{}
+	}
+
+	// Resolve danger level for this tool.
+	level := tools.Dangerous // default for unknown tools
+	if tool := registry.Get(call.Name); tool != nil {
+		level = tools.GetDangerLevel(tool)
+	}
+
+	if !tools.NeedsPermission(mode, level) {
+		return false, llm.ToolResult{}
+	}
+
+	// Permission check required — call the checker.
+	checker := cfg.PermissionChecker
+	if checker == nil {
+		// No checker configured but mode requires one: deny.
+		return true, llm.ToolResult{
+			CallID:  call.ID,
+			Content: fmt.Sprintf("error: tool %q (danger level: %s) requires permission but no checker is configured", call.Name, level),
+			IsError: true,
+		}
+	}
+
+	allowed, err := checker.CheckPermission(call.Name, call.Params, level)
+	if err != nil {
+		return true, llm.ToolResult{
+			CallID:  call.ID,
+			Content: fmt.Sprintf("error: permission check failed for tool %q: %v", call.Name, err),
+			IsError: true,
+		}
+	}
+	if !allowed {
+		return true, llm.ToolResult{
+			CallID:  call.ID,
+			Content: fmt.Sprintf("error: permission denied for tool %q (danger level: %s)", call.Name, level),
+			IsError: true,
+		}
+	}
+
+	return false, llm.ToolResult{}
 }
 
 // sendStreaming calls a StreamProvider, forwards token events to the handler,

@@ -95,6 +95,13 @@ func (r *Registry) Definitions() []llm.ToolDefinition {
 	return defs
 }
 
+// Get returns a tool by name, or nil if not found.
+func (r *Registry) Get(name string) Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.tools[name]
+}
+
 // Names returns the names of all registered tools.
 func (r *Registry) Names() []string {
 	r.mu.RLock()
