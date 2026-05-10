@@ -358,3 +358,88 @@ func TestEval_GitEditAndCommit(t *testing.T) {
 	}
 
 }
+
+// Evaluation Task 5: Apply a unified diff to fix a bug.
+// The agent receives a Go file with a known bug and uses apply_diff to patch it.
+func TestEval_ApplyDiffBugFix(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a Go file with a known bug: off-by-one in loop bound.
+	buggyCode := `package calc
+
+// Sum returns the sum of integers from 1 to n.
+func Sum(n int) int {
+	total := 0
+	for i := 1; i < n; i++ {
+		total += i
+	}
+	return total
+}
+`
+	os.WriteFile(filepath.Join(dir, "calc.go"), []byte(buggyCode), 0o644)
+
+	// The diff fixes i < n to i <= n.
+	fixDiff := `--- a/calc.go
++++ b/calc.go
+@@ -5,3 +5,3 @@
+ 	total := 0
+-	for i := 1; i < n; i++ {
++	for i := 1; i <= n; i++ {
+ 		total += i`
+
+	provider := llm.NewMockProvider(
+		// Turn 1: read the file
+		&llm.Response{
+			ToolCalls: []llm.ToolCall{{
+				ID:     "c1",
+				Name:   "read_file",
+				Params: map[string]any{"path": "calc.go"},
+			}},
+		},
+		// Turn 2: apply the diff to fix the bug
+		&llm.Response{
+			ToolCalls: []llm.ToolCall{{
+				ID:     "c2",
+				Name:   "apply_diff",
+				Params: map[string]any{"diff": fixDiff},
+			}},
+		},
+		// Turn 3: done
+		&llm.Response{Content: "Fixed the off-by-one bug: changed i < n to i <= n in the loop."},
+	)
+
+	registry := tools.NewRegistry()
+	registry.Register(&tools.ReadFile{WorkDir: dir})
+	registry.Register(&tools.ApplyDiff{WorkDir: dir})
+
+	log := transcript.NewLog()
+
+	result, err := Run(context.Background(), provider, registry, log, Config{MaxTurns: 10}, "Fix the off-by-one bug in calc.go")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.StopReason != "complete" {
+		t.Errorf("stop_reason = %s, want complete", result.StopReason)
+	}
+
+	// Verify the file was correctly patched.
+	data, err := os.ReadFile(filepath.Join(dir, "calc.go"))
+	if err != nil {
+		t.Fatalf("file not found: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "i <= n") {
+		t.Errorf("bug not fixed, file content:\n%s", content)
+	}
+	if strings.Contains(content, "i < n") {
+		t.Errorf("old buggy line still present, file content:\n%s", content)
+	}
+
+	// Verify the rest of the file is intact.
+	if !strings.Contains(content, "package calc") {
+		t.Error("package declaration missing")
+	}
+	if !strings.Contains(content, "func Sum(n int) int") {
+		t.Error("function signature missing")
+	}
+}

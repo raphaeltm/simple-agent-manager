@@ -120,6 +120,7 @@ func main() {
 		&tools.ReadFile{WorkDir: workDir},
 		&tools.WriteFile{WorkDir: workDir},
 		&tools.EditFile{WorkDir: workDir},
+		&tools.ApplyDiff{WorkDir: workDir},
 		&tools.Bash{WorkDir: workDir},
 		&tools.Grep{WorkDir: workDir},
 		&tools.Glob{WorkDir: workDir},
