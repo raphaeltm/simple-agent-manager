@@ -38,6 +38,7 @@ func main() {
 		mcpURL           = flag.String("mcp-url", envOr("SAM_MCP_URL", ""), "MCP server URL (or SAM_MCP_URL env var)")
 		mcpToken         = flag.String("mcp-token", envOr("SAM_MCP_TOKEN", ""), "MCP server Bearer token (or SAM_MCP_TOKEN env var)")
 		toolProfile      = flag.String("tool-profile", "workspace", "Tool profile: workspace, orchestrate, or full")
+		mockOrchScenario = flag.String("mock-orchestration", "", "Register mock orchestration tools with scenario: success, failure, or mixed (for eval without MCP)")
 	)
 	flag.Parse()
 
@@ -123,6 +124,13 @@ func main() {
 
 		mcpTools := mcp.AdaptTools(client, mcpDefs)
 		allTools = append(allTools, mcpTools...)
+	}
+
+	// Register mock orchestration tools if requested (for eval without MCP).
+	if *mockOrchScenario != "" {
+		orchTools := tools.MockOrchestrationTools(*mockOrchScenario)
+		allTools = append(allTools, orchTools...)
+		fmt.Fprintf(os.Stderr, "Mock orchestration tools registered (scenario: %s)\n", *mockOrchScenario)
 	}
 
 	// Apply tool profile filtering.
