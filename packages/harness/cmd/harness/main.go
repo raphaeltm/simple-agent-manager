@@ -45,6 +45,7 @@ func main() {
 		permissionMode   = flag.String("permission-mode", "allow-all", "Permission mode: allow-all, deny-dangerous, or ask-always")
 		parallelTools    = flag.Bool("parallel-tools", false, "Execute multiple tool calls in parallel")
 		maxParallelTools = flag.Int("max-parallel-tools", 5, "Maximum concurrent tool executions when --parallel-tools is enabled")
+		compactionStrat  = flag.String("compaction-strategy", "extractive", "Compaction strategy: extractive (default) or llm")
 	)
 	flag.Parse()
 
@@ -234,16 +235,17 @@ func main() {
 	defer cancel()
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
-		SystemPrompt:      sysPrompt,
-		MaxTurns:          *maxTurns,
-		MaxContextTokens:  *maxContextTokens,
-		WorkerModel:       resolvedWorkerModel,
-		WorkDir:           workDir,
-		Stream:            *stream,
-		PermissionMode:    permMode,
-		PermissionChecker: tools.AutoApproveChecker{},
-		ParallelTools:     *parallelTools,
-		MaxParallelTools:  *maxParallelTools,
+		SystemPrompt:       sysPrompt,
+		MaxTurns:           *maxTurns,
+		MaxContextTokens:   *maxContextTokens,
+		CompactionStrategy: agent.CompactionStrategy(*compactionStrat),
+		WorkerModel:        resolvedWorkerModel,
+		WorkDir:            workDir,
+		Stream:             *stream,
+		PermissionMode:     permMode,
+		PermissionChecker:  tools.AutoApproveChecker{},
+		ParallelTools:      *parallelTools,
+		MaxParallelTools:   *maxParallelTools,
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,
