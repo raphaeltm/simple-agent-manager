@@ -28,8 +28,6 @@ function createMockEnv(overrides: Record<string, string> = {}) {
 
 describe('checkNoHeartbeatTimeouts', () => {
   it('transitions sessions with NULL heartbeat past timeout to interrupted', async () => {
-    const now = Date.now();
-    const createdAt = now - ACP_SESSION_DEFAULTS.NO_HEARTBEAT_TIMEOUT_MS - 60_000; // 1 min past timeout
     const rows = [
       {
         id: 'session-1',
