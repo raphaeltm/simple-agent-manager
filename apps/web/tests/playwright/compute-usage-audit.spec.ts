@@ -239,6 +239,133 @@ function makeComputeUsageResponse(options: {
 }
 
 // ---------------------------------------------------------------------------
+// Budget Mock Factories  (UserAiBudgetResponse shape)
+// ---------------------------------------------------------------------------
+
+function makeBudgetResponse(overrides: {
+  dailyInputTokenLimit?: number | null;
+  dailyOutputTokenLimit?: number | null;
+  monthlyCostCapUsd?: number | null;
+  alertThresholdPercent?: number;
+  isCustom?: boolean;
+  dailyInputUsed?: number;
+  dailyOutputUsed?: number;
+  monthCostUsd?: number;
+  exceeded?: boolean;
+  effectiveDailyInput?: number;
+  effectiveDailyOutput?: number;
+} = {}) {
+  const effectiveDailyInput = overrides.effectiveDailyInput ?? overrides.dailyInputTokenLimit ?? 500_000;
+  const effectiveDailyOutput = overrides.effectiveDailyOutput ?? overrides.dailyOutputTokenLimit ?? 200_000;
+  const dailyInputUsed = overrides.dailyInputUsed ?? 0;
+  const dailyOutputUsed = overrides.dailyOutputUsed ?? 0;
+  const monthCostUsd = overrides.monthCostUsd ?? 0;
+  const monthlyCostCapUsd = overrides.monthlyCostCapUsd !== undefined ? overrides.monthlyCostCapUsd : null;
+
+  return {
+    settings: {
+      dailyInputTokenLimit: overrides.dailyInputTokenLimit !== undefined ? overrides.dailyInputTokenLimit : null,
+      dailyOutputTokenLimit: overrides.dailyOutputTokenLimit !== undefined ? overrides.dailyOutputTokenLimit : null,
+      monthlyCostCapUsd,
+      alertThresholdPercent: overrides.alertThresholdPercent ?? 80,
+    },
+    isCustom: overrides.isCustom ?? false,
+    dailyUsage: {
+      inputTokens: dailyInputUsed,
+      outputTokens: dailyOutputUsed,
+    },
+    effectiveLimits: {
+      dailyInputTokenLimit: effectiveDailyInput,
+      dailyOutputTokenLimit: effectiveDailyOutput,
+    },
+    monthCostUsd,
+    utilization: {
+      dailyInputPercent: effectiveDailyInput > 0 ? Math.round((dailyInputUsed / effectiveDailyInput) * 100) : 0,
+      dailyOutputPercent: effectiveDailyOutput > 0 ? Math.round((dailyOutputUsed / effectiveDailyOutput) * 100) : 0,
+      monthlyCostPercent: monthlyCostCapUsd !== null && monthlyCostCapUsd > 0
+        ? Math.round((monthCostUsd / monthlyCostCapUsd) * 100)
+        : null,
+    },
+    exceeded: overrides.exceeded ?? false,
+  };
+}
+
+// Platform-default budget (no custom settings; uses platform effective limits)
+const BUDGET_PLATFORM_DEFAULTS = makeBudgetResponse({
+  isCustom: false,
+  effectiveDailyInput: 500_000,
+  effectiveDailyOutput: 200_000,
+});
+
+// Custom budget: user has set all three limits
+const BUDGET_ALL_CUSTOM = makeBudgetResponse({
+  isCustom: true,
+  dailyInputTokenLimit: 1_000_000,
+  dailyOutputTokenLimit: 400_000,
+  monthlyCostCapUsd: 25.00,
+  effectiveDailyInput: 1_000_000,
+  effectiveDailyOutput: 400_000,
+  dailyInputUsed: 250_000,
+  dailyOutputUsed: 80_000,
+  monthCostUsd: 7.50,
+});
+
+// Budget with monthly cap only (input/output use platform defaults)
+const BUDGET_MONTHLY_CAP_ONLY = makeBudgetResponse({
+  isCustom: true,
+  monthlyCostCapUsd: 10.00,
+  effectiveDailyInput: 500_000,
+  effectiveDailyOutput: 200_000,
+  monthCostUsd: 9.99,
+});
+
+// Budget near limit (>80% utilization) — not exceeded yet
+const BUDGET_NEAR_LIMIT = makeBudgetResponse({
+  isCustom: true,
+  dailyInputTokenLimit: 100_000,
+  dailyOutputTokenLimit: 50_000,
+  monthlyCostCapUsd: 5.00,
+  effectiveDailyInput: 100_000,
+  effectiveDailyOutput: 50_000,
+  dailyInputUsed: 90_000,
+  dailyOutputUsed: 42_000,
+  monthCostUsd: 4.20,
+});
+
+// Budget exceeded (>100%)
+const BUDGET_EXCEEDED = makeBudgetResponse({
+  isCustom: true,
+  dailyInputTokenLimit: 100_000,
+  dailyOutputTokenLimit: 50_000,
+  monthlyCostCapUsd: null,
+  effectiveDailyInput: 100_000,
+  effectiveDailyOutput: 50_000,
+  dailyInputUsed: 120_000,
+  dailyOutputUsed: 55_000,
+  exceeded: true,
+});
+
+// Budget with very large token limits (M-scale formatting)
+const BUDGET_LARGE_LIMITS = makeBudgetResponse({
+  isCustom: true,
+  dailyInputTokenLimit: 10_000_000,
+  dailyOutputTokenLimit: 5_000_000,
+  monthlyCostCapUsd: 1000.00,
+  effectiveDailyInput: 10_000_000,
+  effectiveDailyOutput: 5_000_000,
+  monthCostUsd: 0.005,
+});
+
+// Budget with zero cost (edge case for formatCost)
+const BUDGET_ZERO_COST = makeBudgetResponse({
+  isCustom: true,
+  monthlyCostCapUsd: 50.00,
+  effectiveDailyInput: 500_000,
+  effectiveDailyOutput: 200_000,
+  monthCostUsd: 0,
+});
+
+// ---------------------------------------------------------------------------
 // API Mock Setup
 // ---------------------------------------------------------------------------
 
@@ -246,14 +373,17 @@ type MockOptions = {
   adminUsers?: ReturnType<typeof makeUserNodeSummary>[];
   userDetailedUsage?: ReturnType<typeof makeDetailedNodeUsage>;
   computeUsage?: ReturnType<typeof makeComputeUsageResponse>;
+  budget?: ReturnType<typeof makeBudgetResponse>;
   adminUsageError?: boolean;
   computeUsageError?: boolean;
+  budgetError?: boolean;
 };
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
   const adminUsageData = makeAdminNodeUsageResponse(options.adminUsers ?? USERS_NORMAL);
   const userDetailData = options.userDetailedUsage ?? makeDetailedNodeUsage();
   const computeUsageData = options.computeUsage ?? makeComputeUsageResponse({ activeSessions: ACTIVE_SESSIONS_NORMAL });
+  const budgetData = options.budget ?? BUDGET_PLATFORM_DEFAULTS;
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -298,6 +428,13 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
         cachedRequests: 0, errorRequests: 0, byModel: [], byDay: [],
         period: 'current-month', periodLabel: 'April 2026',
       });
+    }
+
+    // AI budget — GET /api/usage/ai/budget
+    if (path === '/api/usage/ai/budget') {
+      if (route.request().method() !== 'GET') return route.continue();
+      if (options.budgetError) return respond(500, { error: 'Failed to load budget' });
+      return respond(200, budgetData);
     }
 
     // Settings compute usage — GET /api/usage/compute (unchanged)
@@ -759,6 +896,296 @@ test.describe('SettingsComputeUsage — Desktop (1280x800)', () => {
     await page.goto('/settings/usage');
     await page.waitForTimeout(3000);
     await screenshot(page, 'settings-usage-error-desktop');
+    await assertNoOverflow(page);
+  });
+});
+
+// ===========================================================================
+// YOUR LIMITS CARD — Mobile (375x667)
+// ===========================================================================
+
+test.describe('YourLimitsCard — Mobile (375x667)', () => {
+  // ---- platform defaults ----
+
+  test('platform defaults: card renders with correct labels and "Platform default" badge', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_PLATFORM_DEFAULTS });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    await expect(page.locator('text=Daily Input Tokens').first()).toBeVisible();
+    await expect(page.locator('text=Daily Output Tokens').first()).toBeVisible();
+    await expect(page.locator('text=Monthly Cost Cap')).toBeVisible();
+    // Both token limit cells show "Platform default" (exact text match scoped to the limits card)
+    const limitsCard = page.locator('h3:has-text("Your Limits")').locator('..');
+    await expect(limitsCard.locator('p:has-text("Platform default")').first()).toBeVisible();
+    await expect(limitsCard.locator('p:has-text("No cap set")')).toBeVisible();
+    await expect(limitsCard.locator('p:has-text("Unlimited")')).toBeVisible();
+
+    await screenshot(page, 'budget-limits-platform-defaults-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('platform defaults: token values use K/M suffix formatting', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_PLATFORM_DEFAULTS }); // 500K / 200K
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=500.0K').first()).toBeVisible();
+    await expect(page.locator('text=200.0K').first()).toBeVisible();
+
+    await screenshot(page, 'budget-limits-k-format-mobile');
+    await assertNoOverflow(page);
+  });
+
+  // ---- all-custom settings ----
+
+  test('all-custom: shows "Custom" badge for each field that is user-set', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_ALL_CUSTOM });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    // Scoped to the limits card — all three cells show "Custom"
+    const limitsCard = page.locator('h3:has-text("Your Limits")').locator('..');
+    await expect(limitsCard.locator('p:has-text("Custom")').first()).toBeVisible();
+    // No "Platform default" or "No cap set" labels inside the limits card
+    await expect(limitsCard.locator('text=Platform default')).not.toBeVisible();
+    await expect(limitsCard.locator('text=No cap set')).not.toBeVisible();
+
+    await screenshot(page, 'budget-limits-all-custom-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('all-custom: 1M token limits display with M suffix', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_ALL_CUSTOM }); // 1_000_000 / 400_000
+    await goToSettingsUsage(page);
+
+    // The limits card value cell uses exact text like "1.0M" — use first() to avoid strict-mode issues
+    // with the utilization bar denominator which also contains "1.0M"
+    const limitsCard = page.locator('h3:has-text("Your Limits")').locator('..');
+    await expect(limitsCard.locator('text=1.0M').first()).toBeVisible();
+    await expect(limitsCard.locator('text=400.0K').first()).toBeVisible();
+    // Monthly cost cap value in limits card (exact $25.00 — scoped to limits card only)
+    await expect(limitsCard.locator('p:has-text("$25.00")')).toBeVisible();
+
+    await screenshot(page, 'budget-limits-all-custom-values-mobile');
+    await assertNoOverflow(page);
+  });
+
+  // ---- monthly cap only ----
+
+  test('monthly-cap-only: monthly field shows "Custom", tokens show "Platform default"', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_MONTHLY_CAP_ONLY });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    // Scoped to the limits card
+    const limitsCard = page.locator('h3:has-text("Your Limits")').locator('..');
+    // Monthly cost cap is custom, token limits use platform defaults
+    await expect(limitsCard.locator('p:has-text("Custom")')).toBeVisible();
+    await expect(limitsCard.locator('p:has-text("Platform default")').first()).toBeVisible();
+
+    await screenshot(page, 'budget-limits-monthly-cap-only-mobile');
+    await assertNoOverflow(page);
+  });
+
+  // ---- large M-scale limits ----
+
+  test('large limits: M-scale formatting does not overflow at 375px', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_LARGE_LIMITS }); // 10M / 5M / $1000
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    const limitsCard = page.locator('h3:has-text("Your Limits")').locator('..');
+    await expect(limitsCard.locator('text=10.0M').first()).toBeVisible();
+    await expect(limitsCard.locator('text=5.0M').first()).toBeVisible();
+    await expect(limitsCard.locator('p:has-text("$1000.00")')).toBeVisible();
+
+    await screenshot(page, 'budget-limits-large-limits-mobile');
+    await assertNoOverflow(page);
+  });
+
+  // ---- edge: zero cost cap ----
+
+  test('zero-cost edge: $0.00 renders without overflow', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_ZERO_COST });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    // Limits card shows the cap value; the utilization bar below shows "$0.00 / $50.00"
+    const limitsCard = page.locator('h3:has-text("Your Limits")').locator('..');
+    await expect(limitsCard.locator('p:has-text("$50.00")')).toBeVisible();
+
+    await screenshot(page, 'budget-limits-zero-cost-mobile');
+    await assertNoOverflow(page);
+  });
+
+  // ---- exceeded state ----
+
+  test('exceeded: card still renders cleanly with "Budget Exceeded" alert visible below', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_EXCEEDED });
+    await goToSettingsUsage(page);
+
+    // Your Limits card itself does not show an error state — it's purely informational
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    // The "Current Utilization" card directly below should show the exceeded alert
+    await expect(page.locator('text=Budget Exceeded')).toBeVisible();
+
+    await screenshot(page, 'budget-limits-exceeded-mobile');
+    await assertNoOverflow(page);
+  });
+
+  // ---- single-column layout on mobile ----
+
+  test('single-column baseline: three fields stack vertically at 375px', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_ALL_CUSTOM });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+
+    // The grid uses grid-cols-1 by default — verify all 3 label+value pairs visible without scroll
+    const inputLabel = page.locator('p:has-text("Daily Input Tokens")').first();
+    const outputLabel = page.locator('p:has-text("Daily Output Tokens")').first();
+    const capLabel = page.locator('p:has-text("Monthly Cost Cap")');
+
+    await expect(inputLabel).toBeVisible();
+    await expect(outputLabel).toBeVisible();
+    await expect(capLabel).toBeVisible();
+
+    await screenshot(page, 'budget-limits-single-column-mobile');
+    await assertNoOverflow(page);
+  });
+
+  // ---- card absent when budget API returns error ----
+
+  test('budget API error: Your Limits card is not rendered', async ({ page }) => {
+    await setupMocks(page, { budgetError: true });
+    await goToSettingsUsage(page);
+    // Budget section should not show the limits card when data is unavailable
+    await expect(page.locator('text=Your Limits')).not.toBeVisible();
+    // But the rest of the page (compute usage) should still render
+    await expect(page.locator('text=Budget Controls')).toBeVisible();
+
+    await screenshot(page, 'budget-limits-api-error-mobile');
+    await assertNoOverflow(page);
+  });
+
+  // ---- card position: "Your Limits" appears before "Current Utilization" ----
+
+  test('card order: Your Limits appears before Current Utilization in DOM', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_ALL_CUSTOM });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    await expect(page.locator('text=Current Utilization')).toBeVisible();
+
+    // Verify DOM order by comparing Y positions
+    const limitsBox = await page.locator('h3:has-text("Your Limits")').boundingBox();
+    const utilizationBox = await page.locator('h3:has-text("Current Utilization")').boundingBox();
+    expect(limitsBox).not.toBeNull();
+    expect(utilizationBox).not.toBeNull();
+    expect(limitsBox!.y).toBeLessThan(utilizationBox!.y);
+
+    await screenshot(page, 'budget-limits-card-order-mobile');
+    await assertNoOverflow(page);
+  });
+
+  // ---- near-limit: visual check (utilization bars, not limits card) ----
+
+  test('near-limit state: Your Limits card values unchanged regardless of utilization', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_NEAR_LIMIT });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    // Limits card still shows the limit values — it is not affected by usage level
+    await expect(page.locator('text=100.0K').first()).toBeVisible();
+
+    await screenshot(page, 'budget-limits-near-limit-mobile');
+    await assertNoOverflow(page);
+  });
+});
+
+// ===========================================================================
+// YOUR LIMITS CARD — Desktop (1280x800)
+// ===========================================================================
+
+test.describe('YourLimitsCard — Desktop (1280x800)', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+  test('platform defaults: three-column grid renders correctly at 1280px', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_PLATFORM_DEFAULTS });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    await expect(page.locator('text=Daily Input Tokens').first()).toBeVisible();
+    await expect(page.locator('text=Daily Output Tokens').first()).toBeVisible();
+    await expect(page.locator('text=Monthly Cost Cap')).toBeVisible();
+
+    await screenshot(page, 'budget-limits-platform-defaults-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('all-custom: three-column layout shows all values and Custom badges', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_ALL_CUSTOM });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    const limitsCard = page.locator('h3:has-text("Your Limits")').locator('..');
+    await expect(limitsCard.locator('text=1.0M').first()).toBeVisible();
+    await expect(limitsCard.locator('text=400.0K').first()).toBeVisible();
+    await expect(limitsCard.locator('p:has-text("$25.00")')).toBeVisible();
+    await expect(limitsCard.locator('p:has-text("Custom")').first()).toBeVisible();
+
+    await screenshot(page, 'budget-limits-all-custom-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('large limits: M-scale numbers do not cause overflow at 1280px', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_LARGE_LIMITS });
+    await goToSettingsUsage(page);
+
+    await expect(page.locator('text=Your Limits')).toBeVisible();
+    const limitsCard = page.locator('h3:has-text("Your Limits")').locator('..');
+    await expect(limitsCard.locator('text=10.0M').first()).toBeVisible();
+
+    await screenshot(page, 'budget-limits-large-limits-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('consistency: Your Limits token values match Current Utilization limit values', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_ALL_CUSTOM });
+    await goToSettingsUsage(page);
+
+    // Both cards render the effective limit for daily input — value should appear at least twice
+    // (once in the limits card, once as the denominator in utilization bar)
+    const millionValues = page.locator('text=1.0M');
+    const count = await millionValues.count();
+    expect(count).toBeGreaterThanOrEqual(2);
+
+    await screenshot(page, 'budget-limits-consistency-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('card typography: CardTitle uses correct heading level (h3)', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_PLATFORM_DEFAULTS });
+    await goToSettingsUsage(page);
+
+    // CardTitle renders as h3 per Typography.tsx
+    const cardTitle = page.locator('h3:has-text("Your Limits")');
+    await expect(cardTitle).toBeVisible();
+
+    await screenshot(page, 'budget-limits-heading-semantics-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('unlimited cost cap: "Unlimited" text and "No cap set" label visible', async ({ page }) => {
+    await setupMocks(page, { budget: BUDGET_PLATFORM_DEFAULTS });
+    await goToSettingsUsage(page);
+
+    // Scope to limits card to avoid matching the quota section's "Unlimited" span
+    const limitsCard = page.locator('h3:has-text("Your Limits")').locator('..');
+    await expect(limitsCard.locator('p:has-text("Unlimited")')).toBeVisible();
+    await expect(limitsCard.locator('p:has-text("No cap set")')).toBeVisible();
+
+    await screenshot(page, 'budget-limits-unlimited-desktop');
     await assertNoOverflow(page);
   });
 });
