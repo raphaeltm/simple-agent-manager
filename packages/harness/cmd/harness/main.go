@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"github.com/workspace/harness/mcp"
 	"github.com/workspace/harness/prompts"
 	"github.com/workspace/harness/repomap"
+	"github.com/workspace/harness/session"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
 )
@@ -42,11 +45,20 @@ func main() {
 		mockOrchScenario = flag.String("mock-orchestration", "", "Register mock orchestration tools with scenario: success, failure, or mixed (for eval without MCP)")
 		realOrch         = flag.Bool("real-orchestration", false, "Enable real subtask execution — dispatch_task spawns child harness sessions")
 		stream           = flag.Bool("stream", false, "Enable streaming output from LLM providers that support it")
+		sessionDB        = flag.String("session-db", defaultSessionDB(), "Path to SQLite session database")
+		resume           = flag.String("resume", "", "Resume a previous session by ID")
+		listSessions     = flag.Bool("list-sessions", false, "List saved sessions and exit")
 	)
 	flag.Parse()
 
-	if *prompt == "" {
-		fmt.Fprintln(os.Stderr, "error: --prompt is required")
+	// Handle --list-sessions before prompt validation.
+	if *listSessions {
+		handleListSessions(*sessionDB)
+		return
+	}
+
+	if *prompt == "" && *resume == "" {
+		fmt.Fprintln(os.Stderr, "error: --prompt is required (or use --resume to continue a session)")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -219,6 +231,44 @@ func main() {
 		}
 	}
 
+	// Open session store.
+	store, err := session.NewStore(*sessionDB)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening session store: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// Resolve session ID: resume existing or create new.
+	sessionID := *resume
+	userPrompt := *prompt
+	if sessionID != "" {
+		sess, err := store.LoadSession(sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error loading session %q: %v\n", sessionID, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Resuming session %s (status: %s)\n", sess.ID, sess.Status)
+		if userPrompt == "" {
+			userPrompt = sess.Config.UserPrompt
+		}
+	} else {
+		sessionID = generateSessionID()
+		_, err := store.CreateSession(sessionID, session.SessionConfig{
+			SystemPrompt: sysPrompt,
+			Model:        *model,
+			Provider:     *providerName,
+			WorkDir:      workDir,
+			MaxTurns:     *maxTurns,
+			UserPrompt:   userPrompt,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error creating session: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Session: %s\n", sessionID)
+	}
+
 	// Run agent loop with signal handling.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -230,6 +280,8 @@ func main() {
 		WorkerModel:      resolvedWorkerModel,
 		WorkDir:          workDir,
 		Stream:           *stream,
+		SessionStore:     store,
+		SessionID:        sessionID,
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,
@@ -237,13 +289,17 @@ func main() {
 			AuthHeader: *authHeader,
 			Model:      *model,
 		},
-	}, *prompt)
+	}, userPrompt)
 
+	// Update session status based on result.
 	if err != nil {
+		_ = store.UpdateStatus(sessionID, session.StatusError)
 		fmt.Fprintf(os.Stderr, "agent error: %v\n", err)
 		if result == nil {
 			os.Exit(1)
 		}
+	} else if result != nil {
+		_ = store.UpdateStatus(sessionID, session.StatusCompleted)
 	}
 
 	if result != nil {
@@ -288,4 +344,59 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// defaultSessionDB returns the default path for the session database.
+func defaultSessionDB() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".sam-harness/sessions.db"
+	}
+	return filepath.Join(home, ".sam-harness", "sessions.db")
+}
+
+// generateSessionID creates a short random hex session ID.
+func generateSessionID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID.
+		return fmt.Sprintf("sess-%d", time.Now().UnixMilli())
+	}
+	return hex.EncodeToString(b)
+}
+
+// handleListSessions prints all saved sessions and exits.
+func handleListSessions(dbPath string) {
+	store, err := session.NewStore(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening session store: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	summaries, err := store.ListSessions()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error listing sessions: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(summaries) == 0 {
+		fmt.Println("No saved sessions.")
+		return
+	}
+
+	fmt.Printf("%-18s  %-10s  %-5s  %-20s  %s\n", "ID", "STATUS", "MSGS", "UPDATED", "PROMPT")
+	for _, s := range summaries {
+		prompt := s.UserPrompt
+		if len(prompt) > 50 {
+			prompt = prompt[:47] + "..."
+		}
+		fmt.Printf("%-18s  %-10s  %-5d  %-20s  %s\n",
+			s.ID,
+			s.Status,
+			s.MessageCount,
+			s.UpdatedAt.Format("2006-01-02 15:04:05"),
+			prompt,
+		)
+	}
 }

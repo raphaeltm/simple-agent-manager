@@ -4,12 +4,19 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	ctxmgr "github.com/workspace/harness/context"
 	"github.com/workspace/harness/llm"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
 )
+
+// SessionStore is an optional persistence interface for saving messages after each turn.
+// Implementations are in the session package; the agent loop only depends on this interface.
+type SessionStore interface {
+	AppendMessages(sessionID string, turn int, messages []llm.Message) error
+}
 
 // EventHandler receives streaming events from the agent loop.
 // Implementations can display tokens in real-time, show progress, etc.
@@ -48,6 +55,10 @@ type Config struct {
 	Handler EventHandler
 	// Stream enables streaming when the provider supports it. Default: false.
 	Stream bool
+	// SessionStore, if set, persists messages after each turn. Errors are logged, not fatal.
+	SessionStore SessionStore
+	// SessionID identifies the session for persistence. Required when SessionStore is set.
+	SessionID string
 }
 
 // ProviderConfig stores provider connection details for child session spawning.
@@ -95,6 +106,9 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 		messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: cfg.SystemPrompt})
 	}
 	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: userPrompt})
+
+	// Persist the initial messages (system + user prompt) as turn 0.
+	persistMessages(cfg, 0, messages)
 
 	// Check if the provider supports streaming.
 	streamProvider, canStream := provider.(llm.StreamProvider)
@@ -156,6 +170,9 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 
 		// If no tool calls, the model is done.
 		if len(resp.ToolCalls) == 0 {
+			persistMessages(cfg, turn, []llm.Message{
+				{Role: llm.RoleAssistant, Content: resp.Content},
+			})
 			if cfg.Handler != nil {
 				cfg.Handler.OnTurnEnd(turn, 0)
 			}
@@ -206,6 +223,17 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			})
 		}
 
+		// Persist this turn's messages: assistant + all tool results.
+		turnMsgs := make([]llm.Message, 0, 1+len(resp.ToolCalls))
+		turnMsgs = append(turnMsgs, llm.Message{
+			Role:      llm.RoleAssistant,
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+		// Collect tool result messages from the end of the messages slice.
+		turnMsgs = append(turnMsgs, messages[len(messages)-len(resp.ToolCalls):]...)
+		persistMessages(cfg, turn, turnMsgs)
+
 		if cfg.Handler != nil {
 			cfg.Handler.OnTurnEnd(turn, len(resp.ToolCalls))
 		}
@@ -215,6 +243,17 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 		TurnsUsed:  maxTurns,
 		StopReason: "max_turns",
 	}, nil
+}
+
+// persistMessages saves turn messages to the session store if configured.
+// Errors are logged as warnings — persistence failures must not break the agent loop.
+func persistMessages(cfg Config, turn int, msgs []llm.Message) {
+	if cfg.SessionStore == nil || cfg.SessionID == "" {
+		return
+	}
+	if err := cfg.SessionStore.AppendMessages(cfg.SessionID, turn, msgs); err != nil {
+		slog.Warn("session persistence failed", "turn", turn, "error", err)
+	}
 }
 
 func truncate(s string, maxLen int) string {
