@@ -3,10 +3,10 @@
 // =============================================================================
 
 /** Supported agent identifiers */
-export type AgentType = 'claude-code' | 'openai-codex' | 'google-gemini' | 'mistral-vibe' | 'opencode';
+export type AgentType = 'claude-code' | 'openai-codex' | 'google-gemini' | 'mistral-vibe' | 'opencode' | 'sam-harness';
 
 /** API key provider identifiers */
-export type AgentProvider = 'anthropic' | 'openai' | 'google' | 'mistral' | 'opencode';
+export type AgentProvider = 'anthropic' | 'openai' | 'google' | 'mistral' | 'opencode' | 'sam';
 
 // =============================================================================
 // Agent Definition (Configuration Registry)
@@ -124,6 +124,19 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     credentialHelpUrl: 'https://console.scaleway.com/iam/api-keys',
     fallbackCloudProvider: 'scaleway',
     installCommand: 'npm install -g opencode-ai@1.4.3',
+  },
+  {
+    id: 'sam-harness',
+    name: 'SAM Harness',
+    description: 'SAM native Go coding agent harness',
+    provider: 'sam',
+    envVarName: 'SAM_API_KEY',
+    acpCommand: 'sam-harness',
+    acpArgs: ['--acp'],
+    supportsAcp: true,
+    credentialHelpUrl: '',
+    installCommand:
+      'cd /opt/harness && CGO_ENABLED=0 go build -o /usr/local/bin/sam-harness ./cmd/harness/',
   },
 ] as const;
 
