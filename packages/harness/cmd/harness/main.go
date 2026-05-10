@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	acpserver "github.com/workspace/harness/acp"
 	"github.com/workspace/harness/agent"
 	"github.com/workspace/harness/llm"
 	"github.com/workspace/harness/mcp"
@@ -50,6 +51,7 @@ func main() {
 		sessionDB        = flag.String("session-db", "", "Path to SQLite session database (enables persistence)")
 		resumeSession    = flag.String("resume", "", "Resume a previous session by ID")
 		listSessions     = flag.Bool("list-sessions", false, "List recent sessions and exit")
+		acpMode          = flag.Bool("acp", false, "Run in ACP mode: JSON-RPC over stdin/stdout (used by VM agent)")
 	)
 	flag.Parse()
 
@@ -80,6 +82,34 @@ func main() {
 			}
 		}
 		os.Exit(0)
+	}
+
+	// ACP mode: run as a JSON-RPC server over stdin/stdout.
+	// This branch handles the full lifecycle (Initialize, NewSession, Prompt, etc.)
+	// and never returns — it blocks until the peer disconnects.
+	if *acpMode {
+		runACPMode(acpModeArgs{
+			dir:              *dir,
+			providerName:     *providerName,
+			apiURL:           *apiURL,
+			apiKey:           *apiKey,
+			model:            *model,
+			workerModel:      *workerModel,
+			authHeader:       *authHeader,
+			maxTurns:         *maxTurns,
+			maxContextTokens: *maxContextTokens,
+			compactionStrat:  *compactionStrat,
+			stream:           *stream,
+			permissionMode:   *permissionMode,
+			parallelTools:    *parallelTools,
+			maxParallelTools: *maxParallelTools,
+			mcpURL:           *mcpURL,
+			mcpToken:         *mcpToken,
+			toolProfile:      *toolProfile,
+			mockOrchScenario: *mockOrchScenario,
+			realOrch:         *realOrch,
+		})
+		return // unreachable — runACPMode blocks
 	}
 
 	if *prompt == "" && *resumeSession == "" {
@@ -378,4 +408,201 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// acpModeArgs holds the flags needed to set up the ACP server.
+type acpModeArgs struct {
+	dir              string
+	providerName     string
+	apiURL           string
+	apiKey           string
+	model            string
+	workerModel      string
+	authHeader       string
+	maxTurns         int
+	maxContextTokens int
+	compactionStrat  string
+	stream           bool
+	permissionMode   string
+	parallelTools    bool
+	maxParallelTools int
+	mcpURL           string
+	mcpToken         string
+	toolProfile      string
+	mockOrchScenario string
+	realOrch         bool
+}
+
+// runACPMode starts the harness as an ACP JSON-RPC server on stdin/stdout.
+// It blocks until the peer disconnects or the process is interrupted.
+func runACPMode(args acpModeArgs) {
+	// Resolve working directory.
+	workDir := args.dir
+	if info, err := os.Stat(workDir); err != nil || !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "error: --dir %q is not a valid directory\n", workDir)
+		os.Exit(1)
+	}
+
+	// Create LLM provider.
+	provider := createProvider(args)
+
+	// Resolve worker model.
+	resolvedWorkerModel := args.workerModel
+	if resolvedWorkerModel == "" {
+		resolvedWorkerModel = args.model
+	}
+
+	// Build tool registry.
+	registry := buildToolRegistry(args, workDir, resolvedWorkerModel)
+
+	// Parse permission mode.
+	permMode, err := tools.ParsePermissionMode(args.permissionMode)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	cfg := agent.Config{
+		MaxTurns:           args.maxTurns,
+		MaxContextTokens:   args.maxContextTokens,
+		CompactionStrategy: agent.CompactionStrategy(args.compactionStrat),
+		WorkerModel:        resolvedWorkerModel,
+		WorkDir:            workDir,
+		Stream:             args.stream,
+		PermissionMode:     permMode,
+		PermissionChecker:  tools.AutoApproveChecker{},
+		ParallelTools:      args.parallelTools,
+		MaxParallelTools:   args.maxParallelTools,
+		ProviderConfig: &agent.ProviderConfig{
+			Name:       args.providerName,
+			APIURL:     args.apiURL,
+			APIKey:     args.apiKey,
+			AuthHeader: args.authHeader,
+			Model:      args.model,
+		},
+	}
+
+	handler := acpserver.NewHandler(acpserver.Deps{
+		Provider: provider,
+		Registry: registry,
+		Config:   cfg,
+	})
+
+	fmt.Fprintln(os.Stderr, "SAM harness: ACP mode active, waiting for JSON-RPC on stdin")
+	acpserver.Serve(handler, os.Stdout, os.Stdin)
+}
+
+// createProvider builds an LLM provider from the given args.
+func createProvider(args acpModeArgs) llm.Provider {
+	switch args.providerName {
+	case "mock":
+		return llm.NewMockProvider(
+			&llm.Response{Content: "I'll analyze this directory. Let me start by reading the files."},
+		)
+	case "openai":
+		if args.apiURL == "" {
+			fmt.Fprintln(os.Stderr, "error: --api-url is required when using openai provider")
+			os.Exit(1)
+		}
+		key := args.apiKey
+		if key == "" {
+			key = os.Getenv("SAM_API_KEY")
+		}
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "error: --api-key or SAM_API_KEY env var is required when using openai provider")
+			os.Exit(1)
+		}
+		opts := []llm.OpenAIOption{llm.WithModel(args.model)}
+		if args.authHeader != "" {
+			opts = append(opts, llm.WithAuthHeader(args.authHeader))
+		}
+		return llm.NewOpenAIClient(args.apiURL, key, opts...)
+	case "anthropic":
+		if args.apiURL == "" {
+			fmt.Fprintln(os.Stderr, "error: --api-url is required when using anthropic provider")
+			os.Exit(1)
+		}
+		key := args.apiKey
+		if key == "" {
+			key = os.Getenv("SAM_API_KEY")
+		}
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "error: --api-key or SAM_API_KEY env var is required when using anthropic provider")
+			os.Exit(1)
+		}
+		opts := []llm.AnthropicOption{llm.WithAnthropicModel(args.model)}
+		if args.authHeader != "" {
+			opts = append(opts, llm.WithAnthropicAuthHeader(args.authHeader))
+		}
+		return llm.NewAnthropicClient(args.apiURL, key, opts...)
+	default:
+		fmt.Fprintf(os.Stderr, "error: unknown provider %q\n", args.providerName)
+		os.Exit(1)
+		return nil
+	}
+}
+
+// buildToolRegistry creates a tool registry with local and optional MCP/orchestration tools.
+func buildToolRegistry(args acpModeArgs, workDir, resolvedWorkerModel string) *tools.Registry {
+	registry := tools.NewRegistry()
+	localTools := []tools.Tool{
+		&tools.ReadFile{WorkDir: workDir},
+		&tools.WriteFile{WorkDir: workDir},
+		&tools.EditFile{WorkDir: workDir},
+		&tools.ApplyDiff{WorkDir: workDir},
+		&tools.Bash{WorkDir: workDir},
+		&tools.Grep{WorkDir: workDir},
+		&tools.Glob{WorkDir: workDir},
+		&tools.GitStatus{WorkDir: workDir},
+		&tools.GitDiff{WorkDir: workDir},
+		&tools.GitLog{WorkDir: workDir},
+		&tools.GitCommit{WorkDir: workDir},
+		&tools.GitBranch{WorkDir: workDir},
+	}
+
+	allTools := localTools
+
+	if args.mcpURL != "" {
+		if args.mcpToken == "" {
+			fmt.Fprintln(os.Stderr, "error: --mcp-token (or SAM_MCP_TOKEN) is required when --mcp-url is set")
+			os.Exit(1)
+		}
+		client := mcp.NewClient(args.mcpURL, args.mcpToken)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		mcpDefs, err := client.ListTools(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error discovering MCP tools: %v\n", err)
+			os.Exit(1)
+		}
+		mcpTools := mcp.AdaptTools(client, mcpDefs)
+		allTools = append(allTools, mcpTools...)
+	}
+
+	if args.mockOrchScenario != "" && args.realOrch {
+		fmt.Fprintln(os.Stderr, "error: --mock-orchestration and --real-orchestration are mutually exclusive")
+		os.Exit(1)
+	}
+	if args.mockOrchScenario != "" {
+		allTools = append(allTools, tools.MockOrchestrationTools(args.mockOrchScenario)...)
+	}
+	if args.realOrch {
+		realState := tools.NewRealOrchestrationState()
+		realState.WorkDir = workDir
+		realState.Model = resolvedWorkerModel
+		realState.APIURL = args.apiURL
+		realState.APIKey = args.apiKey
+		realState.AuthHeader = args.authHeader
+		allTools = append(allTools, tools.RealOrchestrationTools(realState)...)
+	}
+
+	allTools = mcp.FilterTools(args.toolProfile, allTools)
+
+	for _, t := range allTools {
+		if err := registry.Register(t); err != nil {
+			fmt.Fprintf(os.Stderr, "error registering tool %s: %v\n", t.Name(), err)
+			os.Exit(1)
+		}
+	}
+	return registry
 }
