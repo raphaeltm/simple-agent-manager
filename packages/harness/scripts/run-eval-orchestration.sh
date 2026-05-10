@@ -36,6 +36,12 @@ fi
 
 MODEL="${SAM_AI_MODEL:-gpt-4.1-mini}"
 AUTH_HEADER="${SAM_AI_AUTH_HEADER:-}"
+
+# Auto-detect provider from model name.
+PROVIDER="${SAM_AI_PROVIDER:-openai}"
+if [[ "$MODEL" == claude-* ]] && [ "$PROVIDER" = "openai" ]; then
+  PROVIDER="anthropic"
+fi
 RESULTS_DIR="/tmp/harness-orch-eval"
 mkdir -p "$RESULTS_DIR"
 
@@ -44,6 +50,7 @@ echo "  SAM Orchestration Eval"
 echo "============================================"
 echo "  Proxy URL: ${SAM_AI_PROXY_URL}"
 echo "  Model:     ${MODEL}"
+echo "  Provider:  ${PROVIDER}"
 if [ -n "$AUTH_HEADER" ]; then
   echo "  Auth:      ${AUTH_HEADER}"
 fi
@@ -93,7 +100,7 @@ run_scenario() {
     --dir "$WORK_DIR" \
     --prompt "$(echo -e "$PROMPT")" \
     --transcript "$TRANSCRIPT" \
-    --provider openai \
+    --provider "$PROVIDER" \
     --api-url "$SAM_AI_PROXY_URL" \
     --api-key "$SAM_AI_PROXY_KEY" \
     --model "$MODEL" \

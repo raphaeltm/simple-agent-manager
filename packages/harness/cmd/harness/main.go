@@ -29,7 +29,7 @@ func main() {
 		systemPrompt     = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt (lowest precedence)")
 		promptFile       = flag.String("prompt-file", "", "Path to a markdown file to use as system prompt (highest precedence)")
 		promptPreset     = flag.String("prompt-preset", "", "Built-in prompt preset: workspace, orchestrator")
-		providerName     = flag.String("provider", "mock", "LLM provider: mock or openai")
+		providerName     = flag.String("provider", "mock", "LLM provider: mock, openai, or anthropic")
 		apiURL           = flag.String("api-url", "", "OpenAI-compatible API base URL (enables real LLM provider)")
 		apiKey           = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
 		model            = flag.String("model", llm.DefaultModel, "Model ID for LLM completions (used for orchestrator when --worker-model is set)")
@@ -84,8 +84,27 @@ func main() {
 		}
 		provider = llm.NewOpenAIClient(*apiURL, key, opts...)
 		fmt.Fprintf(os.Stderr, "Using OpenAI-compatible provider: %s (model: %s)\n", *apiURL, *model)
+	case "anthropic":
+		if *apiURL == "" {
+			fmt.Fprintln(os.Stderr, "error: --api-url is required when using anthropic provider")
+			os.Exit(1)
+		}
+		key := *apiKey
+		if key == "" {
+			key = os.Getenv("SAM_API_KEY")
+		}
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "error: --api-key or SAM_API_KEY env var is required when using anthropic provider")
+			os.Exit(1)
+		}
+		opts := []llm.AnthropicOption{llm.WithAnthropicModel(*model)}
+		if *authHeader != "" {
+			opts = append(opts, llm.WithAnthropicAuthHeader(*authHeader))
+		}
+		provider = llm.NewAnthropicClient(*apiURL, key, opts...)
+		fmt.Fprintf(os.Stderr, "Using Anthropic provider: %s (model: %s)\n", *apiURL, *model)
 	default:
-		fmt.Fprintf(os.Stderr, "error: unknown provider %q (use mock or openai)\n", *providerName)
+		fmt.Fprintf(os.Stderr, "error: unknown provider %q (use mock, openai, or anthropic)\n", *providerName)
 		os.Exit(1)
 	}
 
