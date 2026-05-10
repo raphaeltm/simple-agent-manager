@@ -48,6 +48,10 @@ type Response struct {
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	// StopReason indicates why the model stopped generating.
 	StopReason string `json:"stop_reason,omitempty"`
+	// CacheCreationInputTokens is the number of tokens written to cache (Anthropic only).
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	// CacheReadInputTokens is the number of tokens read from cache (Anthropic only).
+	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
 }
 
 // Provider is the interface that LLM backends must implement.

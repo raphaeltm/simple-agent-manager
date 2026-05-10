@@ -13,11 +13,12 @@ import (
 
 // AnthropicClient implements Provider using the Anthropic Messages API.
 type AnthropicClient struct {
-	baseURL    string
-	apiKey     string
-	model      string
-	authHeader string // header name for the API key (default: "x-api-key")
-	httpClient *http.Client
+	baseURL        string
+	apiKey         string
+	model          string
+	authHeader     string // header name for the API key (default: "x-api-key")
+	promptCaching  bool   // whether to add cache_control blocks
+	httpClient     *http.Client
 }
 
 // AnthropicOption configures an AnthropicClient.
@@ -33,13 +34,20 @@ func WithAnthropicAuthHeader(header string) AnthropicOption {
 	return func(c *AnthropicClient) { c.authHeader = header }
 }
 
+// WithPromptCaching enables or disables cache_control blocks on system prompts and tools.
+// Defaults to true. Prompt caching gives ~90% cost savings on repeated system prompts.
+func WithPromptCaching(enabled bool) AnthropicOption {
+	return func(c *AnthropicClient) { c.promptCaching = enabled }
+}
+
 // NewAnthropicClient creates a new Anthropic Messages API provider.
 // baseURL should be the API base (e.g. "https://api.anthropic.com" or a gateway URL).
 func NewAnthropicClient(baseURL, apiKey string, opts ...AnthropicOption) *AnthropicClient {
 	c := &AnthropicClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		model:   "claude-sonnet-4-5-20250514",
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		apiKey:        apiKey,
+		model:         "claude-sonnet-4-5-20250514",
+		promptCaching: true,
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -181,7 +189,11 @@ func (c *AnthropicClient) buildRequest(messages []Message, tools []ToolDefinitio
 		Messages:  anthMsgs,
 	}
 	if systemText != "" {
-		req.System = systemText
+		block := anthSystemBlock{Type: "text", Text: systemText}
+		if c.promptCaching {
+			block.CacheControl = &anthCacheControl{Type: "ephemeral"}
+		}
+		req.System = []anthSystemBlock{block}
 	}
 
 	if len(tools) > 0 {
@@ -192,6 +204,9 @@ func (c *AnthropicClient) buildRequest(messages []Message, tools []ToolDefinitio
 				Description: t.Description,
 				InputSchema: t.Parameters,
 			}
+		}
+		if c.promptCaching {
+			anthTools[len(anthTools)-1].CacheControl = &anthCacheControl{Type: "ephemeral"}
 		}
 		req.Tools = anthTools
 	}
@@ -207,6 +222,10 @@ func (c *AnthropicClient) parseResponse(body []byte) (*Response, error) {
 
 	resp := &Response{
 		StopReason: anthResp.StopReason,
+	}
+	if anthResp.Usage != nil {
+		resp.CacheCreationInputTokens = anthResp.Usage.CacheCreationInputTokens
+		resp.CacheReadInputTokens = anthResp.Usage.CacheReadInputTokens
 	}
 
 	for _, block := range anthResp.Content {
@@ -259,12 +278,22 @@ func (c *AnthropicClient) parseError(statusCode int, body []byte) error {
 
 // --- Anthropic API wire types ---
 
+type anthCacheControl struct {
+	Type string `json:"type"`
+}
+
+type anthSystemBlock struct {
+	Type         string            `json:"type"`
+	Text         string            `json:"text"`
+	CacheControl *anthCacheControl `json:"cache_control,omitempty"`
+}
+
 type anthRequest struct {
-	Model     string        `json:"model"`
-	MaxTokens int           `json:"max_tokens"`
-	System    string        `json:"system,omitempty"`
-	Messages  []anthMessage `json:"messages"`
-	Tools     []anthTool    `json:"tools,omitempty"`
+	Model     string           `json:"model"`
+	MaxTokens int              `json:"max_tokens"`
+	System    []anthSystemBlock `json:"system,omitempty"`
+	Messages  []anthMessage    `json:"messages"`
+	Tools     []anthTool       `json:"tools,omitempty"`
 }
 
 type anthMessage struct {
@@ -288,9 +317,10 @@ type anthContentBlock struct {
 }
 
 type anthTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description"`
+	InputSchema  map[string]any    `json:"input_schema"`
+	CacheControl *anthCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthResponse struct {
@@ -300,7 +330,9 @@ type anthResponse struct {
 	Content    []anthContentBlock `json:"content"`
 	StopReason string             `json:"stop_reason"`
 	Usage      *struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage,omitempty"`
 }

@@ -108,11 +108,18 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			return &Result{TurnsUsed: turn, StopReason: "error"}, fmt.Errorf("turn %d: LLM error: %w", turn, err)
 		}
 
-		log.Append(transcript.EventLLMResponse, turn, map[string]any{
-			"content":       resp.Content,
+		responseData := map[string]any{
+			"content":         resp.Content,
 			"tool_call_count": len(resp.ToolCalls),
-			"stop_reason":   resp.StopReason,
-		})
+			"stop_reason":     resp.StopReason,
+		}
+		if resp.CacheCreationInputTokens > 0 {
+			responseData["cache_creation_input_tokens"] = resp.CacheCreationInputTokens
+		}
+		if resp.CacheReadInputTokens > 0 {
+			responseData["cache_read_input_tokens"] = resp.CacheReadInputTokens
+		}
+		log.Append(transcript.EventLLMResponse, turn, responseData)
 
 		// If no tool calls, the model is done.
 		if len(resp.ToolCalls) == 0 {
