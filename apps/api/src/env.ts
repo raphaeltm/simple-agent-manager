@@ -218,7 +218,10 @@ export interface Env {
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   // ACP Session Lifecycle (spec 027)
   ACP_SESSION_DETECTION_WINDOW_MS?: string;
+  ACP_SESSION_NO_HEARTBEAT_TIMEOUT_MS?: string;
   ACP_SESSION_MAX_FORK_DEPTH?: string;
+  // Chat session staleness sweep
+  CHAT_SESSION_STALE_TIMEOUT_MS?: string;
   // Branch name generation (chat-first submit)
   BRANCH_NAME_PREFIX?: string;
   BRANCH_NAME_MAX_LENGTH?: string;

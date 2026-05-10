@@ -263,21 +263,27 @@ export async function checkStaleChatSessions(
   let stopped = 0;
 
   // 1. Stop sessions whose workspace is in a terminal state
-  if (env.DATABASE) {
-    const activeWithWorkspace = sql
-      .exec(
-        `SELECT id, workspace_id FROM chat_sessions
-         WHERE status = 'active' AND workspace_id IS NOT NULL`
-      )
-      .toArray();
+  const activeWithWorkspace = sql
+    .exec(
+      `SELECT id, workspace_id FROM chat_sessions
+       WHERE status = 'active' AND workspace_id IS NOT NULL`
+    )
+    .toArray();
 
-    for (const row of activeWithWorkspace) {
-      const sessionId = row.id as string;
-      const workspaceId = row.workspace_id as string;
-      try {
-        const wsRow = await env.DATABASE.prepare(
-          `SELECT status FROM workspaces WHERE id = ?`
-        ).bind(workspaceId).first<{ status: string }>();
+  if (activeWithWorkspace.length > 0) {
+    // Batch D1 reads to avoid N+1 query pattern
+    const stmts = activeWithWorkspace.map((row) =>
+      env.DATABASE.prepare('SELECT id, status FROM workspaces WHERE id = ?').bind(row.workspace_id as string)
+    );
+
+    try {
+      const results = await env.DATABASE.batch<{ id: string; status: string }>(stmts);
+
+      for (let i = 0; i < activeWithWorkspace.length; i++) {
+        const row = activeWithWorkspace[i]!;
+        const sessionId = row.id as string;
+        const workspaceId = row.workspace_id as string;
+        const wsRow = results[i]?.results?.[0] ?? null;
 
         if (!wsRow || ['stopped', 'deleted', 'error'].includes(wsRow.status)) {
           stopSessionInternal(sql, sessionId);
@@ -288,13 +294,12 @@ export async function checkStaleChatSessions(
           });
           stopped++;
         }
-      } catch (err) {
-        log.error('session.stale_check_workspace_failed', {
-          sessionId,
-          workspaceId,
-          error: err instanceof Error ? err.message : String(err),
-        });
       }
+    } catch (err) {
+      log.error('session.stale_check_workspace_batch_failed', {
+        sessionCount: activeWithWorkspace.length,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

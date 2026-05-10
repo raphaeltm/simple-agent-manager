@@ -707,8 +707,9 @@ export class ProjectData extends DurableObject<Env> {
     const heartbeatAlarmTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
     if (heartbeatAlarmTime === null) { await this.recalculateAlarm(); return; }
     const { idleCleanupTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
-    const earliest = idleCleanupTime ? Math.min(heartbeatAlarmTime, idleCleanupTime) : heartbeatAlarmTime;
-    await this.ctx.storage.setAlarm(earliest);
+    const staleChatTime = sessions.computeStaleChatSessionAlarmTime(this.sql, this.env);
+    const candidates = [heartbeatAlarmTime, idleCleanupTime, staleChatTime].filter((t): t is number => t !== null);
+    await this.ctx.storage.setAlarm(Math.min(...candidates));
   }
 
   private broadcastEvent(type: string, payload: Record<string, unknown>, sessionId?: string): void {

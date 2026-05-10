@@ -449,8 +449,13 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
   }
 
   // 6. Heartbeat staleness: destroy running nodes with stale heartbeats and no active workspaces.
-  //    Distinct from orphan check (step 4) which uses updated_at — this uses last_heartbeat_at
-  //    specifically for nodes that were once healthy but stopped sending heartbeats.
+  //    Distinct from orphan check (step 4) which uses updated_at + warm_since IS NULL.
+  //    This step catches nodes that HAVE heartbeated at some point but stopped.
+  //    Overlap safety: step 4 sets status='deleted' before this query runs, so nodes
+  //    already destroyed by step 4 won't match status='running' here. The two checks
+  //    are conceptually related but target different failure modes:
+  //    - Step 4: nodes that never entered warm pool and haven't been updated recently
+  //    - Step 6: nodes that had a heartbeat but stopped sending it
   const heartbeatStaleMs = parseMs(env.NODE_HEARTBEAT_STALE_DESTROY_MS, DEFAULT_NODE_HEARTBEAT_STALE_DESTROY_MS);
   const heartbeatStaleThreshold = new Date(now.getTime() - heartbeatStaleMs).toISOString();
   const heartbeatStaleNodes = await env.DATABASE.prepare(
