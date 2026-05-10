@@ -94,6 +94,53 @@ Eight scripted evaluation tasks verify the architecture works end-to-end. All ru
 | `testdata/refactor-project/` | 2 | Go project with unexported functions to export |
 | `testdata/large-project/` | 21 | Multi-package project (auth, db, handlers, middleware, models, workers) |
 
+## Orchestration Mode
+
+The harness supports an orchestrator role that decomposes tasks into subtasks and delegates work to child agents.
+
+### Mock Orchestration (for eval)
+
+```bash
+./harness \
+  --provider openai \
+  --api-url "$SAM_AI_PROXY_URL" \
+  --api-key "$SAM_AI_PROXY_KEY" \
+  --model "gpt-5.4-mini" \
+  --prompt "Refactor the auth middleware into its own package" \
+  --prompt-preset orchestrator \
+  --mock-orchestration success \
+  --tool-profile full \
+  --dir /path/to/project
+```
+
+Use `--mock-orchestration <scenario>` where scenario is `success`, `failure`, or `mixed`. This simulates subtask execution so the model's orchestration decisions can be evaluated without real child processes.
+
+### Real Orchestration
+
+```bash
+./harness \
+  --provider openai \
+  --api-url "$SAM_AI_PROXY_URL" \
+  --api-key "$SAM_AI_PROXY_KEY" \
+  --model "gpt-5.4-mini" \
+  --worker-model "gpt-4.1-mini" \
+  --prompt "Refactor the auth middleware into its own package" \
+  --prompt-preset orchestrator \
+  --real-orchestration \
+  --tool-profile full \
+  --dir /path/to/project
+```
+
+Use `--real-orchestration` to spawn actual harness child sessions for each `dispatch_task` call. Child sessions use `--worker-model` (defaults to `--model` if not set), the `workspace` prompt preset, and `workspace` tool profile.
+
+### Model Routing
+
+Use `--worker-model` to route different models to different roles:
+- `--model` sets the orchestrator model (the one that decomposes and delegates)
+- `--worker-model` sets the model for child subtask sessions (the ones that do the work)
+
+This enables cost-effective orchestration: use a capable model for planning and a cheaper model for execution.
+
 ## Running Against a Real Model
 
 The `scripts/run-eval-real.sh` script runs eval tasks against a real LLM via the SAM AI Gateway. This is for manual validation only — not run in CI.
