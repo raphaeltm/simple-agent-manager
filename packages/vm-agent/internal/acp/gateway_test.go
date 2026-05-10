@@ -540,6 +540,45 @@ func TestAppendSAMHarnessProxyEnv(t *testing.T) {
 	}
 }
 
+func TestWriteSAMHarnessStartupConfigInjectsMCPEnv(t *testing.T) {
+	t.Parallel()
+
+	host := &SessionHost{
+		config: GatewayConfig{
+			WorkspaceID: "ws-123",
+			McpServers: []McpServerEntry{
+				{URL: "https://api.example.com/mcp", Token: "mcp-token"},
+			},
+		},
+	}
+	startup := &agentStartup{}
+
+	host.writeSAMHarnessStartupConfig(startup)
+
+	assertEnvContains(t, startup.envVars, "SAM_MCP_URL", "https://api.example.com/mcp")
+	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "mcp-token")
+}
+
+func TestWriteSAMHarnessStartupConfigSkipsInvalidMCPEnv(t *testing.T) {
+	t.Parallel()
+
+	host := &SessionHost{
+		config: GatewayConfig{
+			WorkspaceID: "ws-123",
+			McpServers: []McpServerEntry{
+				{URL: "https://bad.example.com/mcp\nx", Token: "bad-token"},
+				{URL: "https://api.example.com/mcp", Token: "good-token"},
+			},
+		},
+	}
+	startup := &agentStartup{}
+
+	host.writeSAMHarnessStartupConfig(startup)
+
+	assertEnvContains(t, startup.envVars, "SAM_MCP_URL", "https://api.example.com/mcp")
+	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "good-token")
+}
+
 func TestAgentInstallScriptSamHarnessNotNpmBased(t *testing.T) {
 	t.Parallel()
 

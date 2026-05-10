@@ -315,6 +315,9 @@ func (h *SessionHost) writeAgentStartupConfig(ctx context.Context, agentType str
 	if agentType == "mistral-vibe" {
 		h.writeVibeStartupConfig(ctx, startup)
 	}
+	if agentType == "sam-harness" {
+		h.writeSAMHarnessStartupConfig(startup)
+	}
 	return nil
 }
 
@@ -326,6 +329,22 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, startup *agen
 	}
 	startup.envVars = append(startup.envVars, codexMcpEnvVars...)
 	slog.Info("Wrote Codex config.toml", "mcpServers", len(h.config.McpServers))
+}
+
+func (h *SessionHost) writeSAMHarnessStartupConfig(startup *agentStartup) {
+	for _, server := range h.config.McpServers {
+		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
+			slog.Warn("Skipping SAM harness MCP server with control characters",
+				"workspaceId", h.config.WorkspaceID)
+			continue
+		}
+		startup.envVars = append(startup.envVars,
+			"SAM_MCP_URL="+server.URL,
+			"SAM_MCP_TOKEN="+server.Token,
+		)
+		slog.Info("Injected SAM harness MCP env", "workspaceId", h.config.WorkspaceID)
+		return
+	}
 }
 
 func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) {
