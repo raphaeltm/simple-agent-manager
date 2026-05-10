@@ -486,9 +486,8 @@ func TestGetAgentCommandInfoSamHarness(t *testing.T) {
 	if len(info.args) != 1 || info.args[0] != "--acp" {
 		t.Fatalf("args=%v, want [--acp]", info.args)
 	}
-	wantInstall := "cd /opt/harness && CGO_ENABLED=0 go build -o /usr/local/bin/sam-harness ./cmd/harness/"
-	if info.installCmd != wantInstall {
-		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
+	if info.installCmd != samHarnessInstallCmd {
+		t.Fatalf("installCmd=%q, want %q", info.installCmd, samHarnessInstallCmd)
 	}
 	if info.isNpmBased {
 		t.Fatalf("isNpmBased=true, want false (sam-harness uses Go, not npm)")
@@ -519,12 +518,27 @@ func TestGetAgentExtraEnvVars_SamHarness(t *testing.T) {
 	}
 }
 
+func TestAppendSAMHarnessProxyEnv(t *testing.T) {
+	t.Parallel()
+
+	envVars := appendSAMHarnessProxyEnv(nil, "https://api.example.com/ai/v1", "callback-token", "@cf/google/gemma")
+	want := []string{
+		"SAM_PROVIDER=openai",
+		"SAM_API_URL=https://api.example.com/ai/v1",
+		"SAM_API_KEY=callback-token",
+		"SAM_AI_MODEL=@cf/google/gemma",
+	}
+	if strings.Join(envVars, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("appendSAMHarnessProxyEnv() = %v, want %v", envVars, want)
+	}
+}
+
 func TestAgentInstallScriptSamHarnessNotNpmBased(t *testing.T) {
 	t.Parallel()
 
 	info := agentCommandInfo{
 		command:    "sam-harness",
-		installCmd: "cd /opt/harness && CGO_ENABLED=0 go build -o /usr/local/bin/sam-harness ./cmd/harness/",
+		installCmd: samHarnessInstallCmd,
 		isNpmBased: false,
 	}
 

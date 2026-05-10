@@ -136,7 +136,7 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     supportsAcp: true,
     credentialHelpUrl: '',
     installCommand:
-      'cd /opt/harness && CGO_ENABLED=0 go build -o /usr/local/bin/sam-harness ./cmd/harness/',
+      'set -eu; . /etc/sam/env; arch="$(uname -m)"; case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "Unsupported architecture: $arch"; exit 1 ;; esac; curl -fsSL "$SAM_API_URL/api/agent/download?agent=sam-harness&os=linux&arch=$arch" -o /usr/local/bin/sam-harness; chmod +x /usr/local/bin/sam-harness',
   },
 ] as const;
 

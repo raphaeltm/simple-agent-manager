@@ -787,6 +787,8 @@ type agentCommandInfo struct {
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
+const samHarnessInstallCmd = `set -eu; . /etc/sam/env; arch="$(uname -m)"; case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "Unsupported architecture: $arch"; exit 1 ;; esac; curl -fsSL "$SAM_API_URL/api/agent/download?agent=sam-harness&os=linux&arch=$arch" -o /usr/local/bin/sam-harness; chmod +x /usr/local/bin/sam-harness`
+
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
 // The credentialKind parameter determines which environment variable to use for Claude Code.
@@ -829,7 +831,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:    "sam-harness",
 			args:       []string{"--acp"},
 			envVarName: "SAM_API_KEY",
-			installCmd: "cd /opt/harness && CGO_ENABLED=0 go build -o /usr/local/bin/sam-harness ./cmd/harness/",
+			installCmd: samHarnessInstallCmd,
 			isNpmBased: false,
 		}
 	default:

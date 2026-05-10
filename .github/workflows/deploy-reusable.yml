@@ -18,7 +18,7 @@ on:
 
 env:
   NODE_VERSION: '22'
-  GO_VERSION: '1.24'
+  GO_VERSION: '1.25'
 
 jobs:
   validate:
@@ -627,12 +627,19 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            packages/vm-agent/go.sum
+            packages/harness/go.sum
 
       - name: Build VM Agent
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
         run: make -C packages/vm-agent build-all
 
-      - name: Upload VM Agent Binaries
+      - name: Build SAM Harness
+        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
+        run: make -C packages/harness build-all
+
+      - name: Upload Agent Binaries
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
         working-directory: infra
         run: |
@@ -640,6 +647,8 @@ jobs:
           # Wrangler v4: R2 commands default to local; --remote required for deployed R2.
           pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64 --remote
           pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/sam-harness-linux-amd64 --file $GITHUB_WORKSPACE/packages/harness/bin/sam-harness-linux-amd64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/sam-harness-linux-arm64 --file $GITHUB_WORKSPACE/packages/harness/bin/sam-harness-linux-arm64 --remote
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

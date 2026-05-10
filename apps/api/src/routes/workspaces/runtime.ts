@@ -29,7 +29,7 @@ import {
 } from './_helpers';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
-const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(['opencode', 'claude-code', 'openai-codex']);
+const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(['opencode', 'claude-code', 'openai-codex', 'sam-harness']);
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -87,6 +87,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     const baseDomain = c.env.BASE_DOMAIN;
     const isClaudeCode = body.agentType === 'claude-code';
     const isCodex = body.agentType === 'openai-codex';
+    const isSamHarness = body.agentType === 'sam-harness';
 
     // Resolve default model: KV (admin-set) > env var > shared constant
     let defaultModel: string;
@@ -118,7 +119,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         // with the callback token at injection time.
         proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/anthropic`;
         proxyProvider = 'anthropic-passthrough';
-      } else if (isCodex) {
+      } else if (isCodex || isSamHarness) {
         // Codex appends /chat/completions to OPENAI_BASE_URL.
         // Passthrough route: /ai/proxy/{wstoken}/openai/v1/chat/completions
         proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/openai/v1`;
@@ -174,7 +175,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     if (isClaudeCode) {
       proxyBaseUrl = `https://api.${baseDomain}/ai/anthropic`;
       proxyProvider = 'anthropic-proxy';
-    } else if (isCodex) {
+    } else if (isCodex || isSamHarness) {
       proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
       proxyProvider = 'openai-proxy';
     } else {

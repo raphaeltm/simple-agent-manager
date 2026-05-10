@@ -321,4 +321,54 @@ describe('runtime.ts always-proxy', () => {
     expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/openai/v1');
   });
+
+  it('returns platform OpenAI proxy config for sam-harness with no credential', async () => {
+    mockDbLimit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }]; // workspace
+      if (queryCount === 2) return []; // tasks
+      return [];
+    });
+    mockGetDecryptedAgentKey.mockResolvedValueOnce(null);
+
+    const res = await postAgentKey('sam-harness');
+
+    expect(res.status).toBe(200);
+    const json = await res.json() as {
+      apiKey: string;
+      credentialSource: string;
+      inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
+    };
+    expect(json.apiKey).toBe('__platform_proxy__');
+    expect(json.credentialSource).toBe('platform');
+    expect(json.inferenceConfig.provider).toBe('openai-proxy');
+    expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
+    expect(json.inferenceConfig.baseURL).toBe('https://api.example.com/ai/v1');
+  });
+
+  it('returns passthrough OpenAI proxy config for sam-harness with user credential', async () => {
+    mockDbLimit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }]; // workspace
+      if (queryCount === 2) return []; // tasks
+      return [];
+    });
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: 'sk-openai-compatible-user-key',
+      credentialKind: 'api-key',
+      credentialSource: 'user',
+    });
+
+    const res = await postAgentKey('sam-harness');
+
+    expect(res.status).toBe(200);
+    const json = await res.json() as {
+      apiKey: string;
+      inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
+    };
+    expect(json.apiKey).toBe('sk-openai-compatible-user-key');
+    expect(json.inferenceConfig.provider).toBe('openai-passthrough');
+    expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
+    expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/openai/v1');
+  });
 });

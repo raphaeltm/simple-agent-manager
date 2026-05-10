@@ -189,6 +189,13 @@ func (h *SessionHost) injectPassthroughProxyCredential(
 			"credentialLen", len(cred.credential), "workspaceId", h.config.WorkspaceID)
 		return envVars, settings, nil
 	}
+	if agentType == "sam-harness" && cred.inferenceConfig.Provider == "openai-passthrough" {
+		envVars = appendSAMHarnessProxyEnv(envVars, baseURL, cred.credential, cred.inferenceConfig.Model)
+		slog.Info("SAM harness passthrough proxy credential injected",
+			"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
+			"credentialLen", len(cred.credential), "workspaceId", h.config.WorkspaceID)
+		return envVars, settings, nil
+	}
 
 	envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+baseURL, "OPENCODE_PLATFORM_API_KEY="+cred.credential)
 	settings = configureOpenCodePlatformSettings(settings, cred.inferenceConfig.Model)
@@ -222,6 +229,13 @@ func (h *SessionHost) injectPlatformProxyCredential(
 			"callbackTokenLen", len(h.config.CallbackToken), "workspaceId", h.config.WorkspaceID)
 		return envVars, settings, nil
 	}
+	if agentType == "sam-harness" && cred.inferenceConfig.Provider == "openai-proxy" {
+		envVars = appendSAMHarnessProxyEnv(envVars, cred.inferenceConfig.BaseURL, h.config.CallbackToken, cred.inferenceConfig.Model)
+		slog.Info("SAM harness AI proxy credential injected",
+			"baseURL", cred.inferenceConfig.BaseURL, "model", cred.inferenceConfig.Model,
+			"callbackTokenLen", len(h.config.CallbackToken), "workspaceId", h.config.WorkspaceID)
+		return envVars, settings, nil
+	}
 
 	envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+cred.inferenceConfig.BaseURL, "OPENCODE_PLATFORM_API_KEY="+h.config.CallbackToken)
 	settings = configureOpenCodePlatformSettings(settings, cred.inferenceConfig.Model)
@@ -244,6 +258,14 @@ func appendOpenAIProxyEnv(envVars []string, baseURL, credential, model string) [
 	envVars = append(envVars, "OPENAI_BASE_URL="+baseURL, "OPENAI_API_KEY="+credential)
 	if model != "" {
 		envVars = append(envVars, "OPENAI_MODEL="+model)
+	}
+	return envVars
+}
+
+func appendSAMHarnessProxyEnv(envVars []string, baseURL, credential, model string) []string {
+	envVars = append(envVars, "SAM_PROVIDER=openai", "SAM_API_URL="+baseURL, "SAM_API_KEY="+credential)
+	if model != "" {
+		envVars = append(envVars, "SAM_AI_MODEL="+model)
 	}
 	return envVars
 }
