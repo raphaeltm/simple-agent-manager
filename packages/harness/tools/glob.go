@@ -80,13 +80,14 @@ func (t *Glob) Execute(_ context.Context, params map[string]any) (string, error)
 	}
 
 	if len(matches) == 0 {
-		return "No files matched.", nil
+		return fmt.Sprintf("No files found matching %q. Try '**/*.go' for recursive search.", pattern), nil
 	}
 
 	output := strings.Join(matches, "\n")
 	if len(matches) >= maxResults {
 		output += fmt.Sprintf("\n\n(truncated: showing first %d results)", maxResults)
 	}
+	output += fmt.Sprintf("\n\nFound %d files matching pattern", len(matches))
 	return output, nil
 }
 

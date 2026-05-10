@@ -104,8 +104,29 @@ func TestGlob_NoMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "No files matched." {
+	if !strings.Contains(result, "No files found matching") {
 		t.Errorf("expected no-match message, got: %s", result)
+	}
+	if !strings.Contains(result, "*.xyz") {
+		t.Errorf("expected pattern in message, got: %s", result)
+	}
+}
+
+func TestGlob_FileCount(t *testing.T) {
+	dir := tmpDir(t)
+	writeTestFile(t, dir, "a.go", "")
+	writeTestFile(t, dir, "b.go", "")
+	writeTestFile(t, dir, "c.go", "")
+
+	tool := &Glob{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "*.go",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Found 3 files matching pattern") {
+		t.Errorf("expected file count summary, got: %s", result)
 	}
 }
 

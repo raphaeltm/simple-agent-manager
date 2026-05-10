@@ -51,6 +51,7 @@ func (t *GitStatus) Execute(ctx context.Context, _ map[string]any) (string, erro
 		result := map[string]any{
 			"clean":   true,
 			"entries": []StatusEntry{},
+			"summary": "Working tree clean",
 		}
 		data, _ := json.Marshal(result)
 		return string(data), nil
@@ -58,6 +59,8 @@ func (t *GitStatus) Execute(ctx context.Context, _ map[string]any) (string, erro
 
 	lines := strings.Split(output, "\n")
 	entries := make([]StatusEntry, 0, len(lines))
+	var staged, modified, untracked []string
+
 	for _, line := range lines {
 		if len(line) < 4 {
 			continue
@@ -68,11 +71,42 @@ func (t *GitStatus) Execute(ctx context.Context, _ map[string]any) (string, erro
 			Path:    line[3:],
 		}
 		entries = append(entries, entry)
+
+		// Categorize for summary.
+		switch {
+		case entry.Index == "?" && entry.WorkDir == "?":
+			untracked = append(untracked, entry.Path)
+		case entry.Index != " " && entry.Index != "?":
+			staged = append(staged, entry.Path)
+			if entry.WorkDir != " " && entry.WorkDir != "?" {
+				modified = append(modified, entry.Path)
+			}
+		case entry.WorkDir != " " && entry.WorkDir != "?":
+			modified = append(modified, entry.Path)
+		}
+	}
+
+	// Build human-readable summary.
+	var parts []string
+	if len(staged) > 0 {
+		parts = append(parts, fmt.Sprintf("Staged: %d", len(staged)))
+	}
+	if len(modified) > 0 {
+		parts = append(parts, fmt.Sprintf("Modified: %d", len(modified)))
+	}
+	if len(untracked) > 0 {
+		parts = append(parts, fmt.Sprintf("Untracked: %d", len(untracked)))
 	}
 
 	result := map[string]any{
 		"clean":   false,
 		"entries": entries,
+		"summary": strings.Join(parts, ", "),
+		"counts": map[string]int{
+			"staged":    len(staged),
+			"modified":  len(modified),
+			"untracked": len(untracked),
+		},
 	}
 	data, _ := json.Marshal(result)
 	return string(data), nil

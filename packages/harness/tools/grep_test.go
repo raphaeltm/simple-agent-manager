@@ -35,8 +35,31 @@ func TestGrep_NoMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "No matches found." {
+	if !strings.Contains(result, "No matches found") {
 		t.Errorf("expected no-match message, got: %s", result)
+	}
+	if !strings.Contains(result, "nonexistent") {
+		t.Errorf("expected pattern in hint message, got: %s", result)
+	}
+	if !strings.Contains(result, "Try a broader pattern") {
+		t.Errorf("expected helpful hint, got: %s", result)
+	}
+}
+
+func TestGrep_MatchCount(t *testing.T) {
+	dir := tmpDir(t)
+	writeTestFile(t, dir, "a.go", "func hello() {}\nfunc world() {}\n")
+	writeTestFile(t, dir, "b.go", "func hello() {}\n")
+
+	tool := &Grep{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "func",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Found 3 matches across 2 files") {
+		t.Errorf("expected match count summary, got: %s", result)
 	}
 }
 
