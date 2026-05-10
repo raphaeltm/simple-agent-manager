@@ -408,7 +408,10 @@ describe('recovery type consistency (TDF-7)', () => {
     'max_lifetime_node_cleanup',
     'max_lifetime_node_cleanup_failure',
     'orphaned_workspace',
-    'orphaned_node',
+    'orphaned_node_cleanup',
+    'orphaned_node_cleanup_failure',
+    'heartbeat_stale_node_cleanup',
+    'heartbeat_stale_node_cleanup_failure',
     'provisioning_timeout',
   ];
 

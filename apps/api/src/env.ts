@@ -140,6 +140,8 @@ export interface Env {
   MAX_AUTO_NODE_LIFETIME_MS?: string;
   NODE_WARM_GRACE_PERIOD_MS?: string;
   ORPHANED_WORKSPACE_GRACE_PERIOD_MS?: string;
+  ORPHANED_NODE_DESTROY_GRACE_PERIOD_MS?: string;
+  NODE_HEARTBEAT_STALE_DESTROY_MS?: string;
   // Workspace idle timeout (global default, overridable per-project)
   WORKSPACE_IDLE_TIMEOUT_MS?: string;
   // Auto-delete stopped workspaces after this TTL (default: 300000 = 5 minutes)
