@@ -119,9 +119,23 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 
 	// Build initial conversation (or resume from session store).
 	var messages []llm.Message
+	startTurn := 1
+
 	if cfg.SessionStore != nil && cfg.SessionID != "" {
 		if loaded, err := cfg.SessionStore.LoadMessages(cfg.SessionID); err == nil && len(loaded) > 0 {
 			messages = loaded
+
+			// Offset turn counter based on previous session state.
+			if sess, err := cfg.SessionStore.LoadSession(cfg.SessionID); err == nil {
+				startTurn = sess.TotalTurns + 1
+			}
+
+			// If a new user prompt is provided during resume, append it.
+			if userPrompt != "" {
+				newMsg := llm.Message{Role: llm.RoleUser, Content: userPrompt}
+				messages = append(messages, newMsg)
+				persistMessages(cfg, startTurn-1, []llm.Message{newMsg})
+			}
 		}
 	}
 
@@ -139,10 +153,11 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 	streamProvider, canStream := provider.(llm.StreamProvider)
 	useStreaming := cfg.Stream && canStream
 
-	for turn := 1; turn <= maxTurns; turn++ {
+	endTurn := startTurn + maxTurns
+	for turn := startTurn; turn < endTurn; turn++ {
 		// Check cancellation.
 		if err := ctx.Err(); err != nil {
-			return &Result{TurnsUsed: turn - 1, StopReason: "cancelled"}, err
+			return &Result{TurnsUsed: turn - startTurn, StopReason: "cancelled"}, err
 		}
 
 		if cfg.Handler != nil {
@@ -190,7 +205,7 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 		}
 		if err != nil {
 			log.Append(transcript.EventError, turn, map[string]any{"error": err.Error()})
-			return &Result{TurnsUsed: turn, StopReason: "error"}, fmt.Errorf("turn %d: LLM error: %w", turn, err)
+			return &Result{TurnsUsed: turn - startTurn + 1, StopReason: "error"}, fmt.Errorf("turn %d: LLM error: %w", turn, err)
 		}
 
 		logData := map[string]any{
@@ -216,7 +231,7 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			}
 			return &Result{
 				FinalMessage: resp.Content,
-				TurnsUsed:    turn,
+				TurnsUsed:    turn - startTurn + 1,
 				StopReason:   "complete",
 			}, nil
 		}
@@ -238,7 +253,7 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 
 		// Check if context was cancelled during tool execution.
 		if err := ctx.Err(); err != nil {
-			return &Result{TurnsUsed: turn, StopReason: "cancelled"}, err
+			return &Result{TurnsUsed: turn - startTurn + 1, StopReason: "cancelled"}, err
 		}
 
 		var turnMessages []llm.Message
