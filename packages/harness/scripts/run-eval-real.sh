@@ -9,10 +9,18 @@
 #   SAM_AI_PROXY_URL  — AI Gateway URL (required)
 #   SAM_AI_PROXY_KEY  — API key / CF token for auth (required)
 #   SAM_AI_MODEL      — Model name (default: @cf/google/gemma-3-27b-it)
+#   SAM_AI_AUTH_HEADER — Custom auth header (e.g. cf-aig-authorization for AI Gateway unified billing)
 #
-# Usage:
-#   export SAM_AI_PROXY_URL="https://api.sammy.party/api/ai/proxy/openai/v1"
-#   export SAM_AI_PROXY_KEY="your-api-key"
+# Usage (Workers AI via CF API):
+#   export SAM_AI_PROXY_URL="https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1"
+#   export SAM_AI_PROXY_KEY="<cf-api-token>"
+#   ./scripts/run-eval-real.sh
+#
+# Usage (OpenAI via AI Gateway unified billing):
+#   export SAM_AI_PROXY_URL="https://gateway.ai.cloudflare.com/v1/<account>/sam/openai/v1"
+#   export SAM_AI_PROXY_KEY="<cf-api-token>"
+#   export SAM_AI_AUTH_HEADER="cf-aig-authorization"
+#   export SAM_AI_MODEL="gpt-4.1-mini"
 #   ./scripts/run-eval-real.sh
 #
 # Output: structured results table (task, status, turns, duration)
@@ -35,12 +43,16 @@ if [ -z "${SAM_AI_PROXY_KEY:-}" ]; then
 fi
 
 MODEL="${SAM_AI_MODEL:-@cf/google/gemma-3-27b-it}"
+AUTH_HEADER="${SAM_AI_AUTH_HEADER:-}"
 
 echo "============================================"
 echo "  SAM Harness Real Model Evaluation"
 echo "============================================"
 echo "  Proxy URL: ${SAM_AI_PROXY_URL}"
 echo "  Model:     ${MODEL}"
+if [ -n "$AUTH_HEADER" ]; then
+  echo "  Auth:      ${AUTH_HEADER}"
+fi
 echo "  Time:      $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo "============================================"
 echo ""
@@ -81,6 +93,12 @@ for task_spec in "${TASKS[@]}"; do
   TRANSCRIPT="/tmp/harness-eval-${TASK_NAME}.json"
   START_TIME=$(date +%s)
 
+  # Build auth header flag if set
+  AUTH_FLAG=""
+  if [ -n "$AUTH_HEADER" ]; then
+    AUTH_FLAG="--auth-header $AUTH_HEADER"
+  fi
+
   # Run the harness CLI against the real model
   set +e
   OUTPUT=$(timeout 120 /tmp/harness-eval-runner \
@@ -91,6 +109,7 @@ for task_spec in "${TASKS[@]}"; do
     --api-url "$SAM_AI_PROXY_URL" \
     --api-key "$SAM_AI_PROXY_KEY" \
     --model "$MODEL" \
+    $AUTH_FLAG \
     --max-turns 15 2>&1)
   EXIT_CODE=$?
   set -e

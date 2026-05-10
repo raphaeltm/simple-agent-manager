@@ -1,0 +1,62 @@
+[
+  {
+    "type": "llm_request",
+    "timestamp": "2026-05-10T08:07:57.780714456Z",
+    "turn": 1,
+    "data": {
+      "message_count": 2,
+      "tool_count": 11
+    }
+  },
+  {
+    "type": "llm_response",
+    "timestamp": "2026-05-10T08:07:58.708858794Z",
+    "turn": 1,
+    "data": {
+      "content": "",
+      "stop_reason": "tool_use",
+      "tool_call_count": 1
+    }
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-05-10T08:07:58.708863823Z",
+    "turn": 1,
+    "data": {
+      "id": "call_QaSeUPXQomS6vw39uVUY4uQ9",
+      "name": "grep",
+      "params": {
+        "pattern": "password.*hash"
+      }
+    }
+  },
+  {
+    "type": "tool_result",
+    "timestamp": "2026-05-10T08:07:58.709859406Z",
+    "turn": 1,
+    "data": {
+      "call_id": "call_QaSeUPXQomS6vw39uVUY4uQ9",
+      "content": "auth/password.go:8:// CheckPassword verifies a password against its hash.\nauth/password.go:9:func CheckPassword(password, hash string) bool {\nauth/password.go:10:\treturn \"hashed-\"+password == hash",
+      "is_error": false
+    }
+  },
+  {
+    "type": "llm_request",
+    "timestamp": "2026-05-10T08:07:58.709871308Z",
+    "turn": 2,
+    "data": {
+      "message_count": 4,
+      "tool_count": 11
+    }
+  },
+  {
+    "type": "llm_response",
+    "timestamp": "2026-05-10T08:07:59.559196394Z",
+    "turn": 2,
+    "data": {
+      "content": "The file that handles password hashing in this project is auth/password.go.",
+      "stop_reason": "stop",
+      "tool_call_count": 0
+    }
+  }
+]

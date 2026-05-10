@@ -20,6 +20,7 @@ type OpenAIClient struct {
 	baseURL    string
 	apiKey     string
 	model      string
+	authHeader string // header name for the API key (default: "Authorization")
 	httpClient *http.Client
 }
 
@@ -34,6 +35,12 @@ func WithModel(model string) OpenAIOption {
 // WithHTTPClient sets a custom HTTP client (useful for testing).
 func WithHTTPClient(client *http.Client) OpenAIOption {
 	return func(c *OpenAIClient) { c.httpClient = client }
+}
+
+// WithAuthHeader sets a custom authorization header name.
+// Use "cf-aig-authorization" for Cloudflare AI Gateway unified billing.
+func WithAuthHeader(header string) OpenAIOption {
+	return func(c *OpenAIClient) { c.authHeader = header }
 }
 
 // NewOpenAIClient creates a new OpenAI-compatible provider.
@@ -69,7 +76,11 @@ func (c *OpenAIClient) SendMessage(ctx context.Context, messages []Message, tool
 		return nil, fmt.Errorf("openai: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	authH := c.authHeader
+	if authH == "" {
+		authH = "Authorization"
+	}
+	req.Header.Set(authH, "Bearer "+c.apiKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

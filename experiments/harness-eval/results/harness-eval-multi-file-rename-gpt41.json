@@ -1,0 +1,63 @@
+[
+  {
+    "type": "llm_request",
+    "timestamp": "2026-05-10T08:09:06.524820609Z",
+    "turn": 1,
+    "data": {
+      "message_count": 2,
+      "tool_count": 11
+    }
+  },
+  {
+    "type": "llm_response",
+    "timestamp": "2026-05-10T08:09:07.506052442Z",
+    "turn": 1,
+    "data": {
+      "content": "",
+      "stop_reason": "tool_use",
+      "tool_call_count": 1
+    }
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-05-10T08:09:07.50605704Z",
+    "turn": 1,
+    "data": {
+      "id": "call_bXQOykUESTPSg1nEst5BfKq9",
+      "name": "grep",
+      "params": {
+        "include": "**/*.go",
+        "pattern": "ComputeSum"
+      }
+    }
+  },
+  {
+    "type": "tool_result",
+    "timestamp": "2026-05-10T08:09:07.506188128Z",
+    "turn": 1,
+    "data": {
+      "call_id": "call_bXQOykUESTPSg1nEst5BfKq9",
+      "content": "No matches found.",
+      "is_error": false
+    }
+  },
+  {
+    "type": "llm_request",
+    "timestamp": "2026-05-10T08:09:07.506200491Z",
+    "turn": 2,
+    "data": {
+      "message_count": 4,
+      "tool_count": 11
+    }
+  },
+  {
+    "type": "llm_response",
+    "timestamp": "2026-05-10T08:09:08.688845913Z",
+    "turn": 2,
+    "data": {
+      "content": "There are no functions named ComputeSum found in any Go files in this project. Please verify the function name or provide more context.",
+      "stop_reason": "stop",
+      "tool_call_count": 0
+    }
+  }
+]

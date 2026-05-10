@@ -33,6 +33,7 @@ func main() {
 		apiURL           = flag.String("api-url", "", "OpenAI-compatible API base URL (enables real LLM provider)")
 		apiKey           = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
 		model            = flag.String("model", llm.DefaultModel, "Model ID for LLM completions")
+		authHeader       = flag.String("auth-header", "", "Custom auth header name (e.g. cf-aig-authorization for AI Gateway unified billing)")
 		repoMapFlag      = flag.Bool("repo-map", true, "Generate and prepend a repo map to the system prompt")
 		mcpURL           = flag.String("mcp-url", envOr("SAM_MCP_URL", ""), "MCP server URL (or SAM_MCP_URL env var)")
 		mcpToken         = flag.String("mcp-token", envOr("SAM_MCP_TOKEN", ""), "MCP server Bearer token (or SAM_MCP_TOKEN env var)")
@@ -74,7 +75,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error: --api-key or SAM_API_KEY env var is required when using openai provider")
 			os.Exit(1)
 		}
-		provider = llm.NewOpenAIClient(*apiURL, key, llm.WithModel(*model))
+		opts := []llm.OpenAIOption{llm.WithModel(*model)}
+		if *authHeader != "" {
+			opts = append(opts, llm.WithAuthHeader(*authHeader))
+		}
+		provider = llm.NewOpenAIClient(*apiURL, key, opts...)
 		fmt.Fprintf(os.Stderr, "Using OpenAI-compatible provider: %s (model: %s)\n", *apiURL, *model)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown provider %q (use mock or openai)\n", *providerName)
