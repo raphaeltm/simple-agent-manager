@@ -92,11 +92,15 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			return &Result{TurnsUsed: turn, StopReason: "error"}, fmt.Errorf("turn %d: LLM error: %w", turn, err)
 		}
 
-		log.Append(transcript.EventLLMResponse, turn, map[string]any{
-			"content":       resp.Content,
+		respData := map[string]any{
+			"content":         resp.Content,
 			"tool_call_count": len(resp.ToolCalls),
-			"stop_reason":   resp.StopReason,
-		})
+			"stop_reason":     resp.StopReason,
+		}
+		if resp.Usage != nil {
+			respData["usage"] = resp.Usage
+		}
+		log.Append(transcript.EventLLMResponse, turn, respData)
 
 		// If no tool calls, the model is done.
 		if len(resp.ToolCalls) == 0 {

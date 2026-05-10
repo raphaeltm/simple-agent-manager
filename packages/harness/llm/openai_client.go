@@ -20,6 +20,7 @@ type OpenAIClient struct {
 	baseURL    string
 	apiKey     string
 	model      string
+	authHeader string // custom auth header name (default: "Authorization")
 	httpClient *http.Client
 }
 
@@ -29,6 +30,12 @@ type OpenAIOption func(*OpenAIClient)
 // WithModel sets the model ID for completions.
 func WithModel(model string) OpenAIOption {
 	return func(c *OpenAIClient) { c.model = model }
+}
+
+// WithAuthHeader sets a custom auth header name (e.g. "cf-aig-authorization" for
+// Cloudflare AI Gateway unified billing). The value is still "Bearer <key>".
+func WithAuthHeader(header string) OpenAIOption {
+	return func(c *OpenAIClient) { c.authHeader = header }
 }
 
 // WithHTTPClient sets a custom HTTP client (useful for testing).
@@ -69,7 +76,11 @@ func (c *OpenAIClient) SendMessage(ctx context.Context, messages []Message, tool
 		return nil, fmt.Errorf("openai: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	authHdr := c.authHeader
+	if authHdr == "" {
+		authHdr = "Authorization"
+	}
+	req.Header.Set(authHdr, "Bearer "+c.apiKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -185,6 +196,18 @@ func (c *OpenAIClient) parseResponse(body []byte) (*Response, error) {
 		resp.Content = *choice.Message.Content
 	}
 
+	// Capture usage.
+	if oaiResp.Usage != nil {
+		resp.Usage = &Usage{
+			PromptTokens:     oaiResp.Usage.PromptTokens,
+			CompletionTokens: oaiResp.Usage.CompletionTokens,
+			TotalTokens:      oaiResp.Usage.TotalTokens,
+		}
+		if oaiResp.Usage.CompletionDetails != nil {
+			resp.Usage.ReasoningTokens = oaiResp.Usage.CompletionDetails.ReasoningTokens
+		}
+	}
+
 	// Convert tool calls.
 	if len(choice.Message.ToolCalls) > 0 {
 		resp.ToolCalls = make([]ToolCall, len(choice.Message.ToolCalls))
@@ -286,5 +309,8 @@ type oaiResponse struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
+		CompletionDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details,omitempty"`
 	} `json:"usage,omitempty"`
 }

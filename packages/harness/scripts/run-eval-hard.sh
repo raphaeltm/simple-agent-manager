@@ -1,41 +1,27 @@
 #!/usr/bin/env bash
-# run-eval-real.sh — Run harness eval tasks against a real LLM via SAM AI Gateway.
+# run-eval-hard.sh — Run harder eval tasks designed to stress-test turn efficiency.
 #
-# This script is for MANUAL validation only — it is NOT run in CI.
-# It builds a small Go program that uses the real OpenAI-compatible provider
-# to exercise the same eval scenarios as the mock-based tests.
-#
-# Environment variables:
+# Same environment variables as run-eval-real.sh:
 #   SAM_AI_PROXY_URL  — AI Gateway URL (required)
 #   SAM_AI_PROXY_KEY  — API key / CF token for auth (required)
-#   SAM_AI_MODEL      — Model name (default: @cf/google/gemma-3-27b-it)
-#   SAM_AI_AUTH_HEADER — Custom auth header (e.g. cf-aig-authorization for unified billing)
-#
-# Usage:
-#   export SAM_AI_PROXY_URL="https://api.sammy.party/api/ai/proxy/openai/v1"
-#   export SAM_AI_PROXY_KEY="your-api-key"
-#   ./scripts/run-eval-real.sh
-#
-# Output: structured results table (task, status, turns, duration)
+#   SAM_AI_MODEL      — Model name (required)
+#   SAM_AI_AUTH_HEADER — Custom auth header (e.g. cf-aig-authorization)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HARNESS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Validate required env vars
 if [ -z "${SAM_AI_PROXY_URL:-}" ]; then
   echo "ERROR: SAM_AI_PROXY_URL is required"
-  echo "  Example: https://api.sammy.party/api/ai/proxy/openai/v1"
   exit 1
 fi
-
 if [ -z "${SAM_AI_PROXY_KEY:-}" ]; then
   echo "ERROR: SAM_AI_PROXY_KEY is required"
   exit 1
 fi
 
-MODEL="${SAM_AI_MODEL:-@cf/google/gemma-3-27b-it}"
+MODEL="${SAM_AI_MODEL:-gpt-4.1-mini}"
 AUTH_HEADER="${SAM_AI_AUTH_HEADER:-}"
 AUTH_HEADER_FLAG=""
 if [ -n "$AUTH_HEADER" ]; then
@@ -43,7 +29,7 @@ if [ -n "$AUTH_HEADER" ]; then
 fi
 
 echo "============================================"
-echo "  SAM Harness Real Model Evaluation"
+echo "  SAM Harness HARD Eval Suite"
 echo "============================================"
 echo "  Proxy URL:    ${SAM_AI_PROXY_URL}"
 echo "  Model:        ${MODEL}"
@@ -56,16 +42,13 @@ echo ""
 cd "$HARNESS_DIR"
 go build -o /tmp/harness-eval-runner ./cmd/harness/ 2>/dev/null || true
 
-# Define eval tasks as (name, prompt, fixture_dir) tuples
+# Hard tasks — these require reading 3+ files and cross-referencing
 declare -a TASKS=(
-  "bug-fix|Diagnose and fix this failing test:\n\n--- FAIL: TestAbs (0.00s)\n    mathutil_test.go:15: Abs(-3) = -3, want 3\n    mathutil_test.go:15: Abs(-100) = -100, want 100\nFAIL|buggy-project"
-  "multi-file-rename|Rename the function ComputeSum to Add across all Go files in this project. Update the definition, all callers, and all tests.|multi-file-project"
-  "codebase-navigation|Which file in this project handles password hashing? Answer with the file path.|large-project"
-  "test-diagnosis|Diagnose why this test fails and explain the root cause:\n\n--- FAIL: TestAbs (0.00s)\n    mathutil_test.go:15: Abs(-3) = -3, want 3\nFAIL\n\nRead the test file and implementation, then explain the bug.|buggy-project"
-  "refactor-export|Export the unexported function 'reverse' as 'Reverse' in stringutil.go. Update all call sites and tests. Then create a git commit with a descriptive message.|refactor-project"
+  "cross-file-bug|The tests in orders_test.go are failing. The bug is NOT in the test — the tests are correct. Read ALL source files (types.go, pricing.go, orders.go) to find and fix the bug. The issue involves function arguments being passed in the wrong order somewhere.|cross-ref-bug"
+  "data-flow-trace|Trace the data flow for task status updates in this project. The flow goes: api/handlers.go -> util/validate.go -> store/tasks.go -> store/events.go. There is a missing validation: when UpdateTaskStatus is called, it should reject updates where the actor is empty string. Add this validation in the appropriate layer (util/validate.go) and update the test file (api/handlers_test.go) to cover this case.|dataflow-project"
+  "multi-pkg-refactor|Rename the type TaskStatus to State and all its constants (TaskStatusPending -> StatePending, TaskStatusActive -> StateActive, TaskStatusCompleted -> StateCompleted, TaskStatusCancelled -> StateCancelled) across ALL files in this project. The type is defined in models/task.go but used in models/event.go, store/tasks.go, util/validate.go, api/handlers.go, and api/handlers_test.go. Update every reference.|dataflow-project"
 )
 
-# Results tracking
 PASS_COUNT=0
 FAIL_COUNT=0
 TOTAL=${#TASKS[@]}
@@ -76,21 +59,17 @@ printf "%-25s %-8s %-8s %-10s\n" "-------------------------" "--------" "-------
 for task_spec in "${TASKS[@]}"; do
   IFS='|' read -r TASK_NAME PROMPT FIXTURE <<< "$task_spec"
 
-  # Prepare isolated working directory
   WORK_DIR=$(mktemp -d)
   cp -r "$HARNESS_DIR/testdata/$FIXTURE/"* "$WORK_DIR/"
 
-  # For refactor task, init a git repo
-  if [ "$FIXTURE" = "refactor-project" ]; then
-    (cd "$WORK_DIR" && git init -q && git config user.email "eval@test" && git config user.name "Eval" && git add . && git commit -q -m "initial") 2>/dev/null
-  fi
+  # Init git repo for all hard tasks (they may need git operations)
+  (cd "$WORK_DIR" && git init -q && git config user.email "eval@test" && git config user.name "Eval" && git add . && git commit -q -m "initial") 2>/dev/null
 
-  TRANSCRIPT="/tmp/harness-eval-${TASK_NAME}.json"
+  TRANSCRIPT="/tmp/harness-hard-${TASK_NAME}.json"
   START_TIME=$(date +%s)
 
-  # Run the harness CLI against the real model
   set +e
-  OUTPUT=$(timeout 120 /tmp/harness-eval-runner \
+  OUTPUT=$(timeout 180 /tmp/harness-eval-runner \
     --dir "$WORK_DIR" \
     --prompt "$(echo -e "$PROMPT")" \
     --transcript "$TRANSCRIPT" \
@@ -99,14 +78,13 @@ for task_spec in "${TASKS[@]}"; do
     --api-key "$SAM_AI_PROXY_KEY" \
     --model "$MODEL" \
     $AUTH_HEADER_FLAG \
-    --max-turns 15 2>&1)
+    --max-turns 20 2>&1)
   EXIT_CODE=$?
   set -e
 
   END_TIME=$(date +%s)
   DURATION=$((END_TIME - START_TIME))
 
-  # Extract turns from transcript if available
   TURNS="?"
   if [ -f "$TRANSCRIPT" ]; then
     TURNS=$(jq '[.[] | select(.type == "llm_request")] | length' "$TRANSCRIPT" 2>/dev/null || echo "?")
@@ -122,7 +100,6 @@ for task_spec in "${TASKS[@]}"; do
 
   printf "%-25s %-8s %-8s %-10s\n" "$TASK_NAME" "$STATUS" "$TURNS" "${DURATION}s"
 
-  # Cleanup
   rm -rf "$WORK_DIR"
 done
 
@@ -133,7 +110,7 @@ echo "============================================"
 
 if [ $FAIL_COUNT -gt 0 ]; then
   echo ""
-  echo "Transcript files saved to /tmp/harness-eval-*.json"
+  echo "Transcript files saved to /tmp/harness-hard-*.json"
   echo "Review failed task transcripts for details."
   exit 1
 fi

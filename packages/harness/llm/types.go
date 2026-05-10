@@ -42,12 +42,22 @@ type ToolDefinition struct {
 	Parameters  map[string]any `json:"parameters"` // JSON Schema object
 }
 
+// Usage tracks token consumption for a single LLM call.
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // Response represents an LLM response.
 type Response struct {
 	Content   string     `json:"content,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	// StopReason indicates why the model stopped generating.
 	StopReason string `json:"stop_reason,omitempty"`
+	// Usage is the token consumption for this call (if reported by the provider).
+	Usage *Usage `json:"usage,omitempty"`
 }
 
 // Provider is the interface that LLM backends must implement.
