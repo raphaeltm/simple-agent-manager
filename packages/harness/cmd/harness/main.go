@@ -15,6 +15,7 @@ import (
 	"github.com/workspace/harness/mcp"
 	"github.com/workspace/harness/prompts"
 	"github.com/workspace/harness/repomap"
+	"github.com/workspace/harness/session"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
 )
@@ -46,11 +47,43 @@ func main() {
 		parallelTools    = flag.Bool("parallel-tools", false, "Execute multiple tool calls in parallel")
 		maxParallelTools = flag.Int("max-parallel-tools", 5, "Maximum concurrent tool executions when --parallel-tools is enabled")
 		compactionStrat  = flag.String("compaction-strategy", "extractive", "Compaction strategy: extractive (default) or llm")
+		sessionDB        = flag.String("session-db", "", "Path to SQLite session database (enables persistence)")
+		resumeSession    = flag.String("resume", "", "Resume a previous session by ID")
+		listSessions     = flag.Bool("list-sessions", false, "List recent sessions and exit")
 	)
 	flag.Parse()
 
-	if *prompt == "" {
-		fmt.Fprintln(os.Stderr, "error: --prompt is required")
+	// Handle --list-sessions.
+	if *listSessions {
+		dbPath := *sessionDB
+		if dbPath == "" {
+			home, _ := os.UserHomeDir()
+			dbPath = filepath.Join(home, ".sam-harness", "sessions.db")
+		}
+		store, err := session.NewStore(dbPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		defer store.Close()
+		sessions, err := store.ListSessions(20)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		if len(sessions) == 0 {
+			fmt.Println("No sessions found.")
+		} else {
+			fmt.Printf("%-36s  %-10s  %-5s  %s\n", "ID", "STATUS", "TURNS", "CREATED")
+			for _, s := range sessions {
+				fmt.Printf("%-36s  %-10s  %-5d  %s\n", s.ID, s.Status, s.TotalTurns, s.CreatedAt.Format(time.RFC3339))
+			}
+		}
+		os.Exit(0)
+	}
+
+	if *prompt == "" && *resumeSession == "" {
+		fmt.Fprintln(os.Stderr, "error: --prompt is required (unless --resume is used)")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -230,6 +263,45 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Set up session persistence if requested.
+	var sessionStore *session.Store
+	var sessionID string
+	if *sessionDB != "" || *resumeSession != "" {
+		dbPath := *sessionDB
+		if dbPath == "" {
+			home, _ := os.UserHomeDir()
+			dbPath = filepath.Join(home, ".sam-harness", "sessions.db")
+		}
+		var storeErr error
+		sessionStore, storeErr = session.NewStore(dbPath)
+		if storeErr != nil {
+			fmt.Fprintf(os.Stderr, "error opening session store: %v\n", storeErr)
+			os.Exit(1)
+		}
+		defer sessionStore.Close()
+
+		if *resumeSession != "" {
+			sessionID = *resumeSession
+			sess, loadErr := sessionStore.LoadSession(sessionID)
+			if loadErr != nil {
+				fmt.Fprintf(os.Stderr, "error loading session %q: %v\n", sessionID, loadErr)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "Resuming session %s (%d turns, status: %s)\n", sess.ID, sess.TotalTurns, sess.Status)
+		} else {
+			sessionID = fmt.Sprintf("%d", time.Now().UnixNano())
+			if _, createErr := sessionStore.CreateSession(sessionID, session.Config{
+				SystemPrompt: sysPrompt,
+				WorkDir:      workDir,
+				Model:        *model,
+			}); createErr != nil {
+				fmt.Fprintf(os.Stderr, "error creating session: %v\n", createErr)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "Session %s created\n", sessionID)
+		}
+	}
+
 	// Run agent loop with signal handling.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -246,6 +318,8 @@ func main() {
 		PermissionChecker:  tools.AutoApproveChecker{},
 		ParallelTools:      *parallelTools,
 		MaxParallelTools:   *maxParallelTools,
+		SessionStore:       sessionStore,
+		SessionID:          sessionID,
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,

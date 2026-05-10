@@ -4,10 +4,12 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	ctxmgr "github.com/workspace/harness/context"
 	"github.com/workspace/harness/llm"
+	"github.com/workspace/harness/session"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
 )
@@ -70,6 +72,10 @@ type Config struct {
 	ParallelTools bool
 	// MaxParallelTools is the maximum number of concurrent tool executions. Default: 5.
 	MaxParallelTools int
+	// SessionStore enables SQLite session persistence when set. Nil means no persistence.
+	SessionStore *session.Store
+	// SessionID is the session to persist messages to. Required if SessionStore is set.
+	SessionID string
 }
 
 // ProviderConfig stores provider connection details for child session spawning.
@@ -111,12 +117,23 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 
 	toolDefs := registry.Definitions()
 
-	// Build initial conversation.
-	messages := []llm.Message{}
-	if cfg.SystemPrompt != "" {
-		messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: cfg.SystemPrompt})
+	// Build initial conversation (or resume from session store).
+	var messages []llm.Message
+	if cfg.SessionStore != nil && cfg.SessionID != "" {
+		if loaded, err := cfg.SessionStore.LoadMessages(cfg.SessionID); err == nil && len(loaded) > 0 {
+			messages = loaded
+		}
 	}
-	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: userPrompt})
+
+	if len(messages) == 0 {
+		if cfg.SystemPrompt != "" {
+			messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: cfg.SystemPrompt})
+		}
+		messages = append(messages, llm.Message{Role: llm.RoleUser, Content: userPrompt})
+
+		// Persist the initial messages.
+		persistMessages(cfg, 0, messages)
+	}
 
 	// Check if the provider supports streaming.
 	streamProvider, canStream := provider.(llm.StreamProvider)
@@ -188,6 +205,12 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 
 		// If no tool calls, the model is done.
 		if len(resp.ToolCalls) == 0 {
+			// Persist the final assistant message.
+			persistMessages(cfg, turn, []llm.Message{
+				{Role: llm.RoleAssistant, Content: resp.Content},
+			})
+			persistStatus(cfg, "completed")
+
 			if cfg.Handler != nil {
 				cfg.Handler.OnTurnEnd(turn, 0)
 			}
@@ -218,12 +241,23 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			return &Result{TurnsUsed: turn, StopReason: "cancelled"}, err
 		}
 
+		var turnMessages []llm.Message
+		turnMessages = append(turnMessages, llm.Message{
+			Role:      llm.RoleAssistant,
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
 		for i := range toolResults {
-			messages = append(messages, llm.Message{
+			toolMsg := llm.Message{
 				Role:       llm.RoleTool,
 				ToolResult: &toolResults[i],
-			})
+			}
+			messages = append(messages, toolMsg)
+			turnMessages = append(turnMessages, toolMsg)
 		}
+
+		// Persist this turn's messages (assistant + tool results).
+		persistMessages(cfg, turn, turnMessages)
 
 		if cfg.Handler != nil {
 			cfg.Handler.OnTurnEnd(turn, len(resp.ToolCalls))
@@ -428,4 +462,25 @@ func sendStreaming(ctx context.Context, sp llm.StreamProvider, messages []llm.Me
 	}
 
 	return llm.CollectStream(events)
+}
+
+// persistMessages writes messages to the session store if configured.
+// Errors are logged but never propagated — persistence is non-blocking.
+func persistMessages(cfg Config, turn int, msgs []llm.Message) {
+	if cfg.SessionStore == nil || cfg.SessionID == "" {
+		return
+	}
+	if err := cfg.SessionStore.AppendMessages(cfg.SessionID, turn, msgs); err != nil {
+		log.Printf("session persistence warning: %v", err)
+	}
+}
+
+// persistStatus updates the session status if a store is configured.
+func persistStatus(cfg Config, status string) {
+	if cfg.SessionStore == nil || cfg.SessionID == "" {
+		return
+	}
+	if err := cfg.SessionStore.UpdateStatus(cfg.SessionID, status); err != nil {
+		log.Printf("session persistence warning: %v", err)
+	}
 }
