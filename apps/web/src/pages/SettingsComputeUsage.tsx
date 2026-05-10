@@ -347,6 +347,44 @@ function BudgetSettingsSection() {
         </Card>
       )}
 
+      {/* Effective limits summary (always visible when budget data is available) */}
+      {budget && (
+        <Card className="p-4 space-y-3">
+          <CardTitle className="mb-1">Your Limits</CardTitle>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <Body className="text-fg-muted text-xs m-0 mb-0.5">Daily Input Tokens</Body>
+              <Body className="text-fg-primary text-sm font-medium m-0 tabular-nums">
+                {formatTokens(budget.effectiveLimits.dailyInputTokenLimit)}
+              </Body>
+              <Body className="text-fg-muted text-xs m-0">
+                {budget.isCustom && budget.settings.dailyInputTokenLimit !== null ? 'Custom' : 'Platform default'}
+              </Body>
+            </div>
+            <div>
+              <Body className="text-fg-muted text-xs m-0 mb-0.5">Daily Output Tokens</Body>
+              <Body className="text-fg-primary text-sm font-medium m-0 tabular-nums">
+                {formatTokens(budget.effectiveLimits.dailyOutputTokenLimit)}
+              </Body>
+              <Body className="text-fg-muted text-xs m-0">
+                {budget.isCustom && budget.settings.dailyOutputTokenLimit !== null ? 'Custom' : 'Platform default'}
+              </Body>
+            </div>
+            <div>
+              <Body className="text-fg-muted text-xs m-0 mb-0.5">Monthly Cost Cap</Body>
+              <Body className="text-fg-primary text-sm font-medium m-0 tabular-nums">
+                {budget.settings.monthlyCostCapUsd !== null
+                  ? formatCost(budget.settings.monthlyCostCapUsd)
+                  : 'Unlimited'}
+              </Body>
+              <Body className="text-fg-muted text-xs m-0">
+                {budget.settings.monthlyCostCapUsd !== null ? 'Custom' : 'No cap set'}
+              </Body>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Utilization bars (always visible when budget data is available) */}
       {budget && (
         <Card className="p-4 space-y-3">
