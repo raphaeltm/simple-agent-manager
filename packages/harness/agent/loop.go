@@ -27,6 +27,16 @@ type EventHandler interface {
 	OnTurnEnd(turn int, toolCallCount int)
 }
 
+// CompactionStrategy selects the compaction algorithm.
+type CompactionStrategy string
+
+const (
+	// CompactionExtractive uses heuristic extractive summarization (no LLM call).
+	CompactionExtractive CompactionStrategy = "extractive"
+	// CompactionLLM uses an LLM to produce a richer summary of older messages.
+	CompactionLLM CompactionStrategy = "llm"
+)
+
 // Config configures the agent loop.
 type Config struct {
 	// SystemPrompt is prepended to every LLM call.
@@ -37,6 +47,8 @@ type Config struct {
 	MaxContextTokens int
 	// CompactOptions controls compaction behavior. Zero value uses defaults.
 	CompactOptions ctxmgr.CompactOptions
+	// CompactionStrategy selects extractive (default) or llm-powered compaction.
+	CompactionStrategy CompactionStrategy
 	// WorkerModel is the model ID for subtask child sessions.
 	// If empty, the orchestrator's model is used for workers too.
 	WorkerModel string
@@ -112,10 +124,20 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 
 		// Compact conversation if approaching context limit.
 		if ctxmgr.NeedsCompaction(messages, maxContextTokens, compactOpts) {
-			compacted, cr := ctxmgr.Compact(messages, maxContextTokens, compactOpts)
+			var compacted []llm.Message
+			var cr ctxmgr.CompactResult
+
+			if cfg.CompactionStrategy == CompactionLLM {
+				llmCompactor := ctxmgr.NewLLMCompactor(provider)
+				compacted, cr = llmCompactor.Compact(ctx, messages, maxContextTokens, compactOpts)
+			} else {
+				compacted, cr = ctxmgr.Compact(messages, maxContextTokens, compactOpts)
+			}
+
 			if cr.Compacted {
 				log.Append(transcript.EventInfo, turn, map[string]any{
 					"event":            "compaction",
+					"strategy":         string(cfg.CompactionStrategy),
 					"messages_removed": cr.MessagesRemoved,
 					"tokens_before":    cr.TokensBefore,
 					"tokens_after":     cr.TokensAfter,

@@ -42,6 +42,7 @@ func main() {
 		mockOrchScenario = flag.String("mock-orchestration", "", "Register mock orchestration tools with scenario: success, failure, or mixed (for eval without MCP)")
 		realOrch         = flag.Bool("real-orchestration", false, "Enable real subtask execution — dispatch_task spawns child harness sessions")
 		stream           = flag.Bool("stream", false, "Enable streaming output from LLM providers that support it")
+		compactionStrat  = flag.String("compaction-strategy", "extractive", "Compaction strategy: extractive (default) or llm")
 	)
 	flag.Parse()
 
@@ -224,12 +225,13 @@ func main() {
 	defer cancel()
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
-		SystemPrompt:     sysPrompt,
-		MaxTurns:         *maxTurns,
-		MaxContextTokens: *maxContextTokens,
-		WorkerModel:      resolvedWorkerModel,
-		WorkDir:          workDir,
-		Stream:           *stream,
+		SystemPrompt:       sysPrompt,
+		MaxTurns:           *maxTurns,
+		MaxContextTokens:   *maxContextTokens,
+		CompactionStrategy: agent.CompactionStrategy(*compactionStrat),
+		WorkerModel:        resolvedWorkerModel,
+		WorkDir:            workDir,
+		Stream:             *stream,
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,
