@@ -32,7 +32,8 @@ func main() {
 		providerName     = flag.String("provider", "mock", "LLM provider: mock or openai")
 		apiURL           = flag.String("api-url", "", "OpenAI-compatible API base URL (enables real LLM provider)")
 		apiKey           = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
-		model            = flag.String("model", llm.DefaultModel, "Model ID for LLM completions")
+		model            = flag.String("model", llm.DefaultModel, "Model ID for LLM completions (used for orchestrator when --worker-model is set)")
+		workerModel      = flag.String("worker-model", "", "Model ID for worker subtasks (defaults to --model if not set)")
 		authHeader       = flag.String("auth-header", "", "Custom auth header name (e.g. cf-aig-authorization for AI Gateway unified billing)")
 		repoMapFlag      = flag.Bool("repo-map", true, "Generate and prepend a repo map to the system prompt")
 		mcpURL           = flag.String("mcp-url", envOr("SAM_MCP_URL", ""), "MCP server URL (or SAM_MCP_URL env var)")
@@ -176,10 +177,25 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	// Resolve worker model — defaults to orchestrator model.
+	resolvedWorkerModel := *workerModel
+	if resolvedWorkerModel == "" {
+		resolvedWorkerModel = *model
+	}
+
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
 		SystemPrompt:     sysPrompt,
 		MaxTurns:         *maxTurns,
 		MaxContextTokens: *maxContextTokens,
+		WorkerModel:      resolvedWorkerModel,
+		WorkDir:          workDir,
+		ProviderConfig: &agent.ProviderConfig{
+			Name:       *providerName,
+			APIURL:     *apiURL,
+			APIKey:     *apiKey,
+			AuthHeader: *authHeader,
+			Model:      *model,
+		},
 	}, *prompt)
 
 	if err != nil {

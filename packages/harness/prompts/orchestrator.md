@@ -26,6 +26,7 @@ When dispatching a subtask:
 1. Write a clear, self-contained task description — the child agent has no access to your conversation history
 2. Include all context the child needs: file paths, expected behavior, acceptance criteria
 3. Specify the expected output format if you need structured results
+4. Note: subtasks may run on a different (smaller) model than you. Include sufficient context, explicit file paths, and step-by-step guidance so a less capable model can succeed
 
 ```
 dispatch_task:

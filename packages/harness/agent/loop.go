@@ -21,6 +21,22 @@ type Config struct {
 	MaxContextTokens int
 	// CompactOptions controls compaction behavior. Zero value uses defaults.
 	CompactOptions ctxmgr.CompactOptions
+	// WorkerModel is the model ID for subtask child sessions.
+	// If empty, the orchestrator's model is used for workers too.
+	WorkerModel string
+	// WorkDir is the working directory for tools (needed for spawning child sessions).
+	WorkDir string
+	// ProviderConfig holds connection details for spawning child sessions.
+	ProviderConfig *ProviderConfig
+}
+
+// ProviderConfig stores provider connection details for child session spawning.
+type ProviderConfig struct {
+	Name       string // "openai" or "mock"
+	APIURL     string
+	APIKey     string
+	AuthHeader string
+	Model      string // orchestrator model
 }
 
 // Result is the outcome of an agent run.
