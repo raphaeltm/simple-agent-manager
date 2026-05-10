@@ -483,8 +483,15 @@ func TestGetAgentCommandInfoSamHarness(t *testing.T) {
 	if info.envVarName != "SAM_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "SAM_API_KEY")
 	}
-	if len(info.args) != 1 || info.args[0] != "--acp" {
-		t.Fatalf("args=%v, want [--acp]", info.args)
+	wantArgs := []string{
+		"--acp",
+		"--prompt-preset", "orchestrator",
+		"--tool-profile", "full",
+		"--real-orchestration",
+		"--max-turns", "25",
+	}
+	if strings.Join(info.args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args=%v, want %v", info.args, wantArgs)
 	}
 	if info.installCmd != samHarnessInstallCmd {
 		t.Fatalf("installCmd=%q, want %q", info.installCmd, samHarnessInstallCmd)

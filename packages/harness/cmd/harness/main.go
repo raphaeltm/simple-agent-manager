@@ -95,6 +95,10 @@ func main() {
 			apiKey:           *apiKey,
 			model:            *model,
 			workerModel:      *workerModel,
+			systemPrompt:     *systemPrompt,
+			promptFile:       *promptFile,
+			promptPreset:     *promptPreset,
+			repoMap:          *repoMapFlag,
 			authHeader:       *authHeader,
 			maxTurns:         *maxTurns,
 			maxContextTokens: *maxContextTokens,
@@ -418,6 +422,10 @@ type acpModeArgs struct {
 	apiKey           string
 	model            string
 	workerModel      string
+	systemPrompt     string
+	promptFile       string
+	promptPreset     string
+	repoMap          bool
 	authHeader       string
 	maxTurns         int
 	maxContextTokens int
@@ -452,6 +460,20 @@ func runACPMode(args acpModeArgs) {
 		resolvedWorkerModel = args.model
 	}
 
+	sysPrompt, err := prompts.Resolve(args.promptFile, args.promptPreset, args.systemPrompt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error loading system prompt: %v\n", err)
+		os.Exit(1)
+	}
+	if args.repoMap && isGitRepo(workDir) {
+		rm, err := repomap.Generate(workDir, nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: repo map generation failed: %v\n", err)
+		} else if rm != "" {
+			sysPrompt = "# Repository Map\n\n" + rm + "\n\n" + sysPrompt
+		}
+	}
+
 	// Build tool registry.
 	registry := buildToolRegistry(args, workDir, resolvedWorkerModel)
 
@@ -463,6 +485,7 @@ func runACPMode(args acpModeArgs) {
 	}
 
 	cfg := agent.Config{
+		SystemPrompt:       sysPrompt,
 		MaxTurns:           args.maxTurns,
 		MaxContextTokens:   args.maxContextTokens,
 		CompactionStrategy: agent.CompactionStrategy(args.compactionStrat),
