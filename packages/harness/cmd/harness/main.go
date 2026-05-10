@@ -13,6 +13,7 @@ import (
 	"github.com/workspace/harness/agent"
 	"github.com/workspace/harness/llm"
 	"github.com/workspace/harness/mcp"
+	"github.com/workspace/harness/prompts"
 	"github.com/workspace/harness/repomap"
 	"github.com/workspace/harness/tools"
 	"github.com/workspace/harness/transcript"
@@ -25,7 +26,9 @@ func main() {
 		maxTurns         = flag.Int("max-turns", 10, "Maximum agent loop iterations")
 		maxContextTokens = flag.Int("max-context-tokens", 30000, "Maximum context window tokens before compaction")
 		transcriptF      = flag.String("transcript", "", "Path to write transcript JSON")
-		systemPrompt     = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt")
+		systemPrompt     = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt (lowest precedence)")
+		promptFile       = flag.String("prompt-file", "", "Path to a markdown file to use as system prompt (highest precedence)")
+		promptPreset     = flag.String("prompt-preset", "", "Built-in prompt preset: workspace, orchestrator")
 		providerName     = flag.String("provider", "mock", "LLM provider: mock or openai")
 		apiURL           = flag.String("api-url", "", "OpenAI-compatible API base URL (enables real LLM provider)")
 		apiKey           = flag.String("api-key", "", "API key for LLM provider (or set SAM_API_KEY env var)")
@@ -131,8 +134,14 @@ func main() {
 	// Create transcript log.
 	log := transcript.NewLog()
 
+	// Resolve system prompt from flags (precedence: file > preset > inline).
+	sysPrompt, err := prompts.Resolve(*promptFile, *promptPreset, *systemPrompt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error loading system prompt: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Generate repo map if enabled and directory is a git repo.
-	sysPrompt := *systemPrompt
 	if *repoMapFlag && isGitRepo(workDir) {
 		start := time.Now()
 		rm, err := repomap.Generate(workDir, nil)
