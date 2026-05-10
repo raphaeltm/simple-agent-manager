@@ -1,0 +1,104 @@
+[
+  {
+    "type": "llm_request",
+    "timestamp": "2026-05-10T07:17:20.788527111Z",
+    "turn": 1,
+    "data": {
+      "message_count": 2,
+      "tool_count": 11
+    }
+  },
+  {
+    "type": "llm_response",
+    "timestamp": "2026-05-10T07:17:21.472579304Z",
+    "turn": 1,
+    "data": {
+      "content": "",
+      "stop_reason": "tool_use",
+      "tool_call_count": 1
+    }
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-05-10T07:17:21.47258224Z",
+    "turn": 1,
+    "data": {
+      "id": "chatcmpl-tool-98fc558abc25adf5",
+      "name": "bash",
+      "params": {
+        "command": "find . -maxdepth 2 -not -path '*/.*'"
+      }
+    }
+  },
+  {
+    "type": "tool_result",
+    "timestamp": "2026-05-10T07:17:21.476107558Z",
+    "turn": 1,
+    "data": {
+      "call_id": "chatcmpl-tool-98fc558abc25adf5",
+      "content": ".\n./auth\n./auth/service.go\n./auth/password.go\n./config\n./config/config.go\n./config/validate.go\n./db\n./db/migrations.go\n./db/users.go\n./db/projects.go\n./db/connection.go\n./handlers\n./handlers/users.go\n./handlers/projects.go\n./handlers/health.go\n./handlers/router.go\n./main.go\n./middleware\n./middleware/middleware.go\n./middleware/ratelimit.go\n./middleware/logging.go\n./models\n./models/errors.go\n./models/pagination.go\n./workers\n./workers/scheduler.go\n./workers/cleanup.go\n./workers/email.go\n",
+      "is_error": false
+    }
+  },
+  {
+    "type": "llm_request",
+    "timestamp": "2026-05-10T07:17:21.476122235Z",
+    "turn": 2,
+    "data": {
+      "message_count": 4,
+      "tool_count": 11
+    }
+  },
+  {
+    "type": "llm_response",
+    "timestamp": "2026-05-10T07:17:21.864808076Z",
+    "turn": 2,
+    "data": {
+      "content": "",
+      "stop_reason": "tool_use",
+      "tool_call_count": 1
+    }
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-05-10T07:17:21.86481009Z",
+    "turn": 2,
+    "data": {
+      "id": "chatcmpl-tool-88343c47b2915bc2",
+      "name": "grep",
+      "params": {
+        "path": "auth",
+        "pattern": "hash"
+      }
+    }
+  },
+  {
+    "type": "tool_result",
+    "timestamp": "2026-05-10T07:17:21.865014085Z",
+    "turn": 2,
+    "data": {
+      "call_id": "chatcmpl-tool-88343c47b2915bc2",
+      "content": "auth/password.go:3:// HashPassword hashes a plaintext password for storage.\nauth/password.go:5:\treturn \"hashed-\" + password, nil\nauth/password.go:8:// CheckPassword verifies a password against its hash.\nauth/password.go:9:func CheckPassword(password, hash string) bool {\nauth/password.go:10:\treturn \"hashed-\"+password == hash",
+      "is_error": false
+    }
+  },
+  {
+    "type": "llm_request",
+    "timestamp": "2026-05-10T07:17:21.865025627Z",
+    "turn": 3,
+    "data": {
+      "message_count": 6,
+      "tool_count": 11
+    }
+  },
+  {
+    "type": "llm_response",
+    "timestamp": "2026-05-10T07:17:22.138666144Z",
+    "turn": 3,
+    "data": {
+      "content": "auth/password.go",
+      "stop_reason": "stop",
+      "tool_call_count": 0
+    }
+  }
+]
