@@ -253,7 +253,7 @@ func main() {
 
 	// Apply tool profile filtering.
 	allTools = mcp.FilterTools(*toolProfile, allTools)
-	allTools = preferLastToolByName(allTools)
+	allTools = dedupeTools(allTools, realOrchestrationToolNames())
 
 	for _, t := range allTools {
 		if err := registry.Register(t); err != nil {
@@ -621,7 +621,7 @@ func buildToolRegistry(args acpModeArgs, workDir, resolvedWorkerModel string) *t
 	}
 
 	allTools = mcp.FilterTools(args.toolProfile, allTools)
-	allTools = preferLastToolByName(allTools)
+	allTools = dedupeTools(allTools, realOrchestrationToolNames())
 
 	for _, t := range allTools {
 		if err := registry.Register(t); err != nil {
@@ -632,19 +632,27 @@ func buildToolRegistry(args acpModeArgs, workDir, resolvedWorkerModel string) *t
 	return registry
 }
 
-func preferLastToolByName(input []tools.Tool) []tools.Tool {
-	seen := make(map[string]bool, len(input))
+func dedupeTools(input []tools.Tool, preferLast map[string]bool) []tools.Tool {
+	positions := make(map[string]int, len(input))
 	output := make([]tools.Tool, 0, len(input))
-	for i := len(input) - 1; i >= 0; i-- {
-		name := input[i].Name()
-		if seen[name] {
+	for _, tool := range input {
+		name := tool.Name()
+		if existing, ok := positions[name]; ok {
+			if preferLast[name] {
+				output[existing] = tool
+			}
 			continue
 		}
-		seen[name] = true
-		output = append(output, input[i])
-	}
-	for i, j := 0, len(output)-1; i < j; i, j = i+1, j-1 {
-		output[i], output[j] = output[j], output[i]
+		positions[name] = len(output)
+		output = append(output, tool)
 	}
 	return output
+}
+
+func realOrchestrationToolNames() map[string]bool {
+	return map[string]bool{
+		"dispatch_task":    true,
+		"get_task_details": true,
+		"list_tasks":       true,
+	}
 }
