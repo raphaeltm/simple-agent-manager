@@ -47,6 +47,14 @@ func (t *WriteFile) Execute(_ context.Context, params map[string]any) (string, e
 		return "", err
 	}
 
+	// Check if file already exists and capture old state.
+	var oldLines int
+	var existed bool
+	if oldData, readErr := os.ReadFile(resolved); readErr == nil {
+		existed = true
+		oldLines = countLines(string(oldData))
+	}
+
 	// Ensure parent directory exists.
 	dir := filepath.Dir(resolved)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -57,7 +65,24 @@ func (t *WriteFile) Execute(_ context.Context, params map[string]any) (string, e
 		return "", fmt.Errorf("writing %s: %w", path, err)
 	}
 
-	return fmt.Sprintf("wrote %d bytes to %s", len(content), path), nil
+	newLines := countLines(content)
+	if existed {
+		return fmt.Sprintf("Overwrote %s (%d lines, %d bytes, was %d lines)",
+			path, newLines, len(content), oldLines), nil
+	}
+	return fmt.Sprintf("Created %s (%d lines, %d bytes)", path, newLines, len(content)), nil
+}
+
+// countLines counts the number of lines in a string (non-empty content has at least 1 line).
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
 }
 
 // requireString extracts a required string parameter.

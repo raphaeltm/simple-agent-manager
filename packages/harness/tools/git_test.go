@@ -76,6 +76,36 @@ func TestGitStatus_WithChanges(t *testing.T) {
 	if entry["path"] != "new.txt" {
 		t.Errorf("expected path=new.txt, got %v", entry["path"])
 	}
+	// Check structured summary.
+	summary := parsed["summary"].(string)
+	if !strings.Contains(summary, "Untracked: 1") {
+		t.Errorf("expected 'Untracked: 1' in summary, got %q", summary)
+	}
+	counts := parsed["counts"].(map[string]any)
+	if counts["untracked"].(float64) != 1 {
+		t.Errorf("expected untracked=1, got %v", counts["untracked"])
+	}
+}
+
+func TestGitStatus_StagedFiles(t *testing.T) {
+	dir := initGitRepo(t)
+	os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("content"), 0o644)
+	cmd := exec.Command("git", "add", "staged.txt")
+	cmd.Dir = dir
+	cmd.Run()
+
+	tool := &GitStatus{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed map[string]any
+	json.Unmarshal([]byte(result), &parsed)
+	summary := parsed["summary"].(string)
+	if !strings.Contains(summary, "Staged: 1") {
+		t.Errorf("expected 'Staged: 1' in summary, got %q", summary)
+	}
 }
 
 func TestGitStatus_NotARepo(t *testing.T) {
@@ -251,8 +281,18 @@ func TestGitCommit_Success(t *testing.T) {
 	if parsed["message"] != "add new file" {
 		t.Errorf("expected message 'add new file', got %v", parsed["message"])
 	}
+	// Check short hash.
+	shortHash := parsed["short"].(string)
+	if len(shortHash) != 7 {
+		t.Errorf("expected 7-char short hash, got %q", shortHash)
+	}
+	// Check committed summary.
+	committed := parsed["committed"].(string)
+	if !strings.Contains(committed, "Committed") || !strings.Contains(committed, "add new file") {
+		t.Errorf("expected 'Committed <hash>: add new file', got %q", committed)
+	}
 
-	// Verify the commit exists in git log
+	// Verify the commit exists in git log.
 	cmd := exec.Command("git", "log", "--oneline", "-1")
 	cmd.Dir = dir
 	out, _ := cmd.Output()

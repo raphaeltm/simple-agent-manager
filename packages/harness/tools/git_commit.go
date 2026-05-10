@@ -94,7 +94,7 @@ func (t *GitCommit) Execute(ctx context.Context, params map[string]any) (string,
 		return "", fmt.Errorf("git commit: %s", errMsg)
 	}
 
-	// Get the commit hash
+	// Get the commit hash (short + full).
 	hashCmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
 	hashCmd.Dir = t.WorkDir
 	var hashStdout bytes.Buffer
@@ -104,9 +104,22 @@ func (t *GitCommit) Execute(ctx context.Context, params map[string]any) (string,
 	}
 
 	hash := strings.TrimSpace(hashStdout.String())
+	shortHash := hash
+	if len(shortHash) > 7 {
+		shortHash = shortHash[:7]
+	}
+
+	// Build the first line of the commit message for the summary.
+	firstLine := message
+	if idx := strings.Index(message, "\n"); idx > 0 {
+		firstLine = message[:idx]
+	}
+
 	result := map[string]any{
-		"hash":    hash,
-		"message": message,
+		"hash":      hash,
+		"short":     shortHash,
+		"message":   message,
+		"committed": fmt.Sprintf("Committed %s: %s", shortHash, firstLine),
 	}
 	data, _ := json.Marshal(result)
 	return string(data), nil

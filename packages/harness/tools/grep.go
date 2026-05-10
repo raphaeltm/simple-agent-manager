@@ -126,13 +126,29 @@ func (t *Grep) Execute(_ context.Context, params map[string]any) (string, error)
 	}
 
 	if len(results) == 0 {
-		return "No matches found.", nil
+		return fmt.Sprintf("No matches found for pattern %q. Try a broader pattern or check the file path.", pattern), nil
+	}
+
+	// Count unique files in results.
+	fileSet := make(map[string]bool)
+	for _, r := range results {
+		if idx := strings.Index(r, ":"); idx > 0 {
+			// Handle context-mode lines: strip leading "> " or "  " prefix.
+			line := r
+			if len(line) > 2 && (line[0] == '>' || line[0] == ' ') {
+				line = strings.TrimLeft(line, "> ")
+			}
+			if idx2 := strings.Index(line, ":"); idx2 > 0 {
+				fileSet[line[:idx2]] = true
+			}
+		}
 	}
 
 	output := strings.Join(results, "\n")
 	if matchCount >= maxMatches {
 		output += fmt.Sprintf("\n\n(truncated: showing first %d matches)", maxMatches)
 	}
+	output += fmt.Sprintf("\n\nFound %d matches across %d files", matchCount, len(fileSet))
 	return output, nil
 }
 
