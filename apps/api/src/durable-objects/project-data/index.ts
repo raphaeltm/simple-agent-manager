@@ -317,6 +317,12 @@ export class ProjectData extends DurableObject<Env> {
       await this.transitionAcpSession(sessionId, toStatus, opts);
     });
 
+    // Check for sessions that never received a heartbeat (NULL last_heartbeat_at)
+    const noHbTimedOut = await acpSessions.checkNoHeartbeatTimeouts(this.sql, this.env, async (sessionId, toStatus, opts) => {
+      await this.transitionAcpSession(sessionId, toStatus, opts);
+    });
+    timedOut.push(...noHbTimedOut);
+
     // For conversation-mode sessions, couple agent death to workspace death.
     // Stop workspaces whose ACP sessions timed out to prevent zombie state.
     // Parallelized via Promise.allSettled for better error isolation and performance.

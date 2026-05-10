@@ -439,6 +439,62 @@ export function checkHeartbeatTimeouts(
   });
 }
 
+/**
+ * Check for ACP sessions in assigned/running that never received a heartbeat
+ * (last_heartbeat_at IS NULL) and whose created_at is older than the no-heartbeat
+ * timeout. These sessions likely had a VM agent crash during setup. Transition
+ * them to 'interrupted'.
+ */
+export function checkNoHeartbeatTimeouts(
+  sql: SqlStorage,
+  env: Env,
+  transitionFn: (sessionId: string, toStatus: AcpSessionStatus, opts: {
+    actorType: AcpSessionEventActorType;
+    reason?: string | null;
+    errorMessage?: string;
+    metadata?: Record<string, unknown> | null;
+  }) => Promise<void>
+): Promise<Array<{ sessionId: string; workspaceId: string | null }>> {
+  const noHeartbeatTimeoutMs = parseInt(
+    env.ACP_SESSION_NO_HEARTBEAT_TIMEOUT_MS || String(ACP_SESSION_DEFAULTS.NO_HEARTBEAT_TIMEOUT_MS),
+    10
+  );
+  const cutoff = Date.now() - noHeartbeatTimeoutMs;
+
+  const stuckSessions = sql
+    .exec(
+      `SELECT id, chat_session_id, workspace_id, node_id FROM acp_sessions
+       WHERE status IN ('assigned', 'running')
+       AND last_heartbeat_at IS NULL
+       AND created_at < ?`,
+      cutoff
+    )
+    .toArray()
+    .map((row) => ({
+      id: row.id as string,
+      chatSessionId: row.chat_session_id as string,
+      workspaceId: (row.workspace_id as string) ?? null,
+      nodeId: (row.node_id as string) ?? null,
+    }));
+
+  const timedOut: Array<{ sessionId: string; workspaceId: string | null }> = [];
+  const promises = stuckSessions.map(async (session) => {
+    try {
+      await transitionFn(session.id, 'interrupted', {
+        actorType: 'alarm',
+        reason: 'No heartbeat received within timeout',
+        errorMessage: `No heartbeat received: session created before cutoff ${cutoff}, last_heartbeat_at is NULL`,
+        metadata: { noHeartbeatTimeoutMs, cutoff },
+      });
+      timedOut.push({ sessionId: session.id, workspaceId: session.workspaceId });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log.error('acp_session.no_heartbeat_timeout_transition_failed', { sessionId: session.id, error: errorMsg });
+    }
+  });
+  return Promise.all(promises).then(() => timedOut);
+}
+
 function recordAcpSessionEvent(sql: SqlStorage, acpSessionId: string, fromStatus: AcpSessionStatus | null, toStatus: AcpSessionStatus, actorType: AcpSessionEventActorType | string, actorId: string | null, reason: string | null, metadata: Record<string, unknown> | null = null): void {
   sql.exec(
     `INSERT INTO acp_session_events (id, acp_session_id, from_status, to_status, actor_type, actor_id, reason, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -458,13 +514,22 @@ export function getAcpSessionOrThrow(sql: SqlStorage, sessionId: string): AcpSes
 
 /**
  * Compute the earliest alarm time needed for heartbeat detection.
+ * Considers both sessions with heartbeats (detection window) and sessions
+ * without heartbeats (no-heartbeat timeout from created_at).
  */
 export function computeHeartbeatAlarmTime(sql: SqlStorage, env: Env): number | null {
   const detectionWindow = parseInt(
     env.ACP_SESSION_DETECTION_WINDOW_MS || String(ACP_SESSION_DEFAULTS.DETECTION_WINDOW_MS),
     10
   );
+  const noHeartbeatTimeoutMs = parseInt(
+    env.ACP_SESSION_NO_HEARTBEAT_TIMEOUT_MS || String(ACP_SESSION_DEFAULTS.NO_HEARTBEAT_TIMEOUT_MS),
+    10
+  );
 
+  const candidates: number[] = [];
+
+  // Sessions with heartbeats: alarm at earliest_heartbeat + detection_window
   const earliestRow = sql
     .exec(
       `SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions
@@ -472,11 +537,29 @@ export function computeHeartbeatAlarmTime(sql: SqlStorage, env: Env): number | n
     )
     .toArray()[0];
 
-  if (!earliestRow) return null;
-  const earliestHeartbeat = parseMinEarliest(earliestRow, 'acp_sessions.earliest_heartbeat');
-  if (earliestHeartbeat === null) return null;
+  if (earliestRow) {
+    const earliestHeartbeat = parseMinEarliest(earliestRow, 'acp_sessions.earliest_heartbeat');
+    if (earliestHeartbeat !== null) {
+      candidates.push(earliestHeartbeat + detectionWindow);
+    }
+  }
 
-  return earliestHeartbeat + detectionWindow;
+  // Sessions without heartbeats: alarm at earliest_created_at + no_heartbeat_timeout
+  const noHbRow = sql
+    .exec(
+      `SELECT MIN(created_at) as earliest FROM acp_sessions
+       WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NULL`
+    )
+    .toArray()[0];
+
+  if (noHbRow) {
+    const earliestCreated = parseMinEarliest(noHbRow, 'acp_sessions.earliest_no_heartbeat');
+    if (earliestCreated !== null) {
+      candidates.push(earliestCreated + noHeartbeatTimeoutMs);
+    }
+  }
+
+  return candidates.length > 0 ? Math.min(...candidates) : null;
 }
 
 /**

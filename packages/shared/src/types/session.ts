@@ -280,6 +280,8 @@ export const ACP_SESSION_DEFAULTS = {
   DETECTION_WINDOW_MS: 300_000,
   /** VM agent startup reconciliation timeout (ms). Env: ACP_SESSION_RECONCILIATION_TIMEOUT_MS */
   RECONCILIATION_TIMEOUT_MS: 30_000,
+  /** Timeout (ms) for sessions that never received a heartbeat. Env: ACP_SESSION_NO_HEARTBEAT_TIMEOUT_MS */
+  NO_HEARTBEAT_TIMEOUT_MS: 30 * 60 * 1000, // 30 minutes
   /** Messages to include in fork context summary. Env: ACP_SESSION_FORK_CONTEXT_MESSAGES */
   FORK_CONTEXT_MESSAGES: 20,
   /** Maximum fork chain length. Env: ACP_SESSION_MAX_FORK_DEPTH */
