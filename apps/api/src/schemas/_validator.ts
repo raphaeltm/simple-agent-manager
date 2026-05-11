@@ -15,7 +15,7 @@ import { log } from '../lib/logger';
 /**
  * Formats Valibot issues into a human-readable error message string.
  */
-function formatIssues(issues: v.BaseIssue<unknown>[]): string {
+export function formatIssues(issues: v.BaseIssue<unknown>[]): string {
   return issues
     .map((issue) => {
       const path = issue.path?.map((p) => p.key).join('.') || 'body';

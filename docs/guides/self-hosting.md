@@ -62,6 +62,14 @@ These are runtime Worker variables, not GitHub Environment variables in the curr
 | `MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES`      | Max bytes per runtime env var value    | `8192`   |
 | `MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES`   | Max bytes per runtime file content     | `131072` |
 | `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH`     | Max runtime file path length (chars)   | `256`    |
+| `AGENT_SETTINGS_MAX_MODEL_LENGTH`          | Max saved agent model identifier length | `200`    |
+| `AGENT_SETTINGS_MAX_TOOL_NAME_LENGTH`      | Max saved agent tool name length       | `200`    |
+| `AGENT_SETTINGS_MAX_TOOL_LIST_LENGTH`      | Max entries in allowed/denied tool lists | `100`    |
+| `AGENT_SETTINGS_MAX_ENV_VARS`              | Max additional env vars per agent setting | `50`     |
+| `AGENT_SETTINGS_MAX_ENV_KEY_LENGTH`        | Max additional env var key length      | `128`    |
+| `AGENT_SETTINGS_MAX_ENV_VALUE_LENGTH`      | Max additional env var value length    | `4096`   |
+| `AGENT_SETTINGS_MAX_PROVIDER_NAME_LENGTH`  | Max custom provider display-name length | `100`    |
+| `AGENT_SETTINGS_MAX_BASE_URL_LENGTH`       | Max OpenCode provider base URL length  | `2048`   |
 
 **Optional AI task title generation variables** (Worker `vars`):
 

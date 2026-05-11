@@ -10,16 +10,22 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
-import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { jsonValidator, SaveAgentSettingsSchema } from '../schemas';
+import {
+  AGENT_SETTINGS_VALIDATION_DEFAULTS,
+  createSaveAgentSettingsSchema,
+  formatIssues,
+} from '../schemas';
 
 export const agentSettingsRoutes = new Hono<{ Bindings: Env }>();
+type AgentSettingsBody = v.InferOutput<ReturnType<typeof createSaveAgentSettingsSchema>>;
 
 // All agent settings routes require authentication
 agentSettingsRoutes.use('/*', requireAuth(), requireApproved());
@@ -74,6 +80,87 @@ function permissionModeFromDb(raw: string | null): AgentPermissionMode | null {
 
 function opencodeProviderFromDb(raw: string | null): OpenCodeProvider | null {
   return isOpenCodeProvider(raw) ? raw : null;
+}
+
+function getPositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getAgentSettingsValidationLimits(env: Env) {
+  return {
+    maxModelLength: getPositiveInt(
+      env.AGENT_SETTINGS_MAX_MODEL_LENGTH,
+      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxModelLength
+    ),
+    maxToolNameLength: getPositiveInt(
+      env.AGENT_SETTINGS_MAX_TOOL_NAME_LENGTH,
+      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxToolNameLength
+    ),
+    maxToolListLength: getPositiveInt(
+      env.AGENT_SETTINGS_MAX_TOOL_LIST_LENGTH,
+      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxToolListLength
+    ),
+    maxEnvVars: getPositiveInt(
+      env.AGENT_SETTINGS_MAX_ENV_VARS,
+      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxEnvVars
+    ),
+    maxEnvKeyLength: getPositiveInt(
+      env.AGENT_SETTINGS_MAX_ENV_KEY_LENGTH,
+      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxEnvKeyLength
+    ),
+    maxEnvValueLength: getPositiveInt(
+      env.AGENT_SETTINGS_MAX_ENV_VALUE_LENGTH,
+      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxEnvValueLength
+    ),
+    maxProviderNameLength: getPositiveInt(
+      env.AGENT_SETTINGS_MAX_PROVIDER_NAME_LENGTH,
+      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxProviderNameLength
+    ),
+    maxBaseUrlLength: getPositiveInt(
+      env.AGENT_SETTINGS_MAX_BASE_URL_LENGTH,
+      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxBaseUrlLength
+    ),
+  };
+}
+
+async function parseAgentSettingsBody(
+  c: Context<{ Bindings: Env }>
+): Promise<AgentSettingsBody | Response> {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch (err) {
+    if (err instanceof SyntaxError || (err instanceof Error && err.message.includes('JSON'))) {
+      return c.json(
+        {
+          error: 'BAD_REQUEST',
+          message: 'Invalid JSON in request body',
+        },
+        400
+      );
+    }
+    throw err;
+  }
+
+  const parsed = v.safeParse(
+    createSaveAgentSettingsSchema(getAgentSettingsValidationLimits(c.env)),
+    body
+  );
+  if (!parsed.success) {
+    return c.json(
+      {
+        error: 'BAD_REQUEST',
+        message: formatIssues(parsed.issues),
+      },
+      400
+    );
+  }
+
+  return parsed.output;
 }
 
 /**
@@ -144,7 +231,7 @@ agentSettingsRoutes.get('/:agentType', async (c) => {
  * PUT /api/agent-settings/:agentType
  * Upsert user's settings for a specific agent type.
  */
-agentSettingsRoutes.put('/:agentType', jsonValidator(SaveAgentSettingsSchema), async (c) => {
+agentSettingsRoutes.put('/:agentType', async (c) => {
   const userId = getUserId(c);
   const agentType = c.req.param('agentType');
 
@@ -152,9 +239,11 @@ agentSettingsRoutes.put('/:agentType', jsonValidator(SaveAgentSettingsSchema), a
     throw errors.badRequest(`Invalid agent type: ${agentType}`);
   }
 
-  // Body validated by SaveAgentSettingsSchema middleware (permissionMode, allowedTools,
-  // deniedTools, additionalEnv are all type-checked by Valibot)
-  const body = c.req.valid('json');
+  const parsedBody = await parseAgentSettingsBody(c);
+  if (parsedBody instanceof Response) {
+    return parsedBody;
+  }
+  const body = parsedBody;
 
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date();

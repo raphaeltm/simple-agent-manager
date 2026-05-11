@@ -67,7 +67,7 @@ describe('Agent Settings Routes', () => {
       const res = await app.request('/api/agent-settings/claude-code', {
         method: 'GET',
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(200);
@@ -97,7 +97,7 @@ describe('Agent Settings Routes', () => {
       const res = await app.request('/api/agent-settings/claude-code', {
         method: 'GET',
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(200);
@@ -145,7 +145,7 @@ describe('Agent Settings Routes', () => {
       const res = await app.request('/api/agent-settings/invalid-agent', {
         method: 'GET',
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
@@ -181,7 +181,7 @@ describe('Agent Settings Routes', () => {
           permissionMode: 'default',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(201);
@@ -215,7 +215,7 @@ describe('Agent Settings Routes', () => {
           permissionMode: 'bypassPermissions',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(200);
@@ -232,7 +232,7 @@ describe('Agent Settings Routes', () => {
           permissionMode: 'superAdmin',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
@@ -249,7 +249,7 @@ describe('Agent Settings Routes', () => {
           allowedTools: 'not-an-array',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
@@ -266,7 +266,7 @@ describe('Agent Settings Routes', () => {
           additionalEnv: 'not-an-object',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
@@ -309,6 +309,23 @@ describe('Agent Settings Routes', () => {
       expect(body.message).toContain('model');
     });
 
+    it('should honor configured validation limits from env', async () => {
+      const res = await app.request('/api/agent-settings/claude-code', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: '123456',
+        }),
+      }, {
+        DATABASE: {} as D1Database,
+        AGENT_SETTINGS_MAX_MODEL_LENGTH: '5',
+      } as Env);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('model');
+    });
+
     it('should accept null values to clear settings', async () => {
       mockDB.limit.mockResolvedValueOnce([{ id: 'existing-id' }]);
       mockDB.limit.mockResolvedValueOnce([{
@@ -332,7 +349,7 @@ describe('Agent Settings Routes', () => {
           permissionMode: null,
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(200);
@@ -347,7 +364,7 @@ describe('Agent Settings Routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'test' }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
@@ -365,7 +382,7 @@ describe('Agent Settings Routes', () => {
           opencodeProvider: 'custom',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
@@ -381,7 +398,7 @@ describe('Agent Settings Routes', () => {
           opencodeProvider: 'openai-compatible',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
@@ -398,7 +415,7 @@ describe('Agent Settings Routes', () => {
           opencodeBaseUrl: 'http://example.com/v1',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
@@ -431,7 +448,7 @@ describe('Agent Settings Routes', () => {
           opencodeProvider: 'scaleway',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(201);
@@ -467,7 +484,7 @@ describe('Agent Settings Routes', () => {
           opencodeProviderName: 'My Provider',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(201);
@@ -485,7 +502,7 @@ describe('Agent Settings Routes', () => {
           opencodeProvider: 'invalid-provider',
         }),
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
@@ -511,7 +528,7 @@ describe('Agent Settings Routes', () => {
       const res = await app.request('/api/agent-settings/opencode', {
         method: 'GET',
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(200);
@@ -527,7 +544,7 @@ describe('Agent Settings Routes', () => {
       const res = await app.request('/api/agent-settings/claude-code', {
         method: 'DELETE',
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(200);
@@ -539,7 +556,7 @@ describe('Agent Settings Routes', () => {
       const res = await app.request('/api/agent-settings/bad-type', {
         method: 'DELETE',
       }, {
-        DATABASE: {} as any,
+        DATABASE: {} as D1Database,
       } as Env);
 
       expect(res.status).toBe(400);
