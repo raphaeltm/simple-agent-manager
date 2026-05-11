@@ -20,7 +20,7 @@ describe('task completion callback handling source contract', () => {
   });
 
   it('callback endpoint finalizes terminal states', () => {
-    expect(tasksRouteFile).toContain('await finalizeTaskRun(c.env, {');
+    expect(tasksRouteFile).toContain('await finalizeTerminalStatus(c.env, c.executionCtx, {');
     expect(tasksRouteFile).toContain("body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'");
   });
 
@@ -29,7 +29,7 @@ describe('task completion callback handling source contract', () => {
   });
 
   it('callback endpoint requests workspace cleanup only for completed status', () => {
-    expect(tasksRouteFile).toContain("cleanupWorkspace: body.toStatus === 'completed'");
+    expect(tasksRouteFile).toContain("cleanupWorkspace: input.status === 'completed'");
   });
 
   it('complete_task uses finalization after D1 completion', () => {
@@ -48,7 +48,7 @@ describe('task completion callback handling source contract', () => {
   it('user-initiated status change also finalizes terminal states', () => {
     const callbackRouteIdx = tasksRouteFile.indexOf("crudRoutes.post('/:taskId/status/callback'");
     const beforeCallback = tasksRouteFile.slice(0, callbackRouteIdx);
-    expect(beforeCallback).toContain('await finalizeTaskRun(c.env, {');
+    expect(beforeCallback).toContain('await finalizeTerminalStatus(c.env, c.executionCtx, {');
     expect(beforeCallback).toContain("body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'");
   });
 });

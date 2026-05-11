@@ -66,6 +66,28 @@ import {
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
+type FinalizeTaskMode = Parameters<typeof finalizeTaskRun>[1]['taskMode'];
+
+async function finalizeTerminalStatus(
+  env: Env,
+  executionCtx: { waitUntil(promise: Promise<unknown>): void },
+  input: {
+    taskId: string;
+    projectId: string;
+    status: 'completed' | 'failed' | 'cancelled';
+    taskMode: FinalizeTaskMode;
+  }
+): Promise<void> {
+  await finalizeTaskRun(env, {
+    taskId: input.taskId,
+    projectId: input.projectId,
+    status: input.status,
+    taskMode: input.taskMode,
+    cleanupWorkspace: input.status === 'completed',
+    waitUntil: (promise) => executionCtx.waitUntil(promise),
+  });
+}
+
 // Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
 // The status/callback route uses its own bearer-token auth (verifyCallbackToken).
 // See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
@@ -428,13 +450,11 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
   );
 
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
-    await finalizeTaskRun(c.env, {
+    await finalizeTerminalStatus(c.env, c.executionCtx, {
       taskId,
       projectId: updatedTask.projectId,
       status: body.toStatus,
       taskMode: updatedTask.taskMode,
-      cleanupWorkspace: body.toStatus === 'completed',
-      waitUntil: (promise) => c.executionCtx.waitUntil(promise),
     });
   }
 
@@ -630,13 +650,11 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
   );
 
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
-    await finalizeTaskRun(c.env, {
+    await finalizeTerminalStatus(c.env, c.executionCtx, {
       taskId,
       projectId: updatedTask.projectId,
       status: body.toStatus,
       taskMode: updatedTask.taskMode,
-      cleanupWorkspace: body.toStatus === 'completed',
-      waitUntil: (promise) => c.executionCtx.waitUntil(promise),
     });
 
     // Emit notifications for terminal task states (best-effort)
