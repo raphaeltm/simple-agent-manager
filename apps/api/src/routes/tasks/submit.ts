@@ -416,6 +416,7 @@ submitRoutes.post('/submit', jsonValidator(SubmitTaskSchema), async (c) => {
       // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
       // then falls through to user agent_settings via callback, then platform default).
       model:
+        body.model ??
         resolvedProfile?.model ??
         resolveProjectAgentDefault(
           project.agentDefaults,

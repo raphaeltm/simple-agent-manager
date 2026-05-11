@@ -58,7 +58,7 @@ agentsCatalogRoutes.get('/', async (c) => {
       name: agent.name,
       description: agent.description,
       supportsAcp: agent.supportsAcp,
-      configured: hasDedicatedKey || usesScalewayFallback,
+      configured: !!agent.platformManaged || hasDedicatedKey || usesScalewayFallback,
       credentialHelpUrl: agent.credentialHelpUrl,
       fallbackCredentialSource: usesScalewayFallback ? 'scaleway-cloud' as const : null,
     };

@@ -128,6 +128,9 @@ export const DEFAULT_AI_PROXY_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
  * Override via AI_PROXY_DEFAULT_OPENAI_MODEL env var. */
 export const DEFAULT_AI_PROXY_OPENAI_MODEL = 'gpt-4.1';
 
+/** Default model for SAM Harness agent. Override via AI_PROXY_DEFAULT_SAM_HARNESS_MODEL env var. */
+export const DEFAULT_AI_PROXY_SAM_HARNESS_MODEL = 'gpt-4.1-mini';
+
 /** Budget tier for platform AI models. */
 export type PlatformAIModelTier = 'low-cost' | 'standard' | 'premium';
 

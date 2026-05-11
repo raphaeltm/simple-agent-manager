@@ -95,6 +95,9 @@ export function useProjectChatState() {
     project?.defaultDevcontainerConfigName ?? '',
   );
 
+  // Model selection — empty string means use default resolution chain
+  const [selectedModel, setSelectedModel] = useState('');
+
   // Task mode selection — defaults based on workspace profile
   const [selectedTaskMode, setSelectedTaskMode] = useState<TaskMode>(
     ((project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE) === 'lightweight'
@@ -353,8 +356,9 @@ export function useProjectChatState() {
       const attachmentRefs = attachments.chatAttachments
         .filter((a) => a.status === 'complete' && a.ref)
         .map((a) => a.ref!);
+      const modelField = selectedModel ? { model: selectedModel } : {};
       const baseRequest = selectedProfileId
-        ? { message: trimmed, agentProfileId: selectedProfileId }
+        ? { message: trimmed, agentProfileId: selectedProfileId, ...modelField }
         : {
             message: trimmed,
             ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
@@ -363,6 +367,7 @@ export function useProjectChatState() {
               ? { devcontainerConfigName: selectedDevcontainerConfigName.trim() }
               : {}),
             taskMode: selectedTaskMode,
+            ...modelField,
           };
       const result = await submitTask(projectId, attachmentRefs.length > 0
         ? { ...baseRequest, attachments: attachmentRefs }
@@ -491,6 +496,7 @@ export function useProjectChatState() {
     selectedWorkspaceProfile, setSelectedWorkspaceProfile,
     selectedDevcontainerConfigName, setSelectedDevcontainerConfigName,
     selectedTaskMode, handleTaskModeChange,
+    selectedModel, setSelectedModel,
     ...attachments,
     provisioning, bootLogs, bootLogPanelOpen, setBootLogPanelOpen,
     forkSession, setForkSession, handleFork,

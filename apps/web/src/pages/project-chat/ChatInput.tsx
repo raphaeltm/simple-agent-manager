@@ -1,6 +1,7 @@
 import type { SlashCommand, SlashCommandPaletteHandle } from '@simple-agent-manager/acp-client';
 import { SlashCommandPalette, VoiceButton } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, AgentProfile, TaskMode, UpdateAgentProfileRequest, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import { Paperclip, Settings, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -38,6 +39,8 @@ export function ChatInput({
   onDevcontainerConfigNameChange,
   selectedTaskMode,
   onTaskModeChange,
+  selectedModel,
+  onModelChange,
   slashCommands,
   attachments,
   onFilesSelected,
@@ -65,6 +68,8 @@ export function ChatInput({
   onDevcontainerConfigNameChange: (name: string) => void;
   selectedTaskMode: TaskMode;
   onTaskModeChange: (mode: TaskMode) => void;
+  selectedModel: string;
+  onModelChange: (model: string) => void;
   slashCommands?: SlashCommand[];
   attachments?: ChatAttachmentDisplay[];
   onFilesSelected?: (files: FileList | null) => void;
@@ -81,6 +86,11 @@ export function ChatInput({
   const selectedProfile = hasProfile
     ? agentProfiles.find((p) => p.id === selectedProfileId) ?? null
     : null;
+
+  // Models available for the model dropdown — workspace-scoped with decent tool support
+  const availableModels = PLATFORM_AI_MODELS.filter(
+    (m) => m.allowedScopes.includes('workspace') && m.toolCallSupport !== 'none',
+  );
 
   // Slash command palette state.
   // dismissedFilterRef tracks the exact filter string at the time the user pressed
@@ -231,6 +241,18 @@ export function ChatInput({
                   ? 'Agent will do the work, push changes, and create a PR'
                   : 'Chat with an agent. You decide when it\'s done.'}
               </span>
+              <select
+                value={selectedModel}
+                onChange={(e) => onModelChange(e.target.value)}
+                disabled={submitting}
+                aria-label="Model"
+                className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+              >
+                <option value="">Default model</option>
+                {availableModels.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
             </>
           )}
         </div>
@@ -326,6 +348,21 @@ export function ChatInput({
                     ? 'Agent will do the work, push changes, and create a PR'
                     : 'Chat with an agent. You decide when it\'s done.'}
                 </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label htmlFor="model-select" className="text-xs text-fg-muted whitespace-nowrap">Model:</label>
+                <select
+                  id="model-select"
+                  value={selectedModel}
+                  onChange={(e) => onModelChange(e.target.value)}
+                  disabled={submitting}
+                  className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+                >
+                  <option value="">Default</option>
+                  {availableModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </select>
               </div>
             </>
           )}

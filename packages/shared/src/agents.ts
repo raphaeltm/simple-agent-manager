@@ -36,6 +36,9 @@ export interface AgentDefinition {
   installCommand: string;
   /** Cloud provider whose credential can be used as a fallback when no dedicated agent key exists */
   fallbackCloudProvider?: string;
+  /** When true, agent uses platform-managed credentials (unified billing via AI proxy).
+   *  No user API key is required — always shows as configured in the UI. */
+  platformManaged?: boolean;
   /** OAuth-specific metadata */
   oauthSupport?: {
     /** Environment variable name for OAuth token */
@@ -128,13 +131,14 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
   {
     id: 'sam-harness',
     name: 'SAM Harness',
-    description: 'SAM native Go coding agent harness',
+    description: 'SAM native Go coding agent — uses platform billing, no API key needed',
     provider: 'sam',
     envVarName: 'SAM_API_KEY',
     acpCommand: 'sam-harness',
     acpArgs: ['--acp'],
     supportsAcp: true,
     credentialHelpUrl: '',
+    platformManaged: true,
     installCommand:
       'set -eu; . /etc/sam/env; arch="$(uname -m)"; case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "Unsupported architecture: $arch"; exit 1 ;; esac; curl -fsSL "$SAM_API_URL/api/agent/download?agent=sam-harness&os=linux&arch=$arch" -o /usr/local/bin/sam-harness; chmod +x /usr/local/bin/sam-harness',
   },

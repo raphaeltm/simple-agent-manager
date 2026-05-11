@@ -52,6 +52,7 @@ export const SubmitTaskSchema = v.object({
   taskMode: v.optional(TaskModeSchema),
   agentProfileId: v.optional(v.string()),
   attachments: v.optional(v.array(TaskAttachmentSchema)),
+  model: v.optional(v.string()),
 });
 
 export const CreateTaskSchema = v.object({

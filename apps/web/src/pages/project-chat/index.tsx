@@ -255,6 +255,8 @@ export function ProjectChat() {
               onDevcontainerConfigNameChange={state.setSelectedDevcontainerConfigName}
               selectedTaskMode={state.selectedTaskMode}
               onTaskModeChange={state.handleTaskModeChange}
+              selectedModel={state.selectedModel}
+              onModelChange={state.setSelectedModel}
               slashCommands={state.slashCommands}
               attachments={state.chatAttachments}
               onFilesSelected={state.handleChatFilesSelected}

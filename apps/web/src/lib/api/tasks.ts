@@ -48,6 +48,7 @@ export interface SubmitTaskRequest {
   taskMode?: 'task' | 'conversation';
   agentProfileId?: string;
   attachments?: TaskAttachmentRef[];
+  model?: string;
 }
 
 export interface SubmitTaskResponse {
