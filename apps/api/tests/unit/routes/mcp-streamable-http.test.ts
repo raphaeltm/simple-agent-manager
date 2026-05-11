@@ -86,7 +86,7 @@ const validTokenData = {
   projectId: 'proj-456',
   userId: 'user-789',
   workspaceId: 'ws-abc',
-  createdAt: '2026-03-07T00:00:00Z',
+  createdAt: new Date().toISOString(),
 };
 
 /** Build a JSON-RPC request (has `id` field). */
@@ -222,8 +222,12 @@ describe('MCP Streamable HTTP Compliance', () => {
       // First call is auth (mcp:valid-token), no rate limit call
       expect(kvGetCalls.length).toBe(1);
       expect(kvGetCalls[0][0]).toBe('mcp:valid-token');
-      // No KV.put calls for rate limiting
-      expect(mockKV.put.mock.calls.length).toBe(putCallsBefore);
+      // Only KV.put from MCP token sliding window TTL refresh (no rate limit puts)
+      const newPutCalls = mockKV.put.mock.calls.slice(putCallsBefore);
+      const rateLimitPuts = newPutCalls.filter(
+        (call: unknown[]) => typeof call[0] === 'string' && !call[0].startsWith('mcp:'),
+      );
+      expect(rateLimitPuts.length).toBe(0);
     });
   });
 

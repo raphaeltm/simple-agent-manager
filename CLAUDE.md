@@ -200,6 +200,12 @@ When you discover bugs or errors during testing — even if unrelated to your cu
 - **Test failures**: Check Miniflare bindings are configured in `vitest.config.ts`
 - **Type errors**: Run `pnpm typecheck` from root to see all issues
 - **Staging issues**: Query staging state directly via `$CF_TOKEN` and the Cloudflare API — D1 SQL queries, KV reads, DNS checks. See `.claude/rules/32-cf-api-debugging.md` for copy-paste commands. **Always query before guessing.**
+- **Stale GitHub credentials**: The `GH_TOKEN` env var is set once at session start and expires after ~1 hour (GitHub App installation token). The `git-credential-sam` helper and `gh` wrapper automatically fetch fresh tokens, so `git push` and `gh` commands keep working. If you hit auth errors:
+  - **Check if `GH_TOKEN` is stale**: `curl -sS -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/rate_limit | head -5` — if 401, the env var is stale
+  - **Get a fresh token via credential helper**: `printf 'protocol=https\nhost=github.com\n\n' | git credential fill`
+  - **Update `GH_TOKEN`**: `export GH_TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill | sed -n 's/^password=//p')`
+  - **Direct `$GH_TOKEN` reads** (e.g., `curl -H "Authorization: Bearer $GH_TOKEN"`) will always use the stale value — update the env var first or use `gh` which auto-refreshes
+- **MCP token expiration**: MCP tokens use a sliding window TTL (refreshed on each use, 24h hard cap). If all `sam-mcp` tools start returning auth errors, the token has exceeded the max lifetime — the task must be completed or a new one started.
 
 ## Task Tracking
 

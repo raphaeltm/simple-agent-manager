@@ -476,8 +476,10 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 
 	// Render the credential helper script
 	testCfg := &config.Config{
-		Port:          9999,
-		CallbackToken: "test-cred-token-abc",
+		Port:            9999,
+		CallbackToken:   "test-cred-token-abc",
+		ControlPlaneURL: "https://api.test.example.com",
+		WorkspaceID:     "ws-cred-test",
 	}
 	script, err := renderGitCredentialHelperScript(testCfg)
 	if err != nil {
@@ -552,6 +554,8 @@ func TestIntegration_EnsureGitCredentialHelper(t *testing.T) {
 		Repository:          "https://github.com/test/repo",
 		CallbackToken:       "ensure-cred-token",
 		Port:                8080,
+		ControlPlaneURL:     "https://api.test.example.com",
+		WorkspaceID:         "ws-ensure-cred",
 		ContainerMode:       true,
 		ContainerLabelKey:   labelKey,
 		ContainerLabelValue: labelValue,
@@ -728,6 +732,8 @@ func TestIntegration_DevcontainerWithRemoteUser(t *testing.T) {
 		Repository:          "https://github.com/test/repo",
 		CallbackToken:       "remote-user-cred-token",
 		Port:                8080,
+		ControlPlaneURL:     "https://api.test.example.com",
+		WorkspaceID:         "ws-remote-user-cred",
 		ContainerMode:       true,
 		ContainerLabelKey:   cfg.ContainerLabelKey,
 		ContainerLabelValue: cfg.ContainerLabelValue,
@@ -876,6 +882,8 @@ RUN echo "dockerfile-build-marker" > /tmp/dockerfile-marker
 		Repository:          "https://github.com/test/repo",
 		CallbackToken:       "dockerfile-cred-token",
 		Port:                8080,
+		ControlPlaneURL:     "https://api.test.example.com",
+		WorkspaceID:         "ws-dockerfile-cred",
 		ContainerMode:       true,
 		ContainerLabelKey:   cfg.ContainerLabelKey,
 		ContainerLabelValue: cfg.ContainerLabelValue,

@@ -80,7 +80,7 @@ const tokenData = {
   projectId: 'proj-001',
   userId: 'user-001',
   workspaceId: 'ws-001',
-  createdAt: '2026-04-09T00:00:00Z',
+  createdAt: new Date().toISOString(),
 };
 
 const tokenDataNoWorkspace = {

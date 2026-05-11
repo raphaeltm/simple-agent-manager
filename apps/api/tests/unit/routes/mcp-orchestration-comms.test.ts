@@ -44,7 +44,7 @@ const parentTokenData = {
   projectId: 'proj-001',
   userId: 'user-001',
   workspaceId: 'ws-parent-001',
-  createdAt: '2026-04-07T00:00:00Z',
+  createdAt: new Date().toISOString(),
 };
 
 /**

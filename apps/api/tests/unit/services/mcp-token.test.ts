@@ -1,4 +1,4 @@
-import { DEFAULT_MCP_TOKEN_TTL_SECONDS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS } from '@simple-agent-manager/shared';
+import { DEFAULT_MCP_TOKEN_TTL_SECONDS, DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS } from '@simple-agent-manager/shared';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 const mockKV = {
@@ -122,6 +122,23 @@ describe('MCP Token Service', () => {
     });
   });
 
+  describe('getMcpTokenMaxLifetime', () => {
+    it('should return default max lifetime when no env provided', async () => {
+      const { getMcpTokenMaxLifetime } = await import('../../../src/services/mcp-token');
+      expect(getMcpTokenMaxLifetime()).toBe(DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS);
+    });
+
+    it('should return configured max lifetime from env', async () => {
+      const { getMcpTokenMaxLifetime } = await import('../../../src/services/mcp-token');
+      expect(getMcpTokenMaxLifetime({ MCP_TOKEN_MAX_LIFETIME_SECONDS: '7200' })).toBe(7200);
+    });
+
+    it('should return default for invalid env value', async () => {
+      const { getMcpTokenMaxLifetime } = await import('../../../src/services/mcp-token');
+      expect(getMcpTokenMaxLifetime({ MCP_TOKEN_MAX_LIFETIME_SECONDS: 'bad' })).toBe(DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS);
+    });
+  });
+
   describe('validateMcpToken', () => {
     it('should return null for non-existent token', async () => {
       const { validateMcpToken } = await import('../../../src/services/mcp-token');
@@ -133,14 +150,14 @@ describe('MCP Token Service', () => {
       expect(mockKV.get).toHaveBeenCalledWith('mcp:missing-token', { type: 'json' });
     });
 
-    it('should return data without deleting for valid token', async () => {
+    it('should return data and refresh TTL for valid token', async () => {
       const { validateMcpToken } = await import('../../../src/services/mcp-token');
       const data = {
         taskId: 'task-123',
         projectId: 'proj-456',
         userId: 'user-789',
         workspaceId: 'ws-abc',
-        createdAt: '2026-03-07T00:00:00Z',
+        createdAt: new Date().toISOString(),
       };
       mockKV.get.mockResolvedValue(data);
 
@@ -150,6 +167,101 @@ describe('MCP Token Service', () => {
       expect(mockKV.get).toHaveBeenCalledWith('mcp:valid-token', { type: 'json' });
       // MCP tokens are NOT consumed on validation (unlike bootstrap tokens)
       expect(mockKV.delete).not.toHaveBeenCalled();
+      // Sliding window: TTL should be refreshed
+      expect(mockKV.put).toHaveBeenCalledWith(
+        'mcp:valid-token',
+        JSON.stringify(data),
+        { expirationTtl: DEFAULT_MCP_TOKEN_TTL_SECONDS },
+      );
+    });
+
+    it('should reject token past max lifetime and revoke it', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      // Token created 25 hours ago (past the default 24h max)
+      const createdAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+      const data = {
+        taskId: 'task-123',
+        projectId: 'proj-456',
+        userId: 'user-789',
+        workspaceId: 'ws-abc',
+        createdAt,
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      const result = await validateMcpToken(mockKV as unknown as KVNamespace, 'old-token');
+
+      expect(result).toBeNull();
+      // Token should be deleted from KV
+      expect(mockKV.delete).toHaveBeenCalledWith('mcp:old-token');
+      // TTL should NOT be refreshed for expired tokens
+      expect(mockKV.put).not.toHaveBeenCalled();
+    });
+
+    it('should keep token alive with sliding window across repeated validations', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      // Token created 3 hours ago — past the original 4h TTL if not refreshed,
+      // but within the 24h max lifetime
+      const createdAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+      const data = {
+        taskId: 'task-1',
+        projectId: 'proj-1',
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        createdAt,
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      // Simulate repeated validations — each should refresh TTL
+      const result1 = await validateMcpToken(mockKV as unknown as KVNamespace, 'active-token');
+      expect(result1).toEqual(data);
+      expect(mockKV.put).toHaveBeenCalledTimes(1);
+
+      const result2 = await validateMcpToken(mockKV as unknown as KVNamespace, 'active-token');
+      expect(result2).toEqual(data);
+      expect(mockKV.put).toHaveBeenCalledTimes(2);
+    });
+
+    it('should respect custom max lifetime from env', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      // Token created 2 hours ago
+      const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const data = {
+        taskId: 'task-1',
+        projectId: 'proj-1',
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        createdAt,
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      // Set max lifetime to 1 hour — token should be rejected
+      const result = await validateMcpToken(
+        mockKV as unknown as KVNamespace,
+        'short-lived-token',
+        { MCP_TOKEN_MAX_LIFETIME_SECONDS: '3600' },
+      );
+
+      expect(result).toBeNull();
+      expect(mockKV.delete).toHaveBeenCalledWith('mcp:short-lived-token');
+    });
+
+    it('should handle token without createdAt gracefully (no max lifetime check)', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      // Legacy token data without createdAt
+      const data = {
+        taskId: 'task-1',
+        projectId: 'proj-1',
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        createdAt: '',
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      const result = await validateMcpToken(mockKV as unknown as KVNamespace, 'legacy-token');
+
+      // Should still validate and refresh TTL (no createdAt → skip max lifetime check)
+      expect(result).toEqual(data);
+      expect(mockKV.put).toHaveBeenCalled();
     });
   });
 

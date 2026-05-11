@@ -7,7 +7,10 @@
  * bootstrap tokens, MCP tokens are reusable for the task's lifetime.
  */
 
-import { DEFAULT_MCP_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_MCP_TOKEN_TTL_SECONDS,
+  DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS,
+} from '@simple-agent-manager/shared';
 
 /** KV key prefix for MCP tokens */
 const MCP_TOKEN_PREFIX = 'mcp:';
@@ -30,6 +33,17 @@ export function getMcpTokenTTL(env?: { MCP_TOKEN_TTL_SECONDS?: string }): number
     }
   }
   return DEFAULT_MCP_TOKEN_TTL_SECONDS;
+}
+
+/** Get MCP token max lifetime from env or use default (per constitution principle XI) */
+export function getMcpTokenMaxLifetime(env?: { MCP_TOKEN_MAX_LIFETIME_SECONDS?: string }): number {
+  if (env?.MCP_TOKEN_MAX_LIFETIME_SECONDS) {
+    const seconds = parseInt(env.MCP_TOKEN_MAX_LIFETIME_SECONDS, 10);
+    if (!isNaN(seconds) && seconds > 0) {
+      return seconds;
+    }
+  }
+  return DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS;
 }
 
 /**
@@ -65,14 +79,38 @@ export async function storeMcpToken(
  * Unlike bootstrap tokens, MCP tokens are NOT consumed on validation —
  * agents may call multiple tools during a single task.
  *
- * @returns Token data if valid, null if invalid or expired
+ * Implements a sliding window TTL: each successful validation refreshes the
+ * KV expiration so the token stays alive as long as the agent is actively
+ * using it. A hard max lifetime cap (default 24h) prevents leaked tokens
+ * from living forever.
+ *
+ * @returns Token data if valid, null if invalid/expired/past max lifetime
  */
 export async function validateMcpToken(
   kv: KVNamespace,
   token: string,
+  env?: { MCP_TOKEN_TTL_SECONDS?: string; MCP_TOKEN_MAX_LIFETIME_SECONDS?: string },
 ): Promise<McpTokenData | null> {
   const key = `${MCP_TOKEN_PREFIX}${token}`;
-  return kv.get<McpTokenData>(key, { type: 'json' });
+  const data = await kv.get<McpTokenData>(key, { type: 'json' });
+  if (!data) return null;
+
+  // Enforce hard max lifetime — reject tokens older than the cap
+  if (data.createdAt) {
+    const maxLifetimeMs = getMcpTokenMaxLifetime(env) * 1000;
+    const age = Date.now() - new Date(data.createdAt).getTime();
+    if (age > maxLifetimeMs) {
+      // Token exceeded max lifetime — revoke and reject
+      await kv.delete(key);
+      return null;
+    }
+  }
+
+  // Sliding window: refresh the TTL so the token stays alive while in use
+  const ttl = getMcpTokenTTL(env);
+  await kv.put(key, JSON.stringify(data), { expirationTtl: ttl });
+
+  return data;
 }
 
 /**
