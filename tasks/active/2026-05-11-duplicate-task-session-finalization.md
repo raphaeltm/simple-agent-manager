@@ -36,7 +36,7 @@ There is a broader lifecycle problem: terminal task events are split across D1, 
 - [x] Run local quality checks and impacted tests.
 - [x] Run specialist validation (`task-completion-validator`, `cloudflare-specialist`, `constitution-validator`, `test-engineer`, and security review if touched paths warrant it).
 - [x] Deploy to staging and verify the changed backend behavior without relying on cleanup sweeps.
-- [ ] Push the branch and open a PR; do not merge unless explicitly asked.
+- [x] Push the branch and open PR #964; do not merge unless explicitly asked.
 
 ## Acceptance Criteria
 
@@ -77,3 +77,4 @@ There is a broader lifecycle problem: terminal task events are split across D1, 
 - Staging API health check returned HTTP 200 healthy from `https://api.sammy.party/health`.
 - Authenticated staging browser check passed for `/dashboard`, `/projects`, `/settings/cloud-provider`, and unauthenticated `/` redirect with no console errors.
 - Authenticated staging API finalization check created temporary task `01KRBS4P7PRMGHPXVJ3C4NPNZB`, transitioned it `draft -> cancelled` through `POST /api/projects/:projectId/tasks/:taskId/status`, verified `GET /sessions` for that task returned `count: 0`, verified task events showed `cancelled`, and deleted the temporary task.
+- Opened PR #964: https://github.com/raphaeltm/simple-agent-manager/pull/964
