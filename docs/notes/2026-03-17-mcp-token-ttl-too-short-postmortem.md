@@ -33,3 +33,13 @@ PR #410 (commit `af303ab`, 2026-03-16) reduced `DEFAULT_MCP_TOKEN_TTL_SECONDS` f
 1. **Regression guard test added** (`mcp-token.test.ts`): asserts `DEFAULT_MCP_TOKEN_TTL_SECONDS >= DEFAULT_TASK_RUN_MAX_EXECUTION_MS / 1000` — this test would have caught PR #410's reduction
 2. **Constant moved to shared** (`packages/shared/src/constants.ts`): places the TTL constant next to the task execution time constant, making the relationship visible
 3. **Behavioral test added**: verifies that `storeMcpToken()` actually passes a TTL >= task max execution seconds to KV
+
+## Addendum: Sliding Window TTL (2026-05-11)
+
+The original fix raised the TTL from 30 min to 4 hours, but the token was still minted once and never refreshed. Tasks exceeding 4 hours would still lose MCP access. A follow-up change added:
+
+1. **Sliding window TTL** — `validateMcpToken()` refreshes the KV expiration on each successful validation, keeping the token alive as long as the agent is actively using it
+2. **Hard max lifetime (24h)** — prevents leaked tokens from living forever (`MCP_TOKEN_MAX_LIFETIME_SECONDS`)
+3. **KV write throttle** — only refreshes when >50% of the TTL has elapsed since the last refresh, avoiding a KV write on every tool call
+4. **TTL cap** — the refresh TTL is capped to the remaining max lifetime so it never extends past the hard cap
+5. **Fail-closed on malformed dates** — tokens with missing or unparseable `createdAt` are revoked immediately

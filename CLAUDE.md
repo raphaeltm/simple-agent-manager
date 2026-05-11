@@ -205,7 +205,7 @@ When you discover bugs or errors during testing — even if unrelated to your cu
   - **Get a fresh token via credential helper**: `printf 'protocol=https\nhost=github.com\n\n' | git credential fill`
   - **Update `GH_TOKEN`**: `export GH_TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill | sed -n 's/^password=//p')`
   - **Direct `$GH_TOKEN` reads** (e.g., `curl -H "Authorization: Bearer $GH_TOKEN"`) will always use the stale value — update the env var first or use `gh` which auto-refreshes
-- **MCP token expiration**: MCP tokens use a sliding window TTL (refreshed on each use, 24h hard cap). If all `sam-mcp` tools start returning auth errors, the token has exceeded the max lifetime — the task must be completed or a new one started.
+- **MCP token expiration**: MCP tokens use a sliding window TTL (refreshed on each use, 24h hard cap). If all `sam-mcp` tools start returning auth errors after extended use, the token has exceeded its max lifetime and cannot be recovered — a new task must be started.
 
 ## Task Tracking
 

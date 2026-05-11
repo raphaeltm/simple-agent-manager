@@ -525,8 +525,8 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 	if !strings.Contains(scriptContent, "test-cred-token-abc") {
 		t.Fatal("script missing callback token")
 	}
-	if !strings.Contains(scriptContent, "9999") {
-		t.Fatal("script missing port")
+	if !strings.Contains(scriptContent, "https://api.test.example.com") {
+		t.Fatal("script missing control plane URL")
 	}
 
 	// Verify: git config returns the correct helper path

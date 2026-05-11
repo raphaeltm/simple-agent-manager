@@ -22,6 +22,8 @@ export interface McpTokenData {
   userId: string;
   workspaceId: string;
   createdAt: string;
+  /** ISO timestamp of the last KV TTL refresh (used to throttle writes) */
+  lastRefreshedAt?: string;
 }
 
 /** Get MCP token TTL from env or use default (per constitution principle XI) */
@@ -84,6 +86,10 @@ export async function storeMcpToken(
  * using it. A hard max lifetime cap (default 24h) prevents leaked tokens
  * from living forever.
  *
+ * Write throttle: KV TTL is only refreshed when >50% of the sliding window
+ * has elapsed since the last refresh, avoiding a KV write on every single
+ * tool call (agents can hit 120 req/min at rate limit ceiling).
+ *
  * @returns Token data if valid, null if invalid/expired/past max lifetime
  */
 export async function validateMcpToken(
@@ -95,20 +101,43 @@ export async function validateMcpToken(
   const data = await kv.get<McpTokenData>(key, { type: 'json' });
   if (!data) return null;
 
-  // Enforce hard max lifetime — reject tokens older than the cap
-  if (data.createdAt) {
-    const maxLifetimeMs = getMcpTokenMaxLifetime(env) * 1000;
-    const age = Date.now() - new Date(data.createdAt).getTime();
-    if (age > maxLifetimeMs) {
-      // Token exceeded max lifetime — revoke and reject
+  const now = Date.now();
+
+  // Enforce hard max lifetime — reject tokens older than the cap.
+  // If createdAt is missing or malformed, revoke the token (fail-closed).
+  const maxLifetimeMs = getMcpTokenMaxLifetime(env) * 1000;
+  const createdAtMs = data.createdAt ? new Date(data.createdAt).getTime() : NaN;
+  if (isNaN(createdAtMs)) {
+    // Malformed or missing createdAt — cannot verify age, revoke for safety
+    await kv.delete(key);
+    return null;
+  }
+  const age = now - createdAtMs;
+  if (age > maxLifetimeMs) {
+    await kv.delete(key);
+    return null;
+  }
+
+  // Sliding window: refresh KV TTL, but only when >50% of the window has
+  // elapsed since the last refresh to avoid a write on every request.
+  const ttlSeconds = getMcpTokenTTL(env);
+  const lastRefreshedMs = data.lastRefreshedAt
+    ? new Date(data.lastRefreshedAt).getTime()
+    : createdAtMs;
+  const sinceLastRefresh = now - (isNaN(lastRefreshedMs) ? 0 : lastRefreshedMs);
+  const refreshThresholdMs = (ttlSeconds * 1000) / 2;
+
+  if (sinceLastRefresh >= refreshThresholdMs) {
+    // Cap the TTL so it never extends past the hard max lifetime
+    const remainingLifetimeSeconds = Math.max(0, Math.floor((maxLifetimeMs - age) / 1000));
+    const effectiveTtl = Math.min(ttlSeconds, remainingLifetimeSeconds);
+    if (effectiveTtl <= 0) {
       await kv.delete(key);
       return null;
     }
+    const updated: McpTokenData = { ...data, lastRefreshedAt: new Date(now).toISOString() };
+    await kv.put(key, JSON.stringify(updated), { expirationTtl: effectiveTtl });
   }
-
-  // Sliding window: refresh the TTL so the token stays alive while in use
-  const ttl = getMcpTokenTTL(env);
-  await kv.put(key, JSON.stringify(data), { expirationTtl: ttl });
 
   return data;
 }
