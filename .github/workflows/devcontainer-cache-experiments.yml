@@ -1,0 +1,214 @@
+name: Devcontainer Cache Experiments
+
+on:
+  push:
+    branches:
+      - "sam/cloudflare-devcontainer-cache-experiments-*"
+    paths:
+      - ".github/workflows/devcontainer-cache-experiments.yml"
+      - "scripts/experiments/**"
+  workflow_dispatch:
+    inputs:
+      run_cloudflare_registry:
+        description: "Run Cloudflare managed registry push/pull experiment"
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      run_r2:
+        description: "Run R2 tarball and BuildKit S3 cache experiments"
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+permissions:
+  contents: read
+
+jobs:
+  cloudflare-registry:
+    if: ${{ github.event_name == 'push' || inputs.run_cloudflare_registry == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      IMAGE_NAME: sam-devcontainer-cache-exp
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Show Wrangler container command help
+        run: |
+          pnpm --filter @simple-agent-manager/api exec wrangler containers registries credentials --help
+
+      - name: Build local test image
+        run: |
+          cat > Dockerfile.cache-exp <<'DOCKERFILE'
+          FROM alpine:3.20
+          RUN dd if=/dev/zero of=/cache-test.bin bs=1M count=64
+          CMD ["sh", "-c", "test -f /cache-test.bin && echo ok"]
+          DOCKERFILE
+          docker build -t "$IMAGE_NAME:${GITHUB_RUN_ID}" -f Dockerfile.cache-exp .
+
+      - name: Push through wrangler containers push
+        id: wrangler_push
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm --filter @simple-agent-manager/api exec wrangler containers push "$IMAGE_NAME:${GITHUB_RUN_ID}" 2>&1 | tee wrangler-push.log
+          {
+            echo "### Wrangler containers push"
+            echo
+            echo '```text'
+            sed -E 's/[A-Za-z0-9_-]{24,}/***/g' wrangler-push.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate Cloudflare registry credentials
+        id: cf_creds_raw
+        run: |
+          set +e
+          pnpm --filter @simple-agent-manager/api exec wrangler containers registries credentials registry.cloudflare.com --push --pull --expiration-minutes=60 > cf-creds.txt 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            pnpm --filter @simple-agent-manager/api exec wrangler containers registries credentials --push --pull --expiration-minutes=60 > cf-creds.txt 2>&1
+            status=$?
+          fi
+          {
+            echo "### Wrangler registry credentials command"
+            echo
+            echo "Exit status: \`$status\`"
+            echo
+            echo '```text'
+            sed -E 's/[A-Za-z0-9_-]{24,}/***/g' cf-creds.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Parse registry credentials
+        id: cf_creds
+        run: node scripts/experiments/parse-cf-registry-credentials.mjs cf-creds.txt
+
+      - name: Docker login/push/pull against registry.cloudflare.com
+        run: |
+          set -euxo pipefail
+          REGISTRY="${{ steps.cf_creds.outputs.registry }}"
+          USERNAME="${{ steps.cf_creds.outputs.username }}"
+          PASSWORD="${{ steps.cf_creds.outputs.password }}"
+          REF="$REGISTRY/${CLOUDFLARE_ACCOUNT_ID}/${IMAGE_NAME}:${GITHUB_RUN_ID}"
+          echo "$PASSWORD" | docker login "$REGISTRY" --username "$USERNAME" --password-stdin
+          docker tag "$IMAGE_NAME:${GITHUB_RUN_ID}" "$REF"
+          docker push "$REF"
+          docker rmi "$REF"
+          docker pull "$REF"
+          echo "### Docker registry.cloudflare.com push/pull" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Ref: \`$REF\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Result: push and pull succeeded" >> "$GITHUB_STEP_SUMMARY"
+
+  r2-cache:
+    if: ${{ github.event_name == 'push' || inputs.run_r2 == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare experiment context
+        run: |
+          mkdir -p /tmp/sam-cache-exp
+          cat > /tmp/sam-cache-exp/Dockerfile <<'DOCKERFILE'
+          FROM alpine:3.20
+          RUN dd if=/dev/zero of=/r2-cache-test.bin bs=1M count=64
+          RUN sha256sum /r2-cache-test.bin > /r2-cache-test.sha256
+          CMD ["cat", "/r2-cache-test.sha256"]
+          DOCKERFILE
+          docker build -t sam-r2-cache-exp:${GITHUB_RUN_ID} /tmp/sam-cache-exp
+          docker save sam-r2-cache-exp:${GITHUB_RUN_ID} -o /tmp/sam-cache-exp-image.tar
+
+      - name: Create temporary R2 bucket
+        run: |
+          BUCKET="sam-devcontainer-cache-exp-${GITHUB_RUN_ID}"
+          echo "BUCKET=$BUCKET" >> "$GITHUB_ENV"
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 bucket create "$BUCKET"
+
+      - name: Test R2 tarball upload/download
+        run: |
+          set -euxo pipefail
+          KEY="docker-save/sam-r2-cache-exp-${GITHUB_RUN_ID}.tar"
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put "$BUCKET/$KEY" --file /tmp/sam-cache-exp-image.tar
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object get "$BUCKET/$KEY" --file /tmp/sam-cache-exp-image-downloaded.tar
+          docker rmi sam-r2-cache-exp:${GITHUB_RUN_ID}
+          docker load -i /tmp/sam-cache-exp-image-downloaded.tar
+          docker run --rm sam-r2-cache-exp:${GITHUB_RUN_ID}
+          echo "### R2 docker save/load tarball" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Bucket: \`$BUCKET\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Key: \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Result: upload, download, load, run succeeded" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          buildkitd-flags: --debug
+
+      - name: Test BuildKit S3 cache against R2
+        id: buildkit_s3
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          CACHE_ARGS="type=s3,region=auto,bucket=${BUCKET},name=sam-buildkit-cache-${GITHUB_RUN_ID},endpoint_url=https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com,use_path_style=true,access_key_id=${AWS_ACCESS_KEY_ID},secret_access_key=${AWS_SECRET_ACCESS_KEY},mode=max"
+          docker buildx build \
+            --progress=plain \
+            --cache-to "$CACHE_ARGS" \
+            --cache-from "$CACHE_ARGS" \
+            --load \
+            -t "sam-r2-buildkit-cache-exp:${GITHUB_RUN_ID}" \
+            /tmp/sam-cache-exp 2>&1 | tee buildkit-s3.log
+          {
+            echo "### BuildKit S3 cache to R2"
+            echo
+            echo "Exit status: \`${PIPESTATUS[0]}\`"
+            echo
+            echo '```text'
+            tail -120 buildkit-s3.log | sed -E 's/(access_key_id=)[^,]+/\1***/g; s/(secret_access_key=)[^,]+/\1***/g'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup temporary R2 bucket
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -n "${BUCKET:-}" ]; then
+            aws --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" s3 rm "s3://${BUCKET}" --recursive || true
+            pnpm --filter @simple-agent-manager/api exec wrangler r2 bucket delete "$BUCKET" --yes || true
+          fi
