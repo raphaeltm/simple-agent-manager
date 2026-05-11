@@ -155,6 +155,7 @@ func (h *Handler) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acps
 		conn:      h.conn,
 		sessionID: params.SessionId,
 	}
+	cfg.Stream = true // OnToken() streams content; suppress duplicate FinalMessage send
 
 	// Carry forward conversation history from previous Prompt() calls.
 	h.mu.Lock()
