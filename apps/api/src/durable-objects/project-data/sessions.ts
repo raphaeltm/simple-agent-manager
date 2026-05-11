@@ -84,6 +84,39 @@ export function stopSessionInternal(sql: SqlStorage, sessionId: string): void {
   );
 }
 
+export function stopActiveSessionsForTask(
+  sql: SqlStorage,
+  taskId: string
+): Array<{ sessionId: string; workspaceId: string | null; messageCount: number }> {
+  const rows = sql
+    .exec(
+      `SELECT id, workspace_id, message_count
+       FROM chat_sessions
+       WHERE task_id = ? AND status = 'active'`,
+      taskId
+    )
+    .toArray();
+
+  const now = Date.now();
+  sql.exec(
+    `UPDATE chat_sessions
+     SET status = 'stopped', ended_at = ?, updated_at = ?
+     WHERE task_id = ? AND status = 'active'`,
+    now,
+    now,
+    taskId
+  );
+
+  return rows.map((row) => {
+    const stopped = parseSessionStop(row);
+    return {
+      sessionId: String(row.id),
+      workspaceId: stopped.workspaceId,
+      messageCount: stopped.messageCount,
+    };
+  });
+}
+
 export function linkSessionToWorkspace(
   sql: SqlStorage,
   sessionId: string,

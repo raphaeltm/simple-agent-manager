@@ -43,11 +43,11 @@ import { verifyCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
+import { finalizeTaskRun } from '../../services/task-finalization';
 import {
   type TaskDependencyEdge,
   wouldCreateTaskDependencyCycle,
 } from '../../services/task-graph';
-import { cleanupTaskRun } from '../../services/task-runner';
 import {
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
@@ -427,22 +427,15 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
     ).catch((e) => { log.warn('task.activity_event_failed', { taskId, error: String(e) }); })
   );
 
-  // On terminal states, stop the chat session (best-effort).
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
-    if (updatedTask.workspaceId && updatedTask.projectId) {
-      c.executionCtx.waitUntil(
-        (async () => {
-          const [ws] = await db
-            .select({ chatSessionId: schema.workspaces.chatSessionId })
-            .from(schema.workspaces)
-            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
-            .limit(1);
-          if (ws?.chatSessionId) {
-            await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
-          }
-        })().catch((e) => { log.error('task.session_stop_failed', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
-      );
-    }
+    await finalizeTaskRun(c.env, {
+      taskId,
+      projectId: updatedTask.projectId,
+      status: body.toStatus,
+      taskMode: updatedTask.taskMode,
+      cleanupWorkspace: body.toStatus === 'completed',
+      waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+    });
   }
 
   const nextBlocked = await computeBlockedForTask(db, updatedTask.id);
@@ -636,32 +629,15 @@ crudRoutes.post('/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema
     ).catch((e) => { log.warn('task.callback_activity_event_failed', { taskId, error: String(e) }); })
   );
 
-  // On terminal states, stop the chat session and handle workspace cleanup.
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
-    // Stop the chat session in ProjectData DO (best-effort).
-    // chatSessionId lives on the workspace, not the task — look it up.
-    if (updatedTask.workspaceId && updatedTask.projectId) {
-      c.executionCtx.waitUntil(
-        (async () => {
-          const [ws] = await db
-            .select({ chatSessionId: schema.workspaces.chatSessionId })
-            .from(schema.workspaces)
-            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
-            .limit(1);
-          if (ws?.chatSessionId) {
-            await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
-          }
-        })().catch((e) => { log.error('task.callback_session_stop_failed', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
-      );
-    }
-
-    // On clean completion, auto-trigger workspace cleanup (destroy workspace + optionally node).
-    // On failure/cancellation, keep workspace alive for debugging.
-    if (body.toStatus === 'completed') {
-      c.executionCtx.waitUntil(
-        cleanupTaskRun(taskId, c.env).catch((e) => { log.error('task.cleanup_failed', { taskId, error: String(e) }); })
-      );
-    }
+    await finalizeTaskRun(c.env, {
+      taskId,
+      projectId: updatedTask.projectId,
+      status: body.toStatus,
+      taskMode: updatedTask.taskMode,
+      cleanupWorkspace: body.toStatus === 'completed',
+      waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+    });
 
     // Emit notifications for terminal task states (best-effort)
     if (c.env.NOTIFICATION) {
@@ -935,6 +911,14 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
 
   await appendStatusEvent(db, taskId, task.status as TaskStatus, 'completed', 'user', userId, 'Conversation closed by user');
 
+  await finalizeTaskRun(c.env, {
+    taskId,
+    projectId,
+    status: 'completed',
+    taskMode: task.taskMode,
+    cleanupWorkspace: false,
+  });
+
   // Record activity event (best-effort)
   c.executionCtx.waitUntil(
     projectDataService.recordActivityEvent(
@@ -949,21 +933,6 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
       { reason: 'Conversation closed by user' }
     ).catch(() => { /* best-effort */ })
   );
-
-  // Stop the DO session if the task has a workspace with a chat session (best-effort)
-  if (task.workspaceId) {
-    c.executionCtx.waitUntil(
-      (async () => {
-        const [ws] = await db.select({ chatSessionId: schema.workspaces.chatSessionId })
-          .from(schema.workspaces)
-          .where(eq(schema.workspaces.id, task.workspaceId!))
-          .limit(1);
-        if (ws?.chatSessionId) {
-          await projectDataService.stopSession(c.env, projectId, ws.chatSessionId);
-        }
-      })().catch((e) => { log.error('task.close_session_stop_failed', { taskId, projectId, error: String(e) }); })
-    );
-  }
 
   log.info('task.conversation_closed', { taskId, projectId, userId });
 

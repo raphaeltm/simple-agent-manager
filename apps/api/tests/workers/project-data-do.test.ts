@@ -80,6 +80,27 @@ describe('ProjectData Durable Object', () => {
       expect(session!.endedAt).toBeTruthy();
     });
 
+    it('stops all active sessions for a task while leaving unrelated and already stopped sessions untouched', async () => {
+      const stub = getStub('project-stop-task-sessions');
+      const taskId = 'task-with-orphans';
+      const orphan = await stub.createSession(null, 'Orphan duplicate', taskId);
+      const canonical = await stub.createSession('workspace-1', 'Canonical session', taskId);
+      const alreadyStopped = await stub.createSession(null, 'Already stopped', taskId);
+      const unrelated = await stub.createSession(null, 'Other task', 'task-other');
+
+      await stub.stopSession(alreadyStopped);
+
+      const result = await stub.stopActiveSessionsForTask(taskId);
+
+      expect(result.stopped).toBe(2);
+      expect(result.sessionIds).toEqual(expect.arrayContaining([orphan, canonical]));
+
+      await expect(stub.getSession(orphan)).resolves.toMatchObject({ status: 'stopped' });
+      await expect(stub.getSession(canonical)).resolves.toMatchObject({ status: 'stopped' });
+      await expect(stub.getSession(alreadyStopped)).resolves.toMatchObject({ status: 'stopped' });
+      await expect(stub.getSession(unrelated)).resolves.toMatchObject({ status: 'active' });
+    });
+
     it('getSession returns null for non-existent session', async () => {
       const stub = getStub('project-no-session');
       const result = await stub.getSession('non-existent-id');

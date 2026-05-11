@@ -75,6 +75,7 @@ function makeMockEnv(overrides: {
     project = null,
     user = null,
   } = overrides;
+  const mutableTasks = tasks as Array<Record<string, unknown>>;
 
   const startTaskRunnerCalls: unknown[] = [];
   const mailboxMessages: unknown[] = [];
@@ -98,7 +99,7 @@ function makeMockEnv(overrides: {
             // Schedulable tasks for auto-dispatch
             if (q.includes('SCHEDULER_STATE') && q.includes('SCHEDULABLE')) {
               return {
-                results: tasks.filter((t: Record<string, unknown>) =>
+                results: mutableTasks.filter((t: Record<string, unknown>) =>
                   t.scheduler_state === 'schedulable' && t.status === 'queued',
                 ),
               };
@@ -109,7 +110,7 @@ function makeMockEnv(overrides: {
             const q = query.trim().toUpperCase();
             // Active count
             if (q.includes('COUNT(*)')) {
-              const active = tasks.filter((t: Record<string, unknown>) =>
+              const active = mutableTasks.filter((t: Record<string, unknown>) =>
                 ['in_progress', 'delegated', 'provisioning', 'running'].includes(t.status as string),
               );
               return { cnt: active.length };
@@ -143,7 +144,29 @@ function makeMockEnv(overrides: {
             }
             return null;
           }),
-          run: vi.fn(async () => ({ meta: { changes: 1 } })),
+          run: vi.fn(async () => {
+            const q = query.trim().toUpperCase();
+            if (q.startsWith('UPDATE TASKS') && q.includes("STATUS = 'DELEGATED'")) {
+              const taskId = _args[2];
+              const task = mutableTasks.find((t) => t.id === taskId);
+              if (task?.status === 'queued' && task.scheduler_state === 'schedulable') {
+                task.status = 'delegated';
+                task.execution_step = 'node_selection';
+                return { meta: { changes: 1 } };
+              }
+              return { meta: { changes: 0 } };
+            }
+            if (q.startsWith('UPDATE TASKS') && q.includes("STATUS = 'FAILED'")) {
+              const taskId = _args[3];
+              const task = mutableTasks.find((t) => t.id === taskId);
+              if (task?.status === 'delegated') {
+                task.status = 'failed';
+                return { meta: { changes: 1 } };
+              }
+              return { meta: { changes: 0 } };
+            }
+            return { meta: { changes: 1 } };
+          }),
         })),
       })),
     },
@@ -151,6 +174,7 @@ function makeMockEnv(overrides: {
     PROJECT_DATA: {
       idFromName: vi.fn(() => 'do-id'),
       get: vi.fn(() => ({
+        ensureProjectId: vi.fn(async () => {}),
         createSession: vi.fn(async () => {
           const id = `session-${sessionsCreated.length}`;
           sessionsCreated.push(id);
@@ -216,6 +240,36 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
       (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('UPDATE orchestrator_missions'),
     );
     expect(updateCalls.length).toBeGreaterThan(0);
+  });
+
+  it('does not create duplicate sessions across repeated scheduler cycles after dispatch claim', async () => {
+    const sql = makeSqlStorage({
+      orchestrator_missions: [{ mission_id: 'mission-1' }],
+    });
+
+    const task = {
+      id: 'task-claim-once',
+      status: 'queued',
+      scheduler_state: 'schedulable',
+      mission_id: 'mission-1',
+      updated_at: new Date().toISOString(),
+      title: 'Claim once',
+      description: 'Only one session should exist',
+      user_id: 'user-1',
+      project_id: 'proj-1',
+      output_branch: null,
+      dispatch_depth: 0,
+      priority: 0,
+    };
+
+    const { env, sessionsCreated, startTaskRunnerCalls } = makeMockEnv({ tasks: [task] });
+
+    await runSchedulingCycle(sql, env, 'proj-1', config);
+    await runSchedulingCycle(sql, env, 'proj-1', config);
+
+    expect(sessionsCreated).toHaveLength(1);
+    expect(startTaskRunnerCalls).toHaveLength(1);
+    expect(task.status).toBe('delegated');
   });
 
   it('skips scheduling when no active missions exist', async () => {

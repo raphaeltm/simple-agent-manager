@@ -181,8 +181,8 @@ export async function failTask(
 
   // Check current status before failing (idempotent)
   const task = await rc.env.DATABASE.prepare(
-    `SELECT status, mission_id FROM tasks WHERE id = ?`
-  ).bind(state.taskId).first<{ status: string; mission_id: string | null }>();
+    `SELECT status, mission_id, task_mode FROM tasks WHERE id = ?`
+  ).bind(state.taskId).first<{ status: string; mission_id: string | null; task_mode: string | null }>();
 
   const currentStatus = task?.status;
   if (currentStatus === 'failed' || currentStatus === 'completed' || currentStatus === 'cancelled') {
@@ -253,12 +253,10 @@ export async function failTask(
     });
   }
 
-  // Best-effort: inject error into chat session and stop the session so the UI
-  // shows the failure. Without stopSession, the session stays "active" in the
-  // sidebar even though the task has failed.
+  // Best-effort: inject error into chat session so the UI shows the failure.
   if (state.stepResults.chatSessionId && state.projectId) {
     try {
-      const { persistMessage, stopSession } = await import('../../services/project-data');
+      const { persistMessage } = await import('../../services/project-data');
       await persistMessage(
         rc.env,
         state.projectId,
@@ -267,11 +265,6 @@ export async function failTask(
         `Task failed at step "${state.currentStep}": ${errorMessage}`,
         null
       );
-      await stopSession(
-        rc.env,
-        state.projectId,
-        state.stepResults.chatSessionId
-      );
     } catch (chatErr) {
       log.error('task_runner_do.chat_error_inject_failed', {
         taskId: state.taskId,
@@ -279,6 +272,18 @@ export async function failTask(
         error: chatErr instanceof Error ? chatErr.message : String(chatErr),
       });
     }
+  }
+
+  if (state.projectId) {
+    const { finalizeTaskRun } = await import('../../services/task-finalization');
+    await finalizeTaskRun(rc.env, {
+      taskId: state.taskId,
+      projectId: state.projectId,
+      status: 'failed',
+      taskMode: task?.task_mode ?? null,
+      cleanupWorkspace: true,
+      warmTimeoutOverrideMs: state.config.projectScaling?.warmNodeTimeoutMs ?? null,
+    });
   }
 
   // Revoke MCP token so it cannot be used after task failure
@@ -295,7 +300,8 @@ export async function failTask(
     state.stepResults.mcpToken = null;
   }
 
-  // Best-effort cleanup
+  // Best-effort cleanup for failures before/around workspace creation. This
+  // covers node/workspace resources that cleanupTaskRun cannot infer yet.
   await cleanupOnFailure(state, rc);
 
   state.completed = true;

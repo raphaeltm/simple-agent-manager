@@ -64,6 +64,15 @@ export async function stopSession(
   return stub.stopSession(sessionId);
 }
 
+export async function stopActiveSessionsForTask(
+  env: Env,
+  projectId: string,
+  taskId: string
+): Promise<{ stopped: number; sessionIds: string[] }> {
+  const stub = await getStub(env, projectId);
+  return stub.stopActiveSessionsForTask(taskId);
+}
+
 export async function updateSessionTopic(
   env: Env,
   projectId: string,

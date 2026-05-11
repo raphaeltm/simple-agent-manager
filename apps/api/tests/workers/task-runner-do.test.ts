@@ -151,6 +151,25 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
     expect(statusAfterSecond!.currentStep).toBe('node_selection');
   });
 
+  it('duplicate start does not overwrite the original chat session binding', async () => {
+    await seedTestData();
+    const taskId = 'tr-test-idempotent-session-001';
+    await seedTestTask(taskId);
+
+    const stub = getStub(taskId);
+    const firstInput = buildStartInput(taskId);
+    firstInput.config.chatSessionId = 'session-original';
+    const secondInput = buildStartInput(taskId);
+    secondInput.config.chatSessionId = 'session-duplicate';
+
+    await stub.start(firstInput);
+    await stub.start(secondInput);
+
+    const status = await stub.getStatus();
+    expect(status!.stepResults.chatSessionId).toBe('session-original');
+    expect(status!.config.chatSessionId).toBe('session-original');
+  });
+
   it('getStatus() redacts mcpToken', async () => {
     await seedTestData();
     const taskId = 'tr-test-redact-001';

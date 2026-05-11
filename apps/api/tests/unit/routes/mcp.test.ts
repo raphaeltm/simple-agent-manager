@@ -54,6 +54,7 @@ const mockDoStub = {
   getIdeasForSession: vi.fn().mockReturnValue([]),
   getSessionsForIdea: vi.fn().mockReturnValue([]),
   updateSessionTopic: vi.fn().mockResolvedValue(true),
+  stopActiveSessionsForTask: vi.fn().mockResolvedValue({ stopped: 0, sessionIds: [] }),
 };
 const mockProjectData = {
   idFromName: vi.fn().mockReturnValue('do-id'),

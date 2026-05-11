@@ -92,6 +92,29 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.stopped', { sessionId }, sessionId);
   }
 
+  async stopActiveSessionsForTask(taskId: string): Promise<{ stopped: number; sessionIds: string[] }> {
+    const stoppedSessions = sessions.stopActiveSessionsForTask(this.sql, taskId);
+    for (const stopped of stoppedSessions) {
+      activity.recordActivityEventInternal(
+        this.sql,
+        'session.stopped',
+        'system',
+        null,
+        stopped.workspaceId,
+        stopped.sessionId,
+        taskId,
+        JSON.stringify({ message_count: stopped.messageCount, reason: 'task_terminal' })
+      );
+      try { materialization.materializeSession(this.sql, stopped.sessionId); }
+      catch (e) { log.error('materialize_task_session_on_stop_failed', { sessionId: stopped.sessionId, taskId, error: String(e) }); }
+      this.broadcastEvent('session.stopped', { sessionId: stopped.sessionId, taskId }, stopped.sessionId);
+    }
+    if (stoppedSessions.length > 0) {
+      this.scheduleSummarySync();
+    }
+    return { stopped: stoppedSessions.length, sessionIds: stoppedSessions.map((session) => session.sessionId) };
+  }
+
   async persistMessage(sessionId: string, role: string, content: string, toolMetadata: string | null): Promise<string> {
     const result = messages.persistMessage(this.sql, this.env, sessionId, role, content, toolMetadata);
     const idleReset = idleCleanup.resetIdleCleanup(this.sql, this.env, sessionId);

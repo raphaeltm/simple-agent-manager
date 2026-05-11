@@ -15,6 +15,7 @@ import { log } from '../../lib/logger';
 import * as notificationService from '../../services/notification';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
+import { finalizeTaskRun } from '../../services/task-finalization';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
@@ -264,6 +265,14 @@ export async function handleCompleteTask(
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
   await syncTriggerExecutionStatus(env.DATABASE, tokenData.taskId, 'completed');
+
+  await finalizeTaskRun(env, {
+    taskId: tokenData.taskId,
+    projectId: tokenData.projectId,
+    status: 'completed',
+    taskMode: taskRow?.task_mode ?? null,
+    cleanupWorkspace: false,
+  });
 
   // Recompute scheduler states for sibling tasks in the same mission (best-effort).
   // When a mission task completes, other tasks that were blocked_dependency may become schedulable.

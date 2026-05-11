@@ -22,19 +22,19 @@ There is a broader lifecycle problem: terminal task events are split across D1, 
 
 ## Implementation Checklist
 
-- [ ] Inspect scheduler, TaskRunner DO startup, task callback, MCP `complete_task`, task CRUD, ProjectData sessions, and idle cleanup code paths.
-- [ ] Add an atomic D1 dispatch claim before ProjectOrchestrator creates a ProjectData chat session.
-- [ ] Ensure failed TaskRunner startup clears the claim or terminally fails the task and stops the created session.
-- [ ] Preserve explicit task-mode versus conversation-mode behavior.
-- [ ] Add a single task finalization service/path for terminal task fan-out where practical.
-- [ ] Wire `complete_task`, task callback terminal transitions, TaskRunner failure/cancel paths, and relevant repair paths through finalization.
-- [ ] Add repair/prevention for orphan active ProjectData sessions linked to a terminal or duplicate task session.
-- [ ] Add focused behavioral tests for repeated scheduler cycles and duplicate TaskRunner starts.
-- [ ] Add focused behavioral tests for `complete_task` finalization and callback finalization.
-- [ ] Add focused behavioral tests for orphan-session repair/prevention and task-mode/conversation-mode semantics.
-- [ ] Add required bug postmortem and process fix for this class of lifecycle ordering bug.
-- [ ] Run local quality checks and impacted tests.
-- [ ] Run specialist validation (`task-completion-validator`, `cloudflare-specialist`, `constitution-validator`, `test-engineer`, and security review if touched paths warrant it).
+- [x] Inspect scheduler, TaskRunner DO startup, task callback, MCP `complete_task`, task CRUD, ProjectData sessions, and idle cleanup code paths.
+- [x] Add an atomic D1 dispatch claim before ProjectOrchestrator creates a ProjectData chat session.
+- [x] Ensure failed TaskRunner startup clears the claim or terminally fails the task and stops the created session.
+- [x] Preserve explicit task-mode versus conversation-mode behavior.
+- [x] Add a single task finalization service/path for terminal task fan-out where practical.
+- [x] Wire `complete_task`, task callback terminal transitions, TaskRunner failure/cancel paths, and relevant repair paths through finalization.
+- [x] Add repair/prevention for orphan active ProjectData sessions linked to a terminal or duplicate task session.
+- [x] Add focused behavioral tests for repeated scheduler cycles and duplicate TaskRunner starts.
+- [x] Add focused behavioral tests for `complete_task` finalization and callback finalization.
+- [x] Add focused behavioral tests for orphan-session repair/prevention and task-mode/conversation-mode semantics.
+- [x] Add required bug postmortem and process fix for this class of lifecycle ordering bug.
+- [x] Run local quality checks and impacted tests.
+- [x] Run specialist validation (`task-completion-validator`, `cloudflare-specialist`, `constitution-validator`, `test-engineer`, and security review if touched paths warrant it).
 - [ ] Deploy to staging and verify the changed backend behavior without relying on cleanup sweeps.
 - [ ] Push the branch and open a PR; do not merge unless explicitly asked.
 
@@ -60,3 +60,16 @@ There is a broader lifecycle problem: terminal task events are split across D1, 
 - `apps/api/src/routes/chat.ts`
 - `docs/adr/004-hybrid-d1-do-storage.md`
 - `docs/architecture/workspace-lifecycle.md`
+
+## Verification Notes
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-orchestrator-scheduling.test.ts tests/unit/services/task-finalization.test.ts tests/unit/task-runner-completion.test.ts tests/unit/routes/mcp.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-sessions.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api test` passed: 236 files, 4502 tests.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings only.
+- `pnpm --filter @simple-agent-manager/api build` passed.
+- `pnpm typecheck` passed.
+- `pnpm lint` passed with existing warnings only.
+- Focused Worker DO test command `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-do.test.ts tests/workers/task-runner-do.test.ts --maxWorkers=1` crashed before importing tests with a local `workerd` signal 11 segmentation fault. The Worker tests remain in the branch for CI/runtime validation, and local unit coverage was added for the ProjectData orphan-session stop helper.
+- Specialist validation passed without blocking findings. Review adjustment: workspace cleanup for completed task callback/status routes is now scheduled through `waitUntil` by the shared finalizer so session finalization is prompt without blocking route responses on the configured cleanup delay.

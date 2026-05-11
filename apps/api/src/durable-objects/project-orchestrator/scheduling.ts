@@ -236,7 +236,14 @@ async function autoDispatchSchedulableTasks(
   let dispatched = 0;
 
   for (const task of toDispatch) {
+    let sessionId: string | null = null;
     try {
+      const claimed = await claimTaskForDispatch(env, task.id);
+      if (!claimed) {
+        logDecision(sql, missionId, task.id, 'skip', 'Task was already claimed for dispatch', now);
+        continue;
+      }
+
       // Resolve user info for git config
       const userRow = await env.DATABASE.prepare(
         'SELECT name, email, github_id FROM users WHERE id = ?',
@@ -258,18 +265,13 @@ async function autoDispatchSchedulableTasks(
         : (projectRow.default_devcontainer_config_name ?? null);
 
       // Create chat session for the task
-      const sessionId = await projectDataService.createSession(
+      sessionId = await projectDataService.createSession(
         env, projectId, null, task.title, task.id,
       );
 
       if (task.description) {
         await projectDataService.persistMessage(env, projectId, sessionId, 'user', task.description, null);
       }
-
-      // Transition task to queued → provisioning via status update
-      await env.DATABASE.prepare(
-        `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ?`,
-      ).bind(new Date().toISOString(), task.id).run();
 
       // Start the TaskRunner DO
       await startTaskRunnerDO(env, {
@@ -322,6 +324,7 @@ async function autoDispatchSchedulableTasks(
         projectId, missionId, taskId: task.id,
         error: err instanceof Error ? err.message : String(err),
       });
+      await failClaimedDispatch(env, projectId, task.id, sessionId, err);
       logDecision(sql, missionId, task.id, 'skip',
         `Auto-dispatch failed: ${err instanceof Error ? err.message : String(err)}`, now);
     }
@@ -334,6 +337,63 @@ async function autoDispatchSchedulableTasks(
       now, missionId,
     );
   }
+}
+
+async function claimTaskForDispatch(env: Env, taskId: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = await env.DATABASE.prepare(
+    `UPDATE tasks
+     SET status = 'delegated', execution_step = 'node_selection', started_at = COALESCE(started_at, ?), updated_at = ?
+     WHERE id = ? AND status = 'queued' AND scheduler_state = 'schedulable'`
+  ).bind(now, now, taskId).run();
+
+  if (!result.meta.changes || result.meta.changes === 0) {
+    return false;
+  }
+
+  await env.DATABASE.prepare(
+    `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+     VALUES (?, ?, 'queued', 'delegated', 'system', NULL, ?, ?)`
+  ).bind(ulid(), taskId, 'ProjectOrchestrator claimed task for dispatch', now).run();
+
+  return true;
+}
+
+async function failClaimedDispatch(
+  env: Env,
+  projectId: string,
+  taskId: string,
+  sessionId: string | null,
+  err: unknown,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const message = err instanceof Error ? err.message : String(err);
+
+  if (sessionId) {
+    await projectDataService.stopSession(env, projectId, sessionId).catch((stopErr) => {
+      log.warn('orchestrator.auto_dispatch_session_stop_failed', {
+        projectId,
+        taskId,
+        sessionId,
+        error: stopErr instanceof Error ? stopErr.message : String(stopErr),
+      });
+    });
+  }
+
+  const result = await env.DATABASE.prepare(
+    `UPDATE tasks
+     SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
+     WHERE id = ? AND status = 'delegated'`
+  ).bind(`Auto-dispatch failed: ${message}`, now, now, taskId).run();
+
+  if (!result.meta.changes || result.meta.changes === 0) {
+    return;
+  }
+
+  await env.DATABASE.prepare(
+    `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+     VALUES (?, ?, 'delegated', 'failed', 'system', NULL, ?, ?)`
+  ).bind(ulid(), taskId, `Auto-dispatch failed: ${message}`, now).run();
 }
 
 // ── Handoff Routing ───────────────────────────────────────────────────────────

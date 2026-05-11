@@ -2,8 +2,7 @@
  * Source contract tests for task completion callback handling (T033).
  *
  * Verifies that the task status callback endpoint:
- * - On 'completed': triggers cleanupTaskRun (destroy workspace + optionally node)
- * - On 'completed'/'failed'/'cancelled': stops the chat session in ProjectData DO
+ * - On terminal states: uses finalizeTaskRun for session/workspace fan-out
  * - On 'failed'/'cancelled': does NOT trigger cleanupTaskRun (keep workspace alive)
  * - Handles concurrent/idempotent callbacks gracefully
  */
@@ -14,80 +13,42 @@ import { describe, expect, it } from 'vitest';
 
 describe('task completion callback handling source contract', () => {
   const tasksRouteFile = readFileSync(resolve(process.cwd(), 'src/routes/tasks/crud.ts'), 'utf8');
-  const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
+  const taskFinalizationFile = readFileSync(resolve(process.cwd(), 'src/services/task-finalization.ts'), 'utf8');
 
-  it('imports cleanupTaskRun in tasks route', () => {
-    expect(tasksRouteFile).toContain("import { cleanupTaskRun } from '../../services/task-runner'");
+  it('imports finalizeTaskRun in tasks route', () => {
+    expect(tasksRouteFile).toContain("import { finalizeTaskRun } from '../../services/task-finalization'");
   });
 
-  it('callback endpoint triggers cleanupTaskRun on completed status', () => {
-    // The callback section should call cleanupTaskRun for completed tasks
-    expect(tasksRouteFile).toContain('cleanupTaskRun(taskId, c.env)');
-    // Only on completed — not failed or cancelled
-    expect(tasksRouteFile).toContain("if (body.toStatus === 'completed')");
-  });
-
-  it('stops chat session in ProjectData DO on terminal states', () => {
-    // Should stop the session via projectDataService.stopSession
-    expect(tasksRouteFile).toContain('projectDataService.stopSession');
-    // For all terminal states
+  it('callback endpoint finalizes terminal states', () => {
+    expect(tasksRouteFile).toContain('await finalizeTaskRun(c.env, {');
     expect(tasksRouteFile).toContain("body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'");
   });
 
-  it('looks up chatSessionId from workspace record (not task)', () => {
-    // chatSessionId is on workspace, not task — must query workspace
-    expect(tasksRouteFile).toContain('schema.workspaces.chatSessionId');
-    expect(tasksRouteFile).toContain('schema.workspaces.id');
+  it('finalization stops all active task sessions by task ID', () => {
+    expect(taskFinalizationFile).toContain('projectDataService.stopActiveSessionsForTask(env, projectId, taskId)');
   });
 
-  it('failed/cancelled callbacks do NOT trigger workspace cleanup', () => {
-    // cleanupTaskRun should only be called inside a 'completed' check,
-    // not inside the broader terminal states check
-    const terminalCheck = "body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'";
-    const completedOnly = "if (body.toStatus === 'completed')";
-
-    // Both patterns exist in the callback section
-    expect(tasksRouteFile).toContain(terminalCheck);
-    expect(tasksRouteFile).toContain(completedOnly);
-
-    // cleanupTaskRun appears after the completed-only check, not the terminal check
-    const callbackSection = tasksRouteFile.slice(
-      tasksRouteFile.indexOf("status/callback'")
-    );
-    const completedCheckIdx = callbackSection.indexOf(completedOnly);
-    const cleanupIdx = callbackSection.indexOf('cleanupTaskRun(taskId');
-    expect(completedCheckIdx).toBeGreaterThan(-1);
-    expect(cleanupIdx).toBeGreaterThan(-1);
-    // cleanup call is after the completed-only check
-    expect(cleanupIdx).toBeGreaterThan(completedCheckIdx);
+  it('callback endpoint requests workspace cleanup only for completed status', () => {
+    expect(tasksRouteFile).toContain("cleanupWorkspace: body.toStatus === 'completed'");
   });
 
-  it('cleanupTaskRun stops workspace via stopWorkspaceOnNode', () => {
-    expect(taskRunnerFile).toContain('stopWorkspaceOnNode');
+  it('complete_task uses finalization after D1 completion', () => {
+    const taskToolsFile = readFileSync(resolve(process.cwd(), 'src/routes/mcp/task-tools.ts'), 'utf8');
+    const completionUpdate = taskToolsFile.indexOf("UPDATE tasks SET status = 'completed'");
+    const finalization = taskToolsFile.indexOf('await finalizeTaskRun(env, {');
+    expect(completionUpdate).toBeGreaterThan(-1);
+    expect(finalization).toBeGreaterThan(completionUpdate);
   });
 
-  it('cleanupTaskRun handles auto-provisioned node cleanup', () => {
-    expect(taskRunnerFile).toContain('autoProvisionedNodeId');
-    expect(taskRunnerFile).toContain('cleanupAutoProvisionedNode');
+  it('finalization delegates completed workspace cleanup to cleanupTaskRun', () => {
+    expect(taskFinalizationFile).toContain('cleanupWorkspace && input.status ===');
+    expect(taskFinalizationFile).toContain('cleanupTaskRun(taskId, env');
   });
 
-  it('completion flow is best-effort (wrapped in catch with logging)', () => {
-    // Both the session stop and cleanup are wrapped in catch for best-effort
-    const callbackSection = tasksRouteFile.slice(
-      tasksRouteFile.indexOf("status/callback'")
-    );
-    // Session stop is best-effort with logging
-    expect(callbackSection).toContain('.catch((e) =>');
-    // cleanupTaskRun is best-effort with logging
-    expect(callbackSection).toContain('cleanupTaskRun(taskId, c.env).catch');
-  });
-
-  it('user-initiated status change also stops chat session on terminal states', () => {
-    // The user-facing status endpoint should also stop chat session.
-    // Find the section between the user status handler and the callback handler.
+  it('user-initiated status change also finalizes terminal states', () => {
     const callbackRouteIdx = tasksRouteFile.indexOf("crudRoutes.post('/:taskId/status/callback'");
     const beforeCallback = tasksRouteFile.slice(0, callbackRouteIdx);
-    expect(beforeCallback).toContain('projectDataService.stopSession');
+    expect(beforeCallback).toContain('await finalizeTaskRun(c.env, {');
     expect(beforeCallback).toContain("body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'");
   });
 });
