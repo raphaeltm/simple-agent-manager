@@ -219,27 +219,22 @@ jobs:
       - name: Install devcontainer CLI
         run: npm install -g @devcontainers/cli
 
-      - name: Build and start SAM devcontainer
+      - name: Build SAM devcontainer image
         run: |
           set -euxo pipefail
-          OUTPUT="$(devcontainer up --workspace-folder .)"
-          echo "$OUTPUT"
-          CONTAINER_ID="$(echo "$OUTPUT" | jq -r '.containerId // empty')"
-          if [ -z "$CONTAINER_ID" ]; then
-            echo "Could not extract containerId from devcontainer output"
-            exit 1
-          fi
-          IMAGE_ID="$(docker inspect "$CONTAINER_ID" --format '{{.Image}}')"
+          LOCAL_REF="${IMAGE_NAME}:local-${GITHUB_RUN_ID}"
+          devcontainer build --workspace-folder . --image-name "$LOCAL_REF"
+          IMAGE_ID="$(docker image inspect "$LOCAL_REF" --format '{{.Id}}')"
           SIZE_BYTES="$(docker image inspect "$IMAGE_ID" --format '{{.Size}}')"
           SIZE_MIB="$(awk "BEGIN { printf \"%.1f\", ${SIZE_BYTES} / 1024 / 1024 }")"
-          echo "CONTAINER_ID=$CONTAINER_ID" >> "$GITHUB_ENV"
+          echo "LOCAL_REF=$LOCAL_REF" >> "$GITHUB_ENV"
           echo "IMAGE_ID=$IMAGE_ID" >> "$GITHUB_ENV"
           echo "SIZE_BYTES=$SIZE_BYTES" >> "$GITHUB_ENV"
           echo "SIZE_MIB=$SIZE_MIB" >> "$GITHUB_ENV"
           {
             echo "### SAM devcontainer image"
             echo
-            echo "- Container ID: \`$CONTAINER_ID\`"
+            echo "- Local ref: \`$LOCAL_REF\`"
             echo "- Image ID: \`$IMAGE_ID\`"
             echo "- Local image size: \`${SIZE_BYTES}\` bytes (${SIZE_MIB} MiB)"
             echo
@@ -285,8 +280,7 @@ jobs:
           echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
           docker tag "$IMAGE_ID" "$REF"
           docker push "$REF" 2>&1 | tee docker-push.log
-          docker rm -f "$CONTAINER_ID"
-          docker rmi "$REF" "$IMAGE_ID" || true
+          docker rmi "$REF" "$LOCAL_REF" "$IMAGE_ID" || true
           docker pull "$REF" 2>&1 | tee docker-pull.log
           {
             echo "### SAM devcontainer Cloudflare registry stress result"
