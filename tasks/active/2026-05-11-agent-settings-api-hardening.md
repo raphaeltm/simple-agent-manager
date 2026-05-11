@@ -17,21 +17,21 @@ The route already uses Valibot for request bodies, but it still relies on unchec
 
 ## Implementation Checklist
 
-- [ ] Replace duplicated provider validation literals with a schema derived from shared OpenCode provider metadata.
-- [ ] Add explicit bounded validation for model, tool names, environment keys/values, provider names, and base URLs.
-- [ ] Add safe response mapping for persisted JSON columns and persisted enum-like columns.
-- [ ] Remove avoidable route-level type assertions and non-null assertions.
-- [ ] Tighten the agent settings route tests around typed mocks and add coverage for invalid persisted data and input bounds.
-- [ ] Run focused agent settings tests.
-- [ ] Run API typecheck/lint or the closest available repo checks.
+- [x] Replace duplicated provider validation literals with a schema derived from shared OpenCode provider metadata.
+- [x] Add explicit bounded validation for model, tool names, environment keys/values, provider names, and base URLs.
+- [x] Add safe response mapping for persisted JSON columns and persisted enum-like columns.
+- [x] Remove avoidable route-level type assertions and non-null assertions.
+- [x] Tighten the agent settings route tests around typed mocks and add coverage for invalid persisted data and input bounds.
+- [x] Run focused agent settings tests.
+- [x] Run API typecheck/lint or the closest available repo checks.
 
 ## Acceptance Criteria
 
-- [ ] Invalid request payloads return 400 with descriptive Valibot messages instead of persisting oversized or malformed values.
-- [ ] Corrupt stored JSON or invalid persisted enum-like values do not crash GET/PUT responses.
-- [ ] Provider validation uses the shared provider registry as the source of truth.
-- [ ] Route tests cover happy path, validation failures, stale/corrupt persisted values, and provider base URL rules.
-- [ ] The changed API files pass typecheck, lint, and focused tests.
+- [x] Invalid request payloads return 400 with descriptive Valibot messages instead of persisting oversized or malformed values.
+- [x] Corrupt stored JSON or invalid persisted enum-like values do not crash GET/PUT responses.
+- [x] Provider validation uses the shared provider registry as the source of truth.
+- [x] Route tests cover happy path, validation failures, stale/corrupt persisted values, and provider base URL rules.
+- [x] The changed API files pass typecheck, lint, and focused tests.
 
 ## References
 

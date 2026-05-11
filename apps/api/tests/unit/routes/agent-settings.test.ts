@@ -8,8 +8,8 @@ import { agentSettingsRoutes } from '../../../src/routes/agent-settings';
 // Mock dependencies
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => vi.fn((c: any, next: any) => next()),
-  requireApproved: () => vi.fn((c: any, next: any) => next()),
+  requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
+  requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   getUserId: () => 'test-user-id',
 }));
 vi.mock('../../../src/lib/ulid', () => ({
@@ -18,7 +18,17 @@ vi.mock('../../../src/lib/ulid', () => ({
 
 describe('Agent Settings Routes', () => {
   let app: Hono<{ Bindings: Env }>;
-  let mockDB: any;
+  let mockDB: {
+    select: ReturnType<typeof vi.fn>;
+    from: ReturnType<typeof vi.fn>;
+    where: ReturnType<typeof vi.fn>;
+    limit: ReturnType<typeof vi.fn>;
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    set: ReturnType<typeof vi.fn>;
+    values: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     app = new Hono<{ Bindings: Env }>();
@@ -47,7 +57,7 @@ describe('Agent Settings Routes', () => {
       delete: vi.fn().mockReturnThis(),
     };
 
-    (drizzle as any).mockReturnValue(mockDB);
+    vi.mocked(drizzle).mockReturnValue(mockDB);
   });
 
   describe('GET /api/agent-settings/:agentType', () => {
@@ -97,6 +107,38 @@ describe('Agent Settings Routes', () => {
       expect(body.permissionMode).toBe('acceptEdits');
       expect(body.allowedTools).toEqual(['Read', 'Bash(npm:*)']);
       expect(body.additionalEnv).toEqual({ DEBUG: 'true' });
+    });
+
+    it('should tolerate invalid persisted JSON and enum-like values', async () => {
+      mockDB.limit.mockResolvedValueOnce([{
+        id: 'test-id',
+        userId: 'test-user-id',
+        agentType: 'claude-code',
+        model: 'claude-opus-4-6',
+        permissionMode: 'root',
+        allowedTools: '{not-json',
+        deniedTools: JSON.stringify(['Read', 123]),
+        additionalEnv: JSON.stringify({ DEBUG: true }),
+        opencodeProvider: 'mystery-provider',
+        opencodeBaseUrl: 'https://provider.example.com/v1',
+        opencodeProviderName: 'Provider',
+        createdAt: new Date('2026-02-13T00:00:00Z'),
+        updatedAt: new Date('2026-02-13T00:00:00Z'),
+      }]);
+
+      const res = await app.request('/api/agent-settings/claude-code', {
+        method: 'GET',
+      }, {
+        DATABASE: {} as D1Database,
+      } as Env);
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.permissionMode).toBeNull();
+      expect(body.allowedTools).toBeNull();
+      expect(body.deniedTools).toBeNull();
+      expect(body.additionalEnv).toBeNull();
+      expect(body.opencodeProvider).toBeNull();
     });
 
     it('should reject invalid agent type', async () => {
@@ -231,6 +273,40 @@ describe('Agent Settings Routes', () => {
       const body = await res.json();
       expect(body.error).toBe('BAD_REQUEST');
       expect(body.message).toContain('additionalEnv');
+    });
+
+    it('should reject unsafe additionalEnv keys', async () => {
+      const res = await app.request('/api/agent-settings/claude-code', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          additionalEnv: {
+            'BAD-NAME': 'true',
+          },
+        }),
+      }, {
+        DATABASE: {} as D1Database,
+      } as Env);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('Environment variable names must be shell-safe');
+    });
+
+    it('should reject oversized model values', async () => {
+      const res = await app.request('/api/agent-settings/claude-code', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'x'.repeat(201),
+        }),
+      }, {
+        DATABASE: {} as D1Database,
+      } as Env);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('model');
     });
 
     it('should accept null values to clear settings', async () => {

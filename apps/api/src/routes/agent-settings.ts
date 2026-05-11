@@ -5,6 +5,8 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   isValidAgentType,
+  OPENCODE_PROVIDERS,
+  VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -22,6 +24,58 @@ export const agentSettingsRoutes = new Hono<{ Bindings: Env }>();
 // All agent settings routes require authentication
 agentSettingsRoutes.use('/*', requireAuth(), requireApproved());
 
+function parseJsonColumn(raw: string | null): unknown {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function stringArrayFromJson(raw: string | null): string[] | null {
+  const parsed = parseJsonColumn(raw);
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
+    return null;
+  }
+  return parsed;
+}
+
+function stringRecordFromJson(raw: string | null): Record<string, string> | null {
+  const parsed = parseJsonColumn(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof key !== 'string' || typeof value !== 'string') {
+      return null;
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+function isAgentPermissionMode(raw: string | null): raw is AgentPermissionMode {
+  return raw !== null && VALID_PERMISSION_MODES.some((mode) => mode === raw);
+}
+
+function isOpenCodeProvider(raw: string | null): raw is OpenCodeProvider {
+  return raw !== null && Object.prototype.hasOwnProperty.call(OPENCODE_PROVIDERS, raw);
+}
+
+function permissionModeFromDb(raw: string | null): AgentPermissionMode | null {
+  return isAgentPermissionMode(raw) ? raw : null;
+}
+
+function opencodeProviderFromDb(raw: string | null): OpenCodeProvider | null {
+  return isOpenCodeProvider(raw) ? raw : null;
+}
+
 /**
  * Convert a DB row to an API response.
  * JSON-encoded columns (allowedTools, deniedTools, additionalEnv) are parsed.
@@ -30,11 +84,11 @@ function toResponse(row: schema.AgentSettingsRow): AgentSettingsResponse {
   return {
     agentType: row.agentType,
     model: row.model,
-    permissionMode: row.permissionMode as AgentPermissionMode | null,
-    allowedTools: row.allowedTools ? JSON.parse(row.allowedTools) : null,
-    deniedTools: row.deniedTools ? JSON.parse(row.deniedTools) : null,
-    additionalEnv: row.additionalEnv ? JSON.parse(row.additionalEnv) : null,
-    opencodeProvider: (row.opencodeProvider as OpenCodeProvider) ?? null,
+    permissionMode: permissionModeFromDb(row.permissionMode),
+    allowedTools: stringArrayFromJson(row.allowedTools),
+    deniedTools: stringArrayFromJson(row.deniedTools),
+    additionalEnv: stringRecordFromJson(row.additionalEnv),
+    opencodeProvider: opencodeProviderFromDb(row.opencodeProvider),
     opencodeBaseUrl: row.opencodeBaseUrl ?? null,
     opencodeProviderName: row.opencodeProviderName ?? null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
@@ -118,8 +172,8 @@ agentSettingsRoutes.put('/:agentType', jsonValidator(SaveAgentSettingsSchema), a
     .limit(1);
 
   // Clear opencodeBaseUrl when switching to a provider that doesn't need it
-  const requiresBaseUrl = (p: string | null | undefined) =>
-    p === 'custom' || p === 'openai-compatible';
+  const requiresBaseUrl = (provider: OpenCodeProvider | null | undefined) =>
+    provider ? OPENCODE_PROVIDERS[provider].requiresBaseUrl : false;
 
   const values = {
     model: body.model ?? null,
@@ -165,7 +219,11 @@ agentSettingsRoutes.put('/:agentType', jsonValidator(SaveAgentSettingsSchema), a
     .limit(1);
 
   const status = existing[0] ? 200 : 201;
-  return c.json(toResponse(rows[0]!), status);
+  const saved = rows[0];
+  if (!saved) {
+    throw errors.internal('Agent settings save did not return a row');
+  }
+  return c.json(toResponse(saved), status);
 });
 
 /**
