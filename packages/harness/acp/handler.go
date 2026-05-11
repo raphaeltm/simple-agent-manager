@@ -34,8 +34,9 @@ type Handler struct {
 }
 
 type sessionState struct {
-	cancel context.CancelFunc
-	cwd    string
+	cancel   context.CancelFunc
+	cwd      string
+	messages []llm.Message // conversation history carried across Prompt() calls
 }
 
 // Deps holds the dependencies needed by the ACP handler to run the agent loop.
@@ -155,8 +156,20 @@ func (h *Handler) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acps
 		sessionID: params.SessionId,
 	}
 
+	// Carry forward conversation history from previous Prompt() calls.
+	h.mu.Lock()
+	cfg.InitialMessages = sess.messages
+	h.mu.Unlock()
+
 	log := transcript.NewLog()
 	result, err := agent.Run(promptCtx, h.provider, h.registry, log, cfg, userPrompt)
+
+	// Always save the accumulated messages back, even on error/cancel.
+	if result != nil && len(result.Messages) > 0 {
+		h.mu.Lock()
+		sess.messages = result.Messages
+		h.mu.Unlock()
+	}
 
 	if promptCtx.Err() != nil {
 		return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, nil
@@ -167,8 +180,9 @@ func (h *Handler) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acps
 
 	stopReason := mapStopReason(result.StopReason)
 
-	// Send the final assistant message as a session update if present.
-	if result.FinalMessage != "" && h.conn != nil {
+	// Send the final assistant message as a session update ONLY if not streaming
+	// (when streaming, OnToken() already sent the content token-by-token).
+	if result.FinalMessage != "" && h.conn != nil && !cfg.Stream {
 		_ = h.conn.SessionUpdate(ctx, acpsdk.SessionNotification{
 			SessionId: params.SessionId,
 			Update:    acpsdk.UpdateAgentMessageText(result.FinalMessage),

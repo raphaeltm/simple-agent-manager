@@ -78,6 +78,11 @@ type Config struct {
 	SessionStore *session.Store
 	// SessionID is the session to persist messages to. Required if SessionStore is set.
 	SessionID string
+	// InitialMessages, if non-empty, seeds the conversation instead of building
+	// a fresh system+user pair. The new userPrompt is appended as a user message.
+	// This allows callers (e.g. ACP handler) to carry conversation history
+	// across multiple Run() invocations without a SessionStore.
+	InitialMessages []llm.Message
 }
 
 // ProviderConfig stores provider connection details for child session spawning.
@@ -97,6 +102,10 @@ type Result struct {
 	TurnsUsed int
 	// StopReason indicates why the agent stopped.
 	StopReason string
+	// Messages is the full conversation history at the end of the run.
+	// Callers can feed this back via Config.InitialMessages to continue
+	// the conversation in a subsequent Run() call.
+	Messages []llm.Message
 }
 
 // Run executes the agent loop: think -> act -> observe, repeating until
@@ -119,11 +128,18 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 
 	toolDefs := registry.Definitions()
 
-	// Build initial conversation (or resume from session store).
+	// Build initial conversation: in-memory history > session store > fresh start.
 	var messages []llm.Message
 	startTurn := 1
 
-	if cfg.SessionStore != nil && cfg.SessionID != "" {
+	if len(cfg.InitialMessages) > 0 {
+		// Continue from in-memory history provided by the caller (e.g. ACP handler).
+		messages = make([]llm.Message, len(cfg.InitialMessages))
+		copy(messages, cfg.InitialMessages)
+		if userPrompt != "" {
+			messages = append(messages, llm.Message{Role: llm.RoleUser, Content: userPrompt})
+		}
+	} else if cfg.SessionStore != nil && cfg.SessionID != "" {
 		if loaded, err := cfg.SessionStore.LoadMessages(cfg.SessionID); err == nil && len(loaded) > 0 {
 			messages = loaded
 
@@ -159,7 +175,7 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 	for turn := startTurn; turn < endTurn; turn++ {
 		// Check cancellation.
 		if err := ctx.Err(); err != nil {
-			return &Result{TurnsUsed: turn - startTurn, StopReason: "cancelled"}, err
+			return &Result{TurnsUsed: turn - startTurn, StopReason: "cancelled", Messages: messages}, err
 		}
 
 		if cfg.Handler != nil {
@@ -207,7 +223,7 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 		}
 		if err != nil {
 			log.Append(transcript.EventError, turn, map[string]any{"error": err.Error()})
-			return &Result{TurnsUsed: turn - startTurn + 1, StopReason: "error"}, fmt.Errorf("turn %d: LLM error: %w", turn, err)
+			return &Result{TurnsUsed: turn - startTurn + 1, StopReason: "error", Messages: messages}, fmt.Errorf("turn %d: LLM error: %w", turn, err)
 		}
 
 		logData := map[string]any{
@@ -228,6 +244,9 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			})
 			persistStatus(cfg, "completed")
 
+			// Add the final assistant message to history before returning.
+			messages = append(messages, llm.Message{Role: llm.RoleAssistant, Content: resp.Content})
+
 			if cfg.Handler != nil {
 				cfg.Handler.OnTurnEnd(turn, 0)
 			}
@@ -235,6 +254,7 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 				FinalMessage: resp.Content,
 				TurnsUsed:    turn - startTurn + 1,
 				StopReason:   "complete",
+				Messages:     messages,
 			}, nil
 		}
 
@@ -255,7 +275,7 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 
 		// Check if context was cancelled during tool execution.
 		if err := ctx.Err(); err != nil {
-			return &Result{TurnsUsed: turn - startTurn + 1, StopReason: "cancelled"}, err
+			return &Result{TurnsUsed: turn - startTurn + 1, StopReason: "cancelled", Messages: messages}, err
 		}
 
 		var turnMessages []llm.Message
@@ -284,6 +304,7 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 	return &Result{
 		TurnsUsed:  maxTurns,
 		StopReason: "max_turns",
+		Messages:   messages,
 	}, nil
 }
 
