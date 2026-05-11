@@ -35,7 +35,7 @@ There is a broader lifecycle problem: terminal task events are split across D1, 
 - [x] Add required bug postmortem and process fix for this class of lifecycle ordering bug.
 - [x] Run local quality checks and impacted tests.
 - [x] Run specialist validation (`task-completion-validator`, `cloudflare-specialist`, `constitution-validator`, `test-engineer`, and security review if touched paths warrant it).
-- [ ] Deploy to staging and verify the changed backend behavior without relying on cleanup sweeps.
+- [x] Deploy to staging and verify the changed backend behavior without relying on cleanup sweeps.
 - [ ] Push the branch and open a PR; do not merge unless explicitly asked.
 
 ## Acceptance Criteria
@@ -73,3 +73,7 @@ There is a broader lifecycle problem: terminal task events are split across D1, 
 - `pnpm lint` passed with existing warnings only.
 - Focused Worker DO test command `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-do.test.ts tests/workers/task-runner-do.test.ts --maxWorkers=1` crashed before importing tests with a local `workerd` signal 11 segmentation fault. The Worker tests remain in the branch for CI/runtime validation, and local unit coverage was added for the ProjectData orphan-session stop helper.
 - Specialist validation passed without blocking findings. Review adjustment: workspace cleanup for completed task callback/status routes is now scheduled through `waitUntil` by the shared finalizer so session finalization is prompt without blocking route responses on the configured cleanup delay.
+- Staging deployment workflow `25677596395` passed, including Cloudflare deploy and smoke tests.
+- Staging API health check returned HTTP 200 healthy from `https://api.sammy.party/health`.
+- Authenticated staging browser check passed for `/dashboard`, `/projects`, `/settings/cloud-provider`, and unauthenticated `/` redirect with no console errors.
+- Authenticated staging API finalization check created temporary task `01KRBS4P7PRMGHPXVJ3C4NPNZB`, transitioned it `draft -> cancelled` through `POST /api/projects/:projectId/tasks/:taskId/status`, verified `GET /sessions` for that task returned `count: 0`, verified task events showed `cancelled`, and deleted the temporary task.
