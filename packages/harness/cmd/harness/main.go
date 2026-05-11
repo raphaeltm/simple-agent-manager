@@ -40,9 +40,7 @@ func main() {
 		repoMapFlag      = flag.Bool("repo-map", true, "Generate and prepend a repo map to the system prompt")
 		mcpURL           = flag.String("mcp-url", envOr("SAM_MCP_URL", ""), "MCP server URL (or SAM_MCP_URL env var)")
 		mcpToken         = flag.String("mcp-token", envOr("SAM_MCP_TOKEN", ""), "MCP server Bearer token (or SAM_MCP_TOKEN env var)")
-		toolProfile      = flag.String("tool-profile", "workspace", "Tool profile: workspace, orchestrate, or full")
-		mockOrchScenario = flag.String("mock-orchestration", "", "Register mock orchestration tools with scenario: success, failure, or mixed (for eval without MCP)")
-		realOrch         = flag.Bool("real-orchestration", false, "Enable real subtask execution — dispatch_task spawns child harness sessions")
+		mockOrchScenario = flag.String("mock-orchestration", "", "TEST ONLY: Register mock orchestration tools with scenario: success, failure, or mixed (for eval without MCP)")
 		stream           = flag.Bool("stream", false, "Enable streaming output from LLM providers that support it")
 		permissionMode   = flag.String("permission-mode", "allow-all", "Permission mode: allow-all, deny-dangerous, or ask-always")
 		parallelTools    = flag.Bool("parallel-tools", false, "Execute multiple tool calls in parallel")
@@ -109,9 +107,7 @@ func main() {
 			maxParallelTools: *maxParallelTools,
 			mcpURL:           *mcpURL,
 			mcpToken:         *mcpToken,
-			toolProfile:      *toolProfile,
 			mockOrchScenario: *mockOrchScenario,
-			realOrch:         *realOrch,
 		})
 		return // unreachable — runACPMode blocks
 	}
@@ -226,34 +222,12 @@ func main() {
 		allTools = append(allTools, mcpTools...)
 	}
 
-	// Register orchestration tools: mock (for eval) or real (for actual subtask execution).
-	if *mockOrchScenario != "" && *realOrch {
-		fmt.Fprintln(os.Stderr, "error: --mock-orchestration and --real-orchestration are mutually exclusive")
-		os.Exit(1)
-	}
-
+	// Register mock orchestration tools if requested (test only).
 	if *mockOrchScenario != "" {
 		orchTools := tools.MockOrchestrationTools(*mockOrchScenario)
 		allTools = append(allTools, orchTools...)
-		fmt.Fprintf(os.Stderr, "Mock orchestration tools registered (scenario: %s)\n", *mockOrchScenario)
+		fmt.Fprintf(os.Stderr, "TEST: Mock orchestration tools registered (scenario: %s)\n", *mockOrchScenario)
 	}
-
-	if *realOrch {
-		realState := tools.NewRealOrchestrationState()
-		realState.WorkDir = workDir
-		realState.Model = resolvedWorkerModel
-		realState.APIURL = *apiURL
-		realState.APIKey = *apiKey
-		realState.AuthHeader = *authHeader
-
-		orchTools := tools.RealOrchestrationTools(realState)
-		allTools = append(allTools, orchTools...)
-		fmt.Fprintf(os.Stderr, "Real orchestration tools registered (worker model: %s)\n", resolvedWorkerModel)
-	}
-
-	// Apply tool profile filtering.
-	allTools = mcp.FilterTools(*toolProfile, allTools)
-	allTools = dedupeTools(allTools, realOrchestrationToolNames())
 
 	for _, t := range allTools {
 		if err := registry.Register(t); err != nil {
@@ -261,7 +235,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "Registered %d tools (profile: %s)\n", len(allTools), *toolProfile)
+	fmt.Fprintf(os.Stderr, "Registered %d tools\n", len(allTools))
 
 	// Create transcript log.
 	log := transcript.NewLog()
@@ -437,9 +411,7 @@ type acpModeArgs struct {
 	maxParallelTools int
 	mcpURL           string
 	mcpToken         string
-	toolProfile      string
 	mockOrchScenario string
-	realOrch         bool
 }
 
 // runACPMode starts the harness as an ACP JSON-RPC server on stdin/stdout.
@@ -476,7 +448,7 @@ func runACPMode(args acpModeArgs) {
 	}
 
 	// Build tool registry.
-	registry := buildToolRegistry(args, workDir, resolvedWorkerModel)
+	registry := buildToolRegistry(args, workDir)
 
 	// Parse permission mode.
 	permMode, err := tools.ParsePermissionMode(args.permissionMode)
@@ -567,7 +539,7 @@ func createProvider(args acpModeArgs) llm.Provider {
 }
 
 // buildToolRegistry creates a tool registry with local and optional MCP/orchestration tools.
-func buildToolRegistry(args acpModeArgs, workDir, resolvedWorkerModel string) *tools.Registry {
+func buildToolRegistry(args acpModeArgs, workDir string) *tools.Registry {
 	registry := tools.NewRegistry()
 	localTools := []tools.Tool{
 		&tools.ReadFile{WorkDir: workDir},
@@ -603,25 +575,9 @@ func buildToolRegistry(args acpModeArgs, workDir, resolvedWorkerModel string) *t
 		allTools = append(allTools, mcpTools...)
 	}
 
-	if args.mockOrchScenario != "" && args.realOrch {
-		fmt.Fprintln(os.Stderr, "error: --mock-orchestration and --real-orchestration are mutually exclusive")
-		os.Exit(1)
-	}
 	if args.mockOrchScenario != "" {
 		allTools = append(allTools, tools.MockOrchestrationTools(args.mockOrchScenario)...)
 	}
-	if args.realOrch {
-		realState := tools.NewRealOrchestrationState()
-		realState.WorkDir = workDir
-		realState.Model = resolvedWorkerModel
-		realState.APIURL = args.apiURL
-		realState.APIKey = args.apiKey
-		realState.AuthHeader = args.authHeader
-		allTools = append(allTools, tools.RealOrchestrationTools(realState)...)
-	}
-
-	allTools = mcp.FilterTools(args.toolProfile, allTools)
-	allTools = dedupeTools(allTools, realOrchestrationToolNames())
 
 	for _, t := range allTools {
 		if err := registry.Register(t); err != nil {
@@ -632,27 +588,3 @@ func buildToolRegistry(args acpModeArgs, workDir, resolvedWorkerModel string) *t
 	return registry
 }
 
-func dedupeTools(input []tools.Tool, preferLast map[string]bool) []tools.Tool {
-	positions := make(map[string]int, len(input))
-	output := make([]tools.Tool, 0, len(input))
-	for _, tool := range input {
-		name := tool.Name()
-		if existing, ok := positions[name]; ok {
-			if preferLast[name] {
-				output[existing] = tool
-			}
-			continue
-		}
-		positions[name] = len(output)
-		output = append(output, tool)
-	}
-	return output
-}
-
-func realOrchestrationToolNames() map[string]bool {
-	return map[string]bool{
-		"dispatch_task":    true,
-		"get_task_details": true,
-		"list_tasks":       true,
-	}
-}

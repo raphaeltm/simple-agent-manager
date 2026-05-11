@@ -230,9 +230,6 @@ func (h *Handler) SetSessionMode(_ context.Context, _ acpsdk.SetSessionModeReque
 type acpEventHandler struct {
 	conn      *acpsdk.AgentSideConnection
 	sessionID acpsdk.SessionId
-
-	mu         sync.Mutex
-	toolCallID int
 }
 
 func (e *acpEventHandler) OnToken(token string) {
@@ -245,15 +242,10 @@ func (e *acpEventHandler) OnToken(token string) {
 	})
 }
 
-func (e *acpEventHandler) OnToolStart(name string, params map[string]any) {
+func (e *acpEventHandler) OnToolStart(id string, name string, params map[string]any) {
 	if e.conn == nil {
 		return
 	}
-	e.mu.Lock()
-	e.toolCallID++
-	id := fmt.Sprintf("tool_%d_%d", time.Now().UnixMilli(), e.toolCallID)
-	e.mu.Unlock()
-
 	_ = e.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
 		SessionId: e.sessionID,
 		Update: acpsdk.StartToolCall(
@@ -265,7 +257,7 @@ func (e *acpEventHandler) OnToolStart(name string, params map[string]any) {
 	})
 }
 
-func (e *acpEventHandler) OnToolEnd(name string, result string, isError bool) {
+func (e *acpEventHandler) OnToolEnd(id string, name string, result string, isError bool) {
 	if e.conn == nil {
 		return
 	}
@@ -274,13 +266,21 @@ func (e *acpEventHandler) OnToolEnd(name string, result string, isError bool) {
 		status = acpsdk.ToolCallStatusFailed
 	}
 
-	// We don't track tool call IDs across start/end in the agent loop,
-	// so emit a new agent message chunk with the tool result instead.
 	_ = e.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
 		SessionId: e.sessionID,
-		Update: acpsdk.UpdateAgentMessageText(
-			fmt.Sprintf("[%s %s] %s", name, status, truncate(result, 500)),
-		),
+		Update: acpsdk.SessionUpdate{
+			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+				ToolCallId: acpsdk.ToolCallId(id),
+				Status:     &status,
+				Content: []acpsdk.ToolCallContent{
+					{
+						Content: &acpsdk.ToolCallContentContent{
+							Content: acpsdk.TextBlock(truncate(result, 2000)),
+						},
+					},
+				},
+			},
+		},
 	})
 }
 

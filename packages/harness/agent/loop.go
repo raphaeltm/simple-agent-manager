@@ -21,9 +21,11 @@ type EventHandler interface {
 	// OnToken is called for each content token as it streams from the LLM.
 	OnToken(token string)
 	// OnToolStart is called when a tool begins execution.
-	OnToolStart(name string, params map[string]any)
+	// The id parameter is the LLM-assigned tool call ID for correlating start/end events.
+	OnToolStart(id string, name string, params map[string]any)
 	// OnToolEnd is called when a tool finishes execution.
-	OnToolEnd(name string, result string, isError bool)
+	// The id parameter matches the one from the corresponding OnToolStart call.
+	OnToolEnd(id string, name string, result string, isError bool)
 	// OnTurnStart is called at the beginning of each agent turn.
 	OnTurnStart(turn, maxTurns int)
 	// OnTurnEnd is called at the end of each agent turn.
@@ -298,7 +300,7 @@ func executeToolsSequential(ctx context.Context, registry *tools.Registry, calls
 			"params": call.Params,
 		})
 		if cfg.Handler != nil {
-			cfg.Handler.OnToolStart(call.Name, call.Params)
+			cfg.Handler.OnToolStart(call.ID, call.Name, call.Params)
 		}
 
 		// Permission check before execution.
@@ -315,7 +317,7 @@ func executeToolsSequential(ctx context.Context, registry *tools.Registry, calls
 			"content":  truncate(result.Content, 500),
 		})
 		if cfg.Handler != nil {
-			cfg.Handler.OnToolEnd(call.Name, truncate(result.Content, 200), result.IsError)
+			cfg.Handler.OnToolEnd(call.ID, call.Name, truncate(result.Content, 200), result.IsError)
 		}
 		results = append(results, result)
 	}
@@ -344,7 +346,7 @@ func executeToolsParallel(ctx context.Context, registry *tools.Registry, calls [
 			"params": call.Params,
 		})
 		if cfg.Handler != nil {
-			cfg.Handler.OnToolStart(call.Name, call.Params)
+			cfg.Handler.OnToolStart(call.ID, call.Name, call.Params)
 		}
 
 		wg.Add(1)
@@ -391,7 +393,7 @@ func executeToolsParallel(ctx context.Context, registry *tools.Registry, calls [
 			"content":  truncate(result.Content, 500),
 		})
 		if cfg.Handler != nil {
-			cfg.Handler.OnToolEnd(calls[i].Name, truncate(result.Content, 200), result.IsError)
+			cfg.Handler.OnToolEnd(calls[i].ID, calls[i].Name, truncate(result.Content, 200), result.IsError)
 		}
 	}
 

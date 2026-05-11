@@ -25,12 +25,12 @@ func (h *testHandler) OnToken(token string) {
 	defer h.mu.Unlock()
 	h.tokens = append(h.tokens, token)
 }
-func (h *testHandler) OnToolStart(name string, _ map[string]any) {
+func (h *testHandler) OnToolStart(_ string, name string, _ map[string]any) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.toolStarts = append(h.toolStarts, name)
 }
-func (h *testHandler) OnToolEnd(name string, _ string, _ bool) {
+func (h *testHandler) OnToolEnd(_ string, name string, _ string, _ bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.toolEnds = append(h.toolEnds, name)

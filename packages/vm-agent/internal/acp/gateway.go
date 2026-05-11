@@ -828,13 +828,13 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 	case "sam-harness":
 		return agentCommandInfo{
-			command:    "sam-harness",
+			command: "sam-harness",
 			args: []string{
 				"--acp",
 				"--prompt-preset", "orchestrator",
-				"--tool-profile", "full",
-				"--real-orchestration",
 				"--max-turns", "25",
+				"--stream",
+				"--parallel-tools",
 			},
 			envVarName: "SAM_API_KEY",
 			installCmd: samHarnessInstallCmd,
