@@ -64,14 +64,11 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `MAX_PROJECTS_PER_USER` — Runtime project cap
 - `MAX_TASKS_PER_PROJECT` — Runtime task cap per project
 - `MAX_TASK_DEPENDENCIES_PER_TASK` — Runtime dependency-edge cap per task
-- `AGENT_SETTINGS_MAX_MODEL_LENGTH` — Max saved agent model identifier length (default: 200)
-- `AGENT_SETTINGS_MAX_TOOL_NAME_LENGTH` — Max saved agent tool name length (default: 200)
-- `AGENT_SETTINGS_MAX_TOOL_LIST_LENGTH` — Max entries in allowed/denied tool lists (default: 100)
-- `AGENT_SETTINGS_MAX_ENV_VARS` — Max additional env vars per agent setting (default: 50)
-- `AGENT_SETTINGS_MAX_ENV_KEY_LENGTH` — Max additional env var key length (default: 128)
-- `AGENT_SETTINGS_MAX_ENV_VALUE_LENGTH` — Max additional env var value length (default: 4096)
-- `AGENT_SETTINGS_MAX_PROVIDER_NAME_LENGTH` — Max custom provider display-name length (default: 100)
-- `AGENT_SETTINGS_MAX_BASE_URL_LENGTH` — Max OpenCode provider base URL length (default: 2048)
+- `AGENT_SETTINGS_VALIDATION_LIMITS` — Optional JSON object overriding
+  agent-settings validation bounds for model IDs, tool lists, additional env
+  entries, provider display names, and OpenCode base URLs. See
+  `apps/api/.env.example` and `docs/guides/self-hosting.md` for supported keys
+  and defaults.
 
 ### Pagination
 

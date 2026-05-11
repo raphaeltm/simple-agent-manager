@@ -22,7 +22,7 @@ The route already uses Valibot for request bodies, but it still relies on unchec
 - [x] Add safe response mapping for persisted JSON columns and persisted enum-like columns.
 - [x] Remove avoidable route-level type assertions and non-null assertions.
 - [x] Tighten the agent settings route tests around typed mocks and add coverage for invalid persisted data and input bounds.
-- [x] Make agent-settings validation limits configurable through Worker env vars with documented defaults.
+- [x] Make agent-settings validation limits configurable through a Worker env override with documented defaults.
 - [x] Run focused agent settings tests.
 - [x] Run API typecheck/lint or the closest available repo checks.
 - [x] Run full repository lint, typecheck, build, and test suite.
@@ -34,7 +34,7 @@ The route already uses Valibot for request bodies, but it still relies on unchec
 - [x] Provider validation uses the shared provider registry as the source of truth.
 - [x] Route tests cover happy path, validation failures, stale/corrupt persisted values, and provider base URL rules.
 - [x] The changed API files pass typecheck, lint, and focused tests.
-- [x] New Worker env vars are documented in the env example, self-hosting guide, and env-reference source.
+- [x] New Worker env override is documented in the env example, self-hosting guide, and env-reference source.
 
 ## References
 

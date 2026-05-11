@@ -20,6 +20,7 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
   AGENT_SETTINGS_VALIDATION_DEFAULTS,
+  type AgentSettingsValidationLimits,
   createSaveAgentSettingsSchema,
   formatIssues,
 } from '../schemas';
@@ -82,49 +83,34 @@ function opencodeProviderFromDb(raw: string | null): OpenCodeProvider | null {
   return isOpenCodeProvider(raw) ? raw : null;
 }
 
-function getPositiveInt(value: string | undefined, fallback: number): number {
-  if (!value) {
-    return fallback;
+function getAgentSettingsValidationLimits(env: Env): AgentSettingsValidationLimits {
+  if (!env.AGENT_SETTINGS_VALIDATION_LIMITS) {
+    return AGENT_SETTINGS_VALIDATION_DEFAULTS;
   }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
 
-function getAgentSettingsValidationLimits(env: Env) {
-  return {
-    maxModelLength: getPositiveInt(
-      env.AGENT_SETTINGS_MAX_MODEL_LENGTH,
-      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxModelLength
-    ),
-    maxToolNameLength: getPositiveInt(
-      env.AGENT_SETTINGS_MAX_TOOL_NAME_LENGTH,
-      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxToolNameLength
-    ),
-    maxToolListLength: getPositiveInt(
-      env.AGENT_SETTINGS_MAX_TOOL_LIST_LENGTH,
-      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxToolListLength
-    ),
-    maxEnvVars: getPositiveInt(
-      env.AGENT_SETTINGS_MAX_ENV_VARS,
-      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxEnvVars
-    ),
-    maxEnvKeyLength: getPositiveInt(
-      env.AGENT_SETTINGS_MAX_ENV_KEY_LENGTH,
-      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxEnvKeyLength
-    ),
-    maxEnvValueLength: getPositiveInt(
-      env.AGENT_SETTINGS_MAX_ENV_VALUE_LENGTH,
-      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxEnvValueLength
-    ),
-    maxProviderNameLength: getPositiveInt(
-      env.AGENT_SETTINGS_MAX_PROVIDER_NAME_LENGTH,
-      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxProviderNameLength
-    ),
-    maxBaseUrlLength: getPositiveInt(
-      env.AGENT_SETTINGS_MAX_BASE_URL_LENGTH,
-      AGENT_SETTINGS_VALIDATION_DEFAULTS.maxBaseUrlLength
-    ),
-  };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(env.AGENT_SETTINGS_VALIDATION_LIMITS) as unknown;
+  } catch {
+    return AGENT_SETTINGS_VALIDATION_DEFAULTS;
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return AGENT_SETTINGS_VALIDATION_DEFAULTS;
+  }
+
+  const limits = { ...AGENT_SETTINGS_VALIDATION_DEFAULTS };
+  const overrides = parsed as Partial<Record<keyof AgentSettingsValidationLimits, unknown>>;
+  const limitKeys = Object.keys(limits) as Array<keyof AgentSettingsValidationLimits>;
+
+  for (const key of limitKeys) {
+    const value = overrides[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      limits[key] = Math.trunc(value);
+    }
+  }
+
+  return limits;
 }
 
 async function parseAgentSettingsBody(

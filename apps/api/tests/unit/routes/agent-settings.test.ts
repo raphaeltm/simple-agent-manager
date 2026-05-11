@@ -60,15 +60,39 @@ describe('Agent Settings Routes', () => {
     vi.mocked(drizzle).mockReturnValue(mockDB);
   });
 
+  function bindings(overrides: Partial<Env> = {}): Env {
+    return { DATABASE: {} as D1Database, ...overrides } as Env;
+  }
+
+  function getSettings(agentType: string): Promise<Response> {
+    return app.request(`/api/agent-settings/${agentType}`, { method: 'GET' }, bindings());
+  }
+
+  function putSettings(
+    agentType: string,
+    body: unknown,
+    envOverrides?: Partial<Env>
+  ): Promise<Response> {
+    return app.request(
+      `/api/agent-settings/${agentType}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      bindings(envOverrides)
+    );
+  }
+
+  function deleteSettings(agentType: string): Promise<Response> {
+    return app.request(`/api/agent-settings/${agentType}`, { method: 'DELETE' }, bindings());
+  }
+
   describe('GET /api/agent-settings/:agentType', () => {
     it('should return default empty settings when no row exists', async () => {
       mockDB.limit.mockResolvedValueOnce([]);
 
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'GET',
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await getSettings('claude-code');
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -94,11 +118,7 @@ describe('Agent Settings Routes', () => {
         updatedAt: new Date('2026-02-13T00:00:00Z'),
       }]);
 
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'GET',
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await getSettings('claude-code');
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -126,11 +146,7 @@ describe('Agent Settings Routes', () => {
         updatedAt: new Date('2026-02-13T00:00:00Z'),
       }]);
 
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'GET',
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await getSettings('claude-code');
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -142,11 +158,7 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject invalid agent type', async () => {
-      const res = await app.request('/api/agent-settings/invalid-agent', {
-        method: 'GET',
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await getSettings('invalid-agent');
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -173,16 +185,10 @@ describe('Agent Settings Routes', () => {
         updatedAt: new Date('2026-02-13T00:00:00Z'),
       }]);
 
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          permissionMode: 'default',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('claude-code', {
+        model: 'claude-sonnet-4-5-20250929',
+        permissionMode: 'default',
+      });
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -207,16 +213,10 @@ describe('Agent Settings Routes', () => {
         updatedAt: new Date('2026-02-13T01:00:00Z'),
       }]);
 
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-opus-4-6',
-          permissionMode: 'bypassPermissions',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('claude-code', {
+        model: 'claude-opus-4-6',
+        permissionMode: 'bypassPermissions',
+      });
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -225,15 +225,7 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject invalid permission mode', async () => {
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          permissionMode: 'superAdmin',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('claude-code', { permissionMode: 'superAdmin' });
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -242,15 +234,7 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject non-array allowedTools', async () => {
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          allowedTools: 'not-an-array',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('claude-code', { allowedTools: 'not-an-array' });
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -259,15 +243,7 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject non-object additionalEnv', async () => {
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          additionalEnv: 'not-an-object',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('claude-code', { additionalEnv: 'not-an-object' });
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -276,17 +252,11 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject unsafe additionalEnv keys', async () => {
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          additionalEnv: {
-            'BAD-NAME': 'true',
-          },
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('claude-code', {
+        additionalEnv: {
+          'BAD-NAME': 'true',
+        },
+      });
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -294,15 +264,7 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject oversized model values', async () => {
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'x'.repeat(201),
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('claude-code', { model: 'x'.repeat(201) });
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -310,16 +272,11 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should honor configured validation limits from env', async () => {
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: '123456',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-        AGENT_SETTINGS_MAX_MODEL_LENGTH: '5',
-      } as Env);
+      const res = await putSettings(
+        'claude-code',
+        { model: '123456' },
+        { AGENT_SETTINGS_VALIDATION_LIMITS: JSON.stringify({ maxModelLength: 5 }) }
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -341,16 +298,10 @@ describe('Agent Settings Routes', () => {
         updatedAt: new Date('2026-02-13T01:00:00Z'),
       }]);
 
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: null,
-          permissionMode: null,
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('claude-code', {
+        model: null,
+        permissionMode: null,
+      });
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -359,13 +310,7 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject invalid agent type', async () => {
-      const res = await app.request('/api/agent-settings/not-real', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'test' }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('not-real', { model: 'test' });
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -375,15 +320,7 @@ describe('Agent Settings Routes', () => {
 
   describe('PUT /api/agent-settings/opencode (provider validation)', () => {
     it('should reject custom provider without opencodeBaseUrl', async () => {
-      const res = await app.request('/api/agent-settings/opencode', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          opencodeProvider: 'custom',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('opencode', { opencodeProvider: 'custom' });
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -391,15 +328,7 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject openai-compatible provider without opencodeBaseUrl', async () => {
-      const res = await app.request('/api/agent-settings/opencode', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          opencodeProvider: 'openai-compatible',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('opencode', { opencodeProvider: 'openai-compatible' });
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -407,16 +336,10 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject non-HTTPS opencodeBaseUrl', async () => {
-      const res = await app.request('/api/agent-settings/opencode', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          opencodeProvider: 'custom',
-          opencodeBaseUrl: 'http://example.com/v1',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('opencode', {
+        opencodeProvider: 'custom',
+        opencodeBaseUrl: 'http://example.com/v1',
+      });
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -441,15 +364,7 @@ describe('Agent Settings Routes', () => {
         updatedAt: new Date(),
       }]);
 
-      const res = await app.request('/api/agent-settings/opencode', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          opencodeProvider: 'scaleway',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('opencode', { opencodeProvider: 'scaleway' });
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -475,17 +390,11 @@ describe('Agent Settings Routes', () => {
         updatedAt: new Date(),
       }]);
 
-      const res = await app.request('/api/agent-settings/opencode', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          opencodeProvider: 'custom',
-          opencodeBaseUrl: 'https://my-provider.example.com/v1',
-          opencodeProviderName: 'My Provider',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('opencode', {
+        opencodeProvider: 'custom',
+        opencodeBaseUrl: 'https://my-provider.example.com/v1',
+        opencodeProviderName: 'My Provider',
+      });
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -495,15 +404,7 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject invalid opencodeProvider value', async () => {
-      const res = await app.request('/api/agent-settings/opencode', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          opencodeProvider: 'invalid-provider',
-        }),
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await putSettings('opencode', { opencodeProvider: 'invalid-provider' });
 
       expect(res.status).toBe(400);
     });
@@ -525,11 +426,7 @@ describe('Agent Settings Routes', () => {
         updatedAt: new Date(),
       }]);
 
-      const res = await app.request('/api/agent-settings/opencode', {
-        method: 'GET',
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await getSettings('opencode');
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -541,11 +438,7 @@ describe('Agent Settings Routes', () => {
 
   describe('DELETE /api/agent-settings/:agentType', () => {
     it('should delete settings successfully', async () => {
-      const res = await app.request('/api/agent-settings/claude-code', {
-        method: 'DELETE',
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await deleteSettings('claude-code');
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -553,11 +446,7 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should reject invalid agent type', async () => {
-      const res = await app.request('/api/agent-settings/bad-type', {
-        method: 'DELETE',
-      }, {
-        DATABASE: {} as D1Database,
-      } as Env);
+      const res = await deleteSettings('bad-type');
 
       expect(res.status).toBe(400);
       const body = await res.json();

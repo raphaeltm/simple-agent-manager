@@ -61,6 +61,7 @@ export {
 } from './agent-profiles';
 
 // Agent settings schemas
+export type { AgentSettingsValidationLimits } from './agent-settings';
 export {
   AGENT_SETTINGS_VALIDATION_DEFAULTS,
   createSaveAgentSettingsSchema,
