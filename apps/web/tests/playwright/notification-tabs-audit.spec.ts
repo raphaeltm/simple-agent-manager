@@ -365,7 +365,26 @@ test.describe('Notification tabs — Desktop', () => {
     await screenshot(page, 'notif-tabs-grouped-desktop');
   });
 
-  test('empty state', async ({ page }) => {
+  test('normal data — all tab', async ({ page }) => {
+    await setupApiMocks(page, { notifications: NORMAL_NOTIFICATIONS });
+    await page.goto('/');
+    const panel = await openNotificationPanel(page);
+
+    await panel.getByRole('tab', { name: /^all$/i }).click();
+    await page.waitForTimeout(300);
+
+    await expect(panel.getByText('Agent needs your input on task #42')).toBeVisible();
+    await expect(panel.getByText('PR #123 opened for review')).toBeVisible();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(overflow).toBe(false);
+
+    await screenshot(page, 'notif-tabs-all-desktop');
+  });
+
+  test('empty state — priority', async ({ page }) => {
     await setupApiMocks(page, { notifications: [] });
     await page.goto('/');
     const panel = await openNotificationPanel(page);
@@ -373,5 +392,21 @@ test.describe('Notification tabs — Desktop', () => {
     await expect(panel.getByText(/no priority notifications/i)).toBeVisible();
 
     await screenshot(page, 'notif-tabs-empty-desktop');
+  });
+
+  test('empty state — updates', async ({ page }) => {
+    const priorityOnly = [
+      makeNotification({ id: 'e1', type: 'needs_input', title: 'Input needed' }),
+    ];
+    await setupApiMocks(page, { notifications: priorityOnly });
+    await page.goto('/');
+    const panel = await openNotificationPanel(page);
+
+    await panel.getByRole('tab', { name: /updates/i }).click();
+    await page.waitForTimeout(300);
+
+    await expect(panel.getByText(/no updates/i)).toBeVisible();
+
+    await screenshot(page, 'notif-tabs-empty-updates-desktop');
   });
 });

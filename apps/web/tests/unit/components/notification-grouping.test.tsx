@@ -401,6 +401,16 @@ describe('NotificationCenter tab filtering', () => {
     expect(priorityTab).toHaveTextContent('2');
   });
 
+  it('shows 99+ when priority unread count exceeds 99', () => {
+    const notifications = Array.from({ length: 110 }, (_, i) =>
+      makeNotification({ id: `n${i}`, type: 'needs_input', title: `Help ${i}`, readAt: null }),
+    );
+    renderNotificationCenter(notifications, 110);
+
+    const priorityTab = screen.getByRole('tab', { name: /priority/i });
+    expect(priorityTab).toHaveTextContent('99+');
+  });
+
   it('shows empty state with sub-message on Priority tab when no priority notifications exist', () => {
     const notifications = [
       makeNotification({ id: 'n1', type: 'progress', title: 'Working' }),
