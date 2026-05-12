@@ -472,6 +472,84 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
 });
 
 /**
+ * POST /api/projects/:projectId/sessions/:sessionId/cancel
+ * Cancel the current in-flight prompt on the running agent session.
+ * Sends a cancel signal to the VM agent which interrupts the agent
+ * without tearing down the session — the user can send a follow-up.
+ */
+chatRoutes.post('/:sessionId/cancel', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  // Find the workspace linked to this chat session with active node
+  const [workspace] = await db
+    .select({
+      id: schema.workspaces.id,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
+    .where(
+      and(
+        eq(schema.workspaces.chatSessionId, sessionId),
+        inArray(schema.workspaces.status, ['running', 'recovery'])
+      )
+    )
+    .limit(1);
+
+  if (!workspace || !workspace.nodeId) {
+    throw errors.notFound('No active workspace found for this session');
+  }
+
+  if (workspace.nodeStatus !== 'running') {
+    throw errors.conflict(
+      'The workspace node is no longer running. Start a new chat to create a fresh workspace.'
+    );
+  }
+
+  // Find the running agent session on that workspace
+  const [agentSession] = await db
+    .select({ id: schema.agentSessions.id })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.status, 'running')
+      )
+    )
+    .limit(1);
+
+  if (!agentSession) {
+    throw errors.notFound('No running agent session found');
+  }
+
+  // Forward the cancel to the VM agent
+  const { cancelAgentSessionOnNode } = await import('../services/node-agent');
+  const result = await cancelAgentSessionOnNode(
+    workspace.nodeId,
+    workspace.id,
+    agentSession.id,
+    c.env,
+    userId
+  );
+
+  // 409 means no prompt in flight — not an error from the user's perspective
+  if (!result.success && result.status !== 409) {
+    throw errors.internal('Failed to cancel prompt on agent');
+  }
+
+  return c.json({
+    status: result.success ? 'cancelled' : 'idle',
+    message: result.success ? 'Prompt cancel signal sent' : 'No prompt in flight to cancel',
+  });
+});
+
+/**
  * POST /api/projects/:projectId/sessions/:sessionId/summarize
  * Generate a context summary from a session's message history.
  * Used for conversation forking — the UI calls this to get a summary,

@@ -177,6 +177,17 @@ export async function sendFollowUpPrompt(
   );
 }
 
+/** Cancel the current in-flight prompt on the running agent session. */
+export async function cancelAgentPrompt(
+  projectId: string,
+  sessionId: string
+): Promise<{ status: string; message: string }> {
+  return request<{ status: string; message: string }>(
+    `/api/projects/${projectId}/sessions/${sessionId}/cancel`,
+    { method: 'POST' }
+  );
+}
+
 // =============================================================================
 // Activity Events
 // =============================================================================

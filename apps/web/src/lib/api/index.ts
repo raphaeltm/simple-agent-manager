@@ -216,6 +216,7 @@ export {
   listActivityEvents,
   listChatSessions,
   resetIdleTimer,
+  cancelAgentPrompt,
   sendFollowUpPrompt,
   stopChatSession,
   summarizeSession,

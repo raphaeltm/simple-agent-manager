@@ -21,7 +21,7 @@ import { AcpConversationItemView } from '../../components/project-message-view/A
 import { FollowUpInput } from '../../components/project-message-view/FollowUpInput';
 import { chatMessagesToConversationItems, deriveSessionState, VIRTUAL_START } from '../../components/project-message-view/types';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import { getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
+import { cancelAgentPrompt, getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
 
@@ -244,6 +244,19 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     }
   }, [hasMore, loadingMore, messages, projectId, sessionId]);
 
+  // ── Cancel the current in-flight prompt via REST API ──
+  const handleCancelPrompt = useCallback(() => {
+    if (agentActivity === 'idle') return;
+    cancelAgentPrompt(projectId, sessionId)
+      .then(() => {
+        setAgentActivity('idle');
+      })
+      .catch(() => {
+        // Best-effort cancel — agent may already be idle
+        setAgentActivity('idle');
+      });
+  }, [agentActivity, projectId, sessionId]);
+
   // ── Derive placeholder from agent activity ──
   const placeholder = agentActivity === 'prompting' || agentActivity === 'responding'
     ? 'Agent is working...'
@@ -320,6 +333,21 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           </button>
         )}
       </div>
+
+      {/* Agent working indicator */}
+      {agentActivity !== 'idle' && isActive && (
+        <div className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
+          <Spinner size="sm" />
+          <span className="text-xs text-fg-muted">Agent is working...</span>
+          <button
+            type="button"
+            onClick={handleCancelPrompt}
+            className="ml-auto flex-shrink-0 px-2 py-1.5 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {/* Input */}
       {showInput && (
