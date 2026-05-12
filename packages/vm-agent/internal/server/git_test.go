@@ -393,8 +393,7 @@ exit 1
 	if err := os.WriteFile(mockDocker, []byte(mockScript), 0o755); err != nil {
 		t.Fatalf("failed to write mock docker command: %v", err)
 	}
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", mockBinDir+":"+origPath)
+	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
 
 	s := &Server{
 		config: &config.Config{

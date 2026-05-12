@@ -1048,7 +1048,7 @@ func injectAptMirrorConfig(ctx context.Context, cfg *config.Config, containerID 
 
 	// Uses exec.Command with containerID as a direct argument (not shell-interpolated)
 	// to prevent any injection via containerID.
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", buildAptMirrorScript(mirror))
+	cmd := exec.CommandContext(ctx, "/usr/bin/docker", "exec", "-u", "root", containerID, "sh", "-c", buildAptMirrorScript(mirror))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Warn("Failed to inject apt mirror config into container (non-fatal)", "error", err, "output", strings.TrimSpace(string(output)), "provider", cfg.Provider)

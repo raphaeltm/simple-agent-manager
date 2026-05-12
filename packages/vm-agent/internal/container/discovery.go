@@ -4,7 +4,9 @@ package container
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -21,6 +23,14 @@ var (
 	isContainerRunning           = dockerIsContainerRunning
 	inspectContainerBridgeIP     = dockerInspectContainerBridgeIP
 )
+
+func dockerCLIPath() string {
+	path := os.Getenv("SAM_DOCKER_CLI_PATH")
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return "/usr/bin/docker"
+}
 
 // Discovery finds and caches the devcontainer's Docker container ID and network metadata.
 type Discovery struct {
@@ -143,7 +153,7 @@ func (d *Discovery) discover() (string, error) {
 
 func dockerListRunningContainersByLabel(labelKey, labelValue string) ([]containerCandidate, error) {
 	filter := fmt.Sprintf("label=%s=%s", labelKey, labelValue)
-	cmd := exec.Command("docker", "ps", "--format", "{{.ID}}\t{{.CreatedAt}}", "--filter", filter)
+	cmd := exec.Command(dockerCLIPath(), "ps", "--format", "{{.ID}}\t{{.CreatedAt}}", "--filter", filter)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -175,13 +185,13 @@ func dockerIsContainerRunning(containerID string) bool {
 	if strings.TrimSpace(containerID) == "" {
 		return false
 	}
-	cmd := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", containerID)
+	cmd := exec.Command(dockerCLIPath(), "inspect", "-f", "{{.State.Running}}", containerID)
 	output, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(output)) == "true"
 }
 
 func dockerInspectContainerBridgeIP(containerID string) (string, error) {
-	cmd := exec.Command("docker", "inspect", "-f",
+	cmd := exec.Command(dockerCLIPath(), "inspect", "-f",
 		"{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerID)
 	output, err := cmd.Output()
 	if err != nil {
