@@ -575,6 +575,83 @@ describe('generateCloudInit', () => {
     });
   });
 
+  describe('ephemeral VM stability', () => {
+    it('disables apt-daily and unattended-upgrades timers in runcmd before vm-agent start', () => {
+      const config = generateCloudInit(baseVariables());
+
+      // Timer disables must be present
+      expect(config).toContain('systemctl disable --now apt-daily.timer apt-daily-upgrade.timer');
+      expect(config).toContain('systemctl disable --now unattended-upgrades');
+
+      // Timer disables must appear BEFORE vm-agent start in the runcmd section
+      const runcmdSection = config.split('runcmd:')[1]?.split('write_files:')[0] ?? '';
+      const timerDisableIdx = runcmdSection.indexOf('apt-daily.timer');
+      const agentStartIdx = runcmdSection.indexOf('systemctl start vm-agent');
+      expect(timerDisableIdx).toBeGreaterThan(-1);
+      expect(agentStartIdx).toBeGreaterThan(-1);
+      expect(timerDisableIdx).toBeLessThan(agentStartIdx);
+    });
+
+    it('timer disables use || true to not fail if services are already absent', () => {
+      const config = generateCloudInit(baseVariables());
+      const runcmdSection = config.split('runcmd:')[1]?.split('write_files:')[0] ?? '';
+
+      // Both commands should have || true fallback
+      expect(runcmdSection).toContain('apt-daily.timer apt-daily-upgrade.timer || true');
+      expect(runcmdSection).toContain('unattended-upgrades || true');
+    });
+  });
+
+  describe('IPv6 firewall module loading', () => {
+    it('firewall script loads ip6_tables kernel module before ip6tables commands', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+
+      // Must load the kernel module
+      expect(content).toContain('modprobe ip6_tables');
+
+      // modprobe must appear before ip6tables commands
+      const modprobeIdx = content.indexOf('modprobe ip6_tables');
+      const ip6tablesIdx = content.indexOf('ip6tables -P INPUT ACCEPT');
+      expect(modprobeIdx).toBeGreaterThan(-1);
+      expect(ip6tablesIdx).toBeGreaterThan(-1);
+      expect(modprobeIdx).toBeLessThan(ip6tablesIdx);
+    });
+
+    it('firewall script gracefully skips IPv6 when kernel module is unavailable', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+
+      // IPv6 block must be conditional
+      expect(content).toContain('if modprobe ip6_tables');
+      // Fallback log message when IPv6 is unavailable
+      expect(content).toContain('ip6tables unavailable');
+    });
+
+    it('ip6tables-save handles missing IPv6 support gracefully', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+
+      // ip6tables-save should have error suppression
+      expect(content).toContain('ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true');
+    });
+  });
+
   describe('cloud metadata API blocking', () => {
     it('dedicated metadata block script contains IPv4 DOCKER-USER chain rules', () => {
       const config = generateCloudInit(baseVariables());

@@ -32,6 +32,12 @@ runcmd:
   # pre-installed on all Hetzner Ubuntu images.
   # =====================================================================
 
+  # Disable automatic OS upgrades — ephemeral VMs gain nothing from them
+  # and unattended-upgrades can trigger systemd daemon-reexec which kills
+  # the vm-agent mid-work. Must run before vm-agent starts.
+  - systemctl disable --now apt-daily.timer apt-daily-upgrade.timer || true
+  - systemctl disable --now unattended-upgrades || true
+
   - 'logger -t sam-boot "PHASE START: vm-agent-download"'
   - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall
   - |
@@ -181,21 +187,27 @@ write_files:
       iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       iptables -I INPUT 1 -i lo -j ACCEPT
 
-      # IPv6: same pattern.
-      ip6tables -P INPUT ACCEPT
-      ip6tables -F INPUT
+      # IPv6: same pattern. Load the kernel module first — some Hetzner
+      # images ship without ip6_tables loaded, causing all ip6tables
+      # commands to fail ("ip6tables: No chain/target/match by that name").
+      if modprobe ip6_tables 2>/dev/null && ip6tables -L -n >/dev/null 2>&1; then
+        ip6tables -P INPUT ACCEPT
+        ip6tables -F INPUT
 
-      ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
-      ip6tables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
-      ip6tables -A INPUT -p tcp --dport 22 -j DROP
+        ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
+        ip6tables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
+        ip6tables -A INPUT -p tcp --dport 22 -j DROP
 
-      while IFS= read -r cidr; do
-        [ -n "$cidr" ] && ip6tables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
-      done <<< "$CF_IPV6"
+        while IFS= read -r cidr; do
+          [ -n "$cidr" ] && ip6tables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+        done <<< "$CF_IPV6"
 
-      ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
-      ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
-      ip6tables -I INPUT 1 -i lo -j ACCEPT
+        ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+        ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+        ip6tables -I INPUT 1 -i lo -j ACCEPT
+      else
+        logger -t sam-firewall "WARNING: ip6tables unavailable (kernel module not loaded), skipping IPv6 firewall rules"
+      fi
 
       DOCKER_USER_WAIT=0
       while ! iptables -L DOCKER-USER -n >/dev/null 2>&1; do
@@ -210,7 +222,7 @@ write_files:
 
       mkdir -p /etc/iptables
       iptables-save > /etc/iptables/rules.v4
-      ip6tables-save > /etc/iptables/rules.v6
+      ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
 
       logger -t sam-firewall "Firewall configured: port $VM_AGENT_PORT restricted to Cloudflare IPs, metadata API blocked"
 
