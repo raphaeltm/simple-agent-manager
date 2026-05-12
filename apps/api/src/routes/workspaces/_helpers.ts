@@ -254,6 +254,7 @@ export async function scheduleWorkspaceCreateOnNode(
       .set({
         status: 'error',
         errorMessage: err instanceof Error ? err.message : 'Failed to create workspace on node',
+        dispatchedToAgentAt: null,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.workspaces.id, workspaceId));

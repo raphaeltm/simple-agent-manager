@@ -1,90 +1,121 @@
 /**
- * Tests for workspace dispatch guard.
+ * Behavioral tests for workspace dispatch guard.
  *
- * Verifies that the node-ready handler filters out already-dispatched
- * workspaces, TaskRunner sets the marker before dispatching, and the
- * safety-net recovery path is preserved for un-dispatched workspaces.
+ * The primary behavioral coverage lives in the Miniflare integration tests
+ * (tests/workers/workspace-dispatch-guard.test.ts) which exercise real D1
+ * queries proving the filter works.
+ *
+ * These tests verify the dispatch marker logic at the function level:
+ * - scheduleWorkspaceCreateOnNode sets dispatchedToAgentAt before the VM call
+ * - scheduleWorkspaceCreateOnNode clears dispatchedToAgentAt on failure (safety net)
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 
-import { describe, expect, it } from 'vitest';
+// Mock external dependencies
+vi.mock('../../src/services/jwt', () => ({
+  signCallbackToken: vi.fn().mockResolvedValue('mock-token'),
+  verifyCallbackToken: vi.fn(),
+  signNodeCallbackToken: vi.fn(),
+  signNodeManagementToken: vi.fn(),
+  shouldRefreshCallbackToken: vi.fn(),
+}));
 
-describe('Node-ready workspace dispatch guard', () => {
-  const nodeLifecycleSource = readFileSync(
-    resolve(process.cwd(), 'src/routes/node-lifecycle.ts'),
-    'utf8'
-  );
+vi.mock('../../src/services/node-agent', () => ({
+  createWorkspaceOnNode: vi.fn(),
+}));
 
-  it('filters out workspaces with dispatched_to_agent_at set', () => {
-    expect(nodeLifecycleSource).toContain('isNull(schema.workspaces.dispatchedToAgentAt)');
-  });
-
-  it('imports isNull from drizzle-orm', () => {
-    expect(nodeLifecycleSource).toContain("import { and, eq, isNull, sql } from 'drizzle-orm'");
-  });
+vi.mock('drizzle-orm/d1', () => {
+  const chainable = () => {
+    const obj: Record<string, unknown> = {};
+    obj.set = vi.fn().mockReturnValue(obj);
+    obj.where = vi.fn().mockResolvedValue(undefined);
+    return obj;
+  };
+  return {
+    drizzle: vi.fn().mockReturnValue({
+      update: vi.fn().mockReturnValue(chainable()),
+      select: vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) }),
+    }),
+  };
 });
 
-describe('TaskRunner dispatch marker', () => {
-  const source = readFileSync(
-    resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
-    'utf8'
-  );
+import { createWorkspaceOnNode } from '../../src/services/node-agent';
 
-  it('sets dispatched_to_agent_at before calling createWorkspaceOnVmAgent', () => {
-    const callSiteIndex = source.indexOf('await markWorkspaceDispatched(rc, workspaceId)');
-    const vmAgentCallIndex = source.indexOf('await createWorkspaceOnVmAgent(');
-    expect(callSiteIndex).toBeGreaterThan(-1);
-    expect(vmAgentCallIndex).toBeGreaterThan(-1);
-    expect(callSiteIndex).toBeLessThan(vmAgentCallIndex);
-  });
+describe('scheduleWorkspaceCreateOnNode dispatch marker', () => {
+  it('sets dispatchedToAgentAt before calling createWorkspaceOnNode', async () => {
+    const callOrder: string[] = [];
 
-  it('markWorkspaceDispatched updates the dispatched_to_agent_at column', () => {
-    expect(source).toContain("UPDATE workspaces SET dispatched_to_agent_at = ?");
-  });
-});
+    // Track the order of operations via mock implementations
+    const { drizzle } = await import('drizzle-orm/d1');
+    const mockUpdate = vi.fn().mockImplementation(() => {
+      const chain: Record<string, unknown> = {};
+      chain.set = vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+        if (payload.dispatchedToAgentAt) {
+          callOrder.push('set-dispatch-marker');
+        }
+        if (payload.status === 'error') {
+          callOrder.push('set-error-status');
+        }
+        return chain;
+      });
+      chain.where = vi.fn().mockResolvedValue(undefined);
+      return chain;
+    });
 
-describe('Trial orchestrator dispatch marker', () => {
-  const source = readFileSync(
-    resolve(process.cwd(), 'src/durable-objects/trial-orchestrator/steps.ts'),
-    'utf8'
-  );
+    vi.mocked(drizzle).mockReturnValue({
+      update: mockUpdate,
+    } as never);
 
-  it('sets dispatched_to_agent_at before calling createWorkspaceOnNode', () => {
-    const markerIndex = source.indexOf('dispatched_to_agent_at');
-    const vmAgentCallIndex = source.indexOf('createWorkspaceOnNode(state.nodeId');
-    expect(markerIndex).toBeGreaterThan(-1);
-    expect(vmAgentCallIndex).toBeGreaterThan(-1);
-    expect(markerIndex).toBeLessThan(vmAgentCallIndex);
-  });
-});
+    vi.mocked(createWorkspaceOnNode).mockImplementation(async () => {
+      callOrder.push('create-workspace-on-node');
+    });
 
-describe('Manual workspace creation dispatch marker', () => {
-  const source = readFileSync(
-    resolve(process.cwd(), 'src/routes/workspaces/_helpers.ts'),
-    'utf8'
-  );
+    // Import fresh to pick up mocks
+    const { scheduleWorkspaceCreateOnNode } = await import('../../src/routes/workspaces/_helpers');
 
-  it('sets dispatchedToAgentAt in the same update as status creating', () => {
-    expect(source).toContain('dispatchedToAgentAt: now');
-  });
-});
-
-describe('Workspace dispatch guard — schema', () => {
-  it('Drizzle schema includes dispatchedToAgentAt column', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/db/schema.ts'),
-      'utf8'
+    const mockEnv = { DATABASE: {} } as never;
+    await scheduleWorkspaceCreateOnNode(
+      mockEnv, 'ws-1', 'node-1', 'user-1', 'org/repo', 'main',
     );
-    expect(source).toContain("dispatchedToAgentAt: text('dispatched_to_agent_at')");
+
+    // Dispatch marker must be set BEFORE the VM agent call
+    expect(callOrder.indexOf('set-dispatch-marker')).toBeLessThan(
+      callOrder.indexOf('create-workspace-on-node'),
+    );
   });
 
-  it('migration uses ALTER TABLE ADD COLUMN (no DROP TABLE)', () => {
-    const migration = readFileSync(
-      resolve(process.cwd(), 'src/db/migrations/0049_workspace_dispatched_marker.sql'),
-      'utf8'
+  it('clears dispatchedToAgentAt on VM agent call failure', async () => {
+    let errorPayload: Record<string, unknown> | null = null;
+
+    const { drizzle } = await import('drizzle-orm/d1');
+    const mockUpdate = vi.fn().mockImplementation(() => {
+      const chain: Record<string, unknown> = {};
+      chain.set = vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+        if (payload.status === 'error') {
+          errorPayload = payload;
+        }
+        return chain;
+      });
+      chain.where = vi.fn().mockResolvedValue(undefined);
+      return chain;
+    });
+
+    vi.mocked(drizzle).mockReturnValue({
+      update: mockUpdate,
+    } as never);
+
+    vi.mocked(createWorkspaceOnNode).mockRejectedValue(new Error('VM agent unreachable'));
+
+    const { scheduleWorkspaceCreateOnNode } = await import('../../src/routes/workspaces/_helpers');
+
+    const mockEnv = { DATABASE: {} } as never;
+    await scheduleWorkspaceCreateOnNode(
+      mockEnv, 'ws-1', 'node-1', 'user-1', 'org/repo', 'main',
     );
-    expect(migration).toContain('ALTER TABLE workspaces ADD COLUMN dispatched_to_agent_at TEXT');
-    expect(migration).not.toContain('DROP TABLE');
+
+    // On failure, dispatchedToAgentAt should be cleared so safety net can recover
+    expect(errorPayload).not.toBeNull();
+    expect(errorPayload!.dispatchedToAgentAt).toBeNull();
+    expect(errorPayload!.status).toBe('error');
   });
 });

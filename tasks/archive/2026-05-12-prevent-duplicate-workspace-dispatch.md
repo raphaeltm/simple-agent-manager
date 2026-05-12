@@ -37,21 +37,21 @@ This preserves the safety net: workspaces created but not yet dispatched (TaskRu
 
 ## Implementation Checklist
 
-- [ ] Add D1 migration `0049_workspace_dispatched_marker.sql`: `ALTER TABLE workspaces ADD COLUMN dispatched_to_agent_at TEXT;`
-- [ ] Add `dispatchedToAgentAt` column to Drizzle schema in `apps/api/src/db/schema.ts`
-- [ ] Set `dispatched_to_agent_at` in `createAndProvisionWorkspace()` before calling `createWorkspaceOnVmAgent()`
-- [ ] Filter out dispatched workspaces in node-ready handler (`dispatched_to_agent_at IS NULL`)
-- [ ] Add integration test: TaskRunner dispatch + node-ready overlap → only one VM agent request
-- [ ] Add integration test: workspace created but not dispatched → node-ready handler dispatches it (safety net preserved)
-- [ ] Run typecheck, lint, test
+- [x] Add D1 migration `0049_workspace_dispatched_marker.sql`: `ALTER TABLE workspaces ADD COLUMN dispatched_to_agent_at TEXT;`
+- [x] Add `dispatchedToAgentAt` column to Drizzle schema in `apps/api/src/db/schema.ts`
+- [x] Set `dispatched_to_agent_at` in `createAndProvisionWorkspace()` before calling `createWorkspaceOnVmAgent()`
+- [x] Filter out dispatched workspaces in node-ready handler (`dispatched_to_agent_at IS NULL`)
+- [x] Add integration test: TaskRunner dispatch + node-ready overlap → only one VM agent request
+- [x] Add integration test: workspace created but not dispatched → node-ready handler dispatches it (safety net preserved)
+- [x] Run typecheck, lint, test
 
 ## Acceptance Criteria
 
-- [ ] When TaskRunner dispatches a workspace, a subsequent node-ready callback does NOT re-dispatch it
-- [ ] When TaskRunner creates a workspace row but crashes before dispatching, the node-ready callback DOES dispatch it
-- [ ] The `dispatched_to_agent_at` column is nullable (null = not yet dispatched)
-- [ ] Existing workspace creation flows (manual, trial orchestrator) are unaffected
-- [ ] Tests cover both the race prevention and the safety-net recovery path
+- [x] When TaskRunner dispatches a workspace, a subsequent node-ready callback does NOT re-dispatch it
+- [x] When TaskRunner creates a workspace row but crashes before dispatching, the node-ready callback DOES dispatch it
+- [x] The `dispatched_to_agent_at` column is nullable (null = not yet dispatched)
+- [x] Existing workspace creation flows (manual, trial orchestrator) are unaffected
+- [x] Tests cover both the race prevention and the safety-net recovery path
 
 ## References
 
