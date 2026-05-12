@@ -54,13 +54,15 @@ export function createSession(
   return { id, now };
 }
 
-export function stopSession(
+function terminateSession(
   sql: SqlStorage,
-  sessionId: string
-): { workspaceId: string | null; messageCount: number } | null {
+  sessionId: string,
+  terminalStatus: 'stopped' | 'failed',
+): { workspaceId: string | null; messageCount: number; rowsWritten: number } | null {
   const now = Date.now();
-  sql.exec(
-    `UPDATE chat_sessions SET status = 'stopped', ended_at = ?, updated_at = ? WHERE id = ? AND status = 'active'`,
+  const cursor = sql.exec(
+    `UPDATE chat_sessions SET status = ?, ended_at = ?, updated_at = ? WHERE id = ? AND status = 'active'`,
+    terminalStatus,
     now,
     now,
     sessionId
@@ -71,40 +73,28 @@ export function stopSession(
     .toArray()[0];
 
   if (!row) return null;
-  return parseSessionStop(row);
+  return { ...parseSessionStop(row), rowsWritten: cursor.rowsWritten };
+}
+
+export function stopSession(
+  sql: SqlStorage,
+  sessionId: string
+): { workspaceId: string | null; messageCount: number } | null {
+  return terminateSession(sql, sessionId, 'stopped');
 }
 
 export function stopSessionInternal(sql: SqlStorage, sessionId: string): void {
-  const now = Date.now();
-  sql.exec(
-    `UPDATE chat_sessions SET status = 'stopped', ended_at = ?, updated_at = ? WHERE id = ? AND status = 'active'`,
-    now,
-    now,
-    sessionId
-  );
+  terminateSession(sql, sessionId, 'stopped');
 }
 
 export function failSession(
   sql: SqlStorage,
   sessionId: string
 ): { workspaceId: string | null; messageCount: number } | null {
-  const now = Date.now();
-  const cursor = sql.exec(
-    `UPDATE chat_sessions SET status = 'failed', ended_at = ?, updated_at = ? WHERE id = ? AND status = 'active'`,
-    now,
-    now,
-    sessionId
-  );
-
+  const result = terminateSession(sql, sessionId, 'failed');
   // If no rows were updated, session was already stopped/failed — skip
-  if (cursor.rowsWritten === 0) return null;
-
-  const row = sql
-    .exec('SELECT workspace_id, message_count FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
-
-  if (!row) return null;
-  return parseSessionStop(row);
+  if (!result || result.rowsWritten === 0) return null;
+  return result;
 }
 
 export function linkSessionToWorkspace(
