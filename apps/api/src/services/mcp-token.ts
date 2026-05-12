@@ -5,12 +5,30 @@
  * agents running inside SAM workspaces. Tokens are stored in KV with a
  * configurable TTL and are validated (not consumed) on each use — unlike
  * bootstrap tokens, MCP tokens are reusable for the task's lifetime.
+ *
+ * Sliding window: on each validation, if >50% of the TTL has elapsed since
+ * creation (or last refresh), the KV entry is re-written with a fresh TTL.
+ * This keeps tokens alive for long-running agents without issuing new tokens.
+ * A hard maximum lifetime (default 24h, configurable via MCP_TOKEN_MAX_LIFETIME_SECONDS)
+ * caps how long a token can be extended.
  */
 
 import { DEFAULT_MCP_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
 
 /** KV key prefix for MCP tokens */
 const MCP_TOKEN_PREFIX = 'mcp:';
+
+/** Default maximum lifetime for MCP tokens: 24 hours */
+const DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS = 24 * 60 * 60;
+
+/** Sliding window refresh threshold: refresh when >50% of TTL has elapsed */
+const SLIDING_WINDOW_THRESHOLD = 0.5;
+
+/** Env shape for MCP token configuration */
+export interface McpTokenEnv {
+  MCP_TOKEN_TTL_SECONDS?: string;
+  MCP_TOKEN_MAX_LIFETIME_SECONDS?: string;
+}
 
 /** Data stored alongside each MCP token in KV */
 export interface McpTokenData {
@@ -19,10 +37,12 @@ export interface McpTokenData {
   userId: string;
   workspaceId: string;
   createdAt: string;
+  /** ISO-8601 timestamp of the last sliding-window TTL refresh */
+  lastRefreshedAt?: string;
 }
 
 /** Get MCP token TTL from env or use default (per constitution principle XI) */
-export function getMcpTokenTTL(env?: { MCP_TOKEN_TTL_SECONDS?: string }): number {
+export function getMcpTokenTTL(env?: McpTokenEnv): number {
   if (env?.MCP_TOKEN_TTL_SECONDS) {
     const ttl = parseInt(env.MCP_TOKEN_TTL_SECONDS, 10);
     if (!isNaN(ttl) && ttl > 0) {
@@ -30,6 +50,17 @@ export function getMcpTokenTTL(env?: { MCP_TOKEN_TTL_SECONDS?: string }): number
     }
   }
   return DEFAULT_MCP_TOKEN_TTL_SECONDS;
+}
+
+/** Get MCP token max lifetime from env or use default */
+export function getMcpTokenMaxLifetime(env?: McpTokenEnv): number {
+  if (env?.MCP_TOKEN_MAX_LIFETIME_SECONDS) {
+    const val = parseInt(env.MCP_TOKEN_MAX_LIFETIME_SECONDS, 10);
+    if (!isNaN(val) && val > 0) {
+      return val;
+    }
+  }
+  return DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS;
 }
 
 /**
@@ -52,7 +83,7 @@ export async function storeMcpToken(
   kv: KVNamespace,
   token: string,
   data: McpTokenData,
-  env?: { MCP_TOKEN_TTL_SECONDS?: string },
+  env?: McpTokenEnv,
 ): Promise<void> {
   const ttl = getMcpTokenTTL(env);
   await kv.put(`${MCP_TOKEN_PREFIX}${token}`, JSON.stringify(data), {
@@ -65,14 +96,55 @@ export async function storeMcpToken(
  * Unlike bootstrap tokens, MCP tokens are NOT consumed on validation —
  * agents may call multiple tools during a single task.
  *
+ * Sliding window: when >50% of the TTL has elapsed since the last refresh
+ * (or creation), re-writes the KV entry with a fresh TTL. This extends the
+ * token's life for long-running agents. Capped by max lifetime (default 24h).
+ *
  * @returns Token data if valid, null if invalid or expired
  */
 export async function validateMcpToken(
   kv: KVNamespace,
   token: string,
+  env?: McpTokenEnv,
 ): Promise<McpTokenData | null> {
   const key = `${MCP_TOKEN_PREFIX}${token}`;
-  return kv.get<McpTokenData>(key, { type: 'json' });
+  const data = await kv.get<McpTokenData>(key, { type: 'json' });
+  if (!data) return null;
+
+  // Sliding window refresh: extend TTL if >50% has elapsed and max lifetime not reached
+  if (env) {
+    const ttl = getMcpTokenTTL(env);
+    const maxLifetime = getMcpTokenMaxLifetime(env);
+    const now = Date.now();
+    const createdAt = new Date(data.createdAt).getTime();
+    const lastRefreshed = data.lastRefreshedAt
+      ? new Date(data.lastRefreshedAt).getTime()
+      : createdAt;
+
+    const elapsed = now - lastRefreshed;
+    const thresholdMs = ttl * 1000 * SLIDING_WINDOW_THRESHOLD;
+    const ageMs = now - createdAt;
+
+    // Only refresh if past the threshold AND within max lifetime
+    if (elapsed > thresholdMs && ageMs < maxLifetime * 1000) {
+      // Cap remaining TTL to not exceed max lifetime from creation
+      const remainingLifetime = Math.max(0, (maxLifetime * 1000 - ageMs) / 1000);
+      const refreshTtl = Math.min(ttl, Math.ceil(remainingLifetime));
+
+      if (refreshTtl > 60) {
+        // Only refresh if >60s remaining (avoid pointless tiny refreshes)
+        const refreshedData: McpTokenData = {
+          ...data,
+          lastRefreshedAt: new Date(now).toISOString(),
+        };
+        await kv.put(key, JSON.stringify(refreshedData), {
+          expirationTtl: refreshTtl,
+        });
+      }
+    }
+  }
+
+  return data;
 }
 
 /**
