@@ -32,84 +32,23 @@ function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionR
 }
 
 describe('getSessionState', () => {
-  it('returns "terminated" for stopped sessions', () => {
-    expect(getSessionState(makeSession({ status: 'stopped' }))).toBe('terminated');
-  });
-
-  it('returns "terminated" for failed session status', () => {
-    expect(getSessionState(makeSession({ status: 'failed' }))).toBe('terminated');
-  });
-
-  it('returns "idle" for idle sessions', () => {
-    expect(getSessionState(makeSession({ isIdle: true }))).toBe('idle');
-  });
-
-  it('returns "idle" when agentCompletedAt is set', () => {
-    expect(getSessionState(makeSession({ agentCompletedAt: Date.now() }))).toBe('idle');
-  });
-
-  it('returns "active" for active sessions', () => {
-    expect(getSessionState(makeSession({ status: 'active' }))).toBe('active');
-  });
-
-  it('returns "terminated" for unknown status', () => {
-    expect(getSessionState(makeSession({ status: 'unknown' }))).toBe('terminated');
-  });
-
-  it('returns "terminated" when task is failed even if session is active', () => {
-    expect(getSessionState(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'failed' },
-    }))).toBe('terminated');
-  });
-
-  it('returns "terminated" when task is completed even if session is active', () => {
-    expect(getSessionState(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'completed' },
-    }))).toBe('terminated');
-  });
-
-  it('returns "terminated" when task is cancelled even if session is active', () => {
-    expect(getSessionState(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'cancelled' },
-    }))).toBe('terminated');
-  });
-
-  it('returns "active" when task is in_progress and session is active', () => {
-    expect(getSessionState(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'in_progress' },
-    }))).toBe('active');
-  });
-
-  it('returns "active" when task embed has no status', () => {
-    expect(getSessionState(makeSession({
-      status: 'active',
-      task: { id: 't-1' },
-    }))).toBe('active');
-  });
-
-  it('returns "active" when no task embed exists', () => {
-    expect(getSessionState(makeSession({ status: 'active' }))).toBe('active');
-  });
-
-  it('task terminal takes priority over idle (reconciliation)', () => {
-    // If session is idle but task is failed, task terminal wins → terminated
-    expect(getSessionState(makeSession({
-      status: 'active',
-      isIdle: true,
-      task: { id: 't-1', status: 'failed' },
-    }))).toBe('terminated');
-  });
-
-  it('task terminal takes priority over agentCompletedAt', () => {
-    expect(getSessionState(makeSession({
-      status: 'active',
-      agentCompletedAt: Date.now(),
-      task: { id: 't-1', status: 'completed' },
-    }))).toBe('terminated');
+  it.each([
+    ['stopped session', { status: 'stopped' }, 'terminated'],
+    ['failed session status', { status: 'failed' }, 'terminated'],
+    ['unknown status', { status: 'unknown' }, 'terminated'],
+    ['idle session', { isIdle: true }, 'idle'],
+    ['agentCompletedAt set', { agentCompletedAt: Date.now() }, 'idle'],
+    ['active session', { status: 'active' }, 'active'],
+    ['task failed + active session', { status: 'active', task: { id: 't-1', status: 'failed' } }, 'terminated'],
+    ['task completed + active session', { status: 'active', task: { id: 't-1', status: 'completed' } }, 'terminated'],
+    ['task cancelled + active session', { status: 'active', task: { id: 't-1', status: 'cancelled' } }, 'terminated'],
+    ['task in_progress + active session', { status: 'active', task: { id: 't-1', status: 'in_progress' } }, 'active'],
+    ['task with no status', { status: 'active', task: { id: 't-1' } }, 'active'],
+    ['no task embed', { status: 'active' }, 'active'],
+    ['task failed + idle (priority)', { status: 'active', isIdle: true, task: { id: 't-1', status: 'failed' } }, 'terminated'],
+    ['task completed + agentCompletedAt (priority)', { status: 'active', agentCompletedAt: Date.now(), task: { id: 't-1', status: 'completed' } }, 'terminated'],
+  ] as const)('returns correct state for %s', (_label, overrides, expected) => {
+    expect(getSessionState(makeSession(overrides as Partial<ChatSessionResponse>))).toBe(expected);
   });
 });
 
@@ -136,18 +75,15 @@ describe('isStaleSession', () => {
   });
 
   it('returns false for session with recent activity', () => {
-    const session = makeSession({ lastMessageAt: Date.now() - 1000 });
-    expect(isStaleSession(session)).toBe(false);
+    expect(isStaleSession(makeSession({ lastMessageAt: Date.now() - 1000 }))).toBe(false);
   });
 
   it('returns true for session with activity beyond threshold', () => {
-    const session = makeSession({ lastMessageAt: Date.now() - STALE_SESSION_THRESHOLD_MS - 1 });
-    expect(isStaleSession(session)).toBe(true);
+    expect(isStaleSession(makeSession({ lastMessageAt: Date.now() - STALE_SESSION_THRESHOLD_MS - 1 }))).toBe(true);
   });
 
   it('returns false at exact threshold boundary', () => {
-    const session = makeSession({ lastMessageAt: Date.now() - STALE_SESSION_THRESHOLD_MS });
-    expect(isStaleSession(session)).toBe(false);
+    expect(isStaleSession(makeSession({ lastMessageAt: Date.now() - STALE_SESSION_THRESHOLD_MS }))).toBe(false);
   });
 });
 
@@ -161,73 +97,33 @@ describe('formatRelativeTime', () => {
     vi.useRealTimers();
   });
 
-  it('returns "Just now" for timestamps less than a minute ago', () => {
-    expect(formatRelativeTime(Date.now() - 30000)).toBe('Just now');
-  });
-
-  it('returns minutes for timestamps less than an hour ago', () => {
-    expect(formatRelativeTime(Date.now() - 5 * 60000)).toBe('5m ago');
-  });
-
-  it('returns hours for timestamps less than a day ago', () => {
-    expect(formatRelativeTime(Date.now() - 3 * 3600000)).toBe('3h ago');
-  });
-
-  it('returns days for timestamps less than 30 days ago', () => {
-    expect(formatRelativeTime(Date.now() - 5 * 86400000)).toBe('5d ago');
+  it.each([
+    [30000, 'Just now'],
+    [5 * 60000, '5m ago'],
+    [3 * 3600000, '3h ago'],
+    [5 * 86400000, '5d ago'],
+  ])('formats %ims ago as "%s"', (ms, expected) => {
+    expect(formatRelativeTime(Date.now() - ms)).toBe(expected);
   });
 
   it('returns formatted date for timestamps older than 30 days', () => {
-    const old = Date.now() - 45 * 86400000;
-    const result = formatRelativeTime(old);
-    // Should be a date string, not relative
+    const result = formatRelativeTime(Date.now() - 45 * 86400000);
     expect(result).not.toContain('ago');
   });
 });
 
 describe('isActiveSession', () => {
-  it('returns true for active sessions', () => {
-    expect(isActiveSession(makeSession({ status: 'active' }))).toBe(true);
-  });
-
-  it('returns false for stopped sessions', () => {
-    expect(isActiveSession(makeSession({ status: 'stopped' }))).toBe(false);
-  });
-
-  it('returns true for non-stopped sessions with unknown status', () => {
-    expect(isActiveSession(makeSession({ status: 'pending' }))).toBe(true);
-  });
-
-  it('returns false when task is failed even if session status is active', () => {
-    expect(isActiveSession(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'failed' },
-    }))).toBe(false);
-  });
-
-  it('returns false when task is completed', () => {
-    expect(isActiveSession(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'completed' },
-    }))).toBe(false);
-  });
-
-  it('returns false when task is cancelled', () => {
-    expect(isActiveSession(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'cancelled' },
-    }))).toBe(false);
-  });
-
-  it('returns true when task is in_progress', () => {
-    expect(isActiveSession(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'in_progress' },
-    }))).toBe(true);
-  });
-
-  it('returns false for failed session status directly', () => {
-    expect(isActiveSession(makeSession({ status: 'failed' }))).toBe(false);
+  it.each([
+    ['active session', { status: 'active' }, true],
+    ['stopped session', { status: 'stopped' }, false],
+    ['failed session status', { status: 'failed' }, false],
+    ['unknown status (non-terminal)', { status: 'pending' }, true],
+    ['task failed + active', { status: 'active', task: { id: 't-1', status: 'failed' } }, false],
+    ['task completed + active', { status: 'active', task: { id: 't-1', status: 'completed' } }, false],
+    ['task cancelled + active', { status: 'active', task: { id: 't-1', status: 'cancelled' } }, false],
+    ['task in_progress + active', { status: 'active', task: { id: 't-1', status: 'in_progress' } }, true],
+  ] as const)('returns %s → %s', (_label, overrides, expected) => {
+    expect(isActiveSession(makeSession(overrides as Partial<ChatSessionResponse>))).toBe(expected);
   });
 });
 
