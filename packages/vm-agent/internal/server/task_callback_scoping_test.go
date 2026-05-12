@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,43 @@ func TestBootMessageReporterWorkspaceIDRequiresRealWorkspace(t *testing.T) {
 	}
 	if workspaceID != "workspace-123" {
 		t.Fatalf("workspaceID = %q, want workspace-123", workspaceID)
+	}
+}
+
+func TestTaskCompletionCallbackTreatsPromptCancellationAsAwaitingFollowup(t *testing.T) {
+	t.Parallel()
+
+	var body map[string]interface{}
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode callback body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(controlPlane.Close)
+
+	s := &Server{
+		config:        &config.Config{HTTPCallbackTimeout: 0},
+		callbackToken: "node-token",
+		workspaces: map[string]*WorkspaceRuntime{
+			"workspace-a": {ID: "workspace-a", CallbackToken: "workspace-token-a"},
+		},
+	}
+
+	callback := s.makeTaskCompletionCallback(
+		controlPlane.URL,
+		"project-1",
+		"task-a",
+		"workspace-a",
+		config.TaskModeConversation,
+	)
+	callback("cancelled", context.Canceled)
+
+	if body["toStatus"] != nil {
+		t.Fatalf("toStatus = %v, want no terminal task status", body["toStatus"])
+	}
+	if body["executionStep"] != "awaiting_followup" {
+		t.Fatalf("executionStep = %v, want awaiting_followup", body["executionStep"])
 	}
 }
 

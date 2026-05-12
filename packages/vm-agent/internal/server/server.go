@@ -1081,6 +1081,16 @@ func (s *Server) makeTaskCompletionCallback(
 		strings.TrimRight(controlPlaneURL, "/"), projectID, taskID)
 
 	return func(stopReason string, promptErr error) {
+		if isPromptCancellation(stopReason, promptErr) {
+			s.postTaskCallback(
+				callbackURL,
+				taskID,
+				s.callbackTokenForWorkspace(workspaceID),
+				awaitingFollowupCallbackBody(gitPushResult{}),
+			)
+			return
+		}
+
 		// On error, send terminal failure immediately.
 		if promptErr != nil || stopReason == "error" {
 			reason := "Agent prompt failed"
@@ -1120,19 +1130,31 @@ func (s *Server) makeTaskCompletionCallback(
 		// Send executionStep=awaiting_followup with git push results.
 		// The task stays in running status, waiting for user follow-up.
 		// The idle timer (Phase 6) will eventually clean up if no follow-up.
-		body := map[string]interface{}{
-			"executionStep": "awaiting_followup",
-			"gitPushResult": map[string]interface{}{
-				"pushed":                pushResult.Pushed,
-				"commitSha":             pushResult.CommitSha,
-				"branchName":            pushResult.BranchName,
-				"prUrl":                 pushResult.PrURL,
-				"prNumber":              pushResult.PrNumber,
-				"hasUncommittedChanges": pushResult.HasUncommittedChanges,
-				"error":                 pushResult.Error,
-			},
-		}
-		s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), body)
+		s.postTaskCallback(
+			callbackURL,
+			taskID,
+			s.callbackTokenForWorkspace(workspaceID),
+			awaitingFollowupCallbackBody(pushResult),
+		)
+	}
+}
+
+func isPromptCancellation(stopReason string, promptErr error) bool {
+	return stopReason == "cancelled" || stopReason == "canceled"
+}
+
+func awaitingFollowupCallbackBody(pushResult gitPushResult) map[string]interface{} {
+	return map[string]interface{}{
+		"executionStep": "awaiting_followup",
+		"gitPushResult": map[string]interface{}{
+			"pushed":                pushResult.Pushed,
+			"commitSha":             pushResult.CommitSha,
+			"branchName":            pushResult.BranchName,
+			"prUrl":                 pushResult.PrURL,
+			"prNumber":              pushResult.PrNumber,
+			"hasUncommittedChanges": pushResult.HasUncommittedChanges,
+			"error":                 pushResult.Error,
+		},
 	}
 }
 

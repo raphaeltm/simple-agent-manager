@@ -41,6 +41,7 @@ func (h *SessionHost) beginPrompt(cancel context.CancelFunc) (uint64, bool) {
 	h.promptCancelMu.Lock()
 	h.promptCancel = cancel
 	h.activePromptID = promptID
+	h.promptCancelRequested = false
 	h.promptCancelMu.Unlock()
 	return promptID, true
 }
@@ -54,6 +55,7 @@ func (h *SessionHost) endPrompt(promptID uint64) {
 	if h.activePromptID == promptID {
 		h.activePromptID = 0
 		h.promptCancel = nil
+		h.promptCancelRequested = false
 	}
 	h.promptCancelMu.Unlock()
 }
@@ -62,6 +64,12 @@ func (h *SessionHost) isPromptActive(promptID uint64) bool {
 	h.promptCancelMu.Lock()
 	defer h.promptCancelMu.Unlock()
 	return h.activePromptID == promptID
+}
+
+func (h *SessionHost) isPromptCancelRequested(promptID uint64) bool {
+	h.promptCancelMu.Lock()
+	defer h.promptCancelMu.Unlock()
+	return h.activePromptID == promptID && h.promptCancelRequested
 }
 
 func (h *SessionHost) watchPromptTimeout(

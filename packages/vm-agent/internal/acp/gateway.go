@@ -404,12 +404,11 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 	case "session/cancel":
 		// Cancel the in-flight prompt context. Also forward to agent stdin
 		// so the agent process itself can react to the cancellation signal.
-		g.host.CancelPrompt()
-		// OpenCode v1.4.0 does not implement session/cancel RPC. Send SIGTERM
-		// to the process instead so it shuts down cleanly.
 		if g.host.AgentType() == "opencode" {
+			g.host.cancelPrompt(false)
 			g.host.SignalProcess(syscall.SIGTERM)
 		} else {
+			g.host.CancelPrompt()
 			g.host.ForwardToAgent(data)
 		}
 	default:

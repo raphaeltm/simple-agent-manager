@@ -47,12 +47,13 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	if !h.isPromptActive(promptID) {
 		return
 	}
+	cancelRequested := h.isPromptCancelRequested(promptID)
 	h.markPromptDone()
 	h.finishPrompt(promptCtx, reqID, promptStartInfo{
 		startedAt: promptStart,
 		timeout:   promptTimeout,
 		viewerID:  viewerID,
-	}, resp, err)
+	}, resp, err, cancelRequested)
 }
 
 type preparedPromptRequest struct {
@@ -212,7 +213,12 @@ func (h *SessionHost) finishPrompt(
 	info promptStartInfo,
 	resp acpsdk.PromptResponse,
 	err error,
+	cancelRequested bool,
 ) {
+	if cancelRequested {
+		h.finishPromptCancelled(reqID, info)
+		return
+	}
 	if err != nil {
 		h.finishPromptWithError(promptCtx, reqID, info, err)
 		return
@@ -226,6 +232,15 @@ func (h *SessionHost) finishPrompt(
 	h.checkStderrForSilentErrors(resp.StopReason)
 	h.broadcastPromptResponse(reqID, resp)
 	h.notifyPromptComplete(string(resp.StopReason), nil)
+}
+
+func (h *SessionHost) finishPromptCancelled(reqID json.RawMessage, info promptStartInfo) {
+	slog.Info("ACP: Prompt cancelled")
+	h.reportLifecycle("info", "ACP Prompt cancelled", map[string]interface{}{
+		"duration": time.Since(info.startedAt).String(),
+	})
+	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32800, "Prompt cancelled"))
+	h.notifyPromptComplete("cancelled", context.Canceled)
 }
 
 func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {

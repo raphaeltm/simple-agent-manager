@@ -175,6 +175,10 @@ type SessionHost struct {
 	// activePromptID identifies the in-flight prompt associated with promptCancel.
 	// Protected by promptCancelMu.
 	activePromptID uint64
+	// promptCancelRequested records that the current prompt was explicitly
+	// cancelled by a viewer or control-plane request.
+	// Protected by promptCancelMu.
+	promptCancelRequested bool
 
 	// Stderr collection
 	stderrMu  sync.Mutex
@@ -385,9 +389,16 @@ func (h *SessionHost) autoSuspend() {
 // it's a no-op. The cancel function is guarded by promptCancelMu
 // (separate from promptMu) so we never deadlock with HandlePrompt.
 func (h *SessionHost) CancelPrompt() {
+	h.cancelPrompt(true)
+}
+
+func (h *SessionHost) cancelPrompt(startGraceTimer bool) {
 	h.promptCancelMu.Lock()
 	cancelFn := h.promptCancel
 	promptID := h.activePromptID
+	if cancelFn != nil {
+		h.promptCancelRequested = true
+	}
 	h.promptCancelMu.Unlock()
 
 	if cancelFn == nil {
@@ -398,6 +409,10 @@ func (h *SessionHost) CancelPrompt() {
 	slog.Info("CancelPrompt: cancelling in-flight prompt")
 	h.reportLifecycle("info", "Prompt cancel requested", nil)
 	cancelFn()
+
+	if !startGraceTimer {
+		return
+	}
 
 	grace := h.promptCancelGracePeriod()
 	if grace <= 0 {
