@@ -4,7 +4,7 @@
  * These endpoints are called by the VM agent (ready, heartbeat, errors) or
  * the browser (token) and use callback JWT auth rather than user session auth.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -84,7 +84,8 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
         .where(
           and(
             eq(schema.workspaces.nodeId, nodeId),
-            eq(schema.workspaces.status, 'creating')
+            eq(schema.workspaces.status, 'creating'),
+            isNull(schema.workspaces.dispatchedToAgentAt)
           )
         );
 

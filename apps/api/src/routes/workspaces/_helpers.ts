@@ -235,7 +235,7 @@ export async function scheduleWorkspaceCreateOnNode(
 
   await db
     .update(schema.workspaces)
-    .set({ status: 'creating', errorMessage: null, updatedAt: now })
+    .set({ status: 'creating', errorMessage: null, dispatchedToAgentAt: now, updatedAt: now })
     .where(eq(schema.workspaces.id, workspaceId));
 
   try {

@@ -495,6 +495,13 @@ export async function handleWorkspaceCreation(
 
   await syncTrialRecord(rc, state, { workspaceId });
 
+  // Mark as dispatched before calling VM agent — prevents node-ready handler
+  // from re-dispatching this workspace if it races with this call.
+  const dispatchNow = new Date().toISOString();
+  await rc.env.DATABASE.prepare(
+    `UPDATE workspaces SET dispatched_to_agent_at = ?, updated_at = ? WHERE id = ?`
+  ).bind(dispatchNow, dispatchNow, workspaceId).run();
+
   const callbackToken = await signCallbackToken(workspaceId, rc.env);
   await createWorkspaceOnNode(state.nodeId, rc.env, userId, {
     workspaceId,

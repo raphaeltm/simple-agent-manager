@@ -164,6 +164,7 @@ async function createAndProvisionWorkspace(
   await startComputeTrackingBestEffort(state, rc, db, workspaceId, nodeId);
   await ensureSessionLinked(state, workspaceId, rc);
   await setOutputBranch(state, rc, now);
+  await markWorkspaceDispatched(rc, workspaceId);
   await createWorkspaceOnVmAgent(state, rc, workspaceId, nodeId);
   await rc.ctx.storage.put('state', state);
 }
@@ -210,6 +211,16 @@ async function setOutputBranch(
   await rc.env.DATABASE.prepare(
     `UPDATE tasks SET output_branch = ?, updated_at = ? WHERE id = ?`
   ).bind(outputBranch, now, state.taskId).run();
+}
+
+async function markWorkspaceDispatched(
+  rc: TaskRunnerContext,
+  workspaceId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await rc.env.DATABASE.prepare(
+    `UPDATE workspaces SET dispatched_to_agent_at = ?, updated_at = ? WHERE id = ?`
+  ).bind(now, now, workspaceId).run();
 }
 
 async function createWorkspaceOnVmAgent(

@@ -648,6 +648,8 @@ export const workspaces = sqliteTable(
     /** Soft FK to ProjectData DO session (not a D1 table). Null until a chat session binds to this workspace. */
     chatSessionId: text('chat_session_id'),
     errorMessage: text('error_message'),
+    /** Set before dispatching workspace creation to VM agent. Null = not yet dispatched (safety-net eligible). */
+    dispatchedToAgentAt: text('dispatched_to_agent_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
