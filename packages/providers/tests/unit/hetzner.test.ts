@@ -481,6 +481,21 @@ describe('isTransientCapacityError', () => {
     const err = new ProviderError('hetzner', 412, 'error during placement');
     expect(isTransientCapacityError(err)).toBe(false);
   });
+
+  it('should return true for "resources temporarily unavailable" variant', () => {
+    const err = new ProviderError('hetzner', 422, 'resources temporarily unavailable in this region');
+    expect(isTransientCapacityError(err)).toBe(true);
+  });
+
+  it('should return true for "resource unavailable" singular variant', () => {
+    const err = new ProviderError('hetzner', 422, 'resource unavailable for allocation');
+    expect(isTransientCapacityError(err)).toBe(true);
+  });
+
+  it('should return true for "could not find" variant', () => {
+    const err = new ProviderError('hetzner', 422, 'could not find available host for server type cx33');
+    expect(isTransientCapacityError(err)).toBe(true);
+  });
 });
 
 describe('HetznerProvider capacity retry', () => {
@@ -546,14 +561,10 @@ describe('HetznerProvider capacity retry', () => {
       ),
     );
 
-    await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
+    const err = await provider.createVM(vmConfig).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.message).toContain('invalid input');
     expect(fetch).toHaveBeenCalledTimes(1);
-    // Verify the error message contains the original error
-    try {
-      await provider.createVM(vmConfig);
-    } catch (err) {
-      expect((err as ProviderError).message).toContain('invalid input');
-    }
   });
 
   it('should throw capacity exhaustion error after max attempts', async () => {
@@ -761,6 +772,115 @@ describe('HetznerProvider capacity retry', () => {
     expect(result.statusCode).toBe(412);
     // Only 1 round of placement attempts (6 calls), no capacity retry
     expect(mockFetch).toHaveBeenCalledTimes(6);
+  });
+
+  it('should throw immediately when maxAttempts is 1', async () => {
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 1);
+    globalThis.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ error: { message: 'Server type cx33 unavailable in fsn1' } }),
+          { status: 422 },
+        ),
+      ),
+    );
+
+    const err = await provider.createVM(vmConfig).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.message).toContain('Capacity exhausted after 1 attempts');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('should set .cause on capacity exhaustion error', async () => {
+    vi.useFakeTimers();
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 2);
+    globalThis.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ error: { message: 'no capacity for this server type' } }),
+          { status: 422 },
+        ),
+      ),
+    );
+
+    const promise = provider.createVM(vmConfig).catch((e) => e);
+    await vi.runAllTimersAsync();
+    const err = await promise;
+
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.cause).toBeInstanceOf(ProviderError);
+    expect((err.cause as ProviderError).statusCode).toBe(422);
+  });
+
+  it('should handle mixed 412 placement then 422 capacity then success', async () => {
+    vi.useFakeTimers();
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 3);
+    const mockFetch = vi.fn()
+      // First capacity attempt: first call 422 (transient capacity)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { message: 'Server type cx33 unavailable in fsn1' } }),
+          { status: 422 },
+        ),
+      )
+      // Second capacity attempt: 412 placement errors exhaust all locations
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), { status: 412 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), { status: 412 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), { status: 412 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), { status: 412 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), { status: 412 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), { status: 412 }),
+      );
+
+    globalThis.fetch = mockFetch;
+
+    // 412 is not a capacity error, so the outer loop won't retry it
+    const promise = provider.createVM(vmConfig).catch((e) => e);
+    await vi.runAllTimersAsync();
+    const err = await promise;
+
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.statusCode).toBe(412);
+    // 1 call (422) + 6 calls (412 placement loop) = 7
+    expect(mockFetch).toHaveBeenCalledTimes(7);
+  });
+
+  it('should NOT log a warn on the final exhaustion attempt', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 2);
+    globalThis.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ error: { message: 'no capacity for this server type' } }),
+          { status: 422 },
+        ),
+      ),
+    );
+
+    const promise = provider.createVM(vmConfig).catch((e) => e);
+    await vi.runAllTimersAsync();
+    await promise;
+
+    const capacityWarnCalls = warnSpy.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('transient capacity error'),
+    );
+    // Only 1 warn for first attempt; second attempt is the last and throws without logging
+    expect(capacityWarnCalls).toHaveLength(1);
+    expect(String(capacityWarnCalls[0]?.[0])).toContain('attempt 1/2');
+
+    warnSpy.mockRestore();
   });
 
   it('should log capacity retry attempts with context', async () => {
