@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   resetIdleTimer: vi.fn(),
   sendFollowUpPrompt: vi.fn(),
+  cancelAgentPrompt: vi.fn(),
   getWorkspace: vi.fn(),
   getNode: vi.fn(),
   updateProjectTaskStatus: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getTtsApiUrl: vi.fn().mockReturnValue('https://api.example.com/api/tts'),
   resetIdleTimer: mocks.resetIdleTimer,
   sendFollowUpPrompt: mocks.sendFollowUpPrompt,
+  cancelAgentPrompt: mocks.cancelAgentPrompt,
   getWorkspace: mocks.getWorkspace,
   getNode: mocks.getNode,
   updateProjectTaskStatus: mocks.updateProjectTaskStatus,
@@ -1375,5 +1377,66 @@ describe('ProjectMessageView — catch-up race regression', () => {
 
     // Messages are preserved — empty incoming does not wipe earlier messages
     expect(screen.getByText('Important conversation')).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cancel button — agent working indicator
+// ---------------------------------------------------------------------------
+
+describe('ProjectMessageView — cancel button', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.cancelAgentPrompt.mockResolvedValue({ status: 'cancelled', message: 'Prompt cancel signal sent' });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows cancel button when agent is working and calls cancelAgentPrompt on click', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'Working on it'),
+      ]),
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Working on it')).toBeTruthy();
+    });
+
+    // Initially no "Agent is working" indicator
+    expect(screen.queryByText('Agent is working...')).toBeNull();
+
+    // Inject an assistant message via WebSocket to trigger 'responding' state
+    expect(capturedWsOnMessage).toBeTruthy();
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Still working'));
+    });
+
+    // Now the "Agent is working" indicator should appear with a Cancel button
+    await waitFor(() => {
+      expect(screen.getByText('Agent is working...')).toBeTruthy();
+    });
+    const cancelButton = screen.getByRole('button', { name: /cancel/i });
+    expect(cancelButton).toBeTruthy();
+
+    // Click cancel
+    await act(async () => {
+      fireEvent.click(cancelButton);
+    });
+
+    // Verify cancelAgentPrompt was called with the right args
+    expect(mocks.cancelAgentPrompt).toHaveBeenCalledWith('proj-1', 'session-1');
+
+    // After successful cancel, the indicator should disappear (agent goes idle)
+    await waitFor(() => {
+      expect(screen.queryByText('Agent is working...')).toBeNull();
+    });
   });
 });
