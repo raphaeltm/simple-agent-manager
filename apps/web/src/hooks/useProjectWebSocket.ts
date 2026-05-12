@@ -13,6 +13,7 @@ const SESSION_EVENT_DEBOUNCE_MS = 500;
 const SESSION_LIFECYCLE_EVENTS = new Set([
   'session.created',
   'session.stopped',
+  'session.failed',
   'session.updated',
   'session.agent_completed',
 ]);

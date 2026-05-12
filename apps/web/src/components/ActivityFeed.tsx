@@ -67,6 +67,10 @@ function formatEventDescription(event: ActivityEventResponse): string {
       const msgCount = payload?.message_count as number | undefined;
       return msgCount ? `Chat session stopped (${msgCount} messages)` : 'Chat session stopped';
     }
+    case 'session.failed': {
+      const errMsg = payload?.error as string | undefined;
+      return errMsg ? `Chat session failed: ${errMsg}` : 'Chat session failed';
+    }
     default:
       if (event.eventType.startsWith('task.')) {
         const title = payload?.title as string | undefined;

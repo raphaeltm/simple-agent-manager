@@ -384,7 +384,7 @@ export function parseChatSessionListRow(row: unknown): Record<string, unknown> {
     agentCompletedAt,
     lastMessageAt: r.updated_at,
     isIdle: status === 'active' && agentCompletedAt != null,
-    isTerminated: status === 'stopped',
+    isTerminated: status === 'stopped' || status === 'failed',
     workspaceUrl: null, // populated by addBaseDomain in index.ts
     cleanupAt: r.cleanup_at ?? null,
   };

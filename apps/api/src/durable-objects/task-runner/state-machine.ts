@@ -282,7 +282,7 @@ export async function failTask(
           error: chatErr instanceof Error ? chatErr.message : String(chatErr),
         });
         if (attempt < maxAttempts) {
-          await new Promise((r) => setTimeout(r, 1000));
+          await new Promise((r) => setTimeout(r, 100));
         }
       }
     }

@@ -172,7 +172,7 @@ export function useChatWebSocket({
             for (const msg of msgs) {
               onMessageRef.current(msg);
             }
-          } else if (data.type === 'session.stopped') {
+          } else if (data.type === 'session.stopped' || data.type === 'session.failed') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
             onSessionStoppedRef.current();

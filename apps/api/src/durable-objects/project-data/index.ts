@@ -93,7 +93,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async failSession(sessionId: string, errorMessage: string | null = null): Promise<void> {
-    const result = sessions.failSession(this.sql, sessionId, errorMessage);
+    const result = sessions.failSession(this.sql, sessionId);
     if (result) {
       activity.recordActivityEventInternal(this.sql, 'session.failed', 'system', null, result.workspaceId, sessionId, null, JSON.stringify({ message_count: result.messageCount, error: errorMessage }));
     }
