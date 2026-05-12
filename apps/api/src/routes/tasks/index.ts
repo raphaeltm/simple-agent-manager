@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
+import { taskCallbackRoute } from './callback';
 import { crudRoutes } from './crud';
 import { runRoutes } from './run';
 import { submitRoutes } from './submit';
@@ -12,4 +13,4 @@ tasksRoutes.route('/', runRoutes);
 tasksRoutes.route('/', submitRoutes);
 tasksRoutes.route('/', uploadRoutes);
 
-export { tasksRoutes };
+export { taskCallbackRoute, tasksRoutes };
