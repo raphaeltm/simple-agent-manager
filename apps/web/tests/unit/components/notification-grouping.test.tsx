@@ -99,8 +99,15 @@ describe('NotificationCenter grouping logic', () => {
   });
 
   describe('shouldGroup = false (single project or no notifications)', () => {
-    it('renders flat list when there are no notifications', () => {
+    it('renders empty state for priority tab when there are no notifications', () => {
       renderNotificationCenter([]);
+      expect(screen.getByText(/no priority notifications/i)).toBeInTheDocument();
+    });
+
+    it('renders "No notifications yet" on the All tab when empty', () => {
+      renderNotificationCenter([]);
+      // Switch to All tab
+      fireEvent.click(screen.getByRole('button', { name: /^all$/i }));
       expect(screen.getByText(/no notifications yet/i)).toBeInTheDocument();
     });
 
@@ -299,6 +306,9 @@ describe('useNotifications — notification.updated WebSocket handling', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /notifications/i }));
 
+    // Switch to Updates tab since progress notifications are not shown on the default Priority tab
+    fireEvent.click(screen.getByRole('button', { name: /^updates$/i }));
+
     expect(screen.getByText('Progress: Old title')).toBeInTheDocument();
 
     // Now simulate the hook receiving the updated notification
@@ -316,5 +326,98 @@ describe('useNotifications — notification.updated WebSocket handling', () => {
       expect(screen.getByText('Progress: New title')).toBeInTheDocument();
     });
     expect(screen.queryByText('Progress: Old title')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tab filtering — Priority / Updates / All
+// ---------------------------------------------------------------------------
+
+describe('NotificationCenter tab filtering', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const mixedNotifications: NotificationResponse[] = [
+    makeNotification({ id: 'n-input', type: 'needs_input', title: 'Agent needs help' }),
+    makeNotification({ id: 'n-complete', type: 'task_complete', title: 'Task finished' }),
+    makeNotification({ id: 'n-progress', type: 'progress', title: 'Working on it' }),
+    makeNotification({ id: 'n-error', type: 'error', title: 'Something broke' }),
+    makeNotification({ id: 'n-session', type: 'session_ended', title: 'Session ended' }),
+    makeNotification({ id: 'n-pr', type: 'pr_created', title: 'PR opened' }),
+  ];
+
+  it('defaults to Priority tab showing only needs_input and task_complete', () => {
+    renderNotificationCenter(mixedNotifications, 6);
+
+    // Priority items visible
+    expect(screen.getByText('Agent needs help')).toBeInTheDocument();
+    expect(screen.getByText('Task finished')).toBeInTheDocument();
+
+    // Non-priority items NOT visible
+    expect(screen.queryByText('Working on it')).toBeNull();
+    expect(screen.queryByText('Something broke')).toBeNull();
+    expect(screen.queryByText('Session ended')).toBeNull();
+    expect(screen.queryByText('PR opened')).toBeNull();
+  });
+
+  it('Updates tab shows progress, error, session_ended, pr_created', () => {
+    renderNotificationCenter(mixedNotifications, 6);
+    fireEvent.click(screen.getByRole('button', { name: /^updates$/i }));
+
+    // Update items visible
+    expect(screen.getByText('Working on it')).toBeInTheDocument();
+    expect(screen.getByText('Something broke')).toBeInTheDocument();
+    expect(screen.getByText('Session ended')).toBeInTheDocument();
+    expect(screen.getByText('PR opened')).toBeInTheDocument();
+
+    // Priority items NOT visible
+    expect(screen.queryByText('Agent needs help')).toBeNull();
+    expect(screen.queryByText('Task finished')).toBeNull();
+  });
+
+  it('All tab shows every notification', () => {
+    renderNotificationCenter(mixedNotifications, 6);
+    fireEvent.click(screen.getByRole('button', { name: /^all$/i }));
+
+    expect(screen.getByText('Agent needs help')).toBeInTheDocument();
+    expect(screen.getByText('Task finished')).toBeInTheDocument();
+    expect(screen.getByText('Working on it')).toBeInTheDocument();
+    expect(screen.getByText('Something broke')).toBeInTheDocument();
+    expect(screen.getByText('Session ended')).toBeInTheDocument();
+    expect(screen.getByText('PR opened')).toBeInTheDocument();
+  });
+
+  it('shows priority unread count badge on the Priority tab', () => {
+    const notifications = [
+      makeNotification({ id: 'n1', type: 'needs_input', title: 'Help 1', readAt: null }),
+      makeNotification({ id: 'n2', type: 'task_complete', title: 'Done 1', readAt: null }),
+      makeNotification({ id: 'n3', type: 'progress', title: 'Working', readAt: null }),
+    ];
+    renderNotificationCenter(notifications, 3);
+
+    // The Priority tab should show a badge with "2" (two unread priority notifications)
+    const priorityTab = screen.getByRole('button', { name: /priority/i });
+    expect(priorityTab).toHaveTextContent('2');
+  });
+
+  it('shows empty state with sub-message on Priority tab when no priority notifications exist', () => {
+    const notifications = [
+      makeNotification({ id: 'n1', type: 'progress', title: 'Working' }),
+    ];
+    renderNotificationCenter(notifications, 1);
+
+    expect(screen.getByText(/no priority notifications/i)).toBeInTheDocument();
+    expect(screen.getByText(/agent input requests and completed tasks appear here/i)).toBeInTheDocument();
+  });
+
+  it('shows "No updates" on the Updates tab when only priority notifications exist', () => {
+    const notifications = [
+      makeNotification({ id: 'n1', type: 'needs_input', title: 'Help' }),
+    ];
+    renderNotificationCenter(notifications, 1);
+    fireEvent.click(screen.getByRole('button', { name: /^updates$/i }));
+
+    expect(screen.getByText(/no updates/i)).toBeInTheDocument();
   });
 });

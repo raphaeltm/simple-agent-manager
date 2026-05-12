@@ -34,11 +34,14 @@ const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, {
   pr_created: { icon: GitPullRequest, color: 'text-success-fg', label: 'PR Created' },
 };
 
-type FilterTab = 'all' | 'unread';
+type FilterTab = 'priority' | 'updates' | 'all';
+
+/** Notification types shown in the Priority tab — agent input requests and completed tasks */
+const PRIORITY_TYPES: ReadonlySet<string> = new Set(['needs_input', 'task_complete']);
 
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<FilterTab>('all');
+  const [activeTab, setActiveTab] = useState<FilterTab>('priority');
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -108,9 +111,16 @@ export function NotificationCenter() {
     [markRead, navigate]
   );
 
-  const filteredNotifications = activeTab === 'unread'
-    ? notifications.filter((n) => !n.readAt)
-    : notifications;
+  const filteredNotifications = useMemo(() => {
+    if (activeTab === 'priority') return notifications.filter((n) => PRIORITY_TYPES.has(n.type));
+    if (activeTab === 'updates') return notifications.filter((n) => !PRIORITY_TYPES.has(n.type));
+    return notifications;
+  }, [notifications, activeTab]);
+
+  const priorityUnreadCount = useMemo(
+    () => notifications.filter((n) => PRIORITY_TYPES.has(n.type) && !n.readAt).length,
+    [notifications]
+  );
 
   // Group notifications by project when multiple projects exist
   const { groups, shouldGroup } = useMemo(() => {
@@ -177,18 +187,27 @@ export function NotificationCenter() {
 
           {/* Filter Tabs */}
           <div className="flex border-b border-border-default">
-            {(['all', 'unread'] as const).map((tab) => (
+            {([
+              { id: 'priority' as const, label: 'Priority', badge: priorityUnreadCount },
+              { id: 'updates' as const, label: 'Updates', badge: 0 },
+              { id: 'all' as const, label: 'All', badge: 0 },
+            ]).map(({ id, label, badge }) => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 px-3 py-2 text-xs font-medium border-none cursor-pointer transition-colors ${
-                  activeTab === tab
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`flex-1 px-3 py-2 text-xs font-medium border-none cursor-pointer transition-colors flex items-center justify-center gap-1 ${
+                  activeTab === id
                     ? 'text-accent bg-transparent border-b-2 border-b-accent'
                     : 'text-fg-muted bg-transparent hover:text-fg-primary'
                 }`}
-                style={activeTab === tab ? { borderBottomWidth: '2px', borderBottomStyle: 'solid' } : {}}
+                style={activeTab === id ? { borderBottomWidth: '2px', borderBottomStyle: 'solid' } : {}}
               >
-                {tab === 'all' ? 'All' : `Unread${unreadCount > 0 ? ` (${unreadCount})` : ''}`}
+                {label}
+                {badge > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-accent text-fg-on-accent text-[9px] font-bold leading-none">
+                    {badge > 99 ? '99+' : badge}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -200,9 +219,18 @@ export function NotificationCenter() {
                 <Loader2 size={18} className="animate-spin" />
               </div>
             ) : filteredNotifications.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-fg-muted text-sm">
+              <div className="flex flex-col items-center justify-center py-8 text-fg-muted text-sm gap-1">
                 <Bell size={24} className="mb-2 opacity-40" />
-                <span>{activeTab === 'unread' ? 'No unread notifications' : 'No notifications yet'}</span>
+                <span>
+                  {activeTab === 'priority' ? 'No priority notifications' :
+                   activeTab === 'updates' ? 'No updates' :
+                   'No notifications yet'}
+                </span>
+                {activeTab === 'priority' && (
+                  <span className="text-xs opacity-70">
+                    Agent input requests and completed tasks appear here
+                  </span>
+                )}
               </div>
             ) : shouldGroup ? (
               <>
