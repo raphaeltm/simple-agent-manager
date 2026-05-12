@@ -6,7 +6,7 @@
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { type McpTokenData,validateMcpToken } from '../../services/mcp-token';
+import { type McpTokenData, type McpTokenEnv, validateMcpToken } from '../../services/mcp-token';
 
 // Re-export McpTokenData for use by tool handler files
 export type { McpTokenData } from '../../services/mcp-token';
@@ -277,12 +277,13 @@ export async function checkMcpRateLimit(
 export async function authenticateMcpRequest(
   authHeader: string | undefined,
   kv: KVNamespace,
+  env?: McpTokenEnv,
 ): Promise<[McpTokenData, string] | [null, null]> {
   if (!authHeader?.startsWith('Bearer ') || authHeader.length <= 7) {
     return [null, null];
   }
   const token = authHeader.slice(7);
-  const data = await validateMcpToken(kv, token);
+  const data = await validateMcpToken(kv, token, env);
   return data ? [data, token] : [null, null];
 }
 

@@ -86,7 +86,7 @@ const validTokenData = {
   projectId: 'proj-456',
   userId: 'user-789',
   workspaceId: 'ws-abc',
-  createdAt: '2026-03-07T00:00:00Z',
+  createdAt: new Date().toISOString(),
 };
 
 /** Build a JSON-RPC request (has `id` field). */
