@@ -41,6 +41,7 @@ This document traces every code path that affects workspace lifecycle: creation,
 |--------|---------|--------|
 | `active` | Session is live | `createSession()` |
 | `stopped` | Session has ended | `stopSessionInternal()`, `stopSession()` |
+| `failed` | Session ended due to task failure | `failSession()` |
 
 ---
 

@@ -422,7 +422,7 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
     ).catch((e) => { log.warn('task.activity_event_failed', { taskId, error: String(e) }); })
   );
 
-  // On terminal states, stop the chat session (best-effort).
+  // On terminal states, stop/fail the chat session (best-effort).
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
     if (updatedTask.workspaceId && updatedTask.projectId) {
       c.executionCtx.waitUntil(
@@ -433,7 +433,11 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
             .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
             .limit(1);
           if (ws?.chatSessionId) {
-            await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
+            if (body.toStatus === 'failed') {
+              await projectDataService.failSession(c.env, updatedTask.projectId, ws.chatSessionId, updatedTask.errorMessage ?? null);
+            } else {
+              await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
+            }
           }
         })().catch((e) => { log.error('task.session_stop_failed', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
       );
