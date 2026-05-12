@@ -3,12 +3,11 @@ import { ChevronDown, ChevronRight, LayoutGrid, List, Search, Settings, X } from
 import { useMemo, useState } from 'react';
 
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
-import { ForkDialog } from '../../components/project/ForkDialog';
-import { RetryDialog } from '../../components/project/RetryDialog';
 import { ProjectMessageView } from '../../components/project-message-view';
 import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { ChatInput } from './ChatInput';
+import { DerivedSessionBanner } from './DerivedSessionBanner';
 import { getLineageText } from './lineageUtils';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
 import { ProvisioningIndicator } from './ProvisioningIndicator';
@@ -141,7 +140,7 @@ export function ProjectChat() {
                 allSessions={state.sessions}
                 selectedSessionId={state.sessionId ?? null}
                 onSelect={state.handleSelect}
-                onFork={state.setForkSession}
+                onFork={state.handleFork}
                 taskTitleMap={state.taskTitleMap}
                 taskInfoMap={state.taskInfoMap}
                 searchQuery={state.searchQuery}
@@ -162,7 +161,7 @@ export function ProjectChat() {
                       allSessions={state.sessions}
                       selectedSessionId={state.sessionId ?? null}
                       onSelect={state.handleSelect}
-                      onFork={state.setForkSession}
+                      onFork={state.handleFork}
                       taskTitleMap={state.taskTitleMap}
                       taskInfoMap={state.taskInfoMap}
                       searchQuery={state.searchQuery}
@@ -234,11 +233,17 @@ export function ProjectChat() {
                 </>
               )}
             </div>
+            {state.pendingDerived && (
+              <DerivedSessionBanner
+                derived={state.pendingDerived}
+                onDismiss={() => state.setPendingDerived(null)}
+              />
+            )}
             <ChatInput
               value={state.message}
               onChange={state.setMessage}
               onSubmit={state.handleSubmit}
-              submitting={state.submitting}
+              submitting={state.submitting || (state.pendingDerived?.summaryLoading ?? false)}
               error={state.submitError}
               placeholder="Describe what you want the agent to do..."
               transcribeApiUrl={state.transcribeApiUrl}
@@ -277,11 +282,11 @@ export function ProjectChat() {
               onSessionMutated={() => { void state.loadSessions(); }}
               onRetry={() => {
                 const s = state.sessions.find((sess) => sess.id === state.sessionId);
-                if (s?.taskId) state.setRetrySession(s);
+                if (s?.taskId) state.handleRetry(s);
               }}
               onFork={() => {
                 const s = state.sessions.find((sess) => sess.id === state.sessionId);
-                if (s?.taskId) state.setForkSession(s);
+                if (s?.taskId) state.handleFork(s);
               }}
               lineageText={selectedLineageText}
             />
@@ -317,7 +322,7 @@ export function ProjectChat() {
           sessions={state.sessions}
           selectedSessionId={state.sessionId ?? null}
           onSelect={state.handleSelect}
-          onFork={(session) => { state.setSidebarOpen(false); state.setForkSession(session); }}
+          onFork={(session) => { state.setSidebarOpen(false); state.handleFork(session); }}
           onNewChat={() => { state.setSidebarOpen(false); state.handleNewChat(); }}
           onClose={() => state.setSidebarOpen(false)}
           realtimeDegraded={state.realtimeDegraded}
@@ -327,24 +332,6 @@ export function ProjectChat() {
           taskInfoMap={state.taskInfoMap}
         />
       )}
-
-      {/* Fork dialog */}
-      <ForkDialog
-        open={!!state.forkSession}
-        session={state.forkSession}
-        projectId={state.projectId}
-        onClose={() => state.setForkSession(null)}
-        onFork={state.handleFork}
-      />
-
-      {/* Retry dialog */}
-      <RetryDialog
-        open={!!state.retrySession}
-        session={state.retrySession}
-        projectId={state.projectId}
-        onClose={() => state.setRetrySession(null)}
-        onRetry={state.handleRetry}
-      />
 
       {/* Boot log panel */}
       {state.bootLogPanelOpen && (
