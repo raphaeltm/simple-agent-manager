@@ -126,7 +126,11 @@ export async function validateMcpToken(
     return null;
   }
 
-  // Sliding window: refresh KV TTL if >50% of TTL has elapsed since last refresh
+  // Sliding window: refresh KV TTL if >50% of TTL has elapsed since last refresh.
+  // NOTE: This is a non-atomic read-modify-write over KV. Under concurrent MCP tool
+  // calls from a single agent, multiple Workers may read the same data and all fire a
+  // KV write near the refresh boundary. This produces redundant but correct writes —
+  // the max lifetime cap is enforced on every read regardless of write ordering.
   const lastRefreshMs = data.lastRefreshedAt ? Date.parse(data.lastRefreshedAt) : createdAtMs;
   const elapsedSinceRefresh = (now - lastRefreshMs) / 1000;
   const refreshThreshold = ttl * 0.5;
@@ -137,6 +141,7 @@ export async function validateMcpToken(
     const remainingMaxLifetime = maxLifetime - ageSeconds;
     const effectiveTtl = Math.min(ttl, Math.max(1, Math.floor(remainingMaxLifetime)));
     await kv.put(key, JSON.stringify(updatedData), { expirationTtl: effectiveTtl });
+    return updatedData;
   }
 
   return data;

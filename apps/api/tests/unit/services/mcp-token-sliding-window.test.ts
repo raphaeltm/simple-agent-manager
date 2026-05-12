@@ -84,7 +84,8 @@ describe('MCP Token Sliding Window', () => {
       vi.setSystemTime(new Date('2026-05-12T17:00:00Z'));
 
       const result = await validateMcpToken(kv, 'test-token');
-      expect(result).toEqual(data);
+      // Should return updated data with lastRefreshedAt set
+      expect(result).toEqual({ ...data, lastRefreshedAt: '2026-05-12T17:00:00.000Z' });
       // Should write back to KV with refreshed TTL
       expect(mockKV.put).toHaveBeenCalledTimes(1);
       const [key, value, opts] = mockKV.put.mock.calls[0] as [string, string, { expirationTtl: number }];
@@ -146,7 +147,11 @@ describe('MCP Token Sliding Window', () => {
       vi.setSystemTime(new Date('2026-05-12T12:00:00Z'));
 
       const result = await validateMcpToken(kv, 'valid-token');
-      expect(result).toEqual(data);
+      // Token is accepted (not null) — 23h old triggers a sliding refresh
+      // so the returned data includes lastRefreshedAt
+      expect(result).not.toBeNull();
+      expect(result!.taskId).toBe(data.taskId);
+      expect(result!.createdAt).toBe(data.createdAt);
     });
 
     it('caps refreshed TTL to remaining max lifetime', async () => {

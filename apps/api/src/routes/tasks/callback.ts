@@ -50,7 +50,7 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
   const body = c.req.valid('json');
 
   const token = extractBearerToken(c.req.header('Authorization'));
-  const payload = await verifyCallbackToken(token, c.env);
+  const payload = await verifyCallbackToken(token, c.env, { expectedScope: 'workspace' });
 
   const rows = await db
     .select()
