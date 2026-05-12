@@ -135,12 +135,13 @@ describe('MCP Token Service', () => {
 
     it('should return data without deleting for valid token', async () => {
       const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      // Use a recent createdAt to avoid hitting the max lifetime cap
       const data = {
         taskId: 'task-123',
         projectId: 'proj-456',
         userId: 'user-789',
         workspaceId: 'ws-abc',
-        createdAt: '2026-03-07T00:00:00Z',
+        createdAt: new Date().toISOString(),
       };
       mockKV.get.mockResolvedValue(data);
 
