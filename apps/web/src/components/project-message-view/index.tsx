@@ -229,13 +229,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Agent working indicator */}
       {lc.agentActivity !== 'idle' && isActive && (
-        <div className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
+        <div role="status" className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Agent is working...</span>
           <button
             type="button"
             onClick={lc.handleCancelPrompt}
-            className="ml-auto flex-shrink-0 px-2 py-1.5 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            aria-label="Cancel agent"
+            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
             Cancel
           </button>
