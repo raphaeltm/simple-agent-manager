@@ -36,7 +36,7 @@ const tokenData: McpTokenData = {
   projectId: 'proj-456',
   userId: 'user-789',
   workspaceId: 'ws-abc',
-  createdAt: '2026-04-12T00:00:00Z',
+  createdAt: new Date().toISOString(),
 };
 
 const mockEnv = {
