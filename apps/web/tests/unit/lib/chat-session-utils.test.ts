@@ -94,6 +94,23 @@ describe('getSessionState', () => {
   it('returns "active" when no task embed exists', () => {
     expect(getSessionState(makeSession({ status: 'active' }))).toBe('active');
   });
+
+  it('task terminal takes priority over idle (reconciliation)', () => {
+    // If session is idle but task is failed, task terminal wins → terminated
+    expect(getSessionState(makeSession({
+      status: 'active',
+      isIdle: true,
+      task: { id: 't-1', status: 'failed' },
+    }))).toBe('terminated');
+  });
+
+  it('task terminal takes priority over agentCompletedAt', () => {
+    expect(getSessionState(makeSession({
+      status: 'active',
+      agentCompletedAt: Date.now(),
+      task: { id: 't-1', status: 'completed' },
+    }))).toBe('terminated');
+  });
 });
 
 describe('getLastActivity', () => {
@@ -207,6 +224,10 @@ describe('isActiveSession', () => {
       status: 'active',
       task: { id: 't-1', status: 'in_progress' },
     }))).toBe(true);
+  });
+
+  it('returns false for failed session status directly', () => {
+    expect(isActiveSession(makeSession({ status: 'failed' }))).toBe(false);
   });
 });
 
