@@ -411,6 +411,26 @@ describe('NotificationCenter tab filtering', () => {
     expect(screen.getByText(/agent input requests and completed tasks appear here/i)).toBeInTheDocument();
   });
 
+  it('bell icon badge shows total unread count, not just priority unread', () => {
+    const notifications = [
+      makeNotification({ id: 'n1', type: 'needs_input', title: 'Help 1', readAt: null }),
+      makeNotification({ id: 'n2', type: 'task_complete', title: 'Done 1', readAt: null }),
+      makeNotification({ id: 'n3', type: 'progress', title: 'Working', readAt: null }),
+      makeNotification({ id: 'n4', type: 'error', title: 'Err', readAt: null }),
+      makeNotification({ id: 'n5', type: 'session_ended', title: 'Ended', readAt: new Date().toISOString() }),
+    ];
+    // 4 unread total (n1-n4), 2 are priority (n1, n2)
+    renderNotificationCenter(notifications, 4);
+
+    // Bell button should show total unread count (4), not just priority (2)
+    const bellButton = screen.getByRole('button', { name: /notifications \(4 unread\)/i });
+    expect(bellButton).toBeInTheDocument();
+
+    // Priority tab badge should show 2 (only priority unread)
+    const priorityTab = screen.getByRole('button', { name: /priority/i });
+    expect(priorityTab).toHaveTextContent('2');
+  });
+
   it('shows "No updates" on the Updates tab when only priority notifications exist', () => {
     const notifications = [
       makeNotification({ id: 'n1', type: 'needs_input', title: 'Help' }),
