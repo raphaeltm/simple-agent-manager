@@ -1,0 +1,301 @@
+import { isTaskExecutionStep } from '@simple-agent-manager/shared';
+import { and, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
+import * as schema from '../../db/schema';
+import type { Env } from '../../env';
+import { extractBearerToken } from '../../lib/auth-helpers';
+import { log } from '../../lib/logger';
+import { toTaskResponse } from '../../lib/mappers';
+import { requireRouteParam } from '../../lib/route-helpers';
+import { errors } from '../../middleware/error';
+import { jsonValidator, UpdateTaskStatusSchema } from '../../schemas';
+import { verifyCallbackToken } from '../../services/jwt';
+import * as notificationService from '../../services/notification';
+import * as projectDataService from '../../services/project-data';
+import { cleanupTaskRun } from '../../services/task-runner';
+import {
+  canTransitionTaskStatus,
+  getAllowedTaskTransitions,
+  isTaskStatus,
+} from '../../services/task-status';
+import {
+  computeBlockedForTask,
+  setTaskStatus,
+} from './_helpers';
+
+/**
+ * Task callback route — mounted BEFORE projectsRoutes in index.ts
+ * to avoid the blanket requireAuth() middleware that validates browser session
+ * cookies (not callback JWTs).
+ *
+ * Auth: Callback JWT via Bearer token, verified inline with verifyCallbackToken().
+ *
+ * This is the FOURTH instance of the Hono middleware scope leak fix pattern:
+ * - 2026-03-12: workspace callback routes (post-mortem exists)
+ * - 2026-03-25: deployment identity token route (post-mortem exists)
+ * - 2026-03-25: node ACP heartbeat route (post-mortem exists)
+ * - 2026-05-12: task callback route (this fix)
+ *
+ * See: .claude/rules/06-api-patterns.md (Hono middleware scoping)
+ * See: docs/notes/2026-05-12-task-callback-middleware-leak-postmortem.md
+ */
+const taskCallbackRoute = new Hono<{ Bindings: Env }>();
+
+taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidator(UpdateTaskStatusSchema), async (c) => {
+  const projectId = requireRouteParam(c, 'projectId');
+  const taskId = requireRouteParam(c, 'taskId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  const body = c.req.valid('json');
+
+  const token = extractBearerToken(c.req.header('Authorization'));
+  const payload = await verifyCallbackToken(token, c.env);
+
+  const rows = await db
+    .select()
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)))
+    .limit(1);
+
+  const task = rows[0];
+  if (!task) {
+    throw errors.notFound('Task');
+  }
+
+  if (!task.workspaceId || payload.workspace !== task.workspaceId) {
+    throw errors.forbidden('Token workspace mismatch');
+  }
+
+  // --- Execution-step-only update (no status transition) ---
+  // When executionStep is provided without toStatus, update the step and
+  // optionally persist gitPushResult outputs without changing task status.
+  // This is used by the VM agent to report progress (e.g. awaiting_followup
+  // after the agent pushes code but the task stays running).
+  if (body.executionStep && !body.toStatus) {
+    if (!isTaskExecutionStep(body.executionStep)) {
+      throw errors.badRequest('Invalid executionStep value');
+    }
+
+    const now = new Date().toISOString();
+    const stepUpdate: Partial<schema.NewTask> = {
+      executionStep: body.executionStep,
+      updatedAt: now,
+    };
+
+    // Persist git push result fields into existing task columns
+    if (body.gitPushResult) {
+      // Finalization guard: only save git push results once
+      if (!task.finalizedAt && body.gitPushResult.pushed) {
+        stepUpdate.finalizedAt = now;
+      }
+      if (body.gitPushResult.branchName) {
+        stepUpdate.outputBranch = body.gitPushResult.branchName;
+      }
+      if (body.gitPushResult.prUrl) {
+        stepUpdate.outputPrUrl = body.gitPushResult.prUrl;
+      }
+    }
+
+    if (body.outputBranch !== undefined) {
+      stepUpdate.outputBranch = body.outputBranch?.trim() || null;
+    }
+    if (body.outputPrUrl !== undefined) {
+      stepUpdate.outputPrUrl = body.outputPrUrl?.trim() || null;
+    }
+
+    await db
+      .update(schema.tasks)
+      .set(stepUpdate)
+      .where(eq(schema.tasks.id, task.id));
+
+    // Record activity event for execution step update
+    c.executionCtx.waitUntil(
+      projectDataService.recordActivityEvent(
+        c.env, projectId, 'task.execution_step', 'workspace_callback', payload.workspace,
+        task.workspaceId, null, taskId, {
+          title: task.title,
+          executionStep: body.executionStep,
+          pushed: body.gitPushResult?.pushed ?? false,
+        }
+      ).catch((e) => { log.warn('task.execution_step_activity_failed', { taskId, error: String(e) }); })
+    );
+
+    // T034: When agent signals awaiting_followup, start idle cleanup timer.
+    // Conversation-mode sessions are exempt — the 2-hour workspace idle timeout
+    // is the only kill mechanism for conversation mode (no 15-min idle cleanup).
+    if (body.executionStep === 'awaiting_followup' && task.workspaceId && task.taskMode !== 'conversation') {
+      c.executionCtx.waitUntil(
+        (async () => {
+          // Look up the chat session linked to this workspace
+          const [ws] = await db
+            .select({ chatSessionId: schema.workspaces.chatSessionId })
+            .from(schema.workspaces)
+            .where(eq(schema.workspaces.id, task.workspaceId!))
+            .limit(1);
+
+          if (ws?.chatSessionId) {
+            // Set agent_completed_at on the session
+            await projectDataService.markAgentCompleted(c.env, projectId, ws.chatSessionId);
+
+            // Schedule idle cleanup timer
+            await projectDataService.scheduleIdleCleanup(
+              c.env,
+              projectId,
+              ws.chatSessionId,
+              task.workspaceId!,
+              taskId
+            );
+          }
+
+          // Record agent completion activity event
+          await projectDataService.recordActivityEvent(
+            c.env, projectId, 'task.agent_completed', 'workspace_callback', payload.workspace,
+            task.workspaceId, ws?.chatSessionId ?? null, taskId, {
+              title: task.title,
+              pushed: body.gitPushResult?.pushed ?? false,
+              branchName: body.gitPushResult?.branchName ?? null,
+              prUrl: body.gitPushResult?.prUrl ?? null,
+            }
+          );
+
+          // Emit session-ended notification (best-effort)
+          if (c.env.NOTIFICATION) {
+            const projectName = await notificationService.getProjectName(c.env, projectId);
+            await notificationService.notifySessionEnded(c.env, task.userId, {
+              projectId,
+              projectName,
+              sessionId: ws?.chatSessionId ?? '',
+              taskId,
+              taskTitle: task.title,
+            });
+
+            // If a PR was created, emit a separate pr_created notification
+            if (body.gitPushResult?.prUrl) {
+              await notificationService.notifyPrCreated(c.env, task.userId, {
+                projectId,
+                projectName,
+                taskId,
+                taskTitle: task.title,
+                prUrl: body.gitPushResult.prUrl,
+                branchName: body.gitPushResult.branchName,
+                sessionId: ws?.chatSessionId,
+              });
+            }
+          }
+        })().catch((err) => {
+          log.error('task.idle_cleanup_schedule_failed', { taskId, error: err instanceof Error ? err.message : String(err) });
+        })
+      );
+    }
+
+    const [refreshed] = await db
+      .select()
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, task.id))
+      .limit(1);
+
+    const blocked = await computeBlockedForTask(db, task.id);
+    return c.json(toTaskResponse(refreshed ?? task, blocked));
+  }
+
+  // --- Standard status transition ---
+  if (!isTaskStatus(body.toStatus)) {
+    throw errors.badRequest('Invalid toStatus value');
+  }
+
+  if (!isTaskStatus(task.status)) {
+    throw errors.badRequest(`Invalid task status in database: ${task.status}`);
+  }
+
+  if (!canTransitionTaskStatus(task.status, body.toStatus)) {
+    throw errors.conflict(
+      `Invalid transition ${task.status} -> ${body.toStatus}. Allowed: ${getAllowedTaskTransitions(task.status).join(', ') || 'none'}`
+    );
+  }
+
+  const updatedTask = await setTaskStatus(db, task, body.toStatus, 'workspace_callback', payload.workspace, {
+    reason: body.reason,
+    outputSummary: body.outputSummary,
+    outputBranch: body.outputBranch,
+    outputPrUrl: body.outputPrUrl,
+    errorMessage: body.errorMessage,
+  });
+
+  // Record activity event for task status change (from workspace callback)
+  c.executionCtx.waitUntil(
+    projectDataService.recordActivityEvent(
+      c.env, projectId, `task.${body.toStatus}`, 'workspace_callback', payload.workspace,
+      task.workspaceId, null, taskId, { title: task.title, fromStatus: task.status, toStatus: body.toStatus }
+    ).catch((e) => { log.warn('task.callback_activity_event_failed', { taskId, error: String(e) }); })
+  );
+
+  // On terminal states, stop the chat session and handle workspace cleanup.
+  if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
+    // Stop the chat session in ProjectData DO (best-effort).
+    // chatSessionId lives on the workspace, not the task — look it up.
+    if (updatedTask.workspaceId && updatedTask.projectId) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          const [ws] = await db
+            .select({ chatSessionId: schema.workspaces.chatSessionId })
+            .from(schema.workspaces)
+            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
+            .limit(1);
+          if (ws?.chatSessionId) {
+            await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
+          }
+        })().catch((e) => { log.error('task.callback_session_stop_failed', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
+      );
+    }
+
+    // On clean completion, auto-trigger workspace cleanup (destroy workspace + optionally node).
+    // On failure/cancellation, keep workspace alive for debugging.
+    if (body.toStatus === 'completed') {
+      c.executionCtx.waitUntil(
+        cleanupTaskRun(taskId, c.env).catch((e) => { log.error('task.cleanup_failed', { taskId, error: String(e) }); })
+      );
+    }
+
+    // Emit notifications for terminal task states (best-effort)
+    if (c.env.NOTIFICATION) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          const [ws] = await db
+            .select({ chatSessionId: schema.workspaces.chatSessionId })
+            .from(schema.workspaces)
+            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
+            .limit(1);
+          const sessionId = ws?.chatSessionId ?? null;
+
+          const projectName = await notificationService.getProjectName(c.env, projectId);
+          if (body.toStatus === 'completed') {
+            await notificationService.notifyTaskComplete(c.env, task.userId, {
+              projectId,
+              projectName,
+              taskId,
+              taskTitle: task.title,
+              sessionId,
+              outputPrUrl: updatedTask.outputPrUrl,
+              outputBranch: updatedTask.outputBranch,
+            });
+          } else if (body.toStatus === 'failed') {
+            await notificationService.notifyTaskFailed(c.env, task.userId, {
+              projectId,
+              projectName,
+              taskId,
+              taskTitle: task.title,
+              errorMessage: body.errorMessage,
+              sessionId,
+            });
+          }
+        })().catch((e) => { log.warn('task.notification_failed', { taskId, error: String(e) }); })
+      );
+    }
+  }
+
+  const blocked = await computeBlockedForTask(db, updatedTask.id);
+  return c.json(toTaskResponse(updatedTask, blocked));
+});
+
+export { taskCallbackRoute };
