@@ -54,6 +54,20 @@ export function extractScalewaySecretKey(decryptedToken: string): string | null 
   }
 }
 
+/** Parse an optional env var string to a positive integer, or return undefined. */
+function parseOptionalInt(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/** Env vars that tune Hetzner capacity retry behavior. */
+export interface HetznerCapacityRetryEnv {
+  HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS?: string;
+  HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
+  HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
+}
+
 /**
  * Build a ProviderConfig from a provider name and decrypted credential token.
  * Handles both raw token strings (Hetzner) and JSON blobs (Scaleway).
@@ -61,10 +75,17 @@ export function extractScalewaySecretKey(decryptedToken: string): string | null 
 export function buildProviderConfig(
   provider: CredentialProvider,
   decryptedToken: string,
+  hetznerEnv?: HetznerCapacityRetryEnv,
 ): ProviderConfig {
   switch (provider) {
     case 'hetzner':
-      return { provider: 'hetzner', apiToken: decryptedToken };
+      return {
+        provider: 'hetzner',
+        apiToken: decryptedToken,
+        capacityRetryInitialDelayMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS),
+        capacityRetryMaxDelayMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_MAX_DELAY_MS),
+        capacityRetryMaxAttempts: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS),
+      };
     case 'scaleway': {
       let parsed: unknown;
       try {
@@ -179,7 +200,7 @@ export async function createProviderForUser(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: { KV: KVNamespace; BASE_DOMAIN: string; JWT_PRIVATE_KEY: string; JWT_PUBLIC_KEY: string; GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string; GCP_TOKEN_CACHE_TTL_SECONDS?: string; GCP_API_TIMEOUT_MS?: string; GCP_OPERATION_POLL_TIMEOUT_MS?: string },
+  env: { KV: KVNamespace; BASE_DOMAIN: string; JWT_PRIVATE_KEY: string; JWT_PUBLIC_KEY: string; GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string; GCP_TOKEN_CACHE_TTL_SECONDS?: string; GCP_API_TIMEOUT_MS?: string; GCP_OPERATION_POLL_TIMEOUT_MS?: string } & Partial<HetznerCapacityRetryEnv>,
   targetProvider?: CredentialProvider,
 ): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
   // 1. Try user's own credential first
@@ -215,7 +236,7 @@ export async function createProviderForUser(
       return { provider, providerName, credentialSource: 'user' };
     }
 
-    const config = buildProviderConfig(providerName, decryptedToken);
+    const config = buildProviderConfig(providerName, decryptedToken, env);
     return { provider: createProvider(config), providerName, credentialSource: 'user' };
   }
 
@@ -241,7 +262,7 @@ export async function createProviderForUser(
     return { provider, providerName: platformProvider, credentialSource: 'platform' };
   }
 
-  const config = buildProviderConfig(platformProvider, decryptedToken);
+  const config = buildProviderConfig(platformProvider, decryptedToken, env);
   return { provider: createProvider(config), providerName: platformProvider, credentialSource: 'platform' };
 }
 

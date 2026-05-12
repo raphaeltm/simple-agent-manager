@@ -199,6 +199,10 @@ export interface Env {
   // Hetzner base image override (e.g., "ubuntu-24.04" to roll back from the
   // default "docker-ce" marketplace image). Only applies to Hetzner nodes.
   HETZNER_BASE_IMAGE?: string;
+  // Hetzner capacity retry configuration (for transient 422 errors)
+  HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS?: string;
+  HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
+  HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;
