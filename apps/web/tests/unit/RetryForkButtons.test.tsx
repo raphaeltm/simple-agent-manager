@@ -439,7 +439,7 @@ describe('SessionItem sidebar fork button (regression)', () => {
   it('does not show fork button for active sessions', () => {
     render(
       <SessionItem
-        session={makeSession({ status: 'active', isIdle: false, endedAt: null })}
+        session={makeSession({ status: 'active', isIdle: false, endedAt: null, task: { id: 'task-1', status: 'in_progress' } })}
         isSelected={false}
         onSelect={vi.fn()}
         onFork={vi.fn()}
