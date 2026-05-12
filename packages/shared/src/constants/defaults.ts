@@ -104,5 +104,12 @@ export const DEFAULT_DASHBOARD_POLL_INTERVAL_MS = 15_000; // 15 seconds
 // =============================================================================
 
 /** Default MCP token TTL in seconds. Must be >= DEFAULT_TASK_RUN_MAX_EXECUTION_MS / 1000
- * so tokens remain valid for the full duration of a task. Override via MCP_TOKEN_TTL_SECONDS env var. */
-export const DEFAULT_MCP_TOKEN_TTL_SECONDS = 4 * 60 * 60; // 4 hours (aligned with task max execution time)
+ * so tokens remain valid for the full duration of a task. With sliding window refresh,
+ * this is the inactivity timeout — tokens are auto-extended while in active use.
+ * Override via MCP_TOKEN_TTL_SECONDS env var. */
+export const DEFAULT_MCP_TOKEN_TTL_SECONDS = 8 * 60 * 60; // 8 hours (inactivity timeout with sliding window)
+
+/** Default maximum lifetime for MCP tokens regardless of activity (hard cap).
+ * Even with sliding window refresh, tokens are rejected after this absolute duration.
+ * Override via MCP_TOKEN_MAX_LIFETIME_SECONDS env var. */
+export const DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS = 24 * 60 * 60; // 24 hours

@@ -254,8 +254,10 @@ export interface Env {
   TASK_RUNNER_PROVISION_POLL_INTERVAL_MS?: string;
   // Callback token refresh threshold (ratio of token lifetime, default 0.5)
   CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO?: string;
-  // MCP token TTL in seconds (default 14400 = 4 hours, aligned with task max execution time)
+  // MCP token TTL in seconds (default 28800 = 8 hours, inactivity timeout with sliding window)
   MCP_TOKEN_TTL_SECONDS?: string;
+  // MCP token maximum lifetime in seconds regardless of activity (default 86400 = 24 hours)
+  MCP_TOKEN_MAX_LIFETIME_SECONDS?: string;
   // MCP HTTP-level rate limiting (per task/agent)
   MCP_RATE_LIMIT?: string;                          // Max requests per window (default: 120)
   MCP_RATE_LIMIT_WINDOW_SECONDS?: string;           // Rate limit window in seconds (default: 60)
