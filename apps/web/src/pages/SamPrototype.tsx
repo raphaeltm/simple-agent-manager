@@ -111,6 +111,17 @@ export function SamPrototype() {
         style={{ zIndex: 0 }}
       />
 
+      {/* Blur + dim overlay */}
+      <div
+        className="absolute inset-0"
+        style={{
+          zIndex: 1,
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          background: 'rgba(0, 0, 0, 0.10)',
+        }}
+      />
+
       {/* Content layer */}
       <div className="relative z-10 flex flex-col h-full">
         {/* Header */}

@@ -143,18 +143,28 @@
   <h3>Background Tuning</h3>
 
   <div class="control-row">
-    <label>Blur <span class="value" id="blur-val">40px</span></label>
-    <input type="range" id="blur-slider" min="0" max="100" value="40">
+    <label>Blur <span class="value" id="blur-val">8px</span></label>
+    <input type="range" id="blur-slider" min="0" max="100" value="8">
   </div>
 
   <div class="control-row">
-    <label>Dim (darkness) <span class="value" id="dim-val">0.30</span></label>
-    <input type="range" id="dim-slider" min="0" max="80" value="30">
+    <label>Dim (darkness) <span class="value" id="dim-val">0.15</span></label>
+    <input type="range" id="dim-slider" min="0" max="80" value="15">
   </div>
 
   <div class="control-row">
-    <label>Green brightness <span class="value" id="green-val">0.60</span></label>
-    <input type="range" id="green-slider" min="10" max="100" value="60">
+    <label>Green brightness <span class="value" id="green-val">0.94</span></label>
+    <input type="range" id="green-slider" min="10" max="100" value="94">
+  </div>
+
+  <div class="control-row">
+    <label>Speed <span class="value" id="speed-val">1.0x</span></label>
+    <input type="range" id="speed-slider" min="5" max="300" value="100">
+  </div>
+
+  <div class="control-row">
+    <label>Noise size <span class="value" id="scale-val">1.40</span></label>
+    <input type="range" id="scale-slider" min="20" max="400" value="140">
   </div>
 
   <div class="toggle-row">
@@ -185,6 +195,7 @@ const FRAGMENT_SHADER = `
   uniform vec2 u_resolution;
   uniform float u_amplitude;
   uniform float u_green_mult;  // 0.0–1.0, scales green brightness
+  uniform float u_scale;       // noise coordinate scale (lower = bigger blobs)
 
   vec3 mod289(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
   vec2 mod289(vec2 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
@@ -236,20 +247,22 @@ const FRAGMENT_SHADER = `
     float amp = u_amplitude;
     float gm = u_green_mult;
 
-    vec2 curl = curlNoise(p * 1.2 + vec2(t * 0.4, t * 0.3));
+    float sc = u_scale;
+
+    vec2 curl = curlNoise(p * sc * 0.857 + vec2(t * 0.4, t * 0.3));
     float curlStrength = 0.06 + amp * 0.04;
     vec2 advected = p + curl * curlStrength;
     float warpAmt = 3.0 + amp * 1.5;
 
     vec2 q = vec2(
-      fbm(advected * 1.4 + vec2(0.0, 0.0) + vec2(t * 0.2, t * 0.15)),
-      fbm(advected * 1.4 + vec2(5.2, 1.3) + vec2(t * 0.15, -t * 0.1))
+      fbm(advected * sc + vec2(0.0, 0.0) + vec2(t * 0.2, t * 0.15)),
+      fbm(advected * sc + vec2(5.2, 1.3) + vec2(t * 0.15, -t * 0.1))
     );
     vec2 r = vec2(
-      fbm(advected * 1.4 + warpAmt * q + vec2(1.7, 9.2) + vec2(t * 0.12, t * 0.1)),
-      fbm(advected * 1.4 + warpAmt * q + vec2(8.3, 2.8) + vec2(-t * 0.08, t * 0.14))
+      fbm(advected * sc + warpAmt * q + vec2(1.7, 9.2) + vec2(t * 0.12, t * 0.1)),
+      fbm(advected * sc + warpAmt * q + vec2(8.3, 2.8) + vec2(-t * 0.08, t * 0.14))
     );
-    float f = fbm(advected * 1.4 + warpAmt * r);
+    float f = fbm(advected * sc + warpAmt * r);
     float combined = f * 0.5 + 0.5;
     float warpMagnitude = length(q);
 
@@ -311,9 +324,12 @@ const timeLoc = gl.getUniformLocation(program, 'u_time');
 const resLoc = gl.getUniformLocation(program, 'u_resolution');
 const ampLoc = gl.getUniformLocation(program, 'u_amplitude');
 const greenLoc = gl.getUniformLocation(program, 'u_green_mult');
+const scaleLoc = gl.getUniformLocation(program, 'u_scale');
 
 let accTime = 0, prev = performance.now();
-let greenMult = 0.6;
+let greenMult = 0.94;
+let speedMult = 1.0;  // time multiplier (0.1 = glacial, 3.0 = fast)
+let scaleMult = 1.4;  // noise scale (lower = bigger blobs, higher = finer detail)
 
 function resize() {
   const dpr = Math.min(devicePixelRatio, 1.5);
@@ -326,12 +342,13 @@ function render() {
   const now = performance.now();
   const dt = Math.min((now - prev) / 1000, 0.1);
   prev = now;
-  accTime += dt * 0.08;
+  accTime += dt * 0.08 * speedMult;
 
   gl.uniform1f(timeLoc, accTime);
   gl.uniform2f(resLoc, canvas.width, canvas.height);
   gl.uniform1f(ampLoc, 0.0);
   gl.uniform1f(greenLoc, greenMult);
+  gl.uniform1f(scaleLoc, scaleMult);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   requestAnimationFrame(render);
 }
@@ -345,10 +362,14 @@ const overlay = document.getElementById('blur-overlay');
 const blurSlider = document.getElementById('blur-slider');
 const dimSlider = document.getElementById('dim-slider');
 const greenSlider = document.getElementById('green-slider');
+const speedSlider = document.getElementById('speed-slider');
+const scaleSlider = document.getElementById('scale-slider');
 const blurToggle = document.getElementById('blur-toggle');
 const blurVal = document.getElementById('blur-val');
 const dimVal = document.getElementById('dim-val');
 const greenVal = document.getElementById('green-val');
+const speedVal = document.getElementById('speed-val');
+const scaleVal = document.getElementById('scale-val');
 
 function updateBlur() {
   const blur = blurSlider.value;
@@ -369,32 +390,50 @@ function updateGreen() {
   greenVal.textContent = greenMult.toFixed(2);
 }
 
+function updateSpeed() {
+  speedMult = speedSlider.value / 100;
+  speedVal.textContent = speedMult.toFixed(1) + 'x';
+}
+
+function updateScale() {
+  scaleMult = scaleSlider.value / 100;
+  scaleVal.textContent = scaleMult.toFixed(2);
+}
+
 blurSlider.addEventListener('input', updateBlur);
 dimSlider.addEventListener('input', updateBlur);
 blurToggle.addEventListener('change', updateBlur);
 greenSlider.addEventListener('input', updateGreen);
+speedSlider.addEventListener('input', updateSpeed);
+scaleSlider.addEventListener('input', updateScale);
 
 function applyPreset(name) {
   switch (name) {
     case 'original':
       blurSlider.value = 0; dimSlider.value = 0; greenSlider.value = 100;
+      speedSlider.value = 100; scaleSlider.value = 140;
       blurToggle.checked = false;
       break;
     case 'subtle':
-      blurSlider.value = 20; dimSlider.value = 15; greenSlider.value = 75;
+      blurSlider.value = 8; dimSlider.value = 15; greenSlider.value = 94;
+      speedSlider.value = 100; scaleSlider.value = 140;
       blurToggle.checked = true;
       break;
     case 'heavy':
       blurSlider.value = 60; dimSlider.value = 35; greenSlider.value = 50;
+      speedSlider.value = 50; scaleSlider.value = 80;
       blurToggle.checked = true;
       break;
     case 'frosted':
       blurSlider.value = 80; dimSlider.value = 45; greenSlider.value = 40;
+      speedSlider.value = 30; scaleSlider.value = 60;
       blurToggle.checked = true;
       break;
   }
   updateBlur();
   updateGreen();
+  updateSpeed();
+  updateScale();
 }
 </script>
 </body>

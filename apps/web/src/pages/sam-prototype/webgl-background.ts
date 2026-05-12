@@ -12,6 +12,7 @@ const FRAGMENT_SHADER = `
   uniform float u_time;        // accumulated time (JS controls speed)
   uniform vec2 u_resolution;
   uniform float u_amplitude;   // 0.0 = silent, 1.0 = loud
+  uniform float u_scale;       // noise coordinate scale (lower = bigger blobs)
 
   /* ── Simplex noise ── */
   vec3 mod289(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
@@ -66,33 +67,27 @@ const FRAGMENT_SHADER = `
     float t = u_time;
     float amp = u_amplitude;
 
+    float sc = u_scale;
+
     // ── Step 1: Curl noise advection ──
-    // Compute a divergence-free velocity field and use it to displace
-    // the coordinates. This gives fluid-like swirling motion.
-    vec2 curl = curlNoise(p * 1.2 + vec2(t * 0.4, t * 0.3));
-    // Curl displacement strength: base flow + amplitude boost
+    vec2 curl = curlNoise(p * sc * 0.857 + vec2(t * 0.4, t * 0.3));
     float curlStrength = 0.06 + amp * 0.04;
     vec2 advected = p + curl * curlStrength;
 
     // ── Step 2: Domain warping (Inigo Quilez technique) ──
-    // Feed noise into itself for organic, ink-in-water distortion.
-    // Warp intensity increases with amplitude for more turbulence.
     float warpAmt = 3.0 + amp * 1.5;
 
-    // First warp layer: two independent fbm channels offset by magic constants
     vec2 q = vec2(
-      fbm(advected * 1.4 + vec2(0.0, 0.0) + vec2(t * 0.2, t * 0.15)),
-      fbm(advected * 1.4 + vec2(5.2, 1.3) + vec2(t * 0.15, -t * 0.1))
+      fbm(advected * sc + vec2(0.0, 0.0) + vec2(t * 0.2, t * 0.15)),
+      fbm(advected * sc + vec2(5.2, 1.3) + vec2(t * 0.15, -t * 0.1))
     );
 
-    // Second warp layer: warps the already-warped coordinates
     vec2 r = vec2(
-      fbm(advected * 1.4 + warpAmt * q + vec2(1.7, 9.2) + vec2(t * 0.12, t * 0.1)),
-      fbm(advected * 1.4 + warpAmt * q + vec2(8.3, 2.8) + vec2(-t * 0.08, t * 0.14))
+      fbm(advected * sc + warpAmt * q + vec2(1.7, 9.2) + vec2(t * 0.12, t * 0.1)),
+      fbm(advected * sc + warpAmt * q + vec2(8.3, 2.8) + vec2(-t * 0.08, t * 0.14))
     );
 
-    // Final evaluation through the double-warped field
-    float f = fbm(advected * 1.4 + warpAmt * r);
+    float f = fbm(advected * sc + warpAmt * r);
 
     // Normalize to 0..1 range (fbm returns roughly -1..1)
     float combined = f * 0.5 + 0.5;
@@ -134,11 +129,21 @@ const FRAGMENT_SHADER = `
   }
 `;
 
+export interface WebGLBackgroundOptions {
+  /** Time multiplier — 1.0 = default, lower = slower (default: 0.4) */
+  speed?: number;
+  /** Noise coordinate scale — lower = bigger blobs (default: 1.02) */
+  noiseSize?: number;
+}
+
 /** Hook: WebGL background that responds to an amplitude ref (0-1). */
 export function useWebGLBackground(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   amplitudeRef: React.RefObject<number>,
+  options?: WebGLBackgroundOptions,
 ) {
+  const speed = options?.speed ?? 0.4;
+  const noiseSize = options?.noiseSize ?? 1.02;
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -174,6 +179,7 @@ export function useWebGLBackground(
     const timeLoc = gl.getUniformLocation(program, 'u_time');
     const resLoc = gl.getUniformLocation(program, 'u_resolution');
     const ampLoc = gl.getUniformLocation(program, 'u_amplitude');
+    const scaleLoc = gl.getUniformLocation(program, 'u_scale');
 
     let animId: number;
     let prevTimestamp = performance.now();
@@ -202,14 +208,15 @@ export function useWebGLBackground(
         smoothedAmp += (target - smoothedAmp) * 0.05; // slow decay
       }
 
-      // Accumulate time: base speed + amplitude boost
-      // Base 0.08, max ~0.32 when loud — pattern smoothly accelerates
-      const speed = 0.08 + smoothedAmp * 0.24;
-      accumulatedTime += deltaSeconds * speed;
+      // Accumulate time: base speed * user multiplier + amplitude boost
+      const baseSpeed = 0.08 * speed;
+      const ampBoost = smoothedAmp * 0.24 * speed;
+      accumulatedTime += deltaSeconds * (baseSpeed + ampBoost);
 
       gl!.uniform1f(timeLoc, accumulatedTime);
       gl!.uniform2f(resLoc, canvas!.width, canvas!.height);
       gl!.uniform1f(ampLoc, smoothedAmp);
+      gl!.uniform1f(scaleLoc, noiseSize);
       gl!.drawArrays(gl!.TRIANGLE_STRIP, 0, 4);
       animId = requestAnimationFrame(render);
     }
