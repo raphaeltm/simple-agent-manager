@@ -17,7 +17,8 @@ packages/
 ├── cloud-init/   # Cloud-init template generator
 ├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)
 ├── ui/           # Design system tokens and shared UI components
-└── vm-agent/     # Go VM agent (PTY, WebSocket, ACP, MCP tool endpoints)
+├── vm-agent/     # Go VM agent (PTY, WebSocket, ACP, MCP tool endpoints)
+└── harness/      # Go coding agent harness (eval, orchestration experiments)
 tasks/            # Task tracking (backlog -> active -> archive)
 specs/            # Feature specifications
 docs/             # Documentation
@@ -223,7 +224,7 @@ Domains chain together: competitive research feeds marketing and business strate
 
 ## Active Technologies
 
-- TypeScript 5.x (Worker/Web), Go 1.24+ (VM Agent)
+- TypeScript 5.x (Worker/Web), Go 1.25+ (VM Agent, Harness)
 - Hono (API framework), Drizzle ORM (D1), React 19 + Vite (Web)
 - Cloudflare Workers SDK (Durable Objects, D1, KV, R2, Workers AI)
 - Tailwind CSS v4 (Web), Astro + Starlight (Marketing site)
@@ -234,13 +235,13 @@ Domains chain together: competitive research feeds marketing and business strate
 
 > Full changelog with implementation details: `docs/recent-changes.md`. Use the `/changelog` skill for structured queries.
 
+- hetzner-capacity-retry: Retry transient Hetzner 422 capacity errors with exponential backoff (configurable attempts/delays)
+- cloud-init-firewall-hardening: Disable apt-daily timers and harden IPv6 firewall in cloud-init
+- duplicate-workspace-dispatch-fix: Prevent duplicate workspace creation on node-ready race condition
+- cloudflare-devcontainer-cache: Use Cloudflare Containers Registry for devcontainer image caching
 - compact-mode-lazy-load-tool-content: Chat compact mode strips tool content from RPC payload (80-90% reduction); lazy-loads on expand
 - harness-track-d-integration-design: SAM-native harness architecture doc; Gemma 4 26B as default Workers AI model
 - ai-proxy-universal-tracking: URL-path-based passthrough proxy for usage tracking without consuming auth headers
 - user-ai-budget-controls: User-facing daily token budgets + monthly cost cap with 3-tier resolution
 - anthropic-proxy-endpoint: Native Anthropic Messages API proxy through AI Gateway with Unified Billing
 - user-ai-usage-dashboard: Per-user LLM usage dashboard from AI Gateway logs (by model, by day)
-- cost-monitoring-dashboard: Admin cost dashboard aggregating LLM + compute costs with projections
-- sam-observability-context-tools: SAM tools for searching task messages and browsing project codebases
-- sam-agent-phase-a-tools: SAM orchestration tools (dispatch_task, create_mission, get_task_details)
-- policy-propagation-phase4: Project policies with MCP tools + propagation to child tasks
