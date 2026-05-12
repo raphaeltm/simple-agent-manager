@@ -32,6 +32,12 @@ runcmd:
   # pre-installed on all Hetzner Ubuntu images.
   # =====================================================================
 
+  # Disable Ubuntu automatic package upgrades. These VMs are ephemeral —
+  # unattended-upgrades provides no security benefit and actively kills
+  # running workloads by triggering systemd daemon-reexec which restarts
+  # the vm-agent service. See docs/notes/2026-05-12-unattended-upgrades-vm-agent-kill-postmortem.md
+  - systemctl disable --now apt-daily-upgrade.timer apt-daily.timer unattended-upgrades.service 2>/dev/null || true
+
   - 'logger -t sam-boot "PHASE START: vm-agent-download"'
   - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall
   - |

@@ -222,6 +222,13 @@ async function createWorkspaceOnVmAgent(
   const { createWorkspaceOnNode } = await import('../../services/node-agent');
   const callbackToken = await signCallbackToken(workspaceId, rc.env);
 
+  // Mark workspace as dispatched BEFORE calling the VM agent.
+  // This prevents the node-ready handler from re-dispatching the same workspace.
+  const now = new Date().toISOString();
+  await rc.env.DATABASE.prepare(
+    `UPDATE workspaces SET dispatched_to_agent_at = ?, updated_at = ? WHERE id = ?`
+  ).bind(now, now, workspaceId).run();
+
   await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
     workspaceId,
     repository: state.config.repository,

@@ -4,7 +4,7 @@
  * These endpoints are called by the VM agent (ready, heartbeat, errors) or
  * the browser (token) and use callback JWT auth rather than user session auth.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -73,6 +73,10 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
   c.executionCtx.waitUntil(
     (async () => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
+      // Only dispatch workspaces that haven't been dispatched yet.
+      // The TaskRunner DO sets dispatched_to_agent_at before calling the VM agent;
+      // this handler is a safety net for the crash window between D1 insert and
+      // VM agent dispatch. Without this filter, both paths race and create duplicates.
       const pendingWorkspaces = await innerDb
         .select({
           id: schema.workspaces.id,
@@ -84,12 +88,20 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
         .where(
           and(
             eq(schema.workspaces.nodeId, nodeId),
-            eq(schema.workspaces.status, 'creating')
+            eq(schema.workspaces.status, 'creating'),
+            isNull(schema.workspaces.dispatchedToAgentAt)
           )
         );
 
       for (const workspace of pendingWorkspaces) {
         try {
+          // Mark dispatched before calling VM agent (same pattern as TaskRunner)
+          const dispatchNow = new Date().toISOString();
+          await innerDb
+            .update(schema.workspaces)
+            .set({ dispatchedToAgentAt: dispatchNow, updatedAt: dispatchNow })
+            .where(eq(schema.workspaces.id, workspace.id));
+
           // Intentionally workspace-scoped (not signNodeCallbackToken) — this token
           // is for a specific workspace's VM agent callbacks, not node-level operations.
           const callbackToken = await signCallbackToken(workspace.id, c.env);
