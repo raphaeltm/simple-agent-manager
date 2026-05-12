@@ -7,45 +7,11 @@ import type { ChatMessageResponse, ChatSessionResponse } from '../../lib/api';
 export const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
- * Grace period (ms) after agent stops prompting before switching from full ACP
- * view to merged DO+ACP view. Matches ~2s VM agent batch delay + 1s buffer.
- * Configurable via VITE_ACP_GRACE_MS environment variable.
- */
-const DEFAULT_ACP_GRACE_MS = 3_000;
-export const ACP_GRACE_MS = parseInt(import.meta.env.VITE_ACP_GRACE_MS || String(DEFAULT_ACP_GRACE_MS), 10);
-
-/**
- * Delay (ms) before the auto-resume effect calls the resume API. Gives the
- * ACP WebSocket's own visibility-change reconnection a chance to succeed first.
+ * Delay (ms) before the auto-resume effect calls the resume API.
  * Configurable via VITE_AUTO_RESUME_DELAY_MS environment variable.
  */
 const DEFAULT_AUTO_RESUME_DELAY_MS = 2_000;
 export const AUTO_RESUME_DELAY_MS = parseInt(import.meta.env.VITE_AUTO_RESUME_DELAY_MS || String(DEFAULT_AUTO_RESUME_DELAY_MS), 10);
-
-/**
- * Delay (ms) before the ACP recovery effect kicks in after the ACP WebSocket
- * enters error state while the session is still active. This gives the ACP
- * hook's own reconnection a chance to succeed before we intervene.
- * Configurable via VITE_ACP_RECOVERY_DELAY_MS environment variable.
- */
-const DEFAULT_ACP_RECOVERY_DELAY_MS = 5_000;
-export const ACP_RECOVERY_DELAY_MS = parseInt(import.meta.env.VITE_ACP_RECOVERY_DELAY_MS || String(DEFAULT_ACP_RECOVERY_DELAY_MS), 10);
-
-/**
- * Interval (ms) between ACP recovery retry attempts after the first recovery
- * attempt fails. Each attempt calls resumeAgentSession + reconnect.
- * Configurable via VITE_ACP_RECOVERY_INTERVAL_MS environment variable.
- */
-const DEFAULT_ACP_RECOVERY_INTERVAL_MS = 30_000;
-export const ACP_RECOVERY_INTERVAL_MS = parseInt(import.meta.env.VITE_ACP_RECOVERY_INTERVAL_MS || String(DEFAULT_ACP_RECOVERY_INTERVAL_MS), 10);
-
-/**
- * Maximum number of ACP recovery attempts before giving up. After this many
- * failures, the user sees the error banner with a manual Reconnect button.
- * Configurable via VITE_ACP_RECOVERY_MAX_ATTEMPTS environment variable.
- */
-const DEFAULT_ACP_RECOVERY_MAX_ATTEMPTS = 10;
-export const ACP_RECOVERY_MAX_ATTEMPTS = parseInt(import.meta.env.VITE_ACP_RECOVERY_MAX_ATTEMPTS || String(DEFAULT_ACP_RECOVERY_MAX_ATTEMPTS), 10);
 
 /**
  * Debounce delay (ms) before showing the "Reconnecting..." banner for the DO
@@ -54,6 +20,9 @@ export const ACP_RECOVERY_MAX_ATTEMPTS = parseInt(import.meta.env.VITE_ACP_RECOV
  */
 const DEFAULT_RECONNECT_BANNER_DELAY_MS = 3_000;
 export const RECONNECT_BANNER_DELAY_MS = parseInt(import.meta.env.VITE_RECONNECT_BANNER_DELAY_MS || String(DEFAULT_RECONNECT_BANNER_DELAY_MS), 10);
+
+/** Seconds of silence after last assistant message before returning to idle. */
+export const IDLE_TIMEOUT_MS = 3000;
 
 /** Virtual scroll: starting index for prepend-stable pagination */
 export const VIRTUAL_START = 100_000;

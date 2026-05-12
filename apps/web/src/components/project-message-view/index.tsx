@@ -1,8 +1,16 @@
-import type { PlanItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
-import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
+/**
+ * ProjectMessageView — DO-only chat component for project sessions.
+ *
+ * All messages flow through a single source: the Durable Object WebSocket.
+ * Prompts are sent via the REST API. Agent state is derived from message flow.
+ * TypewriterText animates the latest assistant message; historical messages
+ * render instantly.
+ */
+import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown, ListChecks } from 'lucide-react';
-import { type FC, useCallback, useRef, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { type FC, useCallback, useMemo, useRef } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { getMessageToolContent } from '../../lib/api/sessions';
@@ -10,7 +18,7 @@ import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { AcpConversationItemView } from './AcpConversationItemView';
 import { FollowUpInput } from './FollowUpInput';
-import { AgentErrorBanner, ConnectionBanner } from './MessageBanners';
+import { ConnectionBanner } from './MessageBanners';
 import { SessionHeader } from './SessionHeader';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
@@ -43,7 +51,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   lineageText,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const [planModalOpen, setPlanModalOpen] = useState(false);
 
   const lc = useSessionLifecycle(projectId, sessionId, isProvisioning, onSessionMutated);
 
@@ -52,6 +59,19 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     const { content } = await getMessageToolContent(projectId, sessionId, messageId);
     return (content as Array<{ type: string } & Record<string, unknown>>).map((c) => mapToolCallContent(c));
   }, [projectId, sessionId]);
+
+  // Convert DO messages to conversation items (single source)
+  const conversationItems = useMemo<ConversationItem[]>(() => {
+    return chatMessagesToConversationItems(lc.messages);
+  }, [lc.messages]);
+
+  // Identify the last assistant message for TypewriterText animation
+  const lastAssistantIdx = useMemo(() => {
+    for (let i = conversationItems.length - 1; i >= 0; i--) {
+      if (conversationItems[i]?.kind === 'agent_message') return i;
+    }
+    return -1;
+  }, [conversationItems]);
 
   // Initial load — only show full spinner when no data exists yet
   if (lc.loading && lc.messages.length === 0 && !lc.session) {
@@ -70,6 +90,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     );
   }
 
+  const isActive = lc.sessionState === 'active' || lc.sessionState === 'idle';
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Inline error when session already loaded */}
@@ -79,7 +101,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Connection indicator (TDF-8) */}
+      {/* Connection indicator (DO WebSocket) */}
       {lc.sessionState === 'active' && lc.connectionState !== 'connected' && lc.showConnectionBanner && (
         <ConnectionBanner state={lc.connectionState} onRetry={lc.retryWs} />
       )}
@@ -111,12 +133,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             Retry
           </button>
         </div>
-      )}
-
-      {/* ACP agent error / disconnect warning */}
-      {lc.sessionState === 'active' && lc.connectionState === 'connected' && lc.session?.workspaceId &&
-        !lc.agentSession.isAgentActive && !lc.agentSession.isConnecting && !isProvisioning && !lc.isResuming && (
-        <AgentErrorBanner session={lc.agentSession.session} />
       )}
 
       {/* Session header */}
@@ -151,153 +167,88 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
       )}
 
-      {/* Messages area — virtualized */}
-      {(() => {
-        const acpItems = lc.agentSession.messages.items;
-        const convertedItems = chatMessagesToConversationItems(lc.messages);
-
-        const useFullAcpView = acpItems.length > 0 && !lc.committedToDoViewRef.current && (
-          convertedItems.length === 0 || lc.agentSession.isPrompting || lc.acpGrace
-        );
-
-        const displayItems = useFullAcpView ? acpItems : convertedItems;
-
-        if (displayItems.length === 0) {
-          return (
-            <div className="flex-1 min-h-0 flex items-center justify-center">
-              <span className="text-fg-muted text-sm">
-                {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
-              </span>
-            </div>
-          );
-        }
-
-        return (
-          <div className="flex-1 min-h-0 min-w-0 relative" role="log" aria-live="polite" aria-label="Conversation">
-            <Virtuoso
-              ref={virtuosoRef}
-              key={useFullAcpView ? 'acp' : 'do'}
-              style={{ height: '100%' }}
-              data={displayItems}
-              firstItemIndex={useFullAcpView ? 0 : lc.firstItemIndex}
-              initialTopMostItemIndex={displayItems.length - 1}
-              followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
-              alignToBottom
-              atBottomThreshold={50}
-              atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-              overscan={200}
-              itemContent={(_index, item) => (
-                <div className="px-4 pb-3">
-                  <AcpConversationItemView item={item} onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined} onLoadToolContent={handleLoadToolContent} />
+      {/* Messages area — virtualized, DO-only */}
+      {conversationItems.length === 0 ? (
+        <div className="flex-1 min-h-0 flex items-center justify-center">
+          <span className="text-fg-muted text-sm">
+            {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
+          </span>
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 min-w-0 relative" role="log" aria-live="polite" aria-label="Conversation">
+          <Virtuoso
+            ref={virtuosoRef}
+            style={{ height: '100%' }}
+            data={conversationItems}
+            firstItemIndex={lc.firstItemIndex}
+            initialTopMostItemIndex={conversationItems.length - 1}
+            followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
+            alignToBottom
+            atBottomThreshold={50}
+            atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+            overscan={200}
+            itemContent={(index, item) => (
+              <div className="px-4 pb-3">
+                <AcpConversationItemView
+                  item={item}
+                  onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
+                  onLoadToolContent={handleLoadToolContent}
+                  animateText={item.kind === 'agent_message' && index === lastAssistantIdx && lc.agentActivity === 'responding'}
+                />
+              </div>
+            )}
+            components={{
+              Header: lc.hasMore ? () => (
+                <div className="text-center py-3">
+                  <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
+                    Load earlier messages
+                  </Button>
                 </div>
-              )}
-              components={{
-                Header: (!useFullAcpView && lc.hasMore) ? () => (
-                  <div className="text-center py-3">
-                    <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
-                      Load earlier messages
-                    </Button>
-                  </div>
-                ) : undefined,
+              ) : undefined,
+            }}
+          />
+
+          {/* Scroll to bottom button */}
+          {lc.showScrollButton && (
+            <button
+              type="button"
+              onClick={() => {
+                virtuosoRef.current?.scrollToIndex({
+                  index: 'LAST',
+                  behavior: 'smooth',
+                });
               }}
-            />
-
-            {/* Scroll to bottom button */}
-            {lc.showScrollButton && (
-              <button
-                type="button"
-                onClick={() => {
-                  virtuosoRef.current?.scrollToIndex({
-                    index: 'LAST',
-                    behavior: 'smooth',
-                  });
-                }}
-                className={`absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-[bottom] duration-200 ${lc.agentSession.isPrompting ? 'bottom-14' : 'bottom-3'}`}
-                aria-label="Scroll to bottom"
-              >
-                <ChevronDown size={16} className="text-fg-muted" />
-              </button>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* Agent working indicator */}
-      {lc.agentSession.isPrompting && (() => {
-        const currentPlan = lc.agentSession.messages.items.find(
-          (item): item is PlanItem => item.kind === 'plan'
-        ) ?? null;
-        const activeStep = currentPlan?.entries.find(e => e.status === 'in_progress') ?? null;
-
-        return (
-          <>
-            <div className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
-              {currentPlan ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setPlanModalOpen(true)}
-                    className="relative flex-shrink-0 p-2.5 -m-1 rounded cursor-pointer hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                    aria-label="View agent plan"
-                  >
-                    <ListChecks size={16} className="text-fg-muted" />
-                    <span aria-hidden="true" className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                  </button>
-                  <span className="text-xs text-fg-muted truncate min-w-0 flex-1">
-                    Agent is working on: {activeStep?.content ?? 'next step'}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Spinner size="sm" />
-                  <span className="text-xs text-fg-muted">Agent is working...</span>
-                </>
-              )}
-              <button
-                type="button"
-                onClick={lc.agentSession.cancelPrompt}
-                className="ml-auto flex-shrink-0 px-2 py-2 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                Cancel
-              </button>
-            </div>
-            {currentPlan && (
-              <PlanModal plan={currentPlan} isOpen={planModalOpen} onClose={() => setPlanModalOpen(false)} />
-            )}
-          </>
-        );
-      })()}
-
-      {/* ACP connecting indicator */}
-      {lc.agentSession.isConnecting && lc.session?.workspaceId && (
-        <div className="flex items-center gap-2 px-4 py-1 border-t border-border-default bg-surface shrink-0">
-          <Spinner size="sm" />
-          <span className="text-xs text-fg-muted">Connecting to agent...</span>
+              className={`absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-[bottom] duration-200 ${lc.agentActivity !== 'idle' ? 'bottom-14' : 'bottom-3'}`}
+              aria-label="Scroll to bottom"
+            >
+              <ChevronDown size={16} className="text-fg-muted" />
+            </button>
+          )}
         </div>
       )}
 
-      {/* Input area — varies by session state */}
-      {lc.sessionState === 'active' && (
-        <FollowUpInput
-          value={lc.followUp}
-          onChange={lc.setFollowUp}
-          onSend={lc.handleSendFollowUp}
-          onUploadFiles={(files) => lc.handleUploadFiles(files)}
-          sending={lc.sendingFollowUp}
-          uploading={lc.uploading}
-          placeholder="Send a message..."
-          transcribeApiUrl={lc.transcribeApiUrl}
-        />
+      {/* Agent working indicator */}
+      {lc.agentActivity !== 'idle' && isActive && (
+        <div className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
+          <Spinner size="sm" />
+          <span className="text-xs text-fg-muted">Agent is working...</span>
+        </div>
       )}
-      {lc.sessionState === 'idle' && (
+
+      {/* Input area */}
+      {isActive && (
         <FollowUpInput
           value={lc.followUp}
           onChange={lc.setFollowUp}
-          onSend={lc.handleSendFollowUp}
-          onUploadFiles={(files) => lc.handleUploadFiles(files)}
+          onSend={() => { void lc.handleSendFollowUp(); }}
+          onUploadFiles={(files) => { void lc.handleUploadFiles(files); }}
           sending={lc.sendingFollowUp}
           uploading={lc.uploading}
-          placeholder="Send a message to resume the agent..."
+          placeholder={lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
+            ? 'Agent is working...'
+            : lc.sessionState === 'idle'
+              ? 'Send a message to resume the agent...'
+              : 'Send a message...'}
           transcribeApiUrl={lc.transcribeApiUrl}
         />
       )}

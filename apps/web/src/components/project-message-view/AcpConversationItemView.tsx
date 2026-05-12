@@ -5,6 +5,7 @@ import {
   RawFallbackView,
   ThinkingBlock as AcpThinkingBlock,
   ToolCallCard as AcpToolCallCard,
+  TypewriterText,
 } from '@simple-agent-manager/acp-client';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
@@ -50,11 +51,15 @@ export function SystemMessageBubble({ text }: { text: string }) {
   );
 }
 
-/** Renders a single ACP ConversationItem using the shared acp-client components. */
-export function AcpConversationItemView({ item, onFileClick, onLoadToolContent }: {
+/** Renders a single ACP ConversationItem using the shared acp-client components.
+ *  When `animateText` is true for agent_message items, TypewriterText provides
+ *  word-by-word animation of the latest batch. */
+export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, animateText }: {
   item: ConversationItem;
   onFileClick?: (path: string, line?: number | null) => void;
   onLoadToolContent?: (messageId: string) => Promise<ToolCallContentItem[]>;
+  /** When true, agent_message text is animated with TypewriterText. */
+  animateText?: boolean;
 }) {
   const globalAudio = useGlobalAudio();
 
@@ -78,6 +83,20 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent }
     case 'user_message':
       return <AcpMessageBubble text={item.text} role="user" />;
     case 'agent_message':
+      if (animateText) {
+        return (
+          <div className="flex justify-start mb-4">
+            <div
+              className="max-w-[80%] min-w-0 rounded-lg px-4 py-3 bg-white border border-gray-200 text-gray-900"
+            >
+              <div className="prose prose-sm max-w-none overflow-x-auto break-words whitespace-pre-wrap">
+                <TypewriterText text={item.text} animated={true} />
+              </div>
+              <span className="inline-block mt-1 text-xs opacity-60 animate-pulse">...</span>
+            </div>
+          </div>
+        );
+      }
       return <AcpMessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} ttsApiUrl={getTtsUrl()} ttsStorageId={item.id} onPlayAudio={handlePlayAudio} onFileClick={onFileClick} />;
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;

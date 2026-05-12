@@ -1,19 +1,27 @@
+/**
+ * useSessionLifecycle — DO-only session lifecycle for project chat.
+ *
+ * All messages flow through a single source: the Durable Object WebSocket.
+ * Prompts are sent via the REST API (POST /sessions/:sessionId/prompt).
+ * Agent state (idle/prompting/responding) is derived from message flow.
+ */
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import type { UseProjectAgentSessionReturn } from '../../hooks/useProjectAgentSession';
-import { useProjectAgentSession } from '../../hooks/useProjectAgentSession';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api';
-import { getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, resumeAgentSession, uploadSessionFiles } from '../../lib/api';
+import { getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
-import { deriveSessionState,VIRTUAL_START } from './types';
+import { deriveSessionState, IDLE_TIMEOUT_MS, VIRTUAL_START } from './types';
 import { useConnectionRecovery } from './useConnectionRecovery';
+
+/** Agent activity state derived from message flow (no ACP connection needed). */
+export type AgentActivityState = 'idle' | 'prompting' | 'responding';
 
 export interface UseSessionLifecycleResult {
   // Session state
@@ -48,10 +56,8 @@ export interface UseSessionLifecycleResult {
   showConnectionBanner: boolean;
   retryWs: () => void;
 
-  // ACP session
-  agentSession: UseProjectAgentSessionReturn;
-  acpGrace: boolean;
-  committedToDoViewRef: React.RefObject<boolean>;
+  // Agent activity (derived from message flow)
+  agentActivity: AgentActivityState;
 
   // Scroll state
   firstItemIndex: number;
@@ -102,6 +108,10 @@ export function useSessionLifecycle(
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  // Agent activity state (derived from message flow)
+  const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
   // File panel
   const [filePanel, setFilePanel] = useState<{
     mode: 'browse' | 'view' | 'diff' | 'git-status';
@@ -125,47 +135,44 @@ export function useSessionLifecycle(
 
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = getTranscribeApiUrl();
-  const agentSessionId = session?.agentSessionId ?? null;
 
-  // WebSocket
+  // ── DO WebSocket (sole message source) ──
   const { connectionState, wsRef, retry: retryWs } = useChatWebSocket({
     projectId,
     sessionId,
     enabled: session?.status === 'active',
     onMessage: useCallback((msg: ChatMessageResponse) => {
       setMessages((prev) => mergeMessages(prev, [msg], 'append'));
+
+      // Derive agent activity from assistant messages
+      if (msg.role === 'assistant') {
+        setAgentActivity('responding');
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = setTimeout(() => {
+          setAgentActivity('idle');
+        }, IDLE_TIMEOUT_MS);
+      }
     }, []),
     onSessionStopped: useCallback(() => {
       setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
+      setAgentActivity('idle');
     }, []),
     onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse) => {
       setSession(catchUpSession);
       setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
-      // Do NOT reset hasMore — catch-up returns a limited window of recent
-      // messages; resetting it would discard the pagination state from
-      // earlier "load more" actions.
     }, []),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
+      setAgentActivity('idle');
     }, []),
   });
 
-  // ACP agent session
-  const agentSession = useProjectAgentSession({
-    workspaceId: session?.workspaceId ?? null,
-    sessionId: agentSessionId ?? sessionId,
-    enabled: (sessionState === 'active' || sessionState === 'idle') && agentSessionId !== null,
-    preferredAgentType: undefined,
-  });
-
-  // Connection recovery (auto-resume, ACP recovery, grace period, idle timer, banner debounce)
+  // Connection recovery (banner debounce, idle timer, auto-resume)
   const recovery = useConnectionRecovery({
     sessionId,
     projectId,
     sessionState,
     connectionState,
-    agentSession,
-    agentSessionId,
     session,
     isProvisioning,
     setSession,
@@ -175,7 +182,12 @@ export function useSessionLifecycle(
   useEffect(() => {
     setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  // Cleanup idle timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(idleTimerRef.current);
+  }, []);
 
   // Load session
   const loadSession = useCallback(async () => {
@@ -270,9 +282,6 @@ export function useSessionLifecycle(
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);
-          // Do NOT reset hasMore — polling returns a limited window of recent
-          // messages; resetting it would discard the pagination state from
-          // earlier "load more" actions.
           setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
           if (data.session.task) setTaskEmbed(data.session.task);
         }
@@ -287,12 +296,13 @@ export function useSessionLifecycle(
     };
   }, [session?.status, projectId, sessionId]);
 
-  // Send follow-up
+  // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {
     const trimmed = followUp.trim();
     if (!trimmed || sendingFollowUp) return;
 
     setSendingFollowUp(true);
+    setAgentActivity('prompting');
     try {
       if (sessionState === 'idle') {
         resetIdleTimer(projectId, sessionId)
@@ -307,6 +317,7 @@ export function useSessionLifecycle(
           .catch(() => {});
       }
 
+      // Optimistic user message
       const optimisticId = `optimistic-${crypto.randomUUID()}`;
       setMessages((prev) => [...prev, {
         id: optimisticId,
@@ -317,6 +328,7 @@ export function useSessionLifecycle(
         createdAt: Date.now(),
       }]);
 
+      // Persist via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: 'message.send',
@@ -326,36 +338,17 @@ export function useSessionLifecycle(
         }));
       }
 
-      if (agentSession.isAgentActive) {
-        agentSession.sendPrompt(trimmed);
-      } else if (recovery.isResuming) {
-        recovery.pendingFollowUpRef.current = trimmed;
-      } else if (sessionState === 'idle' && session?.workspaceId && agentSessionId) {
-        recovery.hasAttemptedAutoResumeRef.current = true;
-        recovery.pendingFollowUpRef.current = trimmed;
-        recovery.setIsResuming(true);
-        recovery.setResumeError(null);
-        resumeAgentSession(session.workspaceId, agentSessionId)
-          .then(() => {
-            setSession((prev) => {
-              if (!prev) return prev;
-              return { ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
-            });
-            agentSession.reconnect();
-          })
-          .catch((err) => {
-            recovery.setIsResuming(false);
-            recovery.pendingFollowUpRef.current = null;
-            const msg = err instanceof Error ? err.message : String(err);
-            if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
-              recovery.setResumeError('Could not resume agent \u2014 workspace may have been cleaned up.');
-            } else {
-              console.error('Agent resume failed:', msg);
-              recovery.setResumeError('Could not resume agent \u2014 please try again.');
-            }
-          });
+      // For idle sessions, resume first then send the prompt
+      if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
+        recovery.resumeAndSend(trimmed);
       } else {
-        setError('Agent is not connected \u2014 message saved but prompt not delivered.');
+        // Forward prompt to the running agent via REST API
+        try {
+          await sendFollowUpPrompt(projectId, sessionId, trimmed);
+        } catch {
+          // Agent may be offline — message is still persisted via DO.
+          setAgentActivity('idle');
+        }
       }
 
       setFollowUp('');
@@ -431,9 +424,7 @@ export function useSessionLifecycle(
     connectionState,
     showConnectionBanner: recovery.showConnectionBanner,
     retryWs,
-    agentSession,
-    acpGrace: recovery.acpGrace,
-    committedToDoViewRef: recovery.committedToDoViewRef,
+    agentActivity,
     firstItemIndex,
     showScrollButton,
     setShowScrollButton,

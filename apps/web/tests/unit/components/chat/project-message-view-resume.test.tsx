@@ -41,32 +41,6 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   saveCachedCommands: vi.fn().mockResolvedValue({ cached: 0 }),
 }));
 
-// Mock useProjectAgentSession — controllable via module-level variable
-let mockAgentSession = {
-  isAgentActive: false,
-  isPrompting: false,
-  isConnecting: false,
-  sendPrompt: vi.fn(),
-  cancelPrompt: vi.fn(),
-  reconnect: vi.fn(),
-  transcribeApiUrl: 'https://api.example.com/transcribe',
-  session: {
-    connected: false,
-    state: 'disconnected' as string,
-    agentType: null,
-    error: null,
-    errorCode: null,
-    sendMessage: vi.fn(),
-    reconnect: vi.fn(),
-    switchAgent: vi.fn(),
-  },
-  messages: { items: [], availableCommands: [], processMessage: vi.fn(), prepareForReplay: vi.fn(), clear: vi.fn(), addUserMessage: vi.fn() },
-};
-
-vi.mock('../../../../src/hooks/useProjectAgentSession', () => ({
-  useProjectAgentSession: () => mockAgentSession,
-}));
-
 // Mock useChatWebSocket
 const mockWsRef = { current: null };
 vi.mock('../../../../src/hooks/useChatWebSocket', () => ({
@@ -98,7 +72,7 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
   PlanView: () => null,
   RawFallbackView: () => null,
   mapToolCallContent: vi.fn(),
-  getErrorMeta: vi.fn(),
+  TypewriterText: ({ text }: { text: string }) => text,
 }));
 
 // Mock react-virtuoso
@@ -160,28 +134,6 @@ describe('ProjectMessageView — auto-resume', () => {
     mockGetTerminalToken.mockResolvedValue({ token: 'test-token' });
     mockResetIdleTimer.mockResolvedValue({ cleanupAt: Date.now() + 1800_000 });
     mockResumeAgentSession.mockResolvedValue({ id: AGENT_SESSION_ID, status: 'running' });
-
-    // Reset agent session mock to idle state
-    mockAgentSession = {
-      isAgentActive: false,
-      isPrompting: false,
-      isConnecting: false,
-      sendPrompt: vi.fn(),
-      cancelPrompt: vi.fn(),
-      reconnect: vi.fn(),
-      transcribeApiUrl: 'https://api.example.com/transcribe',
-      session: {
-        connected: false,
-        state: 'disconnected',
-        agentType: null,
-        error: null,
-        errorCode: null,
-        sendMessage: vi.fn(),
-        reconnect: vi.fn(),
-        switchAgent: vi.fn(),
-      },
-      messages: { items: [], availableCommands: [], processMessage: vi.fn(), prepareForReplay: vi.fn(), clear: vi.fn(), addUserMessage: vi.fn() },
-    };
   });
 
   it('calls resumeAgentSession when sending follow-up to idle session', async () => {
@@ -308,138 +260,6 @@ describe('ProjectMessageView — auto-resume', () => {
     expect(screen.queryByText(/agent is not connected/i)).not.toBeInTheDocument();
   });
 
-  it('flushes pending message when agent becomes active after resume', async () => {
-    // Start with agent inactive (idle session)
-    let resolveResume: (value: unknown) => void;
-    mockResumeAgentSession.mockReturnValue(new Promise((resolve) => { resolveResume = resolve; }));
-
-    const { rerender } = render(
-      <ProjectMessageView
-        projectId={PROJECT_ID}
-        sessionId={SESSION_ID}
-      />
-    );
-
-    await waitFor(() => {
-      expect(mockGetChatSession).toHaveBeenCalled();
-    });
-
-    // Send a message that triggers resume
-    const input = await screen.findByPlaceholderText(/send a message/i);
-    fireEvent.change(input, { target: { value: 'Queued message' } });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
-
-    await waitFor(() => {
-      expect(mockResumeAgentSession).toHaveBeenCalled();
-    });
-
-    // sendPrompt should NOT have been called yet (message is queued)
-    expect(mockAgentSession.sendPrompt).not.toHaveBeenCalled();
-
-    // Resolve the resume API call
-    resolveResume!({ id: AGENT_SESSION_ID, status: 'running' });
-
-    // Now simulate the agent becoming active (ACP WebSocket reconnected)
-    mockAgentSession.isAgentActive = true;
-    rerender(
-      <ProjectMessageView
-        projectId={PROJECT_ID}
-        sessionId={SESSION_ID}
-      />
-    );
-
-    // The pending message should be flushed via sendPrompt
-    await waitFor(() => {
-      expect(mockAgentSession.sendPrompt).toHaveBeenCalledWith('Queued message');
-    });
-  });
-
-  it('sends directly via ACP when agent is already active (no resume)', async () => {
-    // Agent is already active — no resume needed
-    mockAgentSession.isAgentActive = true;
-
-    render(
-      <ProjectMessageView
-        projectId={PROJECT_ID}
-        sessionId={SESSION_ID}
-      />
-    );
-
-    await waitFor(() => {
-      expect(mockGetChatSession).toHaveBeenCalled();
-    });
-
-    const input = await screen.findByPlaceholderText(/send a message/i);
-    fireEvent.change(input, { target: { value: 'Direct message' } });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
-
-    await waitFor(() => {
-      expect(mockAgentSession.sendPrompt).toHaveBeenCalledWith('Direct message');
-    });
-
-    // resumeAgentSession should NOT have been called
-    expect(mockResumeAgentSession).not.toHaveBeenCalled();
-  });
-
-  it('calls reconnect() after successful follow-up resume', async () => {
-    mockResumeAgentSession.mockResolvedValue({ id: AGENT_SESSION_ID, status: 'running' });
-
-    render(
-      <ProjectMessageView
-        projectId={PROJECT_ID}
-        sessionId={SESSION_ID}
-      />
-    );
-
-    await waitFor(() => {
-      expect(mockGetChatSession).toHaveBeenCalled();
-    });
-
-    const input = await screen.findByPlaceholderText(/send a message/i);
-    fireEvent.change(input, { target: { value: 'Resume and reconnect' } });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
-
-    await waitFor(() => {
-      expect(mockResumeAgentSession).toHaveBeenCalledWith(WORKSPACE_ID, AGENT_SESSION_ID);
-    });
-
-    // reconnect() should be called after the resume API succeeds
-    await waitFor(() => {
-      expect(mockAgentSession.reconnect).toHaveBeenCalled();
-    });
-  });
-
-  it('shows error when agent is not connected and session is not idle', async () => {
-    // Session is active (not idle), agent is disconnected — the else branch
-    mockGetChatSession.mockResolvedValue({
-      session: makeSessionResponse({ isIdle: false, agentCompletedAt: null, status: 'active' }),
-      messages: [{ id: 'msg-1', sessionId: SESSION_ID, role: 'user', content: 'Hello', toolMetadata: null, createdAt: Date.now() - 10_000 }],
-      hasMore: false,
-    });
-    mockAgentSession.isAgentActive = false;
-
-    render(
-      <ProjectMessageView
-        projectId={PROJECT_ID}
-        sessionId={SESSION_ID}
-      />
-    );
-
-    await waitFor(() => {
-      expect(mockGetChatSession).toHaveBeenCalled();
-    });
-
-    const input = await screen.findByPlaceholderText(/send a message/i);
-    fireEvent.change(input, { target: { value: 'Hello agent' } });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/agent is not connected/i)).toBeInTheDocument();
-    });
-
-    // resumeAgentSession should NOT have been called (not idle)
-    expect(mockResumeAgentSession).not.toHaveBeenCalled();
-  });
 });
 
 describe('ProjectMessageView — auto-resume on page visit', () => {
@@ -458,28 +278,6 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     mockGetTerminalToken.mockResolvedValue({ token: 'test-token' });
     mockResetIdleTimer.mockResolvedValue({ cleanupAt: Date.now() + 1800_000 });
     mockResumeAgentSession.mockResolvedValue({ id: AGENT_SESSION_ID, status: 'running' });
-
-    // Reset agent session mock to idle state (agent disconnected)
-    mockAgentSession = {
-      isAgentActive: false,
-      isPrompting: false,
-      isConnecting: false,
-      sendPrompt: vi.fn(),
-      cancelPrompt: vi.fn(),
-      reconnect: vi.fn(),
-      transcribeApiUrl: 'https://api.example.com/transcribe',
-      session: {
-        connected: false,
-        state: 'disconnected',
-        agentType: null,
-        error: null,
-        errorCode: null,
-        sendMessage: vi.fn(),
-        reconnect: vi.fn(),
-        switchAgent: vi.fn(),
-      },
-      messages: { items: [], availableCommands: [], processMessage: vi.fn(), prepareForReplay: vi.fn(), clear: vi.fn(), addUserMessage: vi.fn() },
-    };
   });
 
   afterEach(() => {
@@ -532,31 +330,6 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
   });
 
-  it('calls reconnect() after successful auto-resume', async () => {
-    mockResumeAgentSession.mockResolvedValue({ id: AGENT_SESSION_ID, status: 'running' });
-
-    render(
-      <ProjectMessageView
-        projectId={PROJECT_ID}
-        sessionId={SESSION_ID}
-      />
-    );
-
-    await waitFor(() => {
-      expect(mockGetChatSession).toHaveBeenCalled();
-    });
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
-
-    await waitFor(() => {
-      expect(mockResumeAgentSession).toHaveBeenCalled();
-    });
-
-    await waitFor(() => {
-      expect(mockAgentSession.reconnect).toHaveBeenCalled();
-    });
-  });
-
   it('shows error when auto-resume fails with 404', async () => {
     mockResumeAgentSession.mockRejectedValue(new Error('404 Not Found'));
 
@@ -576,45 +349,6 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     await waitFor(() => {
       expect(screen.getByText(/could not resume agent.*workspace may have been cleaned up/i)).toBeInTheDocument();
     });
-  });
-
-  it('does not auto-resume when agent is already active', async () => {
-    mockAgentSession.isAgentActive = true;
-
-    render(
-      <ProjectMessageView
-        projectId={PROJECT_ID}
-        sessionId={SESSION_ID}
-      />
-    );
-
-    await waitFor(() => {
-      expect(mockGetChatSession).toHaveBeenCalled();
-    });
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
-
-    // Should NOT have called resume since agent is already active
-    expect(mockResumeAgentSession).not.toHaveBeenCalled();
-  });
-
-  it('does not auto-resume when agent is connecting', async () => {
-    mockAgentSession.isConnecting = true;
-
-    render(
-      <ProjectMessageView
-        projectId={PROJECT_ID}
-        sessionId={SESSION_ID}
-      />
-    );
-
-    await waitFor(() => {
-      expect(mockGetChatSession).toHaveBeenCalled();
-    });
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
-
-    expect(mockResumeAgentSession).not.toHaveBeenCalled();
   });
 
   it('does not auto-resume during provisioning', async () => {
@@ -657,38 +391,6 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
 
     expect(mockResumeAgentSession).not.toHaveBeenCalled();
-  });
-
-  it('queues follow-up messages sent during auto-resume', async () => {
-    // Make auto-resume hang
-    mockResumeAgentSession.mockReturnValue(new Promise(() => {}));
-
-    render(
-      <ProjectMessageView
-        projectId={PROJECT_ID}
-        sessionId={SESSION_ID}
-      />
-    );
-
-    await waitFor(() => {
-      expect(mockGetChatSession).toHaveBeenCalled();
-    });
-
-    // Trigger auto-resume
-    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
-
-    await waitFor(() => {
-      expect(screen.getByText('Resuming agent...')).toBeInTheDocument();
-    });
-
-    // Now send a follow-up while resume is in progress
-    const input = await screen.findByPlaceholderText(/send a message/i);
-    fireEvent.change(input, { target: { value: 'Queued during resume' } });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
-
-    // Should NOT call resumeAgentSession again (already in progress)
-    // The call count should still be 1 (from auto-resume)
-    expect(mockResumeAgentSession).toHaveBeenCalledTimes(1);
   });
 
   it('shows generic error when auto-resume fails with non-404 error', async () => {
