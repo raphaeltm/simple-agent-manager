@@ -90,9 +90,14 @@ export const TypewriterText = memo(function TypewriterText({
     tick.current(time);
   }
 
+  // Respect prefers-reduced-motion (WCAG 2.1 SC 2.3.3)
+  const prefersReducedMotion = typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const shouldAnimate = animated && !prefersReducedMotion;
+
   // Detect new text and queue for animation (or show instantly if not animated)
   useEffect(() => {
-    if (!animated) {
+    if (!shouldAnimate) {
       setDisplayedText(text);
       queueRef.current = [];
       prevTextRef.current = text;
@@ -123,7 +128,7 @@ export const TypewriterText = memo(function TypewriterText({
       lastFrameTimeRef.current = performance.now();
       rafIdRef.current = requestAnimationFrame(runTick);
     }
-  }, [text, animated]);
+  }, [text, shouldAnimate]);
 
   // Cleanup on unmount
   useEffect(() => {

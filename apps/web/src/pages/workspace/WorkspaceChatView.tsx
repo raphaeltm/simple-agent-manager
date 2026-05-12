@@ -78,12 +78,10 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     onMessage: useCallback((msg: ChatMessageResponse) => {
       setMessages((prev) => mergeMessages(prev, [msg], 'append'));
 
-      // Transition to 'responding' when we get an assistant message while prompting
+      // Transition to 'responding' on any assistant message (covers prompting→responding
+      // and also idle→responding on reconnect with in-progress agent output)
       if (msg.role === 'assistant') {
-        setAgentActivity((prev) => {
-          if (prev === 'prompting' || prev === 'responding') return 'responding';
-          return prev;
-        });
+        setAgentActivity('responding');
 
         // Reset idle timer — go idle after silence
         clearTimeout(idleTimerRef.current);
@@ -185,7 +183,9 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       try {
         await sendFollowUpPrompt(projectId, sessionId, trimmed);
       } catch {
-        // Agent may be offline — message is still persisted via DO
+        // Agent may be offline — message is still persisted via DO.
+        // Reset to idle so the input isn't stuck in "Agent is working..." forever.
+        setAgentActivity('idle');
       }
 
       setFollowUp('');
