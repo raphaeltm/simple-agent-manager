@@ -692,6 +692,27 @@ describe('generateCloudInit', () => {
       expect(remaining).toBeNull();
     });
   });
+
+  // Regression: unattended-upgrades triggers systemd daemon-reexec which kills vm-agent.
+  // See docs/notes/2026-05-12-unattended-upgrades-vm-agent-kill-postmortem.md
+  describe('unattended-upgrades disabled on ephemeral VMs', () => {
+    it('runcmd disables apt-daily-upgrade.timer, apt-daily.timer, and unattended-upgrades', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+      const runcmd = parsed.runcmd as string[];
+      expect(runcmd).toBeDefined();
+
+      // Find the command that disables unattended-upgrades
+      const disableCmd = runcmd.find((cmd: string) =>
+        typeof cmd === 'string' &&
+        cmd.includes('apt-daily-upgrade.timer') &&
+        cmd.includes('apt-daily.timer') &&
+        cmd.includes('unattended-upgrades')
+      );
+      expect(disableCmd).toBeDefined();
+      expect(disableCmd).toContain('systemctl disable --now');
+    });
+  });
 });
 
 describe('validateCloudInitSize', () => {

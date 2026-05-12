@@ -153,6 +153,122 @@ describe('MCP Token Service', () => {
     });
   });
 
+  describe('getMcpTokenMaxLifetime', () => {
+    it('should return default 24h when no env provided', async () => {
+      const { getMcpTokenMaxLifetime } = await import('../../../src/services/mcp-token');
+      expect(getMcpTokenMaxLifetime()).toBe(24 * 60 * 60);
+    });
+
+    it('should return configured value from env', async () => {
+      const { getMcpTokenMaxLifetime } = await import('../../../src/services/mcp-token');
+      expect(getMcpTokenMaxLifetime({ MCP_TOKEN_MAX_LIFETIME_SECONDS: '43200' })).toBe(43200);
+    });
+  });
+
+  describe('sliding window TTL refresh', () => {
+    it('should NOT refresh when env is not provided (backwards compat)', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      const data = {
+        taskId: 't', projectId: 'p', userId: 'u', workspaceId: 'w',
+        createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), // 5h ago
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      await validateMcpToken(mockKV as unknown as KVNamespace, 'tok');
+
+      expect(mockKV.put).not.toHaveBeenCalled();
+    });
+
+    it('should NOT refresh when less than 50% of TTL has elapsed', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      const env = { MCP_TOKEN_TTL_SECONDS: '3600' }; // 1h TTL
+      const data = {
+        taskId: 't', projectId: 'p', userId: 'u', workspaceId: 'w',
+        createdAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(), // 10 min ago (< 50% of 1h)
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      await validateMcpToken(mockKV as unknown as KVNamespace, 'tok', env);
+
+      expect(mockKV.put).not.toHaveBeenCalled();
+    });
+
+    it('should refresh when >50% of TTL has elapsed', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      const env = { MCP_TOKEN_TTL_SECONDS: '3600' }; // 1h TTL
+      const data = {
+        taskId: 't', projectId: 'p', userId: 'u', workspaceId: 'w',
+        createdAt: new Date(Date.now() - 40 * 60 * 1000).toISOString(), // 40 min ago (> 50% of 1h)
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      await validateMcpToken(mockKV as unknown as KVNamespace, 'tok', env);
+
+      expect(mockKV.put).toHaveBeenCalledTimes(1);
+      const [key, value, opts] = mockKV.put.mock.calls[0] as [string, string, { expirationTtl: number }];
+      expect(key).toBe('mcp:tok');
+      expect(opts.expirationTtl).toBe(3600);
+      // Verify lastRefreshedAt was set
+      const refreshedData = JSON.parse(value);
+      expect(refreshedData.lastRefreshedAt).toBeDefined();
+    });
+
+    it('should NOT refresh when max lifetime is exceeded', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      const env = {
+        MCP_TOKEN_TTL_SECONDS: '3600',
+        MCP_TOKEN_MAX_LIFETIME_SECONDS: '7200', // 2h max
+      };
+      const data = {
+        taskId: 't', projectId: 'p', userId: 'u', workspaceId: 'w',
+        createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), // 3h ago (> 2h max)
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      await validateMcpToken(mockKV as unknown as KVNamespace, 'tok', env);
+
+      // Should not refresh — past max lifetime
+      expect(mockKV.put).not.toHaveBeenCalled();
+    });
+
+    it('should cap refresh TTL to remaining max lifetime', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      const env = {
+        MCP_TOKEN_TTL_SECONDS: '3600', // 1h TTL
+        MCP_TOKEN_MAX_LIFETIME_SECONDS: '5400', // 1.5h max
+      };
+      const data = {
+        taskId: 't', projectId: 'p', userId: 'u', workspaceId: 'w',
+        createdAt: new Date(Date.now() - 50 * 60 * 1000).toISOString(), // 50 min ago
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      await validateMcpToken(mockKV as unknown as KVNamespace, 'tok', env);
+
+      expect(mockKV.put).toHaveBeenCalledTimes(1);
+      const [, , opts] = mockKV.put.mock.calls[0] as [string, string, { expirationTtl: number }];
+      // Remaining lifetime: 90min - 50min = 40min = 2400s, which is less than 3600s TTL
+      expect(opts.expirationTtl).toBeLessThanOrEqual(2400 + 5); // small tolerance for test timing
+      expect(opts.expirationTtl).toBeGreaterThan(60);
+    });
+
+    it('should use lastRefreshedAt for threshold check when present', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      const env = { MCP_TOKEN_TTL_SECONDS: '3600' }; // 1h TTL
+      const data = {
+        taskId: 't', projectId: 'p', userId: 'u', workspaceId: 'w',
+        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h ago
+        lastRefreshedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(), // refreshed 10min ago
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      await validateMcpToken(mockKV as unknown as KVNamespace, 'tok', env);
+
+      // 10 min since last refresh < 50% of 1h TTL = should NOT refresh
+      expect(mockKV.put).not.toHaveBeenCalled();
+    });
+  });
+
   describe('revokeMcpToken', () => {
     it('should delete token from KV', async () => {
       const { revokeMcpToken } = await import('../../../src/services/mcp-token');
