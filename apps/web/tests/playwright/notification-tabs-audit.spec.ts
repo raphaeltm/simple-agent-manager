@@ -228,7 +228,7 @@ test.describe('Notification tabs — Mobile', () => {
     await page.goto('/');
     const panel = await openNotificationPanel(page);
 
-    await panel.getByRole('button', { name: /^updates$/i }).click();
+    await panel.getByRole('tab', { name: /updates/i }).click();
     await page.waitForTimeout(300);
 
     await expect(panel.getByText('Working on fixing auth flow')).toBeVisible();
@@ -247,7 +247,7 @@ test.describe('Notification tabs — Mobile', () => {
     await page.goto('/');
     const panel = await openNotificationPanel(page);
 
-    await panel.getByRole('button', { name: /^all$/i }).click();
+    await panel.getByRole('tab', { name: /^all$/i }).click();
     await page.waitForTimeout(300);
 
     // All 6 should be visible
@@ -332,7 +332,7 @@ test.describe('Notification tabs — Desktop', () => {
     await page.goto('/');
     const panel = await openNotificationPanel(page);
 
-    await panel.getByRole('button', { name: /^updates$/i }).click();
+    await panel.getByRole('tab', { name: /updates/i }).click();
     await page.waitForTimeout(300);
 
     await expect(panel.getByText('Working on fixing auth flow')).toBeVisible();

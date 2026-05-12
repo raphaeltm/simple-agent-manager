@@ -122,6 +122,11 @@ export function NotificationCenter() {
     [notifications]
   );
 
+  const updatesUnreadCount = useMemo(
+    () => notifications.filter((n) => !PRIORITY_TYPES.has(n.type) && !n.readAt).length,
+    [notifications]
+  );
+
   // Group notifications by project when multiple projects exist
   const { groups, shouldGroup } = useMemo(() => {
     const projectIds = new Set(filteredNotifications.map((n) => n.projectId ?? 'none'));
@@ -186,16 +191,36 @@ export function NotificationCenter() {
           </div>
 
           {/* Filter Tabs */}
-          <div className="flex border-b border-border-default">
+          <div
+            role="tablist"
+            aria-label="Notification filters"
+            className="flex border-b border-border-default"
+            onKeyDown={(e) => {
+              const tabIds: FilterTab[] = ['priority', 'updates', 'all'];
+              const idx = tabIds.indexOf(activeTab);
+              if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                setActiveTab(tabIds[(idx + 1) % tabIds.length]!);
+              } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                setActiveTab(tabIds[(idx - 1 + tabIds.length) % tabIds.length]!);
+              }
+            }}
+          >
             {([
               { id: 'priority' as const, label: 'Priority', badge: priorityUnreadCount },
-              { id: 'updates' as const, label: 'Updates', badge: 0 },
+              { id: 'updates' as const, label: 'Updates', badge: updatesUnreadCount },
               { id: 'all' as const, label: 'All', badge: 0 },
             ]).map(({ id, label, badge }) => (
               <button
                 key={id}
+                role="tab"
+                id={`notif-tab-${id}`}
+                aria-selected={activeTab === id}
+                aria-controls={`notif-panel-${id}`}
+                tabIndex={activeTab === id ? 0 : -1}
                 onClick={() => setActiveTab(id)}
-                className={`flex-1 px-3 py-2 text-xs font-medium border-none cursor-pointer transition-colors flex items-center justify-center gap-1 ${
+                className={`flex-1 px-3 min-h-[44px] text-xs font-medium border-none cursor-pointer transition-colors flex items-center justify-center gap-1 ${
                   activeTab === id
                     ? 'text-accent bg-transparent border-b-2 border-b-accent'
                     : 'text-fg-muted bg-transparent hover:text-fg-primary'
@@ -213,7 +238,12 @@ export function NotificationCenter() {
           </div>
 
           {/* Notification List */}
-          <div className="flex-1 overflow-y-auto">
+          <div
+            role="tabpanel"
+            id={`notif-panel-${activeTab}`}
+            aria-labelledby={`notif-tab-${activeTab}`}
+            className="flex-1 overflow-y-auto"
+          >
             {loading && notifications.length === 0 ? (
               <div className="flex items-center justify-center py-8 text-fg-muted">
                 <Loader2 size={18} className="animate-spin" />

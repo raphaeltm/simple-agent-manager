@@ -107,7 +107,7 @@ describe('NotificationCenter grouping logic', () => {
     it('renders "No notifications yet" on the All tab when empty', () => {
       renderNotificationCenter([]);
       // Switch to All tab
-      fireEvent.click(screen.getByRole('button', { name: /^all$/i }));
+      fireEvent.click(screen.getByRole('tab', { name: /^all$/i }));
       expect(screen.getByText(/no notifications yet/i)).toBeInTheDocument();
     });
 
@@ -307,7 +307,7 @@ describe('useNotifications — notification.updated WebSocket handling', () => {
     fireEvent.click(screen.getByRole('button', { name: /notifications/i }));
 
     // Switch to Updates tab since progress notifications are not shown on the default Priority tab
-    fireEvent.click(screen.getByRole('button', { name: /^updates$/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /updates/i }));
 
     expect(screen.getByText('Progress: Old title')).toBeInTheDocument();
 
@@ -363,7 +363,7 @@ describe('NotificationCenter tab filtering', () => {
 
   it('Updates tab shows progress, error, session_ended, pr_created', () => {
     renderNotificationCenter(mixedNotifications, 6);
-    fireEvent.click(screen.getByRole('button', { name: /^updates$/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /updates/i }));
 
     // Update items visible
     expect(screen.getByText('Working on it')).toBeInTheDocument();
@@ -378,7 +378,7 @@ describe('NotificationCenter tab filtering', () => {
 
   it('All tab shows every notification', () => {
     renderNotificationCenter(mixedNotifications, 6);
-    fireEvent.click(screen.getByRole('button', { name: /^all$/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /^all$/i }));
 
     expect(screen.getByText('Agent needs help')).toBeInTheDocument();
     expect(screen.getByText('Task finished')).toBeInTheDocument();
@@ -397,7 +397,7 @@ describe('NotificationCenter tab filtering', () => {
     renderNotificationCenter(notifications, 3);
 
     // The Priority tab should show a badge with "2" (two unread priority notifications)
-    const priorityTab = screen.getByRole('button', { name: /priority/i });
+    const priorityTab = screen.getByRole('tab', { name: /priority/i });
     expect(priorityTab).toHaveTextContent('2');
   });
 
@@ -427,7 +427,7 @@ describe('NotificationCenter tab filtering', () => {
     expect(bellButton).toBeInTheDocument();
 
     // Priority tab badge should show 2 (only priority unread)
-    const priorityTab = screen.getByRole('button', { name: /priority/i });
+    const priorityTab = screen.getByRole('tab', { name: /priority/i });
     expect(priorityTab).toHaveTextContent('2');
   });
 
@@ -436,7 +436,7 @@ describe('NotificationCenter tab filtering', () => {
       makeNotification({ id: 'n1', type: 'needs_input', title: 'Help' }),
     ];
     renderNotificationCenter(notifications, 1);
-    fireEvent.click(screen.getByRole('button', { name: /^updates$/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /updates/i }));
 
     expect(screen.getByText(/no updates/i)).toBeInTheDocument();
   });
