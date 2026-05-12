@@ -211,12 +211,12 @@ export type {
   SessionSummaryResponse,
 } from './sessions';
 export {
+  cancelAgentPrompt,
   createChatSession,
   getChatSession,
   listActivityEvents,
   listChatSessions,
   resetIdleTimer,
-  cancelAgentPrompt,
   sendFollowUpPrompt,
   stopChatSession,
   summarizeSession,
