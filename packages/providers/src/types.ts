@@ -139,6 +139,12 @@ export interface HetznerProviderConfig {
   placementRetryDelayMs?: number;
   /** Whether to try other locations after primary fails (default: true) */
   placementFallbackEnabled?: boolean;
+  /** Initial delay in ms for capacity retry backoff (default: 15000) */
+  capacityRetryInitialDelayMs?: number;
+  /** Maximum delay in ms per capacity retry wait (default: 120000) */
+  capacityRetryMaxDelayMs?: number;
+  /** Maximum number of capacity retry attempts before giving up (default: 5) */
+  capacityRetryMaxAttempts?: number;
 }
 
 export interface ScalewayProviderConfig {
