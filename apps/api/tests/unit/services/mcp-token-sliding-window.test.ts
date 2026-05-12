@@ -12,9 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { McpTokenData, McpTokenEnv } from '../../../src/services/mcp-token';
 
 const mockKV = {
-  put: vi.fn(),
+  put: vi.fn().mockResolvedValue(undefined),
   get: vi.fn(),
-  delete: vi.fn(),
+  delete: vi.fn().mockResolvedValue(undefined),
 };
 
 const kv = mockKV as unknown as KVNamespace;

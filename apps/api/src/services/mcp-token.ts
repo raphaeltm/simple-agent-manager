@@ -112,17 +112,19 @@ export async function validateMcpToken(
   const ttl = getMcpTokenTTL(env);
   const maxLifetime = getMcpTokenMaxLifetime(env);
 
-  // Fail-closed: reject and revoke tokens with malformed createdAt
+  // Fail-closed: reject and revoke tokens with malformed createdAt.
+  // Best-effort delete — KV errors must not turn an expiry into a 500.
   const createdAtMs = Date.parse(data.createdAt);
   if (isNaN(createdAtMs)) {
-    await kv.delete(key);
+    void kv.delete(key).catch(() => {});
     return null;
   }
 
-  // Hard max lifetime cap: reject tokens older than maxLifetime regardless of activity
+  // Hard max lifetime cap: reject tokens older than maxLifetime regardless of activity.
+  // Best-effort delete — the KV TTL will expire the entry eventually anyway.
   const ageSeconds = (now - createdAtMs) / 1000;
   if (ageSeconds > maxLifetime) {
-    await kv.delete(key);
+    void kv.delete(key).catch(() => {});
     return null;
   }
 
