@@ -512,13 +512,15 @@ chatRoutes.post('/:sessionId/cancel', async (c) => {
     );
   }
 
-  // Find the running agent session on that workspace
+  // Find the running agent session on that workspace, scoped to the user
+  // for defence-in-depth (uses idx_agent_sessions_ws_user_status composite index)
   const [agentSession] = await db
     .select({ id: schema.agentSessions.id })
     .from(schema.agentSessions)
     .where(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.userId, userId),
         eq(schema.agentSessions.status, 'running')
       )
     )

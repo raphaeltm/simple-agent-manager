@@ -245,15 +245,19 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   }, [hasMore, loadingMore, messages, projectId, sessionId]);
 
   // ── Cancel the current in-flight prompt via REST API ──
+  const cancellingRef = useRef(false);
   const handleCancelPrompt = useCallback(() => {
-    if (agentActivity === 'idle') return;
+    if (agentActivity === 'idle' || cancellingRef.current) return;
+    cancellingRef.current = true;
     cancelAgentPrompt(projectId, sessionId)
       .then(() => {
         setAgentActivity('idle');
       })
       .catch(() => {
-        // Best-effort cancel — agent may already be idle
-        setAgentActivity('idle');
+        // Network/server error — keep spinner visible so user can retry
+      })
+      .finally(() => {
+        cancellingRef.current = false;
       });
   }, [agentActivity, projectId, sessionId]);
 
