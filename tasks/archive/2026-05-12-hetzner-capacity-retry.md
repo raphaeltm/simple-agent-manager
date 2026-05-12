@@ -24,7 +24,7 @@ Currently, `HetznerProvider.createVM()` only retries on 412 (placement errors) w
 ### Known Hetzner 422 Capacity Messages
 - Messages containing "unavailable" or "currently not available" for a server type/location
 - Messages containing "no capacity" or "not enough resources"
-- Messages containing "server_type" combined with "location" (type/location mismatch that is often transient)
+- Messages containing "server_type" combined with "location" — intentionally excluded from patterns pending real Hetzner error samples; `/unavailable/i` covers most such messages
 
 ### Existing Patterns
 - Retry delay configurable via constructor: `placementRetryDelayMs`
@@ -33,33 +33,34 @@ Currently, `HetznerProvider.createVM()` only retries on 412 (placement errors) w
 
 ## Implementation Checklist
 
-- [ ] Add `isTransientCapacityError()` helper to identify retryable 422s by message pattern
-- [ ] Add capacity retry constants: `DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS` (15s), `DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS` (120s), `DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS` (5)
-- [ ] Add constructor params for capacity retry config (initial delay, max delay, max attempts)
-- [ ] Update `HetznerProviderConfig` in `types.ts` with new optional fields
-- [ ] Implement exponential backoff retry loop in `createVM()` that wraps the existing placement logic
-- [ ] Log each capacity retry with: provider, region, server type, attempt number, delay, sanitized error
-- [ ] Distinguish final "capacity exhausted" from "invalid configuration" in error messages
-- [ ] Export new defaults from `index.ts`
-- [ ] Add tests: transient 422 succeeds after retry
-- [ ] Add tests: permanent/non-capacity 422 does not retry
-- [ ] Add tests: max attempts exhausted throws with clear message
-- [ ] Add tests: exponential backoff timing
-- [ ] Add tests: configurable retry params
-- [ ] Run `pnpm typecheck && pnpm lint && pnpm test` in providers package
-- [ ] Update `HetznerProviderConfig` doc comments
+- [x] Add `isTransientCapacityError()` helper to identify retryable 422s by message pattern
+- [x] Add capacity retry constants: `DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS` (15s), `DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS` (120s), `DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS` (5)
+- [x] Add constructor params for capacity retry config (initial delay, max delay, max attempts)
+- [x] Update `HetznerProviderConfig` in `types.ts` with new optional fields
+- [x] Implement exponential backoff retry loop in `createVM()` that wraps the existing placement logic
+- [x] Log each capacity retry with: provider, region, server type, attempt number, delay, sanitized error
+- [x] Distinguish final "capacity exhausted" from "invalid configuration" in error messages
+- [x] Export new defaults from `index.ts`
+- [x] Add tests: transient 422 succeeds after retry
+- [x] Add tests: permanent/non-capacity 422 does not retry
+- [x] Add tests: max attempts exhausted throws with clear message
+- [x] Add tests: exponential backoff timing
+- [x] Add tests: configurable retry params
+- [x] Run `pnpm typecheck && pnpm lint && pnpm test` in providers package
+- [x] Update `HetznerProviderConfig` doc comments
+- [x] Wire capacity retry env vars to API layer (Env interface, buildProviderConfig, .env.example)
 
 ## Acceptance Criteria
 
-- [ ] 422 errors matching known capacity patterns are retried with exponential backoff
-- [ ] 422 errors NOT matching capacity patterns are thrown immediately (no retry)
-- [ ] Retry policy: ~15s initial, exponential increase, ~2min max per wait, bounded max attempts
-- [ ] All retry params configurable via constructor (matching existing pattern)
-- [ ] Each retry attempt is logged with provider, region, server type, attempt#, delay, error
-- [ ] Final error after exhaustion clearly says "capacity exhausted after N attempts" (distinct from config error)
-- [ ] Non-capacity 422s throw immediately with original error message
-- [ ] All existing 412 placement retry tests still pass
-- [ ] New tests cover: transient success, permanent failure, timing, configuration
+- [x] 422 errors matching known capacity patterns are retried with exponential backoff
+- [x] 422 errors NOT matching capacity patterns are thrown immediately (no retry)
+- [x] Retry policy: ~15s initial, exponential increase, ~2min max per wait, bounded max attempts
+- [x] All retry params configurable via constructor (matching existing pattern)
+- [x] Each retry attempt is logged with provider, region, server type, attempt#, delay, error
+- [x] Final error after exhaustion clearly says "capacity exhausted after N attempts" (distinct from config error)
+- [x] Non-capacity 422s throw immediately with original error message
+- [x] All existing 412 placement retry tests still pass
+- [x] New tests cover: transient success, permanent failure, timing, configuration
 
 ## References
 
