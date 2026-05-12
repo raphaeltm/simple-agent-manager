@@ -162,7 +162,7 @@ export async function resetIdleTimer(
   });
 }
 
-/** @deprecated Use ACP WebSocket session/prompt instead (useProjectAgentSession.sendPrompt). */
+/** Send a follow-up prompt to the running agent via the REST API. */
 export async function sendFollowUpPrompt(
   projectId: string,
   sessionId: string,

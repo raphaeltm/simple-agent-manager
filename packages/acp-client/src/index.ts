@@ -39,6 +39,8 @@ export { SlashCommandPalette } from './components/SlashCommandPalette';
 export type { StickyPlanButtonProps } from './components/StickyPlanButton';
 export { StickyPlanButton } from './components/StickyPlanButton';
 export { TerminalBlock } from './components/TerminalBlock';
+export type { TypewriterTextProps } from './components/TypewriterText';
+export { TypewriterText } from './components/TypewriterText';
 export { ThinkingBlock } from './components/ThinkingBlock';
 export { ToolCallCard } from './components/ToolCallCard';
 export { UsageIndicator } from './components/UsageIndicator';

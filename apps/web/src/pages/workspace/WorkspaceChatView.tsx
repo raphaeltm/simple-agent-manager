@@ -1,19 +1,15 @@
 /**
- * WorkspaceChatView — lightweight chat component for the workspace page.
+ * WorkspaceChatView — DO-only chat component for the workspace page.
  *
- * Unlike ProjectMessageView which uses the heavyweight useSessionLifecycle hook
- * (with its own workspace fetching, token refresh, port detection, connection
- * recovery, and polling), this component reuses the workspace page's existing
- * state and only manages the chat-specific concerns:
+ * All messages flow through a single source: the Durable Object WebSocket.
+ * Prompts are sent via the REST API (POST /sessions/:sessionId/prompt),
+ * which forwards to the VM agent. This eliminates the dual-WebSocket
+ * architecture (DO + ACP) that caused React error #185 (infinite render loops).
  *
- * 1. Load chat messages from the DO via getChatSession()
- * 2. Real-time message updates via useChatWebSocket
- * 3. ACP agent interaction via useProjectAgentSession
- * 4. Message rendering via AcpConversationItemView + FollowUpInput
- *
- * This avoids the duplicate hook instances that caused React error #185
- * (infinite render loops) when ProjectMessageView was embedded in the
- * workspace page context.
+ * Agent state (idle/prompting/responding) is derived from message flow rather
+ * than a direct ACP connection. The TypewriterText component animates batched
+ * message delivery (~2s intervals) to maintain the perception of continuous
+ * streaming.
  */
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
@@ -25,10 +21,15 @@ import { AcpConversationItemView } from '../../components/project-message-view/A
 import { FollowUpInput } from '../../components/project-message-view/FollowUpInput';
 import { chatMessagesToConversationItems, deriveSessionState, VIRTUAL_START } from '../../components/project-message-view/types';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import { useProjectAgentSession } from '../../hooks/useProjectAgentSession';
-import { getChatSession, getTranscribeApiUrl, resetIdleTimer, uploadSessionFiles } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
+
+/** Agent activity state derived from message flow (no ACP connection needed). */
+type AgentActivityState = 'idle' | 'prompting' | 'responding';
+
+/** Seconds of silence after last assistant message before returning to idle. */
+const IDLE_TIMEOUT_MS = 3000;
 
 interface WorkspaceChatViewProps {
   projectId: string;
@@ -58,24 +59,42 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  // ── Agent activity state (derived from message flow) ──
+  const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
   // ── Scroll ──
   const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
   const [showScrollButton, setShowScrollButton] = useState(false);
 
   const sessionState = session ? deriveSessionState(session) : 'terminated';
-  const agentSessionId = session?.agentSessionId ?? null;
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  // ── DO WebSocket for real-time message updates ──
+  // ── DO WebSocket for real-time message updates (SOLE message source) ──
   const { connectionState, wsRef } = useChatWebSocket({
     projectId,
     sessionId,
     enabled: session?.status === 'active',
     onMessage: useCallback((msg: ChatMessageResponse) => {
       setMessages((prev) => mergeMessages(prev, [msg], 'append'));
+
+      // Transition to 'responding' when we get an assistant message while prompting
+      if (msg.role === 'assistant') {
+        setAgentActivity((prev) => {
+          if (prev === 'prompting' || prev === 'responding') return 'responding';
+          return prev;
+        });
+
+        // Reset idle timer — go idle after silence
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = setTimeout(() => {
+          setAgentActivity('idle');
+        }, IDLE_TIMEOUT_MS);
+      }
     }, []),
     onSessionStopped: useCallback(() => {
       setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
+      setAgentActivity('idle');
     }, []),
     onCatchUp: useCallback((catchUpMsgs: ChatMessageResponse[], catchUpSession: ChatSessionResponse) => {
       setSession(catchUpSession);
@@ -83,15 +102,8 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     }, []),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
+      setAgentActivity('idle');
     }, []),
-  });
-
-  // ── ACP agent session for direct agent interaction ──
-  const agentSession = useProjectAgentSession({
-    workspaceId: session?.workspaceId ?? null,
-    sessionId: agentSessionId ?? sessionId,
-    enabled: (sessionState === 'active' || sessionState === 'idle') && agentSessionId !== null,
-    preferredAgentType: undefined,
   });
 
   // ── Load session data ──
@@ -118,24 +130,23 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     setShowScrollButton(false);
   }, [sessionId]);
 
-  // ── Conversation items from merged sources ──
-  const conversationItems = useMemo<ConversationItem[]>(() => {
-    const doItems = chatMessagesToConversationItems(messages);
-    // Merge ACP real-time items (streaming agent output) with DO-persisted messages
-    const acpItems = agentSession.messages.items;
-    if (acpItems.length === 0) return doItems;
-    // ACP items are newer — append them after DO items, deduplicating by kind+content
-    const doIdSet = new Set(doItems.map((i) => i.id));
-    const uniqueAcp = acpItems.filter((i) => !doIdSet.has(i.id));
-    return [...doItems, ...uniqueAcp];
-  }, [messages, agentSession.messages.items]);
+  // Cleanup idle timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(idleTimerRef.current);
+  }, []);
 
-  // ── Send follow-up message ──
+  // ── Conversation items from DO messages only (single source) ──
+  const conversationItems = useMemo<ConversationItem[]>(() => {
+    return chatMessagesToConversationItems(messages);
+  }, [messages]);
+
+  // ── Send follow-up message via REST API ──
   const handleSendFollowUp = useCallback(async () => {
     const trimmed = followUp.trim();
     if (!trimmed || sendingFollowUp) return;
 
     setSendingFollowUp(true);
+    setAgentActivity('prompting');
     try {
       if (sessionState === 'idle') {
         resetIdleTimer(projectId, sessionId)
@@ -150,7 +161,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           .catch(() => {});
       }
 
-      // Optimistic message
+      // Optimistic user message
       setMessages((prev) => [...prev, {
         id: `optimistic-${crypto.randomUUID()}`,
         sessionId,
@@ -160,7 +171,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
         createdAt: Date.now(),
       }]);
 
-      // Send via DO WebSocket
+      // Persist via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: 'message.send',
@@ -170,16 +181,18 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
         }));
       }
 
-      // Send via ACP for agent interaction
-      if (agentSession.isAgentActive) {
-        agentSession.sendPrompt(trimmed);
+      // Forward prompt to the running agent via REST API
+      try {
+        await sendFollowUpPrompt(projectId, sessionId, trimmed);
+      } catch {
+        // Agent may be offline — message is still persisted via DO
       }
 
       setFollowUp('');
     } finally {
       setSendingFollowUp(false);
     }
-  }, [followUp, sendingFollowUp, sessionState, projectId, sessionId, wsRef, agentSession]);
+  }, [followUp, sendingFollowUp, sessionState, projectId, sessionId, wsRef]);
 
   // ── Upload files ──
   const handleUploadFiles = useCallback(async (files: FileList | File[]) => {
@@ -230,6 +243,11 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       setLoadingMore(false);
     }
   }, [hasMore, loadingMore, messages, projectId, sessionId]);
+
+  // ── Derive placeholder from agent activity ──
+  const placeholder = agentActivity === 'prompting' || agentActivity === 'responding'
+    ? 'Agent is working...'
+    : 'Send a message...';
 
   // ── Render ──
   if (loading && messages.length === 0 && !session) {
@@ -312,7 +330,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           onUploadFiles={(files) => { void handleUploadFiles(files); }}
           sending={sendingFollowUp}
           uploading={uploading}
-          placeholder={agentSession.isAgentActive ? 'Send a message...' : 'Agent offline — message will be saved'}
+          placeholder={placeholder}
           transcribeApiUrl={transcribeApiUrl}
         />
       )}
