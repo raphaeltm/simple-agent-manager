@@ -77,7 +77,7 @@ import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { providersRoutes } from './routes/providers';
 import { samRoutes } from './routes/sam';
 import { smokeTestTokenRoutes } from './routes/smoke-test-tokens';
-import { tasksRoutes } from './routes/tasks';
+import { taskCallbackRoute, tasksRoutes } from './routes/tasks';
 import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
 import { trialRoutes } from './routes/trial';
@@ -527,6 +527,7 @@ app.route('/api/t', analyticsIngestRoutes);
 // See .claude/rules/06-api-patterns.md (Hono middleware scoping)
 app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', nodeAcpHeartbeatRoute);
+app.route('/api/projects', taskCallbackRoute);
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
