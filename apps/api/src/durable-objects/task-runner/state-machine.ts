@@ -253,31 +253,38 @@ export async function failTask(
     });
   }
 
-  // Best-effort: inject error into chat session and stop the session so the UI
-  // shows the failure. Without stopSession, the session stays "active" in the
-  // sidebar even though the task has failed.
+  // Inject error into chat session and mark it as failed. The UI also
+  // cross-references task.status so even if this RPC fails the session will
+  // appear terminated, but we still attempt it for data consistency.
   if (state.stepResults.chatSessionId && state.projectId) {
-    try {
-      const { persistMessage, stopSession } = await import('../../services/project-data');
-      await persistMessage(
-        rc.env,
-        state.projectId,
-        state.stepResults.chatSessionId,
-        'system',
-        `Task failed at step "${state.currentStep}": ${errorMessage}`,
-        null
-      );
-      await stopSession(
-        rc.env,
-        state.projectId,
-        state.stepResults.chatSessionId
-      );
-    } catch (chatErr) {
-      log.error('task_runner_do.chat_error_inject_failed', {
-        taskId: state.taskId,
-        sessionId: state.stepResults.chatSessionId,
-        error: chatErr instanceof Error ? chatErr.message : String(chatErr),
-      });
+    const sessionId = state.stepResults.chatSessionId;
+    const projectId = state.projectId;
+    const maxAttempts = 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const { persistMessage, failSession } = await import('../../services/project-data');
+        await persistMessage(
+          rc.env,
+          projectId,
+          sessionId,
+          'system',
+          `Task failed at step "${state.currentStep}": ${errorMessage}`,
+          null
+        );
+        await failSession(rc.env, projectId, sessionId, errorMessage);
+        break; // success
+      } catch (chatErr) {
+        log.error('task_runner_do.chat_session_fail_attempt', {
+          taskId: state.taskId,
+          sessionId,
+          attempt,
+          maxAttempts,
+          error: chatErr instanceof Error ? chatErr.message : String(chatErr),
+        });
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
     }
   }
 

@@ -64,6 +64,16 @@ export async function stopSession(
   return stub.stopSession(sessionId);
 }
 
+export async function failSession(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  errorMessage: string | null = null
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  return stub.failSession(sessionId, errorMessage);
+}
+
 export async function updateSessionTopic(
   env: Env,
   projectId: string,

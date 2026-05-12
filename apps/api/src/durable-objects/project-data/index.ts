@@ -92,6 +92,17 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.stopped', { sessionId }, sessionId);
   }
 
+  async failSession(sessionId: string, errorMessage: string | null = null): Promise<void> {
+    const result = sessions.failSession(this.sql, sessionId, errorMessage);
+    if (result) {
+      activity.recordActivityEventInternal(this.sql, 'session.failed', 'system', null, result.workspaceId, sessionId, null, JSON.stringify({ message_count: result.messageCount, error: errorMessage }));
+    }
+    try { materialization.materializeSession(this.sql, sessionId); }
+    catch (e) { log.error('materialize_session_on_fail_failed', { sessionId, error: String(e) }); }
+    this.scheduleSummarySync();
+    this.broadcastEvent('session.failed', { sessionId }, sessionId);
+  }
+
   async persistMessage(sessionId: string, role: string, content: string, toolMetadata: string | null): Promise<string> {
     const result = messages.persistMessage(this.sql, this.env, sessionId, role, content, toolMetadata);
     const idleReset = idleCleanup.resetIdleCleanup(this.sql, this.env, sessionId);

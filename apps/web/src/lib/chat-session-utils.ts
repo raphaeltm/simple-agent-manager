@@ -12,8 +12,17 @@ export const STALE_SESSION_THRESHOLD_MS = parseInt(
 
 export type SessionState = 'active' | 'idle' | 'terminated';
 
+/** Whether the associated task (if any) has reached a terminal state. */
+function isTaskTerminal(session: ChatSessionResponse): boolean {
+  const s = session.task?.status;
+  return s === 'failed' || s === 'completed' || s === 'cancelled';
+}
+
 export function getSessionState(session: ChatSessionResponse): SessionState {
-  if (session.status === 'stopped') return 'terminated';
+  if (session.status === 'stopped' || session.status === 'failed') return 'terminated';
+  // If the task reached a terminal state but the session DO wasn't updated
+  // (e.g., best-effort RPC failed during deploy), treat as terminated.
+  if (isTaskTerminal(session)) return 'terminated';
   if (session.isIdle || session.agentCompletedAt) return 'idle';
   if (session.status === 'active') return 'active';
   return 'terminated';
@@ -48,7 +57,9 @@ export const STATE_LABELS: Record<SessionState, string> = {
  * Callers should also apply isStaleSession() to remove old inactive sessions.
  */
 export function isActiveSession(session: ChatSessionResponse): boolean {
-  return session.status !== 'stopped';
+  if (session.status === 'stopped' || session.status === 'failed') return false;
+  if (isTaskTerminal(session)) return false;
+  return true;
 }
 
 /** Returns the most relevant activity timestamp for a session. */

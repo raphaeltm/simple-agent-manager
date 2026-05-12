@@ -84,6 +84,27 @@ export function stopSessionInternal(sql: SqlStorage, sessionId: string): void {
   );
 }
 
+export function failSession(
+  sql: SqlStorage,
+  sessionId: string,
+  _errorMessage: string | null = null
+): { workspaceId: string | null; messageCount: number } | null {
+  const now = Date.now();
+  sql.exec(
+    `UPDATE chat_sessions SET status = 'failed', ended_at = ?, updated_at = ? WHERE id = ? AND status = 'active'`,
+    now,
+    now,
+    sessionId
+  );
+
+  const row = sql
+    .exec('SELECT workspace_id, message_count FROM chat_sessions WHERE id = ?', sessionId)
+    .toArray()[0];
+
+  if (!row) return null;
+  return parseSessionStop(row);
+}
+
 export function linkSessionToWorkspace(
   sql: SqlStorage,
   sessionId: string,

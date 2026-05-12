@@ -36,6 +36,10 @@ describe('getSessionState', () => {
     expect(getSessionState(makeSession({ status: 'stopped' }))).toBe('terminated');
   });
 
+  it('returns "terminated" for failed session status', () => {
+    expect(getSessionState(makeSession({ status: 'failed' }))).toBe('terminated');
+  });
+
   it('returns "idle" for idle sessions', () => {
     expect(getSessionState(makeSession({ isIdle: true }))).toBe('idle');
   });
@@ -50,6 +54,45 @@ describe('getSessionState', () => {
 
   it('returns "terminated" for unknown status', () => {
     expect(getSessionState(makeSession({ status: 'unknown' }))).toBe('terminated');
+  });
+
+  it('returns "terminated" when task is failed even if session is active', () => {
+    expect(getSessionState(makeSession({
+      status: 'active',
+      task: { id: 't-1', status: 'failed' },
+    }))).toBe('terminated');
+  });
+
+  it('returns "terminated" when task is completed even if session is active', () => {
+    expect(getSessionState(makeSession({
+      status: 'active',
+      task: { id: 't-1', status: 'completed' },
+    }))).toBe('terminated');
+  });
+
+  it('returns "terminated" when task is cancelled even if session is active', () => {
+    expect(getSessionState(makeSession({
+      status: 'active',
+      task: { id: 't-1', status: 'cancelled' },
+    }))).toBe('terminated');
+  });
+
+  it('returns "active" when task is in_progress and session is active', () => {
+    expect(getSessionState(makeSession({
+      status: 'active',
+      task: { id: 't-1', status: 'in_progress' },
+    }))).toBe('active');
+  });
+
+  it('returns "active" when task embed has no status', () => {
+    expect(getSessionState(makeSession({
+      status: 'active',
+      task: { id: 't-1' },
+    }))).toBe('active');
+  });
+
+  it('returns "active" when no task embed exists', () => {
+    expect(getSessionState(makeSession({ status: 'active' }))).toBe('active');
   });
 });
 
@@ -136,6 +179,34 @@ describe('isActiveSession', () => {
 
   it('returns true for non-stopped sessions with unknown status', () => {
     expect(isActiveSession(makeSession({ status: 'pending' }))).toBe(true);
+  });
+
+  it('returns false when task is failed even if session status is active', () => {
+    expect(isActiveSession(makeSession({
+      status: 'active',
+      task: { id: 't-1', status: 'failed' },
+    }))).toBe(false);
+  });
+
+  it('returns false when task is completed', () => {
+    expect(isActiveSession(makeSession({
+      status: 'active',
+      task: { id: 't-1', status: 'completed' },
+    }))).toBe(false);
+  });
+
+  it('returns false when task is cancelled', () => {
+    expect(isActiveSession(makeSession({
+      status: 'active',
+      task: { id: 't-1', status: 'cancelled' },
+    }))).toBe(false);
+  });
+
+  it('returns true when task is in_progress', () => {
+    expect(isActiveSession(makeSession({
+      status: 'active',
+      task: { id: 't-1', status: 'in_progress' },
+    }))).toBe(true);
   });
 });
 
