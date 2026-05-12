@@ -18,7 +18,17 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	slog.Info("Agent process exited", "agentType", agentType, "uptime", uptime.Round(time.Millisecond), "exitInfo", exitInfo, "stderrBytes", len(stderrOutput))
 
 	isRapidExit := uptime < 5*time.Second
-	if isRapidExit {
+	h.mu.Lock()
+	if h.process != process {
+		h.mu.Unlock()
+		slog.Info("Agent process monitor: process replaced, skipping status/restart")
+		return
+	}
+	intentionalPromptCancel := h.intentionalPromptCancelProcessStop
+	h.intentionalPromptCancelProcessStop = false
+	h.mu.Unlock()
+
+	if isRapidExit && !intentionalPromptCancel {
 		errMsg := rapidExitMessage(agentType, uptime, exitInfo, stderrOutput)
 		slog.Error("Agent rapid exit", "message", errMsg)
 		h.reportAgentError(agentType, "agent_crash", errMsg, stderrOutput)
@@ -37,7 +47,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 		return
 	}
 
-	if isRapidExit {
+	if isRapidExit && !intentionalPromptCancel {
 		h.clearCurrentAgentSessionLocked()
 		h.status = HostError
 		errMsg := rapidExitMessage(agentType, uptime, exitInfo, stderrOutput)

@@ -13,7 +13,6 @@ import (
 	"path"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -406,7 +405,7 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 		// so the agent process itself can react to the cancellation signal.
 		if g.host.AgentType() == "opencode" {
 			g.host.cancelPrompt(false)
-			g.host.SignalProcess(syscall.SIGTERM)
+			g.host.StopProcessForPromptCancel()
 		} else {
 			g.host.CancelPrompt()
 			g.host.ForwardToAgent(data)
