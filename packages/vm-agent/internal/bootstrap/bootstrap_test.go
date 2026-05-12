@@ -2612,14 +2612,14 @@ func TestGitConfigProcessActive(t *testing.T) {
 		want   bool
 	}{
 		{
-			name: "git config --system running",
+			name:   "git config --system running",
 			output: "COMMAND\n/usr/bin/git config --system credential.helper /usr/local/bin/git-credential-sam\n/bin/sh -c sleep 10\n",
-			want: true,
+			want:   true,
 		},
 		{
-			name: "git-config plumbing binary",
+			name:   "git-config plumbing binary",
 			output: "COMMAND\n/usr/libexec/git-core/git-config --system user.name foo\n",
-			want: true,
+			want:   true,
 		},
 		{
 			name:   "bare git config",
@@ -3235,6 +3235,27 @@ func TestInjectAptMirrorConfig_HetznerProvider(t *testing.T) {
 	// It will fail (no Docker) but should not panic. The key assertion is that it proceeds
 	// past the guards and attempts the docker exec (logged as a warning, not a crash).
 	injectAptMirrorConfig(context.Background(), cfg, "test-container-abc123")
+}
+
+func TestBuildAptMirrorScriptValidatesAndRestoresSources(t *testing.T) {
+	t.Parallel()
+
+	script := buildAptMirrorScript("mirror.hetzner.com")
+
+	required := []string{
+		"cp /etc/apt/sources.list",
+		"cp /etc/apt/sources.list.d/ubuntu.sources",
+		"apt-get update",
+		"Dir::State::Lists",
+		"restore",
+		"cat \"$log\"",
+		"http://mirror.hetzner.com",
+	}
+	for _, want := range required {
+		if !strings.Contains(script, want) {
+			t.Fatalf("expected apt mirror script to contain %q", want)
+		}
+	}
 }
 
 func TestResolveAptMirror(t *testing.T) {

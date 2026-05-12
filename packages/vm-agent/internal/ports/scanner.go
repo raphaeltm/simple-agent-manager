@@ -45,6 +45,11 @@ const (
 	DefaultEphemeralMin = 32768
 )
 
+var (
+	readProcNetTCPFunc  = readProcNetTCP
+	readSSListeningFunc = readSSListening
+)
+
 // Scanner polls /proc/net/tcp inside a container to detect listening ports.
 type Scanner struct {
 	cfg                 ScannerConfig
@@ -144,62 +149,16 @@ func (s *Scanner) scan() {
 	s.mu.RUnlock()
 
 	if containerID == "" {
-		// Attempt lazy resolution if a resolver is configured.
-		if s.cfg.ContainerResolver != nil {
-			if id, err := s.cfg.ContainerResolver(); err == nil && id != "" {
-				s.SetContainerID(id)
-				containerID = id
-				s.containerResolved = true
-				s.consecutiveFailures = 0
-				slog.Info("Port scanner: resolved container ID lazily",
-					"workspaceId", s.cfg.WorkspaceID, "containerID", id)
-				// Emit event so the UI knows the scanner is now active.
-				if s.cfg.EventEmitter != nil {
-					s.cfg.EventEmitter("port.scanner_ready",
-						"Port scanner: container discovered, scanning for open ports",
-						map[string]interface{}{
-							"containerID": id,
-						})
-				}
-			} else {
-				s.consecutiveFailures++
-				// Log at WARN level so these are visible in node logs.
-				// First failure gets INFO, subsequent get WARN with failure count.
-				if s.consecutiveFailures == 1 {
-					slog.Info("Port scanner: container not yet available, will retry",
-						"workspaceId", s.cfg.WorkspaceID, "error", err)
-				} else {
-					slog.Warn("Port scanner: container still not available",
-						"workspaceId", s.cfg.WorkspaceID,
-						"consecutiveFailures", s.consecutiveFailures,
-						"error", err)
-				}
-				// Emit node event every 6 failures (~30s at 5s interval) so the UI
-				// shows diagnostics without flooding events.
-				if s.consecutiveFailures%6 == 0 && s.cfg.EventEmitter != nil {
-					s.cfg.EventEmitter("port.scanner_waiting",
-						fmt.Sprintf("Port scanner: waiting for container (attempt %d)", s.consecutiveFailures),
-						map[string]interface{}{
-							"consecutiveFailures": s.consecutiveFailures,
-							"error":               fmt.Sprintf("%v", err),
-						})
-				}
-				return
-			}
-		} else {
+		var ok bool
+		containerID, ok = s.resolveContainer("lazy")
+		if !ok {
 			return
 		}
 	}
 
-	content, err := readProcNetTCP(containerID)
+	content, err := readProcNetTCPFunc(containerID)
 	if err != nil {
-		s.consecutiveFailures++
-		// Log scan failures at WARN level so they're visible.
-		slog.Warn("Port scan failed",
-			"workspaceId", s.cfg.WorkspaceID,
-			"containerID", containerID,
-			"consecutiveFailures", s.consecutiveFailures,
-			"error", err)
+		s.handleScanFailure(containerID, err)
 		return
 	}
 
@@ -220,7 +179,7 @@ func (s *Scanner) scan() {
 	// which is more reliable in some container runtimes (e.g., devcontainers
 	// where /proc may not reflect the container's full network namespace).
 	if len(listening) == 0 {
-		if ssEntries, ssErr := readSSListening(containerID); ssErr == nil && len(ssEntries) > 0 {
+		if ssEntries, ssErr := readSSListeningFunc(containerID); ssErr == nil && len(ssEntries) > 0 {
 			listening = FilterListening(ssEntries, s.cfg.ExcludePorts, s.cfg.EphemeralMin)
 			if len(listening) > 0 {
 				slog.Info("Port scanner: detected ports via ss fallback",
@@ -297,6 +256,106 @@ func (s *Scanner) scan() {
 	// Emit events outside the lock to prevent deadlocks
 	for _, e := range events {
 		s.cfg.EventEmitter(e.eventType, e.message, e.detail)
+	}
+}
+
+func (s *Scanner) resolveContainer(reason string) (string, bool) {
+	return s.resolveContainerReplacing(reason, "")
+}
+
+func (s *Scanner) resolveContainerReplacing(reason, previousOverride string) (string, bool) {
+	if s.cfg.ContainerResolver == nil {
+		return "", false
+	}
+
+	id, err := s.cfg.ContainerResolver()
+	if err != nil || id == "" {
+		s.recordResolutionFailure(err)
+		return "", false
+	}
+
+	s.mu.Lock()
+	previous := s.containerID
+	s.containerID = id
+	s.mu.Unlock()
+	if previousOverride != "" {
+		previous = previousOverride
+	}
+
+	wasResolved := s.containerResolved
+	s.containerResolved = true
+	s.consecutiveFailures = 0
+
+	slog.Info("Port scanner: resolved container ID",
+		"workspaceId", s.cfg.WorkspaceID,
+		"containerID", id,
+		"previousContainerID", previous,
+		"reason", reason)
+
+	if s.cfg.EventEmitter != nil {
+		if previous != "" && previous != id {
+			s.cfg.EventEmitter("port.scanner_container_changed",
+				"Port scanner: container changed, refreshing open port detection",
+				map[string]interface{}{
+					"previousContainerID": previous,
+					"containerID":         id,
+					"reason":              reason,
+				})
+		} else if !wasResolved {
+			s.cfg.EventEmitter("port.scanner_ready",
+				"Port scanner: container discovered, scanning for open ports",
+				map[string]interface{}{
+					"containerID": id,
+				})
+		}
+	}
+
+	return id, true
+}
+
+func (s *Scanner) recordResolutionFailure(err error) {
+	s.consecutiveFailures++
+	if s.consecutiveFailures == 1 {
+		slog.Info("Port scanner: container not yet available, will retry",
+			"workspaceId", s.cfg.WorkspaceID, "error", err)
+	} else {
+		slog.Warn("Port scanner: container still not available",
+			"workspaceId", s.cfg.WorkspaceID,
+			"consecutiveFailures", s.consecutiveFailures,
+			"error", err)
+	}
+	if s.consecutiveFailures%6 == 0 && s.cfg.EventEmitter != nil {
+		s.cfg.EventEmitter("port.scanner_waiting",
+			fmt.Sprintf("Port scanner: waiting for container (attempt %d)", s.consecutiveFailures),
+			map[string]interface{}{
+				"consecutiveFailures": s.consecutiveFailures,
+				"error":               fmt.Sprintf("%v", err),
+			})
+	}
+}
+
+func (s *Scanner) handleScanFailure(containerID string, err error) {
+	s.consecutiveFailures++
+	slog.Warn("Port scan failed",
+		"workspaceId", s.cfg.WorkspaceID,
+		"containerID", containerID,
+		"consecutiveFailures", s.consecutiveFailures,
+		"error", err)
+
+	if s.cfg.ContainerResolver == nil {
+		return
+	}
+
+	s.mu.Lock()
+	if s.containerID == containerID {
+		s.containerID = ""
+	}
+	s.mu.Unlock()
+
+	if _, ok := s.resolveContainerReplacing("scan-failure", containerID); !ok {
+		slog.Warn("Port scanner: cleared stale container ID after scan failure",
+			"workspaceId", s.cfg.WorkspaceID,
+			"previousContainerID", containerID)
 	}
 }
 

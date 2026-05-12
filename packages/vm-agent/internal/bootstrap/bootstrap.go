@@ -1048,19 +1048,37 @@ func injectAptMirrorConfig(ctx context.Context, cfg *config.Config, containerID 
 
 	// Uses exec.Command with containerID as a direct argument (not shell-interpolated)
 	// to prevent any injection via containerID.
-	innerScript := fmt.Sprintf(
-		`{ [ -f /etc/apt/sources.list ] && sed -i 's|http://archive.ubuntu.com|http://%[1]s|g; s|http://security.ubuntu.com|http://%[1]s|g' /etc/apt/sources.list || true; } && `+
-			`{ [ -f /etc/apt/sources.list.d/ubuntu.sources ] && sed -i 's|http://archive.ubuntu.com|http://%[1]s|g; s|http://security.ubuntu.com|http://%[1]s|g' /etc/apt/sources.list.d/ubuntu.sources || true; }`,
-		mirror,
-	)
-
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", innerScript)
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", buildAptMirrorScript(mirror))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Warn("Failed to inject apt mirror config into container (non-fatal)", "error", err, "output", strings.TrimSpace(string(output)), "provider", cfg.Provider)
 		return
 	}
 	slog.Info("Injected apt mirror config into container", "provider", cfg.Provider, "containerID", containerID, "mirror", mirror)
+}
+
+func buildAptMirrorScript(mirror string) string {
+	return fmt.Sprintf(`set -eu
+tmp="$(mktemp -d /tmp/sam-apt-mirror.XXXXXX)"
+log="$tmp/apt-update.log"
+lists="$tmp/lists"
+cache="$tmp/cache"
+mkdir -p "$lists/partial" "$cache/partial"
+restore() {
+  [ -f "$tmp/sources.list" ] && cp "$tmp/sources.list" /etc/apt/sources.list || true
+  [ -f "$tmp/ubuntu.sources" ] && cp "$tmp/ubuntu.sources" /etc/apt/sources.list.d/ubuntu.sources || true
+}
+[ -f /etc/apt/sources.list ] && cp /etc/apt/sources.list "$tmp/sources.list" || true
+[ -f /etc/apt/sources.list.d/ubuntu.sources ] && cp /etc/apt/sources.list.d/ubuntu.sources "$tmp/ubuntu.sources" || true
+[ -f /etc/apt/sources.list ] && sed -i 's|http://archive.ubuntu.com|http://%[1]s|g; s|http://security.ubuntu.com|http://%[1]s|g' /etc/apt/sources.list || true
+[ -f /etc/apt/sources.list.d/ubuntu.sources ] && sed -i 's|http://archive.ubuntu.com|http://%[1]s|g; s|http://security.ubuntu.com|http://%[1]s|g' /etc/apt/sources.list.d/ubuntu.sources || true
+if ! apt-get update -o Dir::State::Lists="$lists" -o Dir::Cache::Archives="$cache" >"$log" 2>&1; then
+  restore
+  cat "$log"
+  rm -rf "$tmp"
+  exit 1
+fi
+rm -rf "$tmp"`, mirror)
 }
 
 // resolveAptMirror returns the apt mirror hostname for the given cloud provider.

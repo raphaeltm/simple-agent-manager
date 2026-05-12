@@ -48,9 +48,9 @@ func stubCollectorStatFSFail() *sysinfo.Collector {
 // TestBuildTimeoutDiagnostics_AllThreeConstraints verifies that when CPU, memory, and disk
 // are all saturated, the message lists all three joined by " and ".
 func TestBuildTimeoutDiagnostics_AllThreeConstraints(t *testing.T) {
-	// CPU load 12.0 on any machine — cpuPerCore will exceed 2.0.
+	// Use a load that guarantees cpuPerCore > 2.0 on any machine.
 	// Memory 95% (>90 threshold). Disk 91% (>90 threshold).
-	s := newTestServerWithCollector(stubCollector(12.0, 95, 91))
+	s := newTestServerWithCollector(stubCollector(float64(runtime.NumCPU())*3.0, 95, 91))
 
 	msg, diag := s.buildTimeoutDiagnostics(context.DeadlineExceeded)
 

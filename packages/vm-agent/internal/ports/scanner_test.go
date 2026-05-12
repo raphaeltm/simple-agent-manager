@@ -85,6 +85,19 @@ func TestScanner_NoResolverEmptyContainerSkipsScan(t *testing.T) {
 }
 
 func TestScanner_ResolverNotCalledWhenContainerIDSet(t *testing.T) {
+	oldReadProc := readProcNetTCPFunc
+	oldReadSS := readSSListeningFunc
+	readProcNetTCPFunc = func(string) (string, error) {
+		return "  sl  local_address rem_address   st\n", nil
+	}
+	readSSListeningFunc = func(string) ([]TCPEntry, error) {
+		return nil, nil
+	}
+	defer func() {
+		readProcNetTCPFunc = oldReadProc
+		readSSListeningFunc = oldReadSS
+	}()
+
 	// When containerID is already set, the resolver should never be called.
 	var resolverCalled atomic.Int32
 	resolver := func() (string, error) {
@@ -108,6 +121,61 @@ func TestScanner_ResolverNotCalledWhenContainerIDSet(t *testing.T) {
 
 	if resolverCalled.Load() != 0 {
 		t.Error("resolver should not be called when containerID is already set")
+	}
+}
+
+func TestScanner_RefreshesContainerIDAfterScanFailure(t *testing.T) {
+	oldReadProc := readProcNetTCPFunc
+	readProcNetTCPFunc = func(containerID string) (string, error) {
+		if containerID == "stale-container" {
+			return "", fmt.Errorf("docker exec cat /proc/net/tcp: No such container")
+		}
+		return "  sl  local_address rem_address   st\n", nil
+	}
+	defer func() {
+		readProcNetTCPFunc = oldReadProc
+	}()
+
+	var resolverCalled atomic.Int32
+	var events []string
+	scanner := NewScanner(ScannerConfig{
+		Enabled:      true,
+		ExcludePorts: map[int]bool{},
+		EphemeralMin: 32768,
+		WorkspaceID:  "ws-test",
+		ContainerID:  "stale-container",
+		ContainerResolver: func() (string, error) {
+			resolverCalled.Add(1)
+			return "fresh-container", nil
+		},
+		EventEmitter: func(eventType, _ string, _ map[string]interface{}) {
+			events = append(events, eventType)
+		},
+	})
+
+	scanner.scan()
+
+	scanner.mu.RLock()
+	cid := scanner.containerID
+	scanner.mu.RUnlock()
+	if cid != "fresh-container" {
+		t.Fatalf("expected containerID to refresh to fresh-container, got %q", cid)
+	}
+	if resolverCalled.Load() != 1 {
+		t.Fatalf("expected resolver to be called once, got %d", resolverCalled.Load())
+	}
+	if scanner.consecutiveFailures != 0 {
+		t.Fatalf("expected consecutiveFailures to reset after refresh, got %d", scanner.consecutiveFailures)
+	}
+	found := false
+	for _, event := range events {
+		if event == "port.scanner_container_changed" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected port.scanner_container_changed event")
 	}
 }
 

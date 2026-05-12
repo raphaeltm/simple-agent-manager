@@ -41,16 +41,24 @@ Some related work landed in PR #966 and PR #968, but the VM-agent resilience gap
 
 ## Implementation Checklist
 
-- [ ] Add container discovery validation so cached container IDs are verified as still running before reuse.
-- [ ] Make multiple matching devcontainer selection deterministic, preferring the newest running container rather than Docker output order.
-- [ ] Ensure bridge IP cache is invalidated when the cached container changes or disappears.
-- [ ] Make the port scanner clear stale container IDs and re-resolve after container-not-found or stale-container scan failures.
-- [ ] Emit useful scanner diagnostics/events when a stale container ID is replaced.
-- [ ] Update port scanner tests to cover stale container recovery without weakening healthy-container behavior.
-- [ ] Add container discovery tests for cached ID validation, stale ID invalidation, and deterministic newest-container selection.
-- [ ] Harden apt mirror injection so an invalid/unavailable provider mirror does not leave containers with broken apt sources.
-- [ ] Add bootstrap tests for Hetzner mirror validation/fallback behavior.
-- [ ] Decide whether root password expiration and cloud-init schema warnings are actionable in this PR; if not, create/record follow-up backlog tasks.
+- [x] Add container discovery validation so cached container IDs are verified as still running before reuse.
+- [x] Make multiple matching devcontainer selection deterministic, preferring the newest running container rather than Docker output order.
+- [x] Ensure bridge IP cache is invalidated when the cached container changes or disappears.
+- [x] Make the port scanner clear stale container IDs and re-resolve after container-not-found or stale-container scan failures.
+- [x] Emit useful scanner diagnostics/events when a stale container ID is replaced.
+- [x] Update port scanner tests to cover stale container recovery without weakening healthy-container behavior.
+- [x] Add container discovery tests for cached ID validation, stale ID invalidation, and deterministic newest-container selection.
+- [x] Harden apt mirror injection so an invalid/unavailable provider mirror does not leave containers with broken apt sources.
+- [x] Add bootstrap tests for Hetzner mirror validation/fallback behavior.
+- [x] Decide whether root password expiration and cloud-init schema warnings are actionable in this PR; if not, create/record follow-up backlog tasks.
+
+## Implementation Notes
+
+- Container discovery now validates cached container IDs with Docker before returning them, clears stale IDs, and chooses the newest matching running container by parsed creation time.
+- Bridge IP cache entries are scoped to the container ID they were resolved from, so fallback containers cannot inherit stale network metadata.
+- Port scanning now treats scan failures as possible stale-container signals, clears the cached ID, re-runs the configured resolver, and emits `port.scanner_container_changed` when a replacement is found.
+- Provider apt mirror injection now backs up source files, rewrites them, validates the mirror through `apt-get update` using temporary list/cache directories, and restores the original sources if validation fails.
+- Root password expiration and cloud-init schema warnings are not directly actionable in this PR: no repo-controlled `chpasswd`/root password template was found, and the existing active task `tasks/active/2026-05-12-vm-agent-cloud-init-firewall-hygiene.md` already records the remaining cloud-init/firewall hygiene track.
 
 ## Acceptance Criteria
 
