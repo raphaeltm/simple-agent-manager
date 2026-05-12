@@ -16,6 +16,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../src/middleware/error';
+import { verifyCallbackToken } from '../../src/services/jwt';
 
 // Mock better-auth before any route imports
 vi.mock('../../src/auth', () => ({
@@ -59,7 +60,7 @@ vi.mock('drizzle-orm/d1', () => ({
   }),
 }));
 
-// Mock JWT verification to accept any token (workspace-scoped)
+// Mock JWT verification to accept any token (workspace-scoped) by default
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn().mockResolvedValue('mock-token'),
@@ -245,5 +246,65 @@ describe('task callback auth routing (regression)', () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.message).toBe('Authentication required');
+  });
+
+  // =========================================================================
+  // Callback's own auth gate: invalid Bearer token and workspace mismatch
+  // =========================================================================
+
+  it('POST callback with invalid Bearer token is handled by callback auth (not session auth)', async () => {
+    // Override verifyCallbackToken to reject (simulating invalid JWT).
+    // Use mockRejectedValue (not Once) to ensure it persists for this test's request.
+    vi.mocked(verifyCallbackToken).mockRejectedValue(new AppError('Invalid callback token', 401));
+
+    const res = await app.request(
+      '/api/projects/proj-test/tasks/task-test/status/callback',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer bad-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ toStatus: 'completed' }),
+      },
+      // Provide env bindings so c.env.DATABASE doesn't throw
+      { DATABASE: {}, SESSIONS: {}, PROJECT_DATA: { idFromName: vi.fn() } },
+    );
+
+    // Key invariant: the error is NOT "Authentication required" from session auth.
+    // The callback route's own JWT verification handles the invalid token.
+    const body = await res.json();
+    expect(body.message).not.toBe('Authentication required');
+
+    // Restore default mock for other tests
+    vi.mocked(verifyCallbackToken).mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' });
+  });
+
+  it('POST callback with workspace mismatch returns 403', async () => {
+    // Token claims workspace 'ws-other' but the task is linked to 'ws-test'
+    vi.mocked(verifyCallbackToken).mockResolvedValueOnce({
+      workspace: 'ws-other',
+      type: 'callback',
+      scope: 'workspace',
+    });
+
+    const res = await app.request(
+      '/api/projects/proj-test/tasks/task-test/status/callback',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer valid-but-wrong-workspace',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ toStatus: 'completed' }),
+      },
+      // Provide env bindings so c.env.DATABASE doesn't throw
+      { DATABASE: {}, SESSIONS: {}, PROJECT_DATA: { idFromName: vi.fn() } },
+    );
+
+    // The workspace mismatch check in callback.ts throws errors.forbidden()
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.message).toBe('Token workspace mismatch');
   });
 });

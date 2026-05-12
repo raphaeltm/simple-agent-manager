@@ -74,6 +74,20 @@ describe('MCP Token Sliding Window', () => {
       expect(mockKV.put).not.toHaveBeenCalled();
     });
 
+    it('does NOT refresh KV when exactly 50% of TTL has elapsed (threshold is strictly >)', async () => {
+      const { validateMcpToken } = await import('../../../src/services/mcp-token');
+      const now = new Date('2026-05-12T12:00:00Z');
+      const data = makeTokenData({ createdAt: now.toISOString() });
+      mockKV.get.mockResolvedValue(data);
+
+      // Advance exactly 4 hours (50% of 8h TTL — boundary, should NOT refresh because > not >=)
+      vi.setSystemTime(new Date('2026-05-12T16:00:00Z'));
+
+      const result = await validateMcpToken(kv, 'test-token');
+      expect(result).toEqual(data);
+      expect(mockKV.put).not.toHaveBeenCalled();
+    });
+
     it('refreshes KV when more than 50% of TTL has elapsed', async () => {
       const { validateMcpToken } = await import('../../../src/services/mcp-token');
       const createdAt = new Date('2026-05-12T12:00:00Z');
