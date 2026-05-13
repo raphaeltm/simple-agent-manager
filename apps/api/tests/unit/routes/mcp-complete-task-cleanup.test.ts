@@ -228,6 +228,32 @@ describe('complete_task cleanup behavior', () => {
     expect(cleanupTaskRunSpy).not.toHaveBeenCalled();
   });
 
+  it('task-mode complete_task skips stopSession when workspace has no chatSessionId', async () => {
+    mockD1._stmt.first.mockResolvedValueOnce({
+      task_mode: 'task',
+      user_id: 'user-789',
+      title: 'Fix bug',
+      output_pr_url: null,
+      output_branch: null,
+      mission_id: null,
+    });
+    mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+    // Workspace exists but has no linked chat session
+    mockD1._stmt.raw.mockResolvedValueOnce([[null]]);
+
+    const env = createMockEnv(mockD1);
+    const ctx = createMockExecutionCtx();
+
+    await handleCompleteTask(1, { summary: 'Done' }, tokenData, env, ctx);
+    await Promise.allSettled(ctx._promises);
+
+    // stopSession should NOT be called when chatSessionId is null
+    expect(stopSessionSpy).not.toHaveBeenCalled();
+
+    // cleanupTaskRun should still run
+    expect(cleanupTaskRunSpy).toHaveBeenCalledWith('task-123', env);
+  });
+
   it('task-mode complete_task still runs cleanupTaskRun when stopSession fails', async () => {
     mockD1._stmt.first.mockResolvedValueOnce({
       task_mode: 'task',
