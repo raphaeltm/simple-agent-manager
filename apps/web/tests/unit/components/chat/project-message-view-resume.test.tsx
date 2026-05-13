@@ -73,6 +73,7 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
   RawFallbackView: () => null,
   mapToolCallContent: vi.fn(),
   TypewriterText: ({ text }: { text: string }) => text,
+  UserMessageFade: ({ text }: { text: string }) => text,
 }));
 
 // Mock react-virtuoso

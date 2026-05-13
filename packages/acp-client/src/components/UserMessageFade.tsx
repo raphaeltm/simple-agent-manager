@@ -1,5 +1,5 @@
-import { memo, useMemo } from 'react';
 import type { ReactNode } from 'react';
+import { memo, useMemo } from 'react';
 
 export interface UserMessageFadeProps {
   /** Plain text content of the user message. */
