@@ -421,6 +421,86 @@ describe('Task Reconciliation Module', () => {
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
       expect(processed).toBe(0);
     });
+
+    it('calls sendPromptToAgentOnNode with correct parameters', async () => {
+      const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      setupTaskSession();
+      const mockDb = createMockD1(
+        { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+      );
+      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const broadcastEvent = vi.fn();
+
+      await processReconciliationCandidates(sql, env, broadcastEvent);
+
+      expect(vi.mocked(sendPromptToAgentOnNode)).toHaveBeenCalledWith(
+        'node-1',
+        'ws-1',
+        'acp-1',
+        expect.stringContaining('SAM Orchestrator Check-In'),
+        expect.anything(),
+        'user-1',
+      );
+    });
+
+    it('still creates marker and message when agent send fails', async () => {
+      const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      vi.mocked(sendPromptToAgentOnNode).mockRejectedValueOnce(new Error('network error'));
+
+      setupTaskSession();
+      const mockDb = createMockD1(
+        { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+      );
+      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const broadcastEvent = vi.fn();
+
+      const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
+      expect(processed).toBe(1);
+
+      // Message and marker should still exist despite send failure
+      const messages = db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1');
+      expect(messages).toHaveLength(1);
+
+      const markers = db.prepare(
+        `SELECT * FROM session_attention_markers WHERE session_id = ? AND kind = 'reconciliation_checkin'`,
+      ).all('session-1');
+      expect(markers).toHaveLength(1);
+    });
+
+    it('processes multiple concurrent candidates independently', async () => {
+      // Set up two idle task-mode sessions
+      setupTaskSession({ sessionId: 'session-1', workspaceId: 'ws-1', taskId: 'task-1', acpSessionId: 'acp-1' });
+      setupTaskSession({ sessionId: 'session-2', workspaceId: 'ws-2', taskId: 'task-2', acpSessionId: 'acp-2' });
+
+      const mockDb = createMockD1(
+        {
+          'task-1': { task_mode: 'task', status: 'in_progress' },
+          'task-2': { task_mode: 'task', status: 'in_progress' },
+        },
+        {
+          'ws-1': { node_id: 'node-1', user_id: 'user-1' },
+          'ws-2': { node_id: 'node-2', user_id: 'user-2' },
+        },
+      );
+      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const broadcastEvent = vi.fn();
+
+      const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
+      expect(processed).toBe(2);
+
+      // Each session should have its own message and marker
+      const msgs1 = db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1');
+      const msgs2 = db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-2');
+      expect(msgs1).toHaveLength(1);
+      expect(msgs2).toHaveLength(1);
+
+      const markers = db.prepare(
+        `SELECT * FROM session_attention_markers WHERE kind = 'reconciliation_checkin' AND resolved_at IS NULL`,
+      ).all();
+      expect(markers).toHaveLength(2);
+    });
   });
 
   describe('computeReconciliationAlarmTime', () => {
