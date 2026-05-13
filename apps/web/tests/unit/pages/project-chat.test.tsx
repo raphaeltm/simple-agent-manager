@@ -416,6 +416,37 @@ describe('ProjectChat new chat button', () => {
       }));
     });
   });
+
+  it('clears pending derived state when New Chat is clicked', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [SESSION_WITH_TASK],
+      total: 1,
+    });
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_WITH_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toHaveTextContent(SESSION_WITH_TASK.id);
+    });
+
+    // Click fork to set pending derived state
+    fireEvent.click(screen.getByLabelText('Fork session'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Forking from: Fix the login bug')).toBeInTheDocument();
+    });
+
+    // Click New Chat — should clear the banner
+    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Forking from: Fix the login bug')).not.toBeInTheDocument();
+  });
 });
 
 describe('ProjectChat voice input', () => {

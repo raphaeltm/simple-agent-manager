@@ -62,7 +62,7 @@ export function DerivedSessionBanner({
         type="button"
         onClick={onDismiss}
         aria-label="Cancel fork/retry"
-        className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary rounded-sm transition-colors"
+        className="shrink-0 p-2 -m-1 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary rounded-sm transition-colors"
       >
         <X size={14} />
       </button>

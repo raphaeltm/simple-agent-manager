@@ -48,24 +48,24 @@ The current popup approach is frustrating because:
 
 ## Implementation Checklist
 
-- [ ] Add `pendingDerived` state type and state to `useProjectChatState.ts`
-- [ ] Modify fork/retry handlers to populate `pendingDerived`, pre-fill message, and navigate to new chat screen
-- [ ] Load context summary in background when `pendingDerived` is set (for fork, auto-generate summary; for retry, fetch original task description)
-- [ ] Modify `handleSubmit` to include `parentTaskId` and `contextSummary` from `pendingDerived`
-- [ ] Create `DerivedSessionBanner` component to show fork/retry lineage context above the ChatInput settings
-- [ ] Render `DerivedSessionBanner` in `index.tsx` when `pendingDerived` is set and `showNewChatInput` is true
-- [ ] Remove `ForkDialog` and `RetryDialog` imports and usage from `index.tsx`
-- [ ] Delete `ForkDialog.tsx` and `RetryDialog.tsx` files
-- [ ] Run Playwright visual audit with mock data on mobile and desktop viewports
-- [ ] Add/update tests for the new flow
+- [x] Add `pendingDerived` state type and state to `useProjectChatState.ts`
+- [x] Modify fork/retry handlers to populate `pendingDerived`, pre-fill message, and navigate to new chat screen
+- [x] Load context summary in background when `pendingDerived` is set (for fork, auto-generate summary; for retry, fetch original task description)
+- [x] Modify `handleSubmit` to include `parentTaskId` and `contextSummary` from `pendingDerived`
+- [x] Create `DerivedSessionBanner` component to show fork/retry lineage context above the ChatInput settings
+- [x] Render `DerivedSessionBanner` in `index.tsx` when `pendingDerived` is set and `showNewChatInput` is true
+- [x] Remove `ForkDialog` and `RetryDialog` imports and usage from `index.tsx`
+- [x] Delete `ForkDialog.tsx` and `RetryDialog.tsx` files
+- [x] Run Playwright visual audit with mock data on mobile and desktop viewports
+- [x] Add/update tests for the new flow
 
 ## Acceptance Criteria
 
-- [ ] Clicking retry in session header navigates to new chat screen with message pre-filled
-- [ ] Clicking fork in session header navigates to new chat screen with fork template pre-filled
-- [ ] A banner above the settings indicates whether this is a fork or retry, with parent session info
-- [ ] All chat settings (agent type, workspace profile, task mode, devcontainer config) are modifiable
-- [ ] Submitting sends the task with `parentTaskId` and `contextSummary` (same API contract as before)
-- [ ] Clicking "New Chat" while a derived session is pending clears the pending state
-- [ ] ForkDialog and RetryDialog are removed from the codebase
-- [ ] No regressions in normal new chat flow
+- [x] Clicking retry in session header navigates to new chat screen with message pre-filled
+- [x] Clicking fork in session header navigates to new chat screen with fork template pre-filled
+- [x] A banner above the settings indicates whether this is a fork or retry, with parent session info
+- [x] All chat settings (agent type, workspace profile, task mode, devcontainer config) are modifiable
+- [x] Submitting sends the task with `parentTaskId` and `contextSummary` (same API contract as before)
+- [x] Clicking "New Chat" while a derived session is pending clears the pending state
+- [x] ForkDialog and RetryDialog are removed from the codebase
+- [x] No regressions in normal new chat flow
