@@ -42,6 +42,12 @@ export const DEFAULT_SAM_SEARCH_MAX_LIMIT = 50;
 /** Maximum messages loaded on page mount (history). */
 export const DEFAULT_SAM_HISTORY_LOAD_LIMIT = 200;
 
+/** Max bytes for a single tool result in the LLM context (16KB). */
+export const DEFAULT_SAM_MAX_TOOL_RESULT_BYTES = 16_384;
+
+/** Max total request body bytes before trimming older messages (8MB). */
+export const DEFAULT_SAM_MAX_REQUEST_BODY_BYTES = 8_388_608;
+
 /** Anthropic API version header. */
 export const SAM_ANTHROPIC_VERSION = '2023-06-01';
 
@@ -61,6 +67,8 @@ export interface SamConfig {
   searchLimit: number;
   searchMaxLimit: number;
   historyLoadLimit: number;
+  maxToolResultBytes: number;
+  maxRequestBodyBytes: number;
 }
 
 export function resolveSamConfig(env: Record<string, string | undefined>): SamConfig {
@@ -79,5 +87,7 @@ export function resolveSamConfig(env: Record<string, string | undefined>): SamCo
     searchLimit: parseInt(env.SAM_SEARCH_LIMIT || '', 10) || DEFAULT_SAM_SEARCH_LIMIT,
     searchMaxLimit: parseInt(env.SAM_SEARCH_MAX_LIMIT || '', 10) || DEFAULT_SAM_SEARCH_MAX_LIMIT,
     historyLoadLimit: parseInt(env.SAM_HISTORY_LOAD_LIMIT || '', 10) || DEFAULT_SAM_HISTORY_LOAD_LIMIT,
+    maxToolResultBytes: parseInt(env.SAM_MAX_TOOL_RESULT_BYTES || '', 10) || DEFAULT_SAM_MAX_TOOL_RESULT_BYTES,
+    maxRequestBodyBytes: parseInt(env.SAM_MAX_REQUEST_BODY_BYTES || '', 10) || DEFAULT_SAM_MAX_REQUEST_BODY_BYTES,
   };
 }
