@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+
 import { usePrefersReducedMotion } from './usePrefersReducedMotion';
 
 export interface UseStreamingRevealOptions {

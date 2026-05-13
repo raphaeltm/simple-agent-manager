@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { memo, useMemo } from 'react';
+
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 
 export interface UserMessageFadeProps {
