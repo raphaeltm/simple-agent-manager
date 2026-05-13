@@ -298,10 +298,42 @@ jobs:
             fi
           }
 
+          # Remove old v5-typed WorkerRoute if it still exists in state (v6 uses WorkersRoute)
+          OLD_WORKER_ROUTE_URN="urn:pulumi:${STACK}::sam-infra::cloudflare:index/workerRoute:WorkerRoute::${PREFIX}-route-vm-exclusion"
+          if pulumi stack export 2>/dev/null | jq -e ".deployment.resources[] | select(.urn == \"${OLD_WORKER_ROUTE_URN}\")" > /dev/null 2>&1; then
+            echo "Removing old v5 WorkerRoute from state..."
+            pulumi state delete "${OLD_WORKER_ROUTE_URN}" --yes 2>&1 || echo "  Failed to remove (continuing)"
+            echo "- Old v5 WorkerRoute removed from state" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Remove old v5 provider if it exists
+          OLD_PROVIDER_URN="urn:pulumi:${STACK}::sam-infra::pulumi:providers:cloudflare::default_5_49_1"
+          if pulumi stack export 2>/dev/null | jq -e ".deployment.resources[] | select(.urn == \"${OLD_PROVIDER_URN}\")" > /dev/null 2>&1; then
+            echo "Removing old v5 provider from state..."
+            pulumi state delete "${OLD_PROVIDER_URN}" --yes --force 2>&1 || echo "  Failed to remove (continuing)"
+            echo "- Old v5 provider removed from state" >> $GITHUB_STEP_SUMMARY
+          fi
+
           # Cloudflare v6 import IDs use format: <account_id>/<resource_id> or <zone_id>/<resource_id>
           import_resource "cloudflare:index/d1Database:D1Database" "${PREFIX}-database" "${CF_ACCOUNT_ID}/${MAIN_DB_ID}"
           import_resource "cloudflare:index/d1Database:D1Database" "${PREFIX}-observability" "${CF_ACCOUNT_ID}/${OBS_DB_ID}"
           import_resource "cloudflare:index/workersRoute:WorkersRoute" "${PREFIX}-route-vm-exclusion" "${CF_ZONE_ID}/${VM_ROUTE_ID}"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: "Refresh after import"
+        if: inputs.action == 'import-and-up' && inputs.dry_run == false
+        working-directory: infra
+        run: |
+          echo "## Pulumi Refresh (post-import)" >> $GITHUB_STEP_SUMMARY
+          echo "Syncing imported state with Cloudflare reality..." >> $GITHUB_STEP_SUMMARY
+          pulumi refresh --yes 2>&1 | tee /tmp/refresh-output.txt
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -30 /tmp/refresh-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
