@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 // reportAgentError sends an agent error to boot-log and error reporter.
@@ -155,4 +157,48 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 		"workspaceId", h.config.WorkspaceID,
 		"agentType", agentType)
 	return &result
+}
+
+// reportActivity sends an ephemeral activity signal to the control plane.
+// Fire-and-forget: runs in a goroutine, no retry on failure.
+// activity should be "prompting" or "idle".
+func (h *SessionHost) reportActivity(activity string) {
+	projectID := h.config.ProjectID
+	nodeID := h.config.NodeID
+	controlPlaneURL := h.config.ControlPlaneURL
+	callbackToken := h.config.CallbackToken
+	sessionID := h.config.SessionID
+
+	if projectID == "" || nodeID == "" || controlPlaneURL == "" || sessionID == "" {
+		return
+	}
+
+	go func() {
+		url := strings.TrimRight(controlPlaneURL, "/") +
+			"/api/projects/" + projectID + "/acp-sessions/" + sessionID + "/activity"
+
+		body, err := json.Marshal(map[string]string{
+			"activity": activity,
+			"nodeId":   nodeID,
+		})
+		if err != nil {
+			slog.Warn("reportActivity: marshal failed", "error", err)
+			return
+		}
+
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			slog.Warn("reportActivity: request create failed", "error", err)
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+callbackToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := h.httpClient().Do(req)
+		if err != nil {
+			slog.Debug("reportActivity: request failed", "error", err)
+			return
+		}
+		resp.Body.Close()
+	}()
 }

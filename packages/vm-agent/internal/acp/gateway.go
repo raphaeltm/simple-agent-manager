@@ -111,6 +111,10 @@ type GatewayConfig struct {
 	MaxRestartAttempts int
 	// ControlPlaneURL is the URL for fetching agent API keys.
 	ControlPlaneURL string
+	// ProjectID is the project that owns this workspace (used for activity reporting).
+	ProjectID string
+	// NodeID is the node running this workspace (used for activity reporting).
+	NodeID string
 	// WorkspaceID is the current workspace identifier.
 	WorkspaceID string
 	// SessionID is the agent session identifier (used for persistence).

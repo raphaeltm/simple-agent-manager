@@ -322,6 +322,8 @@ func New(cfg *config.Config) (*Server, error) {
 		LoadSessionTimeoutMs:    cfg.ACPLoadSessionTimeoutMs,
 		MaxRestartAttempts:      cfg.ACPMaxRestartAttempts,
 		ControlPlaneURL:         cfg.ControlPlaneURL,
+		ProjectID:               cfg.ProjectID,
+		NodeID:                  cfg.NodeID,
 		WorkspaceID:             defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID),
 		CallbackToken:           cfg.CallbackToken,
 		ContainerResolver:       containerResolver,

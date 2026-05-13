@@ -193,6 +193,7 @@ func (h *SessionHost) startPromptWatchdog(
 func (h *SessionHost) markPromptStarted(sessionID acpsdk.SessionId, blockCount int, viewerID string) {
 	h.setStatus(HostPrompting, "")
 	h.broadcastControl(MsgSessionPrompting, nil)
+	h.reportActivity("prompting")
 
 	slog.Info("ACP: sending Prompt", "sessionID", string(sessionID), "blockCount", blockCount)
 	h.reportLifecycle("info", "ACP Prompt started", map[string]interface{}{
@@ -205,6 +206,7 @@ func (h *SessionHost) markPromptStarted(sessionID acpsdk.SessionId, blockCount i
 func (h *SessionHost) markPromptDone() {
 	h.setStatus(HostReady, "")
 	h.broadcastControl(MsgSessionPromptDone, nil)
+	h.reportActivity("idle")
 }
 
 func (h *SessionHost) finishPrompt(
