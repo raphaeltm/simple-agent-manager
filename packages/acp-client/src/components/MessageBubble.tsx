@@ -2,8 +2,8 @@ import { Highlight, themes } from 'prism-react-renderer';
 import React, { useMemo } from 'react';
 import type { Components } from 'react-markdown';
 import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
+import { REMARK_PLUGINS } from './markdown-config';
 import { MessageActions } from './MessageActions';
 import { TypewriterText } from './TypewriterText';
 
@@ -24,9 +24,6 @@ interface MessageBubbleProps {
   /** Optional callback when a file path link is clicked. Receives path and optional line number. */
   onFileClick?: (path: string, line?: number | null) => void;
 }
-
-// Stable remark plugins array — avoids creating a new array reference on every render
-const REMARK_PLUGINS = [remarkGfm];
 
 /**
  * Detect whether a markdown link href looks like a file path rather than a URL.

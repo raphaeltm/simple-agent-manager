@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useRef } from 'react';
 import type { Components } from 'react-markdown';
 import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
 import { useStreamingReveal } from '../hooks/useStreamingReveal';
+import { REMARK_PLUGINS } from './markdown-config';
 
 export interface TypewriterTextProps {
   /** The full accumulated text to display. When this grows, new content is animated. */
@@ -20,8 +20,73 @@ export interface TypewriterTextProps {
   markdownComponents?: Components;
 }
 
-// Stable remark plugins array
-const REMARK_PLUGINS = [remarkGfm];
+/** Collect all non-empty text nodes from a container in document order. */
+function collectTextNodes(container: HTMLElement): Text[] {
+  const nodes: Text[] = [];
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let node: Text | null;
+  while ((node = walker.nextNode() as Text | null)) {
+    if (node.textContent && node.textContent.length > 0) {
+      nodes.push(node);
+    }
+  }
+  return nodes;
+}
+
+/** Find the last `charCount` characters across text nodes, walking backwards. */
+function findCharTargets(
+  textNodes: Text[],
+  charCount: number
+): Array<{ node: Text; startIdx: number; count: number }> {
+  let remaining = charCount;
+  const targets: Array<{ node: Text; startIdx: number; count: number }> = [];
+  for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
+    const tn = textNodes[i]!;
+    const len = tn.textContent!.length;
+    const take = Math.min(len, remaining);
+    targets.unshift({ node: tn, startIdx: len - take, count: take });
+    remaining -= take;
+  }
+  return targets;
+}
+
+/** Replace a text node with a fragment containing char-fade spans. */
+function wrapTextNodeChars(
+  textNode: Text,
+  startIdx: number,
+  count: number,
+  baseSpanIndex: number,
+  fadeDurationMs: number,
+  fadeStaggerMs: number
+): number {
+  const parent = textNode.parentNode;
+  if (!parent) return baseSpanIndex;
+
+  const fullText = textNode.textContent!;
+  const frag = document.createDocumentFragment();
+
+  if (startIdx > 0) {
+    frag.appendChild(document.createTextNode(fullText.slice(0, startIdx)));
+  }
+
+  let spanIndex = baseSpanIndex;
+  for (let i = 0; i < count; i++) {
+    const span = document.createElement('span');
+    span.className = 'char-fade';
+    span.style.animationDuration = `${fadeDurationMs}ms`;
+    span.style.animationDelay = `${spanIndex * fadeStaggerMs}ms`;
+    span.textContent = fullText[startIdx + i]!;
+    frag.appendChild(span);
+    spanIndex++;
+  }
+
+  if (startIdx + count < fullText.length) {
+    frag.appendChild(document.createTextNode(fullText.slice(startIdx + count)));
+  }
+
+  parent.replaceChild(frag, textNode);
+  return spanIndex;
+}
 
 /**
  * Walk a DOM subtree and wrap the last `charCount` text characters in
@@ -34,60 +99,11 @@ function applyCharFade(
   fadeStaggerMs: number
 ): void {
   if (charCount <= 0) return;
-
-  // Collect all text nodes in document order
-  const textNodes: Text[] = [];
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  let node: Text | null;
-  while ((node = walker.nextNode() as Text | null)) {
-    if (node.textContent && node.textContent.length > 0) {
-      textNodes.push(node);
-    }
-  }
-
-  // Walk backwards through text nodes to find the last `charCount` characters
-  let remaining = charCount;
-  const targets: Array<{ node: Text; startIdx: number; count: number }> = [];
-
-  for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
-    const tn = textNodes[i]!;
-    const len = tn.textContent!.length;
-    const take = Math.min(len, remaining);
-    targets.unshift({ node: tn, startIdx: len - take, count: take });
-    remaining -= take;
-  }
-
-  // Wrap each character range in spans
+  const textNodes = collectTextNodes(container);
+  const targets = findCharTargets(textNodes, charCount);
   let spanIndex = 0;
-  for (const { node: textNode, startIdx, count } of targets) {
-    const parent = textNode.parentNode;
-    if (!parent) continue;
-
-    const fullText = textNode.textContent!;
-    const frag = document.createDocumentFragment();
-
-    // Text before the animated range
-    if (startIdx > 0) {
-      frag.appendChild(document.createTextNode(fullText.slice(0, startIdx)));
-    }
-
-    // Animated character spans
-    for (let i = 0; i < count; i++) {
-      const span = document.createElement('span');
-      span.className = 'char-fade';
-      span.style.animationDuration = `${fadeDurationMs}ms`;
-      span.style.animationDelay = `${spanIndex * fadeStaggerMs}ms`;
-      span.textContent = fullText[startIdx + i]!;
-      frag.appendChild(span);
-      spanIndex++;
-    }
-
-    // Text after the animated range
-    if (startIdx + count < fullText.length) {
-      frag.appendChild(document.createTextNode(fullText.slice(startIdx + count)));
-    }
-
-    parent.replaceChild(frag, textNode);
+  for (const { node, startIdx, count } of targets) {
+    spanIndex = wrapTextNodeChars(node, startIdx, count, spanIndex, fadeDurationMs, fadeStaggerMs);
   }
 }
 
