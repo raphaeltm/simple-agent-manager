@@ -228,6 +228,17 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       # ---- Import Existing Resources & Apply ----
+      - name: "Cancel stale Pulumi locks"
+        if: inputs.action == 'import-and-up'
+        working-directory: infra
+        run: |
+          echo "Cancelling any stale Pulumi locks..."
+          pulumi cancel --yes 2>&1 || echo "No locks to cancel"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
       - name: "Import existing resources into Pulumi state"
         if: inputs.action == 'import-and-up' && inputs.dry_run == false
         working-directory: infra
