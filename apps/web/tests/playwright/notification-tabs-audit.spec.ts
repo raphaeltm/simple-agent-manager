@@ -196,6 +196,18 @@ async function openNotificationPanel(page: Page) {
   return panel;
 }
 
+async function openPanelWithNotifications(page: Page, notifications: ReturnType<typeof makeNotification>[]) {
+  await setupApiMocks(page, { notifications });
+  await page.goto('/');
+  return openNotificationPanel(page);
+}
+
+async function expectNoPageOverflow(page: Page) {
+  await expect.poll(
+    () => page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+  ).toBe(false);
+}
+
 // ---------------------------------------------------------------------------
 // Mobile tests (default viewport from playwright config)
 // ---------------------------------------------------------------------------
@@ -204,9 +216,7 @@ test.describe('Notification tabs — Mobile', () => {
   test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
   test('normal data — attention tab default', async ({ page }) => {
-    await setupApiMocks(page, { notifications: NORMAL_NOTIFICATIONS });
-    await page.goto('/');
-    const panel = await openNotificationPanel(page);
+    const panel = await openPanelWithNotifications(page, NORMAL_NOTIFICATIONS);
 
     // Attention tab should be active by default — shows needs_input + error only
     await expect(panel.getByText('Agent needs your input on task #42')).toBeVisible();
@@ -217,18 +227,13 @@ test.describe('Notification tabs — Mobile', () => {
     // progress is an update
     await expect(panel.getByText('Working on fixing auth flow')).not.toBeVisible();
 
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth,
-    );
-    expect(overflow).toBe(false);
+    await expectNoPageOverflow(page);
 
     await screenshot(page, 'notif-tabs-attention-mobile');
   });
 
   test('normal data — updates tab', async ({ page }) => {
-    await setupApiMocks(page, { notifications: NORMAL_NOTIFICATIONS });
-    await page.goto('/');
-    const panel = await openNotificationPanel(page);
+    const panel = await openPanelWithNotifications(page, NORMAL_NOTIFICATIONS);
 
     await panel.getByRole('tab', { name: /updates/i }).click();
     await page.waitForTimeout(300);
@@ -240,18 +245,13 @@ test.describe('Notification tabs — Mobile', () => {
     // error is attention, not an update
     await expect(panel.getByText('Build failed: missing dependency')).not.toBeVisible();
 
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth,
-    );
-    expect(overflow).toBe(false);
+    await expectNoPageOverflow(page);
 
     await screenshot(page, 'notif-tabs-updates-mobile');
   });
 
   test('normal data — all tab', async ({ page }) => {
-    await setupApiMocks(page, { notifications: NORMAL_NOTIFICATIONS });
-    await page.goto('/');
-    const panel = await openNotificationPanel(page);
+    const panel = await openPanelWithNotifications(page, NORMAL_NOTIFICATIONS);
 
     await panel.getByRole('tab', { name: /^all$/i }).click();
     await page.waitForTimeout(300);
@@ -264,14 +264,9 @@ test.describe('Notification tabs — Mobile', () => {
   });
 
   test('long text wraps correctly', async ({ page }) => {
-    await setupApiMocks(page, { notifications: LONG_TEXT_NOTIFICATIONS });
-    await page.goto('/');
-    await openNotificationPanel(page);
+    await openPanelWithNotifications(page, LONG_TEXT_NOTIFICATIONS);
 
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth,
-    );
-    expect(overflow).toBe(false);
+    await expectNoPageOverflow(page);
 
     await screenshot(page, 'notif-tabs-long-text-mobile');
   });
@@ -280,9 +275,7 @@ test.describe('Notification tabs — Mobile', () => {
     const updatesOnly = [
       makeNotification({ id: 'e1', type: 'progress', title: 'Working on it' }),
     ];
-    await setupApiMocks(page, { notifications: updatesOnly });
-    await page.goto('/');
-    const panel = await openNotificationPanel(page);
+    const panel = await openPanelWithNotifications(page, updatesOnly);
 
     await expect(panel.getByText(/nothing needs your attention/i)).toBeVisible();
     await expect(panel.getByText(/items needing your input or action appear here/i)).toBeVisible();
@@ -291,9 +284,7 @@ test.describe('Notification tabs — Mobile', () => {
   });
 
   test('empty state — no notifications at all', async ({ page }) => {
-    await setupApiMocks(page, { notifications: [] });
-    await page.goto('/');
-    const panel = await openNotificationPanel(page);
+    const panel = await openPanelWithNotifications(page, []);
 
     await expect(panel.getByText(/nothing needs your attention/i)).toBeVisible();
 
@@ -301,14 +292,9 @@ test.describe('Notification tabs — Mobile', () => {
   });
 
   test('many notifications scrolls correctly', async ({ page }) => {
-    await setupApiMocks(page, { notifications: MANY_NOTIFICATIONS });
-    await page.goto('/');
-    await openNotificationPanel(page);
+    await openPanelWithNotifications(page, MANY_NOTIFICATIONS);
 
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth,
-    );
-    expect(overflow).toBe(false);
+    await expectNoPageOverflow(page);
 
     await screenshot(page, 'notif-tabs-many-mobile');
   });
@@ -322,9 +308,7 @@ test.describe('Notification tabs — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('normal data — attention tab', async ({ page }) => {
-    await setupApiMocks(page, { notifications: NORMAL_NOTIFICATIONS });
-    await page.goto('/');
-    const panel = await openNotificationPanel(page);
+    const panel = await openPanelWithNotifications(page, NORMAL_NOTIFICATIONS);
 
     // Attention tab: needs_input + error
     await expect(panel.getByText('Agent needs your input on task #42')).toBeVisible();
@@ -337,9 +321,7 @@ test.describe('Notification tabs — Desktop', () => {
   });
 
   test('normal data — updates tab', async ({ page }) => {
-    await setupApiMocks(page, { notifications: NORMAL_NOTIFICATIONS });
-    await page.goto('/');
-    const panel = await openNotificationPanel(page);
+    const panel = await openPanelWithNotifications(page, NORMAL_NOTIFICATIONS);
 
     await panel.getByRole('tab', { name: /updates/i }).click();
     await page.waitForTimeout(300);
@@ -354,22 +336,15 @@ test.describe('Notification tabs — Desktop', () => {
   });
 
   test('long text', async ({ page }) => {
-    await setupApiMocks(page, { notifications: LONG_TEXT_NOTIFICATIONS });
-    await page.goto('/');
-    await openNotificationPanel(page);
+    await openPanelWithNotifications(page, LONG_TEXT_NOTIFICATIONS);
 
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth,
-    );
-    expect(overflow).toBe(false);
+    await expectNoPageOverflow(page);
 
     await screenshot(page, 'notif-tabs-long-text-desktop');
   });
 
   test('multi-project grouping with tabs', async ({ page }) => {
-    await setupApiMocks(page, { notifications: MULTI_PROJECT_NOTIFICATIONS });
-    await page.goto('/');
-    const panel = await openNotificationPanel(page);
+    const panel = await openPanelWithNotifications(page, MULTI_PROJECT_NOTIFICATIONS);
 
     // Priority tab with multi-project grouping
     await expect(panel.getByText('Backend API')).toBeVisible();
@@ -378,9 +353,7 @@ test.describe('Notification tabs — Desktop', () => {
   });
 
   test('normal data — all tab', async ({ page }) => {
-    await setupApiMocks(page, { notifications: NORMAL_NOTIFICATIONS });
-    await page.goto('/');
-    const panel = await openNotificationPanel(page);
+    const panel = await openPanelWithNotifications(page, NORMAL_NOTIFICATIONS);
 
     await panel.getByRole('tab', { name: /^all$/i }).click();
     await page.waitForTimeout(300);
