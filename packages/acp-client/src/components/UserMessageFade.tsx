@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 
 export interface UserMessageFadeProps {
   /** Plain text content of the user message. */
@@ -10,6 +10,26 @@ export interface UserMessageFadeProps {
   maxTotalMs?: number;
   /** Duration of the fade-in animation per character in ms. Default: 150. */
   fadeDurationMs?: number;
+}
+
+/** Subscribe to prefers-reduced-motion changes reactively. */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+      : false
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!mql) return;
+    const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
+  return reduced;
 }
 
 /**
@@ -28,10 +48,7 @@ export const UserMessageFade = memo(function UserMessageFade({
   maxTotalMs = 1500,
   fadeDurationMs = 150,
 }: UserMessageFadeProps) {
-  // Respect prefers-reduced-motion
-  const prefersReducedMotion =
-    typeof window !== 'undefined' &&
-    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   const elements = useMemo<ReactNode[]>(() => {
     if (prefersReducedMotion || text.length === 0) {
@@ -49,8 +66,10 @@ export const UserMessageFade = memo(function UserMessageFade({
     const nodes: ReactNode[] = [];
     let charIndex = 0;
 
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i]!;
+    // Use Array.from to handle surrogate pairs (emoji) correctly
+    const chars = Array.from(text);
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i]!;
       if (ch === '\n') {
         nodes.push(<br key={`br-${i}`} />);
       } else {
@@ -58,6 +77,7 @@ export const UserMessageFade = memo(function UserMessageFade({
           <span
             key={`ch-${i}`}
             className="char-fade"
+            aria-hidden="true"
             style={{
               animationDuration: `${fadeDurationMs}ms`,
               animationDelay: `${charIndex * charDelayMs}ms`,
@@ -73,5 +93,9 @@ export const UserMessageFade = memo(function UserMessageFade({
     return nodes;
   }, [text, baseCharDelayMs, maxTotalMs, fadeDurationMs, prefersReducedMotion]);
 
-  return <span>{elements}</span>;
+  return (
+    <span aria-label={text}>
+      {elements}
+    </span>
+  );
 });

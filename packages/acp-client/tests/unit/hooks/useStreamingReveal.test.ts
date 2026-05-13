@@ -69,6 +69,48 @@ describe('useStreamingReveal', () => {
     expect(result.current.isRevealing).toBe(false);
   });
 
+  it('tracks prevRevealedLength correctly across reveals', () => {
+    const { result } = renderHook(() =>
+      useStreamingReveal('Hello', true, { charDelayMs: 10 })
+    );
+
+    // Initially prevRevealedLength should be 0
+    expect(result.current.prevRevealedLength).toBe(0);
+
+    // After partial reveal
+    act(() => { advanceTime(25); });
+    const partialLen = result.current.revealedText.length;
+    expect(partialLen).toBeGreaterThanOrEqual(2);
+
+    // After another tick, prevRevealedLength should have advanced
+    act(() => { advanceTime(15); });
+    expect(result.current.prevRevealedLength).toBe(partialLen);
+  });
+
+  it('resets prevRevealedLength to 0 on text replacement (snap)', () => {
+    const { result, rerender } = renderHook(
+      ({ text }) => useStreamingReveal(text, true, { charDelayMs: 10 }),
+      { initialProps: { text: 'Hello' } }
+    );
+
+    act(() => { advanceTime(200); });
+    expect(result.current.revealedText).toBe('Hello');
+
+    rerender({ text: 'Bye' });
+    // After snap, prevRevealedLength resets
+    expect(result.current.prevRevealedLength).toBe(0);
+  });
+
+  it('stops rAF loop after full reveal', () => {
+    renderHook(() =>
+      useStreamingReveal('Hi', true, { charDelayMs: 10 })
+    );
+
+    act(() => { advanceTime(100); });
+    // After full reveal, no more rAF callbacks should be queued
+    expect(rafQueue.length).toBe(0);
+  });
+
   it('extends reveal when text grows', () => {
     const { result, rerender } = renderHook(
       ({ text }) => useStreamingReveal(text, true, { charDelayMs: 10 }),
@@ -97,12 +139,49 @@ describe('useStreamingReveal', () => {
     expect(result.current.revealedText).toBe('Bye');
   });
 
+  it('returns full text immediately when prefers-reduced-motion is set', () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+
+    try {
+      const { result } = renderHook(() =>
+        useStreamingReveal('Hello', true, { charDelayMs: 10 })
+      );
+      expect(result.current.revealedText).toBe('Hello');
+      expect(result.current.isRevealing).toBe(false);
+      // No rAF should be queued
+      expect(rafQueue.length).toBe(0);
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it('handles empty text with animated=true', () => {
+    const { result } = renderHook(() =>
+      useStreamingReveal('', true, { charDelayMs: 10 })
+    );
+    expect(result.current.revealedText).toBe('');
+    expect(result.current.isRevealing).toBe(false);
+    // No rAF should be queued for empty text
+    expect(rafQueue.length).toBe(0);
+  });
+
   it('cleans up rAF on unmount', () => {
+    const cancelSpy = vi.spyOn(window, 'cancelAnimationFrame');
     const { unmount } = renderHook(() =>
       useStreamingReveal('Hello world test', true, { charDelayMs: 50 })
     );
 
     unmount();
-    // Should not throw
+    expect(cancelSpy).toHaveBeenCalled();
   });
 });

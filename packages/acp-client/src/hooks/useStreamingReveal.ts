@@ -5,6 +5,26 @@ export interface UseStreamingRevealOptions {
   charDelayMs?: number;
 }
 
+/** Subscribe to prefers-reduced-motion changes reactively. */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+      : false
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!mql) return;
+    const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
+  return reduced;
+}
+
 /**
  * useStreamingReveal — smooths chunky batch text arrivals into character-by-character reveal.
  *
@@ -33,10 +53,8 @@ export function useStreamingReveal(
   const targetLengthRef = useRef(fullText.length);
   targetLengthRef.current = fullText.length;
 
-  // Respect prefers-reduced-motion
-  const prefersReducedMotion =
-    typeof window !== 'undefined' &&
-    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  // Respect prefers-reduced-motion (reactive)
+  const prefersReducedMotion = usePrefersReducedMotion();
   const shouldAnimate = animated && !prefersReducedMotion;
 
   useEffect(() => {
@@ -66,13 +84,18 @@ export function useStreamingReveal(
 
         if (charsToReveal > 0) {
           lastTickRef.current = now;
+          let done = false;
           setRevealIndex((prev) => {
             const next = Math.min(prev + charsToReveal, targetLengthRef.current);
+            done = next >= targetLengthRef.current;
             return next;
           });
+          if (done) {
+            rafIdRef.current = 0;
+            return;
+          }
         }
 
-        // Continue if there's more to reveal
         rafIdRef.current = requestAnimationFrame(tick);
       };
 
