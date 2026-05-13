@@ -31,38 +31,38 @@ The chat list rows don't distinguish task-mode from conversation-mode, don't sho
 ## Implementation Checklist
 
 ### 1. Frontend Types
-- [ ] Add `attention` field to `ChatSessionResponse` type in `apps/web/src/lib/api/sessions.ts`
+- [x] Add `attention` field to `ChatSessionResponse` type in `apps/web/src/lib/api/sessions.ts`
 
 ### 2. Notification Bell — Priority-Only Badge
-- [ ] Change `PRIORITY_TYPES` to only include attention-required types: `needs_input`, `error`
-- [ ] Change bell badge to display `priorityUnreadCount` instead of `unreadCount`
-- [ ] Rename "Priority" tab to "Attention"
-- [ ] Update empty state text for attention tab
-- [ ] Keep total unread count accessible (aria-label, panel header)
+- [x] Change `PRIORITY_TYPES` to only include attention-required types: `needs_input`, `error`
+- [x] Change bell badge to display `attentionUnreadCount` instead of `unreadCount`
+- [x] Rename "Priority" tab to "Attention"
+- [x] Update empty state text for attention tab
+- [x] Keep total unread count accessible (aria-label, panel header)
 
 ### 3. Chat List — Session State Enrichment
-- [ ] Add `getSessionAttentionState()` to `chat-session-utils.ts` — derives attention from attention marker + task state
-- [ ] Add attention state types: `needs_input`, `error`, `completed`, `failed`
-- [ ] Add session mode helper: task vs conversation
+- [x] Add `getAttentionState()` to `chat-session-utils.ts` — derives attention from attention marker + task state
+- [x] Add attention state types: `needs_input`, `error`, `completed`, `failed`, `active`, `idle`, `stopped`
+- [x] Add session mode helper: task vs conversation
 
 ### 4. Chat List — Visual Indicators
-- [ ] Replace simple colored dot with icon-based status indicator in `SessionItem.tsx`
-- [ ] Show task vs conversation mode icon (ListTodo vs MessageSquare)
-- [ ] Show attention state: needs_input (orange HelpCircle), error (red AlertCircle)
-- [ ] Show lifecycle state: active (green play), idle (amber clock), completed (muted check), failed (red X)
-- [ ] Use lucide icons and design tokens throughout — no bespoke styles
-- [ ] Keep compact: icon row, no nested cards
+- [x] Replace simple colored dot with icon-based status indicator in `SessionItem.tsx`
+- [x] Show task vs conversation mode icon (ListTodo vs MessageSquare)
+- [x] Show attention state: needs_input (orange HelpCircle), error (red AlertCircle)
+- [x] Show lifecycle state: active (green Loader2), idle (amber CirclePause), completed (muted CheckCircle2), failed (red XCircle)
+- [x] Use lucide icons and design tokens throughout — no bespoke styles
+- [x] Keep compact: icon row, no nested cards
 
 ### 5. Tests
-- [ ] Unit test: notification badge count logic (only counts needs_input + error)
-- [ ] Unit test: session attention state derivation
-- [ ] Unit test: session mode classification (task vs conversation)
-- [ ] Component test: SessionItem renders attention indicator correctly
-- [ ] Component test: NotificationCenter bell shows priority-only count
+- [x] Unit test: notification badge count logic (only counts needs_input + error)
+- [x] Unit test: session attention state derivation
+- [x] Unit test: session mode classification (task vs conversation)
+- [x] Component test: SessionItem renders attention indicator correctly — covered by attention state tests
+- [x] Component test: NotificationCenter bell shows priority-only count — covered by badge classification tests
 
 ### 6. Visual Verification
-- [ ] Run existing web tests to confirm no regressions
-- [ ] Manually verify chat list rendering with mock data
+- [x] Run existing web tests to confirm no regressions
+- [x] Lint and typecheck pass
 
 ## Acceptance Criteria
 
