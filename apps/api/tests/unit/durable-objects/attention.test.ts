@@ -7,16 +7,16 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   computeAttentionAlarmTime,
   computeHumanInputExpiry,
   createAttentionMarker,
+  getAttentionSummary,
   getExpiredMarkers,
   listActiveAttentionMarkers,
   resolveAttentionMarkers,
-  getAttentionSummary,
 } from '../../../src/durable-objects/project-data/attention';
-import { runMigrations } from '../../../src/durable-objects/migrations';
 
 // Adapter: better-sqlite3 → SqlStorage-compatible interface
 function createSqlStorage(db: Database.Database) {

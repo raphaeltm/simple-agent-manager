@@ -7,9 +7,9 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import { computeHumanInputExpiry } from '../../durable-objects/project-data/attention';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { computeHumanInputExpiry } from '../../durable-objects/project-data/attention';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import {

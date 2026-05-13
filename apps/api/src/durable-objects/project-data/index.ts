@@ -18,6 +18,7 @@ import type { Env, SummaryData } from './types';
 const log = createModuleLogger('project_data');
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
+import * as attention from './attention';
 import * as commands from './commands';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
@@ -26,7 +27,6 @@ import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messages from './messages';
 import * as missionState from './missions';
-import * as attention from './attention';
 import * as policies from './policies';
 import * as sessions from './sessions';
 
