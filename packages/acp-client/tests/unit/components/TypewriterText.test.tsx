@@ -2,8 +2,13 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, act } from '@testing-library/react';
 import { TypewriterText } from '../../../src/components/TypewriterText';
 
+// Mock react-markdown to avoid complex JSX parsing in tests
+vi.mock('react-markdown', () => ({
+  default: ({ children }: { children: string }) => <div data-testid="markdown">{children}</div>,
+}));
+vi.mock('remark-gfm', () => ({ default: () => {} }));
+
 describe('TypewriterText', () => {
-  // Track rAF callbacks so we can fire them manually
   let rafQueue: Array<{ id: number; cb: FrameRequestCallback }>;
   let nextRafId: number;
   let currentTime: number;
@@ -28,11 +33,9 @@ describe('TypewriterText', () => {
     vi.restoreAllMocks();
   });
 
-  /** Advance time and flush all pending rAF callbacks at that time. */
   function advanceTime(ms: number) {
     currentTime += ms;
-    // Flush rAF callbacks — they may schedule new ones
-    let safety = 100;
+    let safety = 200;
     while (rafQueue.length > 0 && safety-- > 0) {
       const batch = [...rafQueue];
       rafQueue = [];
@@ -47,110 +50,104 @@ describe('TypewriterText', () => {
       const { container } = render(
         <TypewriterText text="Hello world, this is a test." animated={false} />
       );
-      expect(container.textContent).toBe('Hello world, this is a test.');
+      expect(container.textContent).toContain('Hello world, this is a test.');
     });
 
     it('updates instantly when text changes and animated=false', () => {
       const { container, rerender } = render(
         <TypewriterText text="First" animated={false} />
       );
-      expect(container.textContent).toBe('First');
+      expect(container.textContent).toContain('First');
 
       rerender(<TypewriterText text="First Second" animated={false} />);
-      expect(container.textContent).toBe('First Second');
+      expect(container.textContent).toContain('First Second');
     });
   });
 
   describe('animated mode', () => {
-    it('starts with empty text and reveals words over time', () => {
+    it('starts with empty text and reveals characters over time', () => {
       const { container } = render(
-        <TypewriterText text="Hello world" animated={true} wordsPerSecond={10} />
+        <TypewriterText text="Hello" animated={true} charDelayMs={10} />
       );
 
-      // Initially empty — the useEffect hasn't fired yet
+      // Initially empty — useStreamingReveal starts at index 0
       expect(container.textContent).toBe('');
 
-      // Advance time enough to reveal all words (2 words at 10wps = 200ms)
-      act(() => { advanceTime(300); });
+      // Advance enough to reveal all 5 chars (5 * 10ms = 50ms + buffer)
+      act(() => { advanceTime(100); });
 
-      expect(container.textContent).toBe('Hello world');
+      expect(container.textContent).toContain('Hello');
     });
 
-    it('queues new words when text grows', () => {
+    it('queues new characters when text grows', () => {
       const { container, rerender } = render(
-        <TypewriterText text="Hello" animated={true} wordsPerSecond={10} />
+        <TypewriterText text="Hi" animated={true} charDelayMs={10} />
       );
 
-      // Flush initial animation
+      act(() => { advanceTime(100); });
+      expect(container.textContent).toContain('Hi');
+
+      rerender(<TypewriterText text="Hi there" animated={true} charDelayMs={10} />);
+
       act(() => { advanceTime(200); });
-      expect(container.textContent).toBe('Hello');
-
-      // Grow text
-      rerender(<TypewriterText text="Hello world foo" animated={true} wordsPerSecond={10} />);
-
-      act(() => { advanceTime(300); });
-      expect(container.textContent).toBe('Hello world foo');
+      expect(container.textContent).toContain('Hi there');
     });
 
-    it('handles text replacement (shrink) by showing full new text', () => {
+    it('handles text replacement by showing full new text', () => {
       const { container, rerender } = render(
-        <TypewriterText text="Hello world" animated={true} wordsPerSecond={10} />
+        <TypewriterText text="Hello" animated={true} charDelayMs={10} />
       );
 
-      act(() => { advanceTime(300); });
-      expect(container.textContent).toBe('Hello world');
+      act(() => { advanceTime(200); });
+      expect(container.textContent).toContain('Hello');
 
       // Replace with shorter text
-      rerender(<TypewriterText text="Bye" animated={true} wordsPerSecond={10} />);
+      rerender(<TypewriterText text="Bye" animated={true} charDelayMs={10} />);
 
-      // Should show replacement immediately (no animation for shrink)
-      expect(container.textContent).toBe('Bye');
+      // Should show replacement immediately
+      expect(container.textContent).toContain('Bye');
     });
 
-    it('stops animating when queue empties (signals thinking)', () => {
+    it('shows streaming cursor while revealing', () => {
       const { container } = render(
-        <TypewriterText text="Hi" animated={true} wordsPerSecond={10} />
+        <TypewriterText text="Hello world this is long text" animated={true} charDelayMs={50} />
+      );
+
+      const cursor = container.querySelector('.streaming-cursor');
+      expect(cursor).toBeTruthy();
+    });
+
+    it('removes cursor when fully revealed', () => {
+      const { container } = render(
+        <TypewriterText text="Hi" animated={true} charDelayMs={10} />
       );
 
       act(() => { advanceTime(200); });
-      expect(container.textContent).toBe('Hi');
 
-      // No more rAF callbacks should be pending
-      expect(rafQueue.length).toBe(0);
+      const cursor = container.querySelector('.streaming-cursor');
+      expect(cursor).toBeNull();
     });
   });
 
-  describe('word splitting', () => {
-    it('preserves whitespace at word boundaries', () => {
+  describe('markdown rendering', () => {
+    it('renders through react-markdown', () => {
       const { container } = render(
-        <TypewriterText text="a  b" animated={true} wordsPerSecond={10} />
+        <TypewriterText text="**bold**" animated={false} />
       );
-
-      act(() => { advanceTime(300); });
-      expect(container.textContent).toBe('a  b');
-    });
-
-    it('handles leading whitespace', () => {
-      const { container } = render(
-        <TypewriterText text="  hello" animated={true} wordsPerSecond={10} />
-      );
-
-      act(() => { advanceTime(200); });
-      expect(container.textContent).toBe('  hello');
+      const md = container.querySelector('[data-testid="markdown"]');
+      expect(md).toBeTruthy();
+      expect(md?.textContent).toBe('**bold**');
     });
   });
 
   describe('cleanup', () => {
     it('cancels pending animation on unmount', () => {
       const { unmount } = render(
-        <TypewriterText text="Hello world this is a long text" animated={true} wordsPerSecond={2} />
+        <TypewriterText text="Hello world this is a long text" animated={true} charDelayMs={50} />
       );
 
-      // Don't flush — let animation be in progress
-      // The useEffect cleanup should cancel
       unmount();
-      // cancelAnimationFrame should have been called (either by cleanup effect or component)
-      // The key thing is it doesn't error on unmount
+      // Should not error on unmount
     });
   });
 });
