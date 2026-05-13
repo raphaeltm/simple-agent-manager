@@ -1,143 +1,182 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef } from 'react';
+import type { Components } from 'react-markdown';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
+import { useStreamingReveal } from '../hooks/useStreamingReveal';
 
 export interface TypewriterTextProps {
   /** The full accumulated text to display. When this grows, new content is animated. */
   text: string;
   /** When false, renders all text instantly (use for historical messages). Default: true. */
   animated?: boolean;
-  /** Target words per second for the animation. Default: 25. */
-  wordsPerSecond?: number;
-  /** Expected interval between batches in ms (for adaptive rate). Default: 2000. */
-  batchIntervalMs?: number;
+  /** Milliseconds per character for the reveal. Default: 20. */
+  charDelayMs?: number;
+  /** Duration of the fade-in animation per character in ms. Default: 150. */
+  fadeDurationMs?: number;
+  /** Stagger between character fade starts in ms. Default: 8. */
+  fadeStaggerMs?: number;
+  /** Custom react-markdown component overrides (for code highlighting, file links, etc.). */
+  markdownComponents?: Components;
 }
 
-/** Split text into words preserving whitespace for markdown safety. */
-function splitWords(text: string): string[] {
-  const result: string[] = [];
-  const regex = /\S+\s*/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    result.push(match[0]);
+// Stable remark plugins array
+const REMARK_PLUGINS = [remarkGfm];
+
+/**
+ * Walk a DOM subtree and wrap the last `charCount` text characters in
+ * `<span class="char-fade">` elements with staggered animation-delay.
+ */
+function applyCharFade(
+  container: HTMLElement,
+  charCount: number,
+  fadeDurationMs: number,
+  fadeStaggerMs: number
+): void {
+  if (charCount <= 0) return;
+
+  // Collect all text nodes in document order
+  const textNodes: Text[] = [];
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let node: Text | null;
+  while ((node = walker.nextNode() as Text | null)) {
+    if (node.textContent && node.textContent.length > 0) {
+      textNodes.push(node);
+    }
   }
-  // Preserve leading whitespace
-  const leadingWs = text.match(/^\s+/);
-  if (leadingWs && result.length > 0) {
-    result[0] = leadingWs[0] + result[0];
-  } else if (leadingWs && result.length === 0) {
-    result.push(leadingWs[0]);
+
+  // Walk backwards through text nodes to find the last `charCount` characters
+  let remaining = charCount;
+  const targets: Array<{ node: Text; startIdx: number; count: number }> = [];
+
+  for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
+    const tn = textNodes[i]!;
+    const len = tn.textContent!.length;
+    const take = Math.min(len, remaining);
+    targets.unshift({ node: tn, startIdx: len - take, count: take });
+    remaining -= take;
   }
-  return result;
+
+  // Wrap each character range in spans
+  let spanIndex = 0;
+  for (const { node: textNode, startIdx, count } of targets) {
+    const parent = textNode.parentNode;
+    if (!parent) continue;
+
+    const fullText = textNode.textContent!;
+    const frag = document.createDocumentFragment();
+
+    // Text before the animated range
+    if (startIdx > 0) {
+      frag.appendChild(document.createTextNode(fullText.slice(0, startIdx)));
+    }
+
+    // Animated character spans
+    for (let i = 0; i < count; i++) {
+      const span = document.createElement('span');
+      span.className = 'char-fade';
+      span.style.animationDuration = `${fadeDurationMs}ms`;
+      span.style.animationDelay = `${spanIndex * fadeStaggerMs}ms`;
+      span.textContent = fullText[startIdx + i]!;
+      frag.appendChild(span);
+      spanIndex++;
+    }
+
+    // Text after the animated range
+    if (startIdx + count < fullText.length) {
+      frag.appendChild(document.createTextNode(fullText.slice(startIdx + count)));
+    }
+
+    parent.replaceChild(frag, textNode);
+  }
 }
 
 /**
- * TypewriterText — animates new text additions word-by-word.
+ * Remove all `.char-fade` spans, replacing them with their text content,
+ * then normalize adjacent text nodes.
+ */
+function cleanupCharFade(container: HTMLElement): void {
+  const spans = Array.from(container.querySelectorAll('.char-fade'));
+  for (const span of spans) {
+    const text = document.createTextNode(span.textContent || '');
+    span.parentNode?.replaceChild(text, span);
+  }
+  container.normalize();
+}
+
+/**
+ * TypewriterText — animates new text character-by-character with per-character CSS fade-in.
  *
- * When the `text` prop grows (new batch arrives), the new content is queued
- * and revealed word-by-word using requestAnimationFrame. When the queue
- * empties, animation stops naturally — correctly signaling "agent is thinking."
- *
- * Adaptive rate: adjusts speed based on queue size relative to expected batch interval.
+ * Text is revealed one character at a time via `useStreamingReveal`, then rendered
+ * through `react-markdown` for full markdown support. After each render, a DOM
+ * TreeWalker wraps the newest characters in `<span class="char-fade">` elements
+ * with staggered animation-delay. Spans are cleaned up after the animation completes.
  */
 export const TypewriterText = memo(function TypewriterText({
   text,
   animated = true,
-  wordsPerSecond = 25,
-  batchIntervalMs = 2000,
+  charDelayMs = 20,
+  fadeDurationMs = 150,
+  fadeStaggerMs = 8,
+  markdownComponents,
 }: TypewriterTextProps) {
-  const [displayedText, setDisplayedText] = useState(animated ? '' : text);
-  const queueRef = useRef<string[]>([]);
-  const animatingRef = useRef(false);
-  const prevTextRef = useRef(animated ? '' : text);
-  const rafIdRef = useRef<number>(0);
-  const lastFrameTimeRef = useRef(0);
-  const wpsRef = useRef(wordsPerSecond);
-  const batchMsRef = useRef(batchIntervalMs);
-  wpsRef.current = wordsPerSecond;
-  batchMsRef.current = batchIntervalMs;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const prevLengthRef = useRef(animated ? 0 : text.length);
+  const cleanupTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Animation frame callback (stable ref to avoid stale closures)
-  const tick = useRef<(time: number) => void>(() => {});
-  tick.current = (time: number) => {
-    const queue = queueRef.current;
-    if (queue.length === 0) {
-      animatingRef.current = false;
-      return;
-    }
+  const { revealedText, isRevealing } = useStreamingReveal(text, animated, { charDelayMs });
 
-    const elapsed = time - lastFrameTimeRef.current;
-    // Adaptive rate: scale wps based on queue size
-    const adaptiveWps = Math.max(
-      wpsRef.current,
-      (queue.length / batchMsRef.current) * 1000
-    );
-    const msPerWord = 1000 / adaptiveWps;
+  // After each render, apply char-fade to the new characters
+  const applyFade = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || !animated) return;
 
-    if (elapsed >= msPerWord) {
-      const wordsToReveal = Math.max(1, Math.floor(elapsed / msPerWord));
-      const revealed = queue.splice(0, wordsToReveal);
-      setDisplayedText((prev) => prev + revealed.join(''));
-      lastFrameTimeRef.current = time;
-    }
+    const prevLen = prevLengthRef.current;
+    const currentLen = revealedText.length;
+    const delta = currentLen - prevLen;
 
-    if (queue.length > 0) {
-      rafIdRef.current = requestAnimationFrame(runTick);
-    } else {
-      animatingRef.current = false;
-    }
-  };
+    if (delta > 0) {
+      // Clean up any existing spans before applying new ones
+      cleanupCharFade(container);
 
-  function runTick(time: number) {
-    tick.current(time);
-  }
+      // Apply fade to the delta characters
+      applyCharFade(container, delta, fadeDurationMs, fadeStaggerMs);
 
-  // Respect prefers-reduced-motion (WCAG 2.1 SC 2.3.3)
-  const prefersReducedMotion = typeof window !== 'undefined'
-    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  const shouldAnimate = animated && !prefersReducedMotion;
-
-  // Detect new text and queue for animation (or show instantly if not animated)
-  useEffect(() => {
-    if (!shouldAnimate) {
-      setDisplayedText(text);
-      queueRef.current = [];
-      prevTextRef.current = text;
-      return;
-    }
-
-    const prev = prevTextRef.current;
-    prevTextRef.current = text;
-
-    if (text.length <= prev.length) {
-      // Text didn't grow — replacement or reset. Show it all.
-      if (text !== prev) {
-        queueRef.current = [];
-        setDisplayedText(text);
+      // Schedule cleanup after animation completes
+      if (cleanupTimerRef.current) {
+        clearTimeout(cleanupTimerRef.current);
       }
-      return;
+      const totalAnimTime = delta * fadeStaggerMs + fadeDurationMs + 50;
+      cleanupTimerRef.current = setTimeout(() => {
+        if (containerRef.current) {
+          cleanupCharFade(containerRef.current);
+        }
+      }, totalAnimTime);
     }
 
-    // New content is the delta
-    const newContent = text.slice(prev.length);
-    const newWords = splitWords(newContent);
-    if (newWords.length === 0) return;
+    prevLengthRef.current = currentLen;
+  }, [revealedText, animated, fadeDurationMs, fadeStaggerMs]);
 
-    queueRef.current.push(...newWords);
-
-    if (!animatingRef.current) {
-      animatingRef.current = true;
-      lastFrameTimeRef.current = performance.now();
-      rafIdRef.current = requestAnimationFrame(runTick);
-    }
-  }, [text, shouldAnimate]);
+  // Apply fade effect after render
+  useEffect(() => {
+    applyFade();
+  }, [applyFade]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
+      if (cleanupTimerRef.current) {
+        clearTimeout(cleanupTimerRef.current);
       }
     };
   }, []);
 
-  return <>{displayedText}</>;
+  return (
+    <div ref={containerRef}>
+      <Markdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
+        {revealedText}
+      </Markdown>
+      {isRevealing && <span className="streaming-cursor" aria-hidden="true" />}
+    </div>
+  );
 });

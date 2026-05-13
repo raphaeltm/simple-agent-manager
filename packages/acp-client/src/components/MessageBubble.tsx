@@ -5,11 +5,14 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { MessageActions } from './MessageActions';
+import { TypewriterText } from './TypewriterText';
 
 interface MessageBubbleProps {
   text: string;
   role: 'user' | 'agent';
   streaming?: boolean;
+  /** When true, agent text is animated with per-character fade-in via TypewriterText. */
+  animated?: boolean;
   /** Unix-millisecond timestamp for metadata display. */
   timestamp?: number;
   /** TTS API base URL for server-side text-to-speech (e.g., "https://api.example.com/api/tts"). */
@@ -232,7 +235,7 @@ function buildAgentMarkdownComponents(
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * (e.g., scroll position, input value) don't affect this component's props.
  */
-export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio, onFileClick }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, animated, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio, onFileClick }: MessageBubbleProps) {
   const isUser = role === 'user';
   // When onFileClick is provided for agent messages, build components that intercept file-path links.
   // useMemo ensures stable references — react-markdown won't unmount/remount custom renderers.
@@ -241,7 +244,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
     [onFileClick]
   );
   const components = isUser ? USER_MARKDOWN_COMPONENTS : agentComponents;
-  const showActions = !streaming && timestamp != null && timestamp > 0;
+  const showActions = !streaming && !animated && timestamp != null && timestamp > 0;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -253,14 +256,18 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
         }`}
       >
         <div className="prose prose-sm max-w-none overflow-x-auto break-words">
-          <Markdown
-            remarkPlugins={REMARK_PLUGINS}
-            components={components}
-          >
-            {text}
-          </Markdown>
+          {animated && !isUser ? (
+            <TypewriterText text={text} animated={true} markdownComponents={components} />
+          ) : (
+            <Markdown
+              remarkPlugins={REMARK_PLUGINS}
+              components={components}
+            >
+              {text}
+            </Markdown>
+          )}
         </div>
-        {streaming && (
+        {streaming && !animated && (
           <span className="inline-block mt-1 text-xs opacity-60 animate-pulse">...</span>
         )}
         {showActions && (
