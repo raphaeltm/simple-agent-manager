@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useMemo } from 'react';
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 
 export interface UserMessageFadeProps {
   /** Plain text content of the user message. */
@@ -10,26 +11,6 @@ export interface UserMessageFadeProps {
   maxTotalMs?: number;
   /** Duration of the fade-in animation per character in ms. Default: 150. */
   fadeDurationMs?: number;
-}
-
-/** Subscribe to prefers-reduced-motion changes reactively. */
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(() =>
-    typeof window !== 'undefined'
-      ? window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-      : false
-  );
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mql = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-    if (!mql) return;
-    const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
-
-  return reduced;
 }
 
 /**
