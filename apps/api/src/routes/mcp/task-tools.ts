@@ -13,8 +13,10 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as notificationService from '../../services/notification';
+import * as projectDataService from '../../services/project-data';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
+import { cleanupTaskRun } from '../../services/task-runner';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
@@ -139,6 +141,7 @@ export async function handleCompleteTask(
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
+  executionCtx?: ExecutionContext,
 ): Promise<JsonRpcResponse> {
   const summary = typeof params.summary === 'string' ? params.summary.trim() : null;
 
@@ -350,6 +353,19 @@ export async function handleCompleteTask(
     }
   }
 
+  // Stop the ProjectData chat session and trigger workspace cleanup in the background.
+  // This mirrors the terminal-callback cleanup path in callback.ts.
+  if (executionCtx) {
+    executionCtx.waitUntil(
+      stopSessionAndCleanup(env, tokenData).catch((err) => {
+        log.error('mcp.complete_task.cleanup_failed', {
+          taskId: tokenData.taskId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+    );
+  }
+
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,
     projectId: tokenData.projectId,
@@ -359,6 +375,27 @@ export async function handleCompleteTask(
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: 'Task marked as completed.' }],
   });
+}
+
+/**
+ * Stop the chat session in ProjectData and trigger workspace cleanup.
+ * Runs in waitUntil — non-blocking for the MCP response.
+ */
+async function stopSessionAndCleanup(env: Env, tokenData: McpTokenData): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+
+  // Look up the chat session linked to this workspace
+  const [ws] = await db
+    .select({ chatSessionId: schema.workspaces.chatSessionId })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, tokenData.workspaceId))
+    .limit(1);
+
+  if (ws?.chatSessionId) {
+    await projectDataService.stopSession(env, tokenData.projectId, ws.chatSessionId);
+  }
+
+  await cleanupTaskRun(tokenData.taskId, env);
 }
 
 export async function handleListTasks(

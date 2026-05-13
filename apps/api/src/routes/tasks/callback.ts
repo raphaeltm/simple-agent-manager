@@ -121,34 +121,21 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
       ).catch((e) => { log.warn('task.execution_step_activity_failed', { taskId, error: String(e) }); })
     );
 
-    // T034: When agent signals awaiting_followup, start idle cleanup timer.
-    // Conversation-mode sessions are exempt — the 2-hour workspace idle timeout
-    // is the only kill mechanism for conversation mode (no 15-min idle cleanup).
+    // Record agent-completed activity for awaiting_followup (task-mode only).
+    // Task-mode cleanup is NOT triggered here — it happens when the agent explicitly
+    // calls complete_task via the MCP tool. The awaiting_followup callback only means
+    // the agent's current turn ended, not that the task lifecycle is complete.
+    // Conversation-mode is exempt from this block entirely — the 2-hour workspace
+    // idle timeout is the only kill mechanism for conversation mode.
     if (body.executionStep === 'awaiting_followup' && task.workspaceId && task.taskMode !== 'conversation') {
       c.executionCtx.waitUntil(
         (async () => {
-          // Look up the chat session linked to this workspace
           const [ws] = await db
             .select({ chatSessionId: schema.workspaces.chatSessionId })
             .from(schema.workspaces)
             .where(eq(schema.workspaces.id, task.workspaceId!))
             .limit(1);
 
-          if (ws?.chatSessionId) {
-            // Set agent_completed_at on the session
-            await projectDataService.markAgentCompleted(c.env, projectId, ws.chatSessionId);
-
-            // Schedule idle cleanup timer
-            await projectDataService.scheduleIdleCleanup(
-              c.env,
-              projectId,
-              ws.chatSessionId,
-              task.workspaceId!,
-              taskId
-            );
-          }
-
-          // Record agent completion activity event
           await projectDataService.recordActivityEvent(
             c.env, projectId, 'task.agent_completed', 'workspace_callback', payload.workspace,
             task.workspaceId, ws?.chatSessionId ?? null, taskId, {
@@ -158,33 +145,8 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
               prUrl: body.gitPushResult?.prUrl ?? null,
             }
           );
-
-          // Emit session-ended notification (best-effort)
-          if (c.env.NOTIFICATION) {
-            const projectName = await notificationService.getProjectName(c.env, projectId);
-            await notificationService.notifySessionEnded(c.env, task.userId, {
-              projectId,
-              projectName,
-              sessionId: ws?.chatSessionId ?? '',
-              taskId,
-              taskTitle: task.title,
-            });
-
-            // If a PR was created, emit a separate pr_created notification
-            if (body.gitPushResult?.prUrl) {
-              await notificationService.notifyPrCreated(c.env, task.userId, {
-                projectId,
-                projectName,
-                taskId,
-                taskTitle: task.title,
-                prUrl: body.gitPushResult.prUrl,
-                branchName: body.gitPushResult.branchName,
-                sessionId: ws?.chatSessionId,
-              });
-            }
-          }
         })().catch((err) => {
-          log.error('task.idle_cleanup_schedule_failed', { taskId, error: err instanceof Error ? err.message : String(err) });
+          log.error('task.agent_completed_activity_failed', { taskId, error: err instanceof Error ? err.message : String(err) });
         })
       );
     }
