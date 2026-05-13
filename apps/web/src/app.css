@@ -136,6 +136,43 @@
   }
 }
 
+/* Per-character fade-in animation for chat messages */
+.char-fade {
+  opacity: 0;
+  animation: sam-char-fade-in ease-out forwards;
+}
+@keyframes sam-char-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .char-fade {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Blinking cursor for streaming messages */
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  background-color: var(--sam-color-accent, #4f8fff);
+  animation: sam-cursor-blink 1s step-end infinite;
+}
+@keyframes sam-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .streaming-cursor {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 /* GlobalAudioPlayer — full-width seek bar styled as a thin progress bar */
 .sam-player-seek {
   -webkit-appearance: none;

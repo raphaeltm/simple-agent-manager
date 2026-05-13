@@ -2,14 +2,17 @@ import { Highlight, themes } from 'prism-react-renderer';
 import React, { useMemo } from 'react';
 import type { Components } from 'react-markdown';
 import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
+import { REMARK_PLUGINS } from './markdown-config';
 import { MessageActions } from './MessageActions';
+import { TypewriterText } from './TypewriterText';
 
 interface MessageBubbleProps {
   text: string;
   role: 'user' | 'agent';
   streaming?: boolean;
+  /** When true, agent text is animated with per-character fade-in via TypewriterText. */
+  animated?: boolean;
   /** Unix-millisecond timestamp for metadata display. */
   timestamp?: number;
   /** TTS API base URL for server-side text-to-speech (e.g., "https://api.example.com/api/tts"). */
@@ -21,9 +24,6 @@ interface MessageBubbleProps {
   /** Optional callback when a file path link is clicked. Receives path and optional line number. */
   onFileClick?: (path: string, line?: number | null) => void;
 }
-
-// Stable remark plugins array — avoids creating a new array reference on every render
-const REMARK_PLUGINS = [remarkGfm];
 
 /**
  * Detect whether a markdown link href looks like a file path rather than a URL.
@@ -106,67 +106,53 @@ function HighlightedCode({ code, language }: { code: string; language: string })
   );
 }
 
+/** Shared pre component that unwraps the wrapper element. */
+const SharedPre: Components['pre'] = ({ children }) => <>{children}</>;
+
+/** Shared link component for external URLs. */
+const SharedLink: Components['a'] = ({ href, children }) => (
+  <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">
+    {children}
+  </a>
+);
+
+/** Build a code component with a configurable inline-code class. */
+function makeCodeComponent(inlineClassName: string): NonNullable<Components['code']> {
+  const CodeComponent: NonNullable<Components['code']> = ({ className, children, ...props }) => {
+    const match = /language-(\w+)/.exec(className || '');
+    const code = String(children ?? '').replace(/\n$/, '');
+    const isInline = !match && !className;
+    if (isInline) {
+      return (
+        <code className={`${inlineClassName} px-1 py-0.5 rounded text-xs font-mono break-all`} {...props}>
+          {children}
+        </code>
+      );
+    }
+    return (
+      <div className="my-2">
+        <HighlightedCode code={code} language={match?.[1] ?? ''} />
+      </div>
+    );
+  };
+  return CodeComponent;
+}
+
 // Stable Markdown component overrides — hoisted to module scope so
 // react-markdown sees the same component references across renders.
 // This prevents unmount/remount of custom renderers which was destroying
 // DOM nodes (resetting horizontal scroll position on code blocks).
 const USER_MARKDOWN_COMPONENTS: Components = {
-  pre: ({ children }) => <>{children}</>,
-  code: ({ className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '');
-    const code = String(children ?? '').replace(/\n$/, '');
-    const isInline = !match && !className;
-    if (isInline) {
-      return (
-        <code
-          className="bg-blue-500 text-blue-50 px-1 py-0.5 rounded text-xs font-mono break-all"
-          {...props}
-        >
-          {children}
-        </code>
-      );
-    }
-    return (
-      <div className="my-2">
-        <HighlightedCode code={code} language={match?.[1] ?? ''} />
-      </div>
-    );
-  },
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">
-      {children}
-    </a>
-  ),
+  pre: SharedPre,
+  code: makeCodeComponent('bg-blue-500 text-blue-50'),
+  a: SharedLink,
 };
 
 /** Default agent markdown components (no file click handler — links open in new tab). */
 const AGENT_MARKDOWN_COMPONENTS: Components = {
-  pre: ({ children }) => <>{children}</>,
-  code: ({ className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '');
-    const code = String(children ?? '').replace(/\n$/, '');
-    const isInline = !match && !className;
-    if (isInline) {
-      return (
-        <code
-          className="bg-gray-100 text-gray-800 px-1 py-0.5 rounded text-xs font-mono break-all"
-          {...props}
-        >
-          {children}
-        </code>
-      );
-    }
-    return (
-      <div className="my-2">
-        <HighlightedCode code={code} language={match?.[1] ?? ''} />
-      </div>
-    );
-  },
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">
-      {children}
-    </a>
-  ),
+  pre: SharedPre,
+  code: makeCodeComponent('bg-gray-100 text-gray-800'),
+  a: SharedLink,
 };
 
 /**
@@ -178,27 +164,8 @@ function buildAgentMarkdownComponents(
   onFileClick: (path: string, line?: number | null) => void
 ): Components {
   return {
-    pre: ({ children }) => <>{children}</>,
-    code: ({ className, children, ...props }) => {
-      const match = /language-(\w+)/.exec(className || '');
-      const code = String(children ?? '').replace(/\n$/, '');
-      const isInline = !match && !className;
-      if (isInline) {
-        return (
-          <code
-            className="bg-gray-100 text-gray-800 px-1 py-0.5 rounded text-xs font-mono break-all"
-            {...props}
-          >
-            {children}
-          </code>
-        );
-      }
-      return (
-        <div className="my-2">
-          <HighlightedCode code={code} language={match?.[1] ?? ''} />
-        </div>
-      );
-    },
+    pre: SharedPre,
+    code: makeCodeComponent('bg-gray-100 text-gray-800'),
     a: ({ href, children }) => {
       if (isFilePathHref(href)) {
         const { path, line } = parseFilePathRef(href!);
@@ -232,7 +199,7 @@ function buildAgentMarkdownComponents(
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * (e.g., scroll position, input value) don't affect this component's props.
  */
-export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio, onFileClick }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, animated, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio, onFileClick }: MessageBubbleProps) {
   const isUser = role === 'user';
   // When onFileClick is provided for agent messages, build components that intercept file-path links.
   // useMemo ensures stable references — react-markdown won't unmount/remount custom renderers.
@@ -241,7 +208,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
     [onFileClick]
   );
   const components = isUser ? USER_MARKDOWN_COMPONENTS : agentComponents;
-  const showActions = !streaming && timestamp != null && timestamp > 0;
+  const showActions = !streaming && !animated && timestamp != null && timestamp > 0;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -253,14 +220,18 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
         }`}
       >
         <div className="prose prose-sm max-w-none overflow-x-auto break-words">
-          <Markdown
-            remarkPlugins={REMARK_PLUGINS}
-            components={components}
-          >
-            {text}
-          </Markdown>
+          {animated && !isUser ? (
+            <TypewriterText text={text} animated={true} markdownComponents={components} />
+          ) : (
+            <Markdown
+              remarkPlugins={REMARK_PLUGINS}
+              components={components}
+            >
+              {text}
+            </Markdown>
+          )}
         </div>
-        {streaming && (
+        {streaming && !animated && (
           <span className="inline-block mt-1 text-xs opacity-60 animate-pulse">...</span>
         )}
         {showActions && (

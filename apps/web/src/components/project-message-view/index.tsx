@@ -10,7 +10,7 @@ import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manage
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, Clock } from 'lucide-react';
-import { type FC, useCallback, useMemo, useRef } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { getMessageToolContent } from '../../lib/api/sessions';
@@ -63,6 +63,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   const lc = useSessionLifecycle(projectId, sessionId, isProvisioning, onSessionMutated);
 
+  // Track IDs of user messages that should animate (freshly submitted optimistic messages)
+  const [animatedUserMsgIds] = useState(() => new Set<string>());
+  const prevMsgCountRef = useRef(0);
+
   /** Lazy-load tool content for a compact-mode tool call card. */
   const handleLoadToolContent = useCallback(async (messageId: string): Promise<ToolCallContentItem[]> => {
     const { content } = await getMessageToolContent(projectId, sessionId, messageId);
@@ -73,6 +77,23 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const conversationItems = useMemo<ConversationItem[]>(() => {
     return chatMessagesToConversationItems(lc.messages);
   }, [lc.messages]);
+
+  // Detect newly added optimistic user messages for fade animation
+  useEffect(() => {
+    const currentCount = lc.messages.length;
+    if (currentCount > prevMsgCountRef.current) {
+      // Check for new optimistic messages in the delta
+      for (let i = prevMsgCountRef.current; i < currentCount; i++) {
+        const msg = lc.messages[i];
+        if (msg && msg.role === 'user' && msg.id.startsWith('optimistic-')) {
+          animatedUserMsgIds.add(msg.id);
+          // Remove from set after animation completes (max 1.5s + buffer)
+          setTimeout(() => { animatedUserMsgIds.delete(msg.id); }, 2000);
+        }
+      }
+    }
+    prevMsgCountRef.current = currentCount;
+  }, [lc.messages, animatedUserMsgIds]);
 
   // Identify the last assistant message for TypewriterText animation
   const lastAssistantIdx = useMemo(() => {
@@ -203,6 +224,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                   onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
                   onLoadToolContent={handleLoadToolContent}
                   animateText={item.kind === 'agent_message' && index === lastAssistantIdx && lc.agentActivity === 'responding'}
+                  animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
                 />
               </div>
             )}
