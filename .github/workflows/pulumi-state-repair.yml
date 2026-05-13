@@ -287,9 +287,10 @@ jobs:
             fi
           }
 
-          import_resource "cloudflare:index/d1Database:D1Database" "${PREFIX}-database" "$MAIN_DB_ID"
-          import_resource "cloudflare:index/d1Database:D1Database" "${PREFIX}-observability" "$OBS_DB_ID"
-          import_resource "cloudflare:index/workersRoute:WorkersRoute" "${PREFIX}-route-vm-exclusion" "$VM_ROUTE_ID"
+          # Cloudflare v6 import IDs use format: <account_id>/<resource_id> or <zone_id>/<resource_id>
+          import_resource "cloudflare:index/d1Database:D1Database" "${PREFIX}-database" "${CF_ACCOUNT_ID}/${MAIN_DB_ID}"
+          import_resource "cloudflare:index/d1Database:D1Database" "${PREFIX}-observability" "${CF_ACCOUNT_ID}/${OBS_DB_ID}"
+          import_resource "cloudflare:index/workersRoute:WorkersRoute" "${PREFIX}-route-vm-exclusion" "${CF_ZONE_ID}/${VM_ROUTE_ID}"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
