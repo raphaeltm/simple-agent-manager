@@ -18,7 +18,7 @@ import {
   estimateMessagesBytes,
   trimMessagesToFit,
   truncateToolResult,
-} from '../../../src/durable-objects/sam-session/agent-loop';
+} from '../../../src/durable-objects/sam-session/payload-size';
 
 // =============================================================================
 // truncateToolResult
