@@ -20,7 +20,8 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
-import { type OpenAIMessage, estimateMessagesBytes, trimMessagesToFit, truncateToolResult } from './payload-size';
+import type { OpenAIMessage } from './payload-size';
+import { estimateMessagesBytes, trimMessagesToFit, truncateToolResult } from './payload-size';
 import type {
   AnthropicToolDef,
   CollectedToolCall,
