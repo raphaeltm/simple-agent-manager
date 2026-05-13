@@ -67,6 +67,12 @@ describe('task callback awaiting_followup code structure', () => {
     expect(block).not.toContain('notifySessionEnded');
   });
 
+  it('awaiting_followup block does NOT emit pr_created notification', () => {
+    const block = extractAwaitingFollowupBlock();
+    expect(block).not.toBe('');
+    expect(block).not.toContain('notifyPrCreated');
+  });
+
   it('awaiting_followup block still records activity event', () => {
     const block = extractAwaitingFollowupBlock();
     expect(block).not.toBe('');
