@@ -28,7 +28,7 @@ function createMockSql(
   }>
 ) {
   return {
-    exec: vi.fn().mockImplementation((query: string, ...args: unknown[]) => {
+    exec: vi.fn().mockImplementation((query: string, ..._args: unknown[]) => {
       // workspace_activity + chat_sessions join
       if (query.includes('FROM workspace_activity wa') && query.includes('INNER JOIN chat_sessions')) {
         return {
@@ -67,8 +67,6 @@ function createMockEnv(opts: {
   projectTimeoutMs?: number | null;
   taskForWorkspace?: { id: string } | null;
 }) {
-  const prepareResults: Record<string, unknown> = {};
-
   return {
     WORKSPACE_IDLE_TIMEOUT_MS: undefined,
     DATABASE: {

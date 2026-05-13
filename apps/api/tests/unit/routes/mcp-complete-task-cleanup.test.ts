@@ -227,4 +227,34 @@ describe('complete_task cleanup behavior', () => {
     expect(stopSessionSpy).not.toHaveBeenCalled();
     expect(cleanupTaskRunSpy).not.toHaveBeenCalled();
   });
+
+  it('task-mode complete_task still runs cleanupTaskRun when stopSession fails', async () => {
+    mockD1._stmt.first.mockResolvedValueOnce({
+      task_mode: 'task',
+      user_id: 'user-789',
+      title: 'Fix bug',
+      output_pr_url: null,
+      output_branch: null,
+      mission_id: null,
+    });
+    mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+    mockD1._stmt.raw.mockResolvedValueOnce([['session-xyz']]);
+
+    // Make stopSession throw
+    stopSessionSpy.mockRejectedValueOnce(new Error('DO unavailable'));
+
+    const env = createMockEnv(mockD1);
+    const ctx = createMockExecutionCtx();
+
+    const result = await handleCompleteTask(1, { summary: 'Done' }, tokenData, env, ctx);
+    expect(result.result).toBeDefined();
+
+    await Promise.allSettled(ctx._promises);
+
+    // stopSession was attempted and failed
+    expect(stopSessionSpy).toHaveBeenCalled();
+
+    // cleanupTaskRun still ran despite stopSession failure — prevents VM leaks
+    expect(cleanupTaskRunSpy).toHaveBeenCalledWith('task-123', env);
+  });
 });

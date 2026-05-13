@@ -392,9 +392,17 @@ async function stopSessionAndCleanup(env: Env, tokenData: McpTokenData): Promise
     .limit(1);
 
   if (ws?.chatSessionId) {
-    await projectDataService.stopSession(env, tokenData.projectId, ws.chatSessionId);
+    try {
+      await projectDataService.stopSession(env, tokenData.projectId, ws.chatSessionId);
+    } catch (err) {
+      log.warn('mcp.complete_task.session_stop_failed', {
+        taskId: tokenData.taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
+  // cleanupTaskRun must always run regardless of session-stop outcome — it prevents VM leaks.
   await cleanupTaskRun(tokenData.taskId, env);
 }
 
