@@ -217,6 +217,22 @@ describe('getAttentionState', () => {
       attention: null,
     }))).toBe('stopped');
   });
+
+  it('non-needs_input attention marker falls through to lifecycle state', () => {
+    // Backend only creates needs_input markers today. Other kinds (if added)
+    // fall through to lifecycle-based derivation, not the marker kind.
+    expect(getAttentionState(makeSession({
+      status: 'active',
+      attention: { kind: 'error', createdAt: Date.now(), expiresAt: null, reason: null },
+    }))).toBe('active');
+  });
+
+  it('error attention state is derived from session.status, not attention marker', () => {
+    expect(getAttentionState(makeSession({
+      status: 'failed',
+      attention: null,
+    }))).toBe('error');
+  });
 });
 
 // =============================================================================

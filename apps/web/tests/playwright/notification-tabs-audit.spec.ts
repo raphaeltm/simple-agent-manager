@@ -56,7 +56,7 @@ function makeNotification(o: NotifOverrides) {
   };
 }
 
-// Normal mixed notifications — 2 priority + 4 updates
+// Normal mixed notifications — 2 attention (needs_input + error) + 4 updates
 const NORMAL_NOTIFICATIONS = [
   makeNotification({ id: 'n1', type: 'needs_input', title: 'Agent needs your input on task #42' }),
   makeNotification({ id: 'n2', type: 'task_complete', title: 'Deploy backend v2.1 completed' }),
@@ -203,16 +203,18 @@ async function openNotificationPanel(page: Page) {
 test.describe('Notification tabs — Mobile', () => {
   test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
-  test('normal data — priority tab default', async ({ page }) => {
+  test('normal data — attention tab default', async ({ page }) => {
     await setupApiMocks(page, { notifications: NORMAL_NOTIFICATIONS });
     await page.goto('/');
     const panel = await openNotificationPanel(page);
 
-    // Priority tab should be active by default
+    // Attention tab should be active by default — shows needs_input + error only
     await expect(panel.getByText('Agent needs your input on task #42')).toBeVisible();
-    await expect(panel.getByText('Deploy backend v2.1 completed')).toBeVisible();
+    await expect(panel.getByText('Build failed: missing dependency')).toBeVisible();
 
-    // Updates should NOT be visible
+    // task_complete is now an update, not attention
+    await expect(panel.getByText('Deploy backend v2.1 completed')).not.toBeVisible();
+    // progress is an update
     await expect(panel.getByText('Working on fixing auth flow')).not.toBeVisible();
 
     const overflow = await page.evaluate(
@@ -220,7 +222,7 @@ test.describe('Notification tabs — Mobile', () => {
     );
     expect(overflow).toBe(false);
 
-    await screenshot(page, 'notif-tabs-priority-mobile');
+    await screenshot(page, 'notif-tabs-attention-mobile');
   });
 
   test('normal data — updates tab', async ({ page }) => {
@@ -231,8 +233,12 @@ test.describe('Notification tabs — Mobile', () => {
     await panel.getByRole('tab', { name: /updates/i }).click();
     await page.waitForTimeout(300);
 
+    // task_complete and progress are updates
     await expect(panel.getByText('Working on fixing auth flow')).toBeVisible();
-    await expect(panel.getByText('Build failed: missing dependency')).toBeVisible();
+    await expect(panel.getByText('Deploy backend v2.1 completed')).toBeVisible();
+
+    // error is attention, not an update
+    await expect(panel.getByText('Build failed: missing dependency')).not.toBeVisible();
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,
@@ -270,7 +276,7 @@ test.describe('Notification tabs — Mobile', () => {
     await screenshot(page, 'notif-tabs-long-text-mobile');
   });
 
-  test('empty state — priority tab', async ({ page }) => {
+  test('empty state — attention tab', async ({ page }) => {
     const updatesOnly = [
       makeNotification({ id: 'e1', type: 'progress', title: 'Working on it' }),
     ];
@@ -278,10 +284,10 @@ test.describe('Notification tabs — Mobile', () => {
     await page.goto('/');
     const panel = await openNotificationPanel(page);
 
-    await expect(panel.getByText(/no priority notifications/i)).toBeVisible();
-    await expect(panel.getByText(/agent input requests and completed tasks/i)).toBeVisible();
+    await expect(panel.getByText(/nothing needs your attention/i)).toBeVisible();
+    await expect(panel.getByText(/items needing your input or action appear here/i)).toBeVisible();
 
-    await screenshot(page, 'notif-tabs-empty-priority-mobile');
+    await screenshot(page, 'notif-tabs-empty-attention-mobile');
   });
 
   test('empty state — no notifications at all', async ({ page }) => {
@@ -289,7 +295,7 @@ test.describe('Notification tabs — Mobile', () => {
     await page.goto('/');
     const panel = await openNotificationPanel(page);
 
-    await expect(panel.getByText(/no priority notifications/i)).toBeVisible();
+    await expect(panel.getByText(/nothing needs your attention/i)).toBeVisible();
 
     await screenshot(page, 'notif-tabs-empty-all-mobile');
   });
@@ -315,16 +321,19 @@ test.describe('Notification tabs — Mobile', () => {
 test.describe('Notification tabs — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-  test('normal data — priority tab', async ({ page }) => {
+  test('normal data — attention tab', async ({ page }) => {
     await setupApiMocks(page, { notifications: NORMAL_NOTIFICATIONS });
     await page.goto('/');
     const panel = await openNotificationPanel(page);
 
+    // Attention tab: needs_input + error
     await expect(panel.getByText('Agent needs your input on task #42')).toBeVisible();
-    await expect(panel.getByText('Deploy backend v2.1 completed')).toBeVisible();
+    await expect(panel.getByText('Build failed: missing dependency')).toBeVisible();
+    // task_complete is now an update
+    await expect(panel.getByText('Deploy backend v2.1 completed')).not.toBeVisible();
     await expect(panel.getByText('Working on fixing auth flow')).not.toBeVisible();
 
-    await screenshot(page, 'notif-tabs-priority-desktop');
+    await screenshot(page, 'notif-tabs-attention-desktop');
   });
 
   test('normal data — updates tab', async ({ page }) => {
@@ -335,8 +344,11 @@ test.describe('Notification tabs — Desktop', () => {
     await panel.getByRole('tab', { name: /updates/i }).click();
     await page.waitForTimeout(300);
 
+    // task_complete and progress are updates
     await expect(panel.getByText('Working on fixing auth flow')).toBeVisible();
-    await expect(panel.getByText('Build failed: missing dependency')).toBeVisible();
+    await expect(panel.getByText('Deploy backend v2.1 completed')).toBeVisible();
+    // error is attention, not update
+    await expect(panel.getByText('Build failed: missing dependency')).not.toBeVisible();
 
     await screenshot(page, 'notif-tabs-updates-desktop');
   });
@@ -384,12 +396,12 @@ test.describe('Notification tabs — Desktop', () => {
     await screenshot(page, 'notif-tabs-all-desktop');
   });
 
-  test('empty state — priority', async ({ page }) => {
+  test('empty state — attention', async ({ page }) => {
     await setupApiMocks(page, { notifications: [] });
     await page.goto('/');
     const panel = await openNotificationPanel(page);
 
-    await expect(panel.getByText(/no priority notifications/i)).toBeVisible();
+    await expect(panel.getByText(/nothing needs your attention/i)).toBeVisible();
 
     await screenshot(page, 'notif-tabs-empty-desktop');
   });
