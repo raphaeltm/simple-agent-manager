@@ -54,7 +54,7 @@ export const wildcardDnsRecord = new cloudflare.Record(`${prefix}-dns-wildcard`,
  *
  * See docs/notes/2026-03-12-same-zone-routing-postmortem.md.
  */
-export const vmRouteExclusion = new cloudflare.WorkersRoute(`${prefix}-route-vm-exclusion`, {
+export const vmRouteExclusion = new cloudflare.WorkerRoute(`${prefix}-route-vm-exclusion`, {
   zoneId: zoneId,
   pattern: `*.vm.${baseDomain}/*`,
   // No scriptName → route exclusion (requests bypass Worker, go to origin)
