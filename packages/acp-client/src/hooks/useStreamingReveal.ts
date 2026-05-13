@@ -32,18 +32,16 @@ function usePrefersReducedMotion(): boolean {
  * which grows one character at a time via requestAnimationFrame. When `fullText` grows
  * (new batch arrives), the buffer extends but reveal continues at its steady pace.
  *
- * Returns `{ revealedText, isRevealing, prevRevealedLength }` where `prevRevealedLength`
- * is the character count from the previous render cycle (for computing the fade delta).
+ * Returns `{ revealedText, isRevealing }`.
  */
 export function useStreamingReveal(
   fullText: string,
   animated: boolean,
   options: UseStreamingRevealOptions = {}
-): { revealedText: string; isRevealing: boolean; prevRevealedLength: number } {
+): { revealedText: string; isRevealing: boolean } {
   const { charDelayMs = 20 } = options;
 
   const [revealIndex, setRevealIndex] = useState(animated ? 0 : fullText.length);
-  const prevRevealedLengthRef = useRef(animated ? 0 : fullText.length);
   const rafIdRef = useRef(0);
   const lastTickRef = useRef(0);
   const charDelayRef = useRef(charDelayMs);
@@ -59,14 +57,12 @@ export function useStreamingReveal(
 
   useEffect(() => {
     if (!shouldAnimate) {
-      prevRevealedLengthRef.current = revealIndex;
       setRevealIndex(fullText.length);
       return;
     }
 
     // If text shrunk or was replaced, snap to the new text
     if (fullText.length < revealIndex) {
-      prevRevealedLengthRef.current = 0;
       setRevealIndex(fullText.length);
       return;
     }
@@ -131,12 +127,6 @@ export function useStreamingReveal(
 
   const isRevealing = shouldAnimate && revealIndex < fullText.length;
   const revealedText = shouldAnimate ? fullText.slice(0, revealIndex) : fullText;
-  const prevRevealedLength = prevRevealedLengthRef.current;
 
-  // Update the prev ref for next render
-  if (revealIndex !== prevRevealedLengthRef.current) {
-    prevRevealedLengthRef.current = revealIndex;
-  }
-
-  return { revealedText, isRevealing, prevRevealedLength };
+  return { revealedText, isRevealing };
 }

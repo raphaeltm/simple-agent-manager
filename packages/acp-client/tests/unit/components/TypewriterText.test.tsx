@@ -127,6 +127,49 @@ describe('TypewriterText', () => {
       const cursor = container.querySelector('.streaming-cursor');
       expect(cursor).toBeNull();
     });
+
+    it('applies char-fade spans to newly revealed characters', () => {
+      const { container } = render(
+        <TypewriterText text="Hello" animated={true} charDelayMs={10} />
+      );
+
+      // Advance to reveal some characters
+      act(() => { advanceTime(50); });
+
+      // char-fade spans should appear in the DOM via applyCharFade
+      const spans = container.querySelectorAll('.char-fade');
+      expect(spans.length).toBeGreaterThan(0);
+    });
+
+    it('cleans up char-fade spans after animation completes', () => {
+      vi.useFakeTimers();
+
+      const { container } = render(
+        <TypewriterText
+          text="Hi"
+          animated={true}
+          charDelayMs={10}
+          fadeDurationMs={100}
+          fadeStaggerMs={8}
+        />
+      );
+
+      // Use real rAF mock to advance reveal
+      act(() => { advanceTime(100); });
+
+      // Spans should be present
+      expect(container.querySelectorAll('.char-fade').length).toBeGreaterThan(0);
+
+      // Advance past cleanup timer (delta * fadeStaggerMs + fadeDurationMs + 50)
+      act(() => { vi.advanceTimersByTime(500); });
+
+      // Spans should be cleaned up
+      expect(container.querySelectorAll('.char-fade').length).toBe(0);
+      // Text should still be present
+      expect(container.textContent).toContain('Hi');
+
+      vi.useRealTimers();
+    });
   });
 
   describe('markdown rendering', () => {

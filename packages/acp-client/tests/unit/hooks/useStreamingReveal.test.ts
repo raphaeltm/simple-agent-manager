@@ -69,38 +69,6 @@ describe('useStreamingReveal', () => {
     expect(result.current.isRevealing).toBe(false);
   });
 
-  it('tracks prevRevealedLength correctly across reveals', () => {
-    const { result } = renderHook(() =>
-      useStreamingReveal('Hello', true, { charDelayMs: 10 })
-    );
-
-    // Initially prevRevealedLength should be 0
-    expect(result.current.prevRevealedLength).toBe(0);
-
-    // After partial reveal
-    act(() => { advanceTime(25); });
-    const partialLen = result.current.revealedText.length;
-    expect(partialLen).toBeGreaterThanOrEqual(2);
-
-    // After another tick, prevRevealedLength should have advanced
-    act(() => { advanceTime(15); });
-    expect(result.current.prevRevealedLength).toBe(partialLen);
-  });
-
-  it('resets prevRevealedLength to 0 on text replacement (snap)', () => {
-    const { result, rerender } = renderHook(
-      ({ text }) => useStreamingReveal(text, true, { charDelayMs: 10 }),
-      { initialProps: { text: 'Hello' } }
-    );
-
-    act(() => { advanceTime(200); });
-    expect(result.current.revealedText).toBe('Hello');
-
-    rerender({ text: 'Bye' });
-    // After snap, prevRevealedLength resets
-    expect(result.current.prevRevealedLength).toBe(0);
-  });
-
   it('stops rAF loop after full reveal', () => {
     renderHook(() =>
       useStreamingReveal('Hi', true, { charDelayMs: 10 })
