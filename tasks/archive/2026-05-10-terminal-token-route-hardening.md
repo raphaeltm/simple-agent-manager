@@ -29,17 +29,17 @@ The same route also lacks direct route-level regression tests. Existing worker t
 
 ## Implementation Checklist
 
-- [ ] Apply `rateLimitTerminalToken(c.env)` to `POST /api/terminal/token`.
-- [ ] Keep `POST /api/terminal/activity` unthrottled by the token minting limiter unless a separate activity heartbeat limiter is intentionally introduced.
-- [ ] Add focused API route tests proving:
-  - [ ] authenticated owners can mint a terminal token for accessible workspaces;
-  - [ ] token responses include a workspace URL derived from `BASE_DOMAIN` and workspace ID;
-  - [ ] workspaces owned by another user are rejected;
-  - [ ] inaccessible workspace statuses are rejected;
-  - [ ] token minting enforces `RATE_LIMIT_TERMINAL_TOKEN` and emits rate-limit headers.
-- [ ] Avoid brittle source-contract tests; test behavior through Hono route execution or worker runtime behavior.
-- [ ] Run focused tests for the new coverage.
-- [ ] Run API lint/typecheck and broader validation required by `/do`.
+- [x] Apply `rateLimitTerminalToken(c.env)` to `POST /api/terminal/token`.
+- [x] Keep `POST /api/terminal/activity` unthrottled by the token minting limiter unless a separate activity heartbeat limiter is intentionally introduced.
+- [x] Add focused API route tests proving:
+  - [x] authenticated owners can mint a terminal token for accessible workspaces;
+  - [x] token responses include a workspace URL derived from `BASE_DOMAIN` and workspace ID;
+  - [x] workspaces owned by another user are rejected;
+  - [x] inaccessible workspace statuses are rejected;
+  - [x] token minting enforces `RATE_LIMIT_TERMINAL_TOKEN` and emits rate-limit headers.
+- [x] Avoid brittle source-contract tests; test behavior through Hono route execution or worker runtime behavior.
+- [x] Run focused tests for the new coverage.
+- [x] Run API lint/typecheck and broader validation required by `/do`.
 
 ## Acceptance Criteria
 
