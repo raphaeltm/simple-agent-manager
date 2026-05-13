@@ -87,14 +87,13 @@ export function AppShell({ children }: AppShellProps) {
   }, [isSuperadmin]);
 
   const mobileInfraSection = useMemo(() => {
-    if (!isSuperadmin) return undefined;
     return {
       items: [
         { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
         { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
       ],
     };
-  }, [isSuperadmin]);
+  }, []);
 
   const handleProjectNavigate = useCallback(
     (path: string) => {

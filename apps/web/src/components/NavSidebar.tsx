@@ -189,45 +189,42 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
               );
             })}
 
-            {/* Infrastructure section — superadmin only */}
-            {isSuperadmin && (
-              <div className="mt-2">
-                <button
-                  onClick={() => setInfraOpen(!infraOpen)}
-                  className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-150 ${FOCUS_RING}`}
-                  aria-expanded={infraOpen}
-                  aria-controls="infra-nav-panel"
-                >
-                  {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  Infrastructure
-                </button>
-                {infraOpen && (
-                  <div id="infra-nav-panel" className="flex flex-col gap-1">
-                    {[
-                      { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
-                      { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
-                    ].map((item) => {
-                      const active = isActive(item.path, location.pathname);
-                      return (
-                        <Link
-                          key={item.path}
-                          to={item.path}
-                          aria-current={active ? 'page' : undefined}
-                          className={`flex items-center gap-3 px-3 py-2 ml-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${FOCUS_RING} ${
-                            active
-                              ? 'text-accent bg-surface-hover'
-                              : 'text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
-                          }`}
-                        >
-                          {item.icon}
-                          {item.label}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
+            <div className="mt-2">
+              <button
+                onClick={() => setInfraOpen(!infraOpen)}
+                className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-150 ${FOCUS_RING}`}
+                aria-expanded={infraOpen}
+                aria-controls="infra-nav-panel"
+              >
+                {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                Infrastructure
+              </button>
+              {infraOpen && (
+                <div id="infra-nav-panel" className="flex flex-col gap-1">
+                  {[
+                    { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
+                    { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
+                  ].map((item) => {
+                    const active = isActive(item.path, location.pathname);
+                    return (
+                      <Link
+                        key={item.path}
+                        to={item.path}
+                        aria-current={active ? 'page' : undefined}
+                        className={`flex items-center gap-3 px-3 py-2 ml-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${FOCUS_RING} ${
+                          active
+                            ? 'text-accent bg-surface-hover'
+                            : 'text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
+                        }`}
+                      >
+                        {item.icon}
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* Project list — in global panel within project context */}
             {projectListSection}
@@ -263,45 +260,42 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
         );
       })}
 
-      {/* Infrastructure section — superadmin only */}
-      {isSuperadmin && (
-        <div className="mt-2">
-          <button
-            onClick={() => setInfraOpen(!infraOpen)}
-            className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-150 ${FOCUS_RING}`}
-            aria-expanded={infraOpen}
-            aria-controls="infra-nav-panel"
-          >
-            {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            Infrastructure
-          </button>
-          {infraOpen && (
-            <div id="infra-nav-panel" className="flex flex-col gap-1">
-              {[
-                { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
-                { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
-              ].map((item) => {
-                const active = isActive(item.path, location.pathname);
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    aria-current={active ? 'page' : undefined}
-                    className={`flex items-center gap-3 px-3 py-2 ml-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${FOCUS_RING} ${
-                      active
-                        ? 'text-accent bg-surface-hover'
-                        : 'text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
-                    }`}
-                  >
-                    {item.icon}
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      <div className="mt-2">
+        <button
+          onClick={() => setInfraOpen(!infraOpen)}
+          className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-150 ${FOCUS_RING}`}
+          aria-expanded={infraOpen}
+          aria-controls="infra-nav-panel"
+        >
+          {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          Infrastructure
+        </button>
+        {infraOpen && (
+          <div id="infra-nav-panel" className="flex flex-col gap-1">
+            {[
+              { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
+              { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
+            ].map((item) => {
+              const active = isActive(item.path, location.pathname);
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  aria-current={active ? 'page' : undefined}
+                  className={`flex items-center gap-3 px-3 py-2 ml-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${FOCUS_RING} ${
+                    active
+                      ? 'text-accent bg-surface-hover'
+                      : 'text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
+                  }`}
+                >
+                  {item.icon}
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Project list — in standalone global nav */}
       {projectListSection}

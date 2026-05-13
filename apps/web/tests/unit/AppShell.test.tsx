@@ -77,16 +77,16 @@ describe('AppShell (global context)', () => {
     expect(screen.getByText('Settings')).toBeInTheDocument();
   });
 
-  it('does not show Nodes or Workspaces in primary nav for non-superadmins', () => {
-    renderAppShell();
-    expect(screen.queryByText('Nodes')).not.toBeInTheDocument();
-    expect(screen.queryByText('Workspaces')).not.toBeInTheDocument();
-  });
-
-  it('shows Infrastructure section for superadmins', () => {
-    mockAuthState = { ...mockAuthState, isSuperadmin: true };
+  it('shows Infrastructure section for non-superadmins', () => {
     renderAppShell();
     expect(screen.getByText('Infrastructure')).toBeInTheDocument();
+  });
+
+  it('expands Infrastructure to show Nodes and Workspaces in primary nav', () => {
+    renderAppShell();
+    fireEvent.click(screen.getByText('Infrastructure'));
+    expect(screen.getByText('Nodes')).toBeInTheDocument();
+    expect(screen.getByText('Workspaces')).toBeInTheDocument();
   });
 
   it('renders SAM branding', () => {
@@ -291,8 +291,7 @@ describe('AppShell (mobile)', () => {
     expect(within(drawer).getByText('Project')).toBeInTheDocument();
   });
 
-  it('shows Infrastructure section in mobile drawer for superadmins', () => {
-    mockAuthState = { ...mockAuthState, isSuperadmin: true };
+  it('shows Infrastructure section in mobile drawer for non-superadmins', () => {
     renderAppShell();
 
     fireEvent.click(screen.getByLabelText('Open navigation menu'));
@@ -301,7 +300,6 @@ describe('AppShell (mobile)', () => {
   });
 
   it('expands Infrastructure to show Nodes and Workspaces in mobile drawer', () => {
-    mockAuthState = { ...mockAuthState, isSuperadmin: true };
     renderAppShell();
 
     fireEvent.click(screen.getByLabelText('Open navigation menu'));
@@ -309,15 +307,6 @@ describe('AppShell (mobile)', () => {
 
     expect(screen.getByRole('button', { name: 'Nodes' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Workspaces' })).toBeInTheDocument();
-  });
-
-  it('does not show Infrastructure in mobile drawer for non-superadmins', () => {
-    mockAuthState = { ...mockAuthState, isSuperadmin: false };
-    renderAppShell();
-
-    fireEvent.click(screen.getByLabelText('Open navigation menu'));
-
-    expect(screen.queryByText('Infrastructure')).not.toBeInTheDocument();
   });
 
   it('renders sign out with icon in mobile drawer', () => {
@@ -351,16 +340,13 @@ describe('AppShell (mobile)', () => {
     expect(screen.queryByRole('dialog', { name: 'Navigation menu' })).not.toBeInTheDocument();
   });
 
-  it('shows Infrastructure in toggled global view when superadmin is inside a project', () => {
-    mockAuthState = { ...mockAuthState, isSuperadmin: true };
+  it('shows Infrastructure in toggled global view when non-superadmin is inside a project', () => {
     renderAppShell('/projects/proj-123/chat');
 
     fireEvent.click(screen.getByLabelText('Open navigation menu'));
+    fireEvent.click(screen.getByTestId('mobile-nav-toggle'));
 
-    // Infrastructure is in the global nav panel (hidden by default)
-    // It becomes visible when the user toggles to global nav
-    const toggleBtn = screen.getByTestId('mobile-nav-toggle');
-    expect(toggleBtn).toBeInTheDocument();
+    expect(screen.getByText('Infrastructure')).toBeInTheDocument();
   });
 
   it('closes the drawer when backdrop is clicked', () => {
