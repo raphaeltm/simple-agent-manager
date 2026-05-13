@@ -278,6 +278,8 @@ export interface Env {
   ORCHESTRATOR_DEPENDENCY_MAX_EDGES?: string;      // Max dependency edges per project (default: 50)
   ORCHESTRATOR_STOP_GRACE_MS?: string;             // Grace period before hard stop after warning (default: 5000)
   ORCHESTRATOR_MESSAGE_MAX_LENGTH?: string;        // Max length for injected messages to child agents (default: 32768)
+  // Attention markers
+  HUMAN_INPUT_TIMEOUT_MS?: string;                 // Attention marker expiry for needs_input (default: 7200000 = 2 hours)
   // Durable mailbox (Phase 1 orchestrator messaging)
   MAILBOX_ACK_TIMEOUT_MS?: string;                 // Ack timeout before re-delivery (default: 300000)
   MAILBOX_REDELIVERY_MAX_ATTEMPTS?: string;        // Max delivery attempts before expiry (default: 5)

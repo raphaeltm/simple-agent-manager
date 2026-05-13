@@ -18,6 +18,7 @@ import type { Env, SummaryData } from './types';
 const log = createModuleLogger('project_data');
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
+import * as attention from './attention';
 import * as commands from './commands';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
@@ -109,6 +110,14 @@ export class ProjectData extends DurableObject<Env> {
     if (idleReset.cleanupAt > 0) {
       await this.recalculateAlarm();
     }
+    // Resolve attention markers when a human message arrives
+    if (role === 'user') {
+      const resolved = attention.resolveAttentionMarkers(this.sql, sessionId, result.id, 'human', 'human_message');
+      if (resolved > 0) {
+        await this.recalculateAlarm();
+        this.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason: 'human_message' }, sessionId);
+      }
+    }
     if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
     this.scheduleSummarySync();
     let parsedToolMetadata: unknown = null;
@@ -132,6 +141,17 @@ export class ProjectData extends DurableObject<Env> {
       const idleReset = idleCleanup.resetIdleCleanup(this.sql, this.env, sessionId);
       if (idleReset.cleanupAt > 0) {
         await this.recalculateAlarm();
+      }
+      // Resolve attention markers if any persisted message is from a human
+      const hasUserMessage = batchMessages.some((m) => m.role === 'user');
+      if (hasUserMessage) {
+        const firstUserMsg = result.persistedMessages.find((m: { role: string; id: string }) => m.role === 'user');
+        const resolvedByMsgId = firstUserMsg ? firstUserMsg.id : null;
+        const resolved = attention.resolveAttentionMarkers(this.sql, sessionId, resolvedByMsgId, 'human', 'human_message');
+        if (resolved > 0) {
+          await this.recalculateAlarm();
+          this.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason: 'human_message' }, sessionId);
+        }
       }
       if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
       this.scheduleSummarySync();
@@ -243,6 +263,32 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async getCleanupAt(sessionId: string): Promise<number | null> { return idleCleanup.getCleanupAt(this.sql, sessionId); }
+
+  // --- Attention Markers ---
+
+  async createAttentionMarker(opts: attention.CreateAttentionMarkerOpts): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
+    const result = attention.createAttentionMarker(this.sql, opts);
+    await this.recalculateAlarm();
+    this.broadcastEvent('attention.created', { sessionId: opts.sessionId, markerId: result.id, kind: opts.kind }, opts.sessionId);
+    return result;
+  }
+
+  async resolveSessionAttentionMarkers(sessionId: string, resolvedByMessageId: string | null, actorType: string = 'human', reason: string = 'human_message'): Promise<number> {
+    const count = attention.resolveAttentionMarkers(this.sql, sessionId, resolvedByMessageId, actorType, reason);
+    if (count > 0) {
+      await this.recalculateAlarm();
+      this.broadcastEvent('attention.resolved', { sessionId, count, reason }, sessionId);
+    }
+    return count;
+  }
+
+  getSessionAttentionSummary(sessionId: string) {
+    return attention.getAttentionSummary(this.sql, sessionId);
+  }
+
+  listActiveAttentionMarkers(sessionId: string) {
+    return attention.listActiveAttentionMarkers(this.sql, sessionId);
+  }
 
   // --- ACP Session Lifecycle ---
 
@@ -389,6 +435,47 @@ export class ProjectData extends DurableObject<Env> {
         }
       },
       (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());
+
+    // Process expired attention markers (e.g., 2-hour human input timeout)
+    const expiredMarkers = attention.getExpiredMarkers(this.sql);
+    for (const marker of expiredMarkers) {
+      try {
+        // Resolve only this specific expired marker (not all markers on the session)
+        attention.resolveAttentionMarkerById(this.sql, marker.id, 'system', 'expired');
+
+        if (marker.kind === 'needs_input' && marker.taskId) {
+          // Fail the task in D1 and stop the workspace
+          if (this.env.DATABASE) {
+            await this.env.DATABASE.prepare(
+              `UPDATE tasks SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('in_progress', 'delegated')`
+            ).bind('Human input request expired after timeout', marker.taskId).run();
+          }
+          if (marker.workspaceId && this.env.DATABASE) {
+            await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, marker.workspaceId);
+          }
+          // Stop the session
+          await this.failSession(marker.sessionId, 'Human input request expired');
+          activity.recordActivityEventInternal(
+            this.sql, 'attention.expired', 'system', null,
+            marker.workspaceId, marker.sessionId, marker.taskId,
+            JSON.stringify({ kind: marker.kind, markerId: marker.id }),
+          );
+          log.info('attention_marker.expired_cleanup', {
+            markerId: marker.id,
+            sessionId: marker.sessionId,
+            taskId: marker.taskId,
+            workspaceId: marker.workspaceId,
+            kind: marker.kind,
+          });
+        }
+      } catch (err) {
+        log.error('attention_marker.expiry_processing_failed', {
+          markerId: marker.id,
+          sessionId: marker.sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
     const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
@@ -704,7 +791,8 @@ export class ProjectData extends DurableObject<Env> {
     const heartbeatTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
     const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
     const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
-    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime].filter((t): t is number => t !== null);
+    const attentionTime = attention.computeAttentionAlarmTime(this.sql);
+    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime, attentionTime].filter((t): t is number => t !== null);
     if (candidates.length > 0) await this.ctx.storage.setAlarm(Math.min(...candidates));
     else await this.ctx.storage.deleteAlarm();
   }
@@ -713,7 +801,11 @@ export class ProjectData extends DurableObject<Env> {
     const heartbeatAlarmTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
     if (heartbeatAlarmTime === null) { await this.recalculateAlarm(); return; }
     const { idleCleanupTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
-    const earliest = idleCleanupTime ? Math.min(heartbeatAlarmTime, idleCleanupTime) : heartbeatAlarmTime;
+    const attentionTime = attention.computeAttentionAlarmTime(this.sql);
+    const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
+    const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
+    const candidates = [heartbeatAlarmTime, idleCleanupTime, attentionTime, mailboxTime].filter((t): t is number => t !== null);
+    const earliest = Math.min(...candidates);
     await this.ctx.storage.setAlarm(earliest);
   }
 

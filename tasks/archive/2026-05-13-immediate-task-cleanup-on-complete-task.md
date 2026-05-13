@@ -33,16 +33,16 @@ Meanwhile, the VM agent callback for `executionStep = 'awaiting_followup'` sched
 
 ## Implementation Checklist
 
-- [ ] 1. Pass `executionCtx` to `handleCompleteTask` from MCP router in `index.ts`
-- [ ] 2. In `handleCompleteTask` task-mode path: after D1 update + existing side effects, add `waitUntil` to stop/materialize session and call `cleanupTaskRun`
+- [x] 1. Pass `executionCtx` to `handleCompleteTask` from MCP router in `index.ts`
+- [x] 2. In `handleCompleteTask` task-mode path: after D1 update + existing side effects, add `waitUntil` to stop/materialize session and call `cleanupTaskRun`
   - Look up chatSessionId from workspace
   - Call `projectDataService.stopSession(env, projectId, chatSessionId)`
   - Call `cleanupTaskRun(taskId, env)` in background
-- [ ] 3. In `callback.ts` `awaiting_followup` handler: remove task-mode idle cleanup scheduling
+- [x] 3. In `callback.ts` `awaiting_followup` handler: remove task-mode idle cleanup scheduling
   - Keep: D1 execution step update, git push result persistence, activity event recording
   - Remove: `markAgentCompleted`, `scheduleIdleCleanup`, `session_ended` notification, `pr_created` notification for task-mode
   - These notifications now come from `handleCompleteTask` (already emits `notifyTaskComplete`)
-- [ ] 4. Add tests:
+- [x] 4. Add tests:
   - Task-mode `complete_task` triggers session stop + cleanup
   - Conversation-mode `complete_task` does NOT trigger cleanup
   - VM `awaiting_followup` callback does NOT schedule cleanup for task mode
@@ -50,10 +50,10 @@ Meanwhile, the VM agent callback for `executionStep = 'awaiting_followup'` sched
 
 ## Acceptance Criteria
 
-- [ ] Task-mode `complete_task` triggers workspace cleanup immediately (via `cleanupTaskRun` in background)
-- [ ] Task-mode `complete_task` stops the ProjectData chat session
-- [ ] Task-mode `executionStep = 'awaiting_followup'` alone does NOT complete/schedule cleanup
-- [ ] Conversation-mode `complete_task` still produces idle/awaiting-follow-up state (no cleanup)
-- [ ] Node warm-pool behavior unchanged
-- [ ] Existing trigger sync, mission scheduler, activity, and notification behavior preserved
-- [ ] Tests cover all four behavioral assertions
+- [x] Task-mode `complete_task` triggers workspace cleanup immediately (via `cleanupTaskRun` in background)
+- [x] Task-mode `complete_task` stops the ProjectData chat session
+- [x] Task-mode `executionStep = 'awaiting_followup'` alone does NOT complete/schedule cleanup
+- [x] Conversation-mode `complete_task` still produces idle/awaiting-follow-up state (no cleanup)
+- [x] Node warm-pool behavior unchanged (task-runner.ts not modified)
+- [x] Existing trigger sync, mission scheduler, activity, and notification behavior preserved
+- [x] Tests cover all four behavioral assertions
