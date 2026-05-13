@@ -1,7 +1,8 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { act,renderHook } from '@testing-library/react';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { useStreamingReveal } from '../../../src/hooks/useStreamingReveal';
-import { setupRafMock, type RafMockState } from '../helpers/raf-mock';
+import { type RafMockState,setupRafMock } from '../helpers/raf-mock';
 
 describe('useStreamingReveal', () => {
   let raf: RafMockState;

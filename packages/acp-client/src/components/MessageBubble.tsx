@@ -118,7 +118,7 @@ const SharedLink: Components['a'] = ({ href, children }) => (
 
 /** Build a code component with a configurable inline-code class. */
 function makeCodeComponent(inlineClassName: string): NonNullable<Components['code']> {
-  return ({ className, children, ...props }) => {
+  const CodeComponent: NonNullable<Components['code']> = ({ className, children, ...props }) => {
     const match = /language-(\w+)/.exec(className || '');
     const code = String(children ?? '').replace(/\n$/, '');
     const isInline = !match && !className;
@@ -135,6 +135,7 @@ function makeCodeComponent(inlineClassName: string): NonNullable<Components['cod
       </div>
     );
   };
+  return CodeComponent;
 }
 
 // Stable Markdown component overrides — hoisted to module scope so

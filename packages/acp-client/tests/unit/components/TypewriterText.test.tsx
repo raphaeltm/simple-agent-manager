@@ -1,7 +1,8 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { act,render } from '@testing-library/react';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { TypewriterText } from '../../../src/components/TypewriterText';
-import { setupRafMock, type RafMockState } from '../helpers/raf-mock';
+import { type RafMockState,setupRafMock } from '../helpers/raf-mock';
 
 // Mock react-markdown to avoid complex JSX parsing in tests
 vi.mock('react-markdown', () => ({
