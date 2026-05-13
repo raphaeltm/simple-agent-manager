@@ -9,6 +9,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { computeHumanInputExpiry } from '../../durable-objects/project-data/attention';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -454,6 +455,29 @@ export async function handleRequestHumanInput(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // Create durable attention marker (best-effort, alongside notification)
+  try {
+    const sessionId = await notificationService.getChatSessionId(env, tokenData.workspaceId);
+    if (sessionId) {
+      const expiresAt = computeHumanInputExpiry(env.HUMAN_INPUT_TIMEOUT_MS);
+      await projectDataService.createAttentionMarker(env, tokenData.projectId, {
+        sessionId,
+        taskId: tokenData.taskId,
+        workspaceId: tokenData.workspaceId,
+        kind: 'needs_input',
+        source: 'request_human_input',
+        reason: sanitizedContext,
+        metadata: category || options ? JSON.stringify({ category, options }) : null,
+        expiresAt,
+      });
+    }
+  } catch (err) {
+    log.warn('mcp.request_human_input.attention_marker_failed', {
+      taskId: tokenData.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   log.info('mcp.request_human_input', {

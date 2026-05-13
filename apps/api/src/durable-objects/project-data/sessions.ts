@@ -1,6 +1,7 @@
 /**
  * Chat session CRUD, state machine, listing, and search.
  */
+import { getAttentionSummary } from './attention';
 import {
   parseChatSessionListRow,
   parseCountCnt,
@@ -164,7 +165,7 @@ export function listSessions(
     .toArray();
 
   return {
-    sessions: rows.map((row) => mapSessionRow(row)),
+    sessions: rows.map((row) => enrichWithAttention(sql, mapSessionRow(row))),
     total: totalRow ? parseCountCnt(totalRow, 'sessions.list_total') : 0,
   };
 }
@@ -186,7 +187,7 @@ export function getSessionsByTaskIds(
     )
     .toArray();
 
-  return rows.map((row) => mapSessionRow(row));
+  return rows.map((row) => enrichWithAttention(sql, mapSessionRow(row)));
 }
 
 export function getSession(
@@ -208,7 +209,7 @@ export function getSession(
 
   const row = rows[0];
   if (!row) return null;
-  return mapSessionRow(row);
+  return enrichWithAttention(sql, mapSessionRow(row));
 }
 
 export function updateSessionTopic(
@@ -250,4 +251,13 @@ export function mapSessionRow(
   _baseDomain?: string
 ): Record<string, unknown> {
   return parseChatSessionListRow(row);
+}
+
+function enrichWithAttention(
+  sql: SqlStorage,
+  session: Record<string, unknown>,
+): Record<string, unknown> {
+  const sessionId = session.id as string;
+  const summary = getAttentionSummary(sql, sessionId);
+  return { ...session, attention: summary };
 }

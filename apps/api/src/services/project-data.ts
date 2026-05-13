@@ -816,3 +816,38 @@ export async function forwardWebSocket(
   url.pathname = '/ws';
   return stub.fetch(new Request(url.toString(), request));
 }
+
+// =========================================================================
+// Attention Markers
+// =========================================================================
+
+export async function createAttentionMarker(
+  env: Env,
+  projectId: string,
+  opts: {
+    sessionId: string;
+    taskId: string | null;
+    workspaceId: string | null;
+    kind: string;
+    source: string;
+    sourceNotificationId?: string | null;
+    reason?: string | null;
+    metadata?: string | null;
+    expiresAt?: number | null;
+  },
+): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
+  const stub = await getStub(env, projectId);
+  return stub.createAttentionMarker(opts);
+}
+
+export async function resolveSessionAttentionMarkers(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  resolvedByMessageId: string | null,
+  actorType: string = 'human',
+  reason: string = 'human_message',
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.resolveSessionAttentionMarkers(sessionId, resolvedByMessageId, actorType, reason);
+}

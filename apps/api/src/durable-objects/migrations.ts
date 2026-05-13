@@ -564,6 +564,44 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '020-session-attention-markers',
+    run: (sql) => {
+      // Durable attention markers — current product state about whether a
+      // session needs human or system action. Separate from notifications
+      // (delivery/inbox) and task lifecycle status.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS session_attention_markers (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          task_id TEXT,
+          workspace_id TEXT,
+          kind TEXT NOT NULL,
+          source TEXT NOT NULL,
+          source_event_id TEXT,
+          source_message_id TEXT,
+          source_notification_id TEXT,
+          reason TEXT,
+          metadata TEXT,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER,
+          resolved_at INTEGER,
+          resolved_by_message_id TEXT,
+          resolved_by_actor_type TEXT,
+          resolved_reason TEXT
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_attention_active
+          ON session_attention_markers(session_id, resolved_at, created_at DESC)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_attention_expiry
+          ON session_attention_markers(expires_at)
+          WHERE resolved_at IS NULL AND expires_at IS NOT NULL
+      `);
+    },
+  },
 ];
 
 /**
