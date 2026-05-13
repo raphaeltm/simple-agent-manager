@@ -1,30 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ChatSessionResponse } from '../../src/lib/api';
-
-// Mock API calls
-vi.mock('../../src/lib/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/lib/api')>();
-  return {
-    ...actual,
-    getProjectTask: vi.fn().mockResolvedValue({ description: 'Original task description' }),
-    summarizeSession: vi.fn().mockResolvedValue({
-      summary: 'Summary of previous session',
-      messageCount: 10,
-      filteredCount: 5,
-      method: 'ai' as const,
-    }),
-    deleteWorkspace: vi.fn(),
-    updateProjectTaskStatus: vi.fn(),
-  };
-});
-
-import { FORK_MESSAGE_TEMPLATE, ForkDialog } from '../../src/components/project/ForkDialog';
-import { RetryDialog } from '../../src/components/project/RetryDialog';
 import { SessionHeader } from '../../src/components/project-message-view/SessionHeader';
+import type { ChatSessionResponse } from '../../src/lib/api';
+import { DerivedSessionBanner } from '../../src/pages/project-chat/DerivedSessionBanner';
 import { SessionItem } from '../../src/pages/project-chat/SessionItem';
 
 function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionResponse {
@@ -48,277 +29,73 @@ function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionR
   };
 }
 
-describe('RetryDialog', () => {
-  const onClose = vi.fn();
-  const onRetry = vi.fn().mockResolvedValue(undefined);
-  const projectId = 'proj-1';
+describe('DerivedSessionBanner', () => {
+  const onDismiss = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('renders with session title and error message', async () => {
+  it('renders fork lineage with branch and loading context state', () => {
     render(
-      <RetryDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onRetry={onRetry}
+      <DerivedSessionBanner
+        derived={{
+          type: 'fork',
+          parentSessionId: 'session-abc12345',
+          parentSessionLabel: 'Fix the login bug',
+          parentTaskId: 'task-1',
+          parentBranch: 'sam/fix-login-bug',
+          contextSummary: '',
+          summaryLoading: true,
+        }}
+        onDismiss={onDismiss}
       />
     );
 
-    expect(screen.getByText('Retry task')).toBeTruthy();
-    expect(screen.getByText('Fix the login bug')).toBeTruthy();
-    expect(screen.getByText(/Agent crashed unexpectedly/)).toBeTruthy();
+    expect(screen.getByText('Forking from: Fix the login bug')).toBeTruthy();
+    expect(screen.getByText('Branch: sam/fix-login-bug')).toBeTruthy();
+    expect(screen.getByText('Loading context...')).toBeTruthy();
   });
 
-  it('pre-fills message from task description', async () => {
+  it('renders retry lineage with the previous error message', () => {
     render(
-      <RetryDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onRetry={onRetry}
+      <DerivedSessionBanner
+        derived={{
+          type: 'retry',
+          parentSessionId: 'session-abc12345',
+          parentSessionLabel: 'Fix the login bug',
+          parentTaskId: 'task-1',
+          errorMessage: 'Agent crashed unexpectedly',
+          contextSummary: 'Retry context',
+          summaryLoading: false,
+        }}
+        onDismiss={onDismiss}
       />
     );
 
-    await waitFor(() => {
-      const textarea = screen.getByPlaceholderText('Task description...');
-      expect(textarea).toBeTruthy();
-      expect((textarea as HTMLTextAreaElement).value).toBe('Original task description');
-    });
+    expect(screen.getByText('Retrying: Fix the login bug')).toBeTruthy();
+    expect(screen.getByText('Error: Agent crashed unexpectedly')).toBeTruthy();
+    expect(screen.queryByText('Loading context...')).toBeNull();
   });
 
-  it('calls onRetry with message and context summary on submit', async () => {
+  it('calls onDismiss when the cancel button is clicked', async () => {
     const user = userEvent.setup();
     render(
-      <RetryDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onRetry={onRetry}
+      <DerivedSessionBanner
+        derived={{
+          type: 'fork',
+          parentSessionId: 'session-abc12345',
+          parentSessionLabel: 'Fix the login bug',
+          parentTaskId: 'task-1',
+          contextSummary: '',
+          summaryLoading: false,
+        }}
+        onDismiss={onDismiss}
       />
     );
 
-    // Wait for data to load
-    await waitFor(() => {
-      expect((screen.getByPlaceholderText('Task description...') as HTMLTextAreaElement).value).toBe('Original task description');
-    });
-
-    // Wait for summary to load (needed for submit button to enable)
-    await waitFor(() => {
-      const retryBtn = screen.getByRole('button', { name: 'Retry' });
-      expect(retryBtn).not.toBeDisabled();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
-
-    await waitFor(() => {
-      expect(onRetry).toHaveBeenCalledTimes(1);
-      const [msg, ctx, parentId] = onRetry.mock.calls[0] as [string, string, string];
-      expect(msg).toBe('Original task description');
-      expect(ctx).toContain('Retry Context');
-      expect(ctx).toContain('session-abc12345');
-      expect(parentId).toBe('task-1');
-    });
-  });
-
-  it('disables submit when message is empty', async () => {
-    const user = userEvent.setup();
-    render(
-      <RetryDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onRetry={onRetry}
-      />
-    );
-
-    // Wait for load
-    await waitFor(() => {
-      expect((screen.getByPlaceholderText('Task description...') as HTMLTextAreaElement).value).toBe('Original task description');
-    });
-
-    // Clear the message
-    const textarea = screen.getByPlaceholderText('Task description...');
-    await user.clear(textarea);
-
-    // Submit should be disabled
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
-  });
-
-  it('displays error and keeps dialog open when onRetry rejects', async () => {
-    const failingRetry = vi.fn().mockRejectedValue(new Error('Network failure'));
-    const user = userEvent.setup();
-    render(
-      <RetryDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onRetry={failingRetry}
-      />
-    );
-
-    await waitFor(() => {
-      expect((screen.getByPlaceholderText('Task description...') as HTMLTextAreaElement).value).toBe('Original task description');
-    });
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Retry' })).not.toBeDisabled();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('alert')).toBeTruthy();
-      expect(screen.getByText('Network failure')).toBeTruthy();
-    });
-    // Dialog stays open — onClose not called
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('calls onClose after successful retry', async () => {
-    const user = userEvent.setup();
-    render(
-      <RetryDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onRetry={onRetry}
-      />
-    );
-
-    await waitFor(() => {
-      expect((screen.getByPlaceholderText('Task description...') as HTMLTextAreaElement).value).toBe('Original task description');
-    });
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Retry' })).not.toBeDisabled();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
-
-    await waitFor(() => {
-      expect(onClose).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it('falls back to empty message when getProjectTask fails', async () => {
-    const { getProjectTask } = await import('../../src/lib/api');
-    (getProjectTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Not found'));
-
-    render(
-      <RetryDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onRetry={onRetry}
-      />
-    );
-
-    await waitFor(() => {
-      const textarea = screen.getByPlaceholderText('Task description...');
-      expect((textarea as HTMLTextAreaElement).value).toBe('');
-    });
-  });
-});
-
-describe('ForkDialog', () => {
-  const onClose = vi.fn();
-  const onFork = vi.fn().mockResolvedValue(undefined);
-  const projectId = 'proj-1';
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('pre-fills message with MCP tools template', async () => {
-    render(
-      <ForkDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onFork={onFork}
-      />
-    );
-
-    await waitFor(() => {
-      const textarea = screen.getByPlaceholderText('Describe the next task...');
-      const value = (textarea as HTMLTextAreaElement).value;
-      expect(value).toContain('SAM MCP tools');
-      expect(value).toContain('get_session_messages');
-      expect(value).toContain('search_messages');
-      expect(value).toContain('Fix the login bug');
-    });
-  });
-
-  it('exports FORK_MESSAGE_TEMPLATE constant', () => {
-    expect(FORK_MESSAGE_TEMPLATE).toContain('SAM MCP tools');
-    expect(FORK_MESSAGE_TEMPLATE).toContain('get_session_messages');
-  });
-
-  it('calls onFork with message and summary on submit', async () => {
-    const user = userEvent.setup();
-    render(
-      <ForkDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onFork={onFork}
-      />
-    );
-
-    // Wait for template to load and summary to finish
-    await waitFor(() => {
-      const textarea = screen.getByPlaceholderText('Describe the next task...');
-      expect((textarea as HTMLTextAreaElement).value).toContain('SAM MCP tools');
-    });
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Continue' })).not.toBeDisabled();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-
-    await waitFor(() => {
-      expect(onFork).toHaveBeenCalledTimes(1);
-      const [msg, summary, parentId] = onFork.mock.calls[0] as [string, string, string];
-      expect(msg).toContain('SAM MCP tools');
-      expect(summary).toBe('Summary of previous session');
-      expect(parentId).toBe('task-1');
-    });
-  });
-
-  it('displays error and keeps dialog open when onFork rejects', async () => {
-    const failingFork = vi.fn().mockRejectedValue(new Error('Server error'));
-    const user = userEvent.setup();
-    render(
-      <ForkDialog
-        open
-        session={makeSession()}
-        projectId={projectId}
-        onClose={onClose}
-        onFork={failingFork}
-      />
-    );
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Continue' })).not.toBeDisabled();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('alert')).toBeTruthy();
-      expect(screen.getByText('Server error')).toBeTruthy();
-    });
-    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByLabelText('Cancel fork/retry'));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });
 

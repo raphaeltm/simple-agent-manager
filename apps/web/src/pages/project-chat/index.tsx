@@ -19,6 +19,7 @@ export function ProjectChat() {
   const isMobile = useIsMobile();
   const state = useProjectChatState();
   const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
+  const activeSessionId = state.sessionId ?? '';
 
   // Compute lineage text for the selected session (for header display)
   const selectedLineageText = useMemo(() => {
@@ -277,7 +278,7 @@ export function ProjectChat() {
             <ProjectMessageView
               key={state.sessionId}
               projectId={state.projectId}
-              sessionId={state.sessionId!}
+              sessionId={activeSessionId}
               isProvisioning={!!(state.provisioning && state.sessionId === state.provisioning.sessionId && !isTerminal(state.provisioning.status))}
               onSessionMutated={() => { void state.loadSessions(); }}
               onRetry={() => {

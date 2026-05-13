@@ -6,7 +6,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
 import { useProjectWebSocket } from '../../hooks/useProjectWebSocket';
-import type { ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionResponse, TaskAttachmentRef } from '../../lib/api';
 import {
   closeConversationTask,
   getProjectTask,
@@ -220,8 +220,9 @@ export function useProjectChatState() {
         if (cancelled) return;
         const acpAgents = (data.agents || []).filter((a) => a.configured && a.supportsAcp);
         setConfiguredAgents(acpAgents);
-        if (!selectedAgentType && acpAgents.length > 0) {
-          setSelectedAgentType(acpAgents[0]!.id);
+        const firstAgent = acpAgents[0];
+        if (!selectedAgentType && firstAgent) {
+          setSelectedAgentType(firstAgent.id);
         }
       })
       .catch((err: unknown) => { console.error('Failed to load agents', err); });
@@ -328,10 +329,11 @@ export function useProjectChatState() {
     if (!sessionId || provisioning) return;
     const selectedSession = sessions.find((s) => s.id === sessionId);
     if (!selectedSession?.taskId) return;
+    const selectedTaskId = selectedSession.taskId;
     let cancelled = false;
     void (async () => {
       try {
-        const task = await getProjectTask(projectId, selectedSession.taskId!);
+        const task = await getProjectTask(projectId, selectedTaskId);
         if (cancelled) return;
         if (!isTerminal(task.status) && task.status !== 'in_progress') {
           setProvisioning({
@@ -367,8 +369,10 @@ export function useProjectChatState() {
     setSubmitting(true);
     try {
       const attachmentRefs = attachments.chatAttachments
-        .filter((a) => a.status === 'complete' && a.ref)
-        .map((a) => a.ref!);
+        .reduce<TaskAttachmentRef[]>((refs, attachment) => {
+          if (attachment.status === 'complete' && attachment.ref) refs.push(attachment.ref);
+          return refs;
+        }, []);
       const derivedFields = pendingDerived
         ? { parentTaskId: pendingDerived.parentTaskId, contextSummary: pendingDerived.contextSummary }
         : {};
