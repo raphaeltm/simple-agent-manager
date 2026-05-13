@@ -122,8 +122,9 @@ export function SessionItem({
           >
             <StatusIcon
               size={14}
-              className={attentionState === 'active' ? 'animate-spin' : ''}
+              className={attentionState === 'active' ? 'motion-safe:animate-spin' : ''}
             />
+            <span className="sr-only">{iconConfig.label}</span>
           </span>
           <span
             className={`overflow-hidden text-ellipsis whitespace-nowrap flex-1 ${
@@ -177,7 +178,7 @@ export function SessionItem({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onFork(session); }}
-          className="mt-1 flex items-center gap-1 text-xs text-accent-primary bg-transparent border border-transparent rounded-sm cursor-pointer py-0.5 px-1.5 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors"
+          className="mt-1 flex items-center gap-1 text-xs text-accent bg-transparent border border-transparent rounded-sm cursor-pointer py-0.5 px-1.5 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent transition-colors"
           style={{ marginLeft: 20 }}
           title="Continue from this session"
         >

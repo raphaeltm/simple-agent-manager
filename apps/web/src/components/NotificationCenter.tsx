@@ -230,7 +230,6 @@ export function NotificationCenter() {
                     ? 'text-accent bg-transparent border-b-2 border-b-accent'
                     : 'text-fg-muted bg-transparent hover:text-fg-primary'
                 }`}
-                style={activeTab === id ? { borderBottomWidth: '2px', borderBottomStyle: 'solid' } : {}}
               >
                 {label}
                 {badge > 0 && (
