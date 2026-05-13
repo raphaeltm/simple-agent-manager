@@ -12,7 +12,7 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
-import { AcpSessionAssignSchema, AcpSessionForkSchema,AcpSessionHeartbeatSchema, AcpSessionStatusReportSchema, CreateAcpSessionSchema, jsonValidator } from '../../schemas';
+import { AcpSessionActivityReportSchema, AcpSessionAssignSchema, AcpSessionForkSchema,AcpSessionHeartbeatSchema, AcpSessionStatusReportSchema, CreateAcpSessionSchema, jsonValidator } from '../../schemas';
 import * as projectDataService from '../../services/project-data';
 
 /** Default max ACP prompt size (256 KB). Override via MAX_ACP_PROMPT_BYTES env var. */
@@ -218,6 +218,39 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', jsonValidator(Ac
   }
 
   await projectDataService.updateAcpSessionHeartbeat(c.env, projectId, sessionId, body.nodeId);
+  return c.body(null, 204);
+});
+
+/**
+ * POST /:id/acp-sessions/:sessionId/activity — VM agent reports prompt activity.
+ *
+ * Ephemeral signal (no persistence). Broadcasts to DO WebSocket clients.
+ * Auth: BetterAuth session cookie + nodeId verification (same model as /status).
+ */
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/activity', jsonValidator(AcpSessionActivityReportSchema), async (c) => {
+  getUserId(c); // Ensure authenticated
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+
+  const body = c.req.valid('json');
+
+  // Validate node matches assigned node
+  const existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
+  if (!existing) {
+    throw errors.notFound('ACP session not found');
+  }
+  if (existing.nodeId !== body.nodeId) {
+    log.error('acp_session.activity_node_mismatch', {
+      sessionId,
+      projectId,
+      expectedNodeId: existing.nodeId,
+      receivedNodeId: body.nodeId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Node identity verification failed');
+  }
+
+  await projectDataService.reportAcpSessionActivity(c.env, projectId, sessionId, body.activity);
   return c.body(null, 204);
 });
 

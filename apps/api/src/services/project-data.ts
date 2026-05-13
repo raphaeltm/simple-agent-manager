@@ -450,6 +450,17 @@ export async function updateAcpSessionHeartbeat(
  * Update heartbeats for all active ACP sessions on a node within a project.
  * Called from the node heartbeat handler to keep ACP sessions alive.
  */
+/** Broadcast ephemeral activity signal — no persistence. */
+export async function reportAcpSessionActivity(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  activity: string
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  stub.reportActivity(sessionId, activity);
+}
+
 export async function updateNodeHeartbeats(
   env: Env,
   projectId: string,

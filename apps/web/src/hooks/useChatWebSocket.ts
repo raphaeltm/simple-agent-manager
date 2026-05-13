@@ -24,6 +24,8 @@ interface UseChatWebSocketOptions {
   onCatchUp: (messages: ChatMessageResponse[], session: ChatSessionResponse) => void;
   /** Called when the agent completes on the session. */
   onAgentCompleted?: (agentCompletedAt: number) => void;
+  /** Called when a session.activity event arrives (prompting/idle). */
+  onAgentActivity?: (activity: 'prompting' | 'idle') => void;
 }
 
 export interface UseChatWebSocketReturn {
@@ -46,6 +48,7 @@ export function useChatWebSocket({
   onSessionStopped,
   onCatchUp,
   onAgentCompleted,
+  onAgentActivity,
 }: UseChatWebSocketOptions): UseChatWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ChatConnectionState>('disconnected');
 
@@ -62,10 +65,12 @@ export function useChatWebSocket({
   const onSessionStoppedRef = useRef(onSessionStopped);
   const onCatchUpRef = useRef(onCatchUp);
   const onAgentCompletedRef = useRef(onAgentCompleted);
+  const onAgentActivityRef = useRef(onAgentActivity);
   onMessageRef.current = onMessage;
   onSessionStoppedRef.current = onSessionStopped;
   onCatchUpRef.current = onCatchUp;
   onAgentCompletedRef.current = onAgentCompleted;
+  onAgentActivityRef.current = onAgentActivity;
 
   const getReconnectDelay = useCallback((attempt: number) => {
     return Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
@@ -180,6 +185,12 @@ export function useChatWebSocket({
             const p = payload;
             if (p.sessionId !== sessionId) return;
             onAgentCompletedRef.current?.(p.agentCompletedAt ?? Date.now());
+          } else if (data.type === 'session.activity') {
+            const p = payload;
+            if (p.sessionId !== sessionId) return;
+            if (p.activity === 'prompting' || p.activity === 'idle') {
+              onAgentActivityRef.current?.(p.activity);
+            }
           }
         } catch {
           // Ignore malformed messages

@@ -21,8 +21,8 @@ export const AUTO_RESUME_DELAY_MS = parseInt(import.meta.env.VITE_AUTO_RESUME_DE
 const DEFAULT_RECONNECT_BANNER_DELAY_MS = 3_000;
 export const RECONNECT_BANNER_DELAY_MS = parseInt(import.meta.env.VITE_RECONNECT_BANNER_DELAY_MS || String(DEFAULT_RECONNECT_BANNER_DELAY_MS), 10);
 
-/** Seconds of silence after last assistant message before returning to idle. */
-export const IDLE_TIMEOUT_MS = 3000;
+/** Seconds of silence after last message before returning to idle (fallback heuristic). */
+export const IDLE_TIMEOUT_MS = 30_000;
 
 /** Virtual scroll: starting index for prepend-stable pagination */
 export const VIRTUAL_START = 100_000;

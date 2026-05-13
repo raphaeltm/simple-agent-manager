@@ -65,6 +65,7 @@ export { SaveAgentSettingsSchema } from './agent-settings';
 
 // ACP session schemas
 export {
+  AcpSessionActivityReportSchema,
   AcpSessionAssignSchema,
   AcpSessionForkSchema,
   AcpSessionHeartbeatSchema,

@@ -297,6 +297,11 @@ export class ProjectData extends DurableObject<Env> {
     await this.scheduleHeartbeatAlarm();
   }
 
+  /** Broadcast ephemeral activity signal — no persistence. */
+  reportActivity(sessionId: string, activity: string): void {
+    this.broadcastEvent('session.activity', { sessionId, activity }, sessionId);
+  }
+
   async forkAcpSession(sessionId: string, contextSummary: string) {
     return acpSessions.forkAcpSession(this.sql, this.env, sessionId, contextSummary, this.getProjectId());
   }
