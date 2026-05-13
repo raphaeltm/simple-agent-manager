@@ -9,7 +9,7 @@
 import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Clock } from 'lucide-react';
 import { type FC, useCallback, useMemo, useRef } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
@@ -39,6 +39,12 @@ interface ProjectMessageViewProps {
   onFork?: () => void;
   /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
   lineageText?: string;
+  /** Called when the user clicks "End session" on an idle conversation-mode session. */
+  onCloseConversation?: () => void;
+  /** Whether a close-conversation request is in flight. */
+  closingConversation?: boolean;
+  /** Error from a failed close-conversation attempt. */
+  closeError?: string | null;
 }
 
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
@@ -49,6 +55,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onRetry,
   onFork,
   lineageText,
+  onCloseConversation,
+  closingConversation,
+  closeError,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -224,6 +233,26 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               <ChevronDown size={16} className="text-fg-muted" />
             </button>
           )}
+        </div>
+      )}
+
+      {/* Inline idle indicator — subtle "Agent idle | End session" for conversation-mode sessions */}
+      {lc.sessionState === 'idle' && lc.taskEmbed?.taskMode === 'conversation' && onCloseConversation && (
+        <div className="shrink-0 flex items-center gap-3 px-4 py-1.5 text-xs text-fg-muted">
+          <span className="inline-flex items-center gap-1">
+            <Clock size={12} style={{ color: 'var(--sam-color-warning)' }} />
+            Agent idle
+          </span>
+          <span style={{ color: 'var(--sam-color-border-default)' }}>|</span>
+          <button
+            type="button"
+            onClick={onCloseConversation}
+            disabled={closingConversation}
+            className="bg-transparent border-none text-xs cursor-pointer p-0 underline decoration-from-font underline-offset-2 text-fg-muted hover:text-fg-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {closingConversation ? 'Ending...' : 'End session'}
+          </button>
+          {closeError && <span className="text-danger text-xs">{closeError}</span>}
         </div>
       )}
 
