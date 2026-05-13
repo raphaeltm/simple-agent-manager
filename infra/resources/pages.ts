@@ -17,7 +17,7 @@ export const pagesCustomDomain = new cloudflare.PagesDomain(
   {
     accountId: accountId,
     projectName: pagesProject.name,
-    domain: `app.${baseDomain}`,
+    name: `app.${baseDomain}`,
   }
 );
 
