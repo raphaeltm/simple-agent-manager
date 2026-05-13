@@ -40,30 +40,30 @@ For task-mode sessions that become idle (no activity for 5 minutes) without an e
 ## Implementation Checklist
 
 ### 1. Add shared constants
-- [ ] Add `DEFAULT_TASK_RECONCILIATION_IDLE_MS = 5 * 60 * 1000` (5 minutes)
-- [ ] Add `DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS = 60 * 1000` (1 minute)
+- [x] Add `DEFAULT_TASK_RECONCILIATION_IDLE_MS = 5 * 60 * 1000` (5 minutes)
+- [x] Add `DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS = 60 * 1000` (1 minute)
 
 ### 2. Add reconciliation module
-- [ ] Create `apps/api/src/durable-objects/project-data/reconciliation.ts`
-- [ ] Implement `getReconciliationCandidates(sql, env, db)` — queries active task-mode sessions idle for TASK_RECONCILIATION_IDLE_MS, excluding:
+- [x] Create `apps/api/src/durable-objects/project-data/reconciliation.ts`
+- [x] Implement `getReconciliationCandidates(sql, env, db)` — queries active task-mode sessions idle for TASK_RECONCILIATION_IDLE_MS, excluding:
   - Sessions with active `needs_input` markers
   - Sessions with unresolved `reconciliation_checkin` markers
   - Sessions whose tasks are completed/failed/cancelled (D1 query)
   - Conversation-mode tasks (D1 query)
-- [ ] Implement `processReconciliationCandidates(sql, env, db, ...)` — for each candidate:
+- [x] Implement `processReconciliationCandidates(sql, env, db, ...)` — for each candidate:
   1. Persist a user-role check-in message with `source: sam_orchestrator` metadata
   2. Create a `reconciliation_checkin` attention marker with response deadline expiry
   3. Send the prompt to the VM agent via `sendPromptToAgentOnNode`
   4. Record activity event
-- [ ] Implement `computeReconciliationAlarmTime(sql, env)` — returns the earliest time a reconciliation check should fire
+- [x] Implement `computeReconciliationAlarmTime(sql, env)` — returns the earliest time a reconciliation check should fire
 
 ### 3. Integrate with DO alarm handler
-- [ ] Add `reconciliation.processReconciliationCandidates()` call in alarm handler
-- [ ] Add `reconciliationTime` to `recalculateAlarm()` candidates
-- [ ] When attention marker for `reconciliation_checkin` expires (no response), fail task and cleanup (extend existing expired marker handling)
+- [x] Add `reconciliation.processReconciliationCandidates()` call in alarm handler
+- [x] Add `reconciliationTime` to `recalculateAlarm()` candidates
+- [x] When attention marker for `reconciliation_checkin` expires (no response), fail task and cleanup (extend existing expired marker handling)
 
 ### 4. Handle reconciliation attention marker expiry
-- [ ] In alarm handler's expired marker processing, handle `reconciliation_checkin` kind:
+- [x] In alarm handler's expired marker processing, handle `reconciliation_checkin` kind:
   - Fail task in D1 with reason "Agent became unresponsive after SAM check-in"
   - Stop workspace in D1
   - Fail session
@@ -71,32 +71,32 @@ For task-mode sessions that become idle (no activity for 5 minutes) without an e
   - Trigger `cleanupTaskRun` for workspace/node cleanup
 
 ### 5. Ensure activity resets prevent false positives
-- [ ] Verify `persistMessage()` already resets idle cleanup (it does via `resetIdleCleanup`)
-- [ ] Verify `persistMessageBatch()` also resets (it does)
-- [ ] When the agent responds after a check-in, the attention marker gets resolved by activity — verify `resolveAttentionMarkers` covers `reconciliation_checkin` kind
+- [x] Verify `persistMessage()` already resets idle cleanup (it does via `resetIdleCleanup`)
+- [x] Verify `persistMessageBatch()` also resets (it does)
+- [x] When the agent responds after a check-in, the attention marker gets resolved by activity — verify `resolveAttentionMarkers` covers `reconciliation_checkin` kind
 
 ### 6. Tests
-- [ ] Test candidate selection: only task-mode sessions selected
-- [ ] Test candidate exclusion: conversation mode, completed tasks, active needs_input, existing checkin marker
-- [ ] Test check-in message has correct metadata (source: sam_orchestrator, role: user)
-- [ ] Test response deadline creates attention marker with correct expiry
-- [ ] Test marker loop prevention: second reconciliation skipped when unresolved marker exists
-- [ ] Test expiry path: task failed, workspace stopped, session failed, activity recorded
-- [ ] Test agent response resolves marker and prevents failure
-- [ ] Test complete_task before reconciliation: no reconciliation sent
+- [x] Test candidate selection: only task-mode sessions selected
+- [x] Test candidate exclusion: conversation mode, completed tasks, active needs_input, existing checkin marker
+- [x] Test check-in message has correct metadata (source: sam_orchestrator, role: user)
+- [x] Test response deadline creates attention marker with correct expiry
+- [x] Test marker loop prevention: second reconciliation skipped when unresolved marker exists
+- [x] Test expiry path: task failed, workspace stopped, session failed, activity recorded
+- [x] Test agent response resolves marker and prevents failure
+- [x] Test complete_task before reconciliation: no reconciliation sent
 
 ## Acceptance Criteria
 
-- [ ] Task-mode sessions idle for 5 minutes (configurable) receive a SAM orchestrator check-in
-- [ ] Check-in is persisted as a user-role message with `source: sam_orchestrator` metadata
-- [ ] Agent has 1 minute (configurable) to respond before task is failed
-- [ ] If agent responds, normal flow continues (complete_task or needs_input)
-- [ ] Conversation-mode sessions are never reconciled
-- [ ] Sessions with active needs_input markers are not reconciled
-- [ ] Each idle period gets at most one check-in (no loops)
-- [ ] Completed/failed tasks are excluded from reconciliation
-- [ ] Failed task reason is "Agent became unresponsive after SAM check-in"
-- [ ] All tests pass locally
+- [x] Task-mode sessions idle for 5 minutes (configurable) receive a SAM orchestrator check-in
+- [x] Check-in is persisted as a user-role message with `source: sam_orchestrator` metadata
+- [x] Agent has 1 minute (configurable) to respond before task is failed
+- [x] If agent responds, normal flow continues (complete_task or needs_input)
+- [x] Conversation-mode sessions are never reconciled
+- [x] Sessions with active needs_input markers are not reconciled
+- [x] Each idle period gets at most one check-in (no loops)
+- [x] Completed/failed tasks are excluded from reconciliation
+- [x] Failed task reason is "Agent became unresponsive after SAM check-in"
+- [x] All tests pass locally
 
 ## References
 

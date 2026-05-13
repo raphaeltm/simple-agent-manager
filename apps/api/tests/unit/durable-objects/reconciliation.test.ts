@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   createAttentionMarker,
+  getExpiredMarkers,
+  resolveAttentionMarkerById,
   resolveAttentionMarkers,
 } from '../../../src/durable-objects/project-data/attention';
 import {
@@ -513,6 +515,81 @@ describe('Task Reconciliation Module', () => {
         `SELECT * FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL`,
       ).all('session-1');
       expect(after).toHaveLength(0);
+    });
+  });
+
+  describe('Expired marker handling (expiry path)', () => {
+    it('getExpiredMarkers returns reconciliation_checkin markers past their deadline', () => {
+      setupTaskSession();
+      // Create a reconciliation_checkin marker that has already expired
+      createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        kind: 'reconciliation_checkin',
+        source: 'sam_orchestrator',
+        expiresAt: now - 1000, // expired 1 second ago
+      });
+
+      const expired = getExpiredMarkers(sql, now);
+      expect(expired).toHaveLength(1);
+      expect(expired[0].kind).toBe('reconciliation_checkin');
+      expect(expired[0].taskId).toBe('task-1');
+      expect(expired[0].workspaceId).toBe('ws-1');
+      expect(expired[0].sessionId).toBe('session-1');
+    });
+
+    it('resolveAttentionMarkerById resolves expired reconciliation_checkin marker', () => {
+      setupTaskSession();
+      const marker = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        kind: 'reconciliation_checkin',
+        source: 'sam_orchestrator',
+        expiresAt: now - 1000,
+      });
+
+      const resolved = resolveAttentionMarkerById(sql, marker.id, 'system', 'expired');
+      expect(resolved).toBe(1);
+
+      // Verify marker is now resolved
+      const rows = db.prepare(
+        `SELECT resolved_at, resolved_by_actor_type, resolved_reason
+         FROM session_attention_markers WHERE id = ?`,
+      ).all(marker.id);
+      expect(rows).toHaveLength(1);
+      expect((rows[0] as Record<string, unknown>).resolved_at).toBeTruthy();
+      expect((rows[0] as Record<string, unknown>).resolved_by_actor_type).toBe('system');
+      expect((rows[0] as Record<string, unknown>).resolved_reason).toBe('expired');
+    });
+
+    it('non-expired reconciliation_checkin marker is not returned by getExpiredMarkers', () => {
+      setupTaskSession();
+      createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        kind: 'reconciliation_checkin',
+        source: 'sam_orchestrator',
+        expiresAt: now + ONE_MINUTE, // not yet expired
+      });
+
+      const expired = getExpiredMarkers(sql, now);
+      expect(expired).toHaveLength(0);
+    });
+  });
+
+  describe('Additional exclusion cases', () => {
+    it('excludes cancelled tasks', async () => {
+      setupTaskSession();
+      const mockDb = createMockD1({
+        'task-1': { task_mode: 'task', status: 'cancelled' },
+      });
+      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+
+      const candidates = await getReconciliationCandidates(sql, env);
+      expect(candidates).toHaveLength(0);
     });
   });
 });
