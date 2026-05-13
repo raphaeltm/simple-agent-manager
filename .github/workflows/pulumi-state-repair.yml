@@ -20,6 +20,7 @@ on:
           - remove-broken-resources
           - refresh-and-preview
           - full-repair
+          - import-and-up
         default: export-state
       dry_run:
         description: 'Show what would happen without making changes'
@@ -226,8 +227,94 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
+      # ---- Import Existing Resources & Apply ----
+      - name: "Import existing resources into Pulumi state"
+        if: inputs.action == 'import-and-up' && inputs.dry_run == false
+        working-directory: infra
+        run: |
+          PREFIX="${{ steps.prefix.outputs.value }}"
+          STACK="${{ steps.stack.outputs.name }}"
+          CF_ACCOUNT_ID="${{ secrets.CF_ACCOUNT_ID }}"
+          CF_ZONE_ID="${{ secrets.CF_ZONE_ID }}"
+
+          echo "## Import Existing Resources" >> $GITHUB_STEP_SUMMARY
+
+          # 1. Find D1 database IDs from Cloudflare API
+          echo "Looking up D1 databases..."
+          D1_LIST=$(curl -sf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database?per_page=50")
+
+          MAIN_DB_ID=$(echo "$D1_LIST" | jq -r ".result[] | select(.name == \"${PREFIX}-${STACK}\") | .uuid")
+          OBS_DB_ID=$(echo "$D1_LIST" | jq -r ".result[] | select(.name == \"${PREFIX}-observability-${STACK}\") | .uuid")
+
+          echo "Main DB (${PREFIX}-${STACK}): $MAIN_DB_ID"
+          echo "Observability DB (${PREFIX}-observability-${STACK}): $OBS_DB_ID"
+
+          # 2. Find WorkersRoute ID from Cloudflare API
+          echo "Looking up Workers routes..."
+          ROUTES_LIST=$(curl -sf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/workers/routes")
+
+          BASE_DOMAIN="${{ vars.BASE_DOMAIN }}"
+          VM_ROUTE_ID=$(echo "$ROUTES_LIST" | jq -r ".result[] | select(.pattern == \"*.vm.${BASE_DOMAIN}/*\") | .id")
+
+          echo "VM Route Exclusion (*.vm.${BASE_DOMAIN}/*): $VM_ROUTE_ID"
+
+          # 3. Import each resource
+          import_resource() {
+            local TYPE="$1" NAME="$2" ID="$3"
+            if [ -z "$ID" ] || [ "$ID" = "null" ]; then
+              echo "SKIP: $NAME — ID not found"
+              echo "- \`$NAME\` — **skipped** (not found in Cloudflare)" >> $GITHUB_STEP_SUMMARY
+              return 1
+            fi
+
+            # Check if already in state
+            if pulumi stack export 2>/dev/null | jq -e ".deployment.resources[] | select(.urn | endswith(\"::${NAME}\"))" > /dev/null 2>&1; then
+              echo "SKIP: $NAME — already in state"
+              echo "- \`$NAME\` — already in state" >> $GITHUB_STEP_SUMMARY
+              return 0
+            fi
+
+            echo "Importing: $TYPE $NAME = $ID"
+            if pulumi import "$TYPE" "$NAME" "$ID" --yes --skip-preview 2>&1; then
+              echo "  Imported successfully"
+              echo "- \`$NAME\` — imported ($ID)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "  Import failed"
+              echo "- \`$NAME\` — **import failed**" >> $GITHUB_STEP_SUMMARY
+              return 1
+            fi
+          }
+
+          import_resource "cloudflare:index/d1Database:D1Database" "${PREFIX}-database" "$MAIN_DB_ID"
+          import_resource "cloudflare:index/d1Database:D1Database" "${PREFIX}-observability" "$OBS_DB_ID"
+          import_resource "cloudflare:index/workersRoute:WorkersRoute" "${PREFIX}-route-vm-exclusion" "$VM_ROUTE_ID"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: "Apply after import (pulumi up)"
+        if: inputs.action == 'import-and-up' && inputs.dry_run == false
+        working-directory: infra
+        run: |
+          echo "## Pulumi Up (post-import)" >> $GITHUB_STEP_SUMMARY
+          pulumi up --yes --skip-preview 2>&1 | tee /tmp/up-output.txt
+          EXIT_CODE=$?
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -50 /tmp/up-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          exit $EXIT_CODE
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
       - name: "Post-repair state summary"
-        if: inputs.action == 'full-repair' && inputs.dry_run == false
+        if: (inputs.action == 'full-repair' || inputs.action == 'import-and-up') && inputs.dry_run == false
         working-directory: infra
         run: |
           echo "## Post-Repair State" >> $GITHUB_STEP_SUMMARY
