@@ -106,67 +106,52 @@ function HighlightedCode({ code, language }: { code: string; language: string })
   );
 }
 
+/** Shared pre component that unwraps the wrapper element. */
+const SharedPre: Components['pre'] = ({ children }) => <>{children}</>;
+
+/** Shared link component for external URLs. */
+const SharedLink: Components['a'] = ({ href, children }) => (
+  <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">
+    {children}
+  </a>
+);
+
+/** Build a code component with a configurable inline-code class. */
+function makeCodeComponent(inlineClassName: string): NonNullable<Components['code']> {
+  return ({ className, children, ...props }) => {
+    const match = /language-(\w+)/.exec(className || '');
+    const code = String(children ?? '').replace(/\n$/, '');
+    const isInline = !match && !className;
+    if (isInline) {
+      return (
+        <code className={`${inlineClassName} px-1 py-0.5 rounded text-xs font-mono break-all`} {...props}>
+          {children}
+        </code>
+      );
+    }
+    return (
+      <div className="my-2">
+        <HighlightedCode code={code} language={match?.[1] ?? ''} />
+      </div>
+    );
+  };
+}
+
 // Stable Markdown component overrides — hoisted to module scope so
 // react-markdown sees the same component references across renders.
 // This prevents unmount/remount of custom renderers which was destroying
 // DOM nodes (resetting horizontal scroll position on code blocks).
 const USER_MARKDOWN_COMPONENTS: Components = {
-  pre: ({ children }) => <>{children}</>,
-  code: ({ className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '');
-    const code = String(children ?? '').replace(/\n$/, '');
-    const isInline = !match && !className;
-    if (isInline) {
-      return (
-        <code
-          className="bg-blue-500 text-blue-50 px-1 py-0.5 rounded text-xs font-mono break-all"
-          {...props}
-        >
-          {children}
-        </code>
-      );
-    }
-    return (
-      <div className="my-2">
-        <HighlightedCode code={code} language={match?.[1] ?? ''} />
-      </div>
-    );
-  },
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">
-      {children}
-    </a>
-  ),
+  pre: SharedPre,
+  code: makeCodeComponent('bg-blue-500 text-blue-50'),
+  a: SharedLink,
 };
 
 /** Default agent markdown components (no file click handler — links open in new tab). */
 const AGENT_MARKDOWN_COMPONENTS: Components = {
-  pre: ({ children }) => <>{children}</>,
-  code: ({ className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '');
-    const code = String(children ?? '').replace(/\n$/, '');
-    const isInline = !match && !className;
-    if (isInline) {
-      return (
-        <code
-          className="bg-gray-100 text-gray-800 px-1 py-0.5 rounded text-xs font-mono break-all"
-          {...props}
-        >
-          {children}
-        </code>
-      );
-    }
-    return (
-      <div className="my-2">
-        <HighlightedCode code={code} language={match?.[1] ?? ''} />
-      </div>
-    );
-  },
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">
-      {children}
-    </a>
-  ),
+  pre: SharedPre,
+  code: makeCodeComponent('bg-gray-100 text-gray-800'),
+  a: SharedLink,
 };
 
 /**
@@ -178,27 +163,8 @@ function buildAgentMarkdownComponents(
   onFileClick: (path: string, line?: number | null) => void
 ): Components {
   return {
-    pre: ({ children }) => <>{children}</>,
-    code: ({ className, children, ...props }) => {
-      const match = /language-(\w+)/.exec(className || '');
-      const code = String(children ?? '').replace(/\n$/, '');
-      const isInline = !match && !className;
-      if (isInline) {
-        return (
-          <code
-            className="bg-gray-100 text-gray-800 px-1 py-0.5 rounded text-xs font-mono break-all"
-            {...props}
-          >
-            {children}
-          </code>
-        );
-      }
-      return (
-        <div className="my-2">
-          <HighlightedCode code={code} language={match?.[1] ?? ''} />
-        </div>
-      );
-    },
+    pre: SharedPre,
+    code: makeCodeComponent('bg-gray-100 text-gray-800'),
     a: ({ href, children }) => {
       if (isFilePathHref(href)) {
         const { path, line } = parseFilePathRef(href!);
