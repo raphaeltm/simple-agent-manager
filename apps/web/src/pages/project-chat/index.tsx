@@ -290,27 +290,10 @@ export function ProjectChat() {
                 if (s?.taskId) state.handleFork(s);
               }}
               lineageText={selectedLineageText}
+              onCloseConversation={state.handleCloseConversation}
+              closingConversation={state.closingConversation}
+              closeError={state.closeError}
             />
-            {/* Close conversation button — shown for idle sessions with a task */}
-            {(() => {
-              const selectedSession = state.sessions.find((s) => s.id === state.sessionId);
-              if (!selectedSession?.taskId) return null;
-              const sessionState = state.getSessionState(selectedSession);
-              if (sessionState !== 'idle') return null;
-              return (
-                <div className="shrink-0 border-t border-border-default px-4 py-2 bg-surface flex flex-col items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={state.handleCloseConversation}
-                    disabled={state.closingConversation}
-                    className="px-4 py-2.5 min-h-[44px] text-xs rounded-md border border-border-default bg-page text-fg-muted hover:text-fg-primary hover:border-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {state.closingConversation ? 'Closing...' : 'Close conversation'}
-                  </button>
-                  {state.closeError && <p className="text-xs text-red-500">{state.closeError}</p>}
-                </div>
-              );
-            })()}
           </div>
         )}
       </div>

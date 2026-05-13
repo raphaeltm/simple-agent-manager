@@ -1440,3 +1440,132 @@ describe('ProjectMessageView — cancel button', () => {
     });
   });
 });
+
+describe('ProjectMessageView — inline idle indicator', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows "End session" for idle conversation-mode session with onCloseConversation', async () => {
+    const session = {
+      ...makeSession('sess-idle', 'active'),
+      isIdle: true,
+      task: {
+        id: 'task-conv',
+        status: 'in_progress',
+        taskMode: 'conversation' as const,
+        executionStep: null,
+        errorMessage: null,
+        outputBranch: null,
+        outputPrUrl: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-idle', 'Hello')],
+      hasMore: false,
+    });
+
+    const onClose = vi.fn();
+    render(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="sess-idle"
+        onCloseConversation={onClose}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent idle')).toBeTruthy();
+    });
+    expect(screen.getByText('End session')).toBeTruthy();
+  });
+
+  it('does NOT show "End session" for idle task-mode session', async () => {
+    const session = {
+      ...makeSession('sess-task', 'active'),
+      isIdle: true,
+      task: {
+        id: 'task-auto',
+        status: 'in_progress',
+        taskMode: 'task' as const,
+        executionStep: null,
+        errorMessage: null,
+        outputBranch: null,
+        outputPrUrl: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-task', 'Hello')],
+      hasMore: false,
+    });
+
+    render(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="sess-task"
+        onCloseConversation={vi.fn()}
+      />,
+    );
+
+    // Wait for session to load
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-task')).toBeTruthy();
+    });
+
+    // The idle indicator should NOT appear for task-mode
+    expect(screen.queryByText('End session')).toBeNull();
+    expect(screen.queryByText('Agent idle')).toBeNull();
+  });
+
+  it('does NOT show "End session" for active conversation-mode session', async () => {
+    const session = {
+      ...makeSession('sess-active', 'active'),
+      isIdle: false,
+      task: {
+        id: 'task-conv-2',
+        status: 'in_progress',
+        taskMode: 'conversation' as const,
+        executionStep: null,
+        errorMessage: null,
+        outputBranch: null,
+        outputPrUrl: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-active', 'Hello')],
+      hasMore: false,
+    });
+
+    render(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="sess-active"
+        onCloseConversation={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-active')).toBeTruthy();
+    });
+
+    // Active session should NOT show the idle indicator
+    expect(screen.queryByText('End session')).toBeNull();
+    expect(screen.queryByText('Agent idle')).toBeNull();
+  });
+});

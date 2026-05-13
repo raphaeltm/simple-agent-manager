@@ -67,22 +67,20 @@ vi.mock('../../../src/hooks/useProjectWebSocket', () => ({
   },
 }));
 
+const capturedMessageViewProps = { current: null as Record<string, unknown> | null };
 vi.mock('../../../src/components/project-message-view', () => ({
-  ProjectMessageView: ({
-    sessionId,
-    onFork,
-    onRetry,
-  }: {
-    sessionId: string;
-    onFork: () => void;
-    onRetry: () => void;
-  }) => (
-    <div>
-      <div data-testid="message-view">{sessionId}</div>
-      <button type="button" aria-label="Fork session" onClick={onFork}>Fork session</button>
-      <button type="button" aria-label="Retry task" onClick={onRetry}>Retry task</button>
-    </div>
-  ),
+  ProjectMessageView: (props: Record<string, unknown>) => {
+    capturedMessageViewProps.current = props;
+    const onFork = props.onFork as (() => void) | undefined;
+    const onRetry = props.onRetry as (() => void) | undefined;
+    return (
+      <div>
+        <div data-testid="message-view">{String(props.sessionId)}</div>
+        {onFork && <button type="button" aria-label="Fork session" onClick={onFork}>Fork session</button>}
+        {onRetry && <button type="button" aria-label="Retry task" onClick={onRetry}>Retry task</button>}
+      </div>
+    );
+  },
 }));
 
 import { ProjectChat } from '../../../src/pages/project-chat';
@@ -760,7 +758,7 @@ describe('ProjectChat close conversation button', () => {
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
-  it('shows close conversation button for idle session with task and calls API on click', async () => {
+  it('passes onCloseConversation to ProjectMessageView for idle session with task', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [IDLE_SESSION_WITH_TASK],
       total: 1,
@@ -769,35 +767,21 @@ describe('ProjectChat close conversation button', () => {
     renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITH_TASK.id}`);
 
     await waitFor(() => {
-      expect(screen.getByText('Close conversation')).toBeInTheDocument();
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('Close conversation'));
+    // ProjectMessageView should receive the close-conversation handler
+    expect(capturedMessageViewProps.current).toHaveProperty('onCloseConversation');
+    expect(typeof capturedMessageViewProps.current?.onCloseConversation).toBe('function');
+
+    // Invoke the handler and verify it calls the API
+    await act(async () => {
+      (capturedMessageViewProps.current?.onCloseConversation as () => void)();
+    });
 
     await waitFor(() => {
       expect(mocks.closeConversationTask).toHaveBeenCalledWith(PROJECT_ID, 'task-conv-1');
     });
-  });
-
-  it('does not show close conversation button for active (non-idle) session', async () => {
-    const activeSession = {
-      ...IDLE_SESSION_WITH_TASK,
-      id: 'session-active',
-      isIdle: false,
-    };
-    mocks.listChatSessions.mockResolvedValue({
-      sessions: [activeSession],
-      total: 1,
-    });
-
-    renderProjectChat(`/projects/${PROJECT_ID}/chat/${activeSession.id}`);
-
-    // Wait for session content to load
-    await waitFor(() => {
-      expect(screen.getByTestId('message-view')).toBeInTheDocument();
-    });
-
-    expect(screen.queryByText('Close conversation')).not.toBeInTheDocument();
   });
 });
 

@@ -9,7 +9,7 @@
 import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Clock } from 'lucide-react';
 import { type FC, useCallback, useMemo, useRef } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
@@ -39,6 +39,12 @@ interface ProjectMessageViewProps {
   onFork?: () => void;
   /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
   lineageText?: string;
+  /** Called when the user clicks "End session" on an idle conversation-mode session. */
+  onCloseConversation?: () => void;
+  /** Whether a close-conversation request is in flight. */
+  closingConversation?: boolean;
+  /** Error from a failed close-conversation attempt. */
+  closeError?: string | null;
 }
 
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
@@ -49,6 +55,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onRetry,
   onFork,
   lineageText,
+  onCloseConversation,
+  closingConversation,
+  closeError,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -227,6 +236,26 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
+      {/* Inline idle indicator — subtle "Agent idle | End session" for conversation-mode sessions */}
+      {lc.sessionState === 'idle' && lc.taskEmbed?.taskMode === 'conversation' && onCloseConversation && (
+        <div role="status" className="shrink-0 flex items-center gap-3 px-4 py-1.5 text-xs text-fg-muted">
+          <span className="inline-flex items-center gap-1">
+            <Clock size={12} aria-hidden="true" style={{ color: 'var(--sam-color-warning)' }} />
+            Agent idle
+          </span>
+          <span aria-hidden="true" style={{ color: 'var(--sam-color-border-default)' }}>|</span>
+          <button
+            type="button"
+            onClick={onCloseConversation}
+            disabled={closingConversation}
+            className="min-h-[44px] flex items-center bg-transparent border-none text-xs cursor-pointer px-2 underline decoration-from-font underline-offset-2 text-fg-muted hover:text-fg-primary disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)] rounded-sm"
+          >
+            {closingConversation ? 'Ending...' : 'End session'}
+          </button>
+          {closeError && <span role="alert" className="text-danger text-xs">{closeError}</span>}
+        </div>
+      )}
+
       {/* Agent working indicator */}
       {lc.agentActivity !== 'idle' && isActive && (
         <div role="status" className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
@@ -281,3 +310,4 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     </div>
   );
 };
+
