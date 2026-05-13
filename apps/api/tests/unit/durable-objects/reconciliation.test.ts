@@ -51,6 +51,7 @@ function createMockD1(taskRows: Record<string, { task_mode: string; status: stri
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 const ONE_MINUTE = 60 * 1000;
+type ProjectDataEnv = import('../../../src/durable-objects/project-data/types').Env;
 
 describe('Task Reconciliation Module', () => {
   let db: Database.Database;
@@ -116,15 +117,23 @@ describe('Task Reconciliation Module', () => {
     ).run(workspaceId, acpSessionId);
   }
 
+  function envWithRows(
+    taskRows: Record<string, { task_mode: string; status: string }> = {},
+    workspaceRows: Record<string, { node_id: string | null; user_id: string }> = {},
+  ): ProjectDataEnv {
+    return { DATABASE: createMockD1(taskRows, workspaceRows) } as unknown as ProjectDataEnv;
+  }
+
+  async function candidatesForTask(taskMode: string, status: string) {
+    setupTaskSession();
+    return getReconciliationCandidates(sql, envWithRows({
+      'task-1': { task_mode: taskMode, status },
+    }));
+  }
+
   describe('getReconciliationCandidates', () => {
     it('selects task-mode sessions idle for 5 minutes', async () => {
-      setupTaskSession();
-      const mockDb = createMockD1({
-        'task-1': { task_mode: 'task', status: 'in_progress' },
-      });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
-
-      const candidates = await getReconciliationCandidates(sql, env);
+      const candidates = await candidatesForTask('task', 'in_progress');
 
       expect(candidates).toHaveLength(1);
       expect(candidates[0].sessionId).toBe('session-1');
@@ -135,35 +144,17 @@ describe('Task Reconciliation Module', () => {
     });
 
     it('excludes conversation-mode tasks', async () => {
-      setupTaskSession();
-      const mockDb = createMockD1({
-        'task-1': { task_mode: 'conversation', status: 'in_progress' },
-      });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
-
-      const candidates = await getReconciliationCandidates(sql, env);
+      const candidates = await candidatesForTask('conversation', 'in_progress');
       expect(candidates).toHaveLength(0);
     });
 
     it('excludes completed tasks', async () => {
-      setupTaskSession();
-      const mockDb = createMockD1({
-        'task-1': { task_mode: 'task', status: 'completed' },
-      });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
-
-      const candidates = await getReconciliationCandidates(sql, env);
+      const candidates = await candidatesForTask('task', 'completed');
       expect(candidates).toHaveLength(0);
     });
 
     it('excludes failed tasks', async () => {
-      setupTaskSession();
-      const mockDb = createMockD1({
-        'task-1': { task_mode: 'task', status: 'failed' },
-      });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
-
-      const candidates = await getReconciliationCandidates(sql, env);
+      const candidates = await candidatesForTask('task', 'failed');
       expect(candidates).toHaveLength(0);
     });
 
@@ -178,12 +169,9 @@ describe('Task Reconciliation Module', () => {
         reason: 'Waiting for user input',
         expiresAt: now + 7200000,
       });
-      const mockDb = createMockD1({
+      const candidates = await getReconciliationCandidates(sql, envWithRows({
         'task-1': { task_mode: 'task', status: 'in_progress' },
-      });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
-
-      const candidates = await getReconciliationCandidates(sql, env);
+      }));
       expect(candidates).toHaveLength(0);
     });
 
@@ -198,12 +186,9 @@ describe('Task Reconciliation Module', () => {
         reason: 'Agent idle — SAM check-in sent',
         expiresAt: now + ONE_MINUTE,
       });
-      const mockDb = createMockD1({
+      const candidates = await getReconciliationCandidates(sql, envWithRows({
         'task-1': { task_mode: 'task', status: 'in_progress' },
-      });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
-
-      const candidates = await getReconciliationCandidates(sql, env);
+      }));
       expect(candidates).toHaveLength(0);
     });
 
@@ -244,21 +229,12 @@ describe('Task Reconciliation Module', () => {
          VALUES ('session-conv', 'ws-conv', NULL, ${now + 900000}, ${now}, 0)`,
       );
 
-      const mockDb = createMockD1();
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
-
-      const candidates = await getReconciliationCandidates(sql, env);
+      const candidates = await getReconciliationCandidates(sql, envWithRows());
       expect(candidates).toHaveLength(0);
     });
 
     it('includes delegated tasks', async () => {
-      setupTaskSession();
-      const mockDb = createMockD1({
-        'task-1': { task_mode: 'task', status: 'delegated' },
-      });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
-
-      const candidates = await getReconciliationCandidates(sql, env);
+      const candidates = await candidatesForTask('task', 'delegated');
       expect(candidates).toHaveLength(1);
     });
   });
@@ -266,11 +242,10 @@ describe('Task Reconciliation Module', () => {
   describe('processReconciliationCandidates', () => {
     it('persists check-in message with SAM orchestrator metadata', async () => {
       setupTaskSession();
-      const mockDb = createMockD1(
+      const env = envWithRows(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
         { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
       );
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -293,11 +268,10 @@ describe('Task Reconciliation Module', () => {
 
     it('creates reconciliation_checkin attention marker with deadline', async () => {
       setupTaskSession();
-      const mockDb = createMockD1(
+      const env = envWithRows(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
         { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
       );
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
