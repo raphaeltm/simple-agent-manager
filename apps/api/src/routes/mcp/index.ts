@@ -218,8 +218,12 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleUpdateTaskStatus(requestId, toolArgs, tokenData, c.env));
         case 'complete_task': {
           // executionCtx may not be available in test environments (Miniflare/vitest)
-          const execCtx: ExecutionContext | undefined =
-            typeof c.executionCtx?.waitUntil === 'function' ? c.executionCtx : undefined;
+          let execCtx: ExecutionContext | undefined;
+          try {
+            execCtx = typeof c.executionCtx.waitUntil === 'function' ? c.executionCtx : undefined;
+          } catch {
+            execCtx = undefined;
+          }
           return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env, execCtx));
         }
         case 'request_human_input':

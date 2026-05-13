@@ -108,6 +108,46 @@ export function resolveAttentionMarkers(
 }
 
 /**
+ * Resolve active attention markers of a specific kind for a session.
+ * Used when system-owned markers can be satisfied by agent activity without
+ * clearing human-owned markers like `needs_input`.
+ */
+export function resolveAttentionMarkersByKind(
+  sql: SqlStorage,
+  sessionId: string,
+  kind: string,
+  resolvedByMessageId: string | null,
+  actorType: string,
+  reason: string,
+): number {
+  const now = Date.now();
+  const cursor = sql.exec(
+    `UPDATE session_attention_markers
+     SET resolved_at = ?, resolved_by_message_id = ?,
+         resolved_by_actor_type = ?, resolved_reason = ?
+     WHERE session_id = ? AND kind = ? AND resolved_at IS NULL`,
+    now,
+    resolvedByMessageId,
+    actorType,
+    reason,
+    sessionId,
+    kind,
+  );
+
+  if (cursor.rowsWritten > 0) {
+    log.info('attention_markers.resolved_by_kind', {
+      sessionId,
+      kind,
+      count: cursor.rowsWritten,
+      actorType,
+      reason,
+    });
+  }
+
+  return cursor.rowsWritten;
+}
+
+/**
  * Resolve a single attention marker by ID.
  * Used by the alarm handler to resolve only the specific expired marker,
  * without affecting other active markers on the same session.

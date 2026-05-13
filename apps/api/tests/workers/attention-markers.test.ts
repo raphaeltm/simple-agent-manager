@@ -98,6 +98,33 @@ describe('Attention Markers', () => {
     expect(markers).toHaveLength(1);
   });
 
+  it('resolves only reconciliation check-ins on assistant messages', async () => {
+    const stub = getStub('attn-resolve-reconciliation-assistant-1');
+    const sessionId = await stub.createSession(null, 'Assistant resolves check-in test');
+    await stub.createAttentionMarker({
+      sessionId,
+      taskId: 'task-1',
+      workspaceId: 'ws-1',
+      kind: 'needs_input',
+      source: 'request_human_input',
+      reason: 'Need a human decision',
+    });
+    await stub.createAttentionMarker({
+      sessionId,
+      taskId: 'task-1',
+      workspaceId: 'ws-1',
+      kind: 'reconciliation_checkin',
+      source: 'sam_orchestrator',
+      reason: 'Agent idle — SAM check-in sent',
+    });
+
+    await stub.persistMessage(sessionId, 'assistant', 'I am still working on this.', null);
+
+    const markers = await stub.listActiveAttentionMarkers(sessionId);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].kind).toBe('needs_input');
+  });
+
   it('resolves markers on human message in batch', async () => {
     const stub = getStub('attn-resolve-batch-1');
     const sessionId = await stub.createSession(null, 'Batch resolve test');

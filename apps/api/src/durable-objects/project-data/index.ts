@@ -111,13 +111,28 @@ export class ProjectData extends DurableObject<Env> {
     if (idleReset.cleanupAt > 0) {
       await this.recalculateAlarm();
     }
-    // Resolve attention markers when a human message arrives
+    // Resolve attention markers when a human message arrives.
+    // Reconciliation check-ins are system-owned; an assistant reply also
+    // satisfies them without clearing human-owned needs_input markers.
+    let resolved = 0;
+    let resolveReason: string | null = null;
     if (role === 'user') {
-      const resolved = attention.resolveAttentionMarkers(this.sql, sessionId, result.id, 'human', 'human_message');
-      if (resolved > 0) {
-        await this.recalculateAlarm();
-        this.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason: 'human_message' }, sessionId);
-      }
+      resolved = attention.resolveAttentionMarkers(this.sql, sessionId, result.id, 'human', 'human_message');
+      resolveReason = 'human_message';
+    } else if (role === 'assistant') {
+      resolved = attention.resolveAttentionMarkersByKind(
+        this.sql,
+        sessionId,
+        'reconciliation_checkin',
+        result.id,
+        'agent',
+        'agent_message',
+      );
+      resolveReason = 'agent_message';
+    }
+    if (resolved > 0 && resolveReason) {
+      await this.recalculateAlarm();
+      this.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason: resolveReason }, sessionId);
     }
     if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
     this.scheduleSummarySync();
@@ -143,16 +158,34 @@ export class ProjectData extends DurableObject<Env> {
       if (idleReset.cleanupAt > 0) {
         await this.recalculateAlarm();
       }
-      // Resolve attention markers if any persisted message is from a human
+      // Resolve attention markers when a human message arrives. Assistant
+      // activity resolves only reconciliation_checkin markers because those
+      // markers ask whether the agent is still responsive.
       const hasUserMessage = batchMessages.some((m) => m.role === 'user');
+      const hasAssistantMessage = batchMessages.some((m) => m.role === 'assistant');
+      let resolved = 0;
+      let resolveReason: string | null = null;
       if (hasUserMessage) {
         const firstUserMsg = result.persistedMessages.find((m: { role: string; id: string }) => m.role === 'user');
         const resolvedByMsgId = firstUserMsg ? firstUserMsg.id : null;
-        const resolved = attention.resolveAttentionMarkers(this.sql, sessionId, resolvedByMsgId, 'human', 'human_message');
-        if (resolved > 0) {
-          await this.recalculateAlarm();
-          this.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason: 'human_message' }, sessionId);
-        }
+        resolved = attention.resolveAttentionMarkers(this.sql, sessionId, resolvedByMsgId, 'human', 'human_message');
+        resolveReason = 'human_message';
+      } else if (hasAssistantMessage) {
+        const firstAssistantMsg = result.persistedMessages.find((m: { role: string; id: string }) => m.role === 'assistant');
+        const resolvedByMsgId = firstAssistantMsg ? firstAssistantMsg.id : null;
+        resolved = attention.resolveAttentionMarkersByKind(
+          this.sql,
+          sessionId,
+          'reconciliation_checkin',
+          resolvedByMsgId,
+          'agent',
+          'agent_message',
+        );
+        resolveReason = 'agent_message';
+      }
+      if (resolved > 0 && resolveReason) {
+        await this.recalculateAlarm();
+        this.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason: resolveReason }, sessionId);
       }
       if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
       this.scheduleSummarySync();
@@ -483,12 +516,13 @@ export class ProjectData extends DurableObject<Env> {
           // unresponsive for 6+ minutes, so no urgency to await cleanup.
           if (marker.kind === 'reconciliation_checkin' && marker.workspaceId) {
             const workerEnv = this.env as unknown as import('../../env').Env;
+            const taskId = marker.taskId;
             import('../../services/task-runner').then(({ cleanupTaskRun }) =>
-              cleanupTaskRun(marker.taskId, workerEnv),
+              cleanupTaskRun(taskId, workerEnv),
             ).catch((cleanupErr) => {
               log.error('reconciliation.cleanup_task_run_failed', {
                 workspaceId: marker.workspaceId,
-                taskId: marker.taskId,
+                taskId,
                 error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
               });
             });
