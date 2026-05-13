@@ -435,8 +435,8 @@ export class ProjectData extends DurableObject<Env> {
     const expiredMarkers = attention.getExpiredMarkers(this.sql);
     for (const marker of expiredMarkers) {
       try {
-        // Resolve the marker as expired
-        attention.resolveAttentionMarkers(this.sql, marker.sessionId, null, 'system', 'expired');
+        // Resolve only this specific expired marker (not all markers on the session)
+        attention.resolveAttentionMarkerById(this.sql, marker.id, 'system', 'expired');
 
         if (marker.kind === 'needs_input' && marker.taskId) {
           // Fail the task in D1 and stop the workspace
@@ -796,7 +796,11 @@ export class ProjectData extends DurableObject<Env> {
     const heartbeatAlarmTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
     if (heartbeatAlarmTime === null) { await this.recalculateAlarm(); return; }
     const { idleCleanupTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
-    const earliest = idleCleanupTime ? Math.min(heartbeatAlarmTime, idleCleanupTime) : heartbeatAlarmTime;
+    const attentionTime = attention.computeAttentionAlarmTime(this.sql);
+    const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
+    const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
+    const candidates = [heartbeatAlarmTime, idleCleanupTime, attentionTime, mailboxTime].filter((t): t is number => t !== null);
+    const earliest = Math.min(...candidates);
     await this.ctx.storage.setAlarm(earliest);
   }
 

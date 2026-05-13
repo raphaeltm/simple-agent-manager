@@ -15,6 +15,7 @@ import {
   getAttentionSummary,
   getExpiredMarkers,
   listActiveAttentionMarkers,
+  resolveAttentionMarkerById,
   resolveAttentionMarkers,
 } from '../../../src/durable-objects/project-data/attention';
 
@@ -207,6 +208,48 @@ describe('Attention Markers Module', () => {
     });
   });
 
+  describe('resolveAttentionMarkerById', () => {
+    it('resolves only the specified marker', () => {
+      const m1 = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: null,
+        workspaceId: null,
+        kind: 'needs_input',
+        source: 'test',
+        expiresAt: Date.now() - 1000,
+      });
+      createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: null,
+        workspaceId: null,
+        kind: 'needs_review',
+        source: 'test',
+        expiresAt: Date.now() + 7200000,
+      });
+
+      const count = resolveAttentionMarkerById(sql, m1.id, 'system', 'expired');
+      expect(count).toBe(1);
+
+      // The non-expired marker should still be active
+      const active = listActiveAttentionMarkers(sql, 'session-1');
+      expect(active).toHaveLength(1);
+      expect(active[0].kind).toBe('needs_review');
+    });
+
+    it('returns 0 for already-resolved marker', () => {
+      const m1 = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: null,
+        workspaceId: null,
+        kind: 'needs_input',
+        source: 'test',
+      });
+      resolveAttentionMarkerById(sql, m1.id, 'system', 'expired');
+      const count = resolveAttentionMarkerById(sql, m1.id, 'system', 'expired');
+      expect(count).toBe(0);
+    });
+  });
+
   describe('getAttentionSummary', () => {
     it('returns null when no active markers exist', () => {
       const summary = getAttentionSummary(sql, 'session-1');
@@ -377,6 +420,16 @@ describe('Attention Markers Module', () => {
 
       expect(expiry).toBeGreaterThanOrEqual(before + 60000);
       expect(expiry).toBeLessThanOrEqual(after + 60000);
+    });
+
+    it('falls back to default on non-numeric env var', () => {
+      const before = Date.now();
+      const expiry = computeHumanInputExpiry('not-a-number');
+      const after = Date.now();
+      const twoHours = 2 * 60 * 60 * 1000;
+
+      expect(expiry).toBeGreaterThanOrEqual(before + twoHours);
+      expect(expiry).toBeLessThanOrEqual(after + twoHours);
     });
   });
 });

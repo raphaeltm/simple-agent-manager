@@ -108,6 +108,39 @@ export function resolveAttentionMarkers(
 }
 
 /**
+ * Resolve a single attention marker by ID.
+ * Used by the alarm handler to resolve only the specific expired marker,
+ * without affecting other active markers on the same session.
+ */
+export function resolveAttentionMarkerById(
+  sql: SqlStorage,
+  markerId: string,
+  actorType: string = 'system',
+  reason: string = 'expired',
+): number {
+  const now = Date.now();
+  const cursor = sql.exec(
+    `UPDATE session_attention_markers
+     SET resolved_at = ?, resolved_by_actor_type = ?, resolved_reason = ?
+     WHERE id = ? AND resolved_at IS NULL`,
+    now,
+    actorType,
+    reason,
+    markerId,
+  );
+
+  if (cursor.rowsWritten > 0) {
+    log.info('attention_marker.resolved_by_id', {
+      markerId,
+      actorType,
+      reason,
+    });
+  }
+
+  return cursor.rowsWritten;
+}
+
+/**
  * List all active (unresolved) attention markers for a session.
  */
 export function listActiveAttentionMarkers(
@@ -189,6 +222,9 @@ export function computeAttentionAlarmTime(sql: SqlStorage): number | null {
 export function computeHumanInputExpiry(
   humanInputTimeoutMs: string | undefined,
 ): number {
-  const timeoutMs = parseInt(humanInputTimeoutMs || String(DEFAULT_HUMAN_INPUT_TIMEOUT_MS), 10);
+  const parsed = parseInt(humanInputTimeoutMs ?? '', 10);
+  const timeoutMs = Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_HUMAN_INPUT_TIMEOUT_MS;
   return Date.now() + timeoutMs;
 }
