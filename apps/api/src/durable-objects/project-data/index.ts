@@ -7,29 +7,31 @@
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
  */
-import type { AcpSessionEventActorType,AcpSessionStatus } from '@simple-agent-manager/shared';
+import type { AcpSessionEventActorType, AcpSessionStatus } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { runMigrations } from '../migrations';
-import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
-import type { Env, SummaryData } from './types';
-
-const log = createModuleLogger('project_data');
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import * as attention from './attention';
+import * as attentionExpiry from './attention-expiry';
 import * as commands from './commands';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
+import * as messagePersistence from './message-persistence';
 import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
 import * as reconciliation from './reconciliation';
+import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import * as sessions from './sessions';
+import type { Env, SummaryData } from './types';
+
+const log = createModuleLogger('project_data');
 
 export type { Env } from './types';
 
@@ -106,92 +108,22 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async persistMessage(sessionId: string, role: string, content: string, toolMetadata: string | null): Promise<string> {
-    const result = messages.persistMessage(this.sql, this.env, sessionId, role, content, toolMetadata);
-    const idleReset = idleCleanup.resetIdleCleanup(this.sql, this.env, sessionId);
-    if (idleReset.cleanupAt > 0) {
-      await this.recalculateAlarm();
-    }
-    // Resolve attention markers when a human message arrives.
-    // Reconciliation check-ins are system-owned; an assistant reply also
-    // satisfies them without clearing human-owned needs_input markers.
-    let resolved = 0;
-    let resolveReason: string | null = null;
-    if (role === 'user') {
-      resolved = attention.resolveAttentionMarkers(this.sql, sessionId, result.id, 'human', 'human_message');
-      resolveReason = 'human_message';
-    } else if (role === 'assistant') {
-      resolved = attention.resolveAttentionMarkersByKind(
-        this.sql,
-        sessionId,
-        'reconciliation_checkin',
-        result.id,
-        'agent',
-        'agent_message',
-      );
-      resolveReason = 'agent_message';
-    }
-    if (resolved > 0 && resolveReason) {
-      await this.recalculateAlarm();
-      this.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason: resolveReason }, sessionId);
-    }
-    if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
-    this.scheduleSummarySync();
-    let parsedToolMetadata: unknown = null;
-    if (toolMetadata) {
-      try { parsedToolMetadata = JSON.parse(toolMetadata); } catch (err) { log.warn('project_data.tool_metadata_parse_failed', { sessionId, error: String(err) }); }
-    }
-    this.broadcastEvent('message.new', {
-      sessionId, messageId: result.id, role, content,
-      toolMetadata: parsedToolMetadata,
-      createdAt: result.now, sequence: result.sequence,
-    }, sessionId);
-    return result.id;
+    return messagePersistence.persistMessageWithSideEffects(this.sql, this.env, this.messagePersistenceHooks(), sessionId, role, content, toolMetadata);
   }
 
   async persistMessageBatch(
     sessionId: string,
     batchMessages: Array<{ messageId: string; role: string; content: string; toolMetadata: string | null; timestamp: string; sequence?: number }>
   ): Promise<{ persisted: number; duplicates: number }> {
-    const result = messages.persistMessageBatch(this.sql, this.env, sessionId, batchMessages);
-    if (result.persisted > 0) {
-      const idleReset = idleCleanup.resetIdleCleanup(this.sql, this.env, sessionId);
-      if (idleReset.cleanupAt > 0) {
-        await this.recalculateAlarm();
-      }
-      // Resolve attention markers when a human message arrives. Assistant
-      // activity resolves only reconciliation_checkin markers because those
-      // markers ask whether the agent is still responsive.
-      const hasUserMessage = batchMessages.some((m) => m.role === 'user');
-      const hasAssistantMessage = batchMessages.some((m) => m.role === 'assistant');
-      let resolved = 0;
-      let resolveReason: string | null = null;
-      if (hasUserMessage) {
-        const firstUserMsg = result.persistedMessages.find((m: { role: string; id: string }) => m.role === 'user');
-        const resolvedByMsgId = firstUserMsg ? firstUserMsg.id : null;
-        resolved = attention.resolveAttentionMarkers(this.sql, sessionId, resolvedByMsgId, 'human', 'human_message');
-        resolveReason = 'human_message';
-      } else if (hasAssistantMessage) {
-        const firstAssistantMsg = result.persistedMessages.find((m: { role: string; id: string }) => m.role === 'assistant');
-        const resolvedByMsgId = firstAssistantMsg ? firstAssistantMsg.id : null;
-        resolved = attention.resolveAttentionMarkersByKind(
-          this.sql,
-          sessionId,
-          'reconciliation_checkin',
-          resolvedByMsgId,
-          'agent',
-          'agent_message',
-        );
-        resolveReason = 'agent_message';
-      }
-      if (resolved > 0 && resolveReason) {
-        await this.recalculateAlarm();
-        this.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason: resolveReason }, sessionId);
-      }
-      if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
-      this.scheduleSummarySync();
-      this.broadcastEvent('messages.batch', { sessionId, messages: result.persistedMessages, count: result.persisted }, sessionId);
-    }
-    return { persisted: result.persisted, duplicates: result.duplicates };
+    return messagePersistence.persistMessageBatchWithSideEffects(this.sql, this.env, this.messagePersistenceHooks(), sessionId, batchMessages);
+  }
+
+  private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
+    return {
+      recalculateAlarm: () => this.recalculateAlarm(),
+      scheduleSummarySync: () => this.scheduleSummarySync(),
+      broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
+    };
   }
 
   async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
@@ -480,70 +412,11 @@ export class ProjectData extends DurableObject<Env> {
       log.error('alarm.reconciliation_failed', { error: err instanceof Error ? err.message : String(err) });
     }
 
-    // Process expired attention markers (e.g., 2-hour human input timeout, reconciliation deadline)
-    const expiredMarkers = attention.getExpiredMarkers(this.sql);
-    for (const marker of expiredMarkers) {
-      try {
-        // Resolve only this specific expired marker (not all markers on the session)
-        attention.resolveAttentionMarkerById(this.sql, marker.id, 'system', 'expired');
-
-        if ((marker.kind === 'needs_input' || marker.kind === 'reconciliation_checkin') && marker.taskId) {
-          const errorMessage = marker.kind === 'reconciliation_checkin'
-            ? 'Agent became unresponsive after SAM check-in'
-            : 'Human input request expired after timeout';
-
-          // Fail the task in D1 and stop the workspace
-          if (this.env.DATABASE) {
-            await this.env.DATABASE.prepare(
-              `UPDATE tasks SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('in_progress', 'delegated')`
-            ).bind(errorMessage, marker.taskId).run();
-          }
-          if (marker.workspaceId && this.env.DATABASE) {
-            await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, marker.workspaceId);
-          }
-          // Stop the session
-          await this.failSession(marker.sessionId, errorMessage);
-          activity.recordActivityEventInternal(
-            this.sql, 'attention.expired', 'system', null,
-            marker.workspaceId, marker.sessionId, marker.taskId,
-            JSON.stringify({ kind: marker.kind, markerId: marker.id }),
-          );
-
-          // Trigger workspace/node cleanup for reconciliation failures.
-          // Fire-and-forget: cleanupTaskRun includes a configurable delay
-          // (default 5s) that would block the alarm handler if awaited
-          // across multiple expired markers. The agent has already been
-          // unresponsive for 6+ minutes, so no urgency to await cleanup.
-          if (marker.kind === 'reconciliation_checkin' && marker.workspaceId) {
-            const workerEnv = this.env as unknown as import('../../env').Env;
-            const taskId = marker.taskId;
-            import('../../services/task-runner').then(({ cleanupTaskRun }) =>
-              cleanupTaskRun(taskId, workerEnv),
-            ).catch((cleanupErr) => {
-              log.error('reconciliation.cleanup_task_run_failed', {
-                workspaceId: marker.workspaceId,
-                taskId,
-                error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
-              });
-            });
-          }
-
-          log.info('attention_marker.expired_cleanup', {
-            markerId: marker.id,
-            sessionId: marker.sessionId,
-            taskId: marker.taskId,
-            workspaceId: marker.workspaceId,
-            kind: marker.kind,
-          });
-        }
-      } catch (err) {
-        log.error('attention_marker.expiry_processing_failed', {
-          markerId: marker.id,
-          sessionId: marker.sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    await attentionExpiry.processExpiredAttentionMarkers(
+      this.sql,
+      this.env,
+      (sessionId, errorMessage) => this.failSession(sessionId, errorMessage),
+    );
 
     // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
     const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
