@@ -228,7 +228,7 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', jsonValidator(Ac
  * Auth: BetterAuth session cookie + nodeId verification (same model as /status).
  */
 acpSessionRoutes.post('/:id/acp-sessions/:sessionId/activity', jsonValidator(AcpSessionActivityReportSchema), async (c) => {
-  getUserId(c); // Ensure authenticated
+  const userId = getUserId(c); // Ensure authenticated
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
@@ -243,6 +243,7 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/activity', jsonValidator(Acp
     log.error('acp_session.activity_node_mismatch', {
       sessionId,
       projectId,
+      callerUserId: userId,
       expectedNodeId: existing.nodeId,
       receivedNodeId: body.nodeId,
       action: 'rejected',

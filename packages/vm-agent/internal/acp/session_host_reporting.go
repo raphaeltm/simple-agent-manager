@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // reportAgentError sends an agent error to boot-log and error reporter.
@@ -170,10 +171,18 @@ func (h *SessionHost) reportActivity(activity string) {
 	sessionID := h.config.SessionID
 
 	if projectID == "" || nodeID == "" || controlPlaneURL == "" || sessionID == "" {
+		slog.Debug("reportActivity: skipping, missing config",
+			"hasProjectID", projectID != "",
+			"hasNodeID", nodeID != "",
+			"hasControlPlaneURL", controlPlaneURL != "",
+			"hasSessionID", sessionID != "")
 		return
 	}
 
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		url := strings.TrimRight(controlPlaneURL, "/") +
 			"/api/projects/" + projectID + "/acp-sessions/" + sessionID + "/activity"
 
@@ -186,7 +195,7 @@ func (h *SessionHost) reportActivity(activity string) {
 			return
 		}
 
-		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		if err != nil {
 			slog.Warn("reportActivity: request create failed", "error", err)
 			return
@@ -199,6 +208,10 @@ func (h *SessionHost) reportActivity(activity string) {
 			slog.Debug("reportActivity: request failed", "error", err)
 			return
 		}
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			slog.Debug("reportActivity: non-2xx response", "status", resp.StatusCode)
+		}
 	}()
 }

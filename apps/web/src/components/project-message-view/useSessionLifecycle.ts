@@ -171,10 +171,15 @@ export function useSessionLifecycle(
     }, []),
     onAgentActivity: useCallback((activity: 'prompting' | 'idle') => {
       setAgentActivity(activity === 'prompting' ? 'prompting' : 'idle');
-      // When the server says "prompting", clear the fallback idle timer — the
-      // server will also send "idle" when the prompt finishes, so no local
-      // timer is needed while the authoritative signal is flowing.
       clearTimeout(idleTimerRef.current);
+      if (activity === 'prompting') {
+        // Safety backstop: if the server never sends "idle" (e.g., crashed or
+        // network partition), fall back to idle after the same timeout used by
+        // the message-based heuristic.
+        idleTimerRef.current = setTimeout(() => {
+          setAgentActivity('idle');
+        }, IDLE_TIMEOUT_MS);
+      }
     }, []),
   });
 
