@@ -28,6 +28,7 @@ import * as materialization from './materialization';
 import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
+import * as reconciliation from './reconciliation';
 import * as sessions from './sessions';
 
 export type { Env } from './types';
@@ -436,30 +437,63 @@ export class ProjectData extends DurableObject<Env> {
       },
       (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());
 
-    // Process expired attention markers (e.g., 2-hour human input timeout)
+    // Task-mode reconciliation: check-in on idle task agents
+    try {
+      await reconciliation.processReconciliationCandidates(
+        this.sql, this.env,
+        (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+      );
+    } catch (err) {
+      log.error('alarm.reconciliation_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+
+    // Process expired attention markers (e.g., 2-hour human input timeout, reconciliation deadline)
     const expiredMarkers = attention.getExpiredMarkers(this.sql);
     for (const marker of expiredMarkers) {
       try {
         // Resolve only this specific expired marker (not all markers on the session)
         attention.resolveAttentionMarkerById(this.sql, marker.id, 'system', 'expired');
 
-        if (marker.kind === 'needs_input' && marker.taskId) {
+        if ((marker.kind === 'needs_input' || marker.kind === 'reconciliation_checkin') && marker.taskId) {
+          const errorMessage = marker.kind === 'reconciliation_checkin'
+            ? 'Agent became unresponsive after SAM check-in'
+            : 'Human input request expired after timeout';
+
           // Fail the task in D1 and stop the workspace
           if (this.env.DATABASE) {
             await this.env.DATABASE.prepare(
               `UPDATE tasks SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('in_progress', 'delegated')`
-            ).bind('Human input request expired after timeout', marker.taskId).run();
+            ).bind(errorMessage, marker.taskId).run();
           }
           if (marker.workspaceId && this.env.DATABASE) {
             await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, marker.workspaceId);
           }
           // Stop the session
-          await this.failSession(marker.sessionId, 'Human input request expired');
+          await this.failSession(marker.sessionId, errorMessage);
           activity.recordActivityEventInternal(
             this.sql, 'attention.expired', 'system', null,
             marker.workspaceId, marker.sessionId, marker.taskId,
             JSON.stringify({ kind: marker.kind, markerId: marker.id }),
           );
+
+          // Trigger workspace/node cleanup for reconciliation failures.
+          // Fire-and-forget: cleanupTaskRun includes a configurable delay
+          // (default 5s) that would block the alarm handler if awaited
+          // across multiple expired markers. The agent has already been
+          // unresponsive for 6+ minutes, so no urgency to await cleanup.
+          if (marker.kind === 'reconciliation_checkin' && marker.workspaceId) {
+            const workerEnv = this.env as unknown as import('../../env').Env;
+            import('../../services/task-runner').then(({ cleanupTaskRun }) =>
+              cleanupTaskRun(marker.taskId, workerEnv),
+            ).catch((cleanupErr) => {
+              log.error('reconciliation.cleanup_task_run_failed', {
+                workspaceId: marker.workspaceId,
+                taskId: marker.taskId,
+                error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+              });
+            });
+          }
+
           log.info('attention_marker.expired_cleanup', {
             markerId: marker.id,
             sessionId: marker.sessionId,
@@ -792,7 +826,8 @@ export class ProjectData extends DurableObject<Env> {
     const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
     const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
     const attentionTime = attention.computeAttentionAlarmTime(this.sql);
-    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime, attentionTime].filter((t): t is number => t !== null);
+    const reconciliationTime = reconciliation.computeReconciliationAlarmTime(this.sql, this.env);
+    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime, attentionTime, reconciliationTime].filter((t): t is number => t !== null);
     if (candidates.length > 0) await this.ctx.storage.setAlarm(Math.min(...candidates));
     else await this.ctx.storage.deleteAlarm();
   }
