@@ -280,6 +280,9 @@ export interface Env {
   ORCHESTRATOR_MESSAGE_MAX_LENGTH?: string;        // Max length for injected messages to child agents (default: 32768)
   // Attention markers
   HUMAN_INPUT_TIMEOUT_MS?: string;                 // Attention marker expiry for needs_input (default: 7200000 = 2 hours)
+  // Task reconciliation (inactivity check-in)
+  TASK_RECONCILIATION_IDLE_MS?: string;             // Idle threshold before SAM check-in (default: 300000 = 5 minutes)
+  TASK_RECONCILIATION_RESPONSE_DEADLINE_MS?: string; // Response deadline after check-in (default: 60000 = 1 minute)
   // Durable mailbox (Phase 1 orchestrator messaging)
   MAILBOX_ACK_TIMEOUT_MS?: string;                 // Ack timeout before re-delivery (default: 300000)
   MAILBOX_REDELIVERY_MAX_ATTEMPTS?: string;        // Max delivery attempts before expiry (default: 5)

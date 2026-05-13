@@ -301,6 +301,12 @@ export {
   resolveOrchestratorConfig,
 } from './orchestrator';
 
+// Task Reconciliation (Inactivity Check-In)
+export {
+  DEFAULT_TASK_RECONCILIATION_IDLE_MS,
+  DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS,
+} from './reconciliation';
+
 // Policies (Phase 4: Policy Propagation)
 export type { PolicyLimits } from './policies';
 export {
