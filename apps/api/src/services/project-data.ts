@@ -454,7 +454,7 @@ export async function reportAcpSessionActivity(
   activity: string
 ): Promise<void> {
   const stub = await getStub(env, projectId);
-  stub.reportActivity(sessionId, activity);
+  await stub.reportActivity(sessionId, activity);
 }
 
 /**

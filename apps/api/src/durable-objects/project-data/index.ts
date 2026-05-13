@@ -298,7 +298,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /** Broadcast ephemeral activity signal — no persistence. */
-  reportActivity(sessionId: string, activity: string): void {
+  async reportActivity(sessionId: string, activity: string): Promise<void> {
     this.broadcastEvent('session.activity', { sessionId, activity }, sessionId);
   }
 
