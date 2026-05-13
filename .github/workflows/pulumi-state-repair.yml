@@ -1,0 +1,246 @@
+name: Pulumi State Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+        default: production
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - export-state
+          - remove-broken-resources
+          - refresh-and-preview
+          - full-repair
+        default: export-state
+      dry_run:
+        description: 'Show what would happen without making changes'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pulumi-state-repair-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Repair Pulumi State (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+
+      - name: Compute Resource Prefix
+        id: prefix
+        run: |
+          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
+          if [ -n "$EXPLICIT" ]; then
+            echo "value=$EXPLICIT" >> $GITHUB_OUTPUT
+          else
+            DOMAIN="${{ vars.BASE_DOMAIN }}"
+            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
+            PREFIX="s${HASH}"
+            echo "value=$PREFIX" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine Stack Name
+        id: stack
+        run: |
+          case "${{ inputs.environment }}" in
+            production) STACK="prod" ;;
+            staging) STACK="staging" ;;
+            *) STACK="${{ inputs.environment }}" ;;
+          esac
+          echo "name=$STACK" >> $GITHUB_OUTPUT
+
+      - name: Login to Pulumi R2 Backend
+        run: |
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
+          R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          pulumi login "s3://${BUCKET_NAME}?endpoint=${R2_ENDPOINT}&region=auto"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+      - name: Select Pulumi Stack
+        working-directory: infra
+        run: pulumi stack select "${{ steps.stack.outputs.name }}"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Set Pulumi Configuration
+        working-directory: infra
+        run: |
+          pulumi config set cloudflareAccountId "$CF_ACCOUNT_ID"
+          pulumi config set cloudflareZoneId "$CF_ZONE_ID"
+          pulumi config set baseDomain "$BASE_DOMAIN"
+          pulumi config set resourcePrefix "$RESOURCE_PREFIX"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+
+      # ---- Action: Export State ----
+      - name: "Export current state"
+        if: inputs.action == 'export-state' || inputs.action == 'full-repair'
+        working-directory: infra
+        run: |
+          echo "## Current Pulumi State" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          pulumi stack export 2>/dev/null | head -500 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo ""
+          echo "=== Resource URNs ==="
+          pulumi stack export 2>/dev/null | jq -r '.deployment.resources[].urn' 2>/dev/null || echo "Failed to list URNs"
+
+          echo ""
+          echo "=== Broken resources (D1 + PagesDomain) ==="
+          pulumi stack export 2>/dev/null | jq '.deployment.resources[] | select(.type | test("D1Database|PagesDomain")) | {urn: .urn, type: .type, inputs: .inputs, outputs: .outputs}' 2>/dev/null || echo "Failed to extract"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      # ---- Action: Remove Broken Resources ----
+      - name: "Remove broken resources from state"
+        if: inputs.action == 'remove-broken-resources' || inputs.action == 'full-repair'
+        working-directory: infra
+        run: |
+          PREFIX="${{ steps.prefix.outputs.value }}"
+
+          echo "## Removing broken resources from Pulumi state" >> $GITHUB_STEP_SUMMARY
+
+          # Export state, remove broken resources, re-import
+          pulumi stack export > /tmp/state-backup.json
+          echo "State backed up to /tmp/state-backup.json ($(wc -c < /tmp/state-backup.json) bytes)"
+
+          # List the resources we're removing
+          RESOURCES_TO_REMOVE=(
+            "urn:pulumi:${{ steps.stack.outputs.name }}::sam-infra::cloudflare:index/d1Database:D1Database::${PREFIX}-database"
+            "urn:pulumi:${{ steps.stack.outputs.name }}::sam-infra::cloudflare:index/d1Database:D1Database::${PREFIX}-observability"
+            "urn:pulumi:${{ steps.stack.outputs.name }}::sam-infra::cloudflare:index/pagesDomain:PagesDomain::${PREFIX}-pages-domain"
+            "urn:pulumi:${{ steps.stack.outputs.name }}::sam-infra::cloudflare:index/workerRoute:WorkerRoute::${PREFIX}-route-vm-exclusion"
+          )
+
+          for URN in "${RESOURCES_TO_REMOVE[@]}"; do
+            echo "Removing: $URN"
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "  [DRY RUN] Would remove $URN"
+              echo "- \`$URN\` — would remove (dry run)" >> $GITHUB_STEP_SUMMARY
+            else
+              if pulumi state delete "$URN" --yes 2>&1; then
+                echo "  Removed successfully"
+                echo "- \`$URN\` — removed" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "  Not found or already removed (continuing)"
+                echo "- \`$URN\` — not found (skipped)" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      # ---- Action: Refresh and Preview ----
+      - name: "Refresh (re-discover resources)"
+        if: (inputs.action == 'refresh-and-preview' || inputs.action == 'full-repair') && inputs.dry_run == false
+        working-directory: infra
+        run: |
+          echo "## Pulumi Refresh" >> $GITHUB_STEP_SUMMARY
+          echo "Re-discovering resources from Cloudflare..." >> $GITHUB_STEP_SUMMARY
+          pulumi refresh --yes 2>&1 | tee /tmp/refresh-output.txt
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -30 /tmp/refresh-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: "Preview (show what Pulumi would do)"
+        if: inputs.action == 'refresh-and-preview' || inputs.action == 'full-repair'
+        working-directory: infra
+        run: |
+          echo "## Pulumi Preview" >> $GITHUB_STEP_SUMMARY
+          pulumi preview --diff 2>&1 | tee /tmp/preview-output.txt || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -50 /tmp/preview-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      # ---- Full Repair: Apply ----
+      - name: "Apply (pulumi up)"
+        if: inputs.action == 'full-repair' && inputs.dry_run == false
+        working-directory: infra
+        run: |
+          echo "## Pulumi Up" >> $GITHUB_STEP_SUMMARY
+          pulumi up --yes --skip-preview 2>&1 | tee /tmp/up-output.txt
+          EXIT_CODE=$?
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -50 /tmp/up-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          exit $EXIT_CODE
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: "Post-repair state summary"
+        if: inputs.action == 'full-repair' && inputs.dry_run == false
+        working-directory: infra
+        run: |
+          echo "## Post-Repair State" >> $GITHUB_STEP_SUMMARY
+          echo "### Resource Count" >> $GITHUB_STEP_SUMMARY
+          RESOURCE_COUNT=$(pulumi stack export 2>/dev/null | jq '.deployment.resources | length')
+          echo "Total resources: $RESOURCE_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Stack Outputs" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          pulumi stack output 2>&1 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
