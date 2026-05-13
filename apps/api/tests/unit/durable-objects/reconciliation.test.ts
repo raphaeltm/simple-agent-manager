@@ -9,14 +9,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
+  createAttentionMarker,
+  resolveAttentionMarkers,
+} from '../../../src/durable-objects/project-data/attention';
+import {
   computeReconciliationAlarmTime,
   getReconciliationCandidates,
   processReconciliationCandidates,
 } from '../../../src/durable-objects/project-data/reconciliation';
-import {
-  createAttentionMarker,
-  resolveAttentionMarkers,
-} from '../../../src/durable-objects/project-data/attention';
 
 // Mock the node-agent service to prevent real HTTP calls
 vi.mock('../../../src/services/node-agent', () => ({

@@ -17,13 +17,13 @@ import {
   DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS,
 } from '@simple-agent-manager/shared';
 
+import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { sendPromptToAgentOnNode } from '../../services/node-agent';
+import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { persistMessage } from './messages';
-import { recordActivityEventInternal } from './activity';
 import type { Env as DOEnv } from './types';
-import type { Env as WorkerEnv } from '../../env';
 
 const log = createModuleLogger('reconciliation');
 
