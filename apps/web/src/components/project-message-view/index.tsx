@@ -238,21 +238,21 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Inline idle indicator — subtle "Agent idle | End session" for conversation-mode sessions */}
       {lc.sessionState === 'idle' && lc.taskEmbed?.taskMode === 'conversation' && onCloseConversation && (
-        <div className="shrink-0 flex items-center gap-3 px-4 py-1.5 text-xs text-fg-muted">
+        <div role="status" className="shrink-0 flex items-center gap-3 px-4 py-1.5 text-xs text-fg-muted">
           <span className="inline-flex items-center gap-1">
-            <Clock size={12} style={{ color: 'var(--sam-color-warning)' }} />
+            <Clock size={12} aria-hidden="true" style={{ color: 'var(--sam-color-warning)' }} />
             Agent idle
           </span>
-          <span style={{ color: 'var(--sam-color-border-default)' }}>|</span>
+          <span aria-hidden="true" style={{ color: 'var(--sam-color-border-default)' }}>|</span>
           <button
             type="button"
             onClick={onCloseConversation}
             disabled={closingConversation}
-            className="bg-transparent border-none text-xs cursor-pointer p-0 underline decoration-from-font underline-offset-2 text-fg-muted hover:text-fg-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            className="min-h-[44px] flex items-center bg-transparent border-none text-xs cursor-pointer px-2 underline decoration-from-font underline-offset-2 text-fg-muted hover:text-fg-primary disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)] rounded-sm"
           >
             {closingConversation ? 'Ending...' : 'End session'}
           </button>
-          {closeError && <span className="text-danger text-xs">{closeError}</span>}
+          {closeError && <span role="alert" className="text-danger text-xs">{closeError}</span>}
         </div>
       )}
 
