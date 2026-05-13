@@ -76,8 +76,12 @@ export async function getReconciliationCandidates(
        ics.workspace_id,
        ics.task_id,
        COALESCE(
-         MAX(wa.last_message_at, wa.last_terminal_activity_at),
-         wa.last_message_at,
+         CASE
+           WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at
+           WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at
+           WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at
+           ELSE wa.last_message_at
+         END,
          wa.created_at,
          ics.created_at
        ) AS last_activity_at
@@ -302,8 +306,12 @@ export function computeReconciliationAlarmTime(
   const rows = sql.exec(
     `SELECT
        MIN(COALESCE(
-         MAX(wa.last_message_at, wa.last_terminal_activity_at),
-         wa.last_message_at,
+         CASE
+           WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at
+           WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at
+           WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at
+           ELSE wa.last_message_at
+         END,
          wa.created_at,
          ics.created_at
        )) AS earliest_activity

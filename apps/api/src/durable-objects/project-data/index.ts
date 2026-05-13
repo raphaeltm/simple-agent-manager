@@ -471,19 +471,22 @@ export class ProjectData extends DurableObject<Env> {
             JSON.stringify({ kind: marker.kind, markerId: marker.id }),
           );
 
-          // Trigger workspace/node cleanup for reconciliation failures
+          // Trigger workspace/node cleanup for reconciliation failures.
+          // Fire-and-forget: cleanupTaskRun includes a configurable delay
+          // (default 5s) that would block the alarm handler if awaited
+          // across multiple expired markers. The agent has already been
+          // unresponsive for 6+ minutes, so no urgency to await cleanup.
           if (marker.kind === 'reconciliation_checkin' && marker.workspaceId) {
-            try {
-              const workerEnv = this.env as unknown as import('../../env').Env;
-              const { cleanupTaskRun } = await import('../../services/task-runner');
-              await cleanupTaskRun(marker.taskId, workerEnv);
-            } catch (cleanupErr) {
+            const workerEnv = this.env as unknown as import('../../env').Env;
+            import('../../services/task-runner').then(({ cleanupTaskRun }) =>
+              cleanupTaskRun(marker.taskId, workerEnv),
+            ).catch((cleanupErr) => {
               log.error('reconciliation.cleanup_task_run_failed', {
                 workspaceId: marker.workspaceId,
                 taskId: marker.taskId,
                 error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
               });
-            }
+            });
           }
 
           log.info('attention_marker.expired_cleanup', {
