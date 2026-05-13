@@ -20,7 +20,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
-import { estimateMessagesBytes, trimMessagesToFit, truncateToolResult } from './payload-size';
+import { type OpenAIMessage, estimateMessagesBytes, trimMessagesToFit, truncateToolResult } from './payload-size';
 import type {
   AnthropicToolDef,
   CollectedToolCall,
@@ -132,19 +132,8 @@ function isWorkersAIModel(model: string): boolean {
 }
 
 // =============================================================================
-// OpenAI message types (canonical internal format)
+// OpenAI message/tool types
 // =============================================================================
-
-interface OpenAIMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content?: string | null;
-  tool_calls?: Array<{
-    id: string;
-    type: 'function';
-    function: { name: string; arguments: string };
-  }>;
-  tool_call_id?: string;
-}
 
 interface OpenAITool {
   type: 'function';

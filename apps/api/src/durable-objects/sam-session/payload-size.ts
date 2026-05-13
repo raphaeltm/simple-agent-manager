@@ -9,8 +9,8 @@
  * only the LLM's copy is truncated/trimmed.
  */
 
-/** OpenAI message shape (duplicated minimally to avoid circular imports). */
-interface OpenAIMessage {
+/** OpenAI message shape used by the agent loop and payload-size helpers. */
+export interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content?: string | null;
   tool_calls?: Array<{
