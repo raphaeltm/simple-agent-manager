@@ -29,23 +29,23 @@ Replace the bottom bar with a subtle inline action that appears in the message s
 
 ## Implementation Checklist
 
-- [ ] Remove the bottom bar IIFE from `project-chat/index.tsx` (lines 288-307)
-- [ ] Remove `closingConversation` and `closeError` from the return value of `useProjectChatState` (if no longer used elsewhere)
-- [ ] Add `onCloseConversation` optional callback prop to `ProjectMessageView`
-- [ ] Add `closingConversation` and `closeError` props (or just inline the state in `ProjectMessageView`)
-- [ ] In `ProjectMessageView`, render a subtle inline idle indicator below the message list when session is idle + conversation-mode task — with "End session" link
-- [ ] Pass `handleCloseConversation`, `closingConversation`, `closeError` from `project-chat/index.tsx` to `ProjectMessageView`
-- [ ] Style the inline indicator to match the prototype: small text, clock icon, "Agent idle | End session" link
-- [ ] Verify on desktop and mobile viewports with Playwright visual audit
+- [x] Remove the bottom bar IIFE from `project-chat/index.tsx` (lines 288-307)
+- [x] Remove `closingConversation` and `closeError` from the return value of `useProjectChatState` — retained; still required for prop propagation to `ProjectMessageView`
+- [x] Add `onCloseConversation` optional callback prop to `ProjectMessageView`
+- [x] Add `closingConversation` and `closeError` props to `ProjectMessageView`
+- [x] In `ProjectMessageView`, render a subtle inline idle indicator below the message list when session is idle + conversation-mode task — with "End session" link
+- [x] Pass `handleCloseConversation`, `closingConversation`, `closeError` from `project-chat/index.tsx` to `ProjectMessageView`
+- [x] Style the inline indicator to match the prototype: small text, clock icon, "Agent idle | End session" link
+- [x] Verify on desktop and mobile viewports with Playwright visual audit
 
 ## Acceptance Criteria
 
-- [ ] The full-width "Close conversation" bottom bar no longer appears
-- [ ] When a conversation-mode session is idle, a subtle "Agent idle | End session" line appears after the last message
-- [ ] Clicking "End session" closes the conversation (same behavior as old button)
-- [ ] The "Complete" button in the expanded session header still works as before
-- [ ] No horizontal overflow on mobile (375px)
-- [ ] The inline indicator does NOT appear for task-mode sessions or active/terminated sessions
+- [x] The full-width "Close conversation" bottom bar no longer appears
+- [x] When a conversation-mode session is idle, a subtle "Agent idle | End session" line appears after the last message
+- [x] Clicking "End session" closes the conversation (same behavior as old button)
+- [x] The "Complete" button in the expanded session header still works as before — SessionHeader.tsx unchanged, existing tests pass
+- [x] No horizontal overflow on mobile (375px) — verified via Playwright visual audit
+- [x] The inline indicator does NOT appear for task-mode sessions or active/terminated sessions — negative tests added
 
 ## References
 
