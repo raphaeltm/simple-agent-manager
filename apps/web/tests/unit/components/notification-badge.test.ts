@@ -33,8 +33,9 @@ describe('ATTENTION_TYPES — notification badge classification', () => {
 });
 
 describe('notification badge count logic', () => {
+  let notificationId = 0;
   const makeNotification = (type: string, readAt: string | null = null) => ({
-    id: `n-${Math.random()}`,
+    id: `n-${notificationId++}`,
     type,
     readAt,
     title: 'test',

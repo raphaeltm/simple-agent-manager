@@ -61,7 +61,7 @@ export async function getReconciliationCandidates(
   env: DOEnv,
 ): Promise<ReconciliationCandidate[]> {
   const now = Date.now();
-  const idleThresholdMs = parseInt(
+  const idleThresholdMs = Number.parseInt(
     (env as unknown as Record<string, string | undefined>).TASK_RECONCILIATION_IDLE_MS ?? '',
     10,
   ) || DEFAULT_TASK_RECONCILIATION_IDLE_MS;
@@ -160,7 +160,7 @@ export async function processReconciliationCandidates(
   const candidates = await getReconciliationCandidates(sql, env);
   if (candidates.length === 0) return 0;
 
-  const deadlineMs = parseInt(
+  const deadlineMs = Number.parseInt(
     (env as unknown as Record<string, string | undefined>).TASK_RECONCILIATION_RESPONSE_DEADLINE_MS ?? '',
     10,
   ) || DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS;
@@ -296,7 +296,7 @@ export function computeReconciliationAlarmTime(
   sql: SqlStorage,
   env: DOEnv,
 ): number | null {
-  const idleThresholdMs = parseInt(
+  const idleThresholdMs = Number.parseInt(
     (env as unknown as Record<string, string | undefined>).TASK_RECONCILIATION_IDLE_MS ?? '',
     10,
   ) || DEFAULT_TASK_RECONCILIATION_IDLE_MS;
@@ -327,7 +327,7 @@ export function computeReconciliationAlarmTime(
   ).toArray();
 
   const row = rows[0];
-  if (!row || row.earliest_activity === null || row.earliest_activity === undefined) {
+  if (row?.earliest_activity === null || row?.earliest_activity === undefined) {
     return null;
   }
 

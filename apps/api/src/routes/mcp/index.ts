@@ -135,7 +135,7 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>();
 
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
-mcpRoutes.post('/', async (c) => {
+mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is intentionally centralized.
   // Authenticate — returns parsed token data and raw token
   const [tokenData, rawToken] = await authenticateMcpRequest(
     c.req.header('Authorization'),

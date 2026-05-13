@@ -252,7 +252,7 @@ export function computeAttentionAlarmTime(sql: SqlStorage): number | null {
     )
     .toArray();
   const row = rows[0];
-  if (!row || row.earliest === null || row.earliest === undefined) return null;
+  if (row?.earliest === null || row?.earliest === undefined) return null;
   return row.earliest as number;
 }
 
@@ -262,7 +262,7 @@ export function computeAttentionAlarmTime(sql: SqlStorage): number | null {
 export function computeHumanInputExpiry(
   humanInputTimeoutMs: string | undefined,
 ): number {
-  const parsed = parseInt(humanInputTimeoutMs ?? '', 10);
+  const parsed = Number.parseInt(humanInputTimeoutMs ?? '', 10);
   const timeoutMs = Number.isFinite(parsed) && parsed > 0
     ? parsed
     : DEFAULT_HUMAN_INPUT_TIMEOUT_MS;

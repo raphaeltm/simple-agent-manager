@@ -152,13 +152,19 @@ export function NotificationCenter() {
     return { groups: Array.from(groupMap.values()), shouldGroup: true };
   }, [filteredNotifications]);
 
+  const notificationButtonLabel = [
+    'Notifications',
+    attentionUnreadCount > 0 ? ` (${attentionUnreadCount} need attention)` : '',
+    unreadCount > 0 ? `, ${unreadCount} total unread` : '',
+  ].join('');
+
   return (
     <div className="relative">
       {/* Bell Button */}
       <button
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
-        aria-label={`Notifications${attentionUnreadCount > 0 ? ` (${attentionUnreadCount} need attention)` : ''}${unreadCount > 0 ? `, ${unreadCount} total unread` : ''}`}
+        aria-label={notificationButtonLabel}
         className="relative flex items-center justify-center w-9 h-9 bg-transparent border-none text-fg-muted cursor-pointer hover:text-fg-primary transition-colors"
       >
         <Bell size={18} />

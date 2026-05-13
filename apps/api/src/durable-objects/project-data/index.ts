@@ -730,7 +730,7 @@ export class ProjectData extends DurableObject<Env> {
   private async recalculateAlarm(): Promise<void> {
     const { idleCleanupTime, workspaceIdleCheckTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
     const heartbeatTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
-    const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
+    const pollIntervalMs = Number.parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
     const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
     const attentionTime = attention.computeAttentionAlarmTime(this.sql);
     const reconciliationTime = reconciliation.computeReconciliationAlarmTime(this.sql, this.env);

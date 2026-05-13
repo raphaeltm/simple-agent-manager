@@ -18,41 +18,7 @@ import {
   resolveAttentionMarkerById,
   resolveAttentionMarkers,
 } from '../../../src/durable-objects/project-data/attention';
-
-// Adapter: better-sqlite3 → SqlStorage-compatible interface
-function createSqlStorage(db: Database.Database) {
-  return {
-    exec(query: string, ...params: unknown[]) {
-      const trimmed = query.trim().toUpperCase();
-      const isSelect = trimmed.startsWith('SELECT') || trimmed.startsWith('WITH');
-
-      if (isSelect) {
-        const stmt = db.prepare(query);
-        const rows = params.length > 0 ? stmt.all(...params) : stmt.all();
-        return {
-          toArray() { return rows; },
-          rowsWritten: 0,
-        };
-      }
-
-      if (params.length === 0) {
-        // Multi-statement DDL (migrations) — use db.exec()
-        db.exec(query);
-        return {
-          toArray() { return []; },
-          rowsWritten: 0,
-        };
-      }
-
-      const stmt = db.prepare(query);
-      const result = stmt.run(...params);
-      return {
-        toArray() { return []; },
-        rowsWritten: result.changes,
-      };
-    },
-  } as unknown as SqlStorage;
-}
+import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('Attention Markers Module', () => {
   let db: Database.Database;
