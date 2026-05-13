@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, act } from '@testing-library/react';
 import { TypewriterText } from '../../../src/components/TypewriterText';
+import { setupRafMock, type RafMockState } from '../helpers/raf-mock';
 
 // Mock react-markdown to avoid complex JSX parsing in tests
 vi.mock('react-markdown', () => ({
@@ -9,41 +10,15 @@ vi.mock('react-markdown', () => ({
 vi.mock('remark-gfm', () => ({ default: () => {} }));
 
 describe('TypewriterText', () => {
-  let rafQueue: Array<{ id: number; cb: FrameRequestCallback }>;
-  let nextRafId: number;
-  let currentTime: number;
+  let raf: RafMockState;
 
   beforeEach(() => {
-    rafQueue = [];
-    nextRafId = 1;
-    currentTime = 0;
-
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
-      const id = nextRafId++;
-      rafQueue.push({ id, cb });
-      return id;
-    });
-    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
-      rafQueue = rafQueue.filter((item) => item.id !== id);
-    });
-    vi.spyOn(performance, 'now').mockImplementation(() => currentTime);
+    raf = setupRafMock();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
-
-  function advanceTime(ms: number) {
-    currentTime += ms;
-    let safety = 200;
-    while (rafQueue.length > 0 && safety-- > 0) {
-      const batch = [...rafQueue];
-      rafQueue = [];
-      for (const { cb } of batch) {
-        cb(currentTime);
-      }
-    }
-  }
 
   describe('non-animated mode', () => {
     it('renders full text immediately when animated=false', () => {
@@ -74,7 +49,7 @@ describe('TypewriterText', () => {
       expect(container.textContent).toBe('');
 
       // Advance enough to reveal all 5 chars (5 * 10ms = 50ms + buffer)
-      act(() => { advanceTime(100); });
+      act(() => { raf.advanceTime(100); });
 
       expect(container.textContent).toContain('Hello');
     });
@@ -84,12 +59,12 @@ describe('TypewriterText', () => {
         <TypewriterText text="Hi" animated={true} charDelayMs={10} />
       );
 
-      act(() => { advanceTime(100); });
+      act(() => { raf.advanceTime(100); });
       expect(container.textContent).toContain('Hi');
 
       rerender(<TypewriterText text="Hi there" animated={true} charDelayMs={10} />);
 
-      act(() => { advanceTime(200); });
+      act(() => { raf.advanceTime(200); });
       expect(container.textContent).toContain('Hi there');
     });
 
@@ -98,7 +73,7 @@ describe('TypewriterText', () => {
         <TypewriterText text="Hello" animated={true} charDelayMs={10} />
       );
 
-      act(() => { advanceTime(200); });
+      act(() => { raf.advanceTime(200); });
       expect(container.textContent).toContain('Hello');
 
       // Replace with shorter text
@@ -122,7 +97,7 @@ describe('TypewriterText', () => {
         <TypewriterText text="Hi" animated={true} charDelayMs={10} />
       );
 
-      act(() => { advanceTime(200); });
+      act(() => { raf.advanceTime(200); });
 
       const cursor = container.querySelector('.streaming-cursor');
       expect(cursor).toBeNull();
@@ -134,7 +109,7 @@ describe('TypewriterText', () => {
       );
 
       // Advance to reveal some characters
-      act(() => { advanceTime(50); });
+      act(() => { raf.advanceTime(50); });
 
       // char-fade spans should appear in the DOM via applyCharFade
       const spans = container.querySelectorAll('.char-fade');
@@ -155,7 +130,7 @@ describe('TypewriterText', () => {
       );
 
       // Use real rAF mock to advance reveal
-      act(() => { advanceTime(100); });
+      act(() => { raf.advanceTime(100); });
 
       // Spans should be present
       expect(container.querySelectorAll('.char-fade').length).toBeGreaterThan(0);

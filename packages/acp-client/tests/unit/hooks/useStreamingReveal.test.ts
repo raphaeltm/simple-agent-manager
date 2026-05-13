@@ -1,43 +1,18 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useStreamingReveal } from '../../../src/hooks/useStreamingReveal';
+import { setupRafMock, type RafMockState } from '../helpers/raf-mock';
 
 describe('useStreamingReveal', () => {
-  let rafQueue: Array<{ id: number; cb: FrameRequestCallback }>;
-  let nextRafId: number;
-  let currentTime: number;
+  let raf: RafMockState;
 
   beforeEach(() => {
-    rafQueue = [];
-    nextRafId = 1;
-    currentTime = 0;
-
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
-      const id = nextRafId++;
-      rafQueue.push({ id, cb });
-      return id;
-    });
-    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
-      rafQueue = rafQueue.filter((item) => item.id !== id);
-    });
-    vi.spyOn(performance, 'now').mockImplementation(() => currentTime);
+    raf = setupRafMock();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
-
-  function advanceTime(ms: number) {
-    currentTime += ms;
-    let safety = 200;
-    while (rafQueue.length > 0 && safety-- > 0) {
-      const batch = [...rafQueue];
-      rafQueue = [];
-      for (const { cb } of batch) {
-        cb(currentTime);
-      }
-    }
-  }
 
   it('returns full text immediately when not animated', () => {
     const { result } = renderHook(() =>
@@ -60,11 +35,11 @@ describe('useStreamingReveal', () => {
       useStreamingReveal('Hello', true, { charDelayMs: 10 })
     );
 
-    act(() => { advanceTime(25); });
+    act(() => { raf.advanceTime(25); });
     // After 25ms at 10ms/char, should have revealed ~2 chars
     expect(result.current.revealedText.length).toBeGreaterThanOrEqual(2);
 
-    act(() => { advanceTime(100); });
+    act(() => { raf.advanceTime(100); });
     expect(result.current.revealedText).toBe('Hello');
     expect(result.current.isRevealing).toBe(false);
   });
@@ -74,9 +49,9 @@ describe('useStreamingReveal', () => {
       useStreamingReveal('Hi', true, { charDelayMs: 10 })
     );
 
-    act(() => { advanceTime(100); });
+    act(() => { raf.advanceTime(100); });
     // After full reveal, no more rAF callbacks should be queued
-    expect(rafQueue.length).toBe(0);
+    expect(raf.rafQueue.length).toBe(0);
   });
 
   it('extends reveal when text grows', () => {
@@ -85,12 +60,12 @@ describe('useStreamingReveal', () => {
       { initialProps: { text: 'Hi' } }
     );
 
-    act(() => { advanceTime(100); });
+    act(() => { raf.advanceTime(100); });
     expect(result.current.revealedText).toBe('Hi');
 
     rerender({ text: 'Hi there' });
 
-    act(() => { advanceTime(200); });
+    act(() => { raf.advanceTime(200); });
     expect(result.current.revealedText).toBe('Hi there');
   });
 
@@ -100,7 +75,7 @@ describe('useStreamingReveal', () => {
       { initialProps: { text: 'Hello' } }
     );
 
-    act(() => { advanceTime(200); });
+    act(() => { raf.advanceTime(200); });
     expect(result.current.revealedText).toBe('Hello');
 
     rerender({ text: 'Bye' });
@@ -127,7 +102,7 @@ describe('useStreamingReveal', () => {
       expect(result.current.revealedText).toBe('Hello');
       expect(result.current.isRevealing).toBe(false);
       // No rAF should be queued
-      expect(rafQueue.length).toBe(0);
+      expect(raf.rafQueue.length).toBe(0);
     } finally {
       window.matchMedia = original;
     }
@@ -140,7 +115,7 @@ describe('useStreamingReveal', () => {
     expect(result.current.revealedText).toBe('');
     expect(result.current.isRevealing).toBe(false);
     // No rAF should be queued for empty text
-    expect(rafQueue.length).toBe(0);
+    expect(raf.rafQueue.length).toBe(0);
   });
 
   it('cleans up rAF on unmount', () => {
