@@ -699,6 +699,96 @@ describe('useChatWebSocket (behavioral)', () => {
   });
 
   // ===========================================================================
+  // session.activity event (prompt-level status forwarding)
+  // ===========================================================================
+
+  it('calls onAgentActivity with "prompting" on session.activity event', () => {
+    const onAgentActivity = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onAgentActivity }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.activity',
+        payload: {
+          sessionId: 'sess-1',
+          activity: 'prompting',
+        },
+      });
+    });
+
+    expect(onAgentActivity).toHaveBeenCalledOnce();
+    expect(onAgentActivity).toHaveBeenCalledWith('prompting');
+  });
+
+  it('calls onAgentActivity with "idle" on session.activity event', () => {
+    const onAgentActivity = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onAgentActivity }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.activity',
+        payload: {
+          sessionId: 'sess-1',
+          activity: 'idle',
+        },
+      });
+    });
+
+    expect(onAgentActivity).toHaveBeenCalledOnce();
+    expect(onAgentActivity).toHaveBeenCalledWith('idle');
+  });
+
+  it('ignores session.activity for different sessions', () => {
+    const onAgentActivity = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onAgentActivity }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.activity',
+        payload: {
+          sessionId: 'sess-other',
+          activity: 'prompting',
+        },
+      });
+    });
+
+    expect(onAgentActivity).not.toHaveBeenCalled();
+  });
+
+  it('ignores session.activity with unknown activity value', () => {
+    const onAgentActivity = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onAgentActivity }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.activity',
+        payload: {
+          sessionId: 'sess-1',
+          activity: 'unknown_value',
+        },
+      });
+    });
+
+    expect(onAgentActivity).not.toHaveBeenCalled();
+  });
+
+  // ===========================================================================
   // message.new with payload wrapper (broadcast format, TDF fix)
   // ===========================================================================
 
