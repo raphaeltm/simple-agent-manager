@@ -159,6 +159,11 @@ test.describe('Fork/retry new chat screen audit', () => {
     expect(textareaValue).toContain('SAM MCP tools');
     expect(textareaValue).toContain('Previous session: "Fix the login bug"');
 
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(overflow).toBe(false);
+
     await screenshot(page, `fork-new-chat-${testInfo.project.name.replaceAll(/\W+/g, '-').toLowerCase()}`);
   });
 
@@ -174,6 +179,11 @@ test.describe('Fork/retry new chat screen audit', () => {
     await expect(page.getByText('Error: Agent crashed unexpectedly')).toBeVisible();
     await expect(page.getByLabel(/Run mode:?/)).toBeVisible();
     await expect(page.getByPlaceholder('Describe what you want the agent to do...')).toHaveValue('Original task description');
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(overflow).toBe(false);
 
     await screenshot(page, `retry-new-chat-${testInfo.project.name.replaceAll(/\W+/g, '-').toLowerCase()}`);
   });
