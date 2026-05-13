@@ -1,16 +1,46 @@
-import { GitFork } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  CirclePause,
+  GitFork,
+  HelpCircle,
+  ListTodo,
+  Loader2,
+  MessageSquare,
+  XCircle,
+} from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import {
+  type AttentionState,
   formatRelativeTime,
+  getAttentionState,
   getLastActivity,
+  getSessionMode,
   getSessionState,
-  STATE_COLORS,
 } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 
 export type SessionItemVariant = 'default' | 'group-parent' | 'group-child';
+
+// ---------------------------------------------------------------------------
+// Attention state -> icon + color mapping (uses design tokens)
+// ---------------------------------------------------------------------------
+
+const ATTENTION_ICON_MAP: Record<AttentionState, {
+  icon: typeof HelpCircle;
+  color: string;
+  label: string;
+}> = {
+  needs_input: { icon: HelpCircle, color: 'var(--sam-color-warning, #f59e0b)', label: 'Needs input' },
+  error:       { icon: AlertCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Error' },
+  active:      { icon: Loader2, color: 'var(--sam-color-success)', label: 'Running' },
+  idle:        { icon: CirclePause, color: 'var(--sam-color-warning, #f59e0b)', label: 'Idle' },
+  completed:   { icon: CheckCircle2, color: 'var(--sam-color-fg-muted)', label: 'Completed' },
+  failed:      { icon: XCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Failed' },
+  stopped:     { icon: CirclePause, color: 'var(--sam-color-fg-muted)', label: 'Stopped' },
+};
 
 export function SessionItem({
   session,
@@ -30,25 +60,28 @@ export function SessionItem({
   onSelect: (id: string) => void;
   onFork?: (session: ChatSessionResponse) => void;
   variant?: SessionItemVariant;
-  /** Extra badge rendered next to the title (e.g., expand toggle). */
   badge?: ReactNode;
-  /** Progress bar rendered below the title row (e.g., sub-task completion). */
   progressBar?: ReactNode;
-  /** Whether to show a "BLOCKED" badge on this item. */
   blockedBadge?: boolean;
-  /** Title of the task this item is blocked by. */
   blockedByTitle?: string;
-  /** Accessible label override for the select button (e.g., context-anchor annotation). */
   ariaLabel?: string;
-  /** Lineage subtitle text (e.g., "↩ attempt 3" or "⑂ forked from X"). */
   lineageText?: string;
 }) {
   const state = getSessionState(session);
-  const dotColor = blockedBadge ? 'var(--sam-color-danger, #ef4444)' : STATE_COLORS[state];
+  const attentionState = getAttentionState(session);
+  const mode = getSessionMode(session);
   const canFork = state === 'terminated' && !!session.task?.id;
 
   const isChild = variant === 'group-child';
   const isGrouped = variant !== 'default';
+
+  // Icon config — blocked overrides normal attention state
+  const iconConfig = blockedBadge
+    ? { icon: AlertCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Blocked' }
+    : ATTENTION_ICON_MAP[attentionState];
+
+  const StatusIcon = iconConfig.icon;
+  const ModeIcon = mode === 'task' ? ListTodo : MessageSquare;
 
   // Font sizing: parent 13px/500, child 12px/400, default unchanged
   const titleStyle: React.CSSProperties = isChild
@@ -81,10 +114,18 @@ export function SessionItem({
         className="block w-full text-left bg-transparent border-none cursor-pointer p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sam-color-focus-ring)]"
       >
         <div className="flex items-center gap-1.5 mb-0.5">
+          {/* Status icon — replaces the old colored dot */}
           <span
-            className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
-            style={{ backgroundColor: dotColor }}
-          />
+            className="shrink-0 flex items-center"
+            style={{ color: iconConfig.color }}
+            title={iconConfig.label}
+          >
+            <StatusIcon
+              size={14}
+              className={attentionState === 'active' ? 'motion-safe:animate-spin' : ''}
+            />
+            <span className="sr-only">{iconConfig.label}</span>
+          </span>
           <span
             className={`overflow-hidden text-ellipsis whitespace-nowrap flex-1 ${
               !isChild
@@ -97,36 +138,35 @@ export function SessionItem({
           </span>
           {badge}
           {blockedBadge && (
-            <span
-              style={{
-                background: 'rgba(239,68,68,0.15)',
-                color: '#f87171',
-                padding: '0 5px',
-                borderRadius: 9999,
-                fontSize: 9,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                whiteSpace: 'nowrap',
-              }}
-            >
+            <span className="px-1 rounded-full text-danger-fg bg-danger-tint" style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
               BLOCKED
             </span>
           )}
         </div>
         <div
           className="flex items-center gap-1.5 text-fg-muted"
-          style={{ fontSize: 10, paddingLeft: 'calc(6px + 6px)' }}
+          style={{ fontSize: 10, paddingLeft: 20 }}
         >
           {blockedBadge && blockedByTitle ? (
-            <span className="truncate" style={{ color: '#f87171' }}>
+            <span className="truncate text-danger-fg">
               Waiting on: {blockedByTitle}
             </span>
           ) : (
             <>
+              {/* Mode icon + label */}
+              <span className="flex items-center gap-0.5 shrink-0" title={mode === 'task' ? 'Task' : 'Conversation'}>
+                <ModeIcon size={10} />
+                <span>{mode === 'task' ? 'Task' : 'Chat'}</span>
+              </span>
+              {/* Attention label for high-priority states */}
+              {attentionState === 'needs_input' && (
+                <span className="text-warning-fg font-medium">Needs input</span>
+              )}
               {lineageText && (
-                <span className="truncate" style={{ color: 'var(--sam-color-fg-muted)' }}>
-                  {lineageText}
-                </span>
+                <>
+                  <span>&middot;</span>
+                  <span className="truncate">{lineageText}</span>
+                </>
               )}
               <span className="ml-auto shrink-0">{formatRelativeTime(getLastActivity(session))}</span>
             </>
@@ -138,7 +178,8 @@ export function SessionItem({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onFork(session); }}
-          className="mt-1 ml-[calc(6px+6px)] flex items-center gap-1 text-xs text-accent-primary bg-transparent border border-transparent rounded-sm cursor-pointer py-0.5 px-1.5 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors"
+          className="mt-1 flex items-center gap-1 text-xs text-accent bg-transparent border border-transparent rounded-sm cursor-pointer py-0.5 px-1.5 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent transition-colors"
+          style={{ marginLeft: 20 }}
           title="Continue from this session"
         >
           <GitFork size={12} />

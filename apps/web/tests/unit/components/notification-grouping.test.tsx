@@ -1,6 +1,5 @@
 /**
- * Tests for the notification grouping logic and NotificationGroup component
- * added in Phase 2.
+ * Tests for the notification grouping logic and NotificationGroup component.
  *
  * The grouping logic is a useMemo inside NotificationCenter that computes
  * { groups, shouldGroup } from filteredNotifications. We test it by rendering
@@ -16,6 +15,7 @@
  *  - NotificationGroup collapse/expand toggle works
  *  - Unread badge count within a group is accurate
  *  - notification.updated WebSocket message patches the list in-place
+ *  - Attention-only badge on bell button
  */
 import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -43,9 +43,9 @@ import { NotificationCenter } from '../../../src/components/NotificationCenter';
 function makeNotification(overrides: Partial<NotificationResponse> = {}): NotificationResponse {
   return {
     id: `notif-${Math.random().toString(36).slice(2)}`,
-    type: 'task_complete',
-    urgency: 'medium',
-    title: 'Task completed',
+    type: 'needs_input',
+    urgency: 'high',
+    title: 'Agent needs help',
     body: null,
     projectId: 'proj-1',
     taskId: 'task-1',
@@ -99,9 +99,9 @@ describe('NotificationCenter grouping logic', () => {
   });
 
   describe('shouldGroup = false (single project or no notifications)', () => {
-    it('renders empty state for priority tab when there are no notifications', () => {
+    it('renders empty state for attention tab when there are no notifications', () => {
       renderNotificationCenter([]);
-      expect(screen.getByText(/no priority notifications/i)).toBeInTheDocument();
+      expect(screen.getByText(/nothing needs your attention/i)).toBeInTheDocument();
     });
 
     it('renders "No notifications yet" on the All tab when empty', () => {
@@ -113,26 +113,28 @@ describe('NotificationCenter grouping logic', () => {
 
     it('renders flat list when all notifications belong to the same project', () => {
       const notifications = [
-        makeNotification({ id: 'n1', projectId: 'proj-1' }),
-        makeNotification({ id: 'n2', projectId: 'proj-1' }),
+        makeNotification({ id: 'n1', projectId: 'proj-1', title: 'Help 1' }),
+        makeNotification({ id: 'n2', projectId: 'proj-1', title: 'Help 2' }),
       ];
       renderNotificationCenter(notifications);
 
-      // No group headers (Folder icon label) should appear — group headers have aria-labels like "Project A — 2 notifications"
+      // No group headers should appear
       expect(screen.queryByRole('button', { name: /\d+ notifications/i })).toBeNull();
       // Both notification titles should appear directly
-      expect(screen.getAllByText('Task completed')).toHaveLength(2);
+      expect(screen.getByText('Help 1')).toBeInTheDocument();
+      expect(screen.getByText('Help 2')).toBeInTheDocument();
     });
 
     it('renders flat list when all notifications have null projectId', () => {
       const notifications = [
-        makeNotification({ id: 'n1', projectId: null }),
-        makeNotification({ id: 'n2', projectId: null }),
+        makeNotification({ id: 'n1', projectId: null, title: 'Help A' }),
+        makeNotification({ id: 'n2', projectId: null, title: 'Help B' }),
       ];
       renderNotificationCenter(notifications);
 
       expect(screen.queryByRole('button', { name: /general/i })).toBeNull();
-      expect(screen.getAllByText('Task completed')).toHaveLength(2);
+      expect(screen.getByText('Help A')).toBeInTheDocument();
+      expect(screen.getByText('Help B')).toBeInTheDocument();
     });
   });
 
@@ -155,7 +157,6 @@ describe('NotificationCenter grouping logic', () => {
       ];
       renderNotificationCenter(notifications);
 
-      // Both groups should show unique fallback labels with projectId prefix
       expect(screen.getByText('Project proj-1')).toBeInTheDocument();
       expect(screen.getByText('Project proj-2')).toBeInTheDocument();
     });
@@ -173,52 +174,47 @@ describe('NotificationCenter grouping logic', () => {
 
     it('assigns each notification to the correct group', () => {
       const notifications = [
-        makeNotification({ id: 'n1', title: 'Alpha task done', projectId: 'proj-1', metadata: { projectName: 'Alpha' } }),
-        makeNotification({ id: 'n2', title: 'Beta task done', projectId: 'proj-2', metadata: { projectName: 'Beta' } }),
+        makeNotification({ id: 'n1', title: 'Alpha task help', projectId: 'proj-1', metadata: { projectName: 'Alpha' } }),
+        makeNotification({ id: 'n2', title: 'Beta task help', projectId: 'proj-2', metadata: { projectName: 'Beta' } }),
       ];
       renderNotificationCenter(notifications);
 
-      expect(screen.getByText('Alpha task done')).toBeInTheDocument();
-      expect(screen.getByText('Beta task done')).toBeInTheDocument();
+      expect(screen.getByText('Alpha task help')).toBeInTheDocument();
+      expect(screen.getByText('Beta task help')).toBeInTheDocument();
     });
   });
 
   describe('NotificationGroup collapse/expand toggle', () => {
     it('collapses notifications when the group header is clicked', () => {
       const notifications = [
-        makeNotification({ id: 'n1', title: 'Alpha task done', projectId: 'proj-1', metadata: { projectName: 'UniqueAlpha' } }),
-        makeNotification({ id: 'n2', title: 'Beta task done', projectId: 'proj-2', metadata: { projectName: 'UniqueBeta' } }),
+        makeNotification({ id: 'n1', title: 'Alpha needs help', projectId: 'proj-1', metadata: { projectName: 'UniqueAlpha' } }),
+        makeNotification({ id: 'n2', title: 'Beta needs help', projectId: 'proj-2', metadata: { projectName: 'UniqueBeta' } }),
       ];
       renderNotificationCenter(notifications);
 
-      // Both notification titles are visible initially
-      expect(screen.getByText('Alpha task done')).toBeInTheDocument();
+      expect(screen.getByText('Alpha needs help')).toBeInTheDocument();
 
-      // Collapse the "UniqueAlpha" group — use the group header button that contains the project name span
       const alphaHeader = screen.getByRole('button', { name: /uniquealpha/i });
       fireEvent.click(alphaHeader);
 
-      // Alpha notification should no longer be visible
-      expect(screen.queryByText('Alpha task done')).toBeNull();
-      // Beta notification should still be visible
-      expect(screen.getByText('Beta task done')).toBeInTheDocument();
+      expect(screen.queryByText('Alpha needs help')).toBeNull();
+      expect(screen.getByText('Beta needs help')).toBeInTheDocument();
     });
 
     it('expands a collapsed group when the header is clicked again', () => {
       const notifications = [
-        makeNotification({ id: 'n1', title: 'Alpha task done', projectId: 'proj-1', metadata: { projectName: 'UniqueAlpha2' } }),
-        makeNotification({ id: 'n2', title: 'Beta task done', projectId: 'proj-2', metadata: { projectName: 'UniqueBeta2' } }),
+        makeNotification({ id: 'n1', title: 'Alpha needs help', projectId: 'proj-1', metadata: { projectName: 'UniqueAlpha2' } }),
+        makeNotification({ id: 'n2', title: 'Beta needs help', projectId: 'proj-2', metadata: { projectName: 'UniqueBeta2' } }),
       ];
       renderNotificationCenter(notifications);
 
       const alphaHeader = screen.getByRole('button', { name: /uniquealpha2/i });
 
-      // Collapse then expand
       fireEvent.click(alphaHeader);
-      expect(screen.queryByText('Alpha task done')).toBeNull();
+      expect(screen.queryByText('Alpha needs help')).toBeNull();
 
       fireEvent.click(alphaHeader);
-      expect(screen.getByText('Alpha task done')).toBeInTheDocument();
+      expect(screen.getByText('Alpha needs help')).toBeInTheDocument();
     });
   });
 
@@ -231,10 +227,6 @@ describe('NotificationCenter grouping logic', () => {
       ];
       renderNotificationCenter(notifications, 2);
 
-      // Alpha group has 2 unread — the per-group badge inside the group header should appear.
-      // The group header span contains the count and an inner badge span for unread count.
-      // We use getAllByText since the total count "2" may appear in multiple places;
-      // what matters is it appears at least once.
       const countElements = screen.getAllByText('2');
       expect(countElements.length).toBeGreaterThanOrEqual(1);
     });
@@ -247,11 +239,7 @@ describe('NotificationCenter grouping logic', () => {
       ];
       renderNotificationCenter(notifications, 1);
 
-      // Alpha group: all read, no badge
-      // Beta group: 1 unread — only one badge total
       const badges = screen.queryAllByText('1');
-      // The bell button badge counts total unread; the group badge is separate
-      // We assert that the group count badge for Beta (1) appears but Alpha has none
       expect(badges.length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -262,16 +250,6 @@ describe('NotificationCenter grouping logic', () => {
 // ---------------------------------------------------------------------------
 
 describe('useNotifications — notification.updated WebSocket handling', () => {
-  /**
-   * The `notification.updated` case was added in Phase 2 to handle the in-place
-   * update broadcast when progress batching replaces an existing notification.
-   * We test the state-update reducer logic directly here.
-   *
-   * The hook uses a WebSocket internally. Rather than testing full WebSocket
-   * lifecycle (covered by useChatWebSocket.behavioral.test.ts), we verify the
-   * reducer logic by importing the hook and simulating the onmessage dispatch
-   * via a stub WebSocket.
-   */
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -283,16 +261,15 @@ describe('useNotifications — notification.updated WebSocket handling', () => {
       title: 'Progress: Old title',
       body: 'Step 1 done',
       projectId: 'proj-1',
-      readAt: new Date().toISOString(), // was read
+      readAt: new Date().toISOString(),
     });
     const updated: NotificationResponse = {
       ...original,
       title: 'Progress: New title',
       body: 'Step 2 done',
-      readAt: null, // re-opened by batch update
+      readAt: null,
     };
 
-    // Pre-populate the hook state with the original notification
     mockUseNotifications.mockReturnValue({
       ...defaultHookReturn,
       notifications: [original],
@@ -306,19 +283,17 @@ describe('useNotifications — notification.updated WebSocket handling', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /notifications/i }));
 
-    // Switch to Updates tab since progress notifications are not shown on the default Priority tab
+    // Switch to Updates tab since progress notifications are not shown on the default Attention tab
     fireEvent.click(screen.getByRole('tab', { name: /updates/i }));
 
     expect(screen.getByText('Progress: Old title')).toBeInTheDocument();
 
-    // Now simulate the hook receiving the updated notification
     mockUseNotifications.mockReturnValue({
       ...defaultHookReturn,
       notifications: [updated],
       unreadCount: 1,
     });
 
-    // Re-render the component (the hook re-runs)
     fireEvent.click(screen.getByRole('button', { name: /notifications/i })); // close
     fireEvent.click(screen.getByRole('button', { name: /notifications/i })); // reopen
 
@@ -330,7 +305,7 @@ describe('useNotifications — notification.updated WebSocket handling', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tab filtering — Priority / Updates / All
+// Tab filtering — Attention / Updates / All
 // ---------------------------------------------------------------------------
 
 describe('NotificationCenter tab filtering', () => {
@@ -347,33 +322,33 @@ describe('NotificationCenter tab filtering', () => {
     makeNotification({ id: 'n-pr', type: 'pr_created', title: 'PR opened' }),
   ];
 
-  it('defaults to Priority tab showing only needs_input and task_complete', () => {
+  it('defaults to Attention tab showing only needs_input and error', () => {
     renderNotificationCenter(mixedNotifications, 6);
 
-    // Priority items visible
+    // Attention items visible
     expect(screen.getByText('Agent needs help')).toBeInTheDocument();
-    expect(screen.getByText('Task finished')).toBeInTheDocument();
+    expect(screen.getByText('Something broke')).toBeInTheDocument();
 
-    // Non-priority items NOT visible
+    // Non-attention items NOT visible on the default tab
+    expect(screen.queryByText('Task finished')).toBeNull();
     expect(screen.queryByText('Working on it')).toBeNull();
-    expect(screen.queryByText('Something broke')).toBeNull();
     expect(screen.queryByText('Session ended')).toBeNull();
     expect(screen.queryByText('PR opened')).toBeNull();
   });
 
-  it('Updates tab shows progress, error, session_ended, pr_created', () => {
+  it('Updates tab shows task_complete, progress, session_ended, pr_created', () => {
     renderNotificationCenter(mixedNotifications, 6);
     fireEvent.click(screen.getByRole('tab', { name: /updates/i }));
 
     // Update items visible
+    expect(screen.getByText('Task finished')).toBeInTheDocument();
     expect(screen.getByText('Working on it')).toBeInTheDocument();
-    expect(screen.getByText('Something broke')).toBeInTheDocument();
     expect(screen.getByText('Session ended')).toBeInTheDocument();
     expect(screen.getByText('PR opened')).toBeInTheDocument();
 
-    // Priority items NOT visible
+    // Attention items NOT visible
     expect(screen.queryByText('Agent needs help')).toBeNull();
-    expect(screen.queryByText('Task finished')).toBeNull();
+    expect(screen.queryByText('Something broke')).toBeNull();
   });
 
   it('All tab shows every notification', () => {
@@ -388,40 +363,41 @@ describe('NotificationCenter tab filtering', () => {
     expect(screen.getByText('PR opened')).toBeInTheDocument();
   });
 
-  it('shows priority unread count badge on the Priority tab', () => {
+  it('shows attention unread count badge on the Attention tab', () => {
     const notifications = [
       makeNotification({ id: 'n1', type: 'needs_input', title: 'Help 1', readAt: null }),
-      makeNotification({ id: 'n2', type: 'task_complete', title: 'Done 1', readAt: null }),
-      makeNotification({ id: 'n3', type: 'progress', title: 'Working', readAt: null }),
+      makeNotification({ id: 'n2', type: 'error', title: 'Error 1', readAt: null }),
+      makeNotification({ id: 'n3', type: 'task_complete', title: 'Done 1', readAt: null }),
+      makeNotification({ id: 'n4', type: 'progress', title: 'Working', readAt: null }),
     ];
-    renderNotificationCenter(notifications, 3);
+    renderNotificationCenter(notifications, 4);
 
-    // The Priority tab should show a badge with "2" (two unread priority notifications)
-    const priorityTab = screen.getByRole('tab', { name: /priority/i });
-    expect(priorityTab).toHaveTextContent('2');
+    // The Attention tab should show a badge with "2" (needs_input + error)
+    const attentionTab = screen.getByRole('tab', { name: /attention/i });
+    expect(attentionTab).toHaveTextContent('2');
   });
 
-  it('shows 99+ when priority unread count exceeds 99', () => {
+  it('shows 99+ when attention unread count exceeds 99', () => {
     const notifications = Array.from({ length: 110 }, (_, i) =>
       makeNotification({ id: `n${i}`, type: 'needs_input', title: `Help ${i}`, readAt: null }),
     );
     renderNotificationCenter(notifications, 110);
 
-    const priorityTab = screen.getByRole('tab', { name: /priority/i });
-    expect(priorityTab).toHaveTextContent('99+');
+    const attentionTab = screen.getByRole('tab', { name: /attention/i });
+    expect(attentionTab).toHaveTextContent('99+');
   });
 
-  it('shows empty state with sub-message on Priority tab when no priority notifications exist', () => {
+  it('shows empty state with sub-message on Attention tab when no attention notifications exist', () => {
     const notifications = [
       makeNotification({ id: 'n1', type: 'progress', title: 'Working' }),
     ];
     renderNotificationCenter(notifications, 1);
 
-    expect(screen.getByText(/no priority notifications/i)).toBeInTheDocument();
-    expect(screen.getByText(/agent input requests and completed tasks appear here/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing needs your attention/i)).toBeInTheDocument();
+    expect(screen.getByText(/items needing your input or action appear here/i)).toBeInTheDocument();
   });
 
-  it('bell icon badge shows total unread count, not just priority unread', () => {
+  it('bell icon badge shows attention-only unread count, not total unread', () => {
     const notifications = [
       makeNotification({ id: 'n1', type: 'needs_input', title: 'Help 1', readAt: null }),
       makeNotification({ id: 'n2', type: 'task_complete', title: 'Done 1', readAt: null }),
@@ -429,19 +405,19 @@ describe('NotificationCenter tab filtering', () => {
       makeNotification({ id: 'n4', type: 'error', title: 'Err', readAt: null }),
       makeNotification({ id: 'n5', type: 'session_ended', title: 'Ended', readAt: new Date().toISOString() }),
     ];
-    // 4 unread total (n1-n4), 2 are priority (n1, n2)
+    // 4 unread total (n1-n4), 2 are attention-required (n1=needs_input, n4=error)
     renderNotificationCenter(notifications, 4);
 
-    // Bell button should show total unread count (4), not just priority (2)
-    const bellButton = screen.getByRole('button', { name: /notifications \(4 unread\)/i });
+    // Bell button should show attention count (2), not total (4)
+    const bellButton = screen.getByRole('button', { name: /2 need attention/i });
     expect(bellButton).toBeInTheDocument();
 
-    // Priority tab badge should show 2 (only priority unread)
-    const priorityTab = screen.getByRole('tab', { name: /priority/i });
-    expect(priorityTab).toHaveTextContent('2');
+    // Attention tab badge should show 2
+    const attentionTab = screen.getByRole('tab', { name: /attention/i });
+    expect(attentionTab).toHaveTextContent('2');
   });
 
-  it('shows "No updates" on the Updates tab when only priority notifications exist', () => {
+  it('shows "No updates" on the Updates tab when only attention notifications exist', () => {
     const notifications = [
       makeNotification({ id: 'n1', type: 'needs_input', title: 'Help' }),
     ];
