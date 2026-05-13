@@ -6,7 +6,7 @@
  * 2. Conversation-mode complete_task does NOT trigger cleanup
  * 3. Trigger execution sync happens on complete_task
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // ── Module mocks (must be before imports) ───────────────────────────────────
 
