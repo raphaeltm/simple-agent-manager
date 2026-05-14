@@ -12,6 +12,7 @@
  * Swapping models/providers is a config change (SAM_MODEL env var), not a code change.
  */
 import {
+  DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI,
   SAM_ANTHROPIC_VERSION,
   type SamConfig,
 } from '@simple-agent-manager/shared';
@@ -631,14 +632,22 @@ export async function runAgentLoop(
     continueLoop = false;
     turnCount++;
 
-    // Trim messages to fit within the request body budget
+    // Trim messages to fit within the request body budget.
+    // Workers AI models have smaller context windows, so use a tighter budget
+    // unless the user explicitly set SAM_MAX_REQUEST_BODY_BYTES as an override.
+    const envRecord = env as unknown as Record<string, string | undefined>;
+    const hasExplicitOverride = !!envRecord.SAM_MAX_REQUEST_BODY_BYTES;
+    const effectiveBudget = (!hasExplicitOverride && isWorkersAIModel(config.model))
+      ? DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI
+      : config.maxRequestBodyBytes;
     const fixedOverhead = systemPrompt.length + JSON.stringify(tools).length + 500;
-    const llmMessages = trimMessagesToFit(messages, config.maxRequestBodyBytes, fixedOverhead);
+    const llmMessages = trimMessagesToFit(messages, effectiveBudget, fixedOverhead);
     if (llmMessages.length < messages.length) {
       log.info('sam.messages_trimmed', {
         original: messages.length,
         trimmed: llmMessages.length,
         estimatedBytes: estimateMessagesBytes(llmMessages),
+        budgetBytes: effectiveBudget,
       });
     }
 
