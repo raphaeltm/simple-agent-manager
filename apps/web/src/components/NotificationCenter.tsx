@@ -34,14 +34,19 @@ const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, {
   pr_created: { icon: GitPullRequest, color: 'text-success-fg', label: 'PR Created' },
 };
 
-type FilterTab = 'priority' | 'updates' | 'all';
+type FilterTab = 'attention' | 'updates' | 'all';
 
-/** Notification types shown in the Priority tab — agent input requests and completed tasks */
-const PRIORITY_TYPES: ReadonlySet<string> = new Set(['needs_input', 'task_complete']);
+/**
+ * Notification types that represent actionable items needing human attention.
+ * These are the only types counted in the bell badge.
+ * Low-value updates (task_complete, progress, session_ended, pr_created) are
+ * accessible in the Updates tab but do not inflate the badge count.
+ */
+export const ATTENTION_TYPES: ReadonlySet<string> = new Set(['needs_input', 'error']);
 
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<FilterTab>('priority');
+  const [activeTab, setActiveTab] = useState<FilterTab>('attention');
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -112,18 +117,18 @@ export function NotificationCenter() {
   );
 
   const filteredNotifications = useMemo(() => {
-    if (activeTab === 'priority') return notifications.filter((n) => PRIORITY_TYPES.has(n.type));
-    if (activeTab === 'updates') return notifications.filter((n) => !PRIORITY_TYPES.has(n.type));
+    if (activeTab === 'attention') return notifications.filter((n) => ATTENTION_TYPES.has(n.type));
+    if (activeTab === 'updates') return notifications.filter((n) => !ATTENTION_TYPES.has(n.type));
     return notifications;
   }, [notifications, activeTab]);
 
-  const priorityUnreadCount = useMemo(
-    () => notifications.filter((n) => PRIORITY_TYPES.has(n.type) && !n.readAt).length,
+  const attentionUnreadCount = useMemo(
+    () => notifications.filter((n) => ATTENTION_TYPES.has(n.type) && !n.readAt).length,
     [notifications]
   );
 
   const updatesUnreadCount = useMemo(
-    () => notifications.filter((n) => !PRIORITY_TYPES.has(n.type) && !n.readAt).length,
+    () => notifications.filter((n) => !ATTENTION_TYPES.has(n.type) && !n.readAt).length,
     [notifications]
   );
 
@@ -147,19 +152,25 @@ export function NotificationCenter() {
     return { groups: Array.from(groupMap.values()), shouldGroup: true };
   }, [filteredNotifications]);
 
+  const notificationButtonLabel = [
+    'Notifications',
+    attentionUnreadCount > 0 ? ` (${attentionUnreadCount} need attention)` : '',
+    unreadCount > 0 ? `, ${unreadCount} total unread` : '',
+  ].join('');
+
   return (
     <div className="relative">
       {/* Bell Button */}
       <button
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
-        aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
+        aria-label={notificationButtonLabel}
         className="relative flex items-center justify-center w-9 h-9 bg-transparent border-none text-fg-muted cursor-pointer hover:text-fg-primary transition-colors"
       >
         <Bell size={18} />
-        {unreadCount > 0 && (
+        {attentionUnreadCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-fg-on-accent text-[10px] font-bold leading-none">
-            {unreadCount > 99 ? '99+' : unreadCount}
+            {attentionUnreadCount > 99 ? '99+' : attentionUnreadCount}
           </span>
         )}
       </button>
@@ -196,7 +207,7 @@ export function NotificationCenter() {
             aria-label="Notification filters"
             className="flex border-b border-border-default"
             onKeyDown={(e) => {
-              const tabIds: FilterTab[] = ['priority', 'updates', 'all'];
+              const tabIds: FilterTab[] = ['attention', 'updates', 'all'];
               const idx = tabIds.indexOf(activeTab);
               if (e.key === 'ArrowRight') {
                 e.preventDefault();
@@ -208,7 +219,7 @@ export function NotificationCenter() {
             }}
           >
             {([
-              { id: 'priority' as const, label: 'Priority', badge: priorityUnreadCount },
+              { id: 'attention' as const, label: 'Attention', badge: attentionUnreadCount },
               { id: 'updates' as const, label: 'Updates', badge: updatesUnreadCount },
               { id: 'all' as const, label: 'All', badge: 0 },
             ]).map(({ id, label, badge }) => (
@@ -225,7 +236,6 @@ export function NotificationCenter() {
                     ? 'text-accent bg-transparent border-b-2 border-b-accent'
                     : 'text-fg-muted bg-transparent hover:text-fg-primary'
                 }`}
-                style={activeTab === id ? { borderBottomWidth: '2px', borderBottomStyle: 'solid' } : {}}
               >
                 {label}
                 {badge > 0 && (
@@ -252,13 +262,13 @@ export function NotificationCenter() {
               <div className="flex flex-col items-center justify-center py-8 text-fg-muted text-sm gap-1">
                 <Bell size={24} className="mb-2 opacity-40" />
                 <span>
-                  {activeTab === 'priority' ? 'No priority notifications' :
+                  {activeTab === 'attention' ? 'Nothing needs your attention' :
                    activeTab === 'updates' ? 'No updates' :
                    'No notifications yet'}
                 </span>
-                {activeTab === 'priority' && (
+                {activeTab === 'attention' && (
                   <span className="text-xs opacity-70">
-                    Agent input requests and completed tasks appear here
+                    Items needing your input or action appear here
                   </span>
                 )}
               </div>

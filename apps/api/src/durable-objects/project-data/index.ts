@@ -7,27 +7,31 @@
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
  */
-import type { AcpSessionEventActorType,AcpSessionStatus } from '@simple-agent-manager/shared';
+import type { AcpSessionEventActorType, AcpSessionStatus } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { runMigrations } from '../migrations';
-import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
-import type { Env, SummaryData } from './types';
-
-const log = createModuleLogger('project_data');
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
+import * as attention from './attention';
+import * as attentionExpiry from './attention-expiry';
 import * as commands from './commands';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
+import * as messagePersistence from './message-persistence';
 import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
+import * as reconciliation from './reconciliation';
+import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import * as sessions from './sessions';
+import type { Env, SummaryData } from './types';
+
+const log = createModuleLogger('project_data');
 
 export type { Env } from './types';
 
@@ -104,40 +108,22 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async persistMessage(sessionId: string, role: string, content: string, toolMetadata: string | null): Promise<string> {
-    const result = messages.persistMessage(this.sql, this.env, sessionId, role, content, toolMetadata);
-    const idleReset = idleCleanup.resetIdleCleanup(this.sql, this.env, sessionId);
-    if (idleReset.cleanupAt > 0) {
-      await this.recalculateAlarm();
-    }
-    if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
-    this.scheduleSummarySync();
-    let parsedToolMetadata: unknown = null;
-    if (toolMetadata) {
-      try { parsedToolMetadata = JSON.parse(toolMetadata); } catch (err) { log.warn('project_data.tool_metadata_parse_failed', { sessionId, error: String(err) }); }
-    }
-    this.broadcastEvent('message.new', {
-      sessionId, messageId: result.id, role, content,
-      toolMetadata: parsedToolMetadata,
-      createdAt: result.now, sequence: result.sequence,
-    }, sessionId);
-    return result.id;
+    return messagePersistence.persistMessageWithSideEffects(this.sql, this.env, this.messagePersistenceHooks(), sessionId, role, content, toolMetadata);
   }
 
   async persistMessageBatch(
     sessionId: string,
     batchMessages: Array<{ messageId: string; role: string; content: string; toolMetadata: string | null; timestamp: string; sequence?: number }>
   ): Promise<{ persisted: number; duplicates: number }> {
-    const result = messages.persistMessageBatch(this.sql, this.env, sessionId, batchMessages);
-    if (result.persisted > 0) {
-      const idleReset = idleCleanup.resetIdleCleanup(this.sql, this.env, sessionId);
-      if (idleReset.cleanupAt > 0) {
-        await this.recalculateAlarm();
-      }
-      if (result.workspaceId) activity.updateMessageActivity(this.sql, result.workspaceId, sessionId);
-      this.scheduleSummarySync();
-      this.broadcastEvent('messages.batch', { sessionId, messages: result.persistedMessages, count: result.persisted }, sessionId);
-    }
-    return { persisted: result.persisted, duplicates: result.duplicates };
+    return messagePersistence.persistMessageBatchWithSideEffects(this.sql, this.env, this.messagePersistenceHooks(), sessionId, batchMessages);
+  }
+
+  private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
+    return {
+      recalculateAlarm: () => this.recalculateAlarm(),
+      scheduleSummarySync: () => this.scheduleSummarySync(),
+      broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
+    };
   }
 
   async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
@@ -243,6 +229,32 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async getCleanupAt(sessionId: string): Promise<number | null> { return idleCleanup.getCleanupAt(this.sql, sessionId); }
+
+  // --- Attention Markers ---
+
+  async createAttentionMarker(opts: attention.CreateAttentionMarkerOpts): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
+    const result = attention.createAttentionMarker(this.sql, opts);
+    await this.recalculateAlarm();
+    this.broadcastEvent('attention.created', { sessionId: opts.sessionId, markerId: result.id, kind: opts.kind }, opts.sessionId);
+    return result;
+  }
+
+  async resolveSessionAttentionMarkers(sessionId: string, resolvedByMessageId: string | null, actorType: string = 'human', reason: string = 'human_message'): Promise<number> {
+    const count = attention.resolveAttentionMarkers(this.sql, sessionId, resolvedByMessageId, actorType, reason);
+    if (count > 0) {
+      await this.recalculateAlarm();
+      this.broadcastEvent('attention.resolved', { sessionId, count, reason }, sessionId);
+    }
+    return count;
+  }
+
+  getSessionAttentionSummary(sessionId: string) {
+    return attention.getAttentionSummary(this.sql, sessionId);
+  }
+
+  listActiveAttentionMarkers(sessionId: string) {
+    return attention.listActiveAttentionMarkers(this.sql, sessionId);
+  }
 
   // --- ACP Session Lifecycle ---
 
@@ -389,6 +401,22 @@ export class ProjectData extends DurableObject<Env> {
         }
       },
       (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());
+
+    // Task-mode reconciliation: check-in on idle task agents
+    try {
+      await reconciliation.processReconciliationCandidates(
+        this.sql, this.env,
+        (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+      );
+    } catch (err) {
+      log.error('alarm.reconciliation_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+
+    await attentionExpiry.processExpiredAttentionMarkers(
+      this.sql,
+      this.env,
+      (sessionId, errorMessage) => this.failSession(sessionId, errorMessage),
+    );
 
     // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
     const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
@@ -702,9 +730,11 @@ export class ProjectData extends DurableObject<Env> {
   private async recalculateAlarm(): Promise<void> {
     const { idleCleanupTime, workspaceIdleCheckTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
     const heartbeatTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
-    const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
+    const pollIntervalMs = Number.parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
     const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
-    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime].filter((t): t is number => t !== null);
+    const attentionTime = attention.computeAttentionAlarmTime(this.sql);
+    const reconciliationTime = reconciliation.computeReconciliationAlarmTime(this.sql, this.env);
+    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime, attentionTime, reconciliationTime].filter((t): t is number => t !== null);
     if (candidates.length > 0) await this.ctx.storage.setAlarm(Math.min(...candidates));
     else await this.ctx.storage.deleteAlarm();
   }
@@ -713,7 +743,11 @@ export class ProjectData extends DurableObject<Env> {
     const heartbeatAlarmTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
     if (heartbeatAlarmTime === null) { await this.recalculateAlarm(); return; }
     const { idleCleanupTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
-    const earliest = idleCleanupTime ? Math.min(heartbeatAlarmTime, idleCleanupTime) : heartbeatAlarmTime;
+    const attentionTime = attention.computeAttentionAlarmTime(this.sql);
+    const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
+    const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
+    const candidates = [heartbeatAlarmTime, idleCleanupTime, attentionTime, mailboxTime].filter((t): t is number => t !== null);
+    const earliest = Math.min(...candidates);
     await this.ctx.storage.setAlarm(earliest);
   }
 

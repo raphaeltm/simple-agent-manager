@@ -50,6 +50,13 @@ export interface ChatSessionResponse {
     /** Agent profile name hint (human-readable label from dispatch). */
     agentProfileHint?: string | null;
   };
+  /** Durable attention marker summary from backend (null = no active marker). */
+  attention?: {
+    kind: string;
+    createdAt: number;
+    expiresAt: number | null;
+    reason: string | null;
+  } | null;
 }
 
 export interface ChatMessageResponse {

@@ -135,7 +135,7 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>();
 
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
-mcpRoutes.post('/', async (c) => {
+mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is intentionally centralized.
   // Authenticate — returns parsed token data and raw token
   const [tokenData, rawToken] = await authenticateMcpRequest(
     c.req.header('Authorization'),
@@ -216,8 +216,16 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleGetInstructions(requestId, tokenData, c.env));
         case 'update_task_status':
           return c.json(await handleUpdateTaskStatus(requestId, toolArgs, tokenData, c.env));
-        case 'complete_task':
-          return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env));
+        case 'complete_task': {
+          // executionCtx may not be available in test environments (Miniflare/vitest)
+          let execCtx: ExecutionContext | undefined;
+          try {
+            execCtx = typeof c.executionCtx.waitUntil === 'function' ? c.executionCtx : undefined;
+          } catch {
+            execCtx = undefined;
+          }
+          return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env, execCtx));
+        }
         case 'request_human_input':
           return c.json(await handleRequestHumanInput(requestId, toolArgs, tokenData, c.env));
         case 'dispatch_task':

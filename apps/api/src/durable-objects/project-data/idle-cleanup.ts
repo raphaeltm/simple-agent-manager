@@ -257,6 +257,28 @@ export async function checkWorkspaceIdleTimeouts(
         }
 
         await deleteWorkspaceInD1(ws.workspaceId);
+
+        // Complete any in-progress task linked to this workspace.
+        // Without this, conversation-mode tasks stay in_progress until the
+        // 8-hour hard timeout in stuck-tasks cron — the only cleanup path for
+        // conversation mode is this workspace idle timeout, because the 15-min
+        // session idle cleanup is intentionally excluded for conversation mode.
+        let completedTaskId: string | null = null;
+        try {
+          const taskRow = await env.DATABASE.prepare(
+            `SELECT id FROM tasks WHERE workspace_id = ? AND status IN ('in_progress', 'delegated') LIMIT 1`
+          ).bind(ws.workspaceId).first<{ id: string }>();
+          if (taskRow) {
+            await completeTaskInD1(env.DATABASE, taskRow.id);
+            completedTaskId = taskRow.id;
+          }
+        } catch (err) {
+          log.error('workspace_idle_task_complete_failed', {
+            workspaceId: ws.workspaceId,
+            ...serializeError(err),
+          });
+        }
+
         sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', ws.workspaceId);
 
         recordActivityEventInternal(
@@ -266,14 +288,15 @@ export async function checkWorkspaceIdleTimeouts(
           null,
           ws.workspaceId,
           ws.sessionId,
-          null,
+          completedTaskId,
           JSON.stringify({
             lastActivity,
             timeoutMs,
             idleDurationMs: now - lastActivity,
+            completedTaskId,
           })
         );
-        broadcastEvent('workspace.idle_timeout', { workspaceId: ws.workspaceId, sessionId: ws.sessionId });
+        broadcastEvent('workspace.idle_timeout', { workspaceId: ws.workspaceId, sessionId: ws.sessionId, taskId: completedTaskId });
         scheduleSummarySync();
       } catch (err) {
         log.error('workspace_idle_timeout_cleanup_failed', { workspaceId: ws.workspaceId, ...serializeError(err) });

@@ -72,4 +72,61 @@ export function isStaleSession(session: ChatSessionResponse): boolean {
   return Date.now() - getLastActivity(session) > STALE_SESSION_THRESHOLD_MS;
 }
 
+// =============================================================================
+// Session Mode
+// =============================================================================
+
+export type SessionMode = 'task' | 'conversation';
+
+/** Whether this session is task-mode or conversation-mode. */
+export function getSessionMode(session: ChatSessionResponse): SessionMode {
+  if (session.task?.taskMode === 'task') return 'task';
+  if (session.task?.taskMode === 'conversation') return 'conversation';
+  // Fallback: if there's a task association, treat as task
+  return session.taskId ? 'task' : 'conversation';
+}
+
+// =============================================================================
+// Attention State
+// =============================================================================
+
+/** Attention state derived from attention markers and task/session lifecycle. */
+export type AttentionState =
+  | 'needs_input'
+  | 'error'
+  | 'active'
+  | 'idle'
+  | 'completed'
+  | 'failed'
+  | 'stopped';
+
+/**
+ * Derive the attention state for a session.
+ * Precedence: attention markers > task terminal state > lifecycle state.
+ */
+export function getAttentionState(session: ChatSessionResponse): AttentionState {
+  // 1. Durable attention markers take highest precedence
+  if (session.attention?.kind === 'needs_input') return 'needs_input';
+
+  // 2. Task terminal states
+  const taskStatus = session.task?.status;
+  if (taskStatus === 'failed') return 'failed';
+  if (taskStatus === 'completed') return 'completed';
+  if (taskStatus === 'cancelled') return 'stopped';
+
+  // 3. Session lifecycle states
+  if (session.status === 'failed') return 'error';
+  if (session.status === 'stopped') return 'stopped';
+
+  if (session.isIdle || session.agentCompletedAt) return 'idle';
+  if (session.status === 'active') return 'active';
+
+  return 'stopped';
+}
+
+/** Whether a session's attention state should be treated as high-priority. */
+export function isHighPriorityAttention(state: AttentionState): boolean {
+  return state === 'needs_input' || state === 'error';
+}
+
 export { formatRelativeTime } from './time-utils';

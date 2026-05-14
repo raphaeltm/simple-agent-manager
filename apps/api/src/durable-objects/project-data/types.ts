@@ -23,6 +23,9 @@ export type Env = {
   MAILBOX_DELIVERY_POLL_INTERVAL_MS?: string;
   MAILBOX_MAX_MESSAGES_PER_PROJECT?: string;
   POLICY_MAX_PER_PROJECT?: string;
+  HUMAN_INPUT_TIMEOUT_MS?: string;
+  TASK_RECONCILIATION_IDLE_MS?: string;
+  TASK_RECONCILIATION_RESPONSE_DEADLINE_MS?: string;
 };
 
 export interface SummaryData {
