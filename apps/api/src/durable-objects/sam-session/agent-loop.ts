@@ -625,6 +625,14 @@ export async function runAgentLoop(
   };
   const useAnthropicParser = isAnthropicModel(config.model);
 
+  // Workers AI models have smaller context windows, so use a tighter budget
+  // unless the user explicitly set SAM_MAX_REQUEST_BODY_BYTES as an override.
+  const hasExplicitOverride = !!env.SAM_MAX_REQUEST_BODY_BYTES;
+  const effectiveBudget = (!hasExplicitOverride && isWorkersAIModel(config.model))
+    ? DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI
+    : config.maxRequestBodyBytes;
+  const fixedOverhead = systemPrompt.length + JSON.stringify(tools).length + 500;
+
   let turnCount = 0;
   let continueLoop = true;
 
@@ -632,15 +640,7 @@ export async function runAgentLoop(
     continueLoop = false;
     turnCount++;
 
-    // Trim messages to fit within the request body budget.
-    // Workers AI models have smaller context windows, so use a tighter budget
-    // unless the user explicitly set SAM_MAX_REQUEST_BODY_BYTES as an override.
-    const envRecord = env as unknown as Record<string, string | undefined>;
-    const hasExplicitOverride = !!envRecord.SAM_MAX_REQUEST_BODY_BYTES;
-    const effectiveBudget = (!hasExplicitOverride && isWorkersAIModel(config.model))
-      ? DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI
-      : config.maxRequestBodyBytes;
-    const fixedOverhead = systemPrompt.length + JSON.stringify(tools).length + 500;
+    // Trim messages to fit within the request body budget
     const llmMessages = trimMessagesToFit(messages, effectiveBudget, fixedOverhead);
     if (llmMessages.length < messages.length) {
       log.info('sam.messages_trimmed', {

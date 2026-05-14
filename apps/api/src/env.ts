@@ -624,6 +624,7 @@ export interface Env {
   SAM_HISTORY_LOAD_LIMIT?: string;                 // Max messages loaded on page mount (default: 200)
   CHAT_SESSION_MESSAGE_LIMIT?: string;             // Max messages per chat session REST response (default: 500)
   CHAT_COMPACT_MODE_DEFAULT?: string;              // Whether compact mode strips tool content by default (default: true)
+  SAM_MAX_REQUEST_BODY_BYTES?: string;              // Override max request body bytes for LLM trimming
   SAM_LLM_TIMEOUT_MS?: string;                     // LLM call timeout in ms (default: 120000)
   SAM_DISPATCH_MAX_DESCRIPTION_LENGTH?: string;    // Max task description length for SAM dispatch (default: 32000)
   SAM_MESSAGE_MAX_LENGTH?: string;                 // Max message length for send_message_to_subtask (default: 32000)
