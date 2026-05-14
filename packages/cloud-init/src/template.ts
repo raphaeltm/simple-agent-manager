@@ -22,7 +22,6 @@ users:
   - name: workspace
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
-    ssh_authorized_keys: []
 
 runcmd:
   # =====================================================================
@@ -209,22 +208,29 @@ write_files:
         logger -t sam-firewall "WARNING: ip6tables unavailable (kernel module not loaded), skipping IPv6 firewall rules"
       fi
 
-      DOCKER_USER_WAIT=0
-      while ! iptables -L DOCKER-USER -n >/dev/null 2>&1; do
-        if [ "$DOCKER_USER_WAIT" -ge 30 ]; then
-          logger -t sam-firewall "WARNING: DOCKER-USER chain not available after 30s, skipping metadata block"
-          break
-        fi
-        sleep 1
-        DOCKER_USER_WAIT=$((DOCKER_USER_WAIT + 1))
-      done
-      /etc/sam/firewall/apply-metadata-block.sh || logger -t sam-firewall "WARNING: metadata block script failed"
-
       mkdir -p /etc/iptables
       iptables-save > /etc/iptables/rules.v4
       ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
 
-      logger -t sam-firewall "Firewall configured: port $VM_AGENT_PORT restricted to Cloudflare IPs, metadata API blocked"
+      logger -t sam-firewall "Firewall configured: port $VM_AGENT_PORT restricted to Cloudflare IPs; metadata API block deferred until Docker restart"
+
+  - path: /etc/iptables/rules.v4
+    permissions: '0644'
+    content: |
+      *filter
+      :INPUT ACCEPT [0:0]
+      :FORWARD ACCEPT [0:0]
+      :OUTPUT ACCEPT [0:0]
+      COMMIT
+
+  - path: /etc/iptables/rules.v6
+    permissions: '0644'
+    content: |
+      *filter
+      :INPUT ACCEPT [0:0]
+      :FORWARD ACCEPT [0:0]
+      :OUTPUT ACCEPT [0:0]
+      COMMIT
 
   - path: /etc/cron.daily/update-cloudflare-firewall
     permissions: '0755'

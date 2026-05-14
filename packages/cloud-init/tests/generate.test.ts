@@ -107,6 +107,15 @@ describe('generateCloudInit', () => {
       expect(config).toContain('hostname: sam-test-node');
     });
 
+    it('does not emit empty SSH authorized keys for the workspace user', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const workspaceUser = parsed.users.find((user: { name: string }) => user.name === 'workspace');
+      expect(workspaceUser).toBeDefined();
+      expect(workspaceUser).not.toHaveProperty('ssh_authorized_keys');
+    });
+
     it('substitutes journald defaults when not provided', () => {
       const config = generateCloudInit(baseVariables());
 
@@ -478,6 +487,20 @@ describe('generateCloudInit', () => {
       expect(firewallScript.content).toContain('ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true');
     });
 
+    it('writes valid placeholder iptables persistence files before firewall setup runs', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      for (const path of ['/etc/iptables/rules.v4', '/etc/iptables/rules.v6']) {
+        const rulesFile = parsed.write_files.find((f: { path: string }) => f.path === path);
+        expect(rulesFile).toBeDefined();
+        expect(rulesFile.permissions).toBe('0644');
+        expect(rulesFile.content).toContain('*filter');
+        expect(rulesFile.content).toContain(':INPUT ACCEPT [0:0]');
+        expect(rulesFile.content).toContain('COMMIT');
+      }
+    });
+
     it('includes daily cron job for Cloudflare IP refresh', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
@@ -739,7 +762,7 @@ describe('generateCloudInit', () => {
       expect(metadataScript.content).toContain('METADATA_IP="169.254.169.254"');
     });
 
-    it('firewall script delegates to apply-metadata-block.sh with Docker readiness wait', () => {
+    it('firewall script defers metadata blocking until Docker restart', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -747,13 +770,12 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       const content: string = firewallScript.content;
-      // Waits for DOCKER-USER chain to be available
-      expect(content).toContain('iptables -L DOCKER-USER -n');
-      // Delegates to the dedicated script
-      expect(content).toContain('/etc/sam/firewall/apply-metadata-block.sh');
+      expect(content).not.toContain('DOCKER_USER_WAIT');
+      expect(content).not.toContain('/etc/sam/firewall/apply-metadata-block.sh');
+      expect(content).toContain('metadata API block deferred until Docker restart');
     });
 
-    it('metadata block delegation appears before iptables-save (rules are persisted)', () => {
+    it('firewall persistence happens without early metadata block warnings', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -761,11 +783,9 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       const content: string = firewallScript.content;
-      const metadataIdx = content.indexOf('apply-metadata-block.sh');
       const saveIdx = content.indexOf('iptables-save');
-      expect(metadataIdx).toBeGreaterThan(-1);
       expect(saveIdx).toBeGreaterThan(-1);
-      expect(metadataIdx).toBeLessThan(saveIdx);
+      expect(content).not.toContain('DOCKER-USER chain not available after 30s');
     });
 
     it('firewall log message mentions metadata API blocking', () => {
@@ -775,7 +795,7 @@ describe('generateCloudInit', () => {
       const firewallScript = parsed.write_files.find(
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
-      expect(firewallScript.content).toContain('metadata API blocked');
+      expect(firewallScript.content).toContain('metadata API block deferred until Docker restart');
     });
 
     it('systemd unit ensures metadata block survives Docker restarts', () => {
@@ -1559,4 +1579,3 @@ describe('integrated size validation in generateCloudInit', () => {
     }))).not.toThrow();
   });
 });
-

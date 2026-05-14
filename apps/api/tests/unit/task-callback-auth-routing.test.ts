@@ -15,8 +15,10 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { log } from '../../src/lib/logger';
 import { AppError } from '../../src/middleware/error';
 import { verifyCallbackToken } from '../../src/services/jwt';
+import * as projectDataService from '../../src/services/project-data';
 
 // Mock better-auth before any route imports
 vi.mock('../../src/auth', () => ({
@@ -33,15 +35,18 @@ vi.mock('drizzle-orm/d1', () => ({
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: () => Promise.resolve([{
-            id: 'task-test',
-            projectId: 'proj-test',
-            userId: 'user-test',
-            workspaceId: 'ws-test',
-            status: 'running',
-            title: 'Test task',
-            taskMode: 'task',
-          }]),
+          limit: () =>
+            Promise.resolve([
+              {
+                id: 'task-test',
+                projectId: 'proj-test',
+                userId: 'user-test',
+                workspaceId: 'ws-test',
+                status: 'running',
+                title: 'Test task',
+                taskMode: 'task',
+              },
+            ]),
           orderBy: () => Promise.resolve([]),
         }),
       }),
@@ -62,9 +67,20 @@ vi.mock('drizzle-orm/d1', () => ({
 
 // Mock JWT verification to accept any token (workspace-scoped) by default
 vi.mock('../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' }),
+  verifyCallbackToken: vi
+    .fn()
+    .mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn().mockResolvedValue('mock-token'),
   signNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
+}));
+
+vi.mock('../../src/lib/logger', () => ({
+  log: {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  },
 }));
 
 // Mock project-data service
@@ -195,17 +211,14 @@ describe('task callback auth routing (regression)', () => {
   // =========================================================================
 
   it('POST /api/projects/:projectId/tasks/:taskId/status/callback with Bearer token is NOT blocked by session auth', async () => {
-    const res = await app.request(
-      '/api/projects/proj-test/tasks/task-test/status/callback',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer valid-callback-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ toStatus: 'completed' }),
-      }
-    );
+    const res = await app.request('/api/projects/proj-test/tasks/task-test/status/callback', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer valid-callback-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ toStatus: 'completed' }),
+    });
 
     // MUST NOT be 401 "Authentication required" from requireAuth().
     // This was the exact production failure — projectsRoutes.use('/*', requireAuth())
@@ -216,16 +229,13 @@ describe('task callback auth routing (regression)', () => {
   });
 
   it('POST callback without Bearer token does NOT return session auth error', async () => {
-    const res = await app.request(
-      '/api/projects/proj-test/tasks/task-test/status/callback',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ toStatus: 'completed' }),
-      }
-    );
+    const res = await app.request('/api/projects/proj-test/tasks/task-test/status/callback', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ toStatus: 'completed' }),
+    });
 
     // Key invariant: the request was NOT intercepted by session auth middleware.
     // It reaches the callback route handler (which may fail with missing Bearer token
@@ -248,6 +258,33 @@ describe('task callback auth routing (regression)', () => {
     expect(body.message).toBe('Authentication required');
   });
 
+  it('POST node ACP heartbeat logs project and node when the update fails', async () => {
+    vi.mocked(projectDataService.updateNodeHeartbeats).mockRejectedValueOnce(
+      new Error('Durable Object reset because its code was updated.')
+    );
+
+    const res = await app.request(
+      '/api/projects/proj-test/node-acp-heartbeat',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer valid-callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: 'node-test' }),
+      },
+      { DATABASE: {}, SESSIONS: {}, PROJECT_DATA: { idFromName: vi.fn() } }
+    );
+
+    expect(res.status).toBe(500);
+    expect(log.error).toHaveBeenCalledWith('acp_heartbeat.update_failed', {
+      projectId: 'proj-test',
+      nodeId: 'node-test',
+      errorName: 'Error',
+      errorMessage: 'Durable Object reset because its code was updated.',
+    });
+  });
+
   // =========================================================================
   // Callback's own auth gate: invalid Bearer token and workspace mismatch
   // =========================================================================
@@ -262,13 +299,13 @@ describe('task callback auth routing (regression)', () => {
       {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer bad-token',
+          Authorization: 'Bearer bad-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ toStatus: 'completed' }),
       },
       // Provide env bindings so c.env.DATABASE doesn't throw
-      { DATABASE: {}, SESSIONS: {}, PROJECT_DATA: { idFromName: vi.fn() } },
+      { DATABASE: {}, SESSIONS: {}, PROJECT_DATA: { idFromName: vi.fn() } }
     );
 
     // Key invariant: the error is NOT "Authentication required" from session auth.
@@ -277,7 +314,11 @@ describe('task callback auth routing (regression)', () => {
     expect(body.message).not.toBe('Authentication required');
 
     // Restore default mock for other tests
-    vi.mocked(verifyCallbackToken).mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' });
+    vi.mocked(verifyCallbackToken).mockResolvedValue({
+      workspace: 'ws-test',
+      type: 'callback',
+      scope: 'workspace',
+    });
   });
 
   it('POST callback with workspace mismatch returns 403', async () => {
@@ -293,13 +334,13 @@ describe('task callback auth routing (regression)', () => {
       {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer valid-but-wrong-workspace',
+          Authorization: 'Bearer valid-but-wrong-workspace',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ toStatus: 'completed' }),
       },
       // Provide env bindings so c.env.DATABASE doesn't throw
-      { DATABASE: {}, SESSIONS: {}, PROJECT_DATA: { idFromName: vi.fn() } },
+      { DATABASE: {}, SESSIONS: {}, PROJECT_DATA: { idFromName: vi.fn() } }
     );
 
     // The workspace mismatch check in callback.ts throws errors.forbidden()

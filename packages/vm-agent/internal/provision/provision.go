@@ -437,5 +437,5 @@ func enableMetadataBlock(ctx context.Context) error {
 	if err := runCommand(ctx, "systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	return runCommand(ctx, "systemctl", "enable", "sam-metadata-block.service")
+	return runCommand(ctx, "systemctl", "enable", "--now", "sam-metadata-block.service")
 }
