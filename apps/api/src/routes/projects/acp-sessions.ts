@@ -12,7 +12,7 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
-import { AcpSessionActivityReportSchema, AcpSessionAssignSchema, AcpSessionForkSchema,AcpSessionHeartbeatSchema, AcpSessionStatusReportSchema, CreateAcpSessionSchema, jsonValidator } from '../../schemas';
+import { AcpSessionAssignSchema, AcpSessionForkSchema,AcpSessionHeartbeatSchema, AcpSessionStatusReportSchema, CreateAcpSessionSchema, jsonValidator } from '../../schemas';
 import * as projectDataService from '../../services/project-data';
 
 /** Default max ACP prompt size (256 KB). Override via MAX_ACP_PROMPT_BYTES env var. */
@@ -224,24 +224,12 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', jsonValidator(Ac
 });
 
 /**
- * POST /:id/acp-sessions/:sessionId/activity — VM agent reports prompt activity.
+ * POST /:id/acp-sessions/:sessionId/activity — MOVED to agent-activity-callback.ts
  *
- * Ephemeral signal (no persistence). Broadcasts to DO WebSocket clients.
- * Auth: BetterAuth session cookie + nodeId verification (same model as /status).
+ * The activity route is called by the VM agent with a callback JWT Bearer token,
+ * NOT a BetterAuth session cookie. It must be mounted before projectsRoutes to
+ * avoid the requireAuth() middleware. See .claude/rules/34-vm-agent-callback-auth.md.
  */
-acpSessionRoutes.post('/:id/acp-sessions/:sessionId/activity', jsonValidator(AcpSessionActivityReportSchema), async (c) => {
-  const userId = getUserId(c); // Ensure authenticated
-  const projectId = c.req.param('id');
-  const sessionId = c.req.param('sessionId');
-
-  const body = c.req.valid('json');
-
-  // Validate node matches assigned node
-  await verifySessionNode(c.env, projectId, sessionId, body.nodeId, userId, 'activity');
-
-  await projectDataService.reportAcpSessionActivity(c.env, projectId, sessionId, body.activity);
-  return c.body(null, 204);
-});
 
 /** POST /:id/acp-sessions/:sessionId/fork — Fork a completed/interrupted session */
 acpSessionRoutes.post('/:id/acp-sessions/:sessionId/fork', jsonValidator(AcpSessionForkSchema), async (c) => {
