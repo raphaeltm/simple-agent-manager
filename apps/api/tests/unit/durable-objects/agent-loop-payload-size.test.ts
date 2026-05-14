@@ -9,6 +9,7 @@
  */
 import {
   DEFAULT_SAM_MAX_REQUEST_BODY_BYTES,
+  DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI,
   DEFAULT_SAM_MAX_TOOL_RESULT_BYTES,
   resolveSamConfig,
 } from '@simple-agent-manager/shared';
@@ -226,6 +227,29 @@ describe('trimMessagesToFit', () => {
     expect(totalBytes).toBeLessThanOrEqual(8_388_608 - 20_000);
     expect(result[result.length - 1].content).toBe('Final question');
   });
+
+  it('trims within Workers AI budget (800KB)', () => {
+    // Each tool result is ~100KB, so 10 results = ~1MB — exceeds 800KB budget
+    const messages = [];
+    for (let i = 0; i < 10; i++) {
+      messages.push({ role: 'user' as const, content: `Question ${i}` });
+      messages.push(assistantWithToolCall(`call_${i}`, 'get_session_messages', '{"sessionId":"abc"}'));
+      messages.push(toolResult(`call_${i}`, JSON.stringify({ data: 'x'.repeat(100_000) })));
+    }
+    messages.push({ role: 'user' as const, content: 'Final question' });
+
+    const workersAiBudget = DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI;
+    const fixedOverhead = 5_000;
+    const result = trimMessagesToFit(messages, workersAiBudget, fixedOverhead);
+    const totalBytes = estimateMessagesBytes(result);
+    expect(totalBytes).toBeLessThanOrEqual(workersAiBudget - fixedOverhead);
+    expect(result[result.length - 1].content).toBe('Final question');
+    // With 1MB+ of content vs 800KB budget, trimming must have been applied
+    // (either truncating tool results or dropping older messages)
+    const originalBytes = estimateMessagesBytes(messages);
+    expect(originalBytes).toBeGreaterThan(workersAiBudget);
+    expect(totalBytes).toBeLessThan(originalBytes);
+  });
 });
 
 // =============================================================================
@@ -236,6 +260,7 @@ describe('SamConfig payload size resolution', () => {
   it('has correct defaults for payload size constants', () => {
     expect(DEFAULT_SAM_MAX_TOOL_RESULT_BYTES).toBe(16_384);
     expect(DEFAULT_SAM_MAX_REQUEST_BODY_BYTES).toBe(8_388_608);
+    expect(DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI).toBe(819_200);
   });
 
   it('resolves payload size config from env vars', () => {

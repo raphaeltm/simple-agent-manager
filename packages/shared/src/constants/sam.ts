@@ -48,6 +48,11 @@ export const DEFAULT_SAM_MAX_TOOL_RESULT_BYTES = 16_384;
 /** Max total request body bytes before trimming older messages (8MB). */
 export const DEFAULT_SAM_MAX_REQUEST_BODY_BYTES = 8_388_608;
 
+/** Max total request body bytes for Workers AI models (800KB).
+ *  Workers AI models have smaller context windows (e.g., Gemma 4 26B = 256K tokens).
+ *  ~800KB of text ≈ 200K tokens, staying safely under the 256K limit with room for output. */
+export const DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI = 819_200;
+
 /** Anthropic API version header. */
 export const SAM_ANTHROPIC_VERSION = '2023-06-01';
 
