@@ -73,6 +73,7 @@ import { policyRoutes } from './routes/policies';
 import { projectAgentRoutes } from './routes/project-agent';
 import { deploymentIdentityTokenRoute,gcpDeployCallbackRoute, projectDeploymentRoutes } from './routes/project-deployment';
 import { projectsRoutes } from './routes/projects';
+import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
 import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { providersRoutes } from './routes/providers';
 import { samRoutes } from './routes/sam';
@@ -527,6 +528,7 @@ app.route('/api/t', analyticsIngestRoutes);
 // See .claude/rules/06-api-patterns.md (Hono middleware scoping)
 app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', nodeAcpHeartbeatRoute);
+app.route('/api/projects', agentActivityCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', taskCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
