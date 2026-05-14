@@ -2411,8 +2411,9 @@ func TestCredentialHelperHostPathSanitizes(t *testing.T) {
 func TestWriteCredentialHelperToHost(t *testing.T) {
 	t.Parallel()
 
+	workspaceID := fmt.Sprintf("test-ws-%d", time.Now().UnixNano())
 	cfg := &config.Config{
-		WorkspaceID:   "test-ws-123",
+		WorkspaceID:   workspaceID,
 		Repository:    "https://github.com/test/repo",
 		CallbackToken: "test-token",
 		Port:          8080,
@@ -2446,6 +2447,69 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "test-token") {
 		t.Fatal("expected script to contain callback token")
+	}
+}
+
+func TestWriteCredentialHelperToHostReplacesExistingRegularFile(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := fmt.Sprintf("test-retry-%d", time.Now().UnixNano())
+	hostPath := credentialHelperHostPath(workspaceID)
+	if err := os.WriteFile(hostPath, []byte("stale-helper"), 0o755); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	defer os.Remove(hostPath)
+
+	cfg := &config.Config{
+		WorkspaceID:   workspaceID,
+		Repository:    "https://github.com/test/repo",
+		CallbackToken: "fresh-token",
+		Port:          8080,
+	}
+
+	gotPath, err := writeCredentialHelperToHost(cfg)
+	if err != nil {
+		t.Fatalf("writeCredentialHelperToHost failed: %v", err)
+	}
+	if gotPath != hostPath {
+		t.Fatalf("host path = %q, want %q", gotPath, hostPath)
+	}
+
+	content, err := os.ReadFile(hostPath)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if strings.Contains(string(content), "stale-helper") {
+		t.Fatal("expected stale helper content to be replaced")
+	}
+	if !strings.Contains(string(content), "fresh-token") {
+		t.Fatal("expected replacement helper to contain fresh token")
+	}
+}
+
+func TestWriteCredentialHelperToHostRejectsNonRegularPath(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := fmt.Sprintf("test-dir-%d", time.Now().UnixNano())
+	hostPath := credentialHelperHostPath(workspaceID)
+	if err := os.Mkdir(hostPath, 0o755); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	defer os.Remove(hostPath)
+
+	cfg := &config.Config{
+		WorkspaceID:   workspaceID,
+		Repository:    "https://github.com/test/repo",
+		CallbackToken: "test-token",
+		Port:          8080,
+	}
+
+	_, err := writeCredentialHelperToHost(cfg)
+	if err == nil {
+		t.Fatal("expected error for non-regular existing path")
+	}
+	if !strings.Contains(err.Error(), "non-regular") {
+		t.Fatalf("expected non-regular error, got %v", err)
 	}
 }
 

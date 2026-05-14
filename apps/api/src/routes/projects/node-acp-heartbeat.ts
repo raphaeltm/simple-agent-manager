@@ -50,7 +50,18 @@ nodeAcpHeartbeatRoute.post('/:id/node-acp-heartbeat', jsonValidator(AcpSessionHe
   // only touches sessions assigned to the given nodeId, limiting blast radius.
   // This matches the existing backup sweep pattern in nodes.ts:655-663.
   // A D1 lookup per heartbeat would defeat the lightweight 2-hop design.
-  const updated = await projectDataService.updateNodeHeartbeats(c.env, projectId, body.nodeId);
+  let updated: number;
+  try {
+    updated = await projectDataService.updateNodeHeartbeats(c.env, projectId, body.nodeId);
+  } catch (error) {
+    log.error('acp_heartbeat.update_failed', {
+      projectId,
+      nodeId: body.nodeId,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
   log.info('acp_heartbeat.node_level', { projectId, nodeId: body.nodeId, updatedSessions: updated });
   return c.body(null, 204);
 });

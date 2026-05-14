@@ -2249,29 +2249,51 @@ func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
 	}
 
 	hostPath := credentialHelperHostPath(cfg.WorkspaceID)
-
-	// Use O_EXCL to fail if the file already exists, preventing TOCTOU races
-	// in the world-writable /tmp directory (e.g., symlink attacks).
-	// 0o755 (not 0o700): the devcontainer user (e.g., uid 1000 "vscode") must be
-	// able to execute this file via the bind-mount. The VM is single-tenant; world
-	// read/execute on this host path is acceptable. The callback token embedded in
-	// the script is already exposed via GIT_CONFIG_VALUE_0 env var.
-	f, err := os.OpenFile(hostPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
-	if err != nil {
-		return "", fmt.Errorf("failed to create credential helper on host: %w", err)
-	}
-	if _, err := f.WriteString(script); err != nil {
-		_ = f.Close()
-		os.Remove(hostPath)
-		return "", fmt.Errorf("failed to write credential helper to host: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(hostPath)
-		return "", fmt.Errorf("failed to finalize credential helper on host: %w", err)
+	if err := writeCredentialHelperScriptAtomically(hostPath, script); err != nil {
+		return "", err
 	}
 
 	slog.Info("Wrote credential helper to host", "path", hostPath, "workspaceID", cfg.WorkspaceID)
 	return hostPath, nil
+}
+
+func writeCredentialHelperScriptAtomically(hostPath, script string) error {
+	if info, err := os.Lstat(hostPath); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to replace non-regular credential helper path %s", hostPath)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to inspect credential helper on host: %w", err)
+	}
+
+	tempFile, err := os.CreateTemp("/tmp", "git-credential-sam-write-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary credential helper on host: %w", err)
+	}
+	tempPath := tempFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			os.Remove(tempPath)
+		}
+	}()
+
+	if _, err := tempFile.WriteString(script); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("failed to write temporary credential helper on host: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("failed to finalize temporary credential helper on host: %w", err)
+	}
+	// 0o755 is intentional: the devcontainer user must execute the bind-mounted helper.
+	if err := os.Chmod(tempPath, 0o755); err != nil { // NOSONAR
+		return fmt.Errorf("failed to chmod temporary credential helper on host: %w", err)
+	}
+	if err := os.Rename(tempPath, hostPath); err != nil {
+		return fmt.Errorf("failed to install credential helper on host: %w", err)
+	}
+	cleanupTemp = false
+	return nil
 }
 
 // RemoveCredentialHelperFromHost removes the host-side credential helper script.

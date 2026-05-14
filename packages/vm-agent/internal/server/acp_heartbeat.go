@@ -3,11 +3,14 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 )
+
+const maxAcpHeartbeatErrorBodyBytes = 4096
 
 // startAcpHeartbeatReporter starts a background goroutine that sends direct
 // ACP session heartbeats to the control plane for each active workspace's project.
@@ -113,10 +116,48 @@ func (s *Server) sendAcpHeartbeatForProject(projectID, nodeID, token string) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		slog.Warn("acp_heartbeat: non-success status",
-			"projectId", projectID,
-			"nodeId", nodeID,
-			"statusCode", resp.StatusCode,
-		)
+		body := readAcpHeartbeatErrorBody(resp.Body)
+		level := slog.LevelWarn
+		if isTransientAcpHeartbeatResponse(resp.StatusCode, body) {
+			level = slog.LevelInfo
+		}
+		logAcpHeartbeatNonSuccess(level, projectID, nodeID, resp.StatusCode, body)
 	}
+}
+
+func logAcpHeartbeatNonSuccess(level slog.Level, projectID, nodeID string, statusCode int, body string) {
+	attrs := []any{
+		"projectId", projectID,
+		"nodeId", nodeID,
+		"statusCode", statusCode,
+		"responseBody", body,
+		"transient", level == slog.LevelInfo,
+	}
+	if level == slog.LevelInfo {
+		slog.Info("acp_heartbeat: non-success status", attrs...)
+		return
+	}
+	slog.Warn("acp_heartbeat: non-success status", attrs...)
+}
+
+func readAcpHeartbeatErrorBody(body io.Reader) string {
+	if body == nil {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(body, maxAcpHeartbeatErrorBodyBytes+1))
+	if err != nil {
+		return "failed to read response body: " + err.Error()
+	}
+	if len(data) > maxAcpHeartbeatErrorBodyBytes {
+		return string(data[:maxAcpHeartbeatErrorBodyBytes]) + "...[truncated]"
+	}
+	return string(data)
+}
+
+func isTransientAcpHeartbeatResponse(statusCode int, body string) bool {
+	if statusCode < 500 {
+		return false
+	}
+	normalized := strings.ToLower(body)
+	return strings.Contains(normalized, "durable object reset because its code was updated")
 }

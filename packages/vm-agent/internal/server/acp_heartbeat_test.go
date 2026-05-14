@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -193,6 +195,33 @@ func TestStartAcpHeartbeatReporter_StopsOnDoneChannel(t *testing.T) {
 
 	if countAfter != count {
 		t.Errorf("expected no more requests after stop, got %d before and %d after", count, countAfter)
+	}
+}
+
+func TestReadAcpHeartbeatErrorBodyTruncates(t *testing.T) {
+	body := strings.Repeat("a", maxAcpHeartbeatErrorBodyBytes+20)
+
+	got := readAcpHeartbeatErrorBody(bytes.NewBufferString(body))
+
+	if len(got) <= maxAcpHeartbeatErrorBodyBytes {
+		t.Fatalf("expected truncated marker to be appended, got length %d", len(got))
+	}
+	if !strings.HasSuffix(got, "...[truncated]") {
+		t.Fatalf("expected truncated suffix, got %q", got[len(got)-20:])
+	}
+}
+
+func TestIsTransientAcpHeartbeatResponseDetectsDurableObjectCodeUpdate(t *testing.T) {
+	body := `{"error":"Durable Object reset because its code was updated."}`
+
+	if !isTransientAcpHeartbeatResponse(http.StatusInternalServerError, body) {
+		t.Fatal("expected DO code update reset to be transient")
+	}
+	if isTransientAcpHeartbeatResponse(http.StatusBadRequest, body) {
+		t.Fatal("expected non-5xx DO reset response to stay non-transient")
+	}
+	if isTransientAcpHeartbeatResponse(http.StatusInternalServerError, "database failed") {
+		t.Fatal("expected unrelated 500 to stay non-transient")
 	}
 }
 

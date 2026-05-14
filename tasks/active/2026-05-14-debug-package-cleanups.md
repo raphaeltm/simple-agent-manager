@@ -27,14 +27,19 @@ Recent production debug packages surfaced several issues that are either mislead
 
 ## Implementation Checklist
 
-- [ ] Make host credential-helper creation retry-safe: safely reuse or replace existing regular helper files for the same workspace, while still failing suspicious paths.
-- [ ] Add tests for credential-helper retry behavior and suspicious existing files.
-- [ ] Clean up cloud-init schema/netfilter warnings by ensuring valid rendered cloud-init and valid early IPv6 rules persistence state.
-- [ ] Add/update cloud-init tests covering schema-relevant structure and IPv6 rules file initialization.
-- [ ] Improve VM-agent ACP heartbeat diagnostics for non-2xx responses by logging bounded response body and route context.
-- [ ] Treat the specific Durable Object code-update reset message as a transient heartbeat condition with less alarming logging.
-- [ ] Add tests for ACP heartbeat non-2xx body logging/transient classification.
-- [ ] Run focused package tests, then full quality checks where feasible.
+- [x] Make host credential-helper creation retry-safe: safely reuse or replace existing regular helper files for the same workspace, while still failing suspicious paths.
+- [x] Add tests for credential-helper retry behavior and suspicious existing files.
+- [x] Clean up cloud-init schema/netfilter warnings by ensuring valid rendered cloud-init and valid early IPv6 rules persistence state.
+- [x] Add/update cloud-init tests covering schema-relevant structure and IPv6 rules file initialization.
+- [x] Improve VM-agent ACP heartbeat diagnostics for non-2xx responses by logging bounded response body and route context.
+- [x] Treat the specific Durable Object code-update reset message as a transient heartbeat condition with less alarming logging.
+- [x] Add tests for ACP heartbeat non-2xx body logging/transient classification.
+- [x] Run focused package tests, then full quality checks where feasible.
+
+## Validation Notes
+
+- Passed: focused cloud-init tests, focused API route test, full `pnpm typecheck`, full `pnpm lint`, full `pnpm test`, and `git diff --check`.
+- Blocked locally: Go formatter/tests for `packages/vm-agent` because this workspace image does not include `go` or `gofmt`.
 
 ## Acceptance Criteria
 
