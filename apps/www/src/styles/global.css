@@ -41,6 +41,14 @@
 
   --max-width: 1200px;
   --header-height: 64px;
+
+  /* Glassmorphism tokens */
+  --glass-bg: rgba(19, 32, 29, 0.45);
+  --glass-bg-subtle: rgba(19, 32, 29, 0.25);
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-border-hover: rgba(255, 255, 255, 0.1);
+  --glass-blur: blur(20px);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 /* --- Reset --- */
@@ -63,10 +71,28 @@ html {
 
 body {
   font-family: var(--font-body);
-  background-color: var(--color-bg-canvas);
+  background-color: #070d0b;
   color: var(--color-fg-primary);
   line-height: 1.6;
   overflow-x: hidden;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 20%, rgba(22, 163, 74, 0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 60%, rgba(22, 163, 74, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 30% at 50% 90%, rgba(22, 163, 74, 0.04) 0%, transparent 40%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
 }
 
 img, svg {

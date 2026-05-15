@@ -7,9 +7,9 @@ const currentYear = new Date().getFullYear();
 <section class="cta-section">
   <div class="container">
     <div class="cta-content animate-on-scroll">
-      <h2 class="cta-title">Ready to run coding agents on your own infrastructure?</h2>
+      <h2 class="cta-title">Ready to orchestrate agents at scale?</h2>
       <p class="cta-subtitle">
-        Self-host on Cloudflare's free tier. Bring your own cloud. Your agents, your code.
+        Self-host on Cloudflare's free tier. Bring your own cloud. Your agents, your infrastructure.
       </p>
       <div class="cta-actions">
         <a href={appUrl} class="btn-cta btn-cta-primary">
@@ -64,6 +64,13 @@ const currentYear = new Date().getFullYear();
     text-align: center;
     max-width: 600px;
     margin: 0 auto;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--glass-shadow);
+    padding: 48px 32px;
   }
 
   .cta-title {
@@ -113,15 +120,17 @@ const currentYear = new Date().getFullYear();
   }
 
   .btn-cta-secondary {
-    background: var(--color-bg-surface);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
     color: var(--color-fg-primary);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--glass-border);
   }
 
   .btn-cta-secondary:hover {
-    background: var(--color-bg-surface-hover);
+    background: var(--glass-bg-subtle);
     color: var(--color-fg-primary);
-    border-color: var(--color-fg-dim);
+    border-color: var(--glass-border-hover);
   }
 
   /* Footer */

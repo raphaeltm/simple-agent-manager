@@ -11,16 +11,16 @@ const appUrl = `https://app.${baseDomain}`;
   <div class="container hero-content">
     <div class="hero-badge animate-on-scroll">
       <span class="badge-dot"></span>
-      Simple Agent Manager — Open Source & Self-Hosted
+      Open Source & Self-Hosted
     </div>
 
     <h1 class="hero-title animate-on-scroll">
-      The orchestration layer for<br /><span class="gradient-text">autonomous coding agents</span>    </h1>
+      The open-source platform for<br /><span class="gradient-text">multi-agent orchestration</span>
+    </h1>
 
     <p class="hero-subtitle animate-on-scroll">
-      SAM orchestrates Claude Code, Codex, Gemini CLI, Mistral Vibe, or OpenCode on your cloud VMs —
-      provisioning real devcontainer environments, managing lifecycles, and opening PRs autonomously.
-      Bring your own Hetzner, Scaleway, or GCP account, pick an agent, and let it build.
+      Every agent runs in its own isolated container on your cloud.
+      Run 5 or 500 in parallel — SAM handles provisioning, scheduling, and cleanup.
     </p>
 
     <div class="hero-actions animate-on-scroll">
@@ -50,15 +50,7 @@ const appUrl = `https://app.${baseDomain}`;
             <span class="agent-badge">Claude Code</span>
             <span class="msg-time">just now</span>
           </div>
-          <p class="msg-text">I'll refactor the authentication middleware to use JWT validation. Let me read the current implementation first.</p>
-        </div>
-
-        <div class="tool-call">
-          <div class="tool-header">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <span class="tool-name">Read</span>
-            <span class="tool-path">src/middleware/auth.ts</span>
-          </div>
+          <p class="msg-text">I'll refactor the auth middleware. The frontend and API tests can run in parallel — let me dispatch two agents.</p>
         </div>
 
         <div class="tool-call">
@@ -70,14 +62,24 @@ const appUrl = `https://app.${baseDomain}`;
           </div>
         </div>
 
-        <div class="permission-prompt">
-          <div class="permission-header">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            <span>Run <code>npm test</code> ?</span>
+        <div class="tool-call dispatch-call">
+          <div class="tool-header">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span class="tool-name">Dispatch</span>
+            <span class="tool-path">2 sub-agents &rarr; frontend-tests, api-tests</span>
           </div>
-          <div class="permission-actions">
-            <span class="perm-btn perm-allow">Allow</span>
-            <span class="perm-btn perm-deny">Deny</span>
+        </div>
+
+        <div class="sub-agents">
+          <div class="sub-agent">
+            <span class="sub-agent-dot running"></span>
+            <span class="sub-agent-label">frontend-tests</span>
+            <span class="sub-agent-status">running</span>
+          </div>
+          <div class="sub-agent">
+            <div class="sub-agent-dot running"></div>
+            <span class="sub-agent-label">api-tests</span>
+            <span class="sub-agent-status">running</span>
           </div>
         </div>
       </div>
@@ -127,7 +129,10 @@ const appUrl = `https://app.${baseDomain}`;
     font-size: 0.8125rem;
     color: var(--color-fg-muted);
     padding: 6px 16px;
-    border: 1px solid var(--color-border);
+    background: var(--glass-bg-subtle);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
     border-radius: 100px;
     margin-bottom: 32px;
   }
@@ -199,15 +204,17 @@ const appUrl = `https://app.${baseDomain}`;
   }
 
   .btn-hero-secondary {
-    background: var(--color-bg-surface);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
     color: var(--color-fg-primary);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--glass-border);
   }
 
   .btn-hero-secondary:hover {
-    background: var(--color-bg-surface-hover);
+    background: var(--glass-bg-subtle);
     color: var(--color-fg-primary);
-    border-color: var(--color-fg-dim);
+    border-color: var(--glass-border-hover);
   }
 
   /* Workspace mockup */
@@ -216,11 +223,12 @@ const appUrl = `https://app.${baseDomain}`;
     max-width: 720px;
     border-radius: var(--radius-lg);
     overflow: hidden;
-    border: 1px solid var(--color-border);
-    background: var(--color-bg-inset);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
     box-shadow:
-      0 0 0 1px var(--color-border-subtle),
-      0 20px 60px rgba(0, 0, 0, 0.4),
+      var(--glass-shadow),
       0 0 80px var(--color-accent-glow);
   }
 
@@ -229,8 +237,8 @@ const appUrl = `https://app.${baseDomain}`;
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
-    background: var(--color-bg-surface);
-    border-bottom: 1px solid var(--color-border-subtle);
+    background: rgba(19, 32, 29, 0.6);
+    border-bottom: 1px solid var(--glass-border);
   }
 
   .terminal-dots {
@@ -265,8 +273,8 @@ const appUrl = `https://app.${baseDomain}`;
   .agent-message {
     padding: 16px;
     border-radius: var(--radius-md);
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-border-subtle);
+    background: var(--glass-bg-subtle);
+    border: 1px solid var(--glass-border);
   }
 
   .msg-header {
@@ -302,8 +310,54 @@ const appUrl = `https://app.${baseDomain}`;
   .tool-call {
     padding: 10px 16px;
     border-radius: var(--radius-md);
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-border-subtle);
+    background: var(--glass-bg-subtle);
+    border: 1px solid var(--glass-border);
+  }
+
+  .dispatch-call {
+    border-color: rgba(22, 163, 74, 0.2);
+    background: rgba(22, 163, 74, 0.06);
+  }
+
+  /* Sub-agents */
+  .sub-agents {
+    display: flex;
+    gap: 8px;
+  }
+
+  .sub-agent {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    background: var(--glass-bg-subtle);
+    border: 1px solid var(--glass-border);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+  }
+
+  .sub-agent-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .sub-agent-dot.running {
+    background: var(--color-accent);
+    animation: glow-pulse 2s ease-in-out infinite;
+  }
+
+  .sub-agent-label {
+    color: var(--color-fg-muted);
+  }
+
+  .sub-agent-status {
+    margin-left: auto;
+    color: var(--color-accent);
+    font-size: 0.6875rem;
   }
 
   .tool-header {
@@ -336,56 +390,4 @@ const appUrl = `https://app.${baseDomain}`;
   }
 
   /* Permission prompt */
-  .permission-prompt {
-    padding: 12px 16px;
-    border-radius: var(--radius-md);
-    background: rgba(245, 158, 11, 0.08);
-    border: 1px solid rgba(245, 158, 11, 0.2);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .permission-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.8125rem;
-    color: var(--color-warning);
-  }
-
-  .permission-header code {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--color-fg-primary);
-    background: var(--color-bg-surface);
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-
-  .permission-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .perm-btn {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    padding: 4px 14px;
-    border-radius: var(--radius-sm);
-    cursor: default;
-  }
-
-  .perm-allow {
-    background: var(--color-accent);
-    color: white;
-  }
-
-  .perm-deny {
-    background: var(--color-bg-surface);
-    color: var(--color-fg-muted);
-    border: 1px solid var(--color-border);
-  }
 </style>
