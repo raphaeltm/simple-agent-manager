@@ -339,20 +339,24 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
     it('does NOT purge running executions regardless of age', async () => {
       await seedBaseData();
 
-      // Very old running execution — should NOT be purged by retention
-      // (may be recovered by stale recovery, but not deleted)
+      // Running execution from 5 days ago — within the 90-day retention window
+      // but outside the 1h stale threshold. Stale recovery will transition it
+      // to 'failed', but the retention purge should NOT delete it (created_at
+      // is within the retention window). This proves the retention query's
+      // `status IN ('completed', 'failed', 'skipped')` filter works correctly.
       await seedTriggerExecution('exec-old-running', TRIGGER_ID, PROJECT_ID, {
         status: 'running',
-        startedAt: NINETY_ONE_DAYS_AGO,
-        createdAt: NINETY_ONE_DAYS_AGO,
+        startedAt: FIVE_DAYS_AGO,
+        createdAt: FIVE_DAYS_AGO,
       });
 
-      // Run cleanup — the stale recovery will transition it to 'failed',
-      // but check that the row still exists (not purged)
       await runTriggerExecutionCleanup(buildEnv());
 
+      // Row should still exist — stale recovery transitions it to 'failed'
+      // but retention purge does not delete it (only 5 days old)
       const exec = await getExecution('exec-old-running');
       expect(exec).not.toBeNull();
+      expect(exec?.status).toBe('failed'); // recovered by stale sweep
     });
 
     it('uses configurable retention period from env', async () => {

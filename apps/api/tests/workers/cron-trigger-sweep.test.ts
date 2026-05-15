@@ -183,8 +183,8 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
         );
 
       // At maxConcurrent=2, the sweep would skip
+      // (verifies D1 query behavior; control flow is in processTrigger which can't be called without vi.mock)
       expect(activeCount?.count).toBe(2);
-      expect(activeCount!.count >= 2).toBe(true);
     });
   });
 
