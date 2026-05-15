@@ -298,3 +298,9 @@
   .sam-markdown table { font-size: 0.78rem; }
   .sam-markdown th, .sam-markdown td { padding: 6px 8px; }
 }
+
+/* ── Onboarding card animations ──────────────────────────── */
+@keyframes celebration-breathe {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}

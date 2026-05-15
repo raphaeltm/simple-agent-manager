@@ -127,10 +127,11 @@ export const glass = {
     border: '1px solid rgba(60, 180, 120, 0.1)',
   } as React.CSSProperties,
   samBubble: {
-    background: 'rgba(12, 30, 20, 0.6)',
-    backdropFilter: 'blur(16px)',
-    WebkitBackdropFilter: 'blur(16px)',
-    border: '1px solid rgba(60, 180, 120, 0.12)',
+    background: 'rgba(19, 32, 29, 0.75)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: '1px solid rgba(60, 180, 120, 0.15)',
+    boxShadow: '0 4px 24px rgba(0, 0, 0, 0.2), 0 0 40px rgba(22, 163, 74, 0.06)',
   } as React.CSSProperties,
   userBubble: {
     background: 'rgba(30, 120, 80, 0.35)',

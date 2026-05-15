@@ -11,6 +11,8 @@ import type { Components } from 'react-markdown';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+import { renderOnboardingCard } from './onboarding-cards';
+
 // Stable remark plugins array
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -120,9 +122,17 @@ function SamCodeBlock({ code, language }: { code: string; language: string }) {
 const SAM_MARKDOWN_COMPONENTS: Components = {
   pre: ({ children }) => <>{children}</>,
   code: ({ className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '');
+    const match = /language-([\w-]+)/.exec(className || '');
     const code = String(children ?? '').replace(/\n$/, '');
+    const lang = match?.[1] ?? '';
     const isInline = !match && !className;
+
+    // Interactive onboarding cards
+    if (lang === 'onboarding-card') {
+      const card = renderOnboardingCard(code);
+      if (card) return <>{card}</>;
+    }
+
     if (isInline) {
       return (
         <code
@@ -141,7 +151,7 @@ const SAM_MARKDOWN_COMPONENTS: Components = {
         </code>
       );
     }
-    return <SamCodeBlock code={code} language={match?.[1] ?? ''} />;
+    return <SamCodeBlock code={code} language={lang} />;
   },
   a: ({ href, children }) => (
     <a href={href} target="_blank" rel="noopener noreferrer">

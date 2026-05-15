@@ -111,11 +111,54 @@ export function SamPrototype() {
         style={{ zIndex: 0 }}
       />
 
+      {/* Ambient floating orbs (Prototype B aesthetic) */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 1 }}>
+        <div
+          className="absolute rounded-full"
+          style={{
+            width: '400px',
+            height: '400px',
+            top: '-10%',
+            right: '-5%',
+            background: 'radial-gradient(circle, rgba(60, 180, 120, 0.15), transparent 70%)',
+            filter: 'blur(80px)',
+            opacity: 0.12,
+            animation: 'orb-float-1 20s ease-in-out infinite',
+          }}
+        />
+        <div
+          className="absolute rounded-full"
+          style={{
+            width: '350px',
+            height: '350px',
+            bottom: '10%',
+            left: '-10%',
+            background: 'radial-gradient(circle, rgba(40, 160, 100, 0.2), transparent 70%)',
+            filter: 'blur(80px)',
+            opacity: 0.1,
+            animation: 'orb-float-2 25s ease-in-out infinite',
+          }}
+        />
+        <div
+          className="absolute rounded-full"
+          style={{
+            width: '250px',
+            height: '250px',
+            top: '40%',
+            left: '50%',
+            background: 'radial-gradient(circle, rgba(22, 163, 74, 0.12), transparent 70%)',
+            filter: 'blur(60px)',
+            opacity: 0.08,
+            animation: 'orb-float-3 18s ease-in-out infinite',
+          }}
+        />
+      </div>
+
       {/* Blur + dim overlay */}
       <div
         className="absolute inset-0"
         style={{
-          zIndex: 1,
+          zIndex: 2,
           backdropFilter: 'blur(10px)',
           WebkitBackdropFilter: 'blur(10px)',
           background: 'rgba(0, 0, 0, 0.10)',
@@ -124,6 +167,23 @@ export function SamPrototype() {
 
       {/* Content layer */}
       <div className="relative z-10 flex flex-col h-full">
+        {/* Orb keyframes injected inline */}
+        <style>{`
+          @keyframes orb-float-1 {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(-30px, 20px) scale(1.05); }
+            66% { transform: translate(20px, -15px) scale(0.95); }
+          }
+          @keyframes orb-float-2 {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(25px, -30px) scale(1.08); }
+            66% { transform: translate(-15px, 25px) scale(0.92); }
+          }
+          @keyframes orb-float-3 {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(-20px, 20px) scale(1.1); }
+          }
+        `}</style>
         {/* Header */}
         <header className="shrink-0 px-4 py-3 flex items-center gap-3" style={glass.header}>
           <a

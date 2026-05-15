@@ -1,5 +1,6 @@
 import type { AnthropicToolDef, CollectedToolCall, ToolContext } from '../types';
 import { addKnowledge, addKnowledgeDef } from './add-knowledge';
+import { getAccountSetupStatus, getAccountSetupStatusDef } from './get-account-setup-status';
 import { addPolicy, addPolicyDef } from './add-policy';
 import { cancelMission, cancelMissionDef } from './cancel-mission';
 import { createIdea, createIdeaDef } from './create-idea';
@@ -62,6 +63,8 @@ export const SAM_TOOLS: AnthropicToolDef[] = [
   // Codebase contextual search
   searchCodeDef,
   getFileContentDef,
+  // Onboarding
+  getAccountSetupStatusDef,
 ];
 
 type ToolHandler = (input: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
@@ -98,6 +101,8 @@ const toolHandlers: Record<string, ToolHandler> = {
   // Codebase contextual search
   search_code: searchCode as ToolHandler,
   get_file_content: getFileContent as ToolHandler,
+  // Onboarding
+  get_account_setup_status: getAccountSetupStatus as ToolHandler,
 };
 
 /** Execute a tool call and return the result (or error message on failure). */
