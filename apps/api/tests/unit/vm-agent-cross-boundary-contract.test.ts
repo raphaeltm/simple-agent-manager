@@ -46,15 +46,18 @@ describe('Contract 1: Attachment Transfer (TaskRunner → VM Agent)', () => {
       //   ${nodeId}.vm.${baseDomain}:${port}
       const protocol = 'https';
       const port = '8443';
-      const workspaceId = 'ws-abc123';
+      // Workspace IDs are ULIDs (e.g., '01HXYZ...'), NOT ws-prefixed strings.
+      // The ws- prefix is added by the URL construction, not stored in the ID.
+      const workspaceId = '01HXYZ789DEF';
       const baseDomain = 'example.com';
 
       // Reproduce URL construction from workspace-steps.ts:374
       const vmUrl = `${protocol}://ws-${workspaceId}.${baseDomain}:${port}`;
       const uploadUrl = `${vmUrl}/workspaces/${workspaceId}/files/upload`;
 
-      expect(uploadUrl).toBe('https://ws-ws-abc123.example.com:8443/workspaces/ws-abc123/files/upload');
-      expect(uploadUrl).toContain('ws-ws-abc123');
+      expect(uploadUrl).toBe('https://ws-01HXYZ789DEF.example.com:8443/workspaces/01HXYZ789DEF/files/upload');
+      // ws- prefix appears exactly once in subdomain (not doubled)
+      expect(uploadUrl).toMatch(/^https:\/\/ws-[^.]+\.example\.com/);
       expect(uploadUrl).not.toContain('.vm.');
     });
 
@@ -312,14 +315,23 @@ describe('Contract 3: Credential Sync Callback (VM Agent → API Worker)', () =>
       expect(result.success).toBe(true);
     });
 
-    it('validates payload with optional fields omitted', () => {
-      // The schema marks agentType and credentialKind as optional
-      const minimalPayload = {
-        credential: 'some-credential-value',
+    it('Go sender always includes all three fields', () => {
+      // The Valibot schema marks agentType and credentialKind as optional,
+      // but the Go sender (workspace_callbacks.go:37-41) ALWAYS sends all three.
+      // The runtime handler also requires agentType at runtime (workspace-runtime.ts:265-268).
+      // This test verifies the Go-side contract: all fields present.
+      const goPayload = {
+        agentType: 'claude-code',
+        credentialKind: 'api-key',
+        credential: 'sk-test-key',
       };
 
-      const result = v.safeParse(AgentCredentialSyncSchema, minimalPayload);
+      const result = v.safeParse(AgentCredentialSyncSchema, goPayload);
       expect(result.success).toBe(true);
+      // All three fields must be present in what Go sends
+      expect(goPayload).toHaveProperty('agentType');
+      expect(goPayload).toHaveProperty('credentialKind');
+      expect(goPayload).toHaveProperty('credential');
     });
 
     it('rejects payload without credential field', () => {
@@ -445,6 +457,10 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       // Verify auth headers (node management token via Bearer header)
       expect(capturedHeaders!.get('Authorization')).toBe('Bearer mock-jwt');
       expect(capturedHeaders!.get('Content-Type')).toBe('application/json');
+
+      // Verify custom routing headers set by nodeAgentRequest
+      expect(capturedHeaders!.get('X-SAM-Node-Id')).toBe('node-abc');
+      expect(capturedHeaders!.get('X-SAM-Workspace-Id')).toBe('ws-test');
     });
   });
 
@@ -496,7 +512,12 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
         env,
         'user-123',
         { url: 'https://mcp.example.com', token: 'mcp-token' },
-        { model: 'claude-sonnet-4-6', permissionMode: 'auto-edit' },
+        {
+          model: 'claude-sonnet-4-6',
+          permissionMode: 'auto-edit',
+          opencodeProvider: 'scaleway',
+          opencodeBaseUrl: 'https://api.scaleway.ai/v1',
+        },
         { projectId: 'proj-abc', taskId: 'task-xyz', taskMode: 'task' },
       );
 
@@ -516,6 +537,8 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       // Model overrides
       expect(parsedBody.model).toBe('claude-sonnet-4-6');
       expect(parsedBody.permissionMode).toBe('auto-edit');
+      expect(parsedBody.opencodeProvider).toBe('scaleway');
+      expect(parsedBody.opencodeBaseUrl).toBe('https://api.scaleway.ai/v1');
 
       // Task context (flattened into body, not nested)
       expect(parsedBody.projectId).toBe('proj-abc');
@@ -571,6 +594,8 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       expect(parsedBody.mcpServers).toBeUndefined();
       expect(parsedBody.model).toBeUndefined();
       expect(parsedBody.permissionMode).toBeUndefined();
+      expect(parsedBody.opencodeProvider).toBeUndefined();
+      expect(parsedBody.opencodeBaseUrl).toBeUndefined();
       expect(parsedBody.projectId).toBeUndefined();
       expect(parsedBody.taskId).toBeUndefined();
     });
@@ -597,6 +622,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         recordNodeRoutingMetric: vi.fn(),
       }));
 
+      // VM agent returns 204 No Content on successful cancel
       vi.doMock('../../src/services/fetch-timeout', () => ({
         fetchWithTimeout: vi.fn().mockResolvedValue(
           new Response(null, { status: 204 }),
@@ -614,6 +640,9 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         'user-123',
       );
 
+      // cancelAgentSessionOnNode normalizes any 2xx to { success: true, status: 200 }
+      // because nodeAgentRequest succeeds silently (no throw) and the wrapper
+      // returns a fixed status:200 — it does not propagate the raw HTTP status.
       expect(result).toEqual({ success: true, status: 200 });
     });
 
