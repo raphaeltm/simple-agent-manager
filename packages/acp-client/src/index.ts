@@ -35,6 +35,8 @@ export type { PlanModalProps } from './components/PlanModal';
 export { PlanModal } from './components/PlanModal';
 export { PlanView } from './components/PlanView';
 export { RawFallbackView } from './components/RawFallbackView';
+export type { MentionPaletteHandle, MentionPaletteProps, MentionProfile } from './components/MentionPalette';
+export { MentionPalette } from './components/MentionPalette';
 export type { SlashCommandPaletteHandle, SlashCommandPaletteProps } from './components/SlashCommandPalette';
 export { SlashCommandPalette } from './components/SlashCommandPalette';
 export type { StickyPlanButtonProps } from './components/StickyPlanButton';
