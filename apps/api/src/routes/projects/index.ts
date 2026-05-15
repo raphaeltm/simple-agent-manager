@@ -5,6 +5,7 @@ import { requireApproved,requireAuth } from '../../middleware/auth';
 import { acpSessionRoutes } from './acp-sessions';
 import { projectCredentialsRoutes } from './credentials';
 import { crudRoutes } from './crud';
+import { devcontainerConfigRoutes } from './devcontainer-configs';
 import { fileProxyRoutes } from './files';
 
 const projectsRoutes = new Hono<{ Bindings: Env }>();
@@ -13,5 +14,6 @@ projectsRoutes.route('/', crudRoutes);
 projectsRoutes.route('/', acpSessionRoutes);
 projectsRoutes.route('/', fileProxyRoutes);
 projectsRoutes.route('/', projectCredentialsRoutes);
+projectsRoutes.route('/', devcontainerConfigRoutes);
 
 export { projectsRoutes };

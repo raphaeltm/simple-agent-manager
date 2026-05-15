@@ -248,6 +248,7 @@ export function ProjectChat() {
               error={state.submitError}
               placeholder="Describe what you want the agent to do..."
               transcribeApiUrl={state.transcribeApiUrl}
+              projectId={state.projectId}
               agents={state.configuredAgents}
               selectedAgentType={state.selectedAgentType}
               onAgentTypeChange={state.setSelectedAgentType}

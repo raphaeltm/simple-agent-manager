@@ -185,7 +185,7 @@ export {
   markNotificationRead,
   updateNotificationPreference,
 } from './notifications';
-export type { AccountMapResponse } from './projects';
+export type { AccountMapResponse, DevcontainerConfigEntry, DevcontainerConfigsResponse } from './projects';
 export {
   createProject,
   deleteProject,
@@ -195,6 +195,7 @@ export {
   getProject,
   getProjectRuntimeConfig,
   listActiveTasks,
+  listProjectDevcontainerConfigs,
   listProjects,
   updateProject,
   upsertProjectRuntimeEnvVar,
