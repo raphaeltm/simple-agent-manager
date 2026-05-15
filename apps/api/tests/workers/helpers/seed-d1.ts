@@ -87,6 +87,23 @@ export async function seedNode(
 }
 
 /**
+ * Seed a mission into D1. Idempotent. Requires project + user to exist.
+ */
+export async function seedMission(
+  missionId: string,
+  projectId: string,
+  userId: string,
+  opts?: { title?: string; status?: string },
+): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO missions (id, project_id, user_id, title, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(missionId, projectId, userId, opts?.title ?? `Test mission ${missionId}`, opts?.status ?? 'planning')
+    .run();
+}
+
+/**
  * Seed a task into D1. Idempotent. Requires project + user to exist.
  */
 export async function seedTask(
