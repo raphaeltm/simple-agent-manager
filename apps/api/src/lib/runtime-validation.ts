@@ -29,6 +29,9 @@ export function parseWithSchema<TSchema extends GenericSchema>(
 }
 
 export function expectJsonRecord(value: unknown, context: string): JsonRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new RuntimeValidationError(`Invalid payload at ${context}`, context);
+  }
   return parseWithSchema(jsonRecordSchema, value, context);
 }
 

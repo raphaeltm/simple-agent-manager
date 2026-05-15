@@ -141,7 +141,7 @@ describe('HetznerProvider', () => {
 
   describe('no generateCloudInit method', () => {
     it('should not have generateCloudInit method', () => {
-      expect((provider as Record<string, unknown>)['generateCloudInit']).toBeUndefined();
+      expect('generateCloudInit' in provider).toBe(false);
     });
   });
 

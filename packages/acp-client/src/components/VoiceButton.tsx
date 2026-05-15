@@ -1,5 +1,7 @@
 import { useCallback, useEffect,useRef, useState } from 'react';
 
+import { parseJsonRecord, readResponseJsonRecord } from '../runtime-validation';
+
 /** VoiceButton states */
 type VoiceState = 'idle' | 'recording' | 'processing' | 'error';
 
@@ -224,16 +226,16 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl, onError
             const errorText = await response.text().catch(() => '');
             let message = `Transcription failed (${response.status})`;
             try {
-              const errorData = JSON.parse(errorText) as { message?: string };
-              if (errorData.message) message = errorData.message;
+              const errorData = parseJsonRecord(errorText, 'voice.transcribe_error');
+              if (typeof errorData.message === 'string') message = errorData.message;
             } catch {
               if (errorText) message = errorText;
             }
             throw new Error(message);
           }
 
-          const data = (await response.json()) as { text: string };
-          if (data.text) {
+          const data = await readResponseJsonRecord(response, 'voice.transcribe');
+          if (typeof data.text === 'string' && data.text.length > 0) {
             onTranscription(data.text);
           }
           setState('idle');

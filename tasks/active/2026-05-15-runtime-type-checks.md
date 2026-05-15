@@ -36,12 +36,12 @@ Implementation will treat these as checklist items grouped by trust boundary. In
 - [x] Replace API storage `JSON.parse(...) as ...` assertions with runtime validators.
 - [x] Replace Durable Object request and stream event assertions with runtime validators.
 - [x] Replace MCP/tool parameter object casts with runtime validators.
-- [ ] Replace web API client response assertions with runtime validators.
-- [ ] Replace web WebSocket/localStorage/XHR JSON assertions with runtime validators.
-- [ ] Replace package-level JSON assertions in `packages/acp-client`, `packages/terminal`, and provider helpers with runtime validators.
-- [ ] Replace script/infra JSON assertions that consume external command output or event payloads with runtime validators.
-- [ ] Remove or justify remaining `as any` at runtime boundaries.
-- [ ] Add tests proving invalid runtime data is rejected or safely ignored.
+- [x] Replace web API client response assertions with runtime validators.
+- [x] Replace web WebSocket/localStorage/XHR JSON assertions with runtime validators.
+- [x] Replace package-level JSON assertions in `packages/acp-client`, `packages/terminal`, and provider helpers with runtime validators.
+- [x] Replace script/infra JSON assertions that consume external command output or event payloads with runtime validators.
+- [x] Remove or justify remaining `as any` at runtime boundaries.
+- [x] Add tests proving invalid runtime data is rejected or safely ignored.
 - [ ] Run lint, typecheck, tests, and build.
 
 ## Acceptance Criteria

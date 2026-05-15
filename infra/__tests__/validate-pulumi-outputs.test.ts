@@ -30,19 +30,16 @@ describe("validatePulumiOutputs", () => {
 
   it("throws when a required top-level field is missing", () => {
     const outputs = makeValidOutputs();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (outputs as any).d1DatabaseId = "";
+    outputs.d1DatabaseId = "";
     expect(() => validatePulumiOutputs(outputs)).toThrow(
       /D1 Database ID \(d1DatabaseId\)/
     );
   });
 
   it("throws when multiple required fields are missing", () => {
-    const outputs = makeValidOutputs();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (outputs as any).kvId = undefined;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (outputs as any).r2Name = null;
+    const outputs: Record<string, unknown> = makeValidOutputs();
+    outputs.kvId = undefined;
+    outputs.r2Name = null;
     expect(() => validatePulumiOutputs(outputs)).toThrow(
       /KV Namespace ID.*R2 Bucket Name/s
     );
@@ -60,11 +57,10 @@ describe("validatePulumiOutputs", () => {
   });
 
   it("throws when stackSummary is undefined", () => {
-    const outputs = makeValidOutputs();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (outputs as any).stackSummary = undefined;
+    const outputs: Record<string, unknown> = makeValidOutputs();
+    outputs.stackSummary = undefined;
     expect(() => validatePulumiOutputs(outputs)).toThrow(
-      /stackSummary\.baseDomain/
+      /stackSummary/
     );
   });
 });

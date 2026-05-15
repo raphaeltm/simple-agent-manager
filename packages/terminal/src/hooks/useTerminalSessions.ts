@@ -4,6 +4,7 @@ import type {
   TerminalSession,
   UseTerminalSessionsReturn
 } from '../types/multi-terminal';
+import { expectJsonRecord, parseJsonRecord, requireArray } from '../runtime-validation';
 
 /** Serializable session metadata for sessionStorage persistence */
 interface PersistedSession {
@@ -60,11 +61,22 @@ export function useTerminalSessions(
     try {
       const raw = sessionStorage.getItem(persistenceKey);
       if (!raw) return null;
-      const parsed = JSON.parse(raw) as PersistedState;
-      if (!parsed.sessions || !Array.isArray(parsed.sessions) || parsed.sessions.length === 0) {
+      const parsed = parseJsonRecord(raw, 'terminal.persisted_sessions');
+      const sessions = requireArray(parsed, 'sessions', 'terminal.persisted_sessions');
+      if (sessions.length === 0) {
         return null;
       }
-      return parsed;
+      return {
+        sessions: sessions.map((session, index) => {
+          const record = expectJsonRecord(session, `terminal.persisted_sessions.sessions[${index}]`);
+          return {
+            name: typeof record.name === 'string' ? record.name : '',
+            order: typeof record.order === 'number' ? record.order : index,
+            ...(typeof record.serverSessionId === 'string' ? { serverSessionId: record.serverSessionId } : {}),
+          };
+        }),
+        counter: typeof parsed.counter === 'number' ? parsed.counter : sessions.length,
+      };
     } catch {
       return null;
     }

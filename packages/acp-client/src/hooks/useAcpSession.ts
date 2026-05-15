@@ -5,6 +5,7 @@ import { errorCodeFromCloseCode, errorCodeFromMessage, getErrorMeta } from '../e
 import type { AgentSessionStatus, AgentStatusMessage, LifecycleEventCallback,SessionStateMessage } from '../transport/types';
 import type { AcpTransport } from '../transport/websocket';
 import { createAcpWebSocketTransport } from '../transport/websocket';
+import { maybeJsonRecord } from '../runtime-validation';
 
 /** Default reconnection delay in ms */
 const DEFAULT_RECONNECT_DELAY_MS = 1000;
@@ -97,7 +98,8 @@ function isGatewayErrorMessage(data: unknown): data is GatewayErrorMessage {
   if (!data || typeof data !== 'object') {
     return false;
   }
-  const record = data as Record<string, unknown>;
+  const record = maybeJsonRecord(data);
+  if (!record) return false;
   return typeof record.error === 'string' &&
     (typeof record.message === 'string' || record.message === undefined);
 }

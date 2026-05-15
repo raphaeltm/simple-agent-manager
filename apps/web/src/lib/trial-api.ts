@@ -13,8 +13,10 @@ import type {
   TrialWaitlistRequest,
   TrialWaitlistResponse,
 } from '@simple-agent-manager/shared';
+import { parseTrialEvent } from '@simple-agent-manager/shared';
 
 import { API_URL } from './api/client';
+import { expectJsonRecord, maybeJsonRecord } from './runtime-validation';
 
 /**
  * Inline error copy, per error code, for the landing page. Kept in one place so
@@ -66,12 +68,24 @@ export async function createTrial(repoUrl: string): Promise<CreateTrialResult> {
     body: JSON.stringify(body),
   });
 
-  const raw = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+  const parsed: unknown = await resp.json().catch(() => ({}));
+  const raw = maybeJsonRecord(parsed) ?? {};
 
   if (resp.ok) {
     // Normal success: { trialId, projectId, eventsUrl, expiresAt }
-    if (typeof raw.trialId === 'string' && typeof raw.projectId === 'string') {
-      return { ok: true, value: raw as unknown as TrialCreateResponse };
+    if (
+      typeof raw.trialId === 'string' &&
+      typeof raw.projectId === 'string' &&
+      typeof raw.eventsUrl === 'string' &&
+      typeof raw.expiresAt === 'number'
+    ) {
+      const value: TrialCreateResponse = {
+        trialId: raw.trialId,
+        projectId: raw.projectId,
+        eventsUrl: raw.eventsUrl,
+        expiresAt: raw.expiresAt,
+      };
+      return { ok: true, value };
     }
     // Returning-user success (per §3.1): `{ existingTrialId, projectId }` at 200.
     if (typeof raw.existingTrialId === 'string' && typeof raw.projectId === 'string') {
@@ -121,17 +135,18 @@ export async function joinWaitlist(email: string): Promise<TrialWaitlistResponse
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const data = (await resp.json().catch(() => ({}))) as {
-    queued?: boolean;
-    resetsAt?: string;
-    message?: string;
-  };
+  const parsed: unknown = await resp.json().catch(() => ({}));
+  const data = maybeJsonRecord(parsed) ?? {};
   if (!resp.ok) {
-    throw new Error(data.message ?? 'Could not join the waitlist. Please try again.');
+    throw new Error(
+      typeof data.message === 'string'
+        ? data.message
+        : 'Could not join the waitlist. Please try again.'
+    );
   }
   return {
-    queued: data.queued ?? true,
-    resetsAt: data.resetsAt ?? '',
+    queued: typeof data.queued === 'boolean' ? data.queued : true,
+    resetsAt: typeof data.resetsAt === 'string' ? data.resetsAt : '',
   };
 }
 
@@ -162,10 +177,8 @@ export function openTrialEventStream(
 
   source.onmessage = (msg: MessageEvent<string>) => {
     try {
-      const parsed = JSON.parse(msg.data) as TrialEvent;
-      if (parsed && typeof parsed.type === 'string') {
-        handlers.onEvent(parsed);
-      }
+      const parsed = expectJsonRecord(JSON.parse(msg.data), 'trial.sse_event');
+      handlers.onEvent(parseTrialEvent(parsed));
     } catch (err) {
       console.warn('trial: failed to parse SSE payload', err);
     }

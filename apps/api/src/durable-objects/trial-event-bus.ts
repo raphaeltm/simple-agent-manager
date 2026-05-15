@@ -23,10 +23,12 @@
  */
 
 import type { TrialEvent } from '@simple-agent-manager/shared';
+import { TrialEventSchema } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parseWithSchema } from '../lib/runtime-validation';
 
 interface BufferedEvent {
   cursor: number;
@@ -101,7 +103,8 @@ export class TrialEventBus extends DurableObject<Env> {
     }
     let event: TrialEvent;
     try {
-      event = (await req.json()) as TrialEvent;
+      const payload: unknown = await req.json();
+      event = parseWithSchema(TrialEventSchema, payload, 'trial_event_bus.append');
     } catch {
       return new Response('bad_json', { status: 400 });
     }

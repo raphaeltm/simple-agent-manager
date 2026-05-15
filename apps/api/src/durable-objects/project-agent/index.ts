@@ -19,6 +19,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env as AppEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
+import { readRequestJsonRecord } from '../../lib/runtime-validation';
 import { buildFtsQuery, extractSnippet } from '../sam-session';
 import { runAgentLoop } from '../sam-session/agent-loop';
 import type { ConversationRow, MessageRow, SamSseEvent } from '../sam-session/types';
@@ -145,11 +146,13 @@ export class ProjectAgent extends DurableObject<AppEnv> {
 
   /** Handle POST /chat — run the agent loop and stream SSE. */
   private async handleChat(request: Request): Promise<Response> {
-    const body = (await request.json()) as {
-      conversationId?: string;
-      message: string;
-      userId: string;
-      projectId: string;
+    const payload = await readRequestJsonRecord(request, 'project_agent.chat');
+    const body = {
+      conversationId:
+        typeof payload.conversationId === 'string' ? payload.conversationId : undefined,
+      message: typeof payload.message === 'string' ? payload.message : '',
+      userId: typeof payload.userId === 'string' ? payload.userId : '',
+      projectId: typeof payload.projectId === 'string' ? payload.projectId : '',
     };
 
     if (!body.message?.trim()) {

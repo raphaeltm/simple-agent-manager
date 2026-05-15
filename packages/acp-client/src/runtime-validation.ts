@@ -11,6 +11,10 @@ export function expectJsonRecord(value: unknown, context: string): JsonRecord {
   return value;
 }
 
+export function maybeJsonRecord(value: unknown): JsonRecord | null {
+  return isJsonRecord(value) ? value : null;
+}
+
 export function parseJsonRecord(raw: string, context: string): JsonRecord {
   let parsed: unknown;
   try {
@@ -27,4 +31,14 @@ export function requireString(root: JsonRecord, key: string, context: string): s
     throw new Error(`Invalid payload at ${context}.${key}: expected string`);
   }
   return value;
+}
+
+export async function readResponseJsonRecord(response: Response, context: string): Promise<JsonRecord> {
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch (err) {
+    throw new Error(err instanceof Error ? `Invalid response JSON at ${context}: ${err.message}` : `Invalid response JSON at ${context}`);
+  }
+  return expectJsonRecord(parsed, context);
 }

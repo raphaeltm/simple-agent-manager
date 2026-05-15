@@ -2,6 +2,16 @@ import { expect } from 'vitest';
 
 type MockWithCalls = { mock: { calls: unknown[][] } };
 
+function expectRecord(value: unknown): Record<string, unknown> {
+  expect(value).toBeTypeOf('object');
+  expect(value).not.toBeNull();
+  expect(Array.isArray(value)).toBe(false);
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Expected JSON body to be an object');
+  }
+  return value;
+}
+
 export function fetchCall(mockFetch: MockWithCalls, index: number): { url: string; init: RequestInit } {
   const call = mockFetch.mock.calls.at(index);
   expect(call).toBeDefined();
@@ -17,7 +27,7 @@ export function fetchCall(mockFetch: MockWithCalls, index: number): { url: strin
 export function jsonBody(init: RequestInit): Record<string, unknown> {
   expect(typeof init.body).toBe('string');
   if (typeof init.body !== 'string') throw new Error('Expected request body to be a string');
-  return JSON.parse(init.body) as Record<string, unknown>;
+  return expectRecord(JSON.parse(init.body));
 }
 
 export function expectDefined<T>(value: T | null | undefined): T {

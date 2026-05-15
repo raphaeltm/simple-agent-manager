@@ -8,6 +8,8 @@ import {
   useState,
 } from 'react';
 
+import { readResponseJson, requireString } from '../lib/runtime-validation';
+
 /** Playback position polling interval — 4 Hz is smooth enough for the seek bar with low CPU cost. */
 const TIME_UPDATE_INTERVAL_MS = 250;
 
@@ -253,11 +255,16 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
         });
 
         if (!synthesizeRes.ok) {
-          const errData = await synthesizeRes.json().catch(() => null) as { message?: string } | null;
-          throw new Error(errData?.message || `Synthesis failed: ${synthesizeRes.status}`);
+          const errData = await synthesizeRes.json().catch(() => null);
+          const message = errData && typeof errData === 'object' && 'message' in errData && typeof errData.message === 'string'
+            ? errData.message
+            : null;
+          throw new Error(message || `Synthesis failed: ${synthesizeRes.status}`);
         }
 
-        const { audioUrl } = await synthesizeRes.json() as { audioUrl: string; summarized?: boolean };
+        const { audioUrl } = await readResponseJson(synthesizeRes, 'tts.synthesize', (record) => ({
+          audioUrl: requireString(record, 'audioUrl', 'tts.synthesize'),
+        }));
 
         // Step 2: Fetch the audio blob
         const baseOrigin = new URL(ttsApiUrl).origin;

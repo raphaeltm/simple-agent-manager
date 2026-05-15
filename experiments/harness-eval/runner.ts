@@ -23,6 +23,100 @@ interface RunnerEnv {
   authToken: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireString(value: unknown, path: string): string {
+  if (typeof value !== 'string') throw new Error(`${path} must be a string`);
+  return value;
+}
+
+function parseUsage(value: unknown): TokenUsage | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error('usage must be an object');
+  if (
+    typeof value.prompt_tokens !== 'number' ||
+    typeof value.completion_tokens !== 'number' ||
+    typeof value.total_tokens !== 'number'
+  ) {
+    throw new Error('usage token counts must be numbers');
+  }
+  return {
+    prompt_tokens: value.prompt_tokens,
+    completion_tokens: value.completion_tokens,
+    total_tokens: value.total_tokens,
+  };
+}
+
+function parseChatMessage(value: unknown, path: string): ChatMessage {
+  if (!isRecord(value)) throw new Error(`${path} must be an object`);
+  const role = requireString(value.role, `${path}.role`);
+  if (role !== 'system' && role !== 'user' && role !== 'assistant' && role !== 'tool') {
+    throw new Error(`${path}.role has an unsupported value`);
+  }
+
+  let toolCalls: ChatMessage['tool_calls'];
+  if (value.tool_calls !== undefined) {
+    if (!Array.isArray(value.tool_calls)) throw new Error(`${path}.tool_calls must be an array`);
+    toolCalls = value.tool_calls.map((rawToolCall, index) => {
+      if (!isRecord(rawToolCall)) throw new Error(`${path}.tool_calls[${index}] must be an object`);
+      if (rawToolCall.type !== 'function') {
+        throw new Error(`${path}.tool_calls[${index}].type must be "function"`);
+      }
+      if (!isRecord(rawToolCall.function)) {
+        throw new Error(`${path}.tool_calls[${index}].function must be an object`);
+      }
+      return {
+        id: requireString(rawToolCall.id, `${path}.tool_calls[${index}].id`),
+        type: 'function',
+        function: {
+          name: requireString(rawToolCall.function.name, `${path}.tool_calls[${index}].function.name`),
+          arguments: requireString(
+            rawToolCall.function.arguments,
+            `${path}.tool_calls[${index}].function.arguments`,
+          ),
+        },
+      };
+    });
+  }
+
+  return {
+    role,
+    content:
+      value.content === undefined || value.content === null
+        ? value.content
+        : requireString(value.content, `${path}.content`),
+    ...(toolCalls ? { tool_calls: toolCalls } : {}),
+    ...(typeof value.tool_call_id === 'string' ? { tool_call_id: value.tool_call_id } : {}),
+    ...(typeof value.reasoning === 'string' ? { reasoning: value.reasoning } : {}),
+  };
+}
+
+function parseChatCompletionResponse(value: unknown): ChatCompletionResponse {
+  if (!isRecord(value)) throw new Error('chat completion response must be an object');
+  if (!Array.isArray(value.choices)) {
+    throw new Error('chat completion response choices must be an array');
+  }
+  return {
+    id: requireString(value.id, 'chat completion response.id'),
+    model: requireString(value.model, 'chat completion response.model'),
+    choices: value.choices.map((rawChoice, index) => {
+      if (!isRecord(rawChoice)) {
+        throw new Error(`chat completion response.choices[${index}] must be an object`);
+      }
+      return {
+        message: parseChatMessage(rawChoice.message, `chat completion response.choices[${index}].message`),
+        finish_reason: requireString(
+          rawChoice.finish_reason,
+          `chat completion response.choices[${index}].finish_reason`,
+        ),
+      };
+    }),
+    usage: parseUsage(value.usage),
+  };
+}
+
 /**
  * Run a single scenario against a single model.
  */
@@ -97,7 +191,8 @@ export async function runScenario(
         return buildErrorRun(scenario, model, messages, toolCalls, totalUsage, turnUsage, turnLatency, turnsUsed, `API error ${resp.status}: ${errText.slice(0, 500)}`);
       }
 
-      const response = (await resp.json()) as ChatCompletionResponse;
+      const payload: unknown = await resp.json();
+      const response = parseChatCompletionResponse(payload);
 
       // Track usage
       if (response.usage) {

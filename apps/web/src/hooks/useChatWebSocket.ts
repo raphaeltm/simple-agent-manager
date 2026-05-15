@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatMessageResponse, ChatSessionResponse } from '../lib/api';
 import { getChatSession } from '../lib/api';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -170,7 +171,7 @@ export function useChatWebSocket({
                 sessionId: sessionId,
                 role: (m.role as string) || 'assistant',
                 content: m.content as string,
-                toolMetadata: (m.toolMetadata as Record<string, unknown>) || null,
+                toolMetadata: maybeJsonRecord(m.toolMetadata),
                 createdAt: (m.createdAt as number) || Date.now(),
                 sequence: (m.sequence as number) ?? null,
               }));

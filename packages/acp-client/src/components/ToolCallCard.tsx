@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 
 import type { ToolCallContentItem,ToolCallItem } from '../hooks/useAcpMessages';
+import { isJsonRecord } from '../runtime-validation';
 import { FileDiffView } from './FileDiffView';
 import { TerminalBlock } from './TerminalBlock';
 
@@ -198,8 +199,8 @@ function hasRenderableContent(content: ToolCallContentItem): boolean {
     return content.data.length > 0;
   }
 
-  if (typeof content.data === 'object') {
-    return Object.keys(content.data as Record<string, unknown>).length > 0;
+  if (isJsonRecord(content.data)) {
+    return Object.keys(content.data).length > 0;
   }
 
   return false;

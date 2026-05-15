@@ -27,6 +27,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { signCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
@@ -126,7 +127,7 @@ async function fetchDefaultBranch(
       });
       return TRIAL_FALLBACK_BRANCH;
     }
-    const body = (await res.json()) as { default_branch?: unknown };
+    const body = expectJsonRecord(await res.json(), 'trial_orchestrator.default_branch_probe');
     if (typeof body.default_branch === 'string' && body.default_branch.length > 0) {
       return body.default_branch;
     }

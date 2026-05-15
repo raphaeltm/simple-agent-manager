@@ -16,6 +16,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env as AppEnv } from '../../env';
 import { buildSafeFtsQuery } from '../../lib/fts5';
 import { createModuleLogger } from '../../lib/logger';
+import { readRequestJsonRecord } from '../../lib/runtime-validation';
 import { runAgentLoop, SAM_SYSTEM_PROMPT } from './agent-loop';
 import { executeTool, SAM_TOOLS } from './tools';
 import type { ConversationRow, MessageRow, SamSseEvent } from './types';
@@ -181,10 +182,12 @@ export class SamSession extends DurableObject<AppEnv> {
 
   /** Handle POST /chat — run the agent loop and stream SSE. */
   private async handleChat(request: Request): Promise<Response> {
-    const body = (await request.json()) as {
-      conversationId?: string;
-      message: string;
-      userId: string;
+    const payload = await readRequestJsonRecord(request, 'sam_session.chat');
+    const body = {
+      conversationId:
+        typeof payload.conversationId === 'string' ? payload.conversationId : undefined,
+      message: typeof payload.message === 'string' ? payload.message : '',
+      userId: typeof payload.userId === 'string' ? payload.userId : '',
     };
 
     if (!body.message?.trim()) {

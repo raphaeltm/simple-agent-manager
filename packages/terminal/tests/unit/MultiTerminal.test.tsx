@@ -145,14 +145,22 @@ class MockWebSocket {
   }
 }
 
-(global as any).WebSocket = MockWebSocket;
+Object.defineProperty(globalThis, 'WebSocket', {
+  value: MockWebSocket,
+  writable: true,
+  configurable: true,
+});
 
 // Mock ResizeObserver (not available in jsdom)
-(global as any).ResizeObserver = class MockResizeObserver {
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  value: class MockResizeObserver {
   observe() {}
   unobserve() {}
   disconnect() {}
-};
+  },
+  writable: true,
+  configurable: true,
+});
 
 describe('MultiTerminal', () => {
   const defaultProps = {

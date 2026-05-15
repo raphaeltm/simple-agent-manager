@@ -144,6 +144,128 @@ interface ExperimentResult {
   durationMs: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireString(value: unknown, path: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`${path} must be a string`);
+  }
+  return value;
+}
+
+function requireNumber(value: unknown, path: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${path} must be a finite number`);
+  }
+  return value;
+}
+
+function parseToolArguments(raw: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isRecord(parsed)) {
+    throw new Error('tool_call arguments must be a JSON object');
+  }
+  return parsed;
+}
+
+function parseUsage(value: unknown): ChatCompletionResponse['usage'] {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error('usage must be an object when present');
+  }
+  return {
+    prompt_tokens: requireNumber(value.prompt_tokens, 'usage.prompt_tokens'),
+    completion_tokens: requireNumber(value.completion_tokens, 'usage.completion_tokens'),
+    total_tokens: requireNumber(value.total_tokens, 'usage.total_tokens'),
+  };
+}
+
+function parseChatMessage(value: unknown, path: string): ChatMessage {
+  if (!isRecord(value)) {
+    throw new Error(`${path} must be an object`);
+  }
+
+  const role = requireString(value.role, `${path}.role`);
+  const content =
+    value.content === undefined || value.content === null
+      ? value.content
+      : requireString(value.content, `${path}.content`);
+  const toolCallId =
+    value.tool_call_id === undefined
+      ? undefined
+      : requireString(value.tool_call_id, `${path}.tool_call_id`);
+
+  let toolCalls: ChatMessage['tool_calls'];
+  if (value.tool_calls !== undefined) {
+    if (!Array.isArray(value.tool_calls)) {
+      throw new Error(`${path}.tool_calls must be an array when present`);
+    }
+    toolCalls = value.tool_calls.map((toolCall, index) => {
+      if (!isRecord(toolCall)) {
+        throw new Error(`${path}.tool_calls[${index}] must be an object`);
+      }
+      if (toolCall.type !== 'function') {
+        throw new Error(`${path}.tool_calls[${index}].type must be "function"`);
+      }
+      if (!isRecord(toolCall.function)) {
+        throw new Error(`${path}.tool_calls[${index}].function must be an object`);
+      }
+      return {
+        id: requireString(toolCall.id, `${path}.tool_calls[${index}].id`),
+        type: 'function',
+        function: {
+          name: requireString(
+            toolCall.function.name,
+            `${path}.tool_calls[${index}].function.name`,
+          ),
+          arguments: requireString(
+            toolCall.function.arguments,
+            `${path}.tool_calls[${index}].function.arguments`,
+          ),
+        },
+      };
+    });
+  }
+
+  return {
+    role,
+    ...(content !== undefined ? { content } : {}),
+    ...(toolCalls ? { tool_calls: toolCalls } : {}),
+    ...(toolCallId ? { tool_call_id: toolCallId } : {}),
+  };
+}
+
+function parseChatCompletionResponse(value: unknown): ChatCompletionResponse {
+  if (!isRecord(value)) {
+    throw new Error('chat completion response must be an object');
+  }
+  if (!Array.isArray(value.choices)) {
+    throw new Error('chat completion response choices must be an array');
+  }
+
+  return {
+    id: requireString(value.id, 'chat completion response.id'),
+    model: requireString(value.model, 'chat completion response.model'),
+    choices: value.choices.map((choice, index) => {
+      if (!isRecord(choice)) {
+        throw new Error(`chat completion response.choices[${index}] must be an object`);
+      }
+      return {
+        message: parseChatMessage(choice.message, `chat completion response.choices[${index}].message`),
+        finish_reason: requireString(
+          choice.finish_reason,
+          `chat completion response.choices[${index}].finish_reason`,
+        ),
+      };
+    }),
+    usage: parseUsage(value.usage),
+  };
+}
+
 function buildUnifiedApiUrl(accountId: string, gatewayId: string): string {
   return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/compat/chat/completions`;
 }
@@ -189,7 +311,8 @@ async function callUnifiedApi(
     throw new Error(`API error ${resp.status}: ${errText.slice(0, 500)}`);
   }
 
-  return resp.json() as Promise<ChatCompletionResponse>;
+  const payload: unknown = await resp.json();
+  return parseChatCompletionResponse(payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +358,7 @@ async function runTwoToolLoop(
           totalTurns,
           failureCategory: 'tool-call-shape-mismatch',
           failureDetail: 'No choices in response',
-          responseShape: response as unknown as Record<string, unknown>,
+          responseShape: isRecord(response) ? response : undefined,
           durationMs: Date.now() - start,
         };
       }
@@ -263,7 +386,7 @@ async function runTwoToolLoop(
       for (const tc of msg.tool_calls) {
         let args: Record<string, unknown>;
         try {
-          args = JSON.parse(tc.function.arguments);
+          args = parseToolArguments(tc.function.arguments);
         } catch {
           return {
             modelId: displayName,
@@ -398,7 +521,8 @@ async function runWorkersAiToolLoop(
         };
       }
 
-      const response = (await resp.json()) as ChatCompletionResponse;
+      const payload: unknown = await resp.json();
+      const response = parseChatCompletionResponse(payload);
       const choice = response.choices?.[0];
       if (!choice) {
         return {
@@ -409,7 +533,7 @@ async function runWorkersAiToolLoop(
           totalTurns,
           failureCategory: 'tool-call-shape-mismatch',
           failureDetail: 'No choices in Workers AI response',
-          responseShape: response as unknown as Record<string, unknown>,
+          responseShape: isRecord(response) ? response : undefined,
           durationMs: Date.now() - start,
         };
       }
@@ -435,7 +559,7 @@ async function runWorkersAiToolLoop(
       for (const tc of msg.tool_calls) {
         let args: Record<string, unknown>;
         try {
-          args = JSON.parse(tc.function.arguments);
+          args = parseToolArguments(tc.function.arguments);
         } catch {
           return {
             modelId: displayName,

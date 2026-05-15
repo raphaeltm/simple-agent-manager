@@ -25,6 +25,7 @@ import { ProjectNode } from './nodes/ProjectNode';
 import { SessionNode } from './nodes/SessionNode';
 import { TaskNode } from './nodes/TaskNode';
 import { WorkspaceNode } from './nodes/WorkspaceNode';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 
 /** Delay before hiding tooltip after mouse leaves a node (ms). */
 const TOOLTIP_HIDE_DELAY_MS = 100;
@@ -158,7 +159,7 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
           <div className="sam-type-secondary text-fg-primary font-medium mb-1 truncate">
             {(tooltip.node.data?.label as string) ?? 'Entity'}
           </div>
-          <TooltipDetails data={tooltip.node.data as Record<string, unknown>} />
+          <TooltipDetails data={expectJsonRecord(tooltip.node.data, 'account-map.tooltip.node.data')} />
         </div>
       )}
 

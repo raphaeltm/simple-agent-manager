@@ -1,5 +1,7 @@
 import { useCallback, useRef,useState } from 'react';
 
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
+
 /**
  * Manages user-controllable tab ordering backed by localStorage.
  *
@@ -21,9 +23,15 @@ function loadState(workspaceId: string): TabOrderState {
   try {
     const raw = localStorage.getItem(`${STORAGE_KEY_PREFIX}${workspaceId}`);
     if (raw) {
-      const parsed = JSON.parse(raw) as TabOrderState;
-      if (parsed && typeof parsed.nextPosition === 'number' && parsed.positions) {
-        return parsed;
+      const parsed = expectJsonRecord(JSON.parse(raw), 'tab-order.state');
+      const positions = maybeJsonRecord(parsed.positions);
+      if (typeof parsed.nextPosition === 'number' && positions) {
+        return {
+          nextPosition: parsed.nextPosition,
+          positions: Object.fromEntries(
+            Object.entries(positions).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+          ),
+        };
       }
     }
   } catch {

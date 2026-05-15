@@ -101,8 +101,11 @@ export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonV
   if (typeof tokens.id_token === 'string') {
     const idClaims = decodeJwtPayload(tokens.id_token);
     if (idClaims) {
-      const authNamespace = idClaims['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
-      planType = authNamespace?.chatgpt_plan_type as string | undefined;
+      const authNamespace = maybeJsonRecord(idClaims['https://api.openai.com/auth']);
+      planType =
+        typeof authNamespace?.chatgpt_plan_type === 'string'
+          ? authNamespace.chatgpt_plan_type
+          : undefined;
     }
   }
 

@@ -60,6 +60,68 @@ interface TelemetryResponse {
   errors?: Array<{ message: string }>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireErrorList(value: unknown, context: string): Array<{ message: string }> | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error(`${context}.errors must be an array when present`);
+  return value.map((item, index) => {
+    if (!isRecord(item) || typeof item.message !== 'string') {
+      throw new Error(`${context}.errors[${index}].message must be a string`);
+    }
+    return { message: item.message };
+  });
+}
+
+function parseD1QueryResponse(value: unknown): D1QueryResponse {
+  if (!isRecord(value)) throw new Error('D1 query response must be an object');
+  if (typeof value.success !== 'boolean') throw new Error('D1 query response success must be boolean');
+  if (!Array.isArray(value.result)) throw new Error('D1 query response result must be an array');
+  return {
+    success: value.success,
+    result: value.result.map((item, index) => {
+      if (!isRecord(item)) throw new Error(`D1 query result[${index}] must be an object`);
+      if (!Array.isArray(item.results)) {
+        throw new Error(`D1 query result[${index}].results must be an array`);
+      }
+      return {
+        results: item.results.map((row, rowIndex) => {
+          if (!isRecord(row)) {
+            throw new Error(`D1 query result[${index}].results[${rowIndex}] must be an object`);
+          }
+          return row;
+        }),
+        meta: isRecord(item.meta)
+          ? { rows_read: typeof item.meta.rows_read === 'number' ? item.meta.rows_read : undefined }
+          : undefined,
+      };
+    }),
+    errors: requireErrorList(value.errors, 'D1 query response'),
+  };
+}
+
+function parseTelemetryResponse(value: unknown): TelemetryResponse {
+  if (!isRecord(value)) throw new Error('Telemetry response must be an object');
+  if (typeof value.success !== 'boolean') throw new Error('Telemetry response success must be boolean');
+  let data: Array<Record<string, unknown>> | undefined;
+  if (isRecord(value.result) && value.result.data !== undefined) {
+    if (!Array.isArray(value.result.data)) {
+      throw new Error('Telemetry response result.data must be an array');
+    }
+    data = value.result.data.map((row, index) => {
+      if (!isRecord(row)) throw new Error(`Telemetry response result.data[${index}] must be an object`);
+      return row;
+    });
+  }
+  return {
+    success: value.success,
+    result: data ? { data } : undefined,
+    errors: requireErrorList(value.errors, 'Telemetry response'),
+  };
+}
+
 // =============================================================================
 // Configuration
 // =============================================================================
@@ -112,7 +174,8 @@ async function queryD1(
     throw new Error(`D1 query failed: ${resp.status} ${resp.statusText}`);
   }
 
-  return (await resp.json()) as D1QueryResponse;
+  const payload: unknown = await resp.json();
+  return parseD1QueryResponse(payload);
 }
 
 async function queryWorkersTelemetry(
@@ -139,7 +202,8 @@ async function queryWorkersTelemetry(
     throw new Error(`Telemetry query failed: ${resp.status} ${resp.statusText}`);
   }
 
-  return (await resp.json()) as TelemetryResponse;
+  const payload: unknown = await resp.json();
+  return parseTelemetryResponse(payload);
 }
 
 // =============================================================================

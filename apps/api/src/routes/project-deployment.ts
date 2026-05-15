@@ -9,12 +9,13 @@ import {
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
-import { expectJsonRecord } from '../lib/runtime-validation';
+import { expectJsonRecord, maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -38,6 +39,10 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 const projectDeploymentRoutes = new Hono<{ Bindings: Env }>();
+
+const googleDeployTokenResponseSchema = v.object({
+  access_token: v.string(),
+});
 
 // ─── OAuth flow (user session auth) ─────────────────────────────────────
 
@@ -539,15 +544,20 @@ gcpDeployCallbackRoute.get(
     });
 
     if (!tokenResponse.ok) {
-      const errBody = await tokenResponse.json().catch(() => ({})) as { error?: string };
+      const errPayload: unknown = await tokenResponse.json().catch(() => ({}));
+      const errBody = maybeJsonRecord(errPayload) ?? {};
       log.error('project_deployment.google_token_exchange_failed', {
         status: tokenResponse.status,
-        error: errBody.error ?? 'unknown',
+        error: typeof errBody.error === 'string' ? errBody.error : 'unknown',
       });
       return c.redirect(`${appUrl}?gcp_deploy_error=token_exchange_failed`);
     }
 
-    const tokenData = (await tokenResponse.json()) as { access_token: string };
+    const tokenData = await readResponseJson(
+      tokenResponse,
+      googleDeployTokenResponseSchema,
+      'project_deployment.google_token_response',
+    );
 
     // Store token in KV with opaque handle (for subsequent API calls)
     const handle = crypto.randomUUID();

@@ -10,6 +10,7 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import { API_URL, request } from './client';
+import { parseJsonRecord } from '../runtime-validation';
 
 // =============================================================================
 // List files
@@ -90,7 +91,7 @@ export function uploadLibraryFile(
 
     xhr.addEventListener('load', () => {
       try {
-        const data = JSON.parse(xhr.responseText) as Record<string, unknown>;
+        const data = parseJsonRecord(xhr.responseText, 'library.upload');
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(data as unknown as FileMetadataResponse);
         } else {
@@ -142,7 +143,7 @@ export function replaceLibraryFile(
 
     xhr.addEventListener('load', () => {
       try {
-        const data = JSON.parse(xhr.responseText) as Record<string, unknown>;
+        const data = parseJsonRecord(xhr.responseText, 'library.replace');
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(data as unknown as FileMetadataResponse);
         } else {

@@ -167,6 +167,65 @@ export interface TrialErrorEvent {
   at: number;
 }
 
+const TrialErrorCodeSchema = v.picklist([
+  'invalid_url',
+  'repo_not_found',
+  'repo_private',
+  'repo_too_large',
+  'trials_disabled',
+  'cap_exceeded',
+  'existing_trial',
+]);
+
+export const TrialEventSchema = v.variant('type', [
+  v.object({
+    type: v.literal('trial.started'),
+    trialId: v.string(),
+    projectId: v.string(),
+    repoUrl: v.string(),
+    startedAt: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.progress'),
+    stage: v.string(),
+    progress: v.optional(v.number()),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.knowledge'),
+    entity: v.string(),
+    observation: v.string(),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.idea'),
+    ideaId: v.string(),
+    title: v.string(),
+    summary: v.string(),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.ready'),
+    trialId: v.string(),
+    projectId: v.string(),
+    workspaceUrl: v.string(),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.agent_activity'),
+    role: v.picklist(['assistant', 'tool', 'thinking']),
+    text: v.string(),
+    toolName: v.optional(v.string()),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.error'),
+    error: TrialErrorCodeSchema,
+    message: v.string(),
+    at: v.number(),
+  }),
+]);
+
 export type TrialEvent =
   | TrialStartedEvent
   | TrialProgressEvent
@@ -175,6 +234,10 @@ export type TrialEvent =
   | TrialReadyEvent
   | TrialAgentActivityEvent
   | TrialErrorEvent;
+
+export function parseTrialEvent(value: unknown): TrialEvent {
+  return v.parse(TrialEventSchema, value);
+}
 
 // ---------------------------------------------------------------------------
 // UI-facing idea shape (derived from TrialIdeaEvent)

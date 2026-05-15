@@ -8,6 +8,7 @@ import { UserMenu } from '../components/UserMenu';
 import { useToast } from '../hooks/useToast';
 import { createProject, listGitHubInstallations } from '../lib/api';
 import { API_URL } from '../lib/api/client';
+import { readResponseJson } from '../lib/runtime-validation';
 
 export function ProjectCreate() {
   const navigate = useNavigate();
@@ -37,7 +38,9 @@ export function ProjectCreate() {
       try {
         const resp = await fetch(`${API_URL}/api/config/artifacts-enabled`, { credentials: 'include' });
         if (resp.ok) {
-          const data = await resp.json() as { enabled: boolean };
+          const data = await readResponseJson(resp, 'config.artifacts_enabled', (record) => ({
+            enabled: record.enabled === true,
+          }));
           setArtifactsEnabled(data.enabled);
         }
       } catch {

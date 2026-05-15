@@ -26,6 +26,10 @@ export function optionalJsonRecord(value: unknown, context: string): JsonRecord 
   return expectJsonRecord(value, context);
 }
 
+export function maybeJsonRecord(value: unknown): JsonRecord | null {
+  return isJsonRecord(value) ? value : null;
+}
+
 export function parseJsonRecord(raw: string, context: string): JsonRecord {
   let parsed: unknown;
   try {
@@ -58,4 +62,41 @@ export function requireString(root: JsonRecord, key: string, context: string): s
     throw new RuntimeValidationError(`Invalid payload at ${context}.${key}: expected string`, context);
   }
   return value;
+}
+
+export function optionalString(root: JsonRecord, key: string): string | undefined {
+  const value = root[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+export function requireNumber(root: JsonRecord, key: string, context: string): number {
+  const value = root[key];
+  if (typeof value !== 'number') {
+    throw new RuntimeValidationError(`Invalid payload at ${context}.${key}: expected number`, context);
+  }
+  return value;
+}
+
+export function requireBoolean(root: JsonRecord, key: string, context: string): boolean {
+  const value = root[key];
+  if (typeof value !== 'boolean') {
+    throw new RuntimeValidationError(`Invalid payload at ${context}.${key}: expected boolean`, context);
+  }
+  return value;
+}
+
+export function requireArray(root: JsonRecord, key: string, context: string): unknown[] {
+  const value = root[key];
+  if (!Array.isArray(value)) {
+    throw new RuntimeValidationError(`Invalid payload at ${context}.${key}: expected array`, context);
+  }
+  return value;
+}
+
+export async function readResponseJson<T>(
+  response: Response,
+  context: string,
+  parse: (value: JsonRecord) => T
+): Promise<T> {
+  return parse(await readResponseJsonRecord(response, context));
 }

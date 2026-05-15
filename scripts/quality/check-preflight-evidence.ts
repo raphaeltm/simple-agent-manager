@@ -19,6 +19,35 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parsePullRequestPayload(raw: string): { body: string } {
+  const payload: unknown = JSON.parse(raw);
+  if (!isRecord(payload)) {
+    fail('GitHub event payload must be an object.');
+  }
+
+  const pullRequest = payload.pull_request;
+  if (!isRecord(pullRequest)) {
+    fail('GitHub event payload is missing pull_request.');
+  }
+
+  const body = pullRequest.body;
+  if (body !== undefined && body !== null && typeof body !== 'string') {
+    fail('GitHub event pull_request.body must be a string when present.');
+  }
+
+  if (pullRequest.html_url !== undefined && typeof pullRequest.html_url !== 'string') {
+    fail('GitHub event pull_request.html_url must be a string when present.');
+  }
+
+  return {
+    body: body ?? '',
+  };
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -88,11 +117,9 @@ function main(): void {
     fail('GITHUB_EVENT_PATH is missing.');
   }
 
-  const payload = JSON.parse(readFileSync(eventPath, 'utf8')) as {
-    pull_request?: { body?: string | null; html_url?: string };
-  };
+  const payload = parsePullRequestPayload(readFileSync(eventPath, 'utf8'));
 
-  const body = payload.pull_request?.body ?? '';
+  const body = payload.body;
   if (!body.trim()) {
     fail('Pull request body is empty. Fill the PR template, including Agent Preflight evidence.');
   }

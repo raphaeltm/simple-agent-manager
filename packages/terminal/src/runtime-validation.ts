@@ -16,3 +16,11 @@ export function parseJsonRecord(raw: string, context: string): JsonRecord {
   }
   return expectJsonRecord(parsed, context);
 }
+
+export function requireArray(root: JsonRecord, key: string, context: string): unknown[] {
+  const value = root[key];
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid payload at ${context}.${key}: expected array`);
+  }
+  return value;
+}
