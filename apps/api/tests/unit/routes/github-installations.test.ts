@@ -137,11 +137,52 @@ describe('GitHub App installation sharing', () => {
     expect(allLogCalls).not.toContain(token);
   };
 
+  const accessibleAcmeInstallation = () => [
+    { id: 123, account: { login: 'acme', type: 'Organization' } },
+  ];
+
+  const existingInstallationRow = () => ({
+    id: 'inst-row-111',
+    userId: 'user-1',
+    installationId: '111',
+    accountType: 'organization',
+    accountName: 'existing',
+    createdAt: '2026-05-08T00:00:00.000Z',
+    updatedAt: '2026-05-08T00:00:00.000Z',
+  });
+
+  const mockSyncInsertFailure = (error: Error) => {
+    whereResponses.push([{ installationId: '111' }], [existingInstallationRow()]);
+    mocks.insertError = error;
+    mocks.getUserAccessibleInstallations.mockResolvedValue([
+      { id: 111, account: { login: 'existing', type: 'Organization' } },
+      { id: 222, account: { login: 'acme', type: 'Organization' } },
+    ]);
+  };
+
+  const expectOnlyExistingInstallation = async (res: Response) => {
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual([
+      expect.objectContaining({ installationId: '111' }),
+    ]);
+  };
+
+  const callbackInsertFailure = async (error: Error) => {
+    limitResponses.push([]);
+    mocks.insertError = error;
+    mocks.getUserAccessibleInstallations.mockResolvedValue(accessibleAcmeInstallation());
+
+    const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      'https://app.example.com/settings?github_app=error&reason=installation_save_failed'
+    );
+  };
+
   it('stores callback installation only when the GitHub user can access it', async () => {
     limitResponses.push([]);
-    mocks.getUserAccessibleInstallations.mockResolvedValue([
-      { id: 123, account: { login: 'acme', type: 'Organization' } },
-    ]);
+    mocks.getUserAccessibleInstallations.mockResolvedValue(accessibleAcmeInstallation());
 
     const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
 
@@ -229,17 +270,8 @@ describe('GitHub App installation sharing', () => {
   });
 
   it('logs callback insert conflicts without exposing token values', async () => {
-    limitResponses.push([]);
-    mocks.insertError = new Error('UNIQUE constraint failed: github_installations.user_id, installation_id');
-    mocks.getUserAccessibleInstallations.mockResolvedValue([
-      { id: 123, account: { login: 'acme', type: 'Organization' } },
-    ]);
-
-    const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
-
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(
-      'https://app.example.com/settings?github_app=error&reason=installation_save_failed'
+    await callbackInsertFailure(
+      new Error('UNIQUE constraint failed: github_installations.user_id, installation_id')
     );
     expect(mocks.log.warn).toHaveBeenCalledWith('github.installation_callback.insert_result', {
       userId: 'user-1',
@@ -253,18 +285,7 @@ describe('GitHub App installation sharing', () => {
   });
 
   it('logs callback insert errors separately from conflicts', async () => {
-    limitResponses.push([]);
-    mocks.insertError = new Error('D1 write unavailable');
-    mocks.getUserAccessibleInstallations.mockResolvedValue([
-      { id: 123, account: { login: 'acme', type: 'Organization' } },
-    ]);
-
-    const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
-
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(
-      'https://app.example.com/settings?github_app=error&reason=installation_save_failed'
-    );
+    await callbackInsertFailure(new Error('D1 write unavailable'));
     expect(mocks.log.error).toHaveBeenCalledWith('github.installation_callback.insert_result', {
       userId: 'user-1',
       installationId: '123',
@@ -387,29 +408,13 @@ describe('GitHub App installation sharing', () => {
   });
 
   it('logs sync insert conflicts without blocking the installations response', async () => {
-    whereResponses.push(
-      [{ installationId: '111' }],
-      [
-        {
-          id: 'inst-row-111',
-          userId: 'user-1',
-          installationId: '111',
-          accountType: 'organization',
-          accountName: 'existing',
-          createdAt: '2026-05-08T00:00:00.000Z',
-          updatedAt: '2026-05-08T00:00:00.000Z',
-        },
-      ]
+    mockSyncInsertFailure(
+      new Error('UNIQUE constraint failed: github_installations.user_id, installation_id')
     );
-    mocks.insertError = new Error('UNIQUE constraint failed: github_installations.user_id, installation_id');
-    mocks.getUserAccessibleInstallations.mockResolvedValue([
-      { id: 111, account: { login: 'existing', type: 'Organization' } },
-      { id: 222, account: { login: 'acme', type: 'Organization' } },
-    ]);
 
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
-    expect(res.status).toBe(200);
+    await expectOnlyExistingInstallation(res);
     expect(mocks.log.warn).toHaveBeenCalledWith('github.installations_sync.insert_result', {
       userId: 'user-1',
       installationId: '222',
@@ -418,35 +423,14 @@ describe('GitHub App installation sharing', () => {
       accountType: 'Organization',
       error: 'UNIQUE constraint failed: github_installations.user_id, installation_id',
     });
-    await expect(res.json()).resolves.toEqual([
-      expect.objectContaining({ installationId: '111' }),
-    ]);
   });
 
   it('logs sync insert errors without blocking the installations response', async () => {
-    whereResponses.push(
-      [{ installationId: '111' }],
-      [
-        {
-          id: 'inst-row-111',
-          userId: 'user-1',
-          installationId: '111',
-          accountType: 'organization',
-          accountName: 'existing',
-          createdAt: '2026-05-08T00:00:00.000Z',
-          updatedAt: '2026-05-08T00:00:00.000Z',
-        },
-      ]
-    );
-    mocks.insertError = new Error('D1 write unavailable');
-    mocks.getUserAccessibleInstallations.mockResolvedValue([
-      { id: 111, account: { login: 'existing', type: 'Organization' } },
-      { id: 222, account: { login: 'acme', type: 'Organization' } },
-    ]);
+    mockSyncInsertFailure(new Error('D1 write unavailable'));
 
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
-    expect(res.status).toBe(200);
+    await expectOnlyExistingInstallation(res);
     expect(mocks.log.error).toHaveBeenCalledWith('github.installations_sync.insert_result', {
       userId: 'user-1',
       installationId: '222',
@@ -455,9 +439,6 @@ describe('GitHub App installation sharing', () => {
       accountType: 'Organization',
       error: 'D1 write unavailable',
     });
-    await expect(res.json()).resolves.toEqual([
-      expect.objectContaining({ installationId: '111' }),
-    ]);
   });
 
   it('logs BetterAuth token metadata without logging the token value', async () => {
