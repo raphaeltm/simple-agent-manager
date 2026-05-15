@@ -34,6 +34,80 @@ afterEach(() => {
 });
 
 // =============================================================================
+// Shared test helpers for Contracts 4 & 5 (API Worker → VM Agent calls)
+// =============================================================================
+
+interface MockFetchCapture {
+  url: string | null;
+  body: string | null;
+  headers: Headers | null;
+  method: string | null;
+}
+
+/**
+ * Sets up vi.doMock for the standard nodeAgentRequest dependency trio
+ * (jwt, telemetry, fetch-timeout) and returns a capture object for inspecting
+ * the outgoing HTTP request. Call vi.resetModules() before this.
+ */
+function setupNodeAgentMocks(
+  responseInit: { status: number; body?: string | null } = { status: 200, body: '{"ok":true}' },
+  signTokenOverride?: ReturnType<typeof vi.fn>,
+): MockFetchCapture {
+  const capture: MockFetchCapture = { url: null, body: null, headers: null, method: null };
+
+  vi.doMock('../../src/services/jwt', () => ({
+    signNodeManagementToken: signTokenOverride ?? vi.fn().mockResolvedValue({
+      token: 'mock-jwt',
+      expiresAt: new Date().toISOString(),
+    }),
+  }));
+
+  vi.doMock('../../src/services/telemetry', () => ({
+    recordNodeRoutingMetric: vi.fn(),
+  }));
+
+  vi.doMock('../../src/services/fetch-timeout', () => ({
+    fetchWithTimeout: vi.fn().mockImplementation((url: string, init: RequestInit) => {
+      capture.url = url;
+      capture.body = (init.body as string) ?? null;
+      capture.headers = new Headers(init.headers);
+      capture.method = init.method ?? 'GET';
+      const resBody = responseInit.body ?? null;
+      return Promise.resolve(
+        new Response(resBody, {
+          status: responseInit.status,
+          headers: resBody ? { 'Content-Type': 'application/json' } : undefined,
+        }),
+      );
+    }),
+    getTimeoutMs: vi.fn().mockReturnValue(30000),
+  }));
+
+  return capture;
+}
+
+/**
+ * Like setupNodeAgentMocks but the fetch mock rejects with an error.
+ */
+function setupNodeAgentMocksWithError(errorMessage: string): void {
+  vi.doMock('../../src/services/jwt', () => ({
+    signNodeManagementToken: vi.fn().mockResolvedValue({
+      token: 'mock-jwt',
+      expiresAt: new Date().toISOString(),
+    }),
+  }));
+
+  vi.doMock('../../src/services/telemetry', () => ({
+    recordNodeRoutingMetric: vi.fn(),
+  }));
+
+  vi.doMock('../../src/services/fetch-timeout', () => ({
+    fetchWithTimeout: vi.fn().mockRejectedValue(new Error(errorMessage)),
+    getTimeoutMs: vi.fn().mockReturnValue(30000),
+  }));
+}
+
+// =============================================================================
 // Contract 1: Attachment Transfer (CRITICAL — different auth model)
 // =============================================================================
 
@@ -399,37 +473,7 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
   describe('payload structure', () => {
     it('sendPromptToAgentOnNode sends { prompt } in JSON body', async () => {
       vi.resetModules();
-
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: vi.fn().mockResolvedValue({
-          token: 'mock-jwt',
-          expiresAt: new Date().toISOString(),
-        }),
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
-      let capturedBody: string | null = null;
-      let capturedUrl: string | null = null;
-      let capturedHeaders: Headers | null = null;
-
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockImplementation((url: string, init: RequestInit) => {
-          capturedUrl = url;
-          capturedBody = init.body as string;
-          capturedHeaders = new Headers(init.headers);
-          return Promise.resolve(
-            new Response(JSON.stringify({ ok: true }), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' },
-            }),
-          );
-        }),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      const capture = setupNodeAgentMocks();
       const { sendPromptToAgentOnNode } = await import('../../src/services/node-agent');
 
       const env = {
@@ -447,55 +491,27 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       );
 
       // Verify URL path
-      expect(capturedUrl).toContain('/workspaces/ws-test/agent-sessions/sess-xyz/prompt');
-      expect(capturedUrl).toContain('node-abc.vm.example.com');
+      expect(capture.url).toContain('/workspaces/ws-test/agent-sessions/sess-xyz/prompt');
+      expect(capture.url).toContain('node-abc.vm.example.com');
 
       // Verify body shape
-      const parsedBody = JSON.parse(capturedBody!);
+      const parsedBody = JSON.parse(capture.body!);
       expect(parsedBody).toEqual({ prompt: 'Fix the bug in auth.ts' });
 
       // Verify auth headers (node management token via Bearer header)
-      expect(capturedHeaders!.get('Authorization')).toBe('Bearer mock-jwt');
-      expect(capturedHeaders!.get('Content-Type')).toBe('application/json');
+      expect(capture.headers!.get('Authorization')).toBe('Bearer mock-jwt');
+      expect(capture.headers!.get('Content-Type')).toBe('application/json');
 
       // Verify custom routing headers set by nodeAgentRequest
-      expect(capturedHeaders!.get('X-SAM-Node-Id')).toBe('node-abc');
-      expect(capturedHeaders!.get('X-SAM-Workspace-Id')).toBe('ws-test');
+      expect(capture.headers!.get('X-SAM-Node-Id')).toBe('node-abc');
+      expect(capture.headers!.get('X-SAM-Workspace-Id')).toBe('ws-test');
     });
   });
 
   describe('startAgentSessionOnNode payload structure', () => {
     it('sends complex nested payload with MCP servers and overrides', async () => {
       vi.resetModules();
-
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: vi.fn().mockResolvedValue({
-          token: 'mock-jwt',
-          expiresAt: new Date().toISOString(),
-        }),
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
-      let capturedBody: string | null = null;
-      let capturedUrl: string | null = null;
-
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockImplementation((url: string, init: RequestInit) => {
-          capturedUrl = url;
-          capturedBody = init.body as string;
-          return Promise.resolve(
-            new Response(JSON.stringify({ ok: true }), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' },
-            }),
-          );
-        }),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      const capture = setupNodeAgentMocks();
       const { startAgentSessionOnNode } = await import('../../src/services/node-agent');
 
       const env = {
@@ -522,10 +538,10 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       );
 
       // Verify URL path
-      expect(capturedUrl).toContain('/workspaces/ws-test/agent-sessions/sess-xyz/start');
+      expect(capture.url).toContain('/workspaces/ws-test/agent-sessions/sess-xyz/start');
 
       // Verify body has all expected fields
-      const parsedBody = JSON.parse(capturedBody!);
+      const parsedBody = JSON.parse(capture.body!);
       expect(parsedBody.agentType).toBe('claude-code');
       expect(parsedBody.initialPrompt).toBe('Fix the bug');
 
@@ -548,33 +564,7 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
 
     it('omits optional fields when not provided', async () => {
       vi.resetModules();
-
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: vi.fn().mockResolvedValue({
-          token: 'mock-jwt',
-          expiresAt: new Date().toISOString(),
-        }),
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
-      let capturedBody: string | null = null;
-
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockImplementation((_url: string, init: RequestInit) => {
-          capturedBody = init.body as string;
-          return Promise.resolve(
-            new Response(JSON.stringify({ ok: true }), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' },
-            }),
-          );
-        }),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      const capture = setupNodeAgentMocks();
       const { startAgentSessionOnNode } = await import('../../src/services/node-agent');
 
       await startAgentSessionOnNode(
@@ -588,7 +578,7 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
         // No MCP server, no overrides, no task context
       );
 
-      const parsedBody = JSON.parse(capturedBody!);
+      const parsedBody = JSON.parse(capture.body!);
       expect(parsedBody.agentType).toBe('claude-code');
       expect(parsedBody.initialPrompt).toBe('Hello');
       expect(parsedBody.mcpServers).toBeUndefined();
@@ -610,26 +600,8 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
   describe('cancelAgentSessionOnNode', () => {
     it('returns { success: true, status: 200 } on success', async () => {
       vi.resetModules();
-
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: vi.fn().mockResolvedValue({
-          token: 'mock-jwt',
-          expiresAt: new Date().toISOString(),
-        }),
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
       // VM agent returns 204 No Content on successful cancel
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockResolvedValue(
-          new Response(null, { status: 204 }),
-        ),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      setupNodeAgentMocks({ status: 204, body: null });
       const { cancelAgentSessionOnNode } = await import('../../src/services/node-agent');
 
       const result = await cancelAgentSessionOnNode(
@@ -648,29 +620,8 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
 
     it('returns { success: false, status: 409 } when no prompt in flight (does NOT throw)', async () => {
       vi.resetModules();
-
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: vi.fn().mockResolvedValue({
-          token: 'mock-jwt',
-          expiresAt: new Date().toISOString(),
-        }),
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
       // VM agent returns 409 when no prompt is in flight
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockResolvedValue(
-          new Response(JSON.stringify({ error: 'no active prompt' }), {
-            status: 409,
-            headers: { 'Content-Type': 'application/json' },
-          }),
-        ),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      setupNodeAgentMocks({ status: 409, body: '{"error":"no active prompt"}' });
       const { cancelAgentSessionOnNode } = await import('../../src/services/node-agent');
 
       // Should NOT throw — 409 is expected and handled gracefully
@@ -688,24 +639,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
 
     it('returns { success: false, status: 500 } for unrecognized errors', async () => {
       vi.resetModules();
-
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: vi.fn().mockResolvedValue({
-          token: 'mock-jwt',
-          expiresAt: new Date().toISOString(),
-        }),
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
-      // Simulate a network error (no HTTP status in error message)
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockRejectedValue(new Error('Network error: connection refused')),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      setupNodeAgentMocksWithError('Network error: connection refused');
       const { cancelAgentSessionOnNode } = await import('../../src/services/node-agent');
 
       const result = await cancelAgentSessionOnNode(
@@ -722,30 +656,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
 
     it('sends POST to correct cancel path', async () => {
       vi.resetModules();
-
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: vi.fn().mockResolvedValue({
-          token: 'mock-jwt',
-          expiresAt: new Date().toISOString(),
-        }),
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
-      let capturedUrl: string | null = null;
-      let capturedMethod: string | null = null;
-
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockImplementation((url: string, init: RequestInit) => {
-          capturedUrl = url;
-          capturedMethod = init.method ?? 'GET';
-          return Promise.resolve(new Response(null, { status: 204 }));
-        }),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      const capture = setupNodeAgentMocks({ status: 204, body: null });
       const { cancelAgentSessionOnNode } = await import('../../src/services/node-agent');
 
       await cancelAgentSessionOnNode(
@@ -756,38 +667,15 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         'user-123',
       );
 
-      expect(capturedMethod).toBe('POST');
-      expect(capturedUrl).toContain('/workspaces/ws-test/agent-sessions/sess-xyz/cancel');
+      expect(capture.method).toBe('POST');
+      expect(capture.url).toContain('/workspaces/ws-test/agent-sessions/sess-xyz/cancel');
     });
   });
 
   describe('stopAgentSessionOnNode', () => {
     it('sends POST to correct stop path', async () => {
       vi.resetModules();
-
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: vi.fn().mockResolvedValue({
-          token: 'mock-jwt',
-          expiresAt: new Date().toISOString(),
-        }),
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
-      let capturedUrl: string | null = null;
-      let capturedMethod: string | null = null;
-
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockImplementation((url: string, init: RequestInit) => {
-          capturedUrl = url;
-          capturedMethod = init.method ?? 'GET';
-          return Promise.resolve(new Response(null, { status: 204 }));
-        }),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      const capture = setupNodeAgentMocks({ status: 204, body: null });
       const { stopAgentSessionOnNode } = await import('../../src/services/node-agent');
 
       await stopAgentSessionOnNode(
@@ -798,34 +686,13 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         'user-123',
       );
 
-      expect(capturedMethod).toBe('POST');
-      expect(capturedUrl).toContain('/workspaces/ws-test/agent-sessions/sess-xyz/stop');
+      expect(capture.method).toBe('POST');
+      expect(capture.url).toContain('/workspaces/ws-test/agent-sessions/sess-xyz/stop');
     });
 
     it('throws on non-2xx response (unlike cancel which catches)', async () => {
       vi.resetModules();
-
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: vi.fn().mockResolvedValue({
-          token: 'mock-jwt',
-          expiresAt: new Date().toISOString(),
-        }),
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockResolvedValue(
-          new Response(JSON.stringify({ error: 'session not found' }), {
-            status: 404,
-            headers: { 'Content-Type': 'application/json' },
-          }),
-        ),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      setupNodeAgentMocks({ status: 404, body: '{"error":"session not found"}' });
       const { stopAgentSessionOnNode } = await import('../../src/services/node-agent');
 
       // stop THROWS on error (unlike cancel which returns { success: false })
@@ -850,24 +717,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         expiresAt: new Date().toISOString(),
       });
 
-      vi.doMock('../../src/services/jwt', () => ({
-        signNodeManagementToken: mockSignToken,
-      }));
-
-      vi.doMock('../../src/services/telemetry', () => ({
-        recordNodeRoutingMetric: vi.fn(),
-      }));
-
-      let capturedHeaders: Headers | null = null;
-
-      vi.doMock('../../src/services/fetch-timeout', () => ({
-        fetchWithTimeout: vi.fn().mockImplementation((_url: string, init: RequestInit) => {
-          capturedHeaders = new Headers(init.headers);
-          return Promise.resolve(new Response(null, { status: 204 }));
-        }),
-        getTimeoutMs: vi.fn().mockReturnValue(30000),
-      }));
-
+      const capture = setupNodeAgentMocks({ status: 204, body: null }, mockSignToken);
       const { cancelAgentSessionOnNode } = await import('../../src/services/node-agent');
 
       await cancelAgentSessionOnNode(
@@ -880,7 +730,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
 
       // Verify it used signNodeManagementToken (not signCallbackToken or signTerminalToken)
       expect(mockSignToken).toHaveBeenCalledWith('user-123', 'node-abc', 'ws-test', expect.anything());
-      expect(capturedHeaders!.get('Authorization')).toBe('Bearer mgmt-jwt');
+      expect(capture.headers!.get('Authorization')).toBe('Bearer mgmt-jwt');
     });
   });
 });
