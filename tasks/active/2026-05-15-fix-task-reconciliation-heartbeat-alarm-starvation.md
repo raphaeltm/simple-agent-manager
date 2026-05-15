@@ -24,20 +24,20 @@ The affected workspace node was still healthy and heartbeating. Code inspection 
 
 ## Implementation Checklist
 
-- [ ] Add a regression test proving the heartbeat alarm fast path includes the reconciliation deadline for idle task-mode sessions.
-- [ ] Add a regression test proving heartbeat alarm scheduling still includes workspace idle checks, matching full alarm recomputation.
-- [ ] Refactor ProjectData alarm candidate calculation so `recalculateAlarm()` and heartbeat-triggered scheduling cannot diverge again.
-- [ ] Run focused ProjectData/reconciliation tests.
-- [ ] Run API lint/typecheck/test validation for the touched package.
+- [x] Add a regression test proving the heartbeat alarm fast path includes the reconciliation deadline for idle task-mode sessions.
+- [x] Add a regression test proving heartbeat alarm scheduling still includes workspace idle checks, matching full alarm recomputation.
+- [x] Refactor ProjectData alarm candidate calculation so `recalculateAlarm()` and heartbeat-triggered scheduling cannot diverge again.
+- [x] Run focused ProjectData/reconciliation tests.
+- [x] Run API lint/typecheck/test validation for the touched package.
 - [ ] Document the root cause and verification in the PR.
 
 ## Acceptance Criteria
 
-- [ ] A healthy node heartbeat cannot push the ProjectData alarm later than an eligible task-mode reconciliation check-in.
-- [ ] Heartbeat-triggered alarm scheduling considers the same lifecycle alarm candidates as full recomputation.
-- [ ] Existing heartbeat timeout behavior remains covered.
-- [ ] Focused tests pass locally.
-- [ ] Full relevant API checks pass before PR.
+- [x] A healthy node heartbeat cannot push the ProjectData alarm later than an eligible task-mode reconciliation check-in.
+- [x] Heartbeat-triggered alarm scheduling considers the same lifecycle alarm candidates as full recomputation.
+- [x] Existing heartbeat timeout behavior remains covered.
+- [x] Focused tests pass locally.
+- [x] Full relevant API checks pass before PR.
 
 ## References
 

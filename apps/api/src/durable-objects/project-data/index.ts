@@ -14,6 +14,7 @@ import { createModuleLogger, serializeError } from '../../lib/logger';
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
+import { computeProjectDataAlarmTime } from './alarm-schedule';
 import * as attention from './attention';
 import * as attentionExpiry from './attention-expiry';
 import * as commands from './commands';
@@ -728,27 +729,13 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private async recalculateAlarm(): Promise<void> {
-    const { idleCleanupTime, workspaceIdleCheckTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
-    const heartbeatTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
-    const pollIntervalMs = Number.parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
-    const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
-    const attentionTime = attention.computeAttentionAlarmTime(this.sql);
-    const reconciliationTime = reconciliation.computeReconciliationAlarmTime(this.sql, this.env);
-    const candidates = [idleCleanupTime, heartbeatTime, workspaceIdleCheckTime, mailboxTime, attentionTime, reconciliationTime].filter((t): t is number => t !== null);
-    if (candidates.length > 0) await this.ctx.storage.setAlarm(Math.min(...candidates));
+    const alarmTime = computeProjectDataAlarmTime(this.sql, this.env);
+    if (alarmTime !== null) await this.ctx.storage.setAlarm(alarmTime);
     else await this.ctx.storage.deleteAlarm();
   }
 
   private async scheduleHeartbeatAlarm(): Promise<void> {
-    const heartbeatAlarmTime = acpSessions.computeHeartbeatAlarmTime(this.sql, this.env);
-    if (heartbeatAlarmTime === null) { await this.recalculateAlarm(); return; }
-    const { idleCleanupTime } = idleCleanup.computeIdleAlarmTimes(this.sql);
-    const attentionTime = attention.computeAttentionAlarmTime(this.sql);
-    const pollIntervalMs = parseInt(this.env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
-    const mailboxTime = mailbox.computeMailboxAlarmTime(this.sql, pollIntervalMs);
-    const candidates = [heartbeatAlarmTime, idleCleanupTime, attentionTime, mailboxTime].filter((t): t is number => t !== null);
-    const earliest = Math.min(...candidates);
-    await this.ctx.storage.setAlarm(earliest);
+    await this.recalculateAlarm();
   }
 
   private broadcastEvent(type: string, payload: Record<string, unknown>, sessionId?: string): void {
