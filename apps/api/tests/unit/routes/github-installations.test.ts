@@ -127,6 +127,16 @@ describe('GitHub App installation sharing', () => {
     app.route('/api/github', githubRoutes);
   });
 
+  const expectTokenNotLogged = (token: string) => {
+    const allLogCalls = JSON.stringify([
+      mocks.log.debug.mock.calls,
+      mocks.log.info.mock.calls,
+      mocks.log.warn.mock.calls,
+      mocks.log.error.mock.calls,
+    ]);
+    expect(allLogCalls).not.toContain(token);
+  };
+
   it('stores callback installation only when the GitHub user can access it', async () => {
     limitResponses.push([]);
     mocks.getUserAccessibleInstallations.mockResolvedValue([
@@ -239,6 +249,68 @@ describe('GitHub App installation sharing', () => {
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain('github-user-token');
   });
 
+  it('logs callback insert errors separately from conflicts', async () => {
+    limitResponses.push([]);
+    mocks.insertError = new Error('D1 write unavailable');
+    mocks.getUserAccessibleInstallations.mockResolvedValue([
+      { id: 123, account: { login: 'acme', type: 'Organization' } },
+    ]);
+
+    const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
+
+    expect(res.status).toBe(302);
+    expect(mocks.log.error).toHaveBeenCalledWith('github.installation_callback.insert_result', {
+      userId: 'user-1',
+      installationId: '123',
+      result: 'error',
+      error: 'D1 write unavailable',
+    });
+    expectTokenNotLogged('github-user-token');
+  });
+
+  it('logs callback token-unavailable diagnostics and skips GitHub installation lookup', async () => {
+    limitResponses.push([]);
+    mocks.getAccessToken.mockResolvedValue({ accessToken: '', scopes: [] });
+
+    const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      'https://app.example.com/settings?github_app=error&reason=github_user_token_unavailable'
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith('github.user_access_token.lookup', {
+      userId: 'user-1',
+      tokenPresent: false,
+      tokenType: null,
+      scopes: [],
+    });
+    expect(mocks.log.info).toHaveBeenCalledWith('github.installation_callback.token_status', {
+      userId: 'user-1',
+      installationId: '123',
+      tokenPresent: false,
+    });
+    expect(mocks.getUserAccessibleInstallations).not.toHaveBeenCalled();
+    expect(insertedRows).toHaveLength(0);
+  });
+
+  it('logs BetterAuth token lookup failures without logging token values', async () => {
+    mocks.getAccessToken.mockRejectedValue(new Error('BetterAuth unavailable'));
+
+    const res = await app.request('/api/github/installations', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_access_token_unavailable', {
+      userId: 'user-1',
+      tokenPresent: false,
+      error: 'BetterAuth unavailable',
+    });
+    expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.token_status', {
+      userId: 'user-1',
+      tokenPresent: false,
+    });
+    expect(mocks.getUserAccessibleInstallations).not.toHaveBeenCalled();
+  });
+
   it('syncs missing per-user installation rows from user-context GitHub access', async () => {
     whereResponses.push(
       [{ installationId: '111' }],
@@ -345,6 +417,43 @@ describe('GitHub App installation sharing', () => {
     ]);
   });
 
+  it('logs sync insert errors without blocking the installations response', async () => {
+    whereResponses.push(
+      [{ installationId: '111' }],
+      [
+        {
+          id: 'inst-row-111',
+          userId: 'user-1',
+          installationId: '111',
+          accountType: 'organization',
+          accountName: 'existing',
+          createdAt: '2026-05-08T00:00:00.000Z',
+          updatedAt: '2026-05-08T00:00:00.000Z',
+        },
+      ]
+    );
+    mocks.insertError = new Error('D1 write unavailable');
+    mocks.getUserAccessibleInstallations.mockResolvedValue([
+      { id: 111, account: { login: 'existing', type: 'Organization' } },
+      { id: 222, account: { login: 'acme', type: 'Organization' } },
+    ]);
+
+    const res = await app.request('/api/github/installations', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(mocks.log.error).toHaveBeenCalledWith('github.installations_sync.insert_result', {
+      userId: 'user-1',
+      installationId: '222',
+      result: 'error',
+      accountName: 'acme',
+      accountType: 'Organization',
+      error: 'D1 write unavailable',
+    });
+    await expect(res.json()).resolves.toEqual([
+      expect.objectContaining({ installationId: '111' }),
+    ]);
+  });
+
   it('logs BetterAuth token metadata without logging the token value', async () => {
     whereResponses.push([], []);
     mocks.getAccessToken.mockResolvedValue({
@@ -363,6 +472,6 @@ describe('GitHub App installation sharing', () => {
       tokenType: 'bearer',
       scopes: ['read:user', 'repo'],
     });
-    expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain('github-user-token');
+    expectTokenNotLogged('github-user-token');
   });
 });
