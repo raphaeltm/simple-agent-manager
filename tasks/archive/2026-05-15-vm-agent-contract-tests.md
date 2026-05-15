@@ -50,27 +50,27 @@
 
 ## Implementation Checklist
 
-- [ ] Create test file `apps/api/tests/unit/vm-agent-cross-boundary-contract.test.ts`
-- [ ] Contract 1: Attachment transfer URL construction (ws-* subdomain, not nodeId.vm.*)
-- [ ] Contract 1: Attachment transfer auth mechanism (query param, not Bearer header)
-- [ ] Contract 1: Attachment transfer FormData payload structure
-- [ ] Contract 1: Attachment transfer timeout handling
-- [ ] Contract 2: Agent activity callback payload matches Go sender
-- [ ] Contract 2: Agent activity callback auth mechanism (Bearer callback JWT)
-- [ ] Contract 2: Agent activity callback route URL matches Go URL construction
-- [ ] Contract 3: Credential sync payload matches Go sender
-- [ ] Contract 3: Credential sync auth mechanism (Bearer callback JWT)
-- [ ] Contract 3: Credential sync route URL matches Go URL construction
-- [ ] Contract 4: Send prompt payload structure
-- [ ] Contract 4: Send prompt URL path and auth headers
-- [ ] Contract 5: Cancel agent session error handling (409 not treated as failure)
-- [ ] Contract 5: Stop agent session URL and method
-- [ ] All tests pass locally
+- [x] Create test file `apps/api/tests/unit/vm-agent-cross-boundary-contract.test.ts`
+- [x] Contract 1: Attachment transfer URL construction (ws-* subdomain, not nodeId.vm.*)
+- [x] Contract 1: Attachment transfer auth mechanism (query param, not Bearer header)
+- [x] Contract 1: Attachment transfer FormData payload structure
+- [x] Contract 1: Attachment transfer timeout handling
+- [x] Contract 2: Agent activity callback payload matches Go sender
+- [x] Contract 2: Agent activity callback auth mechanism (Bearer callback JWT)
+- [x] Contract 2: Agent activity callback route URL matches Go URL construction
+- [x] Contract 3: Credential sync payload matches Go sender
+- [x] Contract 3: Credential sync auth mechanism (Bearer callback JWT)
+- [x] Contract 3: Credential sync route URL matches Go URL construction
+- [x] Contract 4: Send prompt payload structure
+- [x] Contract 4: Send prompt URL path and auth headers
+- [x] Contract 5: Cancel agent session error handling (409 not treated as failure)
+- [x] Contract 5: Stop agent session URL and method
+- [x] All tests pass locally
 
 ## Acceptance Criteria
 
-- [ ] All 5 contracts have at least one test verifying URL construction, auth mechanism, and payload shape
-- [ ] Attachment transfer test verifies the DIFFERENT auth model (query param vs Bearer header)
-- [ ] Cancel agent session test verifies 409 handling (returns success=false, not throws)
-- [ ] Tests follow existing pattern from node-agent-contract.test.ts
-- [ ] CI passes (lint, typecheck, test)
+- [x] All 5 contracts have at least one test verifying URL construction, auth mechanism, and payload shape
+- [x] Attachment transfer test verifies the DIFFERENT auth model (query param vs Bearer header)
+- [x] Cancel agent session test verifies 409 handling (returns success=false, not throws)
+- [x] Tests follow existing pattern from node-agent-contract.test.ts
+- [x] CI passes (lint, typecheck, test)
