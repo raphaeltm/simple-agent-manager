@@ -236,6 +236,40 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(result).toBe(false);
   });
 
+  it('overrideTaskState returns false when task belongs to different mission', async () => {
+    const projectId = 'proj-po-cross-mission-001';
+    const missionA = 'mission-cross-a-001';
+    const missionB = 'mission-cross-b-001';
+    const taskA = 'task-cross-a-001';
+    const taskB = 'task-cross-b-001';
+    await seedTestProject(projectId);
+    await seedMission(missionA, projectId, TEST_USER_ID);
+    await seedMission(missionB, projectId, TEST_USER_ID);
+    await seedTask(taskA, projectId, TEST_USER_ID);
+    await seedTask(taskB, projectId, TEST_USER_ID);
+
+    // Link each task to its own mission
+    await env.DATABASE.prepare(
+      'UPDATE tasks SET mission_id = ? WHERE id = ?',
+    ).bind(missionA, taskA).run();
+    await env.DATABASE.prepare(
+      'UPDATE tasks SET mission_id = ? WHERE id = ?',
+    ).bind(missionB, taskB).run();
+
+    await startOrchestration(env, projectId, missionA);
+    await startOrchestration(env, projectId, missionB);
+
+    // Attempt to override taskB via missionA — should fail
+    const result = await overrideTaskState(env, projectId, missionA, taskB, 'blocked', 'Cross-mission attempt');
+    expect(result).toBe(false);
+
+    // Verify taskB's scheduler_state was not changed
+    const dbTask = await env.DATABASE.prepare(
+      'SELECT scheduler_state FROM tasks WHERE id = ?',
+    ).bind(taskB).first<{ scheduler_state: string | null }>();
+    expect(dbTask!.scheduler_state).not.toBe('blocked');
+  });
+
   it('notifyTaskEvent triggers scheduling for active mission', async () => {
     const projectId = 'proj-po-notify-001';
     const missionId = 'mission-notify-001';
@@ -250,12 +284,18 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
       event: 'completed',
     };
 
+    // Capture decision count before notification
+    const statusBefore = await getOrchestratorStatus(env, projectId);
+    const decisionsBefore = statusBefore.recentDecisions.length;
+
     // Should not throw — just forwards to DO
     await notifyTaskEvent(env, projectId, notification);
 
-    // The DO should have processed the event (verify via decision log in status)
+    // The DO should have processed the event and triggered a scheduling cycle
     const status = await getOrchestratorStatus(env, projectId);
     expect(status.activeMissions).toHaveLength(1);
+    // Scheduling cycle should have added at least one new decision log entry
+    expect(status.recentDecisions.length).toBeGreaterThan(decisionsBefore);
   });
 
   it('notifyTaskEvent is a no-op for non-orchestrated mission', async () => {

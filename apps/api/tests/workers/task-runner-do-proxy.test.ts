@@ -6,7 +6,7 @@
  *
  * Uses Miniflare with real DOs — no vi.mock().
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { TaskRunner } from '../../src/durable-objects/task-runner';
@@ -216,8 +216,11 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
 
   it('advanceTaskRunnerWorkspaceReady is a no-op on uninitialized DO', async () => {
     // Calling advance on a DO that was never started should not throw
-    await advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null);
+    await expect(
+      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null),
+    ).resolves.toBeUndefined();
 
+    // Verify DO remains uninitialized
     const status = await getTaskRunnerStatus(env, 'task-advance-noop-001');
     expect(status).toBeNull();
   });
@@ -240,6 +243,25 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(status.stepResults.nodeId).toBeNull();
     expect(status.stepResults.workspaceId).toBeNull();
     expect(status.stepResults.agentSessionId).toBeNull();
+  });
+
+  it('getTaskRunnerStatus redacts mcpToken', async () => {
+    const taskId = 'task-redact-mcp-001';
+    await startTaskRunnerDO(env, makeStartInput(taskId));
+
+    // Inject an mcpToken into DO storage directly
+    const stub = getStub(taskId);
+    await runInDurableObject(stub, async (instance) => {
+      const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+      if (state) {
+        state.stepResults.mcpToken = 'secret-mcp-token-value';
+        await instance.ctx.storage.put('state', state);
+      }
+    });
+
+    // Verify the proxy redacts it
+    const status = (await getTaskRunnerStatus(env, taskId)) as TaskRunnerState;
+    expect(status.stepResults.mcpToken).toBe('[redacted]');
   });
 
   it('proxy uses idFromName for deterministic DO resolution', async () => {

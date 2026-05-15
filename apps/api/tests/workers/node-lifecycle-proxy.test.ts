@@ -107,6 +107,16 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(dbNode!.warm_since).toBeNull();
   });
 
+  it('markActive throws on node with no DO state', async () => {
+    const nodeId = 'nlp-active-no-state-001';
+    await seedTestNode(nodeId);
+
+    // Never called markIdle — DO has no stored state
+    await expect(markActive(env, nodeId)).rejects.toThrow(
+      'node_lifecycle_not_found',
+    );
+  });
+
   it('tryClaim on warm node succeeds', async () => {
     const nodeId = 'nlp-claim-warm-001';
     await seedTestNode(nodeId);
