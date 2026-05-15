@@ -25,14 +25,6 @@
         <span class="proof-divider">+</span>
         <div class="proof-item">
           <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
-            <rect width="128" height="128" rx="16" fill="#1A73E8"/>
-            <path d="M40 64L64 40L88 64L64 88Z" fill="white"/>
-          </svg>
-          <span>Gemini CLI</span>
-        </div>
-        <span class="proof-divider">+</span>
-        <div class="proof-item">
-          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
             <rect width="128" height="128" rx="16" fill="#FF6B35"/>
             <path d="M40 84L64 44L88 84Z" fill="white"/>
           </svg>
@@ -59,8 +51,9 @@
 <style>
   .social-proof {
     padding: 40px 0;
-    border-top: 1px solid var(--color-border-subtle);
-    border-bottom: 1px solid var(--color-border-subtle);
+    border-top: 1px solid rgba(22, 163, 74, 0.1);
+    border-bottom: 1px solid rgba(22, 163, 74, 0.1);
+    background: var(--glass-bg-subtle);
   }
 
   .proof-content {
@@ -117,7 +110,10 @@
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     color: var(--color-accent);
-    border: 1px solid var(--color-border);
+    background: var(--glass-bg-subtle);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
     padding: 4px 12px;
     border-radius: 100px;
     letter-spacing: 0.02em;
