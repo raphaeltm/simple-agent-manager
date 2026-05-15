@@ -10,10 +10,10 @@
  */
 
 import * as v from 'valibot';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AcpSessionActivityReportSchema } from '../../src/schemas/acp-sessions';
 import { AgentCredentialSyncSchema } from '../../src/schemas/workspaces';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
 // Key generation for JWT-dependent tests
