@@ -15,6 +15,7 @@ import {
   getInstallationRepositories,
   getRepositoryBranches,
   getUserAccessibleInstallations,
+  type UserAccessibleInstallation,
   verifyWebhookSignature,
 } from '../services/github-app';
 
@@ -32,6 +33,7 @@ githubRoutes.get('/installations', requireAuth(), requireApproved(), async (c) =
 
   // Sync: discover installations the user can access but doesn't have a DB record for
   const accessToken = await getGitHubUserAccessToken(c, userId);
+  log.info('github.installations_sync.token_status', { userId, tokenPresent: Boolean(accessToken) });
   if (accessToken) {
     await syncUserInstallations(db, userId, accessToken);
   }
@@ -298,14 +300,24 @@ githubRoutes.post('/webhook', async (c) => {
 githubRoutes.get('/callback', optionalAuth(), async (c) => {
   const installationId = c.req.query('installation_id');
   const settingsUrl = `https://app.${c.env.BASE_DOMAIN}/settings`;
+  const auth = c.get('auth');
+
+  log.info('github.installation_callback.received', {
+    userId: auth?.user.id,
+    authenticated: Boolean(auth),
+    installationId: installationId ?? null,
+  });
 
   if (!installationId) {
     return c.redirect(settingsUrl);
   }
 
-  const auth = c.get('auth');
   if (!auth) {
     // User not logged in — redirect to login, preserving installation_id
+    log.warn('github.installation_callback.unauthenticated', {
+      authenticated: false,
+      installationId,
+    });
     return c.redirect(`https://app.${c.env.BASE_DOMAIN}/?installation_id=${installationId}`);
   }
 
@@ -325,24 +337,52 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     .limit(1);
 
   if (existing.length > 0) {
+    log.info('github.installation_callback.insert_result', {
+      userId: auth.user.id,
+      installationId,
+      result: 'conflict',
+      reason: 'already_exists',
+    });
     return c.redirect(`${settingsUrl}?github_app=installed`);
   }
 
   // Verify the setup callback's installation_id against the authenticated
   // GitHub user's accessible installations before saving it.
+  let insertAttempted = false;
   try {
     const accessToken = await getGitHubUserAccessToken(c, auth.user.id);
+    log.info('github.installation_callback.token_status', {
+      userId: auth.user.id,
+      installationId,
+      tokenPresent: Boolean(accessToken),
+    });
     if (!accessToken) {
       return c.redirect(`${settingsUrl}?github_app=error&reason=github_user_token_unavailable`);
     }
 
-    const accessibleInstallations = await getUserAccessibleInstallations(accessToken);
+    const accessibleInstallations = await getUserAccessibleInstallations(accessToken, {
+      flow: 'callback',
+      userId: auth.user.id,
+      installationId,
+    });
+    log.info('github.installation_callback.accessible_installations', {
+      userId: auth.user.id,
+      installationId,
+      installationCount: accessibleInstallations.length,
+      installations: summarizeAccessibleInstallations(accessibleInstallations),
+    });
     const accessibleInstallation = accessibleInstallations.find((inst) => String(inst.id) === installationId);
+    log.info('github.installation_callback.installation_match', {
+      userId: auth.user.id,
+      installationId,
+      found: Boolean(accessibleInstallation),
+    });
     if (!accessibleInstallation) {
       log.warn('github.installation_not_accessible_to_user', { installationId, userId: auth.user.id });
       return c.redirect(`${settingsUrl}?github_app=error&reason=installation_not_accessible`);
     }
 
+    insertAttempted = true;
     await db.insert(schema.githubInstallations).values({
       id: ulid(),
       userId: auth.user.id,
@@ -352,11 +392,37 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
       createdAt: now,
       updatedAt: now,
     });
+    log.info('github.installation_callback.insert_result', {
+      userId: auth.user.id,
+      installationId,
+      result: 'success',
+      accountName: accessibleInstallation.account.login,
+      accountType: accessibleInstallation.account.type,
+    });
 
     return c.redirect(`${settingsUrl}?github_app=installed`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.error('github.save_installation_failed', { installationId, error: message });
+    if (insertAttempted) {
+      const result = isDatabaseConflictError(err) ? 'conflict' : 'error';
+      const details = {
+        userId: auth.user.id,
+        installationId,
+        result,
+        error: message,
+      };
+      if (result === 'conflict') {
+        log.warn('github.installation_callback.insert_result', details);
+      } else {
+        log.error('github.installation_callback.insert_result', details);
+      }
+    } else {
+      log.error('github.installation_callback.failed', {
+        userId: auth.user.id,
+        installationId,
+        error: message,
+      });
+    }
     return c.redirect(`${settingsUrl}?github_app=error&reason=${encodeURIComponent(message)}`);
   }
 });
@@ -398,9 +464,19 @@ async function syncUserInstallations(
   accessToken: string
 ): Promise<void> {
   try {
+    log.info('github.installations_sync.token_status', { userId, tokenPresent: Boolean(accessToken) });
+
     // User-context GitHub verification: only sync installations the
     // authenticated GitHub user can access.
-    const accessibleInstallations = await getUserAccessibleInstallations(accessToken);
+    const accessibleInstallations = await getUserAccessibleInstallations(accessToken, {
+      flow: 'sync',
+      userId,
+    });
+    log.info('github.installations_sync.accessible_installations', {
+      userId,
+      installationCount: accessibleInstallations.length,
+      installations: summarizeAccessibleInstallations(accessibleInstallations),
+    });
     if (accessibleInstallations.length === 0) return;
 
     // Get user's existing installation records
@@ -414,6 +490,12 @@ async function syncUserInstallations(
     const missingInstallations = accessibleInstallations.filter(
       (inst) => !existingInstallationIds.has(String(inst.id))
     );
+
+    log.info('github.installations_sync.missing_installations', {
+      userId,
+      missingInstallationCount: missingInstallations.length,
+      installations: summarizeAccessibleInstallations(missingInstallations),
+    });
 
     if (missingInstallations.length === 0) return;
 
@@ -432,9 +514,29 @@ async function syncUserInstallations(
             createdAt: now,
             updatedAt: now,
           })
-          .onConflictDoNothing(); // Unique(userId, installationId) — skip if already exists
-      } catch {
-        // Ignore conflicts from race conditions
+        log.info('github.installations_sync.insert_result', {
+          userId,
+          installationId: String(inst.id),
+          result: 'success',
+          accountName: inst.account.login,
+          accountType: inst.account.type,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const result = isDatabaseConflictError(err) ? 'conflict' : 'error';
+        const details = {
+          userId,
+          installationId: String(inst.id),
+          result,
+          accountName: inst.account.login,
+          accountType: inst.account.type,
+          error: message,
+        };
+        if (result === 'conflict') {
+          log.warn('github.installations_sync.insert_result', details);
+        } else {
+          log.error('github.installations_sync.insert_result', details);
+        }
       }
     }
   } catch (err) {
@@ -458,14 +560,46 @@ async function getGitHubUserAccessToken(
       headers: c.req.raw.headers,
       body: { providerId: 'github', userId },
     });
+    log.info('github.user_access_token.lookup', {
+      userId,
+      tokenPresent: Boolean(token.accessToken),
+      tokenType: getTokenType(token),
+      scopes: token.scopes,
+    });
     return token.accessToken || null;
   } catch (err) {
     log.warn('github.user_access_token_unavailable', {
       userId,
+      tokenPresent: false,
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
   }
+}
+
+function summarizeAccessibleInstallations(installations: UserAccessibleInstallation[]): Array<{
+  installationId: string;
+  accountName: string;
+  accountType: string;
+}> {
+  return installations.map((inst) => ({
+    installationId: String(inst.id),
+    accountName: inst.account.login,
+    accountType: inst.account.type,
+  }));
+}
+
+function getTokenType(token: unknown): string | null {
+  if (!token || typeof token !== 'object' || !('tokenType' in token)) {
+    return null;
+  }
+  const tokenType = token.tokenType;
+  return typeof tokenType === 'string' ? tokenType : null;
+}
+
+function isDatabaseConflictError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /unique|already exists|conflict/i.test(message);
 }
 
 export { githubRoutes };

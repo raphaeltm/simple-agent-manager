@@ -17,13 +17,13 @@ Shared GitHub App organization installations are not being associated with addit
 
 ## Implementation Checklist
 
-- [ ] Add callback diagnostics for auth presence, callback installation ID, token availability, accessible installation summary, match result, and DB insert outcome.
-- [ ] Add explicit unauthenticated callback logging before redirecting to app login with the installation ID.
-- [ ] Add sync diagnostics for token availability, GitHub user-installations response status/count, missing installation count, and each insert attempt result.
-- [ ] Add BetterAuth token retrieval diagnostics with token-present boolean, token type if available, and scopes if available, without logging token values.
-- [ ] Keep logs structured with `userId` and `installationId` where available.
-- [ ] Add or update unit tests for diagnostic logging paths, including unauthenticated callback, callback insert success/rejection, sync inserts, and token metadata logging.
-- [ ] Run focused tests and relevant quality checks.
+- [x] Add callback diagnostics for auth presence, callback installation ID, token availability, accessible installation summary, match result, and DB insert outcome.
+- [x] Add explicit unauthenticated callback logging before redirecting to app login with the installation ID.
+- [x] Add sync diagnostics for token availability, GitHub user-installations response status/count, missing installation count, and each insert attempt result.
+- [x] Add BetterAuth token retrieval diagnostics with token-present boolean, token type if available, and scopes if available, without logging token values.
+- [x] Keep logs structured with `userId` and `installationId` where available.
+- [x] Add or update unit tests for diagnostic logging paths, including unauthenticated callback, callback insert success/rejection, sync inserts, and token metadata logging.
+- [x] Run focused tests and relevant quality checks.
 
 ## Acceptance Criteria
 

@@ -3,6 +3,17 @@ import { importPKCS8,SignJWT } from 'jose';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 
+export interface UserAccessibleInstallation {
+  id: number;
+  account: { login: string; type: string };
+}
+
+interface UserAccessibleInstallationsDiagnostics {
+  flow: 'callback' | 'sync';
+  userId?: string;
+  installationId?: string;
+}
+
 /**
  * Decode a private key that may be stored in various formats:
  * - Raw PEM (with actual newlines)
@@ -253,9 +264,10 @@ export async function getInstallationRepositories(
  * callback's installation_id parameter.
  */
 export async function getUserAccessibleInstallations(
-  accessToken: string
-): Promise<Array<{ id: number; account: { login: string; type: string } }>> {
-  const allInstallations: Array<{ id: number; account: { login: string; type: string } }> = [];
+  accessToken: string,
+  diagnostics?: UserAccessibleInstallationsDiagnostics
+): Promise<UserAccessibleInstallation[]> {
+  const allInstallations: UserAccessibleInstallation[] = [];
   let page = 1;
   const perPage = 100;
   let hasMore = true;
@@ -274,6 +286,15 @@ export async function getUserAccessibleInstallations(
     );
 
     if (!response.ok) {
+      log.warn('github.user_accessible_installations.response', {
+        flow: diagnostics?.flow,
+        userId: diagnostics?.userId,
+        installationId: diagnostics?.installationId,
+        page,
+        status: response.status,
+        ok: false,
+        installationCount: 0,
+      });
       const error = await response.json().catch(() => ({})) as { message?: string };
       throw new Error(error.message || `Failed to get user installations: ${response.status}`);
     }
@@ -284,6 +305,16 @@ export async function getUserAccessibleInstallations(
         account: { login: string; type: string };
       }>;
     };
+
+    log.info('github.user_accessible_installations.response', {
+      flow: diagnostics?.flow,
+      userId: diagnostics?.userId,
+      installationId: diagnostics?.installationId,
+      page,
+      status: response.status,
+      ok: true,
+      installationCount: data.installations.length,
+    });
 
     allInstallations.push(...data.installations.map((installation) => ({
       id: installation.id,
