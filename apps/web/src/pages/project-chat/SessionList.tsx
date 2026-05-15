@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-import type { ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import { buildSessionTree } from './sessionTree';
 import { SessionTreeItem } from './SessionTreeItem';
 import type { TaskInfo } from './useTaskGroups';
@@ -24,9 +24,9 @@ export function SessionList({
   searchQuery = '',
 }: {
   /** Sessions to display (already filtered to the visible bucket, e.g. recent or stale). */
-  sessions: ChatSessionResponse[];
+  sessions: ChatSessionListItem[];
   /** Full session list for resolving lineage across buckets (optional). */
-  allSessions?: ChatSessionResponse[];
+  allSessions?: ChatSessionListItem[];
   selectedSessionId: string | null;
   onSelect: (id: string) => void;
   onFork?: (session: ChatSessionResponse) => void;

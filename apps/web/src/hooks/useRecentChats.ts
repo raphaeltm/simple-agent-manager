@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ChatSessionResponse } from '../lib/api';
+import type { ChatSessionListItem } from '../lib/api';
 import { listChatSessions, listProjects } from '../lib/api';
 import {
   getLastActivity,
@@ -27,7 +27,7 @@ const PROJECT_LIMIT = parseInt(
   import.meta.env.VITE_RECENT_CHATS_PROJECT_LIMIT || String(DEFAULT_PROJECT_LIMIT),
 );
 
-export interface RecentChat extends ChatSessionResponse {
+export interface RecentChat extends ChatSessionListItem {
   projectId: string;
   projectName: string;
 }

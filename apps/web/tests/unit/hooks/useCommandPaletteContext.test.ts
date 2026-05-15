@@ -198,7 +198,7 @@ describe('useCommandPaletteContext', () => {
     expect(labels).toContain('View Task');
   });
 
-  it('shows "Open PR" when session task has outputPrUrl', () => {
+  it('"Open PR" action is not available from list data (task embed only on detail endpoint)', () => {
     mockPathname = '/projects/p1/chat/sess-1';
 
     const sessions = [
@@ -206,20 +206,12 @@ describe('useCommandPaletteContext', () => {
         id: 'sess-1',
         projectId: 'p1',
         taskId: 'task-42',
-        task: {
-          outputPrUrl: 'https://github.com/org/repo/pull/123',
-          outputBranch: null,
-          outputSummary: null,
-          finalizedAt: null,
-          executionStep: null,
-          errorMessage: null,
-        },
       }),
     ];
 
     const { result } = renderContextHook({ chatSessions: sessions });
     const labels = result.current.contextActions.map((a) => a.label);
-    expect(labels).toContain('Open PR');
+    expect(labels).not.toContain('Open PR');
   });
 
   // ── Context Actions: Task/Idea Scope ──
@@ -274,21 +266,14 @@ describe('useCommandPaletteContext', () => {
         projectId: 'p1',
         workspaceUrl: 'https://ws-abc.example.com',
         taskId: 'task-42',
-        task: {
-          outputPrUrl: 'https://github.com/org/repo/pull/123',
-          outputBranch: null,
-          outputSummary: null,
-          finalizedAt: null,
-          executionStep: null,
-          errorMessage: null,
-        },
       }),
     ];
 
     const { result } = renderContextHook({ chatSessions: sessions });
-    // Default cap is 10, and we have 4 project + 3 session = 7 actions (all fit)
+    // Default cap is 10, and we have 4 project + 2 session = 6 actions (all fit)
+    // (outputPrUrl is only on detail endpoint, not list; "Open PR" action removed)
     expect(result.current.contextActions.length).toBeLessThanOrEqual(10);
-    expect(result.current.contextActions.length).toBe(7);
+    expect(result.current.contextActions.length).toBe(6);
   });
 
   // ── window.open assertions ──
@@ -313,32 +298,20 @@ describe('useCommandPaletteContext', () => {
     openSpy.mockRestore();
   });
 
-  it('"Open PR" calls window.open with correct URL', () => {
+  it('"Open PR" action is not available (outputPrUrl only on detail endpoint, not list)', () => {
     mockPathname = '/projects/p1/chat/sess-1';
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
 
     const sessions = [
       makeSession({
         id: 'sess-1',
         projectId: 'p1',
         taskId: 'task-42',
-        task: {
-          outputPrUrl: 'https://github.com/org/repo/pull/123',
-          outputBranch: null,
-          outputSummary: null,
-          finalizedAt: null,
-          executionStep: null,
-          errorMessage: null,
-        },
       }),
     ];
 
     const { result } = renderContextHook({ chatSessions: sessions });
     const prAction = result.current.contextActions.find((a) => a.id === 'ctx-open-pr');
-    prAction?.action();
-
-    expect(openSpy).toHaveBeenCalledWith('https://github.com/org/repo/pull/123', '_blank');
-    openSpy.mockRestore();
+    expect(prAction).toBeUndefined();
   });
 
   // ── Cross-project isolation ──
@@ -352,14 +325,6 @@ describe('useCommandPaletteContext', () => {
         id: 'sess-wrong',
         projectId: 'p2',
         taskId: 'task-42',
-        task: {
-          outputPrUrl: 'https://github.com/org/repo/pull/999',
-          outputBranch: null,
-          outputSummary: null,
-          finalizedAt: null,
-          executionStep: null,
-          errorMessage: null,
-        },
       }),
     ];
 
