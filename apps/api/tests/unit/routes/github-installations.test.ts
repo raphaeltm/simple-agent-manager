@@ -238,6 +238,9 @@ describe('GitHub App installation sharing', () => {
     const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
 
     expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      'https://app.example.com/settings?github_app=error&reason=installation_save_failed'
+    );
     expect(mocks.log.warn).toHaveBeenCalledWith('github.installation_callback.insert_result', {
       userId: 'user-1',
       installationId: '123',
@@ -259,6 +262,9 @@ describe('GitHub App installation sharing', () => {
     const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
 
     expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      'https://app.example.com/settings?github_app=error&reason=installation_save_failed'
+    );
     expect(mocks.log.error).toHaveBeenCalledWith('github.installation_callback.insert_result', {
       userId: 'user-1',
       installationId: '123',

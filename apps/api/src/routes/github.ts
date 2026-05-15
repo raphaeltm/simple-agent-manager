@@ -423,7 +423,8 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
         error: message,
       });
     }
-    return c.redirect(`${settingsUrl}?github_app=error&reason=${encodeURIComponent(message)}`);
+    const reason = insertAttempted ? 'installation_save_failed' : 'installation_lookup_failed';
+    return c.redirect(`${settingsUrl}?github_app=error&reason=${reason}`);
   }
 });
 
@@ -541,7 +542,10 @@ async function syncUserInstallations(
     }
   } catch (err) {
     // Sync is best-effort — don't block the response if GitHub API is down
-    log.error('github.sync_installations_failed', { error: err instanceof Error ? err.message : String(err) });
+    log.error('github.sync_installations_failed', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
