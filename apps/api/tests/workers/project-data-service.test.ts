@@ -15,7 +15,6 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
-
 // Import service functions under test
 import * as svc from '../../src/services/project-data';
 
