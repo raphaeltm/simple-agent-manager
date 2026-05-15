@@ -30,7 +30,7 @@ The same debug package also contains repeated host cron messages saying `Authent
 - [x] Add cloud-init mitigation for expired root password/account state so root cron jobs can run.
 - [x] Add cloud-init tests proving the mitigation exists and runs before VM-agent startup.
 - [x] Run focused package tests and full quality checks.
-- [ ] Deploy to staging and verify with a real VM/workspace that git credential helper auth succeeds.
+- [x] Deploy to staging and verify with a real VM/workspace that git credential helper auth succeeds.
 - [ ] Merge and monitor production deployment.
 
 ## Acceptance Criteria
@@ -42,3 +42,12 @@ The same debug package also contains repeated host cron messages saying `Authent
 - Workspace callback token survives VM-agent metadata persistence and hydration without plaintext SQLite storage.
 - Fresh VMs do not emit root cron PAM failures due to an expired root password/account token.
 - Staging verification provisions a real VM/workspace and confirms credential-helper behavior before merge.
+
+## Staging Verification
+
+- Staging deploy run `25907732700` completed successfully, including smoke-tests.
+- Fresh staging workspace: `01KRNBV6GA08V7SSM04DR77CFP`; node: `01KRNBV62BCC21F4YYTC5NZQF6`.
+- Node heartbeat arrived at `2026-05-15T08:27:54.389Z`; workspace reached `running` at `2026-05-15T08:31:30.882Z`.
+- Terminal WebSocket access succeeded. Inside the workspace, `git ls-remote origin HEAD` exited `0` and returned `14eee07a2b6d11573e7dede996c359cb5c511a71 HEAD`.
+- Debug package downloaded to `/workspaces/.private/staging-debug-01KRNBV62BCC21F4YYTC5NZQF6.tar.gz`; grep found no `Authentication token is no longer valid`, no `pam_unix(cron:account)`, and no `Git credential auth rejected` lines.
+- Staging verification node was deleted after testing.
