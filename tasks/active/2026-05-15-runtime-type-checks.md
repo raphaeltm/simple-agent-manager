@@ -29,8 +29,8 @@ Implementation will treat these as checklist items grouped by trust boundary. In
 
 ## Implementation Checklist
 
-- [ ] Add reusable runtime JSON/object validation helpers for API-side code.
-- [ ] Add reusable runtime JSON/object validation helpers for web/client package code.
+- [x] Add reusable runtime JSON/object validation helpers for API-side code.
+- [x] Add reusable runtime JSON/object validation helpers for web/client package code.
 - [ ] Replace API route request-body assertions with Valibot schemas or object validators.
 - [ ] Replace API upstream `response.json() as ...` assertions with runtime response validators.
 - [ ] Replace API storage `JSON.parse(...) as ...` assertions with runtime validators.
