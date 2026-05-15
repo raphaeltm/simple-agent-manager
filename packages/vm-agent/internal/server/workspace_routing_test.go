@@ -334,6 +334,9 @@ func TestUpsertWorkspaceRuntimeHydratesFromSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open store: %v", err)
 	}
+	if err := store.SetCallbackTokenEncryptionSecret("node-callback-token-secret"); err != nil {
+		t.Fatalf("SetCallbackTokenEncryptionSecret: %v", err)
+	}
 	defer store.Close()
 
 	// Pre-populate metadata as if the workspace was previously created.
@@ -418,6 +421,9 @@ func TestUpsertWorkspaceRuntimeLightweightPersistsToSQLite(t *testing.T) {
 	store, err := persistence.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Open store: %v", err)
+	}
+	if err := store.SetCallbackTokenEncryptionSecret("node-callback-token-secret"); err != nil {
+		t.Fatalf("SetCallbackTokenEncryptionSecret: %v", err)
 	}
 	defer store.Close()
 

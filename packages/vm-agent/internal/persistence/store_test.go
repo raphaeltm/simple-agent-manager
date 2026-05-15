@@ -3,6 +3,7 @@ package persistence
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -10,6 +11,13 @@ func tempDBPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "test.db")
+}
+
+func configureTestTokenEncryption(t *testing.T, store *Store) {
+	t.Helper()
+	if err := store.SetCallbackTokenEncryptionSecret("node-callback-token-secret"); err != nil {
+		t.Fatalf("SetCallbackTokenEncryptionSecret: %v", err)
+	}
 }
 
 func TestOpenAndClose(t *testing.T) {
@@ -445,6 +453,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer store.Close()
+	configureTestTokenEncryption(t, store)
 
 	// Initially no metadata
 	meta, err := store.GetWorkspaceMetadata("ws-1")
@@ -498,6 +507,13 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	}
 	if meta.CallbackToken != "workspace-callback-token" {
 		t.Errorf("expected CallbackToken to round-trip, got %q", meta.CallbackToken)
+	}
+	var rawCallbackToken string
+	if err := store.db.QueryRow("SELECT callback_token FROM workspace_metadata WHERE workspace_id = ?", "ws-1").Scan(&rawCallbackToken); err != nil {
+		t.Fatalf("read raw callback token: %v", err)
+	}
+	if rawCallbackToken == "workspace-callback-token" || !strings.HasPrefix(rawCallbackToken, encryptedCallbackTokenPrefix) {
+		t.Fatalf("expected encrypted callback token in SQLite, got %q", rawCallbackToken)
 	}
 	if meta.UpdatedAt == "" {
 		t.Error("expected non-empty UpdatedAt")
@@ -812,6 +828,7 @@ func TestMigrationV7AddsCallbackTokenColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	configureTestTokenEncryption(t, store)
 
 	err = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
 		WorkspaceID:      "ws-1",
@@ -829,6 +846,7 @@ func TestMigrationV7AddsCallbackTokenColumn(t *testing.T) {
 		t.Fatalf("Reopen after migration v7: %v", err)
 	}
 	defer store2.Close()
+	configureTestTokenEncryption(t, store2)
 
 	meta, err := store2.GetWorkspaceMetadata("ws-1")
 	if err != nil {

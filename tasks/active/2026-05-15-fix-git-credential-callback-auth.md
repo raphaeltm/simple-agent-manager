@@ -25,7 +25,7 @@ The same debug package also contains repeated host cron messages saying `Authent
 
 - [x] Update `/git-credential` auth to accept cryptographically valid workspace-scoped JWTs for the requested workspace, with raw string comparison retained as fallback.
 - [x] Add safe structured logging for rejected git-credential auth attempts without exposing token values.
-- [x] Persist and hydrate per-workspace callback tokens in VM-agent SQLite metadata.
+- [x] Persist and hydrate per-workspace callback tokens in VM-agent SQLite metadata without storing plaintext tokens.
 - [x] Add Go tests for valid workspace JWT without runtime token, wrong-workspace JWT rejection, raw fallback acceptance, and persistence/hydration of callback tokens.
 - [x] Add cloud-init mitigation for expired root password/account state so root cron jobs can run.
 - [x] Add cloud-init tests proving the mitigation exists and runs before VM-agent startup.
@@ -39,6 +39,6 @@ The same debug package also contains repeated host cron messages saying `Authent
 - Tokens for the wrong workspace are rejected.
 - Existing raw-token fallback behavior remains compatible.
 - Rejections are diagnosable from VM-agent logs without leaking token material.
-- Workspace callback token survives VM-agent metadata persistence and hydration.
+- Workspace callback token survives VM-agent metadata persistence and hydration without plaintext SQLite storage.
 - Fresh VMs do not emit root cron PAM failures due to an expired root password/account token.
 - Staging verification provisions a real VM/workspace and confirms credential-helper behavior before merge.

@@ -142,6 +142,12 @@ func (v *JWTValidator) ValidateWorkspaceCallbackToken(tokenString, workspaceID s
 	if workspaceID != "" && claims.Workspace != workspaceID {
 		return nil, fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
 	}
+	if claims.ExpiresAt == nil {
+		return nil, fmt.Errorf("expiration claim is required")
+	}
+	if claims.Subject != claims.Workspace {
+		return nil, fmt.Errorf("subject must match workspace claim")
+	}
 	if claims.Type != "callback" {
 		return nil, fmt.Errorf("callback token type is required")
 	}
