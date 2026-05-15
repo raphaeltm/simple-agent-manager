@@ -94,6 +94,18 @@ func validateAudience(claims *Claims, expectedAudience string) error {
 	return fmt.Errorf("invalid audience: expected %s", expectedAudience)
 }
 
+func validateWorkspaceClaim(claims *Claims, workspaceID string) error {
+	if claims.Workspace == "" {
+		return fmt.Errorf("workspace claim is required")
+	}
+
+	if workspaceID != "" && claims.Workspace != workspaceID {
+		return fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
+	}
+
+	return nil
+}
+
 // Validate validates a token using the default audience.
 func (v *JWTValidator) Validate(tokenString string) (*Claims, error) {
 	claims, err := v.parse(tokenString)
@@ -115,12 +127,8 @@ func (v *JWTValidator) ValidateWorkspaceToken(tokenString, workspaceID string) (
 		return nil, err
 	}
 
-	if claims.Workspace == "" {
-		return nil, fmt.Errorf("workspace claim is required")
-	}
-
-	if workspaceID != "" && claims.Workspace != workspaceID {
-		return nil, fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
+	if err := validateWorkspaceClaim(claims, workspaceID); err != nil {
+		return nil, err
 	}
 
 	return claims, nil
@@ -136,11 +144,8 @@ func (v *JWTValidator) ValidateWorkspaceCallbackToken(tokenString, workspaceID s
 	if err := validateAudience(claims, workspaceCallbackAudience); err != nil {
 		return nil, err
 	}
-	if claims.Workspace == "" {
-		return nil, fmt.Errorf("workspace claim is required")
-	}
-	if workspaceID != "" && claims.Workspace != workspaceID {
-		return nil, fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
+	if err := validateWorkspaceClaim(claims, workspaceID); err != nil {
+		return nil, err
 	}
 	if claims.ExpiresAt == nil {
 		return nil, fmt.Errorf("expiration claim is required")
