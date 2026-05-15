@@ -8,10 +8,26 @@ export interface UserAccessibleInstallation {
   account: { login: string; type: string };
 }
 
+export interface GitHubUserOrganization {
+  login: string;
+}
+
 interface UserAccessibleInstallationsDiagnostics {
   flow: 'callback' | 'sync';
   userId?: string;
   installationId?: string;
+}
+
+interface UserOrganizationDiagnostics {
+  flow: 'shared-org-discovery';
+  userId: string;
+}
+
+interface UserInstallationAccessDiagnostics {
+  flow: 'shared-org-discovery';
+  userId: string;
+  installationId: string;
+  accountName?: string;
 }
 
 /**
@@ -326,6 +342,114 @@ export async function getUserAccessibleInstallations(
   }
 
   return allInstallations;
+}
+
+/**
+ * Fetch organizations for the authenticated GitHub user.
+ *
+ * This narrows shared installation candidates before SAM considers any
+ * organization installation rows already known locally.
+ */
+export async function getAuthenticatedUserOrganizations(
+  accessToken: string,
+  diagnostics: UserOrganizationDiagnostics
+): Promise<GitHubUserOrganization[]> {
+  const allOrganizations: GitHubUserOrganization[] = [];
+  let page = 1;
+  const perPage = 100;
+  let hasMore = true;
+
+  while (hasMore) {
+    const response = await fetch(
+      `https://api.github.com/user/orgs?per_page=${perPage}&page=${page}`,
+      {
+        headers: githubUserTokenHeaders(accessToken),
+      }
+    );
+
+    if (!response.ok) {
+      log.warn('github.user_organizations.response', {
+        flow: diagnostics.flow,
+        userId: diagnostics.userId,
+        page,
+        status: response.status,
+        ok: false,
+        organizationCount: 0,
+      });
+      const error = await response.json().catch(() => ({})) as { message?: string };
+      throw new Error(error.message || `Failed to get user organizations: ${response.status}`);
+    }
+
+    const data = await response.json() as Array<{ login: string }>;
+
+    log.info('github.user_organizations.response', {
+      flow: diagnostics.flow,
+      userId: diagnostics.userId,
+      page,
+      status: response.status,
+      ok: true,
+      organizationCount: data.length,
+    });
+
+    allOrganizations.push(...data.map((org) => ({ login: org.login })));
+    hasMore = data.length === perPage;
+    page++;
+  }
+
+  return allOrganizations;
+}
+
+/**
+ * Verify that a GitHub user token can access a specific app installation.
+ *
+ * 403/404 mean this user cannot use the installation and are represented as
+ * false. Other failures are treated as transient and thrown to the caller.
+ */
+export async function verifyUserInstallationAccess(
+  accessToken: string,
+  installationId: string,
+  diagnostics: UserInstallationAccessDiagnostics
+): Promise<boolean> {
+  const response = await fetch(
+    `https://api.github.com/user/installations/${encodeURIComponent(installationId)}/repositories?per_page=1`,
+    {
+      headers: githubUserTokenHeaders(accessToken),
+    }
+  );
+
+  const details = {
+    flow: diagnostics.flow,
+    userId: diagnostics.userId,
+    installationId: diagnostics.installationId,
+    accountName: diagnostics.accountName,
+    status: response.status,
+    ok: response.ok,
+  };
+  if (response.ok) {
+    log.info('github.user_installation_access.response', details);
+  } else {
+    log.warn('github.user_installation_access.response', details);
+  }
+
+  if (response.ok) {
+    return true;
+  }
+
+  if (response.status === 403 || response.status === 404) {
+    return false;
+  }
+
+  const error = await response.json().catch(() => ({})) as { message?: string };
+  throw new Error(error.message || `Failed to verify user installation access: ${response.status}`);
+}
+
+function githubUserTokenHeaders(accessToken: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'Simple-Agent-Manager',
+  };
 }
 
 const DEFAULT_MAX_BRANCHES_PER_REPO = 5000;

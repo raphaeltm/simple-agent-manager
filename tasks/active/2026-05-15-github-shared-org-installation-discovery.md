@@ -19,24 +19,24 @@ The final authorization gate must be GitHub verification with the signed-in user
 
 ## Implementation Checklist
 
-- [ ] Add GitHub service helper to fetch signed-in user's org memberships with the user token.
-- [ ] Add GitHub service helper to verify access to one installation using `GET /user/installations/{installation_id}/repositories?per_page=1`.
-- [ ] Extend `/api/github/installations` sync with a second best-effort shared-org discovery pass after existing `/user/installations` sync.
-- [ ] Candidate selection must intersect user org logins with known organization installation rows and exclude installations already recorded for the current user.
-- [ ] Do not scan every known installation before narrowing by user org memberships.
-- [ ] Skip `403`/`404` verification failures with diagnostic logs and no insert.
-- [ ] Treat transient GitHub/token/network errors as best-effort failures that do not delete existing rows and do not block returning local rows.
-- [ ] Add route tests for shared org discovery insert, org exclusion, `403`/`404` skip, existing sync preservation, and fallback error behavior.
-- [ ] Add service tests for org membership fetch and installation-specific verification.
+- [x] Add GitHub service helper to fetch signed-in user's org memberships with the user token.
+- [x] Add GitHub service helper to verify access to one installation using `GET /user/installations/{installation_id}/repositories?per_page=1`.
+- [x] Extend `/api/github/installations` sync with a second best-effort shared-org discovery pass after existing `/user/installations` sync.
+- [x] Candidate selection must intersect user org logins with known organization installation rows and exclude installations already recorded for the current user.
+- [x] Do not scan every known installation before narrowing by user org memberships.
+- [x] Skip `403`/`404` verification failures with diagnostic logs and no insert.
+- [x] Treat transient GitHub/token/network errors as best-effort failures that do not delete existing rows and do not block returning local rows.
+- [x] Add route tests for shared org discovery insert, org exclusion, `403`/`404` skip, existing sync preservation, and fallback error behavior.
+- [x] Add service tests for org membership fetch and installation-specific verification.
 
 ## Acceptance Criteria
 
-- [ ] Existing `/user/installations` discovery still works.
-- [ ] A known org installation is inserted for the current user only when the user's org memberships include the org and installation-specific user-token verification succeeds.
-- [ ] Known org installations outside the user's org memberships are not verified or inserted.
-- [ ] `403`/`404` verification responses skip the candidate and log useful context.
-- [ ] Fallback discovery errors do not erase existing rows and do not prevent returning current local installations.
-- [ ] No app-wide installation enumeration or installation-token org member checks are introduced.
+- [x] Existing `/user/installations` discovery still works.
+- [x] A known org installation is inserted for the current user only when the user's org memberships include the org and installation-specific user-token verification succeeds.
+- [x] Known org installations outside the user's org memberships are not verified or inserted.
+- [x] `403`/`404` verification responses skip the candidate and log useful context.
+- [x] Fallback discovery errors do not erase existing rows and do not prevent returning current local installations.
+- [x] No app-wide installation enumeration or installation-token org member checks are introduced.
 
 ## References
 
