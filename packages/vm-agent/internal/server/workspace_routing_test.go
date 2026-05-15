@@ -531,6 +531,9 @@ func TestUpsertWorkspaceRuntimePersistsMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open store: %v", err)
 	}
+	if err := store.SetCallbackTokenEncryptionSecret("node-callback-token-secret"); err != nil {
+		t.Fatalf("SetCallbackTokenEncryptionSecret: %v", err)
+	}
 	defer store.Close()
 
 	s := &Server{
