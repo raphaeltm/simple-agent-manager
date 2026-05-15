@@ -73,6 +73,25 @@ func signToken(t *testing.T, key *rsa.PrivateKey, claims Claims) string {
 	return signed
 }
 
+func signWorkspaceCallbackToken(t *testing.T, key *rsa.PrivateKey, mutate func(*Claims)) string {
+	t.Helper()
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test-issuer",
+			Subject:   "ws-123",
+			Audience:  jwt.ClaimStrings{"workspace-callback"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+		Workspace: "ws-123",
+		Type:      "callback",
+		Scope:     "workspace",
+	}
+	if mutate != nil {
+		mutate(&claims)
+	}
+	return signToken(t, key, claims)
+}
+
 func TestValidateNodeManagementToken_WorkspaceBypass(t *testing.T) {
 	t.Parallel()
 
@@ -278,17 +297,7 @@ func TestValidateWorkspaceCallbackToken(t *testing.T) {
 
 	t.Run("matching workspace callback token accepted", func(t *testing.T) {
 		t.Parallel()
-		tokenStr := signToken(t, key, Claims{
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:    "test-issuer",
-				Subject:   "ws-123",
-				Audience:  jwt.ClaimStrings{"workspace-callback"},
-				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-			},
-			Workspace: "ws-123",
-			Type:      "callback",
-			Scope:     "workspace",
-		})
+		tokenStr := signWorkspaceCallbackToken(t, key, nil)
 
 		claims, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123")
 		if err != nil {
@@ -301,16 +310,8 @@ func TestValidateWorkspaceCallbackToken(t *testing.T) {
 
 	t.Run("wrong audience rejected", func(t *testing.T) {
 		t.Parallel()
-		tokenStr := signToken(t, key, Claims{
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:    "test-issuer",
-				Subject:   "ws-123",
-				Audience:  jwt.ClaimStrings{"workspace-terminal"},
-				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-			},
-			Workspace: "ws-123",
-			Type:      "callback",
-			Scope:     "workspace",
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.Audience = jwt.ClaimStrings{"workspace-terminal"}
 		})
 
 		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
@@ -320,16 +321,9 @@ func TestValidateWorkspaceCallbackToken(t *testing.T) {
 
 	t.Run("wrong workspace rejected", func(t *testing.T) {
 		t.Parallel()
-		tokenStr := signToken(t, key, Claims{
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:    "test-issuer",
-				Subject:   "ws-other",
-				Audience:  jwt.ClaimStrings{"workspace-callback"},
-				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-			},
-			Workspace: "ws-other",
-			Type:      "callback",
-			Scope:     "workspace",
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.Subject = "ws-other"
+			claims.Workspace = "ws-other"
 		})
 
 		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
@@ -339,16 +333,8 @@ func TestValidateWorkspaceCallbackToken(t *testing.T) {
 
 	t.Run("node scoped callback rejected", func(t *testing.T) {
 		t.Parallel()
-		tokenStr := signToken(t, key, Claims{
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:    "test-issuer",
-				Subject:   "ws-123",
-				Audience:  jwt.ClaimStrings{"workspace-callback"},
-				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-			},
-			Workspace: "ws-123",
-			Type:      "callback",
-			Scope:     "node",
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.Scope = "node"
 		})
 
 		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
@@ -358,15 +344,8 @@ func TestValidateWorkspaceCallbackToken(t *testing.T) {
 
 	t.Run("missing expiration rejected", func(t *testing.T) {
 		t.Parallel()
-		tokenStr := signToken(t, key, Claims{
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:   "test-issuer",
-				Subject:  "ws-123",
-				Audience: jwt.ClaimStrings{"workspace-callback"},
-			},
-			Workspace: "ws-123",
-			Type:      "callback",
-			Scope:     "workspace",
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.ExpiresAt = nil
 		})
 
 		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
@@ -376,16 +355,8 @@ func TestValidateWorkspaceCallbackToken(t *testing.T) {
 
 	t.Run("subject mismatch rejected", func(t *testing.T) {
 		t.Parallel()
-		tokenStr := signToken(t, key, Claims{
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:    "test-issuer",
-				Subject:   "not-the-workspace",
-				Audience:  jwt.ClaimStrings{"workspace-callback"},
-				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-			},
-			Workspace: "ws-123",
-			Type:      "callback",
-			Scope:     "workspace",
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.Subject = "not-the-workspace"
 		})
 
 		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
