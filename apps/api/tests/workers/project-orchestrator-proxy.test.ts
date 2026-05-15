@@ -7,10 +7,10 @@
  *
  * Uses Miniflare with real DOs (embedded SQLite) — no vi.mock().
  */
+import type { TaskEventNotification } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { TaskEventNotification } from '@simple-agent-manager/shared';
 import type { ProjectOrchestrator } from '../../src/durable-objects/project-orchestrator';
 import {
   cancelMission,
