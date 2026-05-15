@@ -4,11 +4,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { githubRoutes } from '../../../src/routes/github';
-import { getUserAccessibleInstallations } from '../../../src/services/github-app';
+import {
+  getAuthenticatedUserOrganizations,
+  getUserAccessibleInstallations,
+  verifyUserInstallationAccess,
+} from '../../../src/services/github-app';
 
 const mocks = vi.hoisted(() => ({
   getAccessToken: vi.fn(),
+  getAuthenticatedUserOrganizations: vi.fn(),
   getUserAccessibleInstallations: vi.fn(),
+  verifyUserInstallationAccess: vi.fn(),
   optionalAuthUser: null as null | {
     id: string;
     role: string;
@@ -63,7 +69,9 @@ vi.mock('../../../src/services/github-app', async () => {
   );
   return {
     ...actual,
+    getAuthenticatedUserOrganizations: mocks.getAuthenticatedUserOrganizations,
     getUserAccessibleInstallations: mocks.getUserAccessibleInstallations,
+    verifyUserInstallationAccess: mocks.verifyUserInstallationAccess,
     getInstallationRepositories: vi.fn(),
     getRepositoryBranches: vi.fn(),
     verifyWebhookSignature: vi.fn(),
@@ -92,6 +100,9 @@ describe('GitHub App installation sharing', () => {
     mocks.optionalAuthUser = { id: 'user-1', role: 'user', status: 'active', email: 'u@example.com', name: 'User', avatarUrl: null };
     mocks.insertError = null;
     mocks.getAccessToken.mockResolvedValue({ accessToken: 'github-user-token' });
+    mocks.getAuthenticatedUserOrganizations.mockResolvedValue([]);
+    mocks.getUserAccessibleInstallations.mockResolvedValue([]);
+    mocks.verifyUserInstallationAccess.mockResolvedValue(true);
 
     const makeSelectBuilder = () => {
       const fromBuilder = {
@@ -149,6 +160,22 @@ describe('GitHub App installation sharing', () => {
     accountName: 'existing',
     createdAt: '2026-05-08T00:00:00.000Z',
     updatedAt: '2026-05-08T00:00:00.000Z',
+  });
+
+  const sharedEffpropCandidateRow = () => ({
+    id: 'inst-row-effprop-other-user',
+    userId: 'user-2',
+    installationId: '120081765',
+    accountType: 'organization',
+    accountName: 'effprop',
+    createdAt: '2026-05-08T00:00:00.000Z',
+    updatedAt: '2026-05-08T00:00:00.000Z',
+  });
+
+  const sharedEffpropCurrentUserRow = () => ({
+    ...sharedEffpropCandidateRow(),
+    id: 'inst-row-effprop-user-1',
+    userId: 'user-1',
   });
 
   const mockSyncInsertFailure = (error: Error) => {
@@ -404,6 +431,93 @@ describe('GitHub App installation sharing', () => {
     await expect(res.json()).resolves.toEqual([
       expect.objectContaining({ installationId: '111' }),
       expect.objectContaining({ installationId: '222' }),
+    ]);
+  });
+
+  it('discovers a known org installation when org membership and installation verification succeed', async () => {
+    whereResponses.push([], [sharedEffpropCandidateRow()], [sharedEffpropCurrentUserRow()]);
+    mocks.getAuthenticatedUserOrganizations.mockResolvedValue([{ login: 'effprop' }]);
+    mocks.verifyUserInstallationAccess.mockResolvedValue(true);
+
+    const res = await app.request('/api/github/installations', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(getAuthenticatedUserOrganizations).toHaveBeenCalledWith('github-user-token', {
+      flow: 'shared-org-discovery',
+      userId: 'user-1',
+    });
+    expect(verifyUserInstallationAccess).toHaveBeenCalledWith('github-user-token', '120081765', {
+      flow: 'shared-org-discovery',
+      userId: 'user-1',
+      installationId: '120081765',
+      accountName: 'effprop',
+    });
+    expect(insertedRows).toHaveLength(1);
+    expect(insertedRows[0]).toMatchObject({
+      userId: 'user-1',
+      installationId: '120081765',
+      accountType: 'organization',
+      accountName: 'effprop',
+    });
+    expect(mocks.log.info).toHaveBeenCalledWith('github.shared_org_installations.insert_result', {
+      userId: 'user-1',
+      installationId: '120081765',
+      result: 'success',
+      accountName: 'effprop',
+    });
+    await expect(res.json()).resolves.toEqual([
+      expect.objectContaining({ installationId: '120081765', userId: 'user-1' }),
+    ]);
+  });
+
+  it('does not verify or insert known org installations outside the user org memberships', async () => {
+    whereResponses.push([], [], [existingInstallationRow()]);
+    mocks.getAuthenticatedUserOrganizations.mockResolvedValue([{ login: 'not-effprop' }]);
+
+    const res = await app.request('/api/github/installations', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(verifyUserInstallationAccess).not.toHaveBeenCalled();
+    expect(insertedRows).toHaveLength(0);
+    await expect(res.json()).resolves.toEqual([
+      expect.objectContaining({ installationId: '111' }),
+    ]);
+  });
+
+  it('skips shared org candidates when installation-specific user verification denies access', async () => {
+    whereResponses.push([], [sharedEffpropCandidateRow()], [existingInstallationRow()]);
+    mocks.getAuthenticatedUserOrganizations.mockResolvedValue([{ login: 'effprop' }]);
+    mocks.verifyUserInstallationAccess.mockResolvedValue(false);
+
+    const res = await app.request('/api/github/installations', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(insertedRows).toHaveLength(0);
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.shared_org_installations.verification_skipped', {
+      userId: 'user-1',
+      installationId: '120081765',
+      accountName: 'effprop',
+      reason: 'not_accessible_to_user',
+    });
+    await expect(res.json()).resolves.toEqual([
+      expect.objectContaining({ installationId: '111' }),
+    ]);
+  });
+
+  it('does not let shared org discovery errors erase or block current installations', async () => {
+    whereResponses.push([existingInstallationRow()]);
+    mocks.getAuthenticatedUserOrganizations.mockRejectedValue(new Error('GitHub org lookup timeout'));
+
+    const res = await app.request('/api/github/installations', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(insertedRows).toHaveLength(0);
+    expect(mocks.log.error).toHaveBeenCalledWith('github.shared_org_installations.failed', {
+      userId: 'user-1',
+      error: 'GitHub org lookup timeout',
+    });
+    await expect(res.json()).resolves.toEqual([
+      expect.objectContaining({ installationId: '111' }),
     ]);
   });
 

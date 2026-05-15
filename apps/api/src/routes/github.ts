@@ -1,5 +1,5 @@
 import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
-import { and,eq } from 'drizzle-orm';
+import { and,eq,inArray,ne,sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context,Hono } from 'hono';
 
@@ -12,14 +12,18 @@ import { ulid } from '../lib/ulid';
 import { getUserId, optionalAuth,requireApproved, requireAuth } from '../middleware/auth';
 import { AppError, errors } from '../middleware/error';
 import {
+  getAuthenticatedUserOrganizations,
   getInstallationRepositories,
   getRepositoryBranches,
   getUserAccessibleInstallations,
   type UserAccessibleInstallation,
+  verifyUserInstallationAccess,
   verifyWebhookSignature,
 } from '../services/github-app';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
+
+type GitHubInstallationRow = typeof schema.githubInstallations.$inferSelect;
 
 /**
  * GET /api/github/installations - List user's GitHub App installations
@@ -464,6 +468,15 @@ async function syncUserInstallations(
   userId: string,
   accessToken: string
 ): Promise<void> {
+  await syncDirectUserInstallations(db, userId, accessToken);
+  await syncSharedOrgInstallations(db, userId, accessToken);
+}
+
+async function syncDirectUserInstallations(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string,
+  accessToken: string
+): Promise<void> {
   try {
     log.info('github.installations_sync.token_status', { userId, tokenPresent: Boolean(accessToken) });
 
@@ -541,11 +554,165 @@ async function syncUserInstallations(
       }
     }
   } catch (err) {
-    // Sync is best-effort — don't block the response if GitHub API is down
     log.error('github.sync_installations_failed', {
       userId,
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+}
+
+async function syncSharedOrgInstallations(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string,
+  accessToken: string
+): Promise<void> {
+  try {
+    const organizations = await getAuthenticatedUserOrganizations(accessToken, {
+      flow: 'shared-org-discovery',
+      userId,
+    });
+    const orgLogins = organizations.map((org) => org.login);
+    log.info('github.shared_org_installations.org_memberships', {
+      userId,
+      organizationCount: orgLogins.length,
+      organizations: orgLogins,
+    });
+    if (orgLogins.length === 0) return;
+
+    const existingInstallationIds = await getExistingInstallationIds(db, userId);
+    const candidates = await getSharedOrgInstallationCandidates(
+      db,
+      userId,
+      orgLogins,
+      existingInstallationIds
+    );
+    log.info('github.shared_org_installations.candidates', {
+      userId,
+      candidateCount: candidates.length,
+      installations: summarizeInstallationRows(candidates),
+    });
+
+    await insertVerifiedSharedInstallations(db, userId, accessToken, candidates);
+  } catch (err) {
+    log.error('github.shared_org_installations.failed', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+async function getExistingInstallationIds(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string
+): Promise<Set<string>> {
+  const existingRecords = await db
+    .select({ installationId: schema.githubInstallations.installationId })
+    .from(schema.githubInstallations)
+    .where(eq(schema.githubInstallations.userId, userId));
+
+  return new Set(existingRecords.map((record) => record.installationId));
+}
+
+async function getSharedOrgInstallationCandidates(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string,
+  orgLogins: string[],
+  existingInstallationIds: Set<string>
+): Promise<GitHubInstallationRow[]> {
+  const normalizedOrgLogins = orgLogins.map((login) => login.toLowerCase());
+  const knownOrgInstallations = await db
+    .select()
+    .from(schema.githubInstallations)
+    .where(
+      and(
+        eq(schema.githubInstallations.accountType, 'organization'),
+        ne(schema.githubInstallations.userId, userId),
+        inArray(sql<string>`lower(${schema.githubInstallations.accountName})`, normalizedOrgLogins)
+      )
+    );
+
+  const candidates = new Map<string, GitHubInstallationRow>();
+  for (const installation of knownOrgInstallations) {
+    if (!existingInstallationIds.has(installation.installationId)) {
+      candidates.set(installation.installationId, installation);
+    }
+  }
+  return [...candidates.values()];
+}
+
+async function insertVerifiedSharedInstallations(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string,
+  accessToken: string,
+  candidates: GitHubInstallationRow[]
+): Promise<void> {
+  const now = new Date().toISOString();
+  for (const candidate of candidates) {
+    try {
+      const canAccess = await verifyUserInstallationAccess(accessToken, candidate.installationId, {
+        flow: 'shared-org-discovery',
+        userId,
+        installationId: candidate.installationId,
+        accountName: candidate.accountName,
+      });
+      if (!canAccess) {
+        log.warn('github.shared_org_installations.verification_skipped', {
+          userId,
+          installationId: candidate.installationId,
+          accountName: candidate.accountName,
+          reason: 'not_accessible_to_user',
+        });
+        continue;
+      }
+      await insertSharedInstallation(db, userId, candidate, now);
+    } catch (err) {
+      log.error('github.shared_org_installations.verify_or_insert_failed', {
+        userId,
+        installationId: candidate.installationId,
+        accountName: candidate.accountName,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+async function insertSharedInstallation(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string,
+  candidate: GitHubInstallationRow,
+  now: string
+): Promise<void> {
+  try {
+    await db.insert(schema.githubInstallations).values({
+      id: ulid(),
+      userId,
+      installationId: candidate.installationId,
+      accountType: 'organization',
+      accountName: candidate.accountName,
+      createdAt: now,
+      updatedAt: now,
+    });
+    log.info('github.shared_org_installations.insert_result', {
+      userId,
+      installationId: candidate.installationId,
+      result: 'success',
+      accountName: candidate.accountName,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const result = isDatabaseConflictError(err) ? 'conflict' : 'error';
+    const details = {
+      userId,
+      installationId: candidate.installationId,
+      result,
+      accountName: candidate.accountName,
+      error: message,
+    };
+    if (result === 'conflict') {
+      log.warn('github.shared_org_installations.insert_result', details);
+    } else {
+      log.error('github.shared_org_installations.insert_result', details);
+    }
   }
 }
 
@@ -590,6 +757,16 @@ function summarizeAccessibleInstallations(installations: UserAccessibleInstallat
     installationId: String(inst.id),
     accountName: inst.account.login,
     accountType: inst.account.type,
+  }));
+}
+
+function summarizeInstallationRows(installations: GitHubInstallationRow[]): Array<{
+  installationId: string;
+  accountName: string;
+}> {
+  return installations.map((inst) => ({
+    installationId: inst.installationId,
+    accountName: inst.accountName,
   }));
 }
 
