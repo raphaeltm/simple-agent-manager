@@ -18,6 +18,7 @@ import {
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
@@ -187,8 +188,8 @@ async function autoDispatchSchedulableTasks(
   let maxActive = config.maxActiveTasksPerMission;
   if (missionRow?.budget_config) {
     try {
-      const budget = JSON.parse(missionRow.budget_config) as { maxActiveTasks?: number };
-      if (budget.maxActiveTasks && budget.maxActiveTasks > 0) {
+      const budget = expectJsonRecord(JSON.parse(missionRow.budget_config), 'mission.budget_config');
+      if (typeof budget.maxActiveTasks === 'number' && budget.maxActiveTasks > 0) {
         maxActive = budget.maxActiveTasks;
       }
     } catch {

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 
@@ -83,7 +84,9 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
 
   let storedState: { userId: string };
   try {
-    storedState = JSON.parse(storedStateRaw) as { userId: string };
+    const parsed = expectJsonRecord(JSON.parse(storedStateRaw), 'google_oauth.state');
+    if (typeof parsed.userId !== 'string') throw new Error('Invalid state structure');
+    storedState = { userId: parsed.userId };
   } catch {
     await c.env.KV.delete(`google-oauth-state:${state}`);
     return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid OAuth state format')}`);

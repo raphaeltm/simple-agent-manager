@@ -37,7 +37,7 @@ function parseJsonColumn(raw: string | null): unknown {
   }
 
   try {
-    return JSON.parse(raw) as unknown;
+    return JSON.parse(raw);
   } catch {
     return null;
   }
@@ -90,7 +90,7 @@ function getAgentSettingsValidationLimits(env: Env): AgentSettingsValidationLimi
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(env.AGENT_SETTINGS_VALIDATION_LIMITS) as unknown;
+    parsed = JSON.parse(env.AGENT_SETTINGS_VALIDATION_LIMITS);
   } catch {
     return AGENT_SETTINGS_VALIDATION_DEFAULTS;
   }

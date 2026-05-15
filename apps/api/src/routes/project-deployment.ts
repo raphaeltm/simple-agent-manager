@@ -14,6 +14,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -490,15 +491,11 @@ gcpDeployCallbackRoute.get(
 
     let storedState: { projectId: string; userId: string };
     try {
-      const parsed: unknown = JSON.parse(storedStateRaw);
-      if (
-        !parsed || typeof parsed !== 'object' ||
-        typeof (parsed as Record<string, unknown>).projectId !== 'string' ||
-        typeof (parsed as Record<string, unknown>).userId !== 'string'
-      ) {
+      const parsed = expectJsonRecord(JSON.parse(storedStateRaw), 'gcp_deploy_oauth.state');
+      if (typeof parsed.projectId !== 'string' || typeof parsed.userId !== 'string') {
         throw new Error('Invalid state structure');
       }
-      storedState = parsed as { projectId: string; userId: string };
+      storedState = { projectId: parsed.projectId, userId: parsed.userId };
     } catch {
       await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
       return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid OAuth state format')}`);

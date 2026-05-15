@@ -4,6 +4,8 @@ import {
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
 
+import { maybeJsonRecord } from '../lib/runtime-validation';
+
 // =============================================================================
 // Mustache-Style Template Rendering Engine
 // Supports {{variable.path}} interpolation with safety guarantees:
@@ -85,7 +87,9 @@ function resolvePath(obj: Record<string, unknown>, path: string): unknown {
     if (current === null || current === undefined || typeof current !== 'object') {
       return undefined;
     }
-    current = (current as Record<string, unknown>)[part];
+    const currentRecord = maybeJsonRecord(current);
+    if (!currentRecord) return undefined;
+    current = currentRecord[part];
   }
 
   return current;

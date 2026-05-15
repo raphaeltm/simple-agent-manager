@@ -14,6 +14,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { sendPromptToAgentOnNode } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -62,7 +63,7 @@ export async function handleSendDurableMessage(
     if (serialized.length > 4096) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'metadata exceeds maximum size (4096 bytes)');
     }
-    metadata = params.metadata as Record<string, unknown>;
+    metadata = expectJsonRecord(params.metadata, 'mcp.mailbox.metadata');
   }
 
   // Validate caller is a task agent

@@ -7,6 +7,7 @@ import { createAuth } from '../auth';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord, optionalJsonRecord } from '../lib/runtime-validation';
 import { getWebhookSecret } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { getUserId, optionalAuth,requireApproved, requireAuth } from '../middleware/auth';
@@ -214,11 +215,7 @@ githubRoutes.post('/webhook', async (c) => {
 
   let data: Record<string, unknown>;
   try {
-    const parsed: unknown = JSON.parse(payload);
-    if (!parsed || typeof parsed !== 'object') {
-      throw errors.badRequest('Webhook payload must be a JSON object');
-    }
-    data = parsed as Record<string, unknown>;
+    data = expectJsonRecord(JSON.parse(payload), 'github.webhook');
   } catch (e) {
     if (e instanceof AppError) throw e;
     throw errors.badRequest('Invalid JSON in webhook payload');
@@ -229,9 +226,8 @@ githubRoutes.post('/webhook', async (c) => {
   // Handle installation events
   if (event === 'installation') {
     const action = data.action;
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- webhook payload is signature-verified; shape is GitHub-defined
-    const installation = data.installation as Record<string, unknown> & { account?: Record<string, unknown> } | undefined;
-    const sender = data.sender as Record<string, unknown> | undefined;
+    const installation = optionalJsonRecord(data.installation, 'github.webhook.installation');
+    const sender = optionalJsonRecord(data.sender, 'github.webhook.sender');
 
     if (action === 'created' && sender?.id != null && installation?.id != null) {
       // Find user by GitHub ID (from the sender who installed the app)
@@ -243,7 +239,7 @@ githubRoutes.post('/webhook', async (c) => {
 
       const foundUser = users[0];
       if (foundUser) {
-        const account = installation.account;
+        const account = optionalJsonRecord(installation.account, 'github.webhook.installation.account');
         // Create installation record
         await db.insert(schema.githubInstallations).values({
           id: ulid(),
@@ -266,7 +262,7 @@ githubRoutes.post('/webhook', async (c) => {
   // Handle repository events (renamed, transferred, deleted)
   if (event === 'repository') {
     const action = data.action;
-    const repo = data.repository as Record<string, unknown> | undefined;
+    const repo = optionalJsonRecord(data.repository, 'github.webhook.repository');
     const repoId = typeof repo?.id === 'number' ? repo.id : undefined;
 
     if (repoId !== undefined && (action === 'renamed' || action === 'transferred')) {

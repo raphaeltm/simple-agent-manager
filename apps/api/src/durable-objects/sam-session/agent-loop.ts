@@ -19,6 +19,7 @@ import {
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
 import type { OpenAIMessage } from './payload-size';
@@ -158,6 +159,33 @@ function toOpenAITools(tools: AnthropicToolDef[]): OpenAITool[] {
   }));
 }
 
+function parseToolInput(raw: string, context: string): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    return expectJsonRecord(JSON.parse(raw), context);
+  } catch {
+    return {};
+  }
+}
+
+function parseCollectedToolCalls(raw: string): CollectedToolCall[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry, index) => {
+      try {
+        const item = expectJsonRecord(entry, `sam-session.tool_calls[${index}]`);
+        if (typeof item.id !== 'string' || typeof item.name !== 'string') return [];
+        return [{ id: item.id, name: item.name, input: expectJsonRecord(item.input ?? {}, `sam-session.tool_calls[${index}].input`) }];
+      } catch {
+        return [];
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+
 /** Convert stored message rows to OpenAI messages. */
 function toOpenAIMessages(rows: MessageRow[]): OpenAIMessage[] {
   const messages: OpenAIMessage[] = [];
@@ -167,15 +195,13 @@ function toOpenAIMessages(rows: MessageRow[]): OpenAIMessage[] {
     } else if (row.role === 'assistant') {
       const msg: OpenAIMessage = { role: 'assistant', content: row.content || null };
       if (row.tool_calls_json) {
-        try {
-          const toolCalls = JSON.parse(row.tool_calls_json) as CollectedToolCall[];
-          msg.tool_calls = toolCalls.map((tc) => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: { name: tc.name, arguments: JSON.stringify(tc.input) },
-          }));
-          if (!msg.content) msg.content = null;
-        } catch { /* ignore parse errors */ }
+        const toolCalls = parseCollectedToolCalls(row.tool_calls_json);
+        msg.tool_calls = toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+        }));
+        if (!msg.content) msg.content = null;
       }
       messages.push(msg);
     } else if (row.role === 'tool_result') {
@@ -411,7 +437,7 @@ async function processAnthropicStream(
 
       let event: Record<string, unknown>;
       try {
-        event = JSON.parse(data) as Record<string, unknown>;
+        event = expectJsonRecord(JSON.parse(data), 'sam-session.anthropic_stream.event');
       } catch {
         continue;
       }
@@ -419,10 +445,10 @@ async function processAnthropicStream(
       const eventType = event.type as string;
 
       if (eventType === 'content_block_start') {
-        const block = event.content_block as Record<string, unknown>;
+        const block = expectJsonRecord(event.content_block, 'sam-session.anthropic_stream.content_block');
         if (block?.type === 'tool_use') {
-          currentToolId = block.id as string;
-          currentToolName = block.name as string;
+          currentToolId = typeof block.id === 'string' ? block.id : '';
+          currentToolName = typeof block.name === 'string' ? block.name : '';
           currentToolInputJson = '';
           await writer.write(encodeSseEvent({
             type: 'tool_start',
@@ -431,28 +457,25 @@ async function processAnthropicStream(
           }));
         }
       } else if (eventType === 'content_block_delta') {
-        const delta = event.delta as Record<string, unknown>;
+        const delta = expectJsonRecord(event.delta, 'sam-session.anthropic_stream.delta');
         if (delta?.type === 'text_delta') {
-          const text = delta.text as string;
+          const text = typeof delta.text === 'string' ? delta.text : '';
           textContent += text;
           await writer.write(encodeSseEvent({ type: 'text_delta', content: text }));
         } else if (delta?.type === 'input_json_delta') {
-          currentToolInputJson += delta.partial_json as string;
+          currentToolInputJson += typeof delta.partial_json === 'string' ? delta.partial_json : '';
         }
       } else if (eventType === 'content_block_stop') {
         if (currentToolId) {
-          let input: Record<string, unknown> = {};
-          try {
-            input = JSON.parse(currentToolInputJson) as Record<string, unknown>;
-          } catch { /* empty input */ }
+          const input = parseToolInput(currentToolInputJson, 'sam-session.anthropic_stream.tool_input');
           toolCalls.push({ id: currentToolId, name: currentToolName, input });
           currentToolId = '';
           currentToolName = '';
           currentToolInputJson = '';
         }
       } else if (eventType === 'error') {
-        const errorObj = event.error as Record<string, unknown>;
-        const message = (errorObj?.message as string) || 'Anthropic API error';
+        const errorObj = expectJsonRecord(event.error ?? {}, 'sam-session.anthropic_stream.error');
+        const message = typeof errorObj.message === 'string' ? errorObj.message : 'Anthropic API error';
         await writer.write(encodeSseEvent({ type: 'error', message }));
       }
     }
@@ -497,16 +520,18 @@ async function processOpenAIStream(
 
       let chunk: Record<string, unknown>;
       try {
-        chunk = JSON.parse(data) as Record<string, unknown>;
+        chunk = expectJsonRecord(JSON.parse(data), 'sam-session.openai_stream.chunk');
       } catch {
         continue;
       }
 
-      const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
+      const choices = Array.isArray(chunk.choices)
+        ? chunk.choices.map((choice, index) => expectJsonRecord(choice, `sam-session.openai_stream.choices[${index}]`))
+        : undefined;
       const firstChoice = choices?.[0];
       if (!firstChoice) continue;
 
-      const delta = firstChoice.delta as Record<string, unknown> | undefined;
+      const delta = firstChoice.delta ? expectJsonRecord(firstChoice.delta, 'sam-session.openai_stream.delta') : undefined;
       if (!delta) continue;
 
       // Text content
@@ -516,15 +541,17 @@ async function processOpenAIStream(
       }
 
       // Tool calls (streamed as deltas with index)
-      const deltaToolCalls = delta.tool_calls as Array<Record<string, unknown>> | undefined;
+      const deltaToolCalls = Array.isArray(delta.tool_calls)
+        ? delta.tool_calls.map((toolCall, index) => expectJsonRecord(toolCall, `sam-session.openai_stream.tool_calls[${index}]`))
+        : undefined;
       if (deltaToolCalls) {
         for (const dtc of deltaToolCalls) {
-          const index = (dtc.index as number) ?? 0;
-          const fn = dtc.function as Record<string, unknown> | undefined;
+          const index = typeof dtc.index === 'number' ? dtc.index : 0;
+          const fn = dtc.function ? expectJsonRecord(dtc.function, 'sam-session.openai_stream.tool_call.function') : undefined;
 
           if (!toolCallBuilders.has(index)) {
-            const id = (dtc.id as string) || `call_${crypto.randomUUID().slice(0, 8)}`;
-            const name = (fn?.name as string) || '';
+            const id = typeof dtc.id === 'string' ? dtc.id : `call_${crypto.randomUUID().slice(0, 8)}`;
+            const name = typeof fn?.name === 'string' ? fn.name : '';
             toolCallBuilders.set(index, { id, name, args: '' });
             if (name) {
               await writer.write(encodeSseEvent({ type: 'tool_start', tool: name, input: {} }));
@@ -543,12 +570,11 @@ async function processOpenAIStream(
       }
 
       // Finalize tool calls on finish_reason
-      const finishReason = firstChoice.finish_reason as string | undefined;
+      const finishReason = typeof firstChoice.finish_reason === 'string' ? firstChoice.finish_reason : undefined;
       if (finishReason === 'tool_calls' || finishReason === 'stop') {
         for (const [, builder] of toolCallBuilders) {
           if (builder.name) {
-            let input: Record<string, unknown> = {};
-            try { input = JSON.parse(builder.args) as Record<string, unknown>; } catch { /* empty */ }
+            const input = parseToolInput(builder.args, 'sam-session.openai_stream.tool_input');
             toolCalls.push({ id: builder.id, name: builder.name, input });
           }
         }
@@ -560,8 +586,7 @@ async function processOpenAIStream(
   // Finalize remaining builders (stream ended without explicit finish_reason)
   for (const [, builder] of toolCallBuilders) {
     if (builder.name) {
-      let input: Record<string, unknown> = {};
-      try { input = JSON.parse(builder.args) as Record<string, unknown>; } catch { /* empty */ }
+      const input = parseToolInput(builder.args, 'sam-session.openai_stream.remaining_tool_input');
       toolCalls.push({ id: builder.id, name: builder.name, input });
     }
   }
@@ -618,7 +643,7 @@ export async function runAgentLoop(
   const tools = options?.tools ?? [];
   const executeToolFn = options?.executeTool ?? (async () => ({ error: 'No tool executor configured' }));
   const toolCtx: ToolContext = {
-    env: env as unknown as Record<string, unknown>,
+    env: expectJsonRecord(env, 'sam-session.tool_context.env'),
     userId,
     searchMessages,
     ...options?.toolContextExtras,

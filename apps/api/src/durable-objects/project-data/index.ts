@@ -11,6 +11,7 @@ import type { AcpSessionEventActorType, AcpSessionStatus } from '@simple-agent-m
 import { DurableObject } from 'cloudflare:workers';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
@@ -450,8 +451,7 @@ export class ProjectData extends DurableObject<Env> {
     if (typeof message !== 'string') return;
     try {
       const parsed: unknown = JSON.parse(message);
-      if (!parsed || typeof parsed !== 'object') { return; }
-      const msg = parsed as Record<string, unknown>;
+      const msg = expectJsonRecord(parsed, 'project-data.websocket.message');
       if (msg.type === 'ping') { ws.send(JSON.stringify({ type: 'pong' })); return; }
       if (msg.type === 'message.send') {
         const rawSessionId = msg.sessionId;

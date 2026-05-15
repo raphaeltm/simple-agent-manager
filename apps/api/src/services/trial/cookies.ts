@@ -18,6 +18,8 @@ import {
   TRIAL_COOKIE_FINGERPRINT_NAME,
 } from '@simple-agent-manager/shared';
 
+import { expectJsonRecord } from '../../lib/runtime-validation';
+
 // ---------------------------------------------------------------------------
 // Defaults (Principle XI: all limits configurable, with DEFAULT_* constants)
 // ---------------------------------------------------------------------------
@@ -162,7 +164,13 @@ export async function verifyClaimToken(
   let payload: TrialClaimPayload;
   try {
     const json = new TextDecoder().decode(base64urlDecode(body));
-    payload = JSON.parse(json) as TrialClaimPayload;
+    const parsed = expectJsonRecord(JSON.parse(json), 'trial.claim_cookie');
+    payload = {
+      trialId: typeof parsed.trialId === 'string' ? parsed.trialId : '',
+      projectId: typeof parsed.projectId === 'string' ? parsed.projectId : '',
+      issuedAt: typeof parsed.issuedAt === 'number' ? parsed.issuedAt : Number.NaN,
+      expiresAt: typeof parsed.expiresAt === 'number' ? parsed.expiresAt : Number.NaN,
+    };
   } catch {
     return { ok: false, reason: 'malformed' };
   }

@@ -14,6 +14,7 @@
  */
 
 import type { Env } from '../../env';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 
 /**
  * The canonical trial record. Only fields both tracks agree on live here — any
@@ -62,10 +63,36 @@ export async function readTrial(
   const raw = await env.KV.get(trialKey(trialId));
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as TrialRecord;
+    return parseTrialRecord(JSON.parse(raw));
   } catch {
     return null;
   }
+}
+
+function parseTrialRecord(value: unknown): TrialRecord {
+  const record = expectJsonRecord(value, 'trial.record');
+  if (
+    typeof record.trialId !== 'string' ||
+    typeof record.projectId !== 'string' ||
+    typeof record.fingerprint !== 'string' ||
+    !(typeof record.workspaceId === 'string' || record.workspaceId === null) ||
+    typeof record.repoUrl !== 'string' ||
+    typeof record.createdAt !== 'number' ||
+    typeof record.expiresAt !== 'number' ||
+    typeof record.claimed !== 'boolean'
+  ) {
+    throw new Error('Invalid trial record');
+  }
+  return {
+    trialId: record.trialId,
+    projectId: record.projectId,
+    fingerprint: record.fingerprint,
+    workspaceId: record.workspaceId,
+    repoUrl: record.repoUrl,
+    createdAt: record.createdAt,
+    expiresAt: record.expiresAt,
+    claimed: record.claimed,
+  };
 }
 
 export async function readTrialByProject(

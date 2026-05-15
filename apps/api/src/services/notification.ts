@@ -13,7 +13,7 @@ import { type HumanInputCategory,MAX_NOTIFICATION_BODY_LENGTH, MAX_NOTIFICATION_
 import type { NotificationService } from '../durable-objects/notification';
 import { log } from '../lib/logger';
 
-interface NotificationEnv {
+export interface NotificationEnv {
   NOTIFICATION: DurableObjectNamespace;
   DATABASE: D1Database;
 }

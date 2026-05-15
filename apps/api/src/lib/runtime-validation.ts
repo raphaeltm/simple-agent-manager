@@ -37,6 +37,12 @@ export function optionalJsonRecord(value: unknown, context: string): JsonRecord 
   return expectJsonRecord(value, context);
 }
 
+export function maybeJsonRecord(value: unknown): JsonRecord | null {
+  if (value === undefined || value === null) return null;
+  const result = v.safeParse(jsonRecordSchema, value);
+  return result.success ? result.output : null;
+}
+
 export function parseJsonRecord(raw: string, context: string): JsonRecord {
   let parsed: unknown;
   try {

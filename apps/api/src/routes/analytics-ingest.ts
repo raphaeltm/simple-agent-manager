@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { bucketUserAgent } from '../middleware/analytics';
 import { optionalAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -55,9 +56,12 @@ function validateEvent(raw: unknown): {
   visitorId: string;
   host: string;
 } | null {
-  if (!raw || typeof raw !== 'object') return null;
-
-  const e = raw as Record<string, unknown>;
+  let e: Record<string, unknown>;
+  try {
+    e = expectJsonRecord(raw, 'analytics.event');
+  } catch {
+    return null;
+  }
 
   // Event name is required
   if (typeof e.event !== 'string' || e.event.length === 0) return null;
@@ -142,11 +146,14 @@ analyticsIngestRoutes.post('/', async (c) => {
   }
 
   // Validate structure
-  if (!body || typeof body !== 'object' || !('events' in body)) {
+  let parsedBody: Record<string, unknown>;
+  try {
+    parsedBody = expectJsonRecord(body, 'analytics.ingest.body');
+  } catch {
     throw errors.badRequest('Body must contain an "events" array');
   }
 
-  const events = (body as Record<string, unknown>).events;
+  const events = parsedBody.events;
 
   if (!Array.isArray(events)) {
     throw errors.badRequest('"events" must be an array');

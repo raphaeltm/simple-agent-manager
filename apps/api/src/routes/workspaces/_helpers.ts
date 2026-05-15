@@ -7,6 +7,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import { decrypt } from '../../services/encryption';
 import { signCallbackToken,verifyCallbackToken } from '../../services/jwt';
@@ -32,7 +33,7 @@ export function safeParseJson(s: string): Record<string, unknown> | null {
     ) {
       return null;
     }
-    return parsed as Record<string, unknown>;
+    return expectJsonRecord(parsed, 'workspace.json');
   } catch {
     return null;
   }

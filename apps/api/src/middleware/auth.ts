@@ -4,6 +4,7 @@ import type { Context, MiddlewareHandler,Next } from 'hono';
 import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { AppError, errors } from './error';
 
 /**
@@ -46,14 +47,15 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
       throw errors.unauthorized('Authentication required');
     }
 
+    const sessionUser = expectJsonRecord(session.user, 'auth.session.user');
     c.set('auth', {
       user: {
         id: session.user.id,
         email: session.user.email,
         name: session.user.name ?? null,
         avatarUrl: session.user.image ?? null,
-        role: ((session.user as Record<string, unknown>).role as UserRole) ?? 'user',
-        status: ((session.user as Record<string, unknown>).status as UserStatus) ?? 'active',
+        role: (typeof sessionUser.role === 'string' ? sessionUser.role : 'user') as UserRole,
+        status: (typeof sessionUser.status === 'string' ? sessionUser.status : 'active') as UserStatus,
       },
       session: {
         id: session.session.id,
@@ -79,14 +81,15 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
       });
 
       if (session?.user) {
+        const sessionUser = expectJsonRecord(session.user, 'auth.session.user');
         c.set('auth', {
           user: {
             id: session.user.id,
             email: session.user.email,
             name: session.user.name ?? null,
             avatarUrl: session.user.image ?? null,
-            role: ((session.user as Record<string, unknown>).role as UserRole) ?? 'user',
-            status: ((session.user as Record<string, unknown>).status as UserStatus) ?? 'active',
+            role: (typeof sessionUser.role === 'string' ? sessionUser.role : 'user') as UserRole,
+            status: (typeof sessionUser.status === 'string' ? sessionUser.status : 'active') as UserStatus,
           },
           session: {
             id: session.session.id,

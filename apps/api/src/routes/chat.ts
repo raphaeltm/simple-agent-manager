@@ -17,6 +17,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
@@ -247,7 +248,8 @@ chatRoutes.get('/:sessionId', async (c) => {
 
   // Embed task summary if session is linked to a task (D1 lookup, best-effort)
   let task: ChatSessionTaskEmbed | null = null;
-  const taskId = (session as Record<string, unknown>).taskId as string | null;
+  const sessionRecord = expectJsonRecord(session, 'chat.session');
+  const taskId = typeof sessionRecord.taskId === 'string' ? sessionRecord.taskId : null;
   if (taskId) {
     try {
       const [taskRow] = await db
@@ -468,7 +470,7 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     userId
   );
 
-  return c.json(result as Record<string, unknown>);
+  return c.json(expectJsonRecord(result, 'chat.agent_prompt_result'));
 });
 
 /**
