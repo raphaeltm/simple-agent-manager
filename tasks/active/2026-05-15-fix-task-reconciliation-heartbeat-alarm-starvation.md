@@ -29,7 +29,7 @@ The affected workspace node was still healthy and heartbeating. Code inspection 
 - [x] Refactor ProjectData alarm candidate calculation so `recalculateAlarm()` and heartbeat-triggered scheduling cannot diverge again.
 - [x] Run focused ProjectData/reconciliation tests.
 - [x] Run API lint/typecheck/test validation for the touched package.
-- [ ] Document the root cause and verification in the PR.
+- [x] Document the root cause and verification notes for the PR body.
 
 ## Acceptance Criteria
 
@@ -38,6 +38,23 @@ The affected workspace node was still healthy and heartbeating. Code inspection 
 - [x] Existing heartbeat timeout behavior remains covered.
 - [x] Focused tests pass locally.
 - [x] Full relevant API checks pass before PR.
+
+## Verification Notes
+
+- Root cause: `updateNodeHeartbeats()` refreshed ProjectData alarms through `scheduleHeartbeatAlarm()`, but that fast path used a smaller candidate set than `recalculateAlarm()` and omitted task-mode reconciliation and workspace idle checks.
+- Fix: ProjectData alarm scheduling now uses a shared `computeProjectDataAlarmTime()` candidate calculation for full recomputation and heartbeat-triggered scheduling.
+- Regression coverage:
+  - `computeProjectDataAlarmTime` keeps a due reconciliation deadline ahead of the healthy heartbeat timeout.
+  - `computeProjectDataAlarmTime` keeps a workspace idle check ahead of the healthy heartbeat timeout.
+- Validation passed:
+  - `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/reconciliation.test.ts`
+  - `pnpm --filter @simple-agent-manager/api lint`
+  - `pnpm --filter @simple-agent-manager/api typecheck`
+  - `pnpm --filter @simple-agent-manager/api test`
+  - `pnpm lint`
+  - `pnpm typecheck`
+  - `pnpm test`
+  - `pnpm build`
 
 ## References
 
