@@ -187,6 +187,7 @@ describe('Session icon data flow: list session + task status → correct icon', 
         blocked: false,
         triggeredBy: 'user',
         dispatchDepth: 0,
+        taskMode: 'task',
       }],
     ]);
 
@@ -232,6 +233,7 @@ describe('Session with existing task embed (detail endpoint)', () => {
         blocked: false,
         triggeredBy: 'user',
         dispatchDepth: 0,
+        taskMode: 'task',
       }],
     ]);
 
