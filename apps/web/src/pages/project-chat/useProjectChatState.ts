@@ -6,7 +6,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
 import { useProjectWebSocket } from '../../hooks/useProjectWebSocket';
-import type { ChatSessionResponse, TaskAttachmentRef } from '../../lib/api';
+import type { ChatSessionListItem, ChatSessionResponse, TaskAttachmentRef } from '../../lib/api';
 import {
   closeConversationTask,
   getProjectTask,
@@ -67,7 +67,7 @@ export function useProjectChatState() {
   const executeIdeaId = searchParams.get('executeIdea');
   const executeIdeaIdRef = useRef<string | null>(null);
 
-  const [sessions, setSessions] = useState<ChatSessionResponse[]>([]);
+  const [sessions, setSessions] = useState<ChatSessionListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
@@ -155,8 +155,8 @@ export function useProjectChatState() {
   // ---------------------------------------------------------------------------
 
   const { recentSessions, staleSessions } = useMemo(() => {
-    const recent: ChatSessionResponse[] = [];
-    const stale: ChatSessionResponse[] = [];
+    const recent: ChatSessionListItem[] = [];
+    const stale: ChatSessionListItem[] = [];
     for (const s of sessions) {
       // Stopped retries/forks auto-collapse into the Older bucket.
       // A stopped retry/fork is a terminated session whose task has a

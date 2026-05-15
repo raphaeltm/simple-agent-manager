@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@simple-agent-manager/shared';
 
-import type { ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem } from '../../lib/api';
 import { buildLineageText, isRetryOrFork } from './lineageUtils';
 import type { TaskInfo } from './useTaskGroups';
 
@@ -12,7 +12,7 @@ import type { TaskInfo } from './useTaskGroups';
  * Only genuine agent-dispatched subtasks (triggeredBy=mcp) remain as children.
  */
 export interface SessionTreeNode {
-  session: ChatSessionResponse;
+  session: ChatSessionListItem;
   children: SessionTreeNode[];
   /** Depth from the tree root (0 = root-level). */
   depth: number;
@@ -34,7 +34,7 @@ export interface SessionTreeNode {
 const COMPLETED_STATUSES = new Set<TaskStatus>(['completed']);
 
 interface BuildSessionTreeOptions {
-  allSessions?: ChatSessionResponse[];
+  allSessions?: ChatSessionListItem[];
 }
 
 /**
@@ -46,7 +46,7 @@ interface BuildSessionTreeOptions {
  * - Context anchors are lifted in from allSessions when needed.
  */
 export function buildSessionTree(
-  visibleSessions: ChatSessionResponse[],
+  visibleSessions: ChatSessionListItem[],
   taskInfoMap: Map<string, TaskInfo>,
   options: BuildSessionTreeOptions = {},
 ): SessionTreeNode[] {
@@ -54,7 +54,7 @@ export function buildSessionTree(
   const visibleIds = new Set(visibleSessions.map((s) => s.id));
 
   // Build taskId -> session maps
-  const taskToSession = new Map<string, ChatSessionResponse>();
+  const taskToSession = new Map<string, ChatSessionListItem>();
   for (const s of visibleSessions) {
     if (s.taskId) taskToSession.set(s.taskId, s);
   }
@@ -67,17 +67,17 @@ export function buildSessionTree(
   }
 
   // Accumulator of sessions that will appear in the tree
-  const includedSessionsById = new Map<string, ChatSessionResponse>();
+  const includedSessionsById = new Map<string, ChatSessionListItem>();
   for (const s of visibleSessions) includedSessionsById.set(s.id, s);
 
   // Walk up ancestors for context anchors — but only for genuine subtask chains
-  const walkAncestors = (session: ChatSessionResponse) => {
+  const walkAncestors = (session: ChatSessionListItem) => {
     if (!session.taskId) return;
     const info = taskInfoMap.get(session.taskId);
     // Don't walk up if this is a retry/fork — it will be promoted to root
     if (info && isRetryOrFork(info) && info.parentTaskId) return;
 
-    let cursor: ChatSessionResponse | undefined = session;
+    let cursor: ChatSessionListItem | undefined = session;
     const seen = new Set<string>([session.id]);
     while (cursor?.taskId) {
       const curInfo = taskInfoMap.get(cursor.taskId);

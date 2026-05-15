@@ -1,6 +1,6 @@
 import {
   Activity,
-  ExternalLink,
+
   Eye,
   Lightbulb,
   MessageSquare,
@@ -11,7 +11,7 @@ import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { extractProjectId } from '../components/NavSidebar';
-import type { ChatSessionResponse } from '../lib/api';
+import type { ChatSessionListItem } from '../lib/api';
 
 // ── Configurable limits ──
 
@@ -53,7 +53,7 @@ function extractTaskId(pathname: string): string | undefined {
 // ── Hook ──
 
 interface UseCommandPaletteContextOptions {
-  chatSessions: Array<ChatSessionResponse & { projectId: string; projectName: string }>;
+  chatSessions: Array<ChatSessionListItem & { projectId: string; projectName: string }>;
   projects: Array<{ id: string; name: string }>;
 }
 
@@ -140,14 +140,8 @@ export function useCommandPaletteContext({
         });
       }
 
-      if (session?.task?.outputPrUrl) {
-        actions.push({
-          id: 'ctx-open-pr',
-          label: 'Open PR',
-          icon: <ExternalLink size={14} />,
-          action: () => window.open(session.task!.outputPrUrl!, '_blank'),
-        });
-      }
+      // Note: outputPrUrl is only available via the detail endpoint (task embed),
+      // not the list endpoint. Command palette uses list data, so this is skipped.
     }
 
     // ── Task/Idea-scoped actions ──
@@ -175,18 +169,8 @@ export function useCommandPaletteContext({
         }
       }
 
-      // Find task's PR URL from a session with this taskId in the same project
-      const sessionWithPr = chatSessions.find(
-        (s) => s.taskId === taskId && s.projectId === projectId && s.task?.outputPrUrl,
-      );
-      if (sessionWithPr?.task?.outputPrUrl) {
-        actions.push({
-          id: 'ctx-task-pr',
-          label: 'Open PR',
-          icon: <ExternalLink size={14} />,
-          action: () => window.open(sessionWithPr.task!.outputPrUrl!, '_blank'),
-        });
-      }
+      // Note: PR URL (outputPrUrl) is only available via the detail endpoint
+      // (task embed), not the list endpoint used by the command palette.
     }
 
     return actions.slice(0, MAX_CONTEXT_RESULTS);

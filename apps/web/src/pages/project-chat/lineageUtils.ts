@@ -1,4 +1,4 @@
-import type { ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem } from '../../lib/api';
 import type { TaskInfo } from './useTaskGroups';
 
 /**
@@ -23,14 +23,14 @@ export function isRetryOrFork(taskInfo: TaskInfo): boolean {
 export function getLineageText(
   taskId: string,
   taskInfoMap: Map<string, TaskInfo>,
-  sessions: ChatSessionResponse[],
+  sessions: ChatSessionListItem[],
 ): string | undefined {
   const info = taskInfoMap.get(taskId);
   if (!info?.parentTaskId) return undefined;
 
   if (!isRetryOrFork(info)) return undefined;
 
-  const taskToSession = new Map<string, ChatSessionResponse>();
+  const taskToSession = new Map<string, ChatSessionListItem>();
   for (const s of sessions) {
     if (s.taskId) taskToSession.set(s.taskId, s);
   }
@@ -41,7 +41,7 @@ export function getLineageText(
 export function buildLineageText(
   taskInfo: TaskInfo,
   taskInfoMap: Map<string, TaskInfo>,
-  sessionsByTaskId: Map<string, ChatSessionResponse>,
+  sessionsByTaskId: Map<string, ChatSessionListItem>,
 ): string {
   if (!taskInfo.parentTaskId) return '';
 

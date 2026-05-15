@@ -1,10 +1,10 @@
 import { EmptyState, StatusBadge } from '@simple-agent-manager/ui';
 
-import type { ChatSessionResponse } from '../lib/api';
+import type { ChatSessionListItem } from '../lib/api';
 import { formatDuration, formatRelativeTime } from '../lib/time-utils';
 
 interface ChatSessionListProps {
-  sessions: ChatSessionResponse[];
+  sessions: ChatSessionListItem[];
   onSelect: (sessionId: string) => void;
 }
 
