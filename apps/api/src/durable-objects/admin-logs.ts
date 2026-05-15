@@ -12,6 +12,8 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 
+import { expectJsonRecord, readRequestJsonRecord } from '../lib/runtime-validation';
+
 type Env = {
   OBSERVABILITY_STREAM_BUFFER_SIZE?: string;
 };
@@ -155,15 +157,17 @@ export class AdminLogs extends DurableObject<Env> {
   }
 
   private async handleLogIngestion(request: Request): Promise<Response> {
-    let body: { logs?: LogBufferEntry[] };
+    let logs: LogBufferEntry[];
     try {
-      body = await request.json() as { logs?: LogBufferEntry[] };
+      const body = await readRequestJsonRecord(request, 'admin-logs.ingest');
+      logs = Array.isArray(body.logs)
+        ? body.logs.map((log, index) => parseLogBufferEntry(log, `admin-logs.ingest.logs[${index}]`))
+        : [];
     } catch {
       return new Response('Invalid JSON', { status: 400 });
     }
 
-    const logs = body.logs;
-    if (!Array.isArray(logs) || logs.length === 0) {
+    if (logs.length === 0) {
       return new Response('No logs', { status: 200 });
     }
 
@@ -259,5 +263,24 @@ interface LogBufferEntry {
     message: string;
     details: Record<string, unknown>;
     scriptName: string;
+  };
+}
+
+function parseLogBufferEntry(value: unknown, context: string): LogBufferEntry {
+  const root = expectJsonRecord(value, context);
+  if (root.type !== 'log') {
+    throw new Error(`Invalid payload at ${context}.type: expected log`);
+  }
+  const entry = expectJsonRecord(root.entry, `${context}.entry`);
+  return {
+    type: 'log',
+    entry: {
+      timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : '',
+      level: typeof entry.level === 'string' ? entry.level : 'info',
+      event: typeof entry.event === 'string' ? entry.event : 'unknown',
+      message: typeof entry.message === 'string' ? entry.message : '',
+      details: expectJsonRecord(entry.details ?? {}, `${context}.entry.details`),
+      scriptName: typeof entry.scriptName === 'string' ? entry.scriptName : 'unknown',
+    },
   };
 }

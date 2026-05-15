@@ -18,6 +18,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../env';
+import { readRequestJsonRecord } from '../lib/runtime-validation';
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -173,30 +174,31 @@ export class TrialCounter extends DurableObject<Env> {
       }
 
       if (request.method === 'POST' && url.pathname === '/tryIncrement') {
-        const body = (await request.json()) as {
-          monthKey?: string;
-          cap?: number;
-        };
+        const body = await readRequestJsonRecord(request, 'trial-counter.tryIncrement');
         if (!body.monthKey || typeof body.cap !== 'number') {
           return jsonResponse({ error: 'monthKey + cap required' }, 400);
         }
-        const result = await this.tryIncrement(body.monthKey, body.cap);
+        const monthKey = typeof body.monthKey === 'string' ? body.monthKey : '';
+        if (!monthKey) return jsonResponse({ error: 'monthKey + cap required' }, 400);
+        const result = await this.tryIncrement(monthKey, body.cap);
         return jsonResponse(result, 200);
       }
 
       if (request.method === 'POST' && url.pathname === '/decrement') {
-        const body = (await request.json()) as { monthKey?: string };
-        if (!body.monthKey) return jsonResponse({ error: 'monthKey required' }, 400);
-        const count = await this.decrement(body.monthKey);
+        const body = await readRequestJsonRecord(request, 'trial-counter.decrement');
+        const monthKey = typeof body.monthKey === 'string' ? body.monthKey : '';
+        if (!monthKey) return jsonResponse({ error: 'monthKey required' }, 400);
+        const count = await this.decrement(monthKey);
         return jsonResponse({ count }, 200);
       }
 
       if (request.method === 'POST' && url.pathname === '/prune') {
-        const body = (await request.json()) as { keepMonthKey?: string };
-        if (!body.keepMonthKey) {
+        const body = await readRequestJsonRecord(request, 'trial-counter.prune');
+        const keepMonthKey = typeof body.keepMonthKey === 'string' ? body.keepMonthKey : '';
+        if (!keepMonthKey) {
           return jsonResponse({ error: 'keepMonthKey required' }, 400);
         }
-        const deleted = await this.prune(body.keepMonthKey);
+        const deleted = await this.prune(keepMonthKey);
         return jsonResponse({ deleted }, 200);
       }
 

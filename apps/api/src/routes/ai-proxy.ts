@@ -27,6 +27,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readRequestJsonRecord } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import {
@@ -394,7 +395,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   // --- Parse request body ---
   let body: Record<string, unknown>;
   try {
-    body = await c.req.json() as Record<string, unknown>;
+    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy.chat_completions');
   } catch {
     return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
   }
@@ -405,7 +406,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   }
 
   // --- Resolve and validate model ---
-  const modelId = await resolveModelId(body.model as string | undefined, c.env);
+  const modelId = await resolveModelId(typeof body.model === 'string' ? body.model : undefined, c.env);
   const allowedModels = getAllowedModels(c.env);
   if (!allowedModels.has(modelId)) {
     return c.json({
