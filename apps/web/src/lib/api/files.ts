@@ -7,7 +7,6 @@ import type {
 } from '@simple-agent-manager/shared';
 import type { ApiError } from '@simple-agent-manager/shared';
 
-import { API_URL, ApiClientError, request } from './client';
 import {
   expectJsonRecord,
   optionalString,
@@ -17,6 +16,7 @@ import {
   requireNumber,
   requireString,
 } from '../runtime-validation';
+import { API_URL, ApiClientError, request } from './client';
 
 // =============================================================================
 // Git Integration (direct VM Agent calls via ws-{id} subdomain)

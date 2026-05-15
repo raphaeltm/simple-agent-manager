@@ -176,10 +176,10 @@ export async function verifyClaimToken(
   }
 
   if (
-    typeof payload.trialId !== 'string' ||
-    typeof payload.projectId !== 'string' ||
-    typeof payload.issuedAt !== 'number' ||
-    typeof payload.expiresAt !== 'number'
+    payload.trialId.length === 0 ||
+    payload.projectId.length === 0 ||
+    !Number.isFinite(payload.issuedAt) ||
+    !Number.isFinite(payload.expiresAt)
   ) {
     return { ok: false, reason: 'malformed' };
   }

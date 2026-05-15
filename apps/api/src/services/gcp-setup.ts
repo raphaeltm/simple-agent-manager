@@ -34,13 +34,17 @@ const gcpProjectSchema = v.object({
   lifecycleState: v.string(),
 });
 
+const gcpProjectNumberResponseSchema = v.object({
+  projectNumber: v.string(),
+});
+
 const gcpProjectListResponseSchema = v.object({
   projects: v.optional(v.array(gcpProjectSchema)),
   nextPageToken: v.optional(v.string()),
 });
 
 const gcpOperationSchema = v.object({
-  name: v.string(),
+  name: v.optional(v.string()),
   done: v.optional(v.boolean()),
 });
 
@@ -64,6 +68,13 @@ const pollOperationSchema = v.object({
   done: v.optional(v.boolean()),
   error: v.optional(v.object({ message: v.string() })),
 });
+
+function requireOperationName(op: { name?: string }, context: string): string {
+  if (!op.name) {
+    throw new GcpApiError({ step: context, message: 'GCP operation response missing name' });
+  }
+  return op.name;
+}
 
 /**
  * Validate a value is safe for interpolation into a GCP CEL attribute condition.
@@ -138,9 +149,9 @@ export async function getProjectNumber(
     throw new GcpApiError({ step: 'get_project_number', message: `Failed to get project info (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
-  const data: GcpProject = await readResponseJson(
+  const data = await readResponseJson(
     res,
-    gcpProjectSchema,
+    gcpProjectNumberResponseSchema,
     'gcp.resource_manager.project',
   );
   return data.projectNumber;
@@ -183,7 +194,7 @@ export async function enableApis(
   // Poll the long-running operation
   const op = await readResponseJson(res, gcpOperationSchema, 'gcp.service_usage.batch_enable');
   if (!op.done) {
-    await pollOperation(oauthToken, op.name, timeoutMs);
+    await pollOperation(oauthToken, requireOperationName(op, 'enable_apis'), timeoutMs);
   }
 }
 
@@ -222,7 +233,7 @@ export async function createWifPool(
 
   const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.create_wif_pool');
   if (!op.done) {
-    await pollOperation(oauthToken, op.name, timeoutMs);
+    await pollOperation(oauthToken, requireOperationName(op, 'create_wif_pool'), timeoutMs);
   }
 
   return `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}`;
@@ -289,7 +300,7 @@ export async function createOidcProvider(
 
   const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.create_oidc_provider');
   if (!op.done) {
-    await pollOperation(oauthToken, op.name, timeoutMs);
+    await pollOperation(oauthToken, requireOperationName(op, 'create_oidc_provider'), timeoutMs);
   }
 }
 
@@ -343,7 +354,7 @@ export async function updateOidcProvider(
 
   const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.update_oidc_provider');
   if (!op.done) {
-    await pollOperation(oauthToken, op.name, timeoutMs);
+    await pollOperation(oauthToken, requireOperationName(op, 'update_oidc_provider'), timeoutMs);
   }
 }
 

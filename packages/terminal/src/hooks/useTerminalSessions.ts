@@ -1,10 +1,10 @@
 import { useCallback, useEffect,useRef, useState } from 'react';
 
+import { expectJsonRecord, parseJsonRecord, requireArray } from '../runtime-validation';
 import type {
   TerminalSession,
   UseTerminalSessionsReturn
 } from '../types/multi-terminal';
-import { expectJsonRecord, parseJsonRecord, requireArray } from '../runtime-validation';
 
 /** Serializable session metadata for sessionStorage persistence */
 interface PersistedSession {

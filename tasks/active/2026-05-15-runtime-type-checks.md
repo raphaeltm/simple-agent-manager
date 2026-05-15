@@ -42,7 +42,7 @@ Implementation will treat these as checklist items grouped by trust boundary. In
 - [x] Replace script/infra JSON assertions that consume external command output or event payloads with runtime validators.
 - [x] Remove or justify remaining `as any` at runtime boundaries.
 - [x] Add tests proving invalid runtime data is rejected or safely ignored.
-- [ ] Run lint, typecheck, tests, and build.
+- [x] Run lint, typecheck, tests, and build.
 
 ## Acceptance Criteria
 

@@ -14,9 +14,9 @@ const googleAuthRoutes = new Hono<{ Bindings: Env }>();
 
 const googleTokenResponseSchema = v.object({
   access_token: v.string(),
-  token_type: v.string(),
-  expires_in: v.number(),
-  scope: v.string(),
+  token_type: v.optional(v.string()),
+  expires_in: v.optional(v.number()),
+  scope: v.optional(v.string()),
 });
 
 /**

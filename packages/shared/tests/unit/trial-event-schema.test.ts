@@ -24,7 +24,6 @@ describe('parseTrialEvent', () => {
       parseTrialEvent({
         type: 'trial.ready',
         trialId: 'trial_123',
-        projectId: 'project_123',
         at: 123,
       })
     ).toThrow();

@@ -9,8 +9,8 @@ import type {
   UpdateTagsRequest,
 } from '@simple-agent-manager/shared';
 
-import { API_URL, request } from './client';
 import { parseJsonRecord } from '../runtime-validation';
+import { API_URL, request } from './client';
 
 // =============================================================================
 // List files

@@ -2,10 +2,10 @@ import { useCallback, useEffect,useRef, useState } from 'react';
 
 import type { AcpErrorCode } from '../errors';
 import { errorCodeFromCloseCode, errorCodeFromMessage, getErrorMeta } from '../errors';
+import { maybeJsonRecord } from '../runtime-validation';
 import type { AgentSessionStatus, AgentStatusMessage, LifecycleEventCallback,SessionStateMessage } from '../transport/types';
 import type { AcpTransport } from '../transport/websocket';
 import { createAcpWebSocketTransport } from '../transport/websocket';
-import { maybeJsonRecord } from '../runtime-validation';
 
 /** Default reconnection delay in ms */
 const DEFAULT_RECONNECT_DELAY_MS = 1000;

@@ -119,7 +119,9 @@ export interface TrialStartedEvent {
 export interface TrialProgressEvent {
   type: 'trial.progress';
   /** Short human-facing status ("Cloning repo…", "Analyzing structure…"). */
-  stage: string;
+  stage?: string;
+  /** Legacy/internal progress text used by older producers and tests. */
+  message?: string;
   /** 0..1 progress hint. Undefined when the stage has no numeric progress. */
   progress?: number;
   at: number;
@@ -142,9 +144,9 @@ export interface TrialIdeaEvent {
 
 export interface TrialReadyEvent {
   type: 'trial.ready';
-  trialId: string;
+  trialId?: string;
   projectId: string;
-  workspaceUrl: string;
+  workspaceUrl?: string;
   at: number;
 }
 
@@ -162,20 +164,10 @@ export interface TrialAgentActivityEvent {
 
 export interface TrialErrorEvent {
   type: 'trial.error';
-  error: TrialErrorCode;
+  error: string;
   message: string;
   at: number;
 }
-
-const TrialErrorCodeSchema = v.picklist([
-  'invalid_url',
-  'repo_not_found',
-  'repo_private',
-  'repo_too_large',
-  'trials_disabled',
-  'cap_exceeded',
-  'existing_trial',
-]);
 
 export const TrialEventSchema = v.variant('type', [
   v.object({
@@ -187,7 +179,8 @@ export const TrialEventSchema = v.variant('type', [
   }),
   v.object({
     type: v.literal('trial.progress'),
-    stage: v.string(),
+    stage: v.optional(v.string()),
+    message: v.optional(v.string()),
     progress: v.optional(v.number()),
     at: v.number(),
   }),
@@ -206,9 +199,9 @@ export const TrialEventSchema = v.variant('type', [
   }),
   v.object({
     type: v.literal('trial.ready'),
-    trialId: v.string(),
+    trialId: v.optional(v.string()),
     projectId: v.string(),
-    workspaceUrl: v.string(),
+    workspaceUrl: v.optional(v.string()),
     at: v.number(),
   }),
   v.object({
@@ -220,7 +213,7 @@ export const TrialEventSchema = v.variant('type', [
   }),
   v.object({
     type: v.literal('trial.error'),
-    error: TrialErrorCodeSchema,
+    error: v.string(),
     message: v.string(),
     at: v.number(),
   }),

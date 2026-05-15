@@ -18,6 +18,7 @@ import {
 } from '@xyflow/react';
 import { type FC, useCallback, useEffect, useRef,useState } from 'react';
 
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { AnimatedFlowEdge } from './edges/AnimatedFlowEdge';
 import { IdeaNode } from './nodes/IdeaNode';
 import { NodeVMNode } from './nodes/NodeVMNode';
@@ -25,7 +26,6 @@ import { ProjectNode } from './nodes/ProjectNode';
 import { SessionNode } from './nodes/SessionNode';
 import { TaskNode } from './nodes/TaskNode';
 import { WorkspaceNode } from './nodes/WorkspaceNode';
-import { expectJsonRecord } from '../../lib/runtime-validation';
 
 /** Delay before hiding tooltip after mouse leaves a node (ms). */
 const TOOLTIP_HIDE_DELAY_MS = 100;
