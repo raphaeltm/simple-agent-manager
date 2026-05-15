@@ -70,16 +70,14 @@ const appUrl = `https://app.${baseDomain}`;
           </div>
         </div>
 
-        <div class="sub-agents">
-          <div class="sub-agent">
+        <div class="sub-agents-row">
+          <div class="sub-agent-pill">
             <span class="sub-agent-dot running"></span>
-            <span class="sub-agent-label">frontend-tests</span>
-            <span class="sub-agent-status">running</span>
+            frontend-tests
           </div>
-          <div class="sub-agent">
-            <div class="sub-agent-dot running"></div>
-            <span class="sub-agent-label">api-tests</span>
-            <span class="sub-agent-status">running</span>
+          <div class="sub-agent-pill">
+            <span class="sub-agent-dot running"></span>
+            api-tests
           </div>
         </div>
       </div>
@@ -105,9 +103,9 @@ const appUrl = `https://app.${baseDomain}`;
     top: -200px;
     left: 50%;
     transform: translateX(-50%);
-    width: 800px;
-    height: 600px;
-    background: radial-gradient(ellipse at center, var(--color-accent-glow) 0%, transparent 70%);
+    width: 1000px;
+    height: 700px;
+    background: radial-gradient(ellipse at center, rgba(22, 163, 74, 0.2) 0%, rgba(22, 163, 74, 0.06) 40%, transparent 70%);
     pointer-events: none;
     animation: glow-pulse 6s ease-in-out infinite;
   }
@@ -195,12 +193,14 @@ const appUrl = `https://app.${baseDomain}`;
   .btn-hero-primary {
     background: var(--color-accent);
     color: white;
+    box-shadow: 0 0 20px rgba(22, 163, 74, 0.3), 0 0 60px rgba(22, 163, 74, 0.1);
   }
 
   .btn-hero-primary:hover {
     background: var(--color-accent-hover);
     color: white;
     transform: translateY(-1px);
+    box-shadow: 0 0 30px rgba(22, 163, 74, 0.4), 0 0 80px rgba(22, 163, 74, 0.15);
   }
 
   .btn-hero-secondary {
@@ -229,7 +229,8 @@ const appUrl = `https://app.${baseDomain}`;
     border: 1px solid var(--glass-border);
     box-shadow:
       var(--glass-shadow),
-      0 0 80px var(--color-accent-glow);
+      0 0 60px rgba(22, 163, 74, 0.12),
+      0 0 120px rgba(22, 163, 74, 0.06);
   }
 
   .terminal-chrome {
@@ -319,45 +320,38 @@ const appUrl = `https://app.${baseDomain}`;
     background: rgba(22, 163, 74, 0.06);
   }
 
-  /* Sub-agents */
-  .sub-agents {
+  /* Sub-agent pills */
+  .sub-agents-row {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
   }
 
-  .sub-agent {
-    flex: 1;
-    display: flex;
+  .sub-agent-pill {
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 14px;
-    border-radius: var(--radius-md);
-    background: var(--glass-bg-subtle);
-    border: 1px solid var(--glass-border);
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 100px;
+    background: rgba(22, 163, 74, 0.08);
+    border: 1px solid rgba(22, 163, 74, 0.2);
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: 0.6875rem;
+    color: var(--color-accent);
+    box-shadow: 0 0 12px rgba(22, 163, 74, 0.1);
   }
 
   .sub-agent-dot {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     flex-shrink: 0;
   }
 
   .sub-agent-dot.running {
     background: var(--color-accent);
+    box-shadow: 0 0 6px var(--color-accent);
     animation: glow-pulse 2s ease-in-out infinite;
-  }
-
-  .sub-agent-label {
-    color: var(--color-fg-muted);
-  }
-
-  .sub-agent-status {
-    margin-left: auto;
-    color: var(--color-accent);
-    font-size: 0.6875rem;
   }
 
   .tool-header {

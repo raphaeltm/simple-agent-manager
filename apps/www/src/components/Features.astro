@@ -3,7 +3,7 @@ const features = [
   {
     icon: 'agents',
     title: 'Multi-Agent Support',
-    description: 'Claude Code, Codex, Gemini CLI, Mistral Vibe, or OpenCode — pick the right agent for the job. Bring your own API keys.',
+    description: 'Claude Code, Codex, Mistral Vibe, or OpenCode — pick the right agent for the job. Bring your own API keys.',
   },
   {
     icon: 'shield',
@@ -131,7 +131,7 @@ const iconPaths: Record<string, string[]> = {
 
   .feature-card:hover {
     border-color: var(--glass-border-hover);
-    box-shadow: var(--glass-shadow), 0 0 40px var(--color-accent-glow);
+    box-shadow: var(--glass-shadow), 0 0 40px rgba(22, 163, 74, 0.15), 0 0 80px rgba(22, 163, 74, 0.05);
   }
 
   .feature-icon {
@@ -141,7 +141,9 @@ const iconPaths: Record<string, string[]> = {
     width: 48px;
     height: 48px;
     border-radius: var(--radius-md);
-    background: var(--color-accent-glow);
+    background: rgba(22, 163, 74, 0.12);
+    border: 1px solid rgba(22, 163, 74, 0.15);
+    box-shadow: 0 0 16px rgba(22, 163, 74, 0.1);
     color: var(--color-accent);
     margin-bottom: 20px;
   }

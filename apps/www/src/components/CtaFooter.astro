@@ -69,7 +69,7 @@ const currentYear = new Date().getFullYear();
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-xl);
-    box-shadow: var(--glass-shadow);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 80px rgba(22, 163, 74, 0.06);
     padding: 48px 32px;
   }
 
@@ -111,12 +111,14 @@ const currentYear = new Date().getFullYear();
   .btn-cta-primary {
     background: var(--color-accent);
     color: white;
+    box-shadow: 0 0 20px rgba(22, 163, 74, 0.3), 0 0 60px rgba(22, 163, 74, 0.1);
   }
 
   .btn-cta-primary:hover {
     background: var(--color-accent-hover);
     color: white;
     transform: translateY(-1px);
+    box-shadow: 0 0 30px rgba(22, 163, 74, 0.4), 0 0 80px rgba(22, 163, 74, 0.15);
   }
 
   .btn-cta-secondary {
