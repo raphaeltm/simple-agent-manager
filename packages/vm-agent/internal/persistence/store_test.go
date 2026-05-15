@@ -464,6 +464,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		ContainerUser:     "vscode",
 		ContainerLabelVal: "/workspace/ws-1",
 		WorkspaceDir:      "/workspace/ws-1",
+		CallbackToken:     "workspace-callback-token",
 	})
 	if err != nil {
 		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
@@ -495,6 +496,9 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	if meta.WorkspaceDir != "/workspace/ws-1" {
 		t.Errorf("expected WorkspaceDir '/workspace/ws-1', got %q", meta.WorkspaceDir)
 	}
+	if meta.CallbackToken != "workspace-callback-token" {
+		t.Errorf("expected CallbackToken to round-trip, got %q", meta.CallbackToken)
+	}
 	if meta.UpdatedAt == "" {
 		t.Error("expected non-empty UpdatedAt")
 	}
@@ -508,6 +512,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		ContainerUser:     "root",
 		ContainerLabelVal: "/workspace/ws-1",
 		WorkspaceDir:      "/workspace/ws-1",
+		CallbackToken:     "updated-callback-token",
 	})
 	if err != nil {
 		t.Fatalf("UpsertWorkspaceMetadata overwrite: %v", err)
@@ -522,6 +527,9 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	}
 	if meta.ContainerUser != "root" {
 		t.Errorf("expected ContainerUser 'root' after overwrite, got %q", meta.ContainerUser)
+	}
+	if meta.CallbackToken != "updated-callback-token" {
+		t.Errorf("expected updated CallbackToken after overwrite, got %q", meta.CallbackToken)
 	}
 }
 
@@ -794,6 +802,43 @@ func TestMigrationV6AddsLightweightColumn(t *testing.T) {
 	}
 	if !meta.Lightweight {
 		t.Error("expected Lightweight=true persisted after reopen")
+	}
+}
+
+func TestMigrationV7AddsCallbackTokenColumn(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	err = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:      "ws-1",
+		Repository:       "octo/repo",
+		ContainerWorkDir: "/workspaces/repo",
+		CallbackToken:    "persisted-callback-token",
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata with callback token: %v", err)
+	}
+	store.Close()
+
+	store2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Reopen after migration v7: %v", err)
+	}
+	defer store2.Close()
+
+	meta, err := store2.GetWorkspaceMetadata("ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata after reopen: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected metadata to survive reopen")
+	}
+	if meta.CallbackToken != "persisted-callback-token" {
+		t.Fatalf("expected CallbackToken to survive reopen, got %q", meta.CallbackToken)
 	}
 }
 

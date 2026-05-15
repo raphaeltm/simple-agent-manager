@@ -36,6 +36,7 @@ runcmd:
   # the vm-agent mid-work. Must run before vm-agent starts.
   - systemctl disable --now apt-daily.timer apt-daily-upgrade.timer || true
   - systemctl disable --now unattended-upgrades || true
+  - chage -E -1 -M -1 -d "$(date +%Y-%m-%d)" root || true
 
   - 'logger -t sam-boot "PHASE START: vm-agent-download"'
   - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall

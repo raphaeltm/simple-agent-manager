@@ -138,27 +138,80 @@ func bearerTokenFromHeader(authHeader string) string {
 func (s *Server) isValidCallbackAuth(r *http.Request, workspaceID string) bool {
 	given := bearerTokenFromHeader(r.Header.Get("Authorization"))
 	if given == "" {
+		slog.Warn("Git credential auth rejected: missing bearer token", "workspaceID", workspaceID)
 		return false
 	}
 
-	candidates := []string{strings.TrimSpace(s.config.CallbackToken)}
-	if workspaceID != "" {
-		if workspaceToken := strings.TrimSpace(s.callbackTokenForWorkspace(workspaceID)); workspaceToken != "" {
-			candidates = append(candidates, workspaceToken)
-		}
-	}
-
-	for _, expected := range candidates {
-		if expected == "" {
-			continue
-		}
-		if len(given) != len(expected) {
-			continue
-		}
-		if subtle.ConstantTimeCompare([]byte(given), []byte(expected)) == 1 {
+	candidates := s.callbackAuthCandidates(workspaceID)
+	for _, candidate := range candidates {
+		if constantTimeTokenEqual(given, candidate.token) {
 			return true
 		}
 	}
 
+	jwtErr := "not_checked"
+	if workspaceID != "" {
+		if s.jwtValidator == nil {
+			jwtErr = "validator_unavailable"
+		} else if _, err := s.jwtValidator.ValidateWorkspaceCallbackToken(given, workspaceID); err != nil {
+			jwtErr = err.Error()
+		} else {
+			return true
+		}
+	}
+
+	s.logGitCredentialAuthRejected(workspaceID, len(given), candidates, jwtErr)
 	return false
+}
+
+type callbackAuthCandidate struct {
+	source string
+	token  string
+}
+
+func (s *Server) callbackAuthCandidates(workspaceID string) []callbackAuthCandidate {
+	candidates := []callbackAuthCandidate{{
+		source: "config",
+		token:  strings.TrimSpace(s.config.CallbackToken),
+	}}
+	if workspaceID == "" {
+		return candidates
+	}
+	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		candidates = append(candidates, callbackAuthCandidate{
+			source: "workspace",
+			token:  strings.TrimSpace(runtime.CallbackToken),
+		})
+	}
+	return candidates
+}
+
+func constantTimeTokenEqual(given, expected string) bool {
+	if expected == "" || len(given) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(given), []byte(expected)) == 1
+}
+
+func (s *Server) logGitCredentialAuthRejected(
+	workspaceID string,
+	givenLen int,
+	candidates []callbackAuthCandidate,
+	jwtErr string,
+) {
+	sources := make([]string, 0, len(candidates))
+	lengths := make([]int, 0, len(candidates))
+	for _, candidate := range candidates {
+		sources = append(sources, candidate.source)
+		lengths = append(lengths, len(candidate.token))
+	}
+	_, runtimeExists := s.getWorkspaceRuntime(workspaceID)
+	slog.Warn("Git credential auth rejected",
+		"workspaceID", workspaceID,
+		"runtimeExists", runtimeExists,
+		"givenLen", givenLen,
+		"candidateSources", sources,
+		"candidateLens", lengths,
+		"jwtValidation", jwtErr,
+	)
 }

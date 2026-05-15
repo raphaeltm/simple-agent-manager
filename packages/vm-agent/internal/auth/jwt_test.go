@@ -269,3 +269,86 @@ func TestJWTValidation_CoreProperties(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateWorkspaceCallbackToken(t *testing.T) {
+	t.Parallel()
+
+	const nodeID = "node-123"
+	validator, key := testJWKS(t, nodeID)
+
+	t.Run("matching workspace callback token accepted", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signToken(t, key, Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Audience:  jwt.ClaimStrings{"workspace-callback"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+			Workspace: "ws-123",
+			Type:      "callback",
+			Scope:     "workspace",
+		})
+
+		claims, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if claims.Workspace != "ws-123" {
+			t.Fatalf("expected workspace ws-123, got %q", claims.Workspace)
+		}
+	})
+
+	t.Run("wrong audience rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signToken(t, key, Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Audience:  jwt.ClaimStrings{"workspace-terminal"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+			Workspace: "ws-123",
+			Type:      "callback",
+			Scope:     "workspace",
+		})
+
+		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
+			t.Fatal("expected wrong audience to be rejected")
+		}
+	})
+
+	t.Run("wrong workspace rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signToken(t, key, Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Audience:  jwt.ClaimStrings{"workspace-callback"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+			Workspace: "ws-other",
+			Type:      "callback",
+			Scope:     "workspace",
+		})
+
+		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
+			t.Fatal("expected wrong workspace to be rejected")
+		}
+	})
+
+	t.Run("node scoped callback rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signToken(t, key, Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Audience:  jwt.ClaimStrings{"workspace-callback"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+			Workspace: "ws-123",
+			Type:      "callback",
+			Scope:     "node",
+		})
+
+		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
+			t.Fatal("expected node-scoped callback token to be rejected")
+		}
+	})
+}

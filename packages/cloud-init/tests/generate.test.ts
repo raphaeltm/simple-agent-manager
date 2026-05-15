@@ -639,6 +639,26 @@ describe('generateCloudInit', () => {
       expect(timerCmd).toContain('|| true');
       expect(unattendedCmd).toContain('|| true');
     });
+
+    it('clears root password expiry before vm-agent start so root cron can run', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+      const runcmd: string[] = parsed.runcmd;
+
+      const rootExpiryIdx = runcmd.findIndex(
+        (cmd: string) => typeof cmd === 'string' && cmd.includes('chage') && cmd.includes('root')
+      );
+      const agentStartIdx = runcmd.findIndex(
+        (cmd: string) => typeof cmd === 'string' && cmd.includes('systemctl start vm-agent')
+      );
+
+      expect(rootExpiryIdx).toBeGreaterThan(-1);
+      expect(agentStartIdx).toBeGreaterThan(-1);
+      expect(rootExpiryIdx).toBeLessThan(agentStartIdx);
+      expect(runcmd[rootExpiryIdx]).toContain('-E -1');
+      expect(runcmd[rootExpiryIdx]).toContain('-M -1');
+      expect(runcmd[rootExpiryIdx]).toContain('|| true');
+    });
   });
 
   describe('IPv6 firewall module loading', () => {

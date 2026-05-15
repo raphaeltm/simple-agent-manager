@@ -23,13 +23,13 @@ The same debug package also contains repeated host cron messages saying `Authent
 
 ## Implementation Checklist
 
-- [ ] Update `/git-credential` auth to accept cryptographically valid workspace-scoped JWTs for the requested workspace, with raw string comparison retained as fallback.
-- [ ] Add safe structured logging for rejected git-credential auth attempts without exposing token values.
-- [ ] Persist and hydrate per-workspace callback tokens in VM-agent SQLite metadata.
-- [ ] Add Go tests for valid workspace JWT without runtime token, wrong-workspace JWT rejection, raw fallback acceptance, and persistence/hydration of callback tokens.
-- [ ] Add cloud-init mitigation for expired root password/account state so root cron jobs can run.
-- [ ] Add cloud-init tests proving the mitigation exists and runs before VM-agent startup.
-- [ ] Run focused package tests and full quality checks.
+- [x] Update `/git-credential` auth to accept cryptographically valid workspace-scoped JWTs for the requested workspace, with raw string comparison retained as fallback.
+- [x] Add safe structured logging for rejected git-credential auth attempts without exposing token values.
+- [x] Persist and hydrate per-workspace callback tokens in VM-agent SQLite metadata.
+- [x] Add Go tests for valid workspace JWT without runtime token, wrong-workspace JWT rejection, raw fallback acceptance, and persistence/hydration of callback tokens.
+- [x] Add cloud-init mitigation for expired root password/account state so root cron jobs can run.
+- [x] Add cloud-init tests proving the mitigation exists and runs before VM-agent startup.
+- [x] Run focused package tests and full quality checks.
 - [ ] Deploy to staging and verify with a real VM/workspace that git credential helper auth succeeds.
 - [ ] Merge and monitor production deployment.
 

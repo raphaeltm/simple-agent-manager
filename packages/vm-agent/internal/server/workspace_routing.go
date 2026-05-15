@@ -241,6 +241,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	effectiveRepo := repository
 	effectiveBranch := branch
 	var persistedWorkspaceDir, persistedContainerWorkDir, persistedContainerLabelValue, persistedContainerUser string
+	var persistedCallbackToken string
 	var persistedLightweight bool
 	var persistedDevcontainerConfigName string
 
@@ -262,6 +263,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			persistedContainerWorkDir = meta.ContainerWorkDir
 			persistedContainerLabelValue = meta.ContainerLabelVal
 			persistedContainerUser = meta.ContainerUser
+			persistedCallbackToken = meta.CallbackToken
 			persistedLightweight = meta.Lightweight
 			persistedDevcontainerConfigName = meta.DevcontainerConfigName
 		}
@@ -297,7 +299,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		ContainerLabelValue:    containerLabelValue,
 		ContainerWorkDir:       containerWorkDir,
 		ContainerUser:          containerUser,
-		CallbackToken:          strings.TrimSpace(callbackToken),
+		CallbackToken:          firstNonEmpty(strings.TrimSpace(callbackToken), strings.TrimSpace(persistedCallbackToken)),
 		GitUserName:            opt.GitUserName,
 		GitUserEmail:           opt.GitUserEmail,
 		GitHubID:               opt.GitHubID,
@@ -466,6 +468,7 @@ func (s *Server) persistWorkspaceMetadata(runtime *WorkspaceRuntime) {
 		ContainerUser:          runtime.ContainerUser,
 		ContainerLabelVal:      runtime.ContainerLabelValue,
 		WorkspaceDir:           runtime.WorkspaceDir,
+		CallbackToken:          runtime.CallbackToken,
 		Lightweight:            runtime.Lightweight,
 		DevcontainerConfigName: runtime.DevcontainerConfigName,
 	}); err != nil {
