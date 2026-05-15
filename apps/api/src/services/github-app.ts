@@ -1,7 +1,55 @@
 import { importPKCS8,SignJWT } from 'jose';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readResponseJson } from '../lib/runtime-validation';
+
+const githubErrorSchema = v.object({
+  message: v.optional(v.string()),
+});
+
+const installationTokenSchema = v.object({
+  token: v.string(),
+  expires_at: v.string(),
+});
+
+const repositorySchema = v.object({
+  id: v.number(),
+  full_name: v.string(),
+  private: v.boolean(),
+  default_branch: v.string(),
+});
+
+const installationRepositoriesSchema = v.object({
+  repositories: v.array(repositorySchema),
+  total_count: v.number(),
+});
+
+const userInstallationSchema = v.object({
+  id: v.number(),
+  account: v.object({
+    login: v.string(),
+    type: v.string(),
+  }),
+});
+
+const userInstallationsSchema = v.object({
+  installations: v.array(userInstallationSchema),
+});
+
+const branchSchema = v.object({
+  name: v.string(),
+});
+
+async function readGitHubError(response: Response, fallback: string): Promise<string> {
+  try {
+    const error = await readResponseJson(response, githubErrorSchema, 'github.error');
+    return error.message || fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 /**
  * Decode a private key that may be stored in various formats:
@@ -170,11 +218,10 @@ export async function getInstallationToken(
   );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { message?: string };
-    throw new Error(error.message || `Failed to get installation token: ${response.status}`);
+    throw new Error(await readGitHubError(response, `Failed to get installation token: ${response.status}`));
   }
 
-  const data = await response.json() as { token: string; expires_at: string };
+  const data = await readResponseJson(response, installationTokenSchema, 'github.installation_token');
   return {
     token: data.token,
     expiresAt: data.expires_at,
@@ -210,19 +257,10 @@ export async function getInstallationRepositories(
     );
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({})) as { message?: string };
-      throw new Error(error.message || `Failed to get repositories: ${response.status}`);
+      throw new Error(await readGitHubError(response, `Failed to get repositories: ${response.status}`));
     }
 
-    const data = await response.json() as {
-      repositories: Array<{
-        id: number;
-        full_name: string;
-        private: boolean;
-        default_branch: string;
-      }>;
-      total_count: number;
-    };
+    const data = await readResponseJson(response, installationRepositoriesSchema, 'github.installation_repositories');
 
     const repos = data.repositories.map((repo) => ({
       id: repo.id,
@@ -274,16 +312,10 @@ export async function getUserAccessibleInstallations(
     );
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({})) as { message?: string };
-      throw new Error(error.message || `Failed to get user installations: ${response.status}`);
+      throw new Error(await readGitHubError(response, `Failed to get user installations: ${response.status}`));
     }
 
-    const data = await response.json() as {
-      installations: Array<{
-        id: number;
-        account: { login: string; type: string };
-      }>;
-    };
+    const data = await readResponseJson(response, userInstallationsSchema, 'github.user_installations');
 
     allInstallations.push(...data.installations.map((installation) => ({
       id: installation.id,
@@ -332,11 +364,10 @@ export async function getRepositoryBranches(
     );
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({})) as { message?: string };
-      throw new Error(error.message || `Failed to list branches: ${response.status}`);
+      throw new Error(await readGitHubError(response, `Failed to list branches: ${response.status}`));
     }
 
-    const data = await response.json() as Array<{ name: string }>;
+    const data = await readResponseJson(response, v.array(branchSchema), 'github.branches');
     allBranches.push(...data.map((b) => ({ name: b.name })));
 
     hasMore = data.length === perPage;

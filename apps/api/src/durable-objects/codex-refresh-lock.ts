@@ -30,8 +30,10 @@
  *    OAuth scopes. Unexpected scopes block the refresh with 502 instead of a warn-only log.
  */
 import { DurableObject } from 'cloudflare:workers';
+import * as v from 'valibot';
 
 import { log } from '../lib/logger';
+import { readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { decrypt, encrypt } from '../services/encryption';
 
@@ -322,7 +324,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       // information leakage (e.g., if OpenAI echoes back the refresh token).
       let safeError: Record<string, string> = { error: 'upstream_error' };
       try {
-        const parsed = await upstreamResponse.json() as Record<string, unknown>;
+        const parsed = await readResponseJson(upstreamResponse, v.record(v.string(), v.unknown()), 'codex-refresh.upstream_error');
         if (typeof parsed.error === 'string') safeError.error = parsed.error;
         if (typeof parsed.error_description === 'string') {
           safeError = { ...safeError, error_description: parsed.error_description };
@@ -342,7 +344,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     // Parse new tokens from OpenAI response.
-    const newTokens: Record<string, unknown> = await upstreamResponse.json();
+    const newTokens = await readResponseJson(upstreamResponse, v.record(v.string(), v.unknown()), 'codex-refresh.tokens');
 
     // Scope validation (MEDIUM #6) — warn-only mode.
     // Previously this blocked with 502 when upstream returned unexpected scopes,

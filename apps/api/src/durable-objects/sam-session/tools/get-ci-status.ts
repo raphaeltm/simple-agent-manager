@@ -4,13 +4,27 @@
  * Resolves the user's GitHub token from encrypted credentials, then queries
  * the GitHub Actions API for recent workflow runs on the default branch.
  */
+import * as v from 'valibot';
+
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
+import { readResponseJson } from '../../../lib/runtime-validation';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { getUserGitHubToken, parseRepository, resolveProjectWithOwnership } from './helpers';
 
 const DEFAULT_CI_RUNS_LIMIT = 5;
 const DEFAULT_GITHUB_TIMEOUT_MS = 10_000;
+
+const workflowRunsSchema = v.object({
+  workflow_runs: v.optional(v.array(v.object({
+    id: v.number(),
+    name: v.string(),
+    status: v.string(),
+    conclusion: v.nullable(v.string()),
+    html_url: v.string(),
+    created_at: v.string(),
+  }))),
+});
 
 export const getCiStatusDef: AnthropicToolDef = {
   name: 'get_ci_status',
@@ -88,16 +102,7 @@ export async function getCiStatus(
       };
     }
 
-    const data = await res.json() as {
-      workflow_runs?: Array<{
-        id: number;
-        name: string;
-        status: string;
-        conclusion: string | null;
-        html_url: string;
-        created_at: string;
-      }>;
-    };
+    const data = await readResponseJson(res, workflowRunsSchema, 'github.workflow_runs');
 
     const runs = (data.workflow_runs ?? []).map((r) => ({
       id: r.id,

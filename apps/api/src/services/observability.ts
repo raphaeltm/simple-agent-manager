@@ -15,6 +15,7 @@ import * as observabilitySchema from '../db/observability-schema';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord, optionalJsonRecord } from '../lib/runtime-validation';
 
 // =============================================================================
 // Constants (configurable via env)
@@ -607,7 +608,7 @@ export async function queryCloudflareLogs(
 
   let data: Record<string, unknown>;
   try {
-    data = await response.json() as Record<string, unknown>;
+    data = expectJsonRecord(await response.json(), 'cloudflare.observability');
   } catch {
     throw new CfApiError('Invalid response from Cloudflare Observability API');
   }
@@ -616,33 +617,36 @@ export async function queryCloudflareLogs(
   // The CF Telemetry API response structure (from cloudflare-typescript SDK):
   //   result.events.events — array of telemetry event objects
   //   Each event: { $metadata: { id, level, message, type, ... }, $workers: { scriptName, event, ... }, timestamp, dataset, source }
-  const result = data.result as Record<string, unknown> | undefined;
+  const result = optionalJsonRecord(data.result, 'cloudflare.observability.result');
 
   // Extract events: result.events.events (new format) or result.events (legacy fallback)
   let events: Array<Record<string, unknown>> = [];
-  const eventsContainer = result?.events as Record<string, unknown> | Array<Record<string, unknown>> | undefined;
+  const eventsContainer = result?.events;
   if (Array.isArray(eventsContainer)) {
     // Legacy format: result.events is directly an array
-    events = eventsContainer;
-  } else if (eventsContainer && Array.isArray(eventsContainer.events)) {
+    events = eventsContainer.map((event, index) => expectJsonRecord(event, `cloudflare.observability.result.events[${index}]`));
+  } else if (eventsContainer && typeof eventsContainer === 'object' && !Array.isArray(eventsContainer) && Array.isArray((eventsContainer as { events?: unknown }).events)) {
     // New format: result.events.events is the array
-    events = eventsContainer.events as Array<Record<string, unknown>>;
+    events = (eventsContainer as { events: unknown[] }).events.map((event, index) =>
+      expectJsonRecord(event, `cloudflare.observability.result.events.events[${index}]`)
+    );
   } else if (result?.data && Array.isArray(result.data)) {
     // Fallback: result.data
-    events = result.data as Array<Record<string, unknown>>;
+    events = result.data.map((event, index) => expectJsonRecord(event, `cloudflare.observability.result.data[${index}]`));
   }
 
   // Extract cursor for pagination from the run object
-  const run = result?.run as Record<string, unknown> | undefined;
-  const nextCursor = (run?.offset ?? result?.cursor ?? data.cursor ?? null) as string | null;
+  const run = optionalJsonRecord(result?.run, 'cloudflare.observability.result.run');
+  const rawCursor = run?.offset ?? result?.cursor ?? data.cursor ?? null;
+  const nextCursor = typeof rawCursor === 'string' ? rawCursor : null;
 
   const logs = events.map((event) => {
     // New format: $metadata contains level, message, type; $workers contains scriptName, event details
-    const metadata = event.$metadata as Record<string, unknown> | undefined;
-    const workers = event.$workers as Record<string, unknown> | undefined;
-    const workerEvent = workers?.event as Record<string, unknown> | undefined;
+    const metadata = optionalJsonRecord(event.$metadata, 'cloudflare.observability.event.$metadata');
+    const workers = optionalJsonRecord(event.$workers, 'cloudflare.observability.event.$workers');
+    const workerEvent = optionalJsonRecord(workers?.event, 'cloudflare.observability.event.$workers.event');
     // Legacy format fallback
-    const legacyEvent = event.event as Record<string, unknown> | undefined;
+    const legacyEvent = optionalJsonRecord(event.event, 'cloudflare.observability.event.event');
 
     const timestamp = event.timestamp;
     const timestampStr = typeof timestamp === 'number'

@@ -6,8 +6,11 @@
  *
  * Runs daily via cron. Uses a KV cursor to avoid re-sending events.
  */
+import * as v from 'valibot';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord, readResponseJson } from '../lib/runtime-validation';
 
 // ─── Defaults (configurable via env vars per constitution Principle XI) ───
 
@@ -26,6 +29,10 @@ const DEFAULT_ANALYTICS_SQL_API_URL = 'https://api.cloudflare.com/client/v4/acco
 const DEFAULT_DATASET = 'sam_analytics';
 const DEFAULT_FORWARD_SQL_LIMIT = 10_000;
 const DEFAULT_FORWARD_FETCH_TIMEOUT_MS = 30_000;
+
+const analyticsSqlResponseSchema = v.object({
+  data: v.optional(v.array(v.unknown())),
+});
 
 // ─── Types ───
 
@@ -164,12 +171,12 @@ export async function queryConversionEvents(
     throw new Error(`Analytics Engine query failed: ${response.status}`);
   }
 
-  const body = await response.json() as { data?: unknown[] };
+  const body = await readResponseJson(response, analyticsSqlResponseSchema, 'analytics_forward.sql');
   const rows = body.data ?? [];
 
   // Validate shape: first row must have the expected fields
   if (rows.length > 0) {
-    const first = rows[0] as Record<string, unknown>;
+    const first = expectJsonRecord(rows[0], 'analytics_forward.sql.data[0]');
     if (typeof first.timestamp !== 'string' || typeof first.userId !== 'string') {
       log.error('analytics_forward.unexpected_sql_response_shape', {
         firstRowKeys: Object.keys(first),

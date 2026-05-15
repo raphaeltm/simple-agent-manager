@@ -4,8 +4,11 @@
  * Centralises types, pagination, period parsing, and aggregation that were
  * previously duplicated across admin-costs.ts and admin-ai-usage.ts.
  */
+import * as v from 'valibot';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readResponseJson } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 
 // ---------------------------------------------------------------------------
@@ -85,6 +88,33 @@ const DEFAULT_MAX_PAGES = 20;
 /** Hard cap on max pages to prevent Workers CPU timeout. */
 const MAX_PAGES_HARD_CAP = 20;
 
+const gatewayLogEntrySchema = v.object({
+  id: v.string(),
+  model: v.string(),
+  provider: v.string(),
+  tokens_in: v.number(),
+  tokens_out: v.number(),
+  cost: v.number(),
+  success: v.boolean(),
+  cached: v.boolean(),
+  created_at: v.string(),
+  duration: v.number(),
+  metadata: v.nullable(v.record(v.string(), v.string())),
+});
+
+const gatewayLogsResponseSchema = v.object({
+  result: v.array(gatewayLogEntrySchema),
+  result_info: v.object({
+    page: v.number(),
+    per_page: v.number(),
+    count: v.number(),
+    total_count: v.number(),
+    total_pages: v.number(),
+  }),
+  success: v.boolean(),
+  errors: v.array(v.unknown()),
+});
+
 /** Resolve pageSize/maxPages from env with defaults and hard cap. */
 export function resolveGatewayPagination(env: Env): { pageSize: number; maxPages: number } {
   const pageSize = parseInt(env.AI_USAGE_PAGE_SIZE || '', 10) || DEFAULT_PAGE_SIZE;
@@ -127,7 +157,7 @@ export async function fetchGatewayLogs(
     throw errors.internal(`AI Gateway API error (${resp.status})`);
   }
 
-  return resp.json() as Promise<AIGatewayLogsResponse>;
+  return readResponseJson(resp, gatewayLogsResponseSchema, 'ai_gateway.logs');
 }
 
 /**
