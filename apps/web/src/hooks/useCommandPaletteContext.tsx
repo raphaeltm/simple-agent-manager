@@ -1,6 +1,5 @@
 import {
   Activity,
-
   Eye,
   Lightbulb,
   MessageSquare,

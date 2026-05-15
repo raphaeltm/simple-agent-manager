@@ -16,14 +16,14 @@
  * response. If the enrichment step is missing, every terminated task
  * renders as a gray pause icon instead of a green checkmark or red X.
  */
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { ChatSessionListItem, ChatSessionResponse } from '../../../src/lib/api';
 import { SessionItem } from '../../../src/pages/project-chat/SessionItem';
 import type { SessionTreeNode } from '../../../src/pages/project-chat/sessionTree';
 import { SessionTreeItem } from '../../../src/pages/project-chat/SessionTreeItem';
-import { buildTaskInfoMap, type TaskInfo } from '../../../src/pages/project-chat/useTaskGroups';
+import type { TaskInfo } from '../../../src/pages/project-chat/useTaskGroups';
 
 // ---------------------------------------------------------------------------
 // Helpers — simulate the shapes returned by the API
