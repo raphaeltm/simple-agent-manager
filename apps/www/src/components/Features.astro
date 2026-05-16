@@ -3,7 +3,7 @@ const features = [
   {
     icon: 'agents',
     title: 'Multi-Agent Support',
-    description: 'Claude Code, Codex, Gemini CLI, Mistral Vibe, or OpenCode — pick the right agent for the job. Bring your own API keys.',
+    description: 'Claude Code, Codex, Mistral Vibe, or OpenCode — pick the right agent for the job. Bring your own API keys.',
   },
   {
     icon: 'shield',
@@ -65,7 +65,7 @@ const iconPaths: Record<string, string[]> = {
   <div class="container">
     <div class="features-header animate-on-scroll">
       <span class="section-label">Features</span>
-      <h2 class="section-title">Agent orchestration<br />on infrastructure you own</h2>
+      <h2 class="section-title">Agent workflows<br />on infrastructure you own</h2>
       <p class="section-subtitle">
         Everything you need to run coding agents on your own cloud.
       </p>
@@ -120,15 +120,18 @@ const iconPaths: Record<string, string[]> = {
 
   .feature-card {
     padding: 32px;
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-border-subtle);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
     border-radius: var(--radius-lg);
+    box-shadow: var(--glass-shadow);
     transition: border-color 0.3s, box-shadow 0.3s, opacity 0.6s ease, transform 0.6s ease;
   }
 
   .feature-card:hover {
-    border-color: var(--color-border);
-    box-shadow: 0 0 40px var(--color-accent-glow);
+    border-color: var(--glass-border-hover);
+    box-shadow: var(--glass-shadow), 0 0 40px rgba(22, 163, 74, 0.15), 0 0 80px rgba(22, 163, 74, 0.05);
   }
 
   .feature-icon {
@@ -138,7 +141,9 @@ const iconPaths: Record<string, string[]> = {
     width: 48px;
     height: 48px;
     border-radius: var(--radius-md);
-    background: var(--color-accent-glow);
+    background: rgba(22, 163, 74, 0.12);
+    border: 1px solid rgba(22, 163, 74, 0.15);
+    box-shadow: 0 0 16px rgba(22, 163, 74, 0.1);
     color: var(--color-accent);
     margin-bottom: 20px;
   }

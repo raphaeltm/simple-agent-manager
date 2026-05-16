@@ -68,11 +68,20 @@ export async function seedProject(
 export async function seedNode(
   nodeId: string,
   userId: string,
-  opts?: { status?: string; vmSize?: string; vmLocation?: string; healthStatus?: string },
+  opts?: {
+    status?: string;
+    vmSize?: string;
+    vmLocation?: string;
+    healthStatus?: string;
+    warmSince?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+    lastHeartbeatAt?: string | null;
+  },
 ): Promise<void> {
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO nodes (id, user_id, name, status, vm_size, vm_location, health_status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+    `INSERT OR IGNORE INTO nodes (id, user_id, name, status, vm_size, vm_location, health_status, warm_since, last_heartbeat_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       nodeId,
@@ -82,7 +91,28 @@ export async function seedNode(
       opts?.vmSize ?? 'medium',
       opts?.vmLocation ?? 'nbg1',
       opts?.healthStatus ?? 'healthy',
+      opts?.warmSince ?? null,
+      opts?.lastHeartbeatAt ?? null,
+      opts?.createdAt ?? new Date().toISOString(),
+      opts?.updatedAt ?? new Date().toISOString(),
     )
+    .run();
+}
+
+/**
+ * Seed a mission into D1. Idempotent. Requires project + user to exist.
+ */
+export async function seedMission(
+  missionId: string,
+  projectId: string,
+  userId: string,
+  opts?: { title?: string; status?: string },
+): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO missions (id, project_id, user_id, title, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(missionId, projectId, userId, opts?.title ?? `Test mission ${missionId}`, opts?.status ?? 'planning')
     .run();
 }
 
@@ -93,12 +123,188 @@ export async function seedTask(
   taskId: string,
   projectId: string,
   userId: string,
-  opts?: { title?: string; status?: string },
+  opts?: {
+    title?: string;
+    status?: string;
+    workspaceId?: string;
+    autoProvisionedNodeId?: string;
+    executionStep?: string;
+    startedAt?: string;
+    updatedAt?: string;
+  },
+): Promise<void> {
+  const updatedAt = opts?.updatedAt ?? new Date().toISOString();
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO tasks (id, project_id, user_id, title, status, workspace_id, auto_provisioned_node_id, execution_step, started_at, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`,
+  )
+    .bind(
+      taskId,
+      projectId,
+      userId,
+      opts?.title ?? `Test task ${taskId}`,
+      opts?.status ?? 'delegated',
+      opts?.workspaceId ?? null,
+      opts?.autoProvisionedNodeId ?? null,
+      opts?.executionStep ?? null,
+      opts?.startedAt ?? null,
+      userId,
+      updatedAt,
+    )
+    .run();
+}
+
+/**
+ * Seed a workspace into D1. Idempotent. Requires user + node to exist.
+ */
+export async function seedWorkspace(
+  workspaceId: string,
+  nodeId: string | null,
+  userId: string,
+  opts?: {
+    projectId?: string;
+    status?: string;
+    chatSessionId?: string;
+    createdAt?: string;
+    updatedAt?: string;
+  },
 ): Promise<void> {
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO tasks (id, project_id, user_id, title, status, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+    `INSERT OR IGNORE INTO workspaces (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location, chat_session_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?)`,
   )
-    .bind(taskId, projectId, userId, opts?.title ?? `Test task ${taskId}`, opts?.status ?? 'delegated', userId)
+    .bind(
+      workspaceId,
+      nodeId,
+      userId,
+      opts?.projectId ?? null,
+      `ws-${workspaceId}`,
+      'test-org/test-repo',
+      opts?.status ?? 'running',
+      opts?.chatSessionId ?? null,
+      opts?.createdAt ?? new Date().toISOString(),
+      opts?.updatedAt ?? new Date().toISOString(),
+    )
+    .run();
+}
+
+/**
+ * Seed a compute_usage record into D1. Idempotent. Requires user to exist.
+ */
+export async function seedComputeUsage(
+  id: string,
+  userId: string,
+  workspaceId: string,
+  nodeId: string,
+  opts?: { startedAt?: string; endedAt?: string | null },
+): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO compute_usage (id, user_id, workspace_id, node_id, server_type, vcpu_count, credential_source, started_at, ended_at, created_at)
+     VALUES (?, ?, ?, ?, 'cx22', 2, 'user', ?, ?, datetime('now'))`,
+  )
+    .bind(
+      id,
+      userId,
+      workspaceId,
+      nodeId,
+      opts?.startedAt ?? new Date().toISOString(),
+      opts?.endedAt ?? null,
+    )
+    .run();
+}
+
+/**
+ * Seed a trigger into D1. Idempotent. Requires project + user to exist.
+ */
+export async function seedTrigger(
+  triggerId: string,
+  projectId: string,
+  userId: string,
+  opts?: {
+    name?: string;
+    status?: string;
+    sourceType?: string;
+    cronExpression?: string;
+    cronTimezone?: string;
+    skipIfRunning?: boolean;
+    promptTemplate?: string;
+    maxConcurrent?: number;
+    triggerCount?: number;
+    nextFireAt?: string | null;
+    lastTriggeredAt?: string | null;
+    taskMode?: string;
+  },
+): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO triggers
+      (id, project_id, user_id, name, status, source_type, cron_expression, cron_timezone,
+       skip_if_running, prompt_template, max_concurrent, trigger_count, next_fire_at,
+       last_triggered_at, task_mode, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(
+      triggerId,
+      projectId,
+      userId,
+      opts?.name ?? `Trigger ${triggerId}`,
+      opts?.status ?? 'active',
+      opts?.sourceType ?? 'cron',
+      opts?.cronExpression ?? '0 9 * * *',
+      opts?.cronTimezone ?? 'UTC',
+      opts?.skipIfRunning === false ? 0 : 1,
+      opts?.promptTemplate ?? 'Review PRs for {{trigger.name}}',
+      opts?.maxConcurrent ?? 1,
+      opts?.triggerCount ?? 0,
+      opts?.nextFireAt ?? new Date(Date.now() - 60_000).toISOString(),
+      opts?.lastTriggeredAt ?? null,
+      opts?.taskMode ?? 'task',
+    )
+    .run();
+}
+
+/**
+ * Seed a trigger execution into D1. Idempotent. Requires trigger to exist.
+ */
+export async function seedTriggerExecution(
+  executionId: string,
+  triggerId: string,
+  projectId: string,
+  opts?: {
+    status?: string;
+    taskId?: string | null;
+    eventType?: string;
+    skipReason?: string | null;
+    errorMessage?: string | null;
+    renderedPrompt?: string | null;
+    scheduledAt?: string | null;
+    startedAt?: string | null;
+    completedAt?: string | null;
+    sequenceNumber?: number;
+    createdAt?: string;
+  },
+): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO trigger_executions
+      (id, trigger_id, project_id, status, task_id, event_type, skip_reason,
+       error_message, rendered_prompt, scheduled_at, started_at, completed_at,
+       sequence_number, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      executionId,
+      triggerId,
+      projectId,
+      opts?.status ?? 'running',
+      opts?.taskId ?? null,
+      opts?.eventType ?? 'cron',
+      opts?.skipReason ?? null,
+      opts?.errorMessage ?? null,
+      opts?.renderedPrompt ?? null,
+      opts?.scheduledAt ?? null,
+      opts?.startedAt ?? opts?.createdAt ?? new Date().toISOString(),
+      opts?.completedAt ?? null,
+      opts?.sequenceNumber ?? 1,
+      opts?.createdAt ?? new Date().toISOString(),
+    )
     .run();
 }

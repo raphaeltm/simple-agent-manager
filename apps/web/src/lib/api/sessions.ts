@@ -4,12 +4,30 @@ import { request } from './client';
 // Chat Sessions (Project DO)
 // =============================================================================
 
-export interface ChatSessionListResponse {
-  sessions: ChatSessionResponse[];
-  total: number;
+/** Task embed shape — populated in the detail response, added via enrichment for list items. */
+export interface ChatSessionTaskEmbed {
+  id: string;
+  status?: string;
+  executionStep?: string | null;
+  errorMessage?: string | null;
+  outputBranch?: string | null;
+  outputPrUrl?: string | null;
+  outputSummary?: string | null;
+  finalizedAt?: string | null;
+  /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
+  taskMode?: 'task' | 'conversation' | null;
+  /** Agent profile name hint (human-readable label from dispatch). */
+  agentProfileHint?: string | null;
 }
 
-export interface ChatSessionResponse {
+/**
+ * What the list API returns — no task embed.
+ *
+ * The list endpoint (`GET /api/projects/:id/sessions`) returns sessions from
+ * the ProjectData DO, which only stores `taskId`. Task status, execution step,
+ * and other task metadata live in D1 and are NOT included in list responses.
+ */
+export interface ChatSessionListItem {
   id: string;
   workspaceId: string | null;
   taskId: string | null;
@@ -35,21 +53,6 @@ export interface ChatSessionResponse {
   agentSessionId?: string | null;
   /** Agent type from ACP session (e.g., 'claude-code', 'openai-codex'). */
   agentType?: string | null;
-  /** Embedded task summary (populated in session detail response). */
-  task?: {
-    id: string;
-    status?: string;
-    executionStep?: string | null;
-    errorMessage?: string | null;
-    outputBranch?: string | null;
-    outputPrUrl?: string | null;
-    outputSummary?: string | null;
-    finalizedAt?: string | null;
-    /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
-    taskMode?: 'task' | 'conversation' | null;
-    /** Agent profile name hint (human-readable label from dispatch). */
-    agentProfileHint?: string | null;
-  };
   /** Durable attention marker summary from backend (null = no active marker). */
   attention?: {
     kind: string;
@@ -57,6 +60,23 @@ export interface ChatSessionResponse {
     expiresAt: number | null;
     reason: string | null;
   } | null;
+}
+
+/**
+ * Enriched session — extends the list item with an optional task embed.
+ *
+ * This is the type used by components that need to distinguish completed/failed
+ * tasks from stopped sessions. The `task` field is populated either by:
+ * - The detail API (`GET /api/projects/:id/sessions/:sessionId`)
+ * - Frontend enrichment from `taskInfoMap` (see SessionTreeItem)
+ */
+export interface ChatSessionResponse extends ChatSessionListItem {
+  task?: ChatSessionTaskEmbed;
+}
+
+export interface ChatSessionListResponse {
+  sessions: ChatSessionListItem[];
+  total: number;
 }
 
 export interface ChatMessageResponse {

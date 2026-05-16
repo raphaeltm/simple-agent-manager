@@ -56,6 +56,10 @@ export default defineConfig({
           NODE_LIFECYCLE: {
             className: 'NodeLifecycle',
           },
+          PROJECT_ORCHESTRATOR: {
+            className: 'ProjectOrchestrator',
+            useSQLite: true,
+          },
         },
         bindings: {
           BASE_DOMAIN: 'test.example.com',

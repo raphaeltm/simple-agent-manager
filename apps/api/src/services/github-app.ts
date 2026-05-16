@@ -1,4 +1,4 @@
-import { importPKCS8,SignJWT } from 'jose';
+import { importPKCS8, SignJWT } from 'jose';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -49,6 +49,17 @@ async function readGitHubError(response: Response, fallback: string): Promise<st
   } catch {
     return fallback;
   }
+}
+
+export interface UserAccessibleInstallation {
+  id: number;
+  account: { login: string; type: string };
+}
+
+interface UserAccessibleInstallationsDiagnostics {
+  flow: 'callback' | 'sync';
+  userId?: string;
+  installationId?: string;
 }
 
 /**
@@ -291,9 +302,10 @@ export async function getInstallationRepositories(
  * callback's installation_id parameter.
  */
 export async function getUserAccessibleInstallations(
-  accessToken: string
-): Promise<Array<{ id: number; account: { login: string; type: string } }>> {
-  const allInstallations: Array<{ id: number; account: { login: string; type: string } }> = [];
+  accessToken: string,
+  diagnostics?: UserAccessibleInstallationsDiagnostics
+): Promise<UserAccessibleInstallation[]> {
+  const allInstallations: UserAccessibleInstallation[] = [];
   let page = 1;
   const perPage = 100;
   let hasMore = true;
@@ -312,10 +324,29 @@ export async function getUserAccessibleInstallations(
     );
 
     if (!response.ok) {
+      log.warn('github.user_accessible_installations.response', {
+        flow: diagnostics?.flow,
+        userId: diagnostics?.userId,
+        installationId: diagnostics?.installationId,
+        page,
+        status: response.status,
+        ok: false,
+        installationCount: 0,
+      });
       throw new Error(await readGitHubError(response, `Failed to get user installations: ${response.status}`));
     }
 
     const data = await readResponseJson(response, userInstallationsSchema, 'github.user_installations');
+
+    log.info('github.user_accessible_installations.response', {
+      flow: diagnostics?.flow,
+      userId: diagnostics?.userId,
+      installationId: diagnostics?.installationId,
+      page,
+      status: response.status,
+      ok: true,
+      installationCount: data.installations.length,
+    });
 
     allInstallations.push(...data.installations.map((installation) => ({
       id: installation.id,

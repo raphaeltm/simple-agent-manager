@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useIsMobile } from '../hooks/useIsMobile';
-import type { ChatSessionResponse } from '../lib/api';
+import type { ChatSessionListItem } from '../lib/api';
 import { listChatSessions,listProjectTasks } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
@@ -143,7 +143,7 @@ export function IdeasPage() {
   const isMobile = useIsMobile();
 
   const [ideas, setIdeas] = useState<Task[]>([]);
-  const [sessions, setSessions] = useState<ChatSessionResponse[]>([]);
+  const [sessions, setSessions] = useState<ChatSessionListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IdeaStatus | 'all'>('all');

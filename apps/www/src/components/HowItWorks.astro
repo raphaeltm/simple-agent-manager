@@ -87,8 +87,11 @@ const steps = [
     width: 48px;
     height: 48px;
     border-radius: 50%;
-    background: var(--color-accent-glow);
-    border: 1px solid var(--color-border);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
     color: var(--color-accent);
     font-family: var(--font-mono);
     font-size: 0.875rem;

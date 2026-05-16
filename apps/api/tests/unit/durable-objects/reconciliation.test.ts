@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
+import { computeProjectDataAlarmTime } from '../../../src/durable-objects/project-data/alarm-schedule';
 import {
   createAttentionMarker,
   getExpiredMarkers,
@@ -129,6 +130,12 @@ describe('Task Reconciliation Module', () => {
     return getReconciliationCandidates(sql, envWithRows({
       'task-1': { task_mode: taskMode, status },
     }));
+  }
+
+  function setAcpHeartbeat(acpSessionId = 'acp-1', heartbeatAt = now) {
+    db.prepare(
+      `UPDATE acp_sessions SET node_id = 'node-1', last_heartbeat_at = ? WHERE id = ?`,
+    ).run(heartbeatAt, acpSessionId);
   }
 
   describe('getReconciliationCandidates', () => {
@@ -497,6 +504,38 @@ describe('Task Reconciliation Module', () => {
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBe((now - 60000) + customIdleMs);
+    });
+  });
+
+  describe('computeProjectDataAlarmTime', () => {
+    it('keeps reconciliation deadline ahead of healthy heartbeat timeout', () => {
+      setupTaskSession({ lastActivityAt: now - 60000 }); // reconciliation due in 4 minutes
+      setAcpHeartbeat('acp-1', now); // heartbeat timeout due in 5 minutes by default
+      const env = { DATABASE: createMockD1() } as unknown as ProjectDataEnv;
+
+      const time = computeProjectDataAlarmTime(sql, env);
+
+      expect(time).toBe((now - 60000) + FIVE_MINUTES);
+    });
+
+    it('keeps workspace idle check ahead of healthy heartbeat timeout', () => {
+      db.prepare(
+        `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES ('session-workspace', 'ws-workspace', NULL, 'Workspace', 'active', 0, ?, ?, ?)`,
+      ).run(now - 600000, now - 600000, now - 600000);
+      db.prepare(
+        `INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, last_terminal_activity_at, created_at)
+         VALUES ('ws-workspace', 'session-workspace', ?, 0, ?)`,
+      ).run(now - 4 * 60 * 1000, now - 4 * 60 * 1000);
+      db.prepare(
+        `INSERT INTO acp_sessions (id, chat_session_id, status, agent_type, workspace_id, node_id, last_heartbeat_at, created_at, updated_at)
+         VALUES ('acp-workspace', 'session-workspace', 'running', 'claude_code', 'ws-workspace', 'node-1', ?, ?, ?)`,
+      ).run(now, now - 600000, now - 600000);
+      const env = { DATABASE: createMockD1() } as unknown as ProjectDataEnv;
+
+      const time = computeProjectDataAlarmTime(sql, env);
+
+      expect(time).toBe(now + 60_000);
     });
   });
 

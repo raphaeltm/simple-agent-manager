@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, EyeOff } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
 
-import type { ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import { SessionItem } from './SessionItem';
 import type { SessionTreeNode } from './sessionTree';
 import { treeHasMatchingDescendant } from './sessionTree';
@@ -63,6 +63,22 @@ export function SessionTreeItem({
 
   const childrenId = useId();
   const taskInfo = node.session.taskId ? taskInfoMap.get(node.session.taskId) : undefined;
+
+  // Enrich session with task status from D1 task data so that
+  // getAttentionState() can distinguish completed/failed/cancelled tasks.
+  // The list endpoint only returns taskId — the full task embed is only
+  // populated in the single-session detail endpoint.
+  const enrichedSession = useMemo((): ChatSessionResponse => {
+    if (!taskInfo) return node.session;
+    return {
+      ...node.session,
+      task: {
+        id: taskInfo.id,
+        status: taskInfo.status,
+        taskMode: taskInfo.taskMode,
+      },
+    };
+  }, [node.session, taskInfo]);
 
   // Visual variant
   const variant: 'default' | 'group-parent' | 'group-child' =
@@ -175,7 +191,7 @@ export function SessionTreeItem({
         }
       >
         <SessionItem
-          session={node.session}
+          session={enrichedSession}
           isSelected={isSelected}
           onSelect={onSelect}
           onFork={onFork}
@@ -217,7 +233,7 @@ export function SessionTreeItem({
 }
 
 function getBlockedByTitle(
-  session: ChatSessionResponse,
+  session: ChatSessionListItem,
   taskInfoMap: Map<string, TaskInfo>,
 ): string | undefined {
   if (!session.taskId) return undefined;

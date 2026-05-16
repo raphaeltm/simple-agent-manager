@@ -15,7 +15,7 @@ import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation,useNavigate } from 'react-router';
 
 import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
-import type { ChatSessionResponse } from '../lib/api';
+import type { ChatSessionListItem } from '../lib/api';
 import { listChatSessions,listNodes, listProjects } from '../lib/api';
 import { fuzzyMatch } from '../lib/fuzzy-match';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
@@ -165,7 +165,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
   const [nodes, setNodes] = useState<Array<{ id: string; name: string }>>([]);
   const [chatSessions, setChatSessions] = useState<
-    Array<ChatSessionResponse & { projectId: string; projectName: string }>
+    Array<ChatSessionListItem & { projectId: string; projectName: string }>
   >([]);
   const [loading, setLoading] = useState(true);
 
@@ -204,7 +204,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                   projectName: project.name,
                 })),
               )
-              .catch(() => [] as Array<ChatSessionResponse & { projectId: string; projectName: string }>),
+              .catch(() => [] as Array<ChatSessionListItem & { projectId: string; projectName: string }>),
           ),
         );
         if (!cancelled) {
