@@ -35,7 +35,14 @@ If the only linked SAM user for an org installation unlinks or deletes their acc
 - [x] Preserve per-user unlink semantics and document that account deletion must delete only per-user `github_installations` rows.
 - [x] Add focused tests for canonical upsert/backfill behavior, multi-user linking, per-user unlink isolation, canonical shared discovery, and uninstall cleanup.
 - [x] Run migration safety, lint/typecheck/tests/build.
-- [ ] Run required specialist reviews and staging verification before PR/merge.
+- [x] Run required specialist reviews and staging verification before PR/merge.
+
+## Verification
+
+- Local: `pnpm quality:migration-safety`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed.
+- Focused: `pnpm --filter @simple-agent-manager/api test -- github-installations github-installation-accounts-migration` passed after adding executable migration backfill coverage.
+- Staging: deploy workflow `25967275324` passed, including Cloudflare deploy, D1 migration/data-integrity checks, health check, and 11 smoke tests.
+- Staging D1: migration `0051_github_installation_accounts.sql` applied; `github_installation_accounts` schema and lookup index exist; backfill produced 3 canonical rows for 3 distinct non-sentinel external installations; sentinel `installation_id = '0'` did not backfill.
 
 ## Acceptance Criteria
 
