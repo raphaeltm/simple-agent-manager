@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../../components/agent-profiles/ProfileSelector';
+import { DevcontainerConfigSelect } from '../../components/devcontainer/DevcontainerConfigSelect';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { formatFileSize } from '../../lib/file-utils';
 
@@ -25,6 +26,7 @@ export function ChatInput({
   error,
   placeholder,
   transcribeApiUrl,
+  projectId,
   agents,
   selectedAgentType,
   onAgentTypeChange,
@@ -52,6 +54,7 @@ export function ChatInput({
   error: string | null;
   placeholder: string;
   transcribeApiUrl: string;
+  projectId: string;
   agents: AgentInfo[];
   selectedAgentType: string | null;
   onAgentTypeChange: (agentType: string) => void;
@@ -267,14 +270,12 @@ export function ChatInput({
                 <option value="lightweight">Lightweight</option>
               </select>
               {selectedWorkspaceProfile !== 'lightweight' && (
-                <input
-                  type="text"
+                <DevcontainerConfigSelect
+                  projectId={projectId}
                   value={selectedDevcontainerConfigName}
-                  onChange={(e) => onDevcontainerConfigNameChange(e.target.value)}
+                  onChange={onDevcontainerConfigNameChange}
                   disabled={submitting}
-                  placeholder="Config (auto)"
-                  aria-label="Devcontainer config name"
-                  className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+                  compact
                 />
               )}
               <select
@@ -359,14 +360,12 @@ export function ChatInput({
               {selectedWorkspaceProfile !== 'lightweight' && (
                 <div className="flex items-center gap-2">
                   <label htmlFor="devcontainer-config-select" className="text-xs text-fg-muted whitespace-nowrap">Config:</label>
-                  <input
+                  <DevcontainerConfigSelect
                     id="devcontainer-config-select"
-                    type="text"
+                    projectId={projectId}
                     value={selectedDevcontainerConfigName}
-                    onChange={(e) => onDevcontainerConfigNameChange(e.target.value)}
+                    onChange={onDevcontainerConfigNameChange}
                     disabled={submitting}
-                    placeholder="Auto-detect"
-                    className="w-24 px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
                   />
                 </div>
               )}

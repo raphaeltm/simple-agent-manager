@@ -181,3 +181,28 @@ export async function deleteProjectRuntimeFile(
     }
   );
 }
+
+// =============================================================================
+// Devcontainer Configs
+// =============================================================================
+
+export interface DevcontainerConfigEntry {
+  name: string;
+  path: string;
+}
+
+export interface DevcontainerConfigsResponse {
+  provider: 'github';
+  repository: string;
+  branch: string;
+  defaultConfigExists: boolean;
+  configs: DevcontainerConfigEntry[];
+  truncated?: boolean;
+  unsupported?: boolean;
+}
+
+export async function listProjectDevcontainerConfigs(
+  projectId: string
+): Promise<DevcontainerConfigsResponse> {
+  return request<DevcontainerConfigsResponse>(`/api/projects/${projectId}/devcontainer-configs`);
+}
